@@ -168,12 +168,7 @@ mod imp {
 
     const CALENDAR_EXTENSION: &[u8] = b"Calendar\0";
     const LOCAL_BACKEND: &[u8] = b"local\0";
-    /// Evolution Data Server only reports read-only state after a full backend
-    /// connect, and connecting to every enabled calendar stalled the settings
-    /// page and every push sync for as long as the slowest remote account took
-    /// to come up (#575). The backend name is already in the registry.
-    // ponytail: name check, not a live probe. A share-only CalDAV calendar
-    // still appears and reports `calendar-read-only` when the write is tried.
+
     const READ_ONLY_BACKENDS: &[&str] = &["birthdays", "contacts", "weather", "webcal"];
     const SOURCE_TYPE_EVENTS: c_int = 0;
     const OBJ_MOD_ALL: c_int = 0x07;
@@ -297,12 +292,6 @@ mod imp {
         slist_free: SListFree,
     }
 
-    /// GLib/GObject stacks must never be dlclosed: EDS registers static GTypes
-    /// and e_source_registry_new_sync spawns D-Bus worker threads that outlive
-    /// any handle we hold. Loading per call dropped the Library (dlclose) while
-    /// those threads still ran code in libecal (random SIGSEGV), and the next
-    /// dlopen re-registered GTypes that libgobject still knew at the old
-    /// address, so the registry failed on later calls (#990).
     fn eds_api() -> Result<&'static EdsApi, String> {
         static EDS_API: std::sync::OnceLock<Result<EdsApi, String>> = std::sync::OnceLock::new();
         EDS_API
@@ -313,14 +302,6 @@ mod imp {
 
     impl EdsApi {
         fn load() -> Result<Self, String> {
-            // Load ONLY libecal and resolve every symbol (including libedataserver,
-            // glib, and gobject ones) through its handle: dlsym on a handle searches
-            // the library's whole dependency chain, so all symbols come from the one
-            // EDS stack libecal was linked against. Opening libedataserver by its own
-            // pinned SONAME here loaded a SECOND copy when the two names resolved to
-            // different builds (Flatpak: bundled /app/lib vs GNOME runtime), and two
-            // libedataserver instances abort GLib type registration at runtime
-            // ("cannot register existing type 'ESourceRegistry'", #575).
             let ecal = open_library(&["libecal-2.0.so.3"])?;
             let eds = &ecal;
             let glib = &ecal;
@@ -700,8 +681,7 @@ mod imp {
         for _ in 0..20 {
             if let Some(source) = session.ref_source(&uid) {
                 let target = push_target_from_source(session, &source);
-                // A freshly committed source only accepts writes once its own
-                // backend is up, so this one calendar is still probed live.
+
                 if connect_calendar(session, source, true).is_ok() {
                     if let Some(target) = target {
                         return Ok(target);
@@ -748,7 +728,7 @@ mod imp {
             };
             let name = source_name(session.api, source.ptr);
             let color = source_color(session.api, source.ptr);
-            // One unreachable account must not blank out every other calendar.
+
             let Ok(calendar) = connect_calendar(&session, source, false) else {
                 continue;
             };
@@ -1252,9 +1232,6 @@ mod imp {
 
         #[test]
         fn escapes_ics_text_specials_without_double_escaping_the_backslash() {
-            // Order matters: backslashes are escaped first, so the ones this
-            // function introduces for newlines/semicolons must not be escaped
-            // again on the way out.
             for (raw, expected) in [
                 ("plain", "plain"),
                 (r"back\slash", r"back\\slash"),
@@ -1279,9 +1256,6 @@ mod imp {
                 )
             );
 
-            // A non-RFC3339 bound, an inverted range and an empty range all
-            // have to be refused: EDS would otherwise answer a query that
-            // means something other than what the caller asked for.
             for (start, end) in [
                 ("2026-07-21", "2026-07-22T13:00:00.000Z"),
                 ("not-a-date", "2026-07-22T13:00:00.000Z"),

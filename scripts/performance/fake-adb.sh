@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline harness regression fixture. Never invokes a real adb binary.
+
 set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_ADB_LOG"
 case "$*" in
@@ -12,8 +12,8 @@ case "$*" in
   'shell getprop ro.product.model') echo 'Synthetic Phone' ;;
   'shell getprop ro.build.fingerprint') echo synthetic/android/36 ;;
   'shell date '*)
-    # adb joins shell arguments into a remote command: local quotes do not
-    # protect a format containing spaces from the second shell parse.
+
+
     bash -c "${*:2}" >/dev/null
     echo '09-08 12:00:00.000' ;;
   'shell am start '*) printf 'Status: ok\nLaunchState: %s\nTotalTime: 200\nWaitTime: 205\n' "${FAKE_LAUNCH_STATE:-COLD}" ;;

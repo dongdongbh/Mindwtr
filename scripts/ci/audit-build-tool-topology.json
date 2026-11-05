@@ -1,69 +1,85 @@
 {
-  "desktop": {
-    "": {
-      "version": null,
-      "edges": {
-        "devDependencies:tailwindcss": "^3.4.1"
-      }
-    },
-    "node_modules/braces": {
-      "version": "3.0.3",
-      "edges": {},
-      "dev": true
-    },
-    "node_modules/chokidar": {
-      "version": "3.6.0",
-      "edges": {
-        "dependencies:braces": "~3.0.2"
-      },
-      "dev": true
-    },
-    "node_modules/fast-glob": {
-      "version": "3.3.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.8"
-      },
-      "dev": true
-    },
-    "node_modules/micromatch": {
-      "version": "4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
-      },
-      "dev": true
-    },
-    "node_modules/tailwindcss": {
-      "version": "3.4.19",
-      "edges": {
-        "dependencies:chokidar": "^3.6.0",
-        "dependencies:fast-glob": "^3.3.2",
-        "dependencies:micromatch": "^4.0.8"
-      },
-      "dev": true
-    }
-  },
   "mobile": {
     "": {
       "version": null,
       "edges": {
+        "dependencies:@expo/metro-runtime": "^6.1.2",
+        "dependencies:@expo/vector-icons": "^15.0.3",
+        "dependencies:@op-engineering/op-sqlite": "^17.1.2",
+        "dependencies:@react-native-async-storage/async-storage": "2.2.0",
+        "dependencies:@react-native-community/datetimepicker": "8.4.4",
+        "dependencies:@react-navigation/bottom-tabs": "^7.4.0",
+        "dependencies:@react-navigation/drawer": "^7.5.0",
+        "dependencies:@react-navigation/elements": "^2.6.3",
+        "dependencies:@react-navigation/native": "^7.1.8",
         "dependencies:expo": "~54.0.30",
+        "dependencies:expo-application": "~7.0.8",
+        "dependencies:expo-asset": "~12.0.12",
+        "dependencies:expo-audio": "~1.1.1",
+        "dependencies:expo-auth-session": "~7.0.11",
+        "dependencies:expo-background-task": "~1.0.10",
+        "dependencies:expo-build-properties": "~1.0.10",
+        "dependencies:expo-calendar": "~15.0.8",
+        "dependencies:expo-clipboard": "~8.0.8",
+        "dependencies:expo-constants": "~18.0.13",
+        "dependencies:expo-document-picker": "^14.0.8",
+        "dependencies:expo-file-system": "~19.0.21",
+        "dependencies:expo-font": "~14.0.10",
+        "dependencies:expo-haptics": "~15.0.8",
+        "dependencies:expo-image": "~3.0.11",
+        "dependencies:expo-image-picker": "~17.0.11",
+        "dependencies:expo-intent-launcher": "~13.0.8",
+        "dependencies:expo-linking": "~8.0.12",
+        "dependencies:expo-local-authentication": "~17.0.9",
+        "dependencies:expo-network": "~8.0.8",
+        "dependencies:expo-router": "~6.0.21",
+        "dependencies:expo-secure-store": "~15.0.8",
+        "dependencies:expo-share-intent": "^5.1.1",
+        "dependencies:expo-sharing": "^14.0.8",
+        "dependencies:expo-splash-screen": "~31.0.13",
+        "dependencies:expo-status-bar": "~3.0.9",
+        "dependencies:expo-store-review": "~9.0.9",
+        "dependencies:expo-symbols": "~1.0.8",
+        "dependencies:expo-system-ui": "~6.0.9",
+        "dependencies:expo-task-manager": "~14.0.9",
+        "dependencies:expo-web-browser": "~15.0.11",
+        "dependencies:lucide-react-native": "^0.556.0",
+        "dependencies:nativewind": "^4.2.1",
         "dependencies:react-native": "0.81.5",
-        "dependencies:tailwindcss": "3.3.2"
+        "dependencies:react-native-alarm-notification": "^1.8.0",
+        "dependencies:react-native-draggable-flatlist": "^4.0.2",
+        "dependencies:react-native-fs": "^2.20.0",
+        "dependencies:react-native-gesture-handler": "~2.28.0",
+        "dependencies:react-native-nitro-modules": "0.33.2",
+        "dependencies:react-native-quick-base64": "^3.0.1",
+        "dependencies:react-native-quick-crypto": "^1.1.7",
+        "dependencies:react-native-reanimated": "~4.1.1",
+        "dependencies:react-native-safe-area-context": "~5.6.0",
+        "dependencies:react-native-screens": "~4.16.0",
+        "dependencies:react-native-svg": "15.12.1",
+        "dependencies:react-native-url-polyfill": "^3.0.0",
+        "dependencies:react-native-widgetkit": "^1.0.9",
+        "dependencies:react-native-worklets": "0.5.1",
+        "dependencies:whisper.rn": "^0.5.3",
+        "devDependencies:babel-preset-expo": "~54.0.10",
+        "devDependencies:eslint": "^9.39.1",
+        "devDependencies:eslint-config-expo": "~10.0.0"
       }
     },
     "node_modules/@expo/cli": {
       "version": "54.0.26",
       "edges": {
-        "dependencies:@expo/code-signing-certificates": "^0.0.6",
+        "dependencies:@expo/config": "~12.0.14",
+        "dependencies:@expo/config-plugins": "~54.0.5",
         "dependencies:@expo/metro": "~54.2.0",
         "dependencies:@expo/metro-config": "~54.0.17",
-        "dependencies:node-forge": "^1.3.3"
-      }
-    },
-    "node_modules/@expo/code-signing-certificates": {
-      "version": "0.0.6",
-      "edges": {
-        "dependencies:node-forge": "^1.3.3"
+        "dependencies:@expo/prebuild-config": "^54.0.9",
+        "dependencies:@react-native/dev-middleware": "0.81.5",
+        "dependencies:glob": "^13.0.0",
+        "dependencies:minimatch": "^9.0.0",
+        "peerDependencies:expo": "*",
+        "peerDependencies:expo-router": "*",
+        "peerDependencies:react-native": "*"
       }
     },
     "node_modules/@expo/metro": {
@@ -71,101 +87,57 @@
       "edges": {
         "dependencies:metro": "0.83.3",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
     "node_modules/@expo/metro-config": {
       "version": "54.0.17",
       "edges": {
-        "dependencies:@expo/metro": "~54.2.0"
-      }
-    },
-    "node_modules/@jest/environment": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "node_modules/@jest/fake-timers": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:jest-message-util": "^29.7.0"
-      }
-    },
-    "node_modules/@jest/transform": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:jest-haste-map": "^29.7.0",
-        "dependencies:micromatch": "^4.0.4"
+        "dependencies:@expo/config": "~12.0.14",
+        "dependencies:@expo/metro": "~54.2.0",
+        "dependencies:glob": "^13.0.0",
+        "peerDependencies:expo": "*"
       }
     },
     "node_modules/@react-native/community-cli-plugin": {
       "version": "0.81.5",
       "edges": {
+        "dependencies:@react-native/dev-middleware": "0.81.5",
         "dependencies:metro": "^0.83.1",
         "dependencies:metro-config": "^0.83.1"
-      }
-    },
-    "node_modules/babel-jest": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:@jest/transform": "^29.7.0"
-      }
-    },
-    "node_modules/braces": {
-      "version": "3.0.3",
-      "edges": {}
-    },
-    "node_modules/chokidar": {
-      "version": "3.6.0",
-      "edges": {
-        "dependencies:braces": "~3.0.2"
       }
     },
     "node_modules/expo": {
       "version": "54.0.36",
       "edges": {
         "dependencies:@expo/cli": "54.0.26",
+        "dependencies:@expo/config": "~12.0.14",
+        "dependencies:@expo/config-plugins": "~54.0.5",
+        "dependencies:@expo/devtools": "0.1.8",
+        "dependencies:@expo/fingerprint": "0.15.5",
         "dependencies:@expo/metro": "~54.2.0",
-        "dependencies:@expo/metro-config": "54.0.17"
-      }
-    },
-    "node_modules/fast-glob": {
-      "version": "3.3.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.8"
+        "dependencies:@expo/metro-config": "54.0.17",
+        "dependencies:@expo/vector-icons": "^15.0.3",
+        "dependencies:babel-preset-expo": "~54.0.12",
+        "dependencies:expo-asset": "~12.0.13",
+        "dependencies:expo-constants": "~18.0.13",
+        "dependencies:expo-file-system": "~19.0.23",
+        "dependencies:expo-font": "~14.0.12",
+        "dependencies:expo-keep-awake": "~15.0.8",
+        "dependencies:expo-modules-core": "3.0.30",
+        "peerDependencies:@expo/metro-runtime": "*",
+        "peerDependencies:react-native": "*"
       }
     },
     "node_modules/image-size": {
       "version": "1.2.1",
       "edges": {}
     },
-    "node_modules/jest-environment-node": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:@jest/environment": "^29.7.0",
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "node_modules/jest-haste-map": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
-    "node_modules/jest-message-util": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "node_modules/metro": {
       "version": "0.83.3",
       "edges": {
         "dependencies:image-size": "^1.0.2",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
@@ -175,42 +147,800 @@
         "dependencies:metro": "0.83.3"
       }
     },
-    "node_modules/metro-file-map": {
-      "version": "0.83.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "node_modules/metro-transform-worker": {
       "version": "0.83.3",
       "edges": {
         "dependencies:metro": "0.83.3"
       }
     },
-    "node_modules/micromatch": {
-      "version": "4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
-      }
-    },
-    "node_modules/node-forge": {
-      "version": "1.4.0",
-      "edges": {}
-    },
     "node_modules/react-native": {
       "version": "0.81.5",
       "edges": {
+        "dependencies:@react-native/codegen": "0.81.5",
         "dependencies:@react-native/community-cli-plugin": "0.81.5",
+        "dependencies:@react-native/virtualized-lists": "0.81.5",
         "dependencies:babel-jest": "^29.7.0",
-        "dependencies:jest-environment-node": "^29.7.0"
+        "dependencies:glob": "^7.1.1"
       }
     },
-    "node_modules/tailwindcss": {
-      "version": "3.3.2",
+    "node_modules/@expo/config": {
+      "version": "12.0.14",
       "edges": {
-        "dependencies:chokidar": "^3.5.3",
-        "dependencies:fast-glob": "^3.2.12",
-        "dependencies:micromatch": "^4.0.5"
+        "dependencies:@expo/config-plugins": "~54.0.5",
+        "dependencies:deepmerge": "^4.3.1",
+        "dependencies:glob": "^13.0.0"
+      }
+    },
+    "node_modules/@expo/prebuild-config": {
+      "version": "54.0.9",
+      "edges": {
+        "dependencies:@expo/config": "~12.0.14",
+        "dependencies:@expo/config-plugins": "~54.0.5",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/deepmerge": {
+      "version": "4.3.1",
+      "edges": {}
+    },
+    "node_modules/expo-asset": {
+      "version": "12.0.13",
+      "edges": {
+        "dependencies:expo-constants": "~18.0.13",
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-auth-session": {
+      "version": "7.0.11",
+      "edges": {
+        "dependencies:expo-application": "~7.0.8",
+        "dependencies:expo-constants": "~18.0.13",
+        "dependencies:expo-crypto": "~15.0.9",
+        "dependencies:expo-linking": "~8.0.12",
+        "dependencies:expo-web-browser": "~15.0.11",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-constants": {
+      "version": "18.0.13",
+      "edges": {
+        "dependencies:@expo/config": "~12.0.13",
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-linking": {
+      "version": "8.0.12",
+      "edges": {
+        "dependencies:expo-constants": "~18.0.13",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-share-intent": {
+      "version": "5.1.1",
+      "edges": {
+        "dependencies:@expo/config-plugins": "~10.1.1",
+        "dependencies:expo-constants": "~18.0.10",
+        "dependencies:expo-linking": "~8.0.9",
+        "peerDependencies:expo": "^54",
+        "peerDependencies:expo-constants": ">=18.0.8",
+        "peerDependencies:expo-linking": ">=8.0.8",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-splash-screen": {
+      "version": "31.0.13",
+      "edges": {
+        "dependencies:@expo/prebuild-config": "^54.0.8",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/@eslint/config-array": {
+      "version": "0.21.1",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2"
+      }
+    },
+    "node_modules/@expo/cli/node_modules/glob": {
+      "version": "13.0.6",
+      "edges": {
+        "dependencies:minimatch": "^10.2.2"
+      }
+    },
+    "node_modules/@expo/cli/node_modules/glob/node_modules/minimatch": {
+      "version": "10.2.6",
+      "edges": {}
+    },
+    "node_modules/@expo/cli/node_modules/minimatch": {
+      "version": "9.0.9",
+      "edges": {}
+    },
+    "node_modules/@expo/config-plugins": {
+      "version": "54.0.5",
+      "edges": {
+        "dependencies:glob": "^13.0.0"
+      }
+    },
+    "node_modules/@expo/config-plugins/node_modules/glob": {
+      "version": "13.0.1",
+      "edges": {
+        "dependencies:minimatch": "^10.1.2"
+      }
+    },
+    "node_modules/@expo/config-plugins/node_modules/minimatch": {
+      "version": "10.2.6",
+      "edges": {}
+    },
+    "node_modules/@expo/config/node_modules/glob": {
+      "version": "13.0.1",
+      "edges": {
+        "dependencies:minimatch": "^10.1.2"
+      }
+    },
+    "node_modules/@expo/config/node_modules/minimatch": {
+      "version": "10.2.6",
+      "edges": {}
+    },
+    "node_modules/@expo/fingerprint": {
+      "version": "0.15.5",
+      "edges": {
+        "dependencies:glob": "^13.0.0",
+        "dependencies:minimatch": "^10.2.2"
+      }
+    },
+    "node_modules/@expo/fingerprint/node_modules/glob": {
+      "version": "13.0.6",
+      "edges": {
+        "dependencies:minimatch": "^10.2.2"
+      }
+    },
+    "node_modules/@expo/fingerprint/node_modules/minimatch": {
+      "version": "10.2.6",
+      "edges": {}
+    },
+    "node_modules/@expo/metro-config/node_modules/glob": {
+      "version": "13.0.6",
+      "edges": {
+        "dependencies:minimatch": "^10.2.2"
+      }
+    },
+    "node_modules/@expo/metro-config/node_modules/minimatch": {
+      "version": "10.2.6",
+      "edges": {}
+    },
+    "node_modules/@jest/transform": {
+      "version": "29.7.0",
+      "edges": {
+        "dependencies:babel-plugin-istanbul": "^6.1.1"
+      }
+    },
+    "node_modules/@react-native/babel-plugin-codegen": {
+      "version": "0.81.5",
+      "edges": {
+        "dependencies:@react-native/codegen": "0.81.5"
+      }
+    },
+    "node_modules/@react-native/babel-preset": {
+      "version": "0.81.5",
+      "edges": {
+        "dependencies:@react-native/babel-plugin-codegen": "0.81.5"
+      }
+    },
+    "node_modules/@react-native/codegen": {
+      "version": "0.81.5",
+      "edges": {
+        "dependencies:glob": "^7.1.1"
+      }
+    },
+    "node_modules/@react-native/dev-middleware": {
+      "version": "0.81.5",
+      "edges": {
+        "dependencies:chromium-edge-launcher": "^0.2.0"
+      }
+    },
+    "node_modules/@typescript-eslint/eslint-plugin": {
+      "version": "8.55.0",
+      "edges": {
+        "dependencies:@typescript-eslint/type-utils": "8.55.0",
+        "dependencies:@typescript-eslint/utils": "8.55.0",
+        "peerDependencies:@typescript-eslint/parser": "^8.55.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "node_modules/@typescript-eslint/parser": {
+      "version": "8.55.0",
+      "edges": {
+        "dependencies:@typescript-eslint/typescript-estree": "8.55.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "node_modules/@typescript-eslint/type-utils": {
+      "version": "8.55.0",
+      "edges": {
+        "dependencies:@typescript-eslint/typescript-estree": "8.55.0",
+        "dependencies:@typescript-eslint/utils": "8.55.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "node_modules/@typescript-eslint/typescript-estree": {
+      "version": "8.55.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.5"
+      }
+    },
+    "node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch": {
+      "version": "9.0.9",
+      "edges": {}
+    },
+    "node_modules/@typescript-eslint/utils": {
+      "version": "8.55.0",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.9.1",
+        "dependencies:@typescript-eslint/typescript-estree": "8.55.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "node_modules/babel-jest": {
+      "version": "29.7.0",
+      "edges": {
+        "dependencies:@jest/transform": "^29.7.0",
+        "dependencies:babel-plugin-istanbul": "^6.1.1"
+      }
+    },
+    "node_modules/babel-plugin-istanbul": {
+      "version": "6.1.1",
+      "edges": {
+        "dependencies:test-exclude": "^6.0.0"
+      }
+    },
+    "node_modules/babel-preset-expo": {
+      "version": "54.0.12",
+      "edges": {
+        "dependencies:@react-native/babel-preset": "0.81.5",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/chromium-edge-launcher": {
+      "version": "0.2.0",
+      "edges": {
+        "dependencies:rimraf": "^3.0.2"
+      }
+    },
+    "node_modules/eslint": {
+      "version": "9.39.1",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.8.0",
+        "dependencies:@eslint/config-array": "^0.21.1",
+        "dependencies:@eslint/eslintrc": "^3.3.1",
+        "dependencies:minimatch": "^3.1.2"
+      }
+    },
+    "node_modules/eslint-config-expo": {
+      "version": "10.0.0",
+      "edges": {
+        "dependencies:@typescript-eslint/eslint-plugin": "^8.18.2",
+        "dependencies:@typescript-eslint/parser": "^8.18.2",
+        "dependencies:eslint-import-resolver-typescript": "^3.6.3",
+        "dependencies:eslint-plugin-expo": "^1.0.0",
+        "dependencies:eslint-plugin-import": "^2.30.0",
+        "dependencies:eslint-plugin-react": "^7.37.3",
+        "dependencies:eslint-plugin-react-hooks": "^5.1.0",
+        "peerDependencies:eslint": ">=8.10"
+      }
+    },
+    "node_modules/eslint-plugin-expo": {
+      "version": "1.0.0",
+      "edges": {
+        "dependencies:@typescript-eslint/utils": "^8.29.1",
+        "dependencies:eslint": "^9.24.0",
+        "peerDependencies:eslint": ">=8.10"
+      }
+    },
+    "node_modules/eslint-plugin-import": {
+      "version": "2.32.0",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2",
+        "peerDependencies:eslint": "^2 || ^3 || ^4 || ^5 || ^6 || ^7.2.0 || ^8 || ^9"
+      }
+    },
+    "node_modules/eslint-plugin-react": {
+      "version": "7.37.5",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2",
+        "peerDependencies:eslint": "^3 || ^4 || ^5 || ^6 || ^7 || ^8 || ^9.7"
+      }
+    },
+    "node_modules/eslint/node_modules/@eslint/eslintrc": {
+      "version": "3.3.3",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2"
+      }
+    },
+    "node_modules/expo-share-intent/node_modules/@expo/config-plugins": {
+      "version": "10.1.2",
+      "edges": {
+        "dependencies:glob": "^10.4.2"
+      }
+    },
+    "node_modules/expo-share-intent/node_modules/glob": {
+      "version": "10.5.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.4"
+      }
+    },
+    "node_modules/expo-share-intent/node_modules/minimatch": {
+      "version": "9.0.9",
+      "edges": {}
+    },
+    "node_modules/glob": {
+      "version": "7.2.3",
+      "edges": {
+        "dependencies:minimatch": "^3.1.1"
+      }
+    },
+    "node_modules/minimatch": {
+      "version": "3.1.5",
+      "edges": {}
+    },
+    "node_modules/rimraf": {
+      "version": "3.0.2",
+      "edges": {
+        "dependencies:glob": "^7.1.3"
+      }
+    },
+    "node_modules/test-exclude": {
+      "version": "6.0.0",
+      "edges": {
+        "dependencies:glob": "^7.1.4",
+        "dependencies:minimatch": "^3.0.4"
+      }
+    },
+    "node_modules/@craftzdog/react-native-buffer": {
+      "version": "6.1.2",
+      "edges": {
+        "dependencies:react-native-quick-base64": "^3.0.0"
+      }
+    },
+    "node_modules/@eslint-community/eslint-utils": {
+      "version": "4.9.1",
+      "edges": {
+        "peerDependencies:eslint": "^6.0.0 || ^7.0.0 || >=8.0.0"
+      }
+    },
+    "node_modules/@expo/devtools": {
+      "version": "0.1.8",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@expo/metro-runtime": {
+      "version": "6.1.2",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@expo/vector-icons": {
+      "version": "15.0.3",
+      "edges": {
+        "peerDependencies:expo-font": ">=14.0.4",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@op-engineering/op-sqlite": {
+      "version": "17.1.2",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@react-native-async-storage/async-storage": {
+      "version": "2.2.0",
+      "edges": {
+        "peerDependencies:react-native": "^0.0.0-0 || >=0.65 <1.0"
+      }
+    },
+    "node_modules/@react-native-community/datetimepicker": {
+      "version": "8.4.4",
+      "edges": {
+        "peerDependencies:expo": ">=52.0.0",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@react-native/virtualized-lists": {
+      "version": "0.81.5",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@react-navigation/bottom-tabs": {
+      "version": "7.12.0",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.5",
+        "peerDependencies:@react-navigation/native": "^7.1.28",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "node_modules/@react-navigation/drawer": {
+      "version": "7.8.0",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.5",
+        "dependencies:react-native-drawer-layout": "^4.2.1",
+        "peerDependencies:@react-navigation/native": "^7.1.28",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-gesture-handler": ">= 2.0.0",
+        "peerDependencies:react-native-reanimated": ">= 2.0.0",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "node_modules/@react-navigation/elements": {
+      "version": "2.9.5",
+      "edges": {
+        "peerDependencies:@react-navigation/native": "^7.1.28",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0"
+      }
+    },
+    "node_modules/@react-navigation/native": {
+      "version": "7.1.28",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/@react-navigation/native-stack": {
+      "version": "7.12.0",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.5",
+        "peerDependencies:@react-navigation/native": "^7.1.28",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "node_modules/eslint-import-resolver-typescript": {
+      "version": "3.10.1",
+      "edges": {
+        "peerDependencies:eslint": "*",
+        "peerDependencies:eslint-plugin-import": "*"
+      }
+    },
+    "node_modules/eslint-plugin-react-hooks": {
+      "version": "5.2.0",
+      "edges": {
+        "peerDependencies:eslint": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0 || ^9.0.0"
+      }
+    },
+    "node_modules/expo-application": {
+      "version": "7.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-audio": {
+      "version": "1.1.1",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:expo-asset": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-background-task": {
+      "version": "1.0.10",
+      "edges": {
+        "dependencies:expo-task-manager": "~14.0.9",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-build-properties": {
+      "version": "1.0.10",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-calendar": {
+      "version": "15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-clipboard": {
+      "version": "8.0.8",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-crypto": {
+      "version": "15.0.9",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-document-picker": {
+      "version": "14.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-file-system": {
+      "version": "19.0.23",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-font": {
+      "version": "14.0.12",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-haptics": {
+      "version": "15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-image": {
+      "version": "3.0.11",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-image-loader": {
+      "version": "6.0.0",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-image-picker": {
+      "version": "17.0.11",
+      "edges": {
+        "dependencies:expo-image-loader": "~6.0.0",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-intent-launcher": {
+      "version": "13.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-keep-awake": {
+      "version": "15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-local-authentication": {
+      "version": "17.0.9",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-modules-core": {
+      "version": "3.0.30",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-network": {
+      "version": "8.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-router": {
+      "version": "6.0.23",
+      "edges": {
+        "dependencies:@expo/metro-runtime": "^6.1.2",
+        "dependencies:@react-navigation/bottom-tabs": "^7.4.0",
+        "dependencies:@react-navigation/native": "^7.1.8",
+        "dependencies:@react-navigation/native-stack": "^7.3.16",
+        "dependencies:react-native-is-edge-to-edge": "^1.1.6",
+        "peerDependencies:@expo/metro-runtime": "^6.1.2",
+        "peerDependencies:@react-navigation/drawer": "^7.5.0",
+        "peerDependencies:expo": "*",
+        "peerDependencies:expo-constants": "^18.0.13",
+        "peerDependencies:expo-linking": "^8.0.11",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-gesture-handler": "*",
+        "peerDependencies:react-native-reanimated": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 5.4.0",
+        "peerDependencies:react-native-screens": "*"
+      }
+    },
+    "node_modules/expo-secure-store": {
+      "version": "15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-sharing": {
+      "version": "14.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "node_modules/expo-status-bar": {
+      "version": "3.0.9",
+      "edges": {
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-store-review": {
+      "version": "9.0.9",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-symbols": {
+      "version": "1.0.8",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-system-ui": {
+      "version": "6.0.9",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-task-manager": {
+      "version": "14.0.9",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/expo-web-browser": {
+      "version": "15.0.11",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/lucide-react-native": {
+      "version": "0.556.0",
+      "edges": {
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-svg": "^12.0.0 || ^13.0.0 || ^14.0.0 || ^15.0.0"
+      }
+    },
+    "node_modules/nativewind": {
+      "version": "4.2.1",
+      "edges": {
+        "dependencies:react-native-css-interop": "0.2.1"
+      }
+    },
+    "node_modules/react-native-alarm-notification": {
+      "version": "1.8.0",
+      "edges": {
+        "peerDependencies:react-native": ">=0.60.0-rc.0 <1.0.x"
+      }
+    },
+    "node_modules/react-native-css-interop": {
+      "version": "0.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-reanimated": ">=3.6.2"
+      }
+    },
+    "node_modules/react-native-draggable-flatlist": {
+      "version": "4.0.3",
+      "edges": {
+        "peerDependencies:react-native": ">=0.64.0",
+        "peerDependencies:react-native-gesture-handler": ">=2.0.0",
+        "peerDependencies:react-native-reanimated": ">=2.8.0"
+      }
+    },
+    "node_modules/react-native-drawer-layout": {
+      "version": "4.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-gesture-handler": ">= 2.0.0",
+        "peerDependencies:react-native-reanimated": ">= 2.0.0"
+      }
+    },
+    "node_modules/react-native-fs": {
+      "version": "2.20.0",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-gesture-handler": {
+      "version": "2.28.0",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-is-edge-to-edge": {
+      "version": "1.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-nitro-modules": {
+      "version": "0.33.2",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-quick-base64": {
+      "version": "3.0.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-quick-crypto": {
+      "version": "1.1.7",
+      "edges": {
+        "dependencies:@craftzdog/react-native-buffer": "^6.1.2",
+        "peerDependencies:expo": ">=48.0.0",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-nitro-modules": ">=0.31.2",
+        "peerDependencies:react-native-quick-base64": ">=3.0.0"
+      }
+    },
+    "node_modules/react-native-reanimated": {
+      "version": "4.1.6",
+      "edges": {
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-worklets": ">=0.5.0"
+      }
+    },
+    "node_modules/react-native-safe-area-context": {
+      "version": "5.6.2",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-screens": {
+      "version": "4.16.0",
+      "edges": {
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-svg": {
+      "version": "15.12.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-url-polyfill": {
+      "version": "3.0.0",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-widgetkit": {
+      "version": "1.0.9",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/react-native-worklets": {
+      "version": "0.5.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "node_modules/whisper.rn": {
+      "version": "0.5.5",
+      "edges": {
+        "peerDependencies:react-native": "*"
       }
     }
   },
@@ -221,16 +951,76 @@
         "dependencies:eas-cli": "21.5.0"
       }
     },
-    "node_modules/@expo/code-signing-certificates": {
-      "version": "0.0.5",
+    "node_modules/eas-cli": {
+      "version": "21.5.0",
       "edges": {
-        "dependencies:node-forge": "^1.2.1"
+        "dependencies:@expo/config": "55.0.10",
+        "dependencies:@expo/config-plugins": "55.0.7",
+        "dependencies:@expo/eas-build-job": "21.5.0",
+        "dependencies:@expo/eas-json": "21.5.0",
+        "dependencies:@expo/logger": "21.0.0",
+        "dependencies:@expo/plugin-help": "5.1.23",
+        "dependencies:@expo/plugin-warn-if-update-available": "2.5.1",
+        "dependencies:@expo/prebuild-config": "9.0.12",
+        "dependencies:@expo/steps": "21.5.0",
+        "dependencies:@oclif/core": "^4.8.3",
+        "dependencies:@oclif/plugin-autocomplete": "^3.2.40",
+        "dependencies:minimatch": "5.1.2",
+        "dependencies:minizlib": "3.0.1",
+        "dependencies:tar": "7.5.19"
       }
     },
-    "node_modules/@expo/pkcs12": {
-      "version": "0.1.3",
+    "node_modules/@expo/config": {
+      "version": "55.0.10",
       "edges": {
-        "dependencies:node-forge": "^1.2.1"
+        "dependencies:@expo/config-plugins": "~55.0.7",
+        "dependencies:deepmerge": "^4.3.1",
+        "dependencies:glob": "^13.0.0"
+      }
+    },
+    "node_modules/@expo/prebuild-config": {
+      "version": "9.0.12",
+      "edges": {
+        "dependencies:@expo/config": "~11.0.13",
+        "dependencies:@expo/config-plugins": "~10.1.2"
+      }
+    },
+    "node_modules/@expo/prebuild-config/node_modules/@expo/config": {
+      "version": "11.0.13",
+      "edges": {
+        "dependencies:@expo/config-plugins": "~10.1.2",
+        "dependencies:deepmerge": "^4.3.1",
+        "dependencies:glob": "^10.4.2",
+        "dependencies:sucrase": "3.35.0"
+      }
+    },
+    "node_modules/deepmerge": {
+      "version": "4.3.1",
+      "edges": {}
+    },
+    "node_modules/@expo/config-plugins": {
+      "version": "55.0.7",
+      "edges": {
+        "dependencies:glob": "^13.0.0"
+      }
+    },
+    "node_modules/@expo/eas-build-job": {
+      "version": "21.5.0",
+      "edges": {
+        "dependencies:@expo/logger": "21.0.0",
+        "dependencies:@expo/turtle-spawn": "21.0.0"
+      }
+    },
+    "node_modules/@expo/eas-json": {
+      "version": "21.5.0",
+      "edges": {
+        "dependencies:@expo/eas-build-job": "21.5.0"
+      }
+    },
+    "node_modules/@expo/logger": {
+      "version": "21.0.0",
+      "edges": {
+        "dependencies:bunyan": "^1.8.15"
       }
     },
     "node_modules/@expo/plugin-help": {
@@ -242,92 +1032,298 @@
     "node_modules/@expo/plugin-help/node_modules/@oclif/core": {
       "version": "2.16.0",
       "edges": {
-        "dependencies:globby": "^11.1.0"
+        "dependencies:ejs": "^3.1.8"
       }
     },
     "node_modules/@expo/plugin-warn-if-update-available": {
       "version": "2.5.1",
       "edges": {
-        "dependencies:@oclif/core": "^2.11.1"
+        "dependencies:@oclif/core": "^2.11.1",
+        "dependencies:ejs": "^3.1.7"
       }
     },
     "node_modules/@expo/plugin-warn-if-update-available/node_modules/@oclif/core": {
       "version": "2.16.0",
       "edges": {
-        "dependencies:globby": "^11.1.0"
+        "dependencies:ejs": "^3.1.8"
+      }
+    },
+    "node_modules/@expo/prebuild-config/node_modules/@expo/config-plugins": {
+      "version": "10.1.2",
+      "edges": {
+        "dependencies:glob": "^10.4.2"
+      }
+    },
+    "node_modules/@expo/prebuild-config/node_modules/glob": {
+      "version": "10.5.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.4"
+      }
+    },
+    "node_modules/@expo/prebuild-config/node_modules/minimatch": {
+      "version": "9.0.9",
+      "edges": {}
+    },
+    "node_modules/@expo/steps": {
+      "version": "21.5.0",
+      "edges": {
+        "dependencies:@expo/eas-build-job": "21.5.0",
+        "dependencies:@expo/logger": "21.0.0"
+      }
+    },
+    "node_modules/@expo/turtle-spawn": {
+      "version": "21.0.0",
+      "edges": {
+        "dependencies:@expo/logger": "21.0.0"
       }
     },
     "node_modules/@oclif/core": {
       "version": "4.13.3",
+      "edges": {
+        "dependencies:ejs": "^3.1.10",
+        "dependencies:minimatch": "^10.2.5"
+      }
+    },
+    "node_modules/@oclif/core/node_modules/minimatch": {
+      "version": "10.2.6",
       "edges": {}
     },
     "node_modules/@oclif/plugin-autocomplete": {
       "version": "3.2.55",
       "edges": {
-        "dependencies:@oclif/core": "^4"
+        "dependencies:@oclif/core": "^4",
+        "dependencies:ejs": "^3.1.10"
       }
     },
-    "node_modules/braces": {
-      "version": "3.0.3",
+    "node_modules/bunyan": {
+      "version": "1.8.15",
+      "edges": {
+        "optionalDependencies:mv": "~2"
+      }
+    },
+    "node_modules/ejs": {
+      "version": "3.1.10",
+      "edges": {
+        "dependencies:jake": "^10.8.5"
+      }
+    },
+    "node_modules/filelist": {
+      "version": "1.0.6",
+      "edges": {
+        "dependencies:minimatch": "^5.0.1"
+      }
+    },
+    "node_modules/glob": {
+      "version": "13.0.6",
+      "edges": {
+        "dependencies:minimatch": "^10.2.2"
+      }
+    },
+    "node_modules/glob/node_modules/minimatch": {
+      "version": "10.2.6",
       "edges": {}
     },
-    "node_modules/eas-cli": {
-      "version": "21.5.0",
+    "node_modules/jake": {
+      "version": "10.9.4",
       "edges": {
-        "dependencies:@expo/code-signing-certificates": "0.0.5",
-        "dependencies:@expo/pkcs12": "0.1.3",
-        "dependencies:@expo/plugin-help": "5.1.23",
-        "dependencies:@expo/plugin-warn-if-update-available": "2.5.1",
-        "dependencies:@oclif/core": "^4.8.3",
-        "dependencies:@oclif/plugin-autocomplete": "^3.2.40",
-        "dependencies:fast-glob": "3.3.2",
-        "dependencies:jks-js": "1.1.0",
-        "dependencies:node-forge": "1.4.0"
+        "dependencies:filelist": "^1.0.4"
       }
     },
-    "node_modules/fast-glob": {
-      "version": "3.3.2",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
-    "node_modules/globby": {
-      "version": "11.1.0",
-      "edges": {
-        "dependencies:fast-glob": "^3.2.9"
-      }
-    },
-    "node_modules/jks-js": {
-      "version": "1.1.0",
-      "edges": {
-        "dependencies:node-forge": "^1.3.1"
-      }
-    },
-    "node_modules/micromatch": {
-      "version": "4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
-      }
-    },
-    "node_modules/node-forge": {
-      "version": "1.4.0",
+    "node_modules/minimatch": {
+      "version": "5.1.8",
       "edges": {}
+    },
+    "node_modules/minizlib": {
+      "version": "3.0.1",
+      "edges": {
+        "dependencies:rimraf": "^5.0.5"
+      }
+    },
+    "node_modules/mv": {
+      "version": "2.1.1",
+      "edges": {
+        "dependencies:rimraf": "~2.4.0"
+      }
+    },
+    "node_modules/mv/node_modules/glob": {
+      "version": "6.0.4",
+      "edges": {
+        "dependencies:minimatch": "2 || 3"
+      }
+    },
+    "node_modules/mv/node_modules/minimatch": {
+      "version": "3.1.5",
+      "edges": {}
+    },
+    "node_modules/mv/node_modules/rimraf": {
+      "version": "2.4.5",
+      "edges": {
+        "dependencies:glob": "^6.0.1"
+      }
+    },
+    "node_modules/rimraf": {
+      "version": "5.0.10",
+      "edges": {
+        "dependencies:glob": "^10.3.7"
+      }
+    },
+    "node_modules/rimraf/node_modules/glob": {
+      "version": "10.5.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.4"
+      }
+    },
+    "node_modules/rimraf/node_modules/minimatch": {
+      "version": "9.0.9",
+      "edges": {}
+    },
+    "node_modules/sucrase": {
+      "version": "3.35.0",
+      "edges": {
+        "dependencies:glob": "^10.3.10"
+      }
+    },
+    "node_modules/sucrase/node_modules/glob": {
+      "version": "10.5.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.4"
+      }
+    },
+    "node_modules/sucrase/node_modules/minimatch": {
+      "version": "9.0.9",
+      "edges": {}
+    },
+    "node_modules/tar": {
+      "version": "7.5.22",
+      "edges": {
+        "dependencies:minizlib": "^3.1.0"
+      }
+    },
+    "node_modules/tar/node_modules/minizlib": {
+      "version": "3.1.0",
+      "edges": {}
+    }
+  },
+  "desktop": {
+    "": {
+      "version": null,
+      "edges": {
+        "devDependencies:@typescript-eslint/eslint-plugin": "^8.46.2",
+        "devDependencies:@typescript-eslint/parser": "^8.46.2",
+        "devDependencies:eslint": "^9.39.1",
+        "devDependencies:eslint-plugin-react-hooks": "^5.2.0",
+        "devDependencies:eslint-plugin-react-refresh": "^0.4.24"
+      }
+    },
+    "node_modules/@eslint/config-array": {
+      "version": "0.21.2",
+      "edges": {
+        "dependencies:minimatch": "^3.1.5"
+      }
+    },
+    "node_modules/@eslint/config-array/node_modules/minimatch": {
+      "version": "3.1.5",
+      "edges": {}
+    },
+    "node_modules/@eslint/eslintrc": {
+      "version": "3.3.5",
+      "edges": {
+        "dependencies:minimatch": "^3.1.5"
+      }
+    },
+    "node_modules/@eslint/eslintrc/node_modules/minimatch": {
+      "version": "3.1.5",
+      "edges": {}
+    },
+    "node_modules/@typescript-eslint/eslint-plugin": {
+      "version": "8.57.1",
+      "edges": {
+        "dependencies:@typescript-eslint/type-utils": "8.57.1",
+        "dependencies:@typescript-eslint/utils": "8.57.1",
+        "peerDependencies:@typescript-eslint/parser": "^8.57.1",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0 || ^10.0.0"
+      }
+    },
+    "node_modules/@typescript-eslint/parser": {
+      "version": "8.57.1",
+      "edges": {
+        "dependencies:@typescript-eslint/typescript-estree": "8.57.1",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0 || ^10.0.0"
+      }
+    },
+    "node_modules/@typescript-eslint/type-utils": {
+      "version": "8.57.1",
+      "edges": {
+        "dependencies:@typescript-eslint/typescript-estree": "8.57.1",
+        "dependencies:@typescript-eslint/utils": "8.57.1",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0 || ^10.0.0"
+      }
+    },
+    "node_modules/@typescript-eslint/typescript-estree": {
+      "version": "8.57.1",
+      "edges": {
+        "dependencies:minimatch": "^10.2.2"
+      }
+    },
+    "node_modules/@typescript-eslint/utils": {
+      "version": "8.57.1",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.9.1",
+        "dependencies:@typescript-eslint/typescript-estree": "8.57.1",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0 || ^10.0.0"
+      }
+    },
+    "node_modules/eslint": {
+      "version": "9.39.4",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.8.0",
+        "dependencies:@eslint/config-array": "^0.21.2",
+        "dependencies:@eslint/eslintrc": "^3.3.5",
+        "dependencies:minimatch": "^3.1.5"
+      }
+    },
+    "node_modules/eslint/node_modules/minimatch": {
+      "version": "3.1.5",
+      "edges": {}
+    },
+    "node_modules/minimatch": {
+      "version": "10.2.4",
+      "edges": {}
+    },
+    "node_modules/@eslint-community/eslint-utils": {
+      "version": "4.9.1",
+      "edges": {
+        "peerDependencies:eslint": "^6.0.0 || ^7.0.0 || >=8.0.0"
+      }
+    },
+    "node_modules/eslint-plugin-react-hooks": {
+      "version": "5.2.0",
+      "edges": {
+        "peerDependencies:eslint": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0 || ^9.0.0"
+      }
+    },
+    "node_modules/eslint-plugin-react-refresh": {
+      "version": "0.4.26",
+      "edges": {
+        "peerDependencies:eslint": ">=8.40"
+      }
     }
   },
   "bun": {
     "@expo/cli": {
       "version": "@expo/cli@54.0.20",
       "edges": {
-        "dependencies:@expo/code-signing-certificates": "^0.0.5",
+        "dependencies:@expo/config": "~12.0.13",
+        "dependencies:@expo/config-plugins": "~54.0.4",
         "dependencies:@expo/metro": "~54.2.0",
         "dependencies:@expo/metro-config": "~54.0.12",
-        "dependencies:node-forge": "^1.3.1"
-      }
-    },
-    "@expo/code-signing-certificates": {
-      "version": "@expo/code-signing-certificates@0.0.5",
-      "edges": {
-        "dependencies:node-forge": "^1.2.1"
+        "dependencies:@expo/prebuild-config": "^54.0.8",
+        "dependencies:@react-native/dev-middleware": "0.81.5",
+        "dependencies:glob": "^13.0.0",
+        "dependencies:minimatch": "^9.0.0",
+        "peerDependencies:expo": "*",
+        "peerDependencies:expo-router": "*",
+        "peerDependencies:react-native": "*"
       }
     },
     "@expo/metro": {
@@ -335,101 +1331,58 @@
       "edges": {
         "dependencies:metro": "0.83.3",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
     "@expo/metro-config": {
       "version": "@expo/metro-config@54.0.12",
       "edges": {
-        "dependencies:@expo/metro": "~54.2.0"
-      }
-    },
-    "@jest/environment": {
-      "version": "@jest/environment@29.7.0",
-      "edges": {
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "@jest/fake-timers": {
-      "version": "@jest/fake-timers@29.7.0",
-      "edges": {
-        "dependencies:jest-message-util": "^29.7.0"
-      }
-    },
-    "@jest/transform": {
-      "version": "@jest/transform@29.7.0",
-      "edges": {
-        "dependencies:jest-haste-map": "^29.7.0",
-        "dependencies:micromatch": "^4.0.4"
+        "dependencies:@expo/config": "~12.0.13",
+        "dependencies:@expo/metro": "~54.2.0",
+        "dependencies:glob": "^13.0.0",
+        "dependencies:minimatch": "^9.0.0",
+        "peerDependencies:expo": "*"
       }
     },
     "@react-native/community-cli-plugin": {
       "version": "@react-native/community-cli-plugin@0.81.5",
       "edges": {
+        "dependencies:@react-native/dev-middleware": "0.81.5",
         "dependencies:metro": "^0.83.1",
         "dependencies:metro-config": "^0.83.1"
-      }
-    },
-    "babel-jest": {
-      "version": "babel-jest@29.7.0",
-      "edges": {
-        "dependencies:@jest/transform": "^29.7.0"
-      }
-    },
-    "braces": {
-      "version": "braces@3.0.3",
-      "edges": {}
-    },
-    "chokidar": {
-      "version": "chokidar@3.6.0",
-      "edges": {
-        "dependencies:braces": "~3.0.2"
       }
     },
     "expo": {
       "version": "expo@54.0.30",
       "edges": {
         "dependencies:@expo/cli": "54.0.20",
+        "dependencies:@expo/config": "~12.0.13",
+        "dependencies:@expo/config-plugins": "~54.0.4",
+        "dependencies:@expo/devtools": "0.1.8",
+        "dependencies:@expo/fingerprint": "0.15.4",
         "dependencies:@expo/metro": "~54.2.0",
-        "dependencies:@expo/metro-config": "54.0.12"
-      }
-    },
-    "fast-glob": {
-      "version": "fast-glob@3.3.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.8"
+        "dependencies:@expo/metro-config": "54.0.12",
+        "dependencies:@expo/vector-icons": "^15.0.3",
+        "dependencies:babel-preset-expo": "~54.0.9",
+        "dependencies:expo-asset": "~12.0.12",
+        "dependencies:expo-constants": "~18.0.12",
+        "dependencies:expo-file-system": "~19.0.21",
+        "dependencies:expo-font": "~14.0.10",
+        "dependencies:expo-keep-awake": "~15.0.8",
+        "dependencies:expo-modules-core": "3.0.29",
+        "peerDependencies:@expo/metro-runtime": "*",
+        "peerDependencies:react-native": "*"
       }
     },
     "image-size": {
       "version": "image-size@1.2.1",
       "edges": {}
     },
-    "jest-environment-node": {
-      "version": "jest-environment-node@29.7.0",
-      "edges": {
-        "dependencies:@jest/environment": "^29.7.0",
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "jest-haste-map": {
-      "version": "jest-haste-map@29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
-    "jest-message-util": {
-      "version": "jest-message-util@29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "metro": {
       "version": "metro@0.83.3",
       "edges": {
         "dependencies:image-size": "^1.0.2",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
@@ -439,64 +1392,995 @@
         "dependencies:metro": "0.83.3"
       }
     },
-    "metro-file-map": {
-      "version": "metro-file-map@0.83.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "metro-transform-worker": {
       "version": "metro-transform-worker@0.83.3",
       "edges": {
         "dependencies:metro": "0.83.3"
       }
     },
-    "micromatch": {
-      "version": "micromatch@4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
-      }
-    },
-    "node-forge": {
-      "version": "node-forge@1.4.0",
-      "edges": {}
-    },
     "react-native": {
       "version": "react-native@0.81.5",
       "edges": {
+        "dependencies:@react-native/codegen": "0.81.5",
         "dependencies:@react-native/community-cli-plugin": "0.81.5",
+        "dependencies:@react-native/virtualized-lists": "0.81.5",
         "dependencies:babel-jest": "^29.7.0",
-        "dependencies:jest-environment-node": "^29.7.0"
-      }
-    },
-    "tailwindcss": {
-      "version": "tailwindcss@3.4.19",
-      "edges": {
-        "dependencies:chokidar": "^3.6.0",
-        "dependencies:fast-glob": "^3.3.2",
-        "dependencies:micromatch": "^4.0.8"
-      }
-    },
-    "mobile/tailwindcss": {
-      "version": "tailwindcss@3.3.2",
-      "edges": {
-        "dependencies:chokidar": "^3.5.3",
-        "dependencies:fast-glob": "^3.2.12",
-        "dependencies:micromatch": "^4.0.5"
-      }
-    },
-    "workspace:apps/desktop": {
-      "version": null,
-      "edges": {
-        "devDependencies:tailwindcss": "^3.4.1"
+        "dependencies:glob": "^7.1.1"
       }
     },
     "workspace:apps/mobile": {
       "version": null,
       "edges": {
+        "dependencies:@expo/metro-runtime": "^6.1.2",
+        "dependencies:@expo/vector-icons": "^15.0.3",
+        "dependencies:@op-engineering/op-sqlite": "^17.1.2",
+        "dependencies:@react-native-async-storage/async-storage": "2.2.0",
+        "dependencies:@react-native-community/datetimepicker": "8.4.4",
+        "dependencies:@react-navigation/bottom-tabs": "^7.4.0",
+        "dependencies:@react-navigation/drawer": "^7.5.0",
+        "dependencies:@react-navigation/elements": "^2.6.3",
+        "dependencies:@react-navigation/native": "^7.1.8",
         "dependencies:expo": "~54.0.30",
+        "dependencies:expo-application": "~7.0.8",
+        "dependencies:expo-asset": "~12.0.12",
+        "dependencies:expo-audio": "~1.1.1",
+        "dependencies:expo-auth-session": "~7.0.11",
+        "dependencies:expo-background-task": "~1.0.10",
+        "dependencies:expo-build-properties": "~1.0.10",
+        "dependencies:expo-calendar": "~15.0.8",
+        "dependencies:expo-clipboard": "~8.0.8",
+        "dependencies:expo-constants": "~18.0.13",
+        "dependencies:expo-dev-client": "~6.0.21",
+        "dependencies:expo-document-picker": "^14.0.8",
+        "dependencies:expo-file-system": "~19.0.21",
+        "dependencies:expo-font": "~14.0.10",
+        "dependencies:expo-haptics": "~15.0.8",
+        "dependencies:expo-image": "~3.0.11",
+        "dependencies:expo-image-picker": "~17.0.11",
+        "dependencies:expo-intent-launcher": "~13.0.8",
+        "dependencies:expo-linking": "~8.0.12",
+        "dependencies:expo-local-authentication": "~17.0.9",
+        "dependencies:expo-network": "~8.0.8",
+        "dependencies:expo-router": "~6.0.21",
+        "dependencies:expo-secure-store": "~15.0.8",
+        "dependencies:expo-share-intent": "^5.1.1",
+        "dependencies:expo-sharing": "^14.0.8",
+        "dependencies:expo-splash-screen": "~31.0.13",
+        "dependencies:expo-status-bar": "~3.0.9",
+        "dependencies:expo-store-review": "~9.0.9",
+        "dependencies:expo-symbols": "~1.0.8",
+        "dependencies:expo-system-ui": "~6.0.9",
+        "dependencies:expo-task-manager": "~14.0.9",
+        "dependencies:expo-web-browser": "~15.0.11",
+        "dependencies:lucide-react-native": "^0.556.0",
+        "dependencies:nativewind": "^4.2.1",
         "dependencies:react-native": "0.81.5",
-        "dependencies:tailwindcss": "3.3.2"
+        "dependencies:react-native-alarm-notification": "^1.8.0",
+        "dependencies:react-native-draggable-flatlist": "^4.0.2",
+        "dependencies:react-native-fs": "^2.20.0",
+        "dependencies:react-native-gesture-handler": "~2.28.0",
+        "dependencies:react-native-nitro-modules": "0.33.2",
+        "dependencies:react-native-quick-base64": "^3.0.1",
+        "dependencies:react-native-quick-crypto": "^1.1.7",
+        "dependencies:react-native-reanimated": "~4.1.1",
+        "dependencies:react-native-safe-area-context": "~5.6.0",
+        "dependencies:react-native-screens": "~4.16.0",
+        "dependencies:react-native-svg": "15.12.1",
+        "dependencies:react-native-url-polyfill": "^3.0.0",
+        "dependencies:react-native-widgetkit": "^1.0.9",
+        "dependencies:react-native-worklets": "0.5.1",
+        "dependencies:whisper.rn": "^0.5.3",
+        "devDependencies:babel-preset-expo": "~54.0.10",
+        "devDependencies:eslint": "^9.39.1",
+        "devDependencies:eslint-config-expo": "~10.0.0"
+      }
+    },
+    "@expo/config": {
+      "version": "@expo/config@12.0.13",
+      "edges": {
+        "dependencies:@expo/config-plugins": "~54.0.4",
+        "dependencies:deepmerge": "^4.3.1",
+        "dependencies:glob": "^13.0.0"
+      }
+    },
+    "@expo/prebuild-config": {
+      "version": "@expo/prebuild-config@54.0.8",
+      "edges": {
+        "dependencies:@expo/config": "~12.0.13",
+        "dependencies:@expo/config-plugins": "~54.0.4",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "deepmerge": {
+      "version": "deepmerge@4.3.1",
+      "edges": {}
+    },
+    "expo-asset": {
+      "version": "expo-asset@12.0.12",
+      "edges": {
+        "dependencies:expo-constants": "~18.0.12",
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-auth-session": {
+      "version": "expo-auth-session@7.0.11",
+      "edges": {
+        "dependencies:expo-application": "~7.0.8",
+        "dependencies:expo-constants": "~18.0.13",
+        "dependencies:expo-crypto": "~15.0.9",
+        "dependencies:expo-linking": "~8.0.12",
+        "dependencies:expo-web-browser": "~15.0.11",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-constants": {
+      "version": "expo-constants@18.0.13",
+      "edges": {
+        "dependencies:@expo/config": "~12.0.13",
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-dev-client": {
+      "version": "expo-dev-client@6.0.21",
+      "edges": {
+        "dependencies:expo-dev-launcher": "6.0.21",
+        "dependencies:expo-dev-menu": "7.0.19",
+        "dependencies:expo-dev-menu-interface": "2.0.0",
+        "dependencies:expo-manifests": "~1.0.11",
+        "dependencies:expo-updates-interface": "~2.0.0",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-dev-launcher": {
+      "version": "expo-dev-launcher@6.0.21",
+      "edges": {
+        "dependencies:expo-dev-menu": "7.0.19",
+        "dependencies:expo-manifests": "~1.0.11",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-linking": {
+      "version": "expo-linking@8.0.12",
+      "edges": {
+        "dependencies:expo-constants": "~18.0.13",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-manifests": {
+      "version": "expo-manifests@1.0.11",
+      "edges": {
+        "dependencies:@expo/config": "~12.0.13",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-share-intent": {
+      "version": "expo-share-intent@5.1.1",
+      "edges": {
+        "dependencies:@expo/config-plugins": "~10.1.1",
+        "dependencies:expo-constants": "~18.0.10",
+        "dependencies:expo-linking": "~8.0.9",
+        "peerDependencies:expo": "^54",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-splash-screen": {
+      "version": "expo-splash-screen@31.0.13",
+      "edges": {
+        "dependencies:@expo/prebuild-config": "^54.0.8",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "@eslint/config-array": {
+      "version": "@eslint/config-array@0.21.2",
+      "edges": {
+        "dependencies:minimatch": "^3.1.5"
+      }
+    },
+    "@eslint/eslintrc": {
+      "version": "@eslint/eslintrc@3.3.5",
+      "edges": {
+        "dependencies:minimatch": "^3.1.5"
+      }
+    },
+    "@expo/config-plugins": {
+      "version": "@expo/config-plugins@54.0.4",
+      "edges": {
+        "dependencies:glob": "^13.0.0"
+      }
+    },
+    "@expo/fingerprint": {
+      "version": "@expo/fingerprint@0.15.4",
+      "edges": {
+        "dependencies:glob": "^13.0.0",
+        "dependencies:minimatch": "^9.0.0"
+      }
+    },
+    "@jest/transform": {
+      "version": "@jest/transform@29.7.0",
+      "edges": {
+        "dependencies:babel-plugin-istanbul": "^6.1.1"
+      }
+    },
+    "@react-native/babel-plugin-codegen": {
+      "version": "@react-native/babel-plugin-codegen@0.81.5",
+      "edges": {
+        "dependencies:@react-native/codegen": "0.81.5"
+      }
+    },
+    "@react-native/babel-preset": {
+      "version": "@react-native/babel-preset@0.81.5",
+      "edges": {
+        "dependencies:@react-native/babel-plugin-codegen": "0.81.5"
+      }
+    },
+    "@react-native/codegen": {
+      "version": "@react-native/codegen@0.81.5",
+      "edges": {
+        "dependencies:glob": "^7.1.1"
+      }
+    },
+    "@react-native/dev-middleware": {
+      "version": "@react-native/dev-middleware@0.81.5",
+      "edges": {
+        "dependencies:chromium-edge-launcher": "^0.2.0"
+      }
+    },
+    "@typescript-eslint/eslint-plugin": {
+      "version": "@typescript-eslint/eslint-plugin@8.49.0",
+      "edges": {
+        "dependencies:@typescript-eslint/type-utils": "8.49.0",
+        "dependencies:@typescript-eslint/utils": "8.49.0",
+        "peerDependencies:@typescript-eslint/parser": "^8.49.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "@typescript-eslint/parser": {
+      "version": "@typescript-eslint/parser@8.49.0",
+      "edges": {
+        "dependencies:@typescript-eslint/typescript-estree": "8.49.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "@typescript-eslint/type-utils": {
+      "version": "@typescript-eslint/type-utils@8.49.0",
+      "edges": {
+        "dependencies:@typescript-eslint/typescript-estree": "8.49.0",
+        "dependencies:@typescript-eslint/utils": "8.49.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "@typescript-eslint/typescript-estree": {
+      "version": "@typescript-eslint/typescript-estree@8.49.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.4"
+      }
+    },
+    "@typescript-eslint/utils": {
+      "version": "@typescript-eslint/utils@8.49.0",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.7.0",
+        "dependencies:@typescript-eslint/typescript-estree": "8.49.0",
+        "peerDependencies:eslint": "^8.57.0 || ^9.0.0"
+      }
+    },
+    "babel-jest": {
+      "version": "babel-jest@29.7.0",
+      "edges": {
+        "dependencies:@jest/transform": "^29.7.0",
+        "dependencies:babel-plugin-istanbul": "^6.1.1"
+      }
+    },
+    "babel-plugin-istanbul": {
+      "version": "babel-plugin-istanbul@6.1.1",
+      "edges": {
+        "dependencies:test-exclude": "^6.0.0"
+      }
+    },
+    "babel-preset-expo": {
+      "version": "babel-preset-expo@54.0.10",
+      "edges": {
+        "dependencies:@react-native/babel-preset": "0.81.5",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "chromium-edge-launcher": {
+      "version": "chromium-edge-launcher@0.2.0",
+      "edges": {
+        "dependencies:rimraf": "^3.0.2"
+      }
+    },
+    "eslint": {
+      "version": "eslint@9.39.4",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.8.0",
+        "dependencies:@eslint/config-array": "^0.21.2",
+        "dependencies:@eslint/eslintrc": "^3.3.5",
+        "dependencies:minimatch": "^3.1.5"
+      }
+    },
+    "eslint-config-expo": {
+      "version": "eslint-config-expo@10.0.0",
+      "edges": {
+        "dependencies:@typescript-eslint/eslint-plugin": "^8.18.2",
+        "dependencies:@typescript-eslint/parser": "^8.18.2",
+        "dependencies:eslint-import-resolver-typescript": "^3.6.3",
+        "dependencies:eslint-plugin-expo": "^1.0.0",
+        "dependencies:eslint-plugin-import": "^2.30.0",
+        "dependencies:eslint-plugin-react": "^7.37.3",
+        "dependencies:eslint-plugin-react-hooks": "^5.1.0",
+        "peerDependencies:eslint": ">=8.10"
+      }
+    },
+    "eslint-plugin-expo": {
+      "version": "eslint-plugin-expo@1.0.0",
+      "edges": {
+        "dependencies:@typescript-eslint/utils": "^8.29.1",
+        "dependencies:eslint": "^9.24.0"
+      }
+    },
+    "eslint-plugin-import": {
+      "version": "eslint-plugin-import@2.32.0",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2",
+        "peerDependencies:eslint": "^2 || ^3 || ^4 || ^5 || ^6 || ^7.2.0 || ^8 || ^9"
+      }
+    },
+    "eslint-plugin-react": {
+      "version": "eslint-plugin-react@7.37.5",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2",
+        "peerDependencies:eslint": "^3 || ^4 || ^5 || ^6 || ^7 || ^8 || ^9.7"
+      }
+    },
+    "glob": {
+      "version": "glob@7.2.3",
+      "edges": {
+        "dependencies:minimatch": "^3.1.1"
+      }
+    },
+    "minimatch": {
+      "version": "minimatch@10.2.3",
+      "edges": {}
+    },
+    "rimraf": {
+      "version": "rimraf@3.0.2",
+      "edges": {
+        "dependencies:glob": "^7.1.3"
+      }
+    },
+    "test-exclude": {
+      "version": "test-exclude@6.0.0",
+      "edges": {
+        "dependencies:glob": "^7.1.4",
+        "dependencies:minimatch": "^3.0.4"
+      }
+    },
+    "@expo/cli/glob": {
+      "version": "glob@13.0.0",
+      "edges": {
+        "dependencies:minimatch": "^10.1.1"
+      }
+    },
+    "@expo/config/glob": {
+      "version": "glob@13.0.0",
+      "edges": {
+        "dependencies:minimatch": "^10.1.1"
+      }
+    },
+    "@expo/config-plugins/glob": {
+      "version": "glob@13.0.0",
+      "edges": {
+        "dependencies:minimatch": "^10.1.1"
+      }
+    },
+    "@expo/fingerprint/glob": {
+      "version": "glob@13.0.0",
+      "edges": {
+        "dependencies:minimatch": "^10.1.1"
+      }
+    },
+    "@expo/metro-config/glob": {
+      "version": "glob@13.0.0",
+      "edges": {
+        "dependencies:minimatch": "^10.1.1"
+      }
+    },
+    "eslint-plugin-expo/eslint": {
+      "version": "eslint@9.39.1",
+      "edges": {
+        "dependencies:@eslint-community/eslint-utils": "^4.8.0",
+        "dependencies:@eslint/config-array": "^0.21.1",
+        "dependencies:@eslint/eslintrc": "^3.3.1",
+        "dependencies:minimatch": "^3.1.2"
+      }
+    },
+    "expo/babel-preset-expo": {
+      "version": "babel-preset-expo@54.0.9",
+      "edges": {
+        "dependencies:@react-native/babel-preset": "0.81.5",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-share-intent/@expo/config-plugins": {
+      "version": "@expo/config-plugins@10.1.2",
+      "edges": {
+        "dependencies:glob": "^10.4.2"
+      }
+    },
+    "eslint-plugin-expo/eslint/@eslint/config-array": {
+      "version": "@eslint/config-array@0.21.1",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2"
+      }
+    },
+    "eslint-plugin-expo/eslint/@eslint/eslintrc": {
+      "version": "@eslint/eslintrc@3.3.3",
+      "edges": {
+        "dependencies:minimatch": "^3.1.2"
+      }
+    },
+    "expo-share-intent/@expo/config-plugins/glob": {
+      "version": "glob@10.5.0",
+      "edges": {
+        "dependencies:minimatch": "^9.0.4"
+      }
+    },
+    "workspace:": {
+      "version": null,
+      "edges": {
+        "dependencies:@react-native/virtualized-lists": "^0.82.1",
+        "dependencies:@react-navigation/native-stack": "^7.8.5",
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "devDependencies:@typescript-eslint/eslint-plugin": "^8.46.2",
+        "devDependencies:@typescript-eslint/parser": "^8.46.2",
+        "devDependencies:eslint": "^9.39.1"
+      }
+    },
+    "workspace:apps/desktop": {
+      "version": null,
+      "edges": {
+        "devDependencies:@typescript-eslint/eslint-plugin": "^8.46.2",
+        "devDependencies:@typescript-eslint/parser": "^8.46.2",
+        "devDependencies:eslint": "^9.39.1",
+        "devDependencies:eslint-plugin-react-hooks": "^5.2.0",
+        "devDependencies:eslint-plugin-react-refresh": "^0.4.24"
+      }
+    },
+    "@craftzdog/react-native-buffer": {
+      "version": "@craftzdog/react-native-buffer@6.1.2",
+      "edges": {
+        "dependencies:react-native-quick-base64": "^3.0.0"
+      }
+    },
+    "@eslint-community/eslint-utils": {
+      "version": "@eslint-community/eslint-utils@4.9.0",
+      "edges": {
+        "peerDependencies:eslint": "^6.0.0 || ^7.0.0 || >=8.0.0"
+      }
+    },
+    "@expo/devtools": {
+      "version": "@expo/devtools@0.1.8",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@expo/metro-runtime": {
+      "version": "@expo/metro-runtime@6.1.2",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@expo/vector-icons": {
+      "version": "@expo/vector-icons@15.0.3",
+      "edges": {
+        "peerDependencies:expo-font": ">=14.0.4",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@op-engineering/op-sqlite": {
+      "version": "@op-engineering/op-sqlite@17.1.2",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@react-native-async-storage/async-storage": {
+      "version": "@react-native-async-storage/async-storage@2.2.0",
+      "edges": {
+        "peerDependencies:react-native": "^0.0.0-0 || >=0.65 <1.0"
+      }
+    },
+    "@react-native-community/datetimepicker": {
+      "version": "@react-native-community/datetimepicker@8.4.4",
+      "edges": {
+        "peerDependencies:expo": ">=52.0.0",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@react-native/virtualized-lists": {
+      "version": "@react-native/virtualized-lists@0.82.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@react-navigation/bottom-tabs": {
+      "version": "@react-navigation/bottom-tabs@7.8.12",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.2",
+        "peerDependencies:@react-navigation/native": "^7.1.25",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "@react-navigation/drawer": {
+      "version": "@react-navigation/drawer@7.7.9",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.2",
+        "dependencies:react-native-drawer-layout": "^4.2.0",
+        "peerDependencies:@react-navigation/native": "^7.1.25",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-gesture-handler": ">= 2.0.0",
+        "peerDependencies:react-native-reanimated": ">= 2.0.0",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "@react-navigation/elements": {
+      "version": "@react-navigation/elements@2.9.14",
+      "edges": {
+        "peerDependencies:@react-navigation/native": "^7.2.2",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0"
+      }
+    },
+    "@react-navigation/native": {
+      "version": "@react-navigation/native@7.1.25",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@react-navigation/native-stack": {
+      "version": "@react-navigation/native-stack@7.14.10",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.14",
+        "peerDependencies:@react-navigation/native": "^7.2.2",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "eslint-import-resolver-typescript": {
+      "version": "eslint-import-resolver-typescript@3.10.1",
+      "edges": {
+        "peerDependencies:eslint": "*",
+        "peerDependencies:eslint-plugin-import": "*"
+      }
+    },
+    "eslint-plugin-react-hooks": {
+      "version": "eslint-plugin-react-hooks@5.2.0",
+      "edges": {
+        "peerDependencies:eslint": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0 || ^9.0.0"
+      }
+    },
+    "eslint-plugin-react-refresh": {
+      "version": "eslint-plugin-react-refresh@0.4.24",
+      "edges": {
+        "peerDependencies:eslint": ">=8.40"
+      }
+    },
+    "expo-application": {
+      "version": "expo-application@7.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-audio": {
+      "version": "expo-audio@1.1.1",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:expo-asset": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-background-task": {
+      "version": "expo-background-task@1.0.10",
+      "edges": {
+        "dependencies:expo-task-manager": "~14.0.9",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-build-properties": {
+      "version": "expo-build-properties@1.0.10",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-calendar": {
+      "version": "expo-calendar@15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-clipboard": {
+      "version": "expo-clipboard@8.0.8",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-crypto": {
+      "version": "expo-crypto@15.0.9",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-dev-menu": {
+      "version": "expo-dev-menu@7.0.19",
+      "edges": {
+        "dependencies:expo-dev-menu-interface": "2.0.0",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-dev-menu-interface": {
+      "version": "expo-dev-menu-interface@2.0.0",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-document-picker": {
+      "version": "expo-document-picker@14.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-file-system": {
+      "version": "expo-file-system@19.0.21",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-font": {
+      "version": "expo-font@14.0.10",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-haptics": {
+      "version": "expo-haptics@15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-image": {
+      "version": "expo-image@3.0.11",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-image-loader": {
+      "version": "expo-image-loader@6.0.0",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-image-picker": {
+      "version": "expo-image-picker@17.0.11",
+      "edges": {
+        "dependencies:expo-image-loader": "~6.0.0",
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-intent-launcher": {
+      "version": "expo-intent-launcher@13.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-keep-awake": {
+      "version": "expo-keep-awake@15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-local-authentication": {
+      "version": "expo-local-authentication@17.0.9",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-modules-core": {
+      "version": "expo-modules-core@3.0.29",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-network": {
+      "version": "expo-network@8.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-router": {
+      "version": "expo-router@6.0.21",
+      "edges": {
+        "dependencies:@expo/metro-runtime": "^6.1.2",
+        "dependencies:@react-navigation/bottom-tabs": "^7.4.0",
+        "dependencies:@react-navigation/native": "^7.1.8",
+        "dependencies:@react-navigation/native-stack": "^7.3.16",
+        "dependencies:react-native-is-edge-to-edge": "^1.1.6",
+        "peerDependencies:@react-navigation/drawer": "^7.5.0",
+        "peerDependencies:expo": "*",
+        "peerDependencies:expo-constants": "^18.0.12",
+        "peerDependencies:expo-linking": "^8.0.11",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-gesture-handler": "*",
+        "peerDependencies:react-native-reanimated": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 5.4.0",
+        "peerDependencies:react-native-screens": "*"
+      }
+    },
+    "expo-secure-store": {
+      "version": "expo-secure-store@15.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-sharing": {
+      "version": "expo-sharing@14.0.8",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-status-bar": {
+      "version": "expo-status-bar@3.0.9",
+      "edges": {
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-store-review": {
+      "version": "expo-store-review@9.0.9",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-symbols": {
+      "version": "expo-symbols@1.0.8",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-system-ui": {
+      "version": "expo-system-ui@6.0.9",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-task-manager": {
+      "version": "expo-task-manager@14.0.9",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-updates-interface": {
+      "version": "expo-updates-interface@2.0.0",
+      "edges": {
+        "peerDependencies:expo": "*"
+      }
+    },
+    "expo-web-browser": {
+      "version": "expo-web-browser@15.0.11",
+      "edges": {
+        "peerDependencies:expo": "*",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "lucide-react-native": {
+      "version": "lucide-react-native@0.556.0",
+      "edges": {
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-svg": "^12.0.0 || ^13.0.0 || ^14.0.0 || ^15.0.0"
+      }
+    },
+    "nativewind": {
+      "version": "nativewind@4.2.1",
+      "edges": {
+        "dependencies:react-native-css-interop": "0.2.1"
+      }
+    },
+    "react-native-alarm-notification": {
+      "version": "react-native-alarm-notification@1.8.0",
+      "edges": {
+        "peerDependencies:react-native": ">=0.60.0-rc.0 <1.0.x"
+      }
+    },
+    "react-native-css-interop": {
+      "version": "react-native-css-interop@0.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-reanimated": ">=3.6.2"
+      }
+    },
+    "react-native-draggable-flatlist": {
+      "version": "react-native-draggable-flatlist@4.0.3",
+      "edges": {
+        "peerDependencies:react-native": ">=0.64.0",
+        "peerDependencies:react-native-gesture-handler": ">=2.0.0",
+        "peerDependencies:react-native-reanimated": ">=2.8.0"
+      }
+    },
+    "react-native-drawer-layout": {
+      "version": "react-native-drawer-layout@4.2.0",
+      "edges": {
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-gesture-handler": ">= 2.0.0",
+        "peerDependencies:react-native-reanimated": ">= 2.0.0"
+      }
+    },
+    "react-native-fs": {
+      "version": "react-native-fs@2.20.0",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-gesture-handler": {
+      "version": "react-native-gesture-handler@2.28.0",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-is-edge-to-edge": {
+      "version": "react-native-is-edge-to-edge@1.3.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-nitro-modules": {
+      "version": "react-native-nitro-modules@0.33.2",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-quick-base64": {
+      "version": "react-native-quick-base64@3.0.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-quick-crypto": {
+      "version": "react-native-quick-crypto@1.1.7",
+      "edges": {
+        "dependencies:@craftzdog/react-native-buffer": "^6.1.2",
+        "peerDependencies:expo": ">=48.0.0",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-nitro-modules": ">=0.31.2",
+        "peerDependencies:react-native-quick-base64": ">=3.0.0"
+      }
+    },
+    "react-native-reanimated": {
+      "version": "react-native-reanimated@4.1.6",
+      "edges": {
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-worklets": ">=0.5.0"
+      }
+    },
+    "react-native-safe-area-context": {
+      "version": "react-native-safe-area-context@5.6.2",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-screens": {
+      "version": "react-native-screens@4.16.0",
+      "edges": {
+        "dependencies:react-native-is-edge-to-edge": "^1.2.1",
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-svg": {
+      "version": "react-native-svg@15.12.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-url-polyfill": {
+      "version": "react-native-url-polyfill@3.0.0",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-widgetkit": {
+      "version": "react-native-widgetkit@1.0.9",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-worklets": {
+      "version": "react-native-worklets@0.5.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "whisper.rn": {
+      "version": "whisper.rn@0.5.4",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "@react-navigation/bottom-tabs/@react-navigation/elements": {
+      "version": "@react-navigation/elements@2.9.2",
+      "edges": {
+        "peerDependencies:@react-navigation/native": "^7.1.25",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0"
+      }
+    },
+    "@react-navigation/drawer/@react-navigation/elements": {
+      "version": "@react-navigation/elements@2.9.2",
+      "edges": {
+        "peerDependencies:@react-navigation/native": "^7.1.25",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0"
+      }
+    },
+    "expo-router/@react-navigation/native-stack": {
+      "version": "@react-navigation/native-stack@7.8.6",
+      "edges": {
+        "dependencies:@react-navigation/elements": "^2.9.2",
+        "peerDependencies:@react-navigation/native": "^7.1.25",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0",
+        "peerDependencies:react-native-screens": ">= 4.0.0"
+      }
+    },
+    "expo-router/react-native-is-edge-to-edge": {
+      "version": "react-native-is-edge-to-edge@1.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-status-bar/react-native-is-edge-to-edge": {
+      "version": "react-native-is-edge-to-edge@1.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native/@react-native/virtualized-lists": {
+      "version": "@react-native/virtualized-lists@0.81.5",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-reanimated/react-native-is-edge-to-edge": {
+      "version": "react-native-is-edge-to-edge@1.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "react-native-screens/react-native-is-edge-to-edge": {
+      "version": "react-native-is-edge-to-edge@1.2.1",
+      "edges": {
+        "peerDependencies:react-native": "*"
+      }
+    },
+    "expo-router/@react-navigation/native-stack/@react-navigation/elements": {
+      "version": "@react-navigation/elements@2.9.2",
+      "edges": {
+        "peerDependencies:@react-navigation/native": "^7.1.25",
+        "peerDependencies:react-native": "*",
+        "peerDependencies:react-native-safe-area-context": ">= 4.0.0"
       }
     }
   }

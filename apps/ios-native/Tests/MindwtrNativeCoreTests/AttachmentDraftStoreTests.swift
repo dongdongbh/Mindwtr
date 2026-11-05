@@ -65,7 +65,7 @@ final class AttachmentDraftStoreTests: XCTestCase {
     private func object(_ value: Store.Record) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: encoded(value)) as? [String: Any])
     }
-    // Small schema-fixture editor, used only to address the frozen object levels.
+
     private func edit(_ value: Any, path: ArraySlice<String>, body: (inout [String: Any]) -> Void) throws -> Any {
         guard let first = path.first else {
             var object = try XCTUnwrap(value as? [String: Any]); body(&object); return object
@@ -283,7 +283,7 @@ final class AttachmentDraftStoreTests: XCTestCase {
             try malformedRead(mutated(value, path: ["operations", "0", "source"]) { $0["sourceURI"] = uri })
             try malformedRead(mutated(value, path: ["operations", "0", "stage"]) { $0["uri"] = uri })
         }
-        // Store intentionally does not infer containment from valid URI spelling.
+
         let outside = try model(mutated(record([operation(1)]), path: ["operations", "0"]) { $0["targetURI"] = "file:///another-library/file" })
         let outsideDatabase = root.appendingPathComponent("structural-outside-uri.sqlite")
         let structuralStore = Store(databaseURL: outsideDatabase)
@@ -326,8 +326,8 @@ final class AttachmentDraftStoreTests: XCTestCase {
         try refusedWrite(record((1...129).map { operation($0, phase: .checkpointed) }))
         let localDatabase = root.appendingPathComponent("encoded-bound.sqlite")
         let local = Store(databaseURL: localDatabase)
-        // Inner JSON remains under 2 MiB; its escaped sidecar representation is
-        // larger. Three operations fit; the retained fourth exceeds total 8 MiB.
+
+
         let prepared = "{\"text\":\"" + String(repeating: "\\\\", count: 600_000) + "\"}"
         let prior = record((1...3).map { operation($0, phase: .checkpointed, prepared: prepared) })
         try local.write(prior)

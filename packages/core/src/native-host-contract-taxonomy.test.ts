@@ -38,7 +38,7 @@ async function open(initial: AppData, fail?: () => boolean) {
     useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
         settings: {}, error: null, persistenceFailure: null, isLoading: false, lastDataChangeAt: 0 } as never);
     await useTaskStore.getState().fetchData({ throwOnError: true }); await flushPendingSave(); saves = 0;
-    // The loader cleans display state; the adapter still owns the raw terminal rows.
+
     data = structuredClone(initial);
     const methods = createTaxonomyMethods({ readiness: () => ({ ok: true, value: null }), t: () => (key) => key,
         save: async () => {

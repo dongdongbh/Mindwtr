@@ -105,7 +105,7 @@ describe('capture-only tokens (allowlist mode)', () => {
             createdAt: created.body.createdAt,
         });
         expect(readFileSync(tokenFile, 'utf8')).not.toContain(token);
-        // Allowlist mode creates the account document lazily; token creation reserves it.
+
         expect(existsSync(join(harness.dataDir, `${sha256(OWNER_TOKEN)}.json`))).toBe(true);
         expect(readdirSync(join(harness.dataDir, CAPTURE_TOKENS_DIR_NAME)).some((name) => name.includes(token))).toBe(false);
 
@@ -159,7 +159,7 @@ describe('capture-only tokens (allowlist mode)', () => {
             expect(`${method} ${path} ${response.status}`).toBe(`${method} ${path} 403`);
             expect(await response.json()).toEqual({ error: 'Capture-only token' });
         }
-        // Nothing above created a namespace for the capture token's own digest.
+
         expect(existsSync(join(harness.dataDir, `${sha256(token)}.json`))).toBe(false);
     });
 
@@ -177,7 +177,7 @@ describe('capture-only tokens (allowlist mode)', () => {
         const token = String(first.body.token);
         expect((await postJsonCapture(token, 'before revoke')).status).toBe(201);
 
-        // Another account's full token cannot revoke it, and it keeps working.
+
         expect((await deleteToken(OTHER_TOKEN, String(first.body.id))).status).toBe(404);
         expect((await postJsonCapture(token, 'still works')).status).toBe(201);
 
@@ -192,14 +192,14 @@ describe('capture-only tokens (allowlist mode)', () => {
         const token = String((await createToken(OWNER_TOKEN)).body.token);
         expect((await postJsonCapture(token, 'ok')).status).toBe(201);
 
-        // Orphan: the owner's namespace document is gone.
+
         const namespaceFile = join(harness.dataDir, `${sha256(OWNER_TOKEN)}.json`);
         rmSync(namespaceFile);
         rmSync(join(harness.dataDir, sha256(OWNER_TOKEN)), { recursive: true, force: true });
         expect((await postJsonCapture(token, 'orphan')).status).toBe(403);
         expect(existsSync(namespaceFile)).toBe(false);
 
-        // Allowlist: restart with the owner removed; the token file still exists.
+
         harness.stopServer();
         harness = await startHarness(new Set([OTHER_TOKEN]), harness.dataDir);
         expect(existsSync(join(harness.dataDir, CAPTURE_TOKENS_DIR_NAME, `${sha256(token)}.json`))).toBe(true);
@@ -213,7 +213,7 @@ describe('capture-only tokens (allowlist mode)', () => {
         const overflow = await createToken(OWNER_TOKEN, 'one too many');
         expect(overflow.status).toBe(409);
         expect(overflow.body).toEqual({ error: 'Capture token limit reached' });
-        // The cap is per account.
+
         expect((await createToken(OTHER_TOKEN)).status).toBe(201);
 
         const badLabel = await fetch(`${harness.url}/v1/capture-tokens`, {
@@ -239,7 +239,7 @@ describe('capture-only tokens (allowlist mode)', () => {
 
         expect((await postJsonCapture(garbageToken, 'x')).status).toBe(401);
         expect((await postJsonCapture(wrongShape, 'x')).status).toBe(401);
-        // Listing and creating still work for a real account with the junk present.
+
         expect((await listTokens(OWNER_TOKEN)).status).toBe(200);
         expect((await createToken(OWNER_TOKEN)).status).toBe(201);
     });
@@ -271,13 +271,13 @@ describe('capture-only tokens (any-token mode)', () => {
         expect(existsSync(join(harness.dataDir, `${sha256(freshOwner)}.json`))).toBe(false);
         const created = await createToken(freshOwner, 'first thing');
         expect(created.status).toBe(201);
-        // Admission reserved the owner's empty namespace, so the capture token is not an orphan.
+
         expect(existsSync(join(harness.dataDir, `${sha256(freshOwner)}.json`))).toBe(true);
         const captureToken = String(created.body.token);
         expect((await fetch(`${harness.url}/v1/data`, { headers: bearer(captureToken) })).status).toBe(403);
         expect((await postJsonCapture(captureToken, 'hello')).status).toBe(201);
         expect((await readData(freshOwner)).tasks.map((task) => task.title)).toEqual(['hello']);
-        // The capture token never got a namespace of its own.
+
         expect(existsSync(join(harness.dataDir, `${sha256(captureToken)}.json`))).toBe(false);
     });
 
@@ -363,20 +363,20 @@ describe('capture-only tokens (any-token mode)', () => {
 
 describe('capture-only tokens (rate limiting)', () => {
     beforeEach(async () => {
-        // Two requests per window per bucket, so the third shows which bucket was counted.
+
         harness = await startHarness(new Set([OWNER_TOKEN, OTHER_TOKEN]), undefined, 2);
     });
     afterEach(() => harness.stop());
 
     test('a capture token spends its owner account bucket, not one of its own', async () => {
         const token = String((await createToken(OWNER_TOKEN)).body.token);
-        // One capture from each token fills the owner's POST /v1/capture bucket...
+
         expect((await postJsonCapture(OWNER_TOKEN, 'from the full token')).status).toBe(201);
         expect((await postJsonCapture(token, 'from the capture token')).status).toBe(201);
-        // ...so the next one is refused whichever token sends it.
+
         expect((await postJsonCapture(token, 'over the limit')).status).toBe(429);
         expect((await postJsonCapture(OWNER_TOKEN, 'also over the limit')).status).toBe(429);
-        // Other routes and other accounts keep their own buckets.
+
         expect((await listTokens(OWNER_TOKEN)).status).toBe(200);
         expect((await postJsonCapture(OTHER_TOKEN, 'another account')).status).toBe(201);
     });

@@ -56,7 +56,7 @@ async function open(sections = [section('a', 0), section('b', 1024), section('c'
         fail: (value: boolean) => { failSave = value; } };
 }
 
-afterEach(async () => { try { await flushPendingSave(); } catch { /* expected after a failing save */ }
+afterEach(async () => { try { await flushPendingSave(); } catch {                                     }
     resetForTests(); });
 
 describe('prepared native Project Section order', () => {

@@ -1,17 +1,10 @@
-/**
- * React Native's Weekly Review, replayed against the `weeklyReview` part of the
- * review views parity fixture (packages/core/src/review-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_REVIEW_VIEWS=1 rewrites that part.
- *
- * Each scenario opens the real modal with the real core store, steps through it,
- * expands lists, pauses and resumes, adds project tasks and finishes, and records
- * what a user sees, what the store is asked to write and what the device stores.
- * Rows, the task editor and the nested sheets are stand-ins that record props.
- */
+
+
+
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { configureDateFormatting, flushPendingSave, loadTranslations, resetForTests, type AppSettings } from '@mindwtr/core';
+import { configureDateFormatting, flushPendingSave, getStorageAdapter, loadTranslations, resetForTests, setSaveRetrySleepForTests, setStorageAdapter, useTaskStore, type AppSettings } from '@mindwtr/core';
 
 import {
   CAPTURE,
@@ -24,6 +17,8 @@ import {
   hostsOf,
   normalize,
   readFixturePart,
+  projects,
+  tasks,
   scenarioProjects,
   scenarioTasks,
   seedStore,
@@ -37,6 +32,7 @@ import {
 } from './review-modal.parity-support';
 import { ReviewModal } from './review-modal';
 import { styles } from './review-modal.styles';
+import { logInfo } from '../lib/app-log';
 
 const harness = vi.hoisted(() => ({
   strings: {} as Record<string, string>,
@@ -238,6 +234,14 @@ const hasStyle = (node: ReactTestInstance, style: object) => {
 };
 const within = (root: ReactTestInstance, style: object) => visibleNodes(root).filter((node) => typeof node.type === 'string' && hasStyle(node, style));
 
+
+const baselineTexts = (node: ReactTestInstance): string[] => {
+  if (String(node.props.testID ?? '').startsWith('review-complete-project-')) return [];
+  if (String(node.type) === 'Modal' && !node.props.visible) return [];
+  if (String(node.type) === 'Text') return textsIn(node);
+  return node.children.flatMap((child) => typeof child === 'string' ? [] : baselineTexts(child));
+};
+
 function observe(root: ReactTestInstance, seen: { writes: number; storage: number; captures: number; closes: number; ai: number }): Observation {
   const tint = '#3b82f6';
   const rail = within(root, styles.stepRailItem).map((item) => {
@@ -250,7 +254,7 @@ function observe(root: ReactTestInstance, seen: { writes: number; storage: numbe
   const editor = hostsOf(root, 'TaskEditModal')[0]?.props;
   const back = hostsOf(root, 'TouchableOpacity').find((node) => hasStyle(node, styles.backButton));
   const observation: Observation = {
-    texts: textsIn(root),
+    texts: baselineTexts(root),
     rail,
     progress: within(root, styles.progressBar).map((node) => flattenStyle(node.props.style).width)[0] ?? null,
     rows: hostsOf(root, 'SwipeableTaskItem').map((row) => row.props.task.id),
@@ -373,6 +377,84 @@ describe('React Native Weekly Review parity fixture', () => {
     resetForTests();
     if (originalTz === undefined) delete process.env.TZ;
     else process.env.TZ = originalTz;
+  });
+
+  it('completes a project through the real store after confirmation and keeps the Projects step', async () => {
+    harness.storage = new Map([[SESSION_KEY, session('projects', NOW)]]);
+    harness.calendar = 'none';
+    const project = projects.find((entry) => entry.id === 'p-launch')!;
+    const children = tasks.filter((task) => task.projectId === project.id);
+    await seedStore(settingsVariants.base, children, [project]);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Host />); });
+    await perform(renderer.root, ['project', 'Launch']);
+    await act(async () => renderer.root.findByProps({ testID: 'review-complete-project-p-launch' }).props.onPress());
+    expect(useTaskStore.getState()._allProjects[0].status).toBe('active');
+    expect(textsIn(renderer.root)).toContain(harness.strings['projects.completeConfirm']);
+    await act(async () => renderer.root.findByProps({ testID: 'review-confirm-complete-project' }).props.onPress());
+    await act(async () => { await flushPendingSave(); });
+    const state = useTaskStore.getState();
+    expect(state._allProjects[0].status).toBe('archived');
+    expect(state._allProjects[0].archivedAt).toBe(NOW);
+    expect(state._allTasks.map((task) => [task.id, task.title])).toEqual(children.map((task) => [task.id, task.title]));
+    expect(state._allTasks.find((task) => task.id === 'n-launch')).toMatchObject({ status: 'done', archivedAt: NOW });
+    expect(textsIn(renderer.root)).toContain(harness.strings['review.projectsStep']);
+    expect(textsIn(renderer.root)).toContain(harness.strings['review.noActiveTasks']);
+    expect(renderer.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+    await act(async () => renderer.unmount());
+  });
+
+  it.each(['saved', 'rejected'] as const)('waits for the real adapter to settle as %s before reporting completion', async (outcome) => {
+    harness.storage = new Map([[SESSION_KEY, session('projects', NOW)]]);
+    harness.calendar = 'none';
+    const project = projects.find((entry) => entry.id === 'p-launch')!;
+    await seedStore(settingsVariants.base, tasks.filter((task) => task.projectId === project.id), [project]);
+    const storage = getStorageAdapter();
+    let settleSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => { settleSave = resolve; });
+    const saveData = vi.fn(async () => {
+      await saveGate;
+      if (outcome === 'rejected') throw new Error('Disk full');
+    });
+    setStorageAdapter({ ...storage, saveData });
+    setSaveRetrySleepForTests(async () => undefined);
+    vi.mocked(logInfo).mockClear();
+    let renderer!: ReactTestRenderer;
+    try {
+      await act(async () => { renderer = create(<Host />); });
+      await perform(renderer.root, ['project', 'Launch']);
+      await act(async () => renderer.root.findByProps({ testID: 'review-complete-project-p-launch' }).props.onPress());
+      const confirm = renderer.root.findByProps({ testID: 'review-confirm-complete-project' });
+      await act(async () => { confirm.props.onPress(); });
+      expect(useTaskStore.getState()._allProjects[0].status).toBe('archived');
+      expect(saveData).toHaveBeenCalledOnce();
+      expect(logInfo).not.toHaveBeenCalled();
+      expect(renderer.root.findByProps({ testID: 'review-confirm-complete-project' }).props.disabled).toBe(true);
+      await act(async () => { confirm.props.onPress(); });
+      expect(saveData).toHaveBeenCalledOnce();
+      await act(async () => { settleSave(); });
+      if (outcome === 'saved') {
+        expect(logInfo).toHaveBeenCalledExactlyOnceWith('Weekly review project completed', {
+          scope: 'review', force: true,
+          extra: { releaseCheck: 'v1.3.8/weekly-review-complete-project', outcome: 'completed' },
+        });
+        expect(useTaskStore.getState().persistenceFailure).toBeNull();
+      } else {
+        expect(logInfo).not.toHaveBeenCalled();
+        expect(renderer.root.findByProps({ accessibilityRole: 'alert' }).props.children).toBe(harness.strings['projects.archiveFailed']);
+        expect(useTaskStore.getState().persistenceFailure).not.toBeNull();
+        expect(useTaskStore.getState()._allProjects[0].status).toBe('archived');
+      }
+      expect(renderer.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+    } finally {
+      settleSave();
+      setStorageAdapter(storage);
+      await act(async () => {
+        await useTaskStore.getState().retryPersistence();
+        renderer?.unmount();
+      });
+      setSaveRetrySleepForTests(null);
+    }
   });
 
   it('keeps an applied AI suggestion titled with the task name', async () => {

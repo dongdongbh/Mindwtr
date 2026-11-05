@@ -14,7 +14,7 @@ export const projectSectionOrderMax = (sections: readonly Section[], projectId: 
     sections.filter((section) => section.projectId === projectId && !section.deletedAt)
         .reduce((max, section) => Math.max(max, Number.isFinite(section.order) ? section.order : -1), -1);
 
-/** Shared RN/native Section defaults; the caller supplies the ID and clock. */
+
 export const buildNewSection = (input: { id: string; projectId: string; title: string;
     initialProps?: Partial<Section>; orderMax: number; deviceId: string; now: string }): Section => ({
     id: input.id,
@@ -46,7 +46,7 @@ export const sameTaskSqliteRow = (left: Task, right: Task): boolean => {
     });
 };
 
-/** Compare raw JSON without reordering arrays or equating null with an absent field. */
+
 export const sameSectionDeleteJson = (left: unknown, right: unknown): boolean => {
     const sorted = (_key: string, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
@@ -58,7 +58,7 @@ const SECTION_DELETE_TASK_JSON_COLUMNS = new Set([
     'relativeStartOffset', 'recurrence', 'tags', 'contexts', 'checklist', 'attachments', 'viewSectionIds',
 ]);
 
-/** A saved Task receipt may cross Swift's sorted-key JSON journal boundary. */
+
 const sameSectionDeleteTaskSqliteRow = (left: Task, right: Task): boolean => {
     const stored = taskToSqliteRow(left);
     const frozen = taskToSqliteRow(right);
@@ -71,7 +71,7 @@ const sameSectionDeleteTaskSqliteRow = (left: Task, right: Task): boolean => {
     });
 };
 
-/** RN updateSection's title-only row, preserving every unrelated raw field. */
+
 export const sectionRenameEffect = (before: Section, title: string, deviceId: string,
     now: string): PreparedProjectSectionRename['effect'] => ({
     section: { before, after: { ...before, title: title.trim(), updatedAt: now,
@@ -133,7 +133,7 @@ export const createSectionActions = ({
             error: 'Prepared Project Section creation conflicts with current data' };
         set((state) => {
             const existing = state._allSections.find((section) => section.id === input.section.id);
-            // A complete Section receipt and initialized device precede mutable parent/order checks.
+
             if (existing && !existing.deletedAt && !('purgedAt' in existing)
                 && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
                 && JSON.stringify(sectionToSqliteRow(existing)) === JSON.stringify(sectionToSqliteRow(input.section))) {
@@ -167,7 +167,7 @@ export const createSectionActions = ({
             error: 'Prepared Project Section rename conflicts with current data' };
         set((state) => {
             const current = state._allSections.find((section) => section.id === input.request.sectionId);
-            // The complete Section receipt precedes mutable parent, title, and device guards.
+
             if (current && !current.deletedAt && !('purgedAt' in current)
                 && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
                 && sameSectionSqliteRow(current, input.effect.section.after)) {
@@ -212,7 +212,7 @@ export const createSectionActions = ({
                 tasksById.set(task.id, task);
             }
             const frozenTasks = input.effect.tasks;
-            // The full durable receipt precedes mutable parent and linked-task scope checks.
+
             if (current && !('purgedAt' in current)
                 && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
                 && sameSectionSqliteRow(current, input.effect.section.after)

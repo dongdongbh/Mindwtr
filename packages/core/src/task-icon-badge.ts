@@ -2,6 +2,7 @@ import { safeParseDueDate } from './date';
 import { isTaskActionable } from './task-status';
 import type { Project, Section, Task } from './types';
 
+
 export function countTasksForIconBadge(
     tasks: readonly Task[],
     projects: readonly Project[],

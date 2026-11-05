@@ -41,7 +41,7 @@ describe('SettingRow', () => {
       );
     });
     expect(collectText(tree.root)).toEqual(['Notifications', 'Enable reminders', 'control']);
-    // Label + description live inside the settingInfo wrapper.
+
     const json = tree.toJSON() as renderer.ReactTestRendererJSON;
     expect(flattenStyle((json.children![0] as renderer.ReactTestRendererJSON).props.style)).toMatchObject(
       flattenStyle(styles.settingInfo),

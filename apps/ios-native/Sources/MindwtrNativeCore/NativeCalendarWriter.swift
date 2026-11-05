@@ -36,7 +36,7 @@ struct NativeCalendarSource: Sendable {
     let type: NativeCalendarSourceType
 }
 
-/// Event calendars only; source selection and scheduling remain shared policy.
+
 struct NativeCalendarCreateDetails: Sendable {
     let title: String
     let color: String
@@ -107,8 +107,7 @@ struct NativeCalendarEventDetails: Sendable {
     }
 }
 
-/// Not an authorization boundary: root must retain durable effect ownership
-/// through provider completion and mapping acknowledgment before exposing it.
+
 protocol NativeCalendarWriting: NativeCalendarReading {
     func sources() throws -> [NativeCalendarSource]
     func createCalendar(_ details: NativeCalendarCreateDetails) throws -> String
@@ -119,8 +118,7 @@ protocol NativeCalendarWriting: NativeCalendarReading {
     func deleteEvent(eventID: String, calendarID: String) throws
 }
 
-/// Per-call proof on the serial worker, before mutable provider handles or stores are changed.
-/// Unrefined writers remain uncertain on every error; callbacks cannot escape or authorize a write.
+
 protocol NativeCalendarWriteWitnessing: NativeCalendarWriting {
     func writeWitnessed(_ request: NativeCalendarWriteRequest, beforeProviderMutation: () -> Void,
                         confirmedMissingEvent: () -> Void) throws -> NativeCalendarWriteValue
@@ -170,7 +168,7 @@ struct NativeCalendarWriteEventIdentity {
     let recurring: Bool
 }
 
-/// Plain metadata and injected provider handles keep policy tests permission-free.
+
 protocol NativeCalendarWriteProviding: AnyObject {
     associatedtype SourceValue
     associatedtype CalendarValue

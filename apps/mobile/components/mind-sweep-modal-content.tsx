@@ -41,7 +41,7 @@ export function MindSweepModalContent({ onClose }: MindSweepModalContentProps) {
   const [capturedByGroup, setCapturedByGroup] = useState<Record<string, string[]>>({});
   const [addFailed, setAddFailed] = useState(false);
 
-  // What the screen shows comes from core, as the native host shows it.
+
   const view = buildMindSweepView({ state: { scope, step: stepIndex, captured: capturedByGroup }, draft, addFailed, t });
   const { intro, group, summary } = view;
 
@@ -50,20 +50,19 @@ export function MindSweepModalContent({ onClose }: MindSweepModalContentProps) {
     const title = getMindSweepCaptureTitle(submitted);
     if (!title || !group) return;
     try {
-      // Count the item only once the store accepted it, so the summary never
-      // claims more captures than exist. A rejected write keeps the draft and
-      // says so, instead of failing silently.
+
+
       const result = await addTask(title, { status: 'inbox' });
       if (!result?.success) {
         setAddFailed(true);
         return;
       }
       setCapturedByGroup((current) => addMindSweepCapture(current, group.id, title));
-      // Clear only what was added: text typed while the add ran stays.
+
       setDraft((current) => (current === submitted ? '' : current));
       setAddFailed(false);
     } catch {
-      // Keep the draft so the capture is not lost; the user can retry.
+
       setAddFailed(true);
     }
   };

@@ -37,7 +37,7 @@ const makeArea = (overrides: Partial<Area>): Area => ({
     ...overrides,
 });
 
-// Return the human fallback so assertions read as labels, not keys.
+
 const resolveText: FocusResolveText = (_key, fallback) => fallback;
 
 const build = (groupBy: Parameters<typeof buildFocusTaskGroups>[0]['groupBy'], params: {
@@ -110,7 +110,7 @@ describe('buildFocusTaskGroups', () => {
             const groups = build('project', { tasks, projects });
             expect(keys(groups)).toEqual(['project:none', 'project:p2', 'project:p1']);
             expect(groups[0].muted).toBe(true);
-            // Unknown projectId collapses into the no-project bucket.
+
             expect(groups[0].tasks.map((task) => task.id).sort()).toEqual(['c', 'd']);
         });
     });
@@ -123,9 +123,9 @@ describe('buildFocusTaskGroups', () => {
                 makeArea({ id: 'a2', name: 'Work', order: 0 }),
             ];
             const tasks = [
-                makeTask({ id: 'a', projectId: 'p1' }),      // area a2 via project
-                makeTask({ id: 'b', areaId: 'a1' }),         // area a1 via task
-                makeTask({ id: 'c' }),                       // no area
+                makeTask({ id: 'a', projectId: 'p1' }),
+                makeTask({ id: 'b', areaId: 'a1' }),
+                makeTask({ id: 'c' }),
             ];
             const groups = build('area', { tasks, projects, areas });
             expect(keys(groups)).toEqual(['area:none', 'area:a2', 'area:a1']);
@@ -179,7 +179,7 @@ describe('buildFocusTaskGroups', () => {
             const tasks = [makeTask({ id: 'a', contexts: ['@work'] })];
             expect(build('context', { tasks, theme: 'nord' })[0].dotColor)
                 .toBe(getContextColor('@work', 'nord'));
-            // The project/area axes read stored colors and must not be themed.
+
             const projects = [makeProject({ id: 'p1', color: '#123456' })];
             expect(build('project', { tasks: [makeTask({ id: 'a', projectId: 'p1' })], projects, theme: 'nord' })[0].dotColor)
                 .toBe('#123456');
@@ -193,6 +193,12 @@ describe('buildFocusTaskGroups', () => {
             ], projects });
             expect(groups.find((g) => g.key === 'project:p1')?.dotColor).toBe('#123456');
             expect(groups.find((g) => g.key === 'project:none')?.dotColor).toBeUndefined();
+        });
+
+        it('gives a project with no Area and no color of its own the grey default dot, like an Area bucket (#1422)', () => {
+            const groups = build('project', { tasks: [makeTask({ id: 'a', projectId: 'p1' })],
+                projects: [makeProject({ id: 'p1', color: DEFAULT_AREA_COLOR })] });
+            expect(groups.find((g) => g.key === 'project:p1')?.dotColor).toBe(DEFAULT_AREA_COLOR);
         });
 
         it('colors area buckets by area.color (default when unset), none-bucket bare', () => {

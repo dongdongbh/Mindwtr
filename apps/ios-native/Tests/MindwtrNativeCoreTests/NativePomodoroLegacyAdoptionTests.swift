@@ -3,9 +3,7 @@ import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Actual private JSC bundle, canonical KV, journal and SQLite adoption.
-/// Existing optional KV constructor reads are allowed before pure validation;
-/// the fixed DEBUG seam counts only legacy source multiGet, never boot or SQL.
+
 final class NativePomodoroLegacyAdoptionTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private let namespace = "NativeUITests.pomodoro-adoption"
@@ -111,7 +109,7 @@ final class NativePomodoroLegacyAdoptionTests: XCTestCase {
     private func command() throws -> [String: Any] { try object(String(contentsOf: journal, encoding: .utf8)) }
     private func assertRetainedCommand(_ before: [String: Any], file: StaticString = #filePath, line: UInt = #line) throws {
         let after = try command()
-        // Recovery may re-encode the outer envelope; inner JSON strings remain literal.
+
         XCTAssertEqual(Data(try XCTUnwrap(after["argumentsJSON"] as? String).utf8), Data(try XCTUnwrap(before["argumentsJSON"] as? String).utf8), file: file, line: line)
         XCTAssertEqual(Data(try json(after).utf8), Data(try json(before).utf8), file: file, line: line)
     }
@@ -146,6 +144,24 @@ final class NativePomodoroLegacyAdoptionTests: XCTestCase {
         XCTAssertEqual((try session()["timerState"] as? [String: Any])?["isRunning"] as? Bool, false)
         let saved = try snapshot(); await failure { _ = try await core.writePomodoroTransition(requestJSON: original) }
         XCTAssertEqual(try snapshot(), saved); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try await capture(core)
+    }
+
+    func testOwedRNCreditsAdoptWithTheSessionOnceThroughTheJournal() async throws {
+        try await seedTask()
+        var value = try object(legacy())
+
+        value["pendingCredits"] = [["taskId": "task", "from": 4, "to": 29], ["taskId": "other", "from": 7, "to": 32]]
+        try source(json(value))
+        let core = host(); _ = try await core.start(); let original = try request()
+        let response = try object(await core.writePomodoroTransition(requestJSON: original))
+        XCTAssertEqual(response["kind"] as? String, "confirmed")
+        XCTAssertEqual(try rows("SELECT id, timeSpentMinutes FROM tasks WHERE id IN ('task','other') ORDER BY id").map { $0["timeSpentMinutes"] as? Int }, [32, 79])
+        let id = try XCTUnwrap(object(original)["requestId"] as? String)
+        let payload = try XCTUnwrap(rows("SELECT method FROM native_request_receipts WHERE request_id=?", [id]).first?["method"] as? String)
+        let plan = try XCTUnwrap((NativeJSON.jsonObject(with: Data(payload.utf8)) as? [Any])?[1] as? [String: Any])
+        XCTAssertEqual((plan["owed"] as? [[String: Any]])?.count, 1)
+        let saved = try snapshot(); await failure { _ = try await core.writePomodoroTransition(requestJSON: original) }
+        XCTAssertEqual(try snapshot(), saved)
     }
 
     func testInlineExternalAndExternalBOMPreservePhysicalSourceAndExactLogicalReceipt() async throws {
@@ -258,7 +274,7 @@ final class NativePomodoroLegacyAdoptionTests: XCTestCase {
             try FileManager.default.moveItem(at: held, to: target); faults.beforeSQL = nil
             XCTAssertTrue(try rows("SELECT * FROM native_request_receipts").isEmpty); try credit(4)
             if libraryCase {
-                // Moving an open SQLite file invalidates its vnode (SQLITE_IOERR_VNODE); revalidate on cold startup.
+
                 await core.close()
                 let reopened = host(), reply = try object(await reopened.start())
                 XCTAssertEqual((reply["recovery"] as? [String: Any])?["method"] as? String, "pomodoroTransitionCommit")

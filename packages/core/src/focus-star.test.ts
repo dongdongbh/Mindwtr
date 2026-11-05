@@ -79,6 +79,28 @@ describe('resolveFocusStarAction', () => {
     });
 });
 
+describe('resolveRowFocusStarAction', () => {
+    it('stars an Inbox task as Next, with status next in the same patch (#1464)', () => {
+        const action = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext());
+        expect(action).toMatchObject({ canToggle: true, blockedReason: null, patch: { isFocusedToday: true, status: 'next' } });
+    });
+
+    it('refuses an Inbox task the Next rules refuse', () => {
+
+        expect(resolveFocusStarAction(makeTask({ status: 'inbox' }), baseContext()).blockedReason).toBe('clarify');
+        const refused = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext({ focusedCount: 3 }));
+        expect(refused).toMatchObject({ canToggle: false, blockedReason: 'limit' });
+
+        expect(refused.patch).toEqual({ isFocusedToday: true });
+    });
+
+    it('leaves other statuses and star removal to resolveFocusStarAction', () => {
+        for (const task of [makeTask({ status: 'waiting' }), makeTask({ status: 'someday' }), makeTask({ status: 'inbox', isFocusedToday: true })]) {
+            expect(resolveRowFocusStarAction(task, baseContext())).toEqual(resolveFocusStarAction(task, baseContext()));
+        }
+    });
+});
+
 describe('resolveTaskEditorFocusStar', () => {
     const now = new Date('2026-09-28T12:00:00.000Z');
     it('uses draft status and start date, and keeps queued stars outside the current cap', () => {

@@ -23,8 +23,8 @@ const controller = {
 } as never;
 
 describe('CalendarOpenTaskModal', () => {
-    // #1241: the global list shortcuts are muted while a modal dialog is open, so the
-    // pop-up must answer the edit key itself, and without a prior click on the row.
+
+
     it('opens the editor from the edit shortcut without selecting the row first', () => {
         editTrigger.mockClear();
         render(<CalendarOpenTaskModal controller={controller} />);

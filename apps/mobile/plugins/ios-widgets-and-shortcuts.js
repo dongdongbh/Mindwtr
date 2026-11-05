@@ -120,8 +120,8 @@ const ensureWidgetSwiftSourcesInTarget = (
   xcodeProject,
   { swiftFiles, groupKey, targetUuid }
 ) => {
-  // node-xcode locates target phases by their conventional comment; an old
-  // target-name comment makes addSourceFile fall back to the app's Sources.
+
+
   const objects = xcodeProject.hash.project.objects;
   for (const phase of objects.PBXNativeTarget[targetUuid].buildPhases) {
     if (objects.PBXSourcesBuildPhase[phase.value]) {
@@ -130,7 +130,7 @@ const ensureWidgetSwiftSourcesInTarget = (
     }
   }
   return swiftFiles.filter((fileName) => ensureSourceFileInTarget(xcodeProject, {
-    // The group already owns the MindwtrWidgets directory.
+
     filePath: fileName,
     groupKey,
     targetUuid,
@@ -139,10 +139,8 @@ const ensureWidgetSwiftSourcesInTarget = (
 
 const addSiriShortcutsRegistrationToAppDelegate = (contents) => {
   const registrationCall = `${SIRI_CAPTURE_SHORTCUTS_PROVIDER}.updateAppShortcutParameters()`;
-  // Spotlight reindexing must be driven by the app's own refresh path, never
-  // by an intent's perform() -- launch is the native entry point this plugin
-  // already owns, and it reads the same snapshot the widget pipeline writes
-  // on every foreground refresh (#980).
+
+
   const reindexCall = `${SPOTLIGHT_INDEXER}.reindexIfNeeded()`;
   const needsRegistration = !contents.includes(registrationCall);
   const needsReindex = !contents.includes(reindexCall);
@@ -178,9 +176,7 @@ const addAppGroupEntitlement = (config) =>
     return cfg;
   });
 
-// Scene-based delivery is owned by ios-scene-lifecycle. This plugin keeps the
-// launch-time App Shortcuts/Spotlight registration beside their maintained
-// sources, but must not install a second quick-action delivery path.
+
 const addAppDelegateShortcutsRegistration = (config) =>
   withDangerousMod(config, [
     'ios',

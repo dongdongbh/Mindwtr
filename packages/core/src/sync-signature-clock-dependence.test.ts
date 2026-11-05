@@ -4,32 +4,6 @@ import { normalizeTaskForSyncMerge } from './sync-normalization';
 import { getMergeComparableSignature, normalizeTaskForContentComparison } from './sync-signatures';
 import type { Task } from './types';
 
-/**
- * The merge's content signature is NOT independent of the merge clock.
- *
- * Why this file exists: the profile in `docs/performance/merge-profile-2026-09-21.md`
- * proposes keying the signature cache on the raw, pre-normalization task, so the
- * local side of a merge stops recomputing signatures it computed last cycle. That
- * key is only sound if the same raw task always produces the same comparable
- * content. It does not. `normalizeTaskForSyncMerge` takes `nowIso` and passes it to
- * `normalizeTaskForLoad`, whose completedAt fallback lands on a field the content
- * signature compares:
- *
- *   `completedAt` (task-status.ts, `normalizeTaskLifecycleFields`) — a finished
- *      task with no `completedAt`, no `updatedAt` and no `createdAt` falls all the
- *      way back to the backfilled `createdAt`, which is `nowIso`.
- *
- * `focusOrder` also changes at a future start, but is excluded from the content
- * signature, so that branch is now clock-independent for comparison.
- *
- * If a later change makes the completedAt branch clock-independent, these tests fail. That
- * is the signal to update them AND to re-open the cache-key question — not to
- * loosen the assertion.
- *
- * Nothing here reports a live bug: one merge uses one `nowIso` for both sides, so
- * the two sides are always judged by the same clock. Only a signature CACHED
- * across merges would be wrong.
- */
 
 const EARLY = '2026-07-13T10:00:00.000Z';
 const LATE = '2027-03-13T10:00:00.000Z';

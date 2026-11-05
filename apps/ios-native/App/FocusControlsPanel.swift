@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Focus has its own core DTO: no row search or archived-project toggle.
+
 struct FocusControlsPanel: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -237,9 +237,9 @@ struct FocusControlsPanel: View {
     private func pickerOption(_ item: CoreObject) -> some View {
         let token = model.focusPickerName == "tokens"
         let selected = token ? item.text("state") == "included" : item.flag("selected")
-        let excluded = token && item.text("state") == "excluded"
+        let excluded = token ? item.text("state") == "excluded" : item.flag("excluded")
         let label = item.text(token ? "value" : "title")
-        // RN keeps the picker search keyboard open while selecting options.
+
         return Button { model.editFocusControl(item.object("edit")) } label: {
             HStack(spacing: 12) {
                 Text(label).rnFont(14).strikethrough(excluded).frame(maxWidth: .infinity, alignment: .leading)
@@ -358,7 +358,7 @@ struct FocusControlsPanel: View {
     }
 }
 
-/// RN's save-name overlay and destructive confirmations share exact-retry state.
+
 struct FocusSavedFilterDialog: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette

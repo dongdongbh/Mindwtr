@@ -1,6 +1,6 @@
 export type DesktopVisibilitySyncAction = 'focus' | 'blur' | null;
 
-/** Only the low-frequency heartbeat/lifecycle receipts bypass the Diagnostics toggle. */
+
 export function logDesktopAutoSyncTrace(
     message: string,
     extra: Record<string, string> | undefined,
@@ -25,7 +25,7 @@ export function logDesktopAutoSyncTrace(
         void writeLog(message, { scope: 'sync', extra });
         return;
     }
-    // Keep the existing opt-in failure detail; the forced receipt never carries it.
+
     if (message === 'Auto sync run complete' && extra?.error) {
         void writeLog(message, { scope: 'sync', extra });
     }

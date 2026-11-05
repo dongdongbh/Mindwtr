@@ -18,11 +18,7 @@ export type AttachmentInstallOutcome =
         preservedPath?: string;
     };
 
-/**
- * Commits a fully-written download stage inside the managed attachments directory.
- * Rust owns the generation check, no-replace namespace mutation, quarantine, and
- * crash journal; this wrapper deliberately contains no filesystem policy.
- */
+
 export const installAttachmentDownload = (
     stagedPath: string,
     targetPath: string,

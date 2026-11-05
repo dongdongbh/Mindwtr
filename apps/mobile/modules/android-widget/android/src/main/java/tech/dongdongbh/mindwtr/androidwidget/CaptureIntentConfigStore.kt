@@ -22,7 +22,7 @@ data class CaptureIntentConfig(
   }
 }
 
-/** Pure transition policy, separated so revocation and token rotation have JVM coverage. */
+
 object CaptureIntentConfigPolicy {
   fun setEnabled(
     current: CaptureIntentConfig,
@@ -38,10 +38,7 @@ object CaptureIntentConfigPolicy {
   }
 }
 
-/**
- * Device-only capture authorization. The file lives under noBackupFilesDir so
- * neither Android backup nor Mindwtr sync can transfer the secret to a peer.
- */
+
 internal interface CaptureIntentConfigPersistence {
   @Throws(IOException::class)
   fun read(): String?
@@ -71,8 +68,8 @@ private class AtomicCaptureIntentConfigPersistence(private val file: File) : Cap
     try {
       stream = atomicFile.startWrite()
       stream.write(raw.toByteArray(Charsets.UTF_8))
-      // AtomicFile.finishWrite only logs a failed sync. Sync explicitly so a
-      // durability failure rejects the bridge call instead of reporting success.
+
+
       stream.fd.sync()
       atomicFile.finishWrite(stream)
     } catch (error: Exception) {

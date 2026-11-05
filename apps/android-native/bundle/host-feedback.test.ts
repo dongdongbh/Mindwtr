@@ -39,7 +39,7 @@ const fixture = () => {
     class Controller extends AbortController {
         constructor() { super(); if (cancelNext) { cancelNext = false; this.abort(); } }
     }
-    // The real bundled module runs against SQLite and a closed synthetic native port.
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const state: Record<string, any> = {
         AbortController: Controller, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,

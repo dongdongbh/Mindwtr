@@ -44,13 +44,11 @@ describe('useDesktopShellSync', () => {
         expect(invoked).toEqual([
             ['set_tray_visible', { visible: true }],
             ['set_tray_tooltip', { tooltip: 'Mindwtr' }],
-            ['set_tray_labels', options.trayLabels],
+            ['set_tray_labels', { ...options.trayLabels, lock: null }],
         ]);
     });
 
-    // The window is on screen whenever this hook runs, so enabling close-to-tray
-    // must never cost the Dock icon, the Cmd+Tab entry or the menu bar. Only the
-    // hide path may make the app an accessory.
+
     it('never makes the app an accessory from settings alone', () => {
         enableTauri();
         const { rerender } = renderHook((props: typeof options) => useDesktopShellSync(props), {
@@ -66,15 +64,14 @@ describe('useDesktopShellSync', () => {
         enableTauri();
         renderHook(() => useDesktopShellSync({ ...options, showTray: undefined }));
         expect(invoked.map(([command]) => command)).toEqual([
-            // No visibility command without a setting, but an unhydrated tray is
-            // still shown, so its tooltip still applies.
+
+
             'set_tray_tooltip',
             'set_tray_labels',
         ]);
     });
 
-    // A window hidden in the tray when the tray is switched off has nothing left
-    // to bring it back, so the app must return to the Dock and Cmd+Tab.
+
     it('skips the tooltip when the tray is hidden and keeps the dock icon', () => {
         enableTauri();
         renderHook(() => useDesktopShellSync({ ...options, showTray: false }));
@@ -110,13 +107,13 @@ describe('useDesktopShellSync', () => {
         invoked.length = 0;
         const trayLabels = { quickAdd: '快速添加', show: '查看Mindwtr', quit: '退出' };
         rerender({ ...options, trayLabels });
-        expect(invoked).toEqual([['set_tray_labels', trayLabels]]);
+        expect(invoked).toEqual([['set_tray_labels', { ...trayLabels, lock: null }]]);
         rerender({ ...options, showTray: false, trayLabels });
         invoked.length = 0;
         rerender({ ...options, showTray: false });
         expect(invoked).toEqual([]);
         rerender(options);
-        expect(invoked).toContainEqual(['set_tray_labels', options.trayLabels]);
+        expect(invoked).toContainEqual(['set_tray_labels', { ...options.trayLabels, lock: null }]);
     });
 
     it('issues each command once per unchanged render', () => {

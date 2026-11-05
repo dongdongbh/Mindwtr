@@ -9,7 +9,6 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +41,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,17 +83,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import org.json.JSONObject
 
-/*
- * RN's Settings screens (settings.tsx, settings.shell.tsx, setting-row.tsx, general-, manage- and gtd-settings-screen.tsx,
- * views/someday-section-manager.tsx) drawn from core's views in RN's settings.styles.ts. Every word, option, value, confirmation
- * and write is core's; Kotlin keeps which screen, picker and dialog are open.
- */
 
-/** The open Settings screen under RN's settings top bar (MenuScreenHost draws the bar with [SettingsModel.title]). */
 @Composable
 fun SettingsList(model: InboxViewModel) = with(model.menu.settings) {
     val shown = page ?: return
-    // A GTD sub-screen shares core's one GTD view with the hub.
+
     if (shown.screen != screen && !(shown.screen.startsWith("gtd") && screen.startsWith("gtd"))) return
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp).testTag("settings-$screen")) {
         when (screen) {
@@ -111,15 +108,13 @@ fun SettingsList(model: InboxViewModel) = with(model.menu.settings) {
     SettingsDialogs(model, shown)
 }
 
-// ---- The menu ----
 
-/** RN's settings menu: the search field, core's cards of rows, and core's no-matches line. */
 @Composable
 private fun SettingsMenu(model: InboxViewModel, view: JSONObject) = with(model.menu.settings) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
     val placeholder = view.getString("searchPlaceholder")
-    Row(Modifier.padding(top = 16.dp).fillMaxWidth().height(44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp),
+    Row(Modifier.padding(top = 16.dp).fillMaxWidth().height(44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(Lucide.Search, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         BasicTextField(query, { search(it) }, singleLine = true, textStyle = rnText(15, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
@@ -136,7 +131,7 @@ private fun SettingsMenu(model: InboxViewModel, view: JSONObject) = with(model.m
     }
 }
 
-/** RN's menuCard of MenuItems: core's icon, title, description and badge dot; a screen this app does not build is drawn disabled. */
+
 @Composable
 private fun MenuCard(model: InboxViewModel, rows: List<JSONObject>) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -147,7 +142,7 @@ private fun MenuCard(model: InboxViewModel, rows: List<JSONObject>) = with(model
             val enabled = row.getBoolean("enabled") && idle
             val label = row.getString("accessibilityLabel")
             Row(Modifier.fillMaxWidth().heightIn(min = 72.dp)
-                .then(if (index < rows.size - 1) Modifier.hairline(c.border, top = false) else Modifier)
+                .then(if (index < rows.size - 1) Modifier.rnBorderBottom(c.border) else Modifier)
                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { settings.push(id); true } else disabled() }
                 .clickable(enabled = enabled) { settings.push(id) }.fade(if (row.getBoolean("enabled")) 1f else 0.5f)
                 .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -166,42 +161,36 @@ private fun MenuCard(model: InboxViewModel, rows: List<JSONObject>) = with(model
     }
 }
 
-// ---- Shared pieces (setting-row.tsx, settings.styles.ts) ----
 
-/** RN's sectionTitle: 13/600 capitals, in the secondary text color unless the screen sets another (Data's Diagnostics: the text color). */
 @Composable
 internal fun SectionTitle(text: String, top: Int = 0, color: Color = LocalTheme.current.colors.secondaryText) =
     Text(text.uppercase(), style = rnText(13, 600), color = color,
         modifier = Modifier.padding(start = 4.dp, bottom = 8.dp, top = top.dp).semantics { heading() })
 
-/** RN's description line above a card. */
+
 @Composable
 private fun Description(text: String, top: Int = 0) =
     Text(text, style = rnText(13, 400, 18), color = LocalTheme.current.colors.secondaryText, modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 12.dp, top = top.dp))
 
-/** RN's settingCard. */
+
 @Composable
 internal fun Card(top: Int = 0, content: @Composable ColumnScope.() -> Unit) =
     Column(Modifier.padding(top = top.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(LocalTheme.current.colors.cardBg), content = content)
 
-/**
- * RN's SettingRow: the label and description at the left, a trailing control at the top (RN's settingRow is flex-start); a
- * hairline above when [divider]. [failure] is App
- * lock's line in RN's danger color under the description (TalkBack hears it when it shows).
- */
+
 @Composable
 internal fun SettingRow(label: String, description: String?, divider: Boolean = false, modifier: Modifier = Modifier, failure: String? = null,
                         dimmed: Boolean = false, trailing: (@Composable RowScope.() -> Unit)? = null) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).then(modifier).padding(16.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).then(modifier).padding(16.dp),
         verticalAlignment = Alignment.Top) {
-        // RN's dimmed row fades its label and description only (opacity 0.5), never its control.
+
         Column(Modifier.weight(1f).padding(end = 16.dp).fade(if (dimmed) 0.5f else 1f)) {
             Text(label, style = rnText(16, 500, 21), color = c.text)
             description?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp)) }
             failure?.let { Text(it, style = rnText(13, 400, 18), color = c.danger, modifier = Modifier.padding(top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
         }
-        // RN's settingRow gap (12) between the label block and its control.
+
         if (trailing != null) {
             Spacer(Modifier.width(12.dp))
             trailing()
@@ -209,21 +198,21 @@ internal fun SettingRow(label: String, description: String?, divider: Boolean = 
     }
 }
 
-/** A SettingRow that opens a picker or a screen: one node with its label, value and role. */
+
 @Composable
 private fun PressRow(label: String, value: String?, divider: Boolean, enabled: Boolean, icon: ImageVector = SettingsIonicons.ChevronDown,
                      expanded: Boolean? = null, onClick: () -> Unit) {
     val spoken = if (value == null) label else "$label: $value"
     SettingRow(label, value, divider, Modifier.clearAndSetSemantics {
         contentDescription = spoken; role = Role.Button; if (enabled) onClick { onClick(); true } else disabled()
-        // A row that folds (Regional formats) reports expanded or collapsed, as RN's accessibilityState does.
+
         if (expanded == true) collapse { onClick(); true } else if (expanded == false) expand { onClick(); true }
     }.clickable(enabled = enabled, onClick = onClick)) {
         Icon(icon, null, tint = LocalTheme.current.colors.secondaryText, modifier = Modifier.size(18.dp))
     }
 }
 
-/** RN's SettingToggleRow: core's label and description, and RN's Android switch sending core's edit. */
+
 @Composable
 private fun ToggleRow(model: InboxViewModel, toggle: JSONObject, divider: Boolean, enabled: Boolean = true,
                       props: RnSwitchProps = LocalTheme.current.settingsSwitch, write: (JSONObject) -> Unit) {
@@ -233,13 +222,13 @@ private fun ToggleRow(model: InboxViewModel, toggle: JSONObject, divider: Boolea
     }
 }
 
-/** RN's GTD navigation row: the label, the description, and chevron-forward; it pushes core's screen. */
+
 @Composable
 private fun NavRow(model: InboxViewModel, link: JSONObject, first: Boolean = false) {
     val c = LocalTheme.current.colors
     val title = link.getString("title")
     val enabled = model.menu.idle
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (first) Modifier else Modifier.hairline(c.border, top = true))
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (first) Modifier else Modifier.rnBorderTop(c.border))
         .clearAndSetSemantics { contentDescription = title; role = Role.Button; if (enabled) onClick { model.menu.settings.push(link.getString("screen")); true } else disabled() }
         .clickable(enabled = enabled) { model.menu.settings.push(link.getString("screen")) }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -251,13 +240,13 @@ private fun NavRow(model: InboxViewModel, link: JSONObject, first: Boolean = fal
     }
 }
 
-/** RN's gtdSegmentedControl: core's options side by side; the chosen one washed and in the tint. */
+
 @Composable
 private fun Segmented(model: InboxViewModel, options: List<JSONObject>, text: (JSONObject) -> String, icons: Boolean = false, radio: Boolean = false,
                       write: (JSONObject) -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(14.dp)
-    Row(Modifier.fillMaxWidth().clip(shape).background(c.bg).border(1.dp, c.border, shape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(Modifier.fillMaxWidth().clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for (option in options) {
             val on = option.getBoolean("selected")
             val label = text(option)
@@ -274,7 +263,7 @@ private fun Segmented(model: InboxViewModel, options: List<JSONObject>, text: (J
     }
 }
 
-/** RN's settings text input (textInput): a bordered field on the screen color. */
+
 @Composable
 private fun SettingInput(value: String, label: String, placeholder: String?, modifier: Modifier, enabled: Boolean = true, number: Boolean = false,
                          center: Boolean = false, onDone: (() -> Unit)? = null, change: (String) -> Unit) {
@@ -285,7 +274,7 @@ private fun SettingInput(value: String, label: String, placeholder: String?, mod
         textStyle = rnText(14, 400).copy(color = c.text, textAlign = if (center) TextAlign.Center else TextAlign.Start),
         keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { onDone?.invoke(); focus.clearFocus() }),
-        modifier = modifier.clip(shape).background(c.bg).border(1.dp, c.border, shape).semantics { contentDescription = label },
+        modifier = modifier.clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).semantics { contentDescription = label },
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = if (center) Alignment.Center else Alignment.CenterStart) {
                 if (value.isEmpty() && placeholder != null) Text(placeholder, style = rnText(14, 400), color = c.secondaryText); inner()
@@ -293,9 +282,7 @@ private fun SettingInput(value: String, label: String, placeholder: String?, mod
         })
 }
 
-// ---- General ----
 
-/** RN's GeneralSettingsScreen on core's getGeneralSettings; every choice sends core's edit through setGeneralSetting. */
 @Composable
 private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
@@ -314,11 +301,13 @@ private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(mode
     }
     SectionTitle(privacy.getString("title"), top = 16)
     Card {
-        // RN's app lock (AppLock.kt): turning it on asks the device lock first; a no shows core's line for why under the row.
+
         val lock = privacy.getJSONObject("appLock")
         SettingRow(lock.getString("label"), lock.getString("description"), failure = model.lock.switchFailure(lock)) {
             RnSwitch(lock.getBoolean("value"), model.failedAction == null && !model.lock.authenticating, lock.getString("label"), theme.generalSwitch) { model.lock.toggle(lock) }
         }
+
+        privacy.optJSONObject("appLockRelockDelay")?.let { PressRow(it.getString("label"), it.getString("value"), true, idle) { open("appLockRelockDelay") } }
         privacy.optJSONObject("appSearch")?.let { ToggleRow(model, it, true, props = theme.generalSwitch) { edit -> settings.general(edit) } }
     }
     SectionTitle(language.getString("title"), top = 16)
@@ -336,31 +325,26 @@ private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(mode
     }
 }
 
-// ---- Data ----
 
-/**
- * RN's Data screen on core's getDataSettings: the Backup fold (SyncBackupSection: the three exports, Restore backup, Merge backup,
- * Getting Started; DataTransfer.kt runs each), the Import fold (the guide link, then the five importers), then the Diagnostics
- * card (SyncDiagnosticsCard): the Debug logging switch sends core's edit; while logging is on, Share log and Clear log. RN's
- * Archive retention, Pending remote deletes and Sandbox rows come with their passes.
- */
 @Composable
 private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
+    OnboardingHandoffCard(model)
     BackupCard(model, view.getJSONObject("backup"))
     ImportCard(model, view.getJSONObject("importData"))
+    ArchiveRetentionCard(model, view.getJSONObject("archiveRetention"))
     val diagnostics = view.getJSONObject("diagnostics")
     SectionTitle(diagnostics.getString("title"), top = 24, color = c.text)
     Card {
-        // RN's analytics switch, in a build with the heartbeat: on while opted out; turning it on asks core's question first.
+
         diagnostics.optJSONObject("analytics")?.let { analytics ->
             ToggleRow(model, analytics, false, props = theme.analyticsSwitch) { edit ->
                 if (edit.getBoolean("value")) settings.editLocal { put("analyticsConfirm", true) } else settings.data(edit)
             }
         }
-        // RN always draws this row's top border (it follows the Encryption block). Share and Clear touch no app data, so they work
-        // in every state, as RN's do (a retry owed included).
+
+
         ToggleRow(model, diagnostics.getJSONObject("debugLogging"), true) { settings.data(it) }
         val activity = LocalActivity.current
         LaunchedEffect(settings.logToShare) { if (settings.logToShare != null) activity?.let(settings::openShareSheet) }
@@ -373,10 +357,75 @@ private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.m
     }
 }
 
-/**
- * RN's Backup card (SyncBackupSection): folded under its heading (RN's gtdNavigationRow with an Ionicons chevron) until opened; each
- * row is a button that shows RN's spinner while it runs and is off while any data action runs. The system pickers open from here.
- */
+
+@Composable
+private fun ArchiveRetentionCard(model: InboxViewModel, card: JSONObject) = with(model.menu) {
+    val c = LocalTheme.current.colors
+    val days = card.getInt("days")
+    var draft by rememberSaveable(days) { mutableStateOf(if (days > 0) "$days" else "") }
+
+    val typed = draft.takeIf { it.matches(Regex("[1-9][0-9]{0,4}")) }?.toInt()?.takeIf { it <= 36500 }
+    val canSave = typed != null && idle && typed != days
+    val canNever = days != 0 && idle
+    val never = card.getJSONObject("never")
+    val shape = RoundedCornerShape(8.dp)
+    val focus = LocalFocusManager.current
+    Card(top = 16) {
+        Column(Modifier.padding(16.dp)) {
+            Text(card.getString("title"), style = rnText(16, 500, 21), color = c.text)
+            Text(card.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
+            Text(card.getString("safety"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
+            Text(card.getString("current"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.padding(top = 12.dp))
+            val label = card.getString("daysLabel")
+            Text(label, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
+            BasicTextField(draft, { draft = it; settings.archiveSaveFailed(false) }, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.padding(top = 6.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(10.dp)
+                    .semantics { contentDescription = label }.testTag("archive-retention-days"))
+            if (draft.isNotEmpty() && typed == null) Text(card.getString("invalid"), style = rnText(14, 400), color = c.text,
+                modifier = Modifier.padding(top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite })
+            if (settings.local.optBoolean("archiveSaveFailed")) Text(card.getString("saveFailed"), style = rnText(14, 400), color = c.text,
+                modifier = Modifier.padding(top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("archive-retention-save-failed"))
+            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(card.getString("save"), style = rnText(16, 400, 21), color = c.tint, modifier = Modifier.fade(if (canSave) 1f else 0.45f)
+                    .clickable(enabled = canSave, role = Role.Button) { focus.clearFocus(); typed?.let(settings::archiveRetention) }.testTag("archive-retention-save"))
+                Text(never.getString("label"), style = rnText(16, 400, 21), color = c.tint, modifier = Modifier.fade(if (canNever) 1f else 0.45f)
+                    .clickable(enabled = canNever, role = Role.Button) { settings.archiveData(never.getJSONObject("edit")) }.testTag("archive-retention-never"))
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun ArchiveRetentionReview(model: InboxViewModel, review: JSONObject) = with(model.menu) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val close = { settings.editLocal { remove("archiveReview") } }
+    BackHandler { close() }
+    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { close() } }.padding(20.dp),
+        contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(16.dp)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("archive-retention-review")) {
+            Text(review.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Text(review.getString("description"), style = rnText(14, 400), color = c.text)
+                for (line in listOf("counts", "legacy", "heading")) Text(review.getString(line), style = rnText(14, 400), color = c.text, modifier = Modifier.padding(top = 12.dp))
+                val lines = review.getJSONArray("lines")
+                for (index in 0 until lines.length()) Text(lines.getString(index), style = rnText(14, 400), color = c.text, modifier = Modifier.padding(top = 6.dp))
+            }
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.End)) {
+                Text(review.getString("cancel"), style = rnText(14, 400), color = c.tint, modifier = Modifier.clickable(role = Role.Button) { close() }.testTag("archive-retention-cancel"))
+                Text(review.getString("confirm"), style = rnText(14, 400), color = c.tint, modifier = Modifier.clickable(role = Role.Button) {
+                    close(); settings.archiveData(review.getJSONObject("edit"))
+                }.testTag("archive-retention-apply"))
+            }
+        }
+    }
+}
+
+
 @Composable
 private fun BackupCard(model: InboxViewModel, backup: JSONObject) = with(model.menu.settings) {
     val theme = LocalTheme.current
@@ -388,8 +437,8 @@ private fun BackupCard(model: InboxViewModel, backup: JSONObject) = with(model.m
     LaunchedEffect(transfer.launch) {
         val wanted = transfer.launch ?: return@LaunchedEffect
         transfer.launched()
-        // No picker on the device reads as a cancelled pick: the export shares, the restore stops.
-        // Debug builds only (check-data-device.mjs): `debug.mindwtr.native.export_tree` opens the folder picker in its test folder.
+
+
         if (wanted == "tree") runCatching { pickTree.launch(tech.dongdongbh.mindwtr.pilot.core.debugProperty("export_tree").ifEmpty { null }?.toUri()) }
             .onFailure { transfer.folderPicked(null) }
         else runCatching { pickJson.launch(transfer.pickTypes) }.onFailure { transfer.backupPicked(null) }
@@ -404,7 +453,7 @@ private fun BackupCard(model: InboxViewModel, backup: JSONObject) = with(model.m
             .clearAndSetSemantics { contentDescription = "$title, $description"; role = Role.Button; testTag = "backup-disclosure"
                 onClick { toggle(); true }; if (open) collapse { toggle(); true } else expand { toggle(); true } }
             .clickable(onClick = toggle).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            // RN's settingInfo margin (16) and the row's gap (12) before the chevron.
+
             Column(Modifier.weight(1f).padding(end = 28.dp)) {
                 Text(title, style = rnText(16, 500, 21), color = c.text)
                 Text(description, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
@@ -419,17 +468,14 @@ private fun BackupCard(model: InboxViewModel, backup: JSONObject) = with(model.m
             BackupRow(backup.getString("tasknotesLabel"), backup.getString("tasknotesDescription"), theme.exportAction, enabled, running == "export:tasknotes", "data-transfer-export-tasknotes") { transfer.export("tasknotes") }
             BackupRow(backup.getString("restoreFileLabel"), backup.getString("restoreFileDescription"), c.tint, enabled, running == "restore", "data-transfer-restore") { transfer.pickBackup("restore") }
             BackupRow(backup.getString("mergeLabel"), backup.getString("mergeDescription"), c.tint, enabled, running == "merge", "data-transfer-merge") { transfer.pickBackup("merge") }
-            // RN's Getting Started recovery row: off while any data action runs, its own spinner while it seeds.
+
             val starter = backup.getJSONObject("gettingStarted")
             BackupRow(starter.getString("label"), starter.getString("description"), c.tint, enabled, running == "gettingStarted", "add-getting-started-content") { transfer.gettingStarted() }
         }
     }
 }
 
-/**
- * RN's Import card (SyncBackupSection's second fold): folded under its heading until opened; then RN's guide link in its own row
- * and one row per importer in RN's order, each off while any data action runs (DataTransfer.pickImport runs it).
- */
+
 @Composable
 private fun ImportCard(model: InboxViewModel, importData: JSONObject) = with(model.menu.settings) {
     val c = LocalTheme.current.colors
@@ -450,7 +496,7 @@ private fun ImportCard(model: InboxViewModel, importData: JSONObject) = with(mod
             Icon(if (open) SettingsIonicons.ChevronUp else SettingsIonicons.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
         if (open) {
-            Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) { GuideLink(importData.getJSONObject("guide"), "import-guide-link", bottom = 0) }
+            Row(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) { GuideLink(importData.getJSONObject("guide"), "import-guide-link", bottom = 0) }
             val running = transfer.action
             val rows = importData.getJSONArray("rows")
             for (index in 0 until rows.length()) {
@@ -462,11 +508,11 @@ private fun ImportCard(model: InboxViewModel, importData: JSONObject) = with(mod
     }
 }
 
-/** RN's data action row: the colored label and its description, RN's small spinner at the right while [busy]; TalkBack reads one button. */
+
 @Composable
 internal fun BackupRow(label: String, description: String, color: Color, enabled: Boolean, busy: Boolean, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true)
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border)
         .clearAndSetSemantics { contentDescription = "$label, $description"; role = Role.Button; testTag = tag
             if (busy) stateDescription = "busy"
             if (enabled) onClick { onClick(); true } else disabled() }
@@ -479,10 +525,7 @@ internal fun BackupRow(label: String, description: String, color: Color, enabled
     }
 }
 
-/**
- * RN's Alert before a restore, a merge or a snapshot restore (DataTransfer.kt's open question), drawn as RN's themed alert: Cancel,
- * then core's action word, in red for a restore (RN's destructive style) and the tint for a merge.
- */
+
 @Composable
 internal fun DataTransferQuestion(model: InboxViewModel) {
     val transfer = model.menu.settings.transfer
@@ -494,15 +537,15 @@ internal fun DataTransferQuestion(model: InboxViewModel) {
             AlertButton(words.getString("confirmLabel"), if (destructive) "destructive" else "default", transfer::confirm)), transfer::cancel)
 }
 
-/** RN's pressable settingRow with a colored label and no trailing control: one button node that reads its texts, as RN's does. */
+
 @Composable
 private fun ActionRow(label: String, description: String?, color: Color, enabled: Boolean, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val spoken = if (description == null) label else "$label, $description"
-    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true)
+    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border)
         .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = tag; if (enabled) onClick { onClick(); true } else disabled() }
         .clickable(enabled = enabled, onClick = onClick).padding(16.dp)) {
-        // RN's settingInfo: 16dp to its right.
+
         Column(Modifier.padding(end = 16.dp)) {
             Text(label, style = rnText(16, 500, 21), color = color)
             description?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp)) }
@@ -510,9 +553,7 @@ private fun ActionRow(label: String, description: String?, color: Color, enabled
     }
 }
 
-// ---- Manage ----
 
-/** RN's ManageSettingsScreen on core's getManageSettings: its five folding sections, each read open or closed from RN's key. */
 @Composable
 private fun ManageSettings(model: InboxViewModel, page: SettingsPage) = with(model.menu) {
     val view = page.view
@@ -528,7 +569,7 @@ private fun ManageSettings(model: InboxViewModel, page: SettingsPage) = with(mod
                 .clearAndSetSemantics {
                     contentDescription = spoken; role = Role.Button; heading(); testTag = "manage-section-$key"
                     onClick { settings.toggleSection(section.getJSONObject("toggle")); true }
-                    // RN's accessibilityState expanded: TalkBack hears "expanded" or "collapsed" from the action it offers.
+
                     if (open) collapse { settings.toggleSection(section.getJSONObject("toggle")); true } else expand { settings.toggleSection(section.getJSONObject("toggle")); true }
                 }
                 .clickable { settings.toggleSection(section.getJSONObject("toggle")) }.padding(16.dp),
@@ -549,10 +590,10 @@ private fun ManageSettings(model: InboxViewModel, page: SettingsPage) = with(mod
     }
 }
 
-/** RN's row buttons on Manage: pencil (edit) and trash (delete, in RN's red), each a 44 target with core's words. */
+
 @Composable
 private fun RowButton(icon: ImageVector, label: String, tint: Color, enabled: Boolean, tag: String? = null, onClick: () -> Unit) {
-    // The tag goes inside the one semantics block: clearAndSetSemantics drops a testTag set after it (S23 run 50).
+
     Box(Modifier.size(44.dp).clearAndSetSemantics {
         contentDescription = label; role = Role.Button; if (tag != null) testTag = tag
         if (enabled) onClick { onClick(); true } else disabled()
@@ -561,14 +602,14 @@ private fun RowButton(icon: ImageVector, label: String, tint: Color, enabled: Bo
     }
 }
 
-/** RN's 24 color swatch beside an area. */
+
 @Composable
 private fun Swatch(color: String) {
     val c = LocalTheme.current.colors
-    Box(Modifier.padding(end = 12.dp).size(24.dp).clip(RoundedCornerShape(6.dp)).background(coreColorOrNull(color) ?: c.tint))
+    Box(Modifier.padding(end = 12.dp).size(24.dp).clip(RoundedCornerShape(6.dp)).background(LocalTheme.current.identityColorOrNull(color) ?: c.tint))
 }
 
-/** RN's primary Add button (manageEditorButtonPrimary): core's label with RN's plus, in RN's fixed blue. */
+
 @Composable
 private fun AddButton(label: String, spoken: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
     val theme = LocalTheme.current
@@ -581,7 +622,7 @@ private fun AddButton(label: String, spoken: String, enabled: Boolean, tag: Stri
     }
 }
 
-/** A list's More: the next window of core's rows. */
+
 @Composable
 private fun ListMore(model: InboxViewModel, list: String) =
     Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
@@ -594,7 +635,7 @@ private fun ManageAreas(model: InboxViewModel, page: SettingsPage) = with(model.
     val c = theme.colors
     val areas = page.view.getJSONObject("areas")
     val unassigned = areas.getJSONObject("unassigned")
-    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Swatch(unassigned.getString("color"))
         Column(Modifier.weight(1f)) {
             Text(unassigned.getString("label"), style = rnText(16, 500, 21), color = c.text, maxLines = 1)
@@ -607,7 +648,7 @@ private fun ManageAreas(model: InboxViewModel, page: SettingsPage) = with(model.
     areas.menuText("empty")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(16.dp)) }
     for (row in page.list("areas")) {
         val name = row.getString("name")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Swatch(row.getString("color"))
             Text(name, style = rnText(16, 500, 21), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             RowButton(SettingsIonicons.PencilOutline, "${t("common.edit")}: $name", c.secondaryText, idle) { settings.openEditor(row.getJSONObject("edit")) }
@@ -638,15 +679,15 @@ private fun ManagePeople(model: InboxViewModel, page: SettingsPage) = with(model
     people.menuText("empty")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(16.dp)) }
     for (row in page.list("people")) {
         val name = row.getString("name")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).clip(CircleShape).background(c.bg).border(1.dp, c.border, CircleShape), contentAlignment = Alignment.Center) {
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(34.dp).clip(CircleShape).background(c.bg).rnBorder(1.dp, c.border, CircleShape), contentAlignment = Alignment.Center) {
                 Text(row.getString("initial"), style = rnText(14, 700), color = c.text)
             }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(name, style = rnText(16, 500, 21), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 row.menuText("detail")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-            // The task count opens global search for the person's tasks (core's query), as RN's does.
+
             val count = row.getString("countAccessibilityLabel")
             Text(row.getString("countLabel"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier
                 .clearAndSetSemantics { contentDescription = count; role = Role.Button; onClick { model.openSearch(); model.editSearch(row.getString("searchQuery")); true } }
@@ -674,7 +715,7 @@ private fun ManagePeople(model: InboxViewModel, page: SettingsPage) = with(model
     }
 }
 
-/** Contexts and tags: each value with Rename (core's editor) and Delete (after core's question). */
+
 @Composable
 private fun ManageValues(model: InboxViewModel, page: SettingsPage, list: String, empty: String?) = with(model.menu) {
     val theme = LocalTheme.current
@@ -682,7 +723,7 @@ private fun ManageValues(model: InboxViewModel, page: SettingsPage, list: String
     empty?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(16.dp)) }
     for (row in page.list(list)) {
         val value = row.getString("value")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(value, style = rnText(16, 500, 21), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             RowButton(SettingsIonicons.PencilOutline, "${t("common.edit")}: $value", c.secondaryText, idle) { settings.openEditor(row.getJSONObject("edit")) }
             RowButton(SettingsIonicons.TrashOutline, "${t("common.delete")}: $value", theme.deleteAction, idle) {
@@ -692,16 +733,13 @@ private fun ManageValues(model: InboxViewModel, page: SettingsPage, list: String
     }
     if (page.list(list).size < page.total(list)) ListMore(model, list)
     val create = page.view.getJSONObject(list).getJSONObject("create")
-    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(create.getString("label"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.weight(1f))
         RowButton(SettingsIonicons.Add, create.getString("label"), c.tint, idle) { settings.openEditor(create.getJSONObject("edit")) }
     }
 }
 
-/**
- * RN's SomedaySectionManager on core's getSomedaySections: each section with Move up and Move down (core's order after the move),
- * Rename (an inline field; Save sends core's rename), and Delete after core's question. Core's hint shows when there is none.
- */
+
 @Composable
 private fun SomedaySectionsManager(model: InboxViewModel, page: SettingsPage) = with(model.menu) {
     val theme = LocalTheme.current
@@ -716,7 +754,7 @@ private fun SomedaySectionsManager(model: InboxViewModel, page: SettingsPage) = 
     for (row in sections.menuObjects("rows")) {
         val id = row.getString("id")
         val editing = renaming?.optString("id") == id
-        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).hairline(c.border, top = false).padding(horizontal = 12.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).rnBorderBottom(c.border).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (editing) {
                 val typed = renaming!!.optString("title")
@@ -752,9 +790,7 @@ private fun SomedaySectionsManager(model: InboxViewModel, page: SettingsPage) = 
     if (sections.menuObjects("rows").size < sections.getInt("total")) ListMore(model, "somedaySections")
 }
 
-// ---- GTD ----
 
-/** RN's GtdSettingsScreen: the hub or one of its six screens, from core's one GTD view; every control sends core's edit. */
 @Composable
 private fun GtdSettings(model: InboxViewModel, view: JSONObject) = with(model.menu.settings) {
     when (screen) {
@@ -820,9 +856,11 @@ private fun GtdHub(model: InboxViewModel, hub: JSONObject) = with(model.menu.set
                 JSONObject().put("type", "defaultScheduleTime").put("value", typed)
             }
         }
-        for (name in listOf("focusTaskLimit", "defaultProjectFlowMode")) {
+        for (name in listOf("focusTaskLimit", "focusIncludeStartDates", "defaultProjectFlowMode")) {
             val control = hub.getJSONObject(name)
-            Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            if (name == "focusIncludeStartDates") { ToggleRow(model, control, true, write = { gtd(it) }); continue }
+            Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column {
                     Text(control.getString("label"), style = rnText(16, 500, 21), color = c.text)
                     Text(control.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
@@ -842,10 +880,7 @@ private fun GtdHub(model: InboxViewModel, hub: JSONObject) = with(model.menu.set
     }
 }
 
-/**
- * A GTD text field (the Default schedule time, a Pomodoro minute field): the typed text is kept with the screen, and it commits
- * on blur or Done, as RN's onBlur does, sending the typed text in core's edit ([edit] builds it from the typed text).
- */
+
 @Composable
 private fun TimeField(model: InboxViewModel, name: String, shown: String, label: String, placeholder: String?, modifier: Modifier,
                       number: Boolean = false, edit: (String) -> JSONObject) = with(model.menu.settings) {
@@ -877,7 +912,7 @@ private fun GtdPomodoro(model: InboxViewModel, pomodoro: JSONObject) = with(mode
                 Text(preset.getString("label"), style = rnText(16, 500, 21), color = c.text)
                 Text(preset.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
             }
-            // RN commits both minute fields together on either field's blur (core's pomodoroDurations reads both as typed).
+
             val focusShown = minutes.getString("focus")
             val breakShown = minutes.getString("break")
             val both = { JSONObject().put("type", "pomodoroDurations").put("focusMinutes", local.optString("typed:focus", focusShown))
@@ -898,8 +933,8 @@ private fun GtdPomodoro(model: InboxViewModel, pomodoro: JSONObject) = with(mode
             }
         }
         for (name in listOf("linkTask", "autoStartBreaks", "autoStartFocus", "completionAlert")) ToggleRow(model, controls.getJSONObject(name), true, write = { gtd(it) })
-        // RN's exact-alarm notice under the Completion alert (exact-alarm-notice.tsx, inline), core's words: only while Android 12+
-        // withholds exact alarms from this app, read again on each resume. Allow opens Android's Alarms & reminders page.
+
+
         controls.optJSONObject("alarmNotice")?.let { notice ->
             val context = LocalContext.current
             val denied = remember(model.resumes) { ReminderAlarms.exactAlarmsDenied(context) }
@@ -940,13 +975,10 @@ private fun GtdCapture(model: InboxViewModel, capture: JSONObject) = with(model.
         for (name in listOf("quickAddAutoClean", "naturalLanguageDates", "markdownEditorAssist")) ToggleRow(model, capture.getJSONObject(name), true, write = settings::gtd)
     }
     capture.optJSONObject("captureIntent")?.let { CaptureIntentCard(model, it) }
+    GmailCaptureSection(model)
 }
 
-/**
- * RN's AndroidCaptureIntentSection under the Capture card, from core's card: the switch (off while the stored config is unread or
- * its write runs), and while on the token row with the token RN's CaptureIntentConfigStore holds (never core's), selectable, and
- * Copy. A config that cannot be read shows core's loadFailed toast once per visit, as RN shows it on opening.
- */
+
 @Composable
 private fun CaptureIntentCard(model: InboxViewModel, card: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -975,10 +1007,10 @@ private fun CaptureIntentCard(model: InboxViewModel, card: JSONObject) = with(mo
                 SelectionContainer {
                     Text(stored, style = rnText(13, 400, 19).copy(fontFamily = FontFamily.Monospace), color = c.secondaryText,
                         modifier = Modifier.fillMaxWidth().testTag("android-capture-intent-token").clip(RoundedCornerShape(8.dp)).background(c.bg)
-                            .border(Dp.Hairline, c.border, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
+                            .rnBorder(Dp.Hairline, c.border, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
                 }
                 val copyLabel = token.getString("copyLabel")
-                Box(Modifier.testTag("android-capture-intent-copy").clip(RoundedCornerShape(8.dp)).border(1.dp, c.tint, RoundedCornerShape(8.dp))
+                Box(Modifier.testTag("android-capture-intent-copy").clip(RoundedCornerShape(8.dp)).rnBorder(1.dp, c.tint, RoundedCornerShape(8.dp))
                     .clearAndSetSemantics { contentDescription = copyLabel; role = Role.Button; onClick { copy(context, stored, messages, model); true } }
                     .clickable { copy(context, stored, messages, model) }.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Text(copyLabel, style = rnText(14, 600), color = c.tint)
@@ -988,7 +1020,7 @@ private fun CaptureIntentCard(model: InboxViewModel, card: JSONObject) = with(mo
     }
 }
 
-/** RN's copyToken: the token on the clipboard, then core's copied (info) or copyFailed (error) toast. */
+
 private fun copy(context: Context, token: String, messages: JSONObject, model: InboxViewModel) {
     val copied = runCatching {
         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(null, token))
@@ -996,10 +1028,7 @@ private fun copy(context: Context, token: String, messages: JSONObject, model: I
     if (copied) model.showToast(null, messages.getString("copied"), "info") else model.showToast(null, messages.getString("copyFailed"), "error")
 }
 
-/**
- * RN's Task editor layout: Open tasks in (device-local, core's deviceWrites), the presets, core's groups (open as core says on
- * each visit and whenever core's expandedResetKey changes) with each field's visibility badge and its sheet, and Reset.
- */
+
 @Composable
 private fun GtdTaskEditor(model: InboxViewModel, editor: JSONObject) = with(model.menu.settings) {
     val c = LocalTheme.current.colors
@@ -1032,7 +1061,7 @@ private fun GtdTaskEditor(model: InboxViewModel, editor: JSONObject) = with(mode
                 val on = option.getBoolean("selected")
                 val label = option.getString("label")
                 val enabled = model.menu.idle
-                Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                     .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (enabled) onClick { gtd(option.getJSONObject("edit")); true } else disabled() }
                     .clickable(enabled = enabled) { gtd(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
                     Text(label, style = rnText(13, 700), color = if (on) c.tint else c.secondaryText, maxLines = 1)
@@ -1070,17 +1099,17 @@ private fun GtdTaskEditor(model: InboxViewModel, editor: JSONObject) = with(mode
     }
 }
 
-/** One field of the task editor layout: RN's eye badge (core's visibility edit) and the row that opens the field's sheet. */
+
 @Composable
 private fun FieldRow(model: InboxViewModel, field: JSONObject, divider: Boolean) = with(model.menu.settings) {
     val c = LocalTheme.current.colors
     val visible = field.getBoolean("visible")
     val visibility = field.getJSONObject("visibility")
     val enabled = model.menu.idle
-    Row(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+    Row(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val label = visibility.getString("accessibilityLabel")
-        Box(Modifier.padding(end = 12.dp).size(34.dp).clip(CircleShape).background(if (visible) c.filterBg else c.cardBg).border(1.dp, if (visible) c.tint else c.border, CircleShape)
+        Box(Modifier.padding(end = 12.dp).size(34.dp).clip(CircleShape).background(if (visible) c.filterBg else c.cardBg).rnBorder(1.dp, if (visible) c.tint else c.border, CircleShape)
             .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = visible; if (enabled) onClick { gtd(visibility.getJSONObject("edit")); true } else disabled() }
             .clickable(enabled = enabled) { gtd(visibility.getJSONObject("edit")) }, contentAlignment = Alignment.Center) {
             Icon(if (visible) SettingsIonicons.EyeOutline else SettingsIonicons.EyeOffOutline, null, tint = if (visible) c.tint else c.secondaryText, modifier = Modifier.size(16.dp))
@@ -1099,9 +1128,7 @@ private fun FieldRow(model: InboxViewModel, field: JSONObject, divider: Boolean)
     }
 }
 
-// ---- Dialogs ----
 
-/** The open picker, Manage editor, or task editor field sheet over the Settings screen. */
 @Composable
 private fun SettingsDialogs(model: InboxViewModel, page: SettingsPage) = with(model.menu) {
     val open = dialog
@@ -1111,8 +1138,9 @@ private fun SettingsDialogs(model: InboxViewModel, page: SettingsPage) = with(mo
     }
     if (settings.screen == "ai") AISettingsDialogs(model, page.view)
     if (settings.screen == "data" || settings.screen == "sync") DataTransferQuestion(model)
+    if (settings.screen == "data") settings.local.optJSONObject("archiveReview")?.let { ArchiveRetentionReview(model, it) }
     if (settings.screen == "about") AboutOverlays(model, page.view)
-    // Data's analytics question (RN's Alert): Keep enabled closes it; Disable sends the switch's edit.
+
     if (settings.screen == "data" && settings.local.optBoolean("analyticsConfirm")) page.view.getJSONObject("diagnostics").optJSONObject("analytics")?.let { analytics ->
         val confirm = analytics.getJSONObject("confirm")
         val close = { settings.editLocal { remove("analyticsConfirm") } }
@@ -1126,16 +1154,14 @@ private fun SettingsDialogs(model: InboxViewModel, page: SettingsPage) = with(mo
         )
     }
     if (settings.screen == "calendar") CalendarSettingsDialogs(model)
+    if (settings.screen == "gtd-capture") GmailLabelPicker(model)
     if (settings.screen == "gtd-task-editor") settings.local.optString("sheetField").ifEmpty { null }?.let { id ->
         val field = page.view.getJSONObject("taskEditor").menuObjects("groups").flatMap { it.menuObjects("fields") }.firstOrNull { it.getString("id") == id }
         if (field != null) FieldSheet(model, field)
     }
 }
 
-/**
- * RN's settings picker (pickerOverlay, pickerCard): core's title and options, the current one washed with RN's checkmark; the
- * theme picker adds core's icons and a rule between its two groups. A choice sends core's edit and closes it.
- */
+
 @Composable
 private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = with(model.menu) {
     val theme = LocalTheme.current
@@ -1143,6 +1169,7 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
     val source = when (picker) {
         "theme" -> view.getJSONObject("appearance").getJSONObject("theme")
         "quickAccess" -> view.getJSONObject("appearance").getJSONObject("quickAccess")
+        "appLockRelockDelay" -> view.getJSONObject("privacy").optJSONObject("appLockRelockDelay")
         "language" -> view.getJSONObject("language")
         "defaultArea" -> view.getJSONObject("capture").getJSONObject("defaultArea")
         "weeklyReviewDay" -> view.getJSONObject("weeklyReview").getJSONObject("day")
@@ -1157,7 +1184,7 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
-            .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("settings-picker")) {
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("settings-picker")) {
             Text(source.getString("pickerTitle"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 groups.forEachIndexed { index, options ->
@@ -1166,16 +1193,16 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
                         val on = option.getBoolean("selected")
                         val label = option.getString("label")
                         val row = RoundedCornerShape(10.dp)
-                        Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on && picker == "defaultArea") c.tint else c.border, row)
+                        Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on && picker == "defaultArea") c.tint else c.border, row)
                             .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (idle) onClick { write(option.getJSONObject("edit")); true } else disabled() }
                             .clickable(enabled = idle) { write(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             SettingsIonicons.byName[option.optString("icon")]?.let { icon ->
-                                Box(Modifier.padding(end = 12.dp).size(32.dp).clip(CircleShape).background(c.filterBg).border(1.dp, if (on) c.tint else c.border, CircleShape),
+                                Box(Modifier.padding(end = 12.dp).size(32.dp).clip(CircleShape).background(c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape),
                                     contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (on) c.tint else c.secondaryText, modifier = Modifier.size(17.dp)) }
                             }
                             Text(label, style = rnText(13, 600), color = if (on) c.tint else c.text, maxLines = 2, modifier = Modifier.weight(1f))
-                            // Notifications' day picker draws RN's lucide Check (stroke 2.5); the others Ionicons' checkmark.
+
                             if (on) Icon(if (picker == "weeklyReviewDay") Lucide.CheckPicked else SettingsIonicons.Checkmark, null, tint = c.tint, modifier = Modifier.size(18.dp))
                         }
                     }
@@ -1185,11 +1212,7 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
     }
 }
 
-/**
- * RN's Manage editor modal on core's editor text for the target's type: the name (with core's checkManageEditor line and Save state),
- * a person's note and link, the color swatches, Cancel and Save. Save sends the dialog's exact
- * request (its request UUID stays with the dialog); while a retry is owed the fields stay as sent.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObject) = with(model.menu) {
@@ -1201,18 +1224,18 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
     val action = settings.editorAction(open, text)
     val owed = model.failedAction == action
     val editable = model.failedAction == null
-    // Core's checkManageEditor for the name as typed (a blank name, or a new area named like a live one): its taken-name line and
-    // Save's state. Save stays off until core has answered for this name; an owed retry is the dialog's exact request as sent.
+
+
     val target = open.getJSONObject("target")
     LaunchedEffect(target.toString(), name, model.busy, model.failedAction) { settings.checkEditor(target, name) }
     val checked = settings.editorCheck?.takeIf { it.getString("name") == name && it.getString("target") == target.toString() }
     val canSave = owed || (idle && checked != null && !checked.getBoolean("saveDisabled"))
-    // While its Save's retry is owed, Back is left to the system, as on the lists.
+
     BackHandler(enabled = !owed) { keepDialog(null) }
     Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(owed) { detectTapGestures { if (!owed) keepDialog(null) } }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("manage-editor")) {
             Text(text.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             text.menuText("namePlaceholder")?.let { placeholder ->
@@ -1232,7 +1255,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
                     val label = swatch.getString("label")
                     val choose = { settings.editField("color", color) }
                     Box(Modifier.size(32.dp).clip(CircleShape).background(coreColorOrNull(color) ?: c.tint)
-                        .border(if (on) 2.dp else 1.dp, if (on) theme.swatchSelected else theme.swatchBorder, CircleShape)
+                        .rnBorder(if (on) 2.dp else 1.dp, if (on) theme.swatchSelected else theme.swatchBorder, CircleShape)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (editable) onClick { choose(); true } else disabled() }
                         .clickable(enabled = editable) { choose() }, contentAlignment = Alignment.Center) {
                         if (on) Icon(SettingsIonicons.Checkmark, null, tint = theme.onAction, modifier = Modifier.size(16.dp))
@@ -1242,7 +1265,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
             Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
                 val button = RoundedCornerShape(10.dp)
                 val cancel = text.getString("cancelLabel")
-                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 42.dp).clip(button).border(1.dp, c.border, button)
+                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 42.dp).clip(button).rnBorder(1.dp, c.border, button)
                     .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; if (!owed) onClick { keepDialog(null); true } else disabled() }
                     .clickable(enabled = !owed) { keepDialog(null) }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                     Text(cancel, style = rnText(14, 600), color = c.secondaryText)
@@ -1259,10 +1282,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
     }
 }
 
-/**
- * RN's field sheet on the task editor layout: the field and its group, Show in editor (core's edit), Move to section (core's
- * chips), Order within section (core's moves, off where core says), and Done.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.menu.settings) {
@@ -1273,7 +1293,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
     BackHandler { close() }
     Box(Modifier.fillMaxSize().background(theme.scrim).pointerInput(Unit) { detectTapGestures { close() } }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(bottom = 24.dp).testTag("settings-field-sheet")) {
             Box(Modifier.padding(top = 10.dp, bottom = 2.dp).align(Alignment.CenterHorizontally).size(42.dp, 5.dp).clip(CircleShape).background(c.border))
             Column(Modifier.padding(16.dp)) {
@@ -1282,7 +1302,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
             }
             ToggleRow(model, sheet.getJSONObject("visible"), true, write = { gtd(it) })
             sheet.optJSONObject("sections")?.let { sections ->
-                Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+                Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
                     Text(sections.getString("label"), style = rnText(16, 500, 21), color = c.text)
                     FlowRow(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (option in sections.menuObjects("options")) {
@@ -1290,7 +1310,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                             val label = option.getString("label")
                             val enabled = model.menu.idle
                             Text(label, style = rnText(12, 600), color = if (on) c.tint else c.secondaryText, modifier = Modifier.clip(CircleShape)
-                                .background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                                .background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (enabled) onClick { gtd(option.getJSONObject("edit")); true } else disabled() }
                                 .clickable(enabled = enabled) { gtd(option.getJSONObject("edit")) }.padding(horizontal = 10.dp, vertical = 6.dp))
                         }
@@ -1298,7 +1318,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                 }
             }
             val order = sheet.getJSONObject("order")
-            Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+            Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
                 Text(order.getString("label"), style = rnText(16, 500, 21), color = c.text)
                 Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     for ((name, icon) in listOf("moveUp" to SettingsIonicons.ArrowUp, "moveDown" to SettingsIonicons.ArrowDown)) {
@@ -1307,7 +1327,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                         val can = !move.getBoolean("disabled") && edit != null && model.menu.idle
                         val label = move.getString("label")
                         val button = RoundedCornerShape(12.dp)
-                        Row(Modifier.fade(if (!move.getBoolean("disabled")) 1f else 0.45f).weight(1f).heightIn(min = 44.dp).clip(button).background(c.filterBg).border(1.dp, c.border, button)
+                        Row(Modifier.fade(if (!move.getBoolean("disabled")) 1f else 0.45f).weight(1f).heightIn(min = 44.dp).clip(button).background(c.filterBg).rnBorder(1.dp, c.border, button)
                             .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (can) onClick { gtd(edit!!); true } else disabled() }
                             .clickable(enabled = can) { gtd(edit!!) }.padding(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -1323,6 +1343,29 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                 .clearAndSetSemantics { contentDescription = done; role = Role.Button; onClick { close(); true } }.clickable { close() }, contentAlignment = Alignment.Center) {
                 Text(done, style = rnText(15, 700), color = theme.filledText)
             }
+        }
+    }
+}
+
+
+@Composable
+internal fun OnboardingHandoffCard(model: InboxViewModel) {
+    val settings = model.menu.settings
+    if (!settings.local.optBoolean("onboardingHandoff")) return
+    val c = LocalTheme.current.colors
+    val transfer = settings.transfer
+    val seeding = transfer.action == "gettingStarted"
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardBg).padding(16.dp)) {
+        Text(t("settings.gettingStartedContentContinueTitle"), style = rnText(16, 500, 21), color = c.text)
+        Text(t("settings.gettingStartedContentContinueDesc"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
+        val busy = transfer.busy
+        val shape = RoundedCornerShape(16.dp)
+        Box(Modifier.padding(top = 12.dp).clip(shape).background(if (busy) c.filterBg else c.tint).rnBorder(1.dp, if (busy) c.border else c.tint, shape)
+            .clickable(enabled = !busy, role = Role.Button) { transfer.gettingStarted(openProject = true) }.semantics { if (busy) disabled() }
+            .testTag("mobile-onboarding-start-fresh-handoff")
+
+            .padding(horizontal = 11.dp, vertical = 7.dp)) {
+            Text(t(if (seeding) "common.loading" else "onboarding.startFreshTitle"), style = rnText(13, 700, 17), color = if (busy) c.secondaryText else c.onTint)
         }
     }
 }

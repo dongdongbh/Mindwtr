@@ -145,7 +145,7 @@ Quick options:
 
 - Windows: Microsoft Store, Winget, Chocolatey, Scoop, or GitHub Releases.
 - macOS: Mac App Store, Homebrew, TestFlight beta, or GitHub Releases.
-- Linux: Flathub, Snap, AUR, APT/RPM repos, or GitHub Releases.
+- Linux: Flathub, Snap, AUR, APT/RPM repos, GitHub Releases, or the [community-maintained Nix flake](https://github.com/TheRealGramdalf/mindwtr-flake).
 - Android: Google Play, F-Droid, IzzyOnDroid, or GitHub Releases APK.
 - iOS: App Store or TestFlight beta.
 - Web / self-hosted: [Cloud Deployment](https://docs.mindwtr.app/data-sync/cloud-deployment) or the [Docker guide](docker/README.md).

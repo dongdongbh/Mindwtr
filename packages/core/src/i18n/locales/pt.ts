@@ -1,8 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const ptOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Antes do início",
-        'savedFilters.saveTitle': "Salvar filtro",
-        'savedFilters.namePlaceholder': "Nome do filtro",
     "settings.speechUseGemini": "Usar Gemini",
     "settings.speechNativeUnsupported": "Este provedor de voz ainda não é compatível aqui. Selecione Gemini, OpenAI ou Whisper para usar a captura de voz.",
     "settings.speechGeminiDisclosure": "As gravações são enviadas diretamente ao Gemini para transcrição. O Mindwtr não as coleta.",
@@ -47,7 +45,7 @@ export const ptOverrides: Record<string, string> = {
     "task.addToChecklist": "Adicionar à lista de verificação…",
     "task.addedToChecklist": "Adicionado à lista de verificação",
     'task.doneTagOutcomeUnknown': "Não foi possível confirmar a alteração das etiquetas. Reinicie o Mindwtr para recarregar os dados salvos.",
-    "task.copyTaskLink": "Copiar link da tarefa",
+    "task.copyTaskLink": "Copiar link do Mindwtr",
     "task.copyTaskId": "Copiar ID da tarefa",
     "task.linkNotFound": "Esta tarefa não está nesta biblioteca. Pode ter sido excluída ou ainda não ter sido sincronizada com este dispositivo.",
     'task.doneCompletedAtOutcomeUnknown': "Não foi possível confirmar a alteração da data de conclusão. Reinicie o Mindwtr para recarregar os dados salvos.",
@@ -94,6 +92,28 @@ export const ptOverrides: Record<string, string> = {
     'sandbox.confirmTitle': "Entrar no ambiente de teste?",
     'sandbox.confirmDescription': "Use tarefas e projetos fictícios para gravar um erro ou fazer uma demonstração. Seus dados pessoais permanecem separados. As alterações no ambiente de teste são descartadas ao sair.",
     'sandbox.enter': "Entrar no ambiente de teste",
+    'workspaces.title': "Espaços de trabalho",
+    'workspaces.description': "Mantenha tarefas, anexos, servidores de sincronização e configurações separados neste computador. Só um espaço de trabalho fica aberto por vez, e só ele sincroniza e envia lembretes.",
+    'workspaces.defaultName': "Padrão",
+    'workspaces.open': "Aberto",
+    'workspaces.add': "Adicionar espaço de trabalho",
+    'workspaces.namePlaceholder': "Nome do espaço de trabalho",
+    'workspaces.switch': "Trocar",
+    'workspaces.switchTitle': "Trocar de espaço de trabalho?",
+    'workspaces.switchDesc': "O Mindwtr reinicia para abrir {{name}}.",
+    'workspaces.switchNow': "Trocar agora",
+    'workspaces.createdTitle': "Espaço de trabalho adicionado",
+    'workspaces.later': "Mais tarde",
+    'workspaces.saveFailed': "Não foi possível salvar suas alterações, então o espaço de trabalho não foi trocado. Tente novamente.",
+    'workspaces.failed': "Não foi possível alterar o espaço de trabalho.",
+    'workspaces.deleteTitle': "Excluir {{name}}?",
+    'workspaces.deleteDesc': "Isto remove deste computador as tarefas locais, os anexos e as configurações deste espaço de trabalho. Nada muda no servidor de sincronização dele.",
+    'workspaces.dataFolder': "Pasta de dados",
+    'workspaces.cliHint': "O servidor MCP e a linha de comando abrem o espaço de trabalho padrão. Para outro espaço de trabalho, informe o arquivo mindwtr.db dele com --db.",
+    'workspaces.unavailable': "Os espaços de trabalho ficam indisponíveis até o Mindwtr terminar de mover a pasta do perfil. Reinicie o Mindwtr e tente novamente.",
+    'workspaces.unreadable': "Não foi possível ler a lista de espaços de trabalho, então o espaço de trabalho padrão foi aberto. Verifique o arquivo workspaces.toml na pasta de configuração do Mindwtr.",
+    'workspaces.iCloudDefaultOnly': "A sincronização com o iCloud só está disponível no espaço de trabalho padrão.",
+    'workspaces.switcherLabel': "Espaço de trabalho",
     'sandbox.title': "Ambiente de teste · Dados de exemplo",
     'sandbox.exit': "Sair do ambiente de teste",
     'sandbox.reset': "Redefinir dados de exemplo",
@@ -121,7 +141,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.automationCaptureLoadFailed': 'Não foi possível carregar as configurações de captura automatizada.',
         'settings.automationCaptureUpdateFailed': 'Não foi possível atualizar as configurações de captura automatizada.',
         'taskEdit.quickAddTokenHint': 'Adição rápida: {{token}}',
-        // App
+
         'app.name': 'Mindwtr',
         'donationPrompt.title': "Mantenha o Mindwtr gratuito e independente",
         'donationPrompt.body': "O Mindwtr não tem anúncios, rastreamento nem paywalls. Ele é criado por uma pessoa e apoiado por quem o considera útil. Se ele ajuda você a manter a clareza, uma pequena doação ajuda a continuar melhorando.",
@@ -134,7 +154,7 @@ export const ptOverrides: Record<string, string> = {
         'markdown.openLinkFailed': "Não foi possível abrir este link. Verifique se o aplicativo correspondente está instalado. Você pode copiar o link e abri-lo nele.",
         'markdown.copyLinkFailed': "Não foi possível copiar este link.",
 
-        // Navigation
+
         'nav.main': 'Principal',
         'nav.inbox': 'Caixa de entrada',
         'nav.board': 'Visualização do quadro',
@@ -157,7 +177,7 @@ export const ptOverrides: Record<string, string> = {
         'nav.sectionOrganize': 'Organizar',
         'nav.sectionArchive': 'Arquivo',
 
-        // Quick Add
+
         'quickAdd.help': 'A adição rápida suporta /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
         'quickAdd.example': 'Exemplo: Ligue para a mãe /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tente: Ligue para a mãe /due:tomorrow 5pm @phone #family',
@@ -191,10 +211,10 @@ export const ptOverrides: Record<string, string> = {
         'quickDate.nextMonth': 'Próximo mês',
         'quickDate.noDate': 'Sem data',
 
-        // Checklist
+
         'checklist.progress': 'Progresso da lista de verificação',
 
-        // Keybindings (Desktop)
+
         'keybindings.helpTitle': 'Atalhos de teclado',
         'keybindings.helpSubtitle': 'Pressione Esc para fechar',
         'keybindings.styleLabel': 'Estilo de atalho de teclado',
@@ -238,14 +258,14 @@ export const ptOverrides: Record<string, string> = {
         'keybindings.list.toggleDetails': 'Alternar detalhes da lista',
         'keybindings.list.toggleDensity': 'Alternar densidade',
 
-        // Tabs (Mobile)
+
         'tab.inbox': 'Caixa de entrada',
         'tab.next': 'Foco',
         'tab.board': 'Quadro',
         'tab.calendar': 'Calendário',
         'tab.review': 'Revisão',
 
-        // List Views
+
         'list.inbox': 'Caixa de entrada',
         'list.todo': 'Pendência',
         'list.inProgress': 'Em andamento',
@@ -279,7 +299,7 @@ export const ptOverrides: Record<string, string> = {
         'reference.empty': 'Ainda não há itens de referência.',
         'reference.emptyHint': 'Guarde notas, links e materiais de apoio aqui.',
 
-        // Status Labels
+
         'status.inbox': 'Caixa de entrada',
         'status.todo': 'Pendência',
         'status.next': 'Próximo',
@@ -291,15 +311,22 @@ export const ptOverrides: Record<string, string> = {
         'status.archived': 'Arquivado',
         'status.active': 'Ativo',
 
-        // Priority Labels
+
         'priority.low': 'Baixo',
         'priority.medium': 'Médio',
         'priority.high': 'Alto',
         'priority.urgent': 'Urgente',
 
-        // Task Edit
+
         'taskEdit.editTask': 'Editar tarefa',
         'taskEdit.checklist': 'Lista de verificação',
+        'savedFilters.saveTitle': "Salvar filtro",
+        'savedFilters.namePlaceholder': "Nome do filtro",
+        'taskEdit.dragChecklistItem': "Arrastar para reordenar",
+        'taskEdit.checklistItemActions': "Ações do item da lista",
+        'taskEdit.moveChecklistTop': "Mover para o início",
+        'taskEdit.moveChecklistBottom': "Mover para o fim",
+        'taskEdit.addChecklistBelow': "Adicionar item abaixo",
         'taskEdit.tab.task': 'Tarefa',
         'taskEdit.tab.list': 'Lista',
         'taskEdit.tab.view': 'Visualizar',
@@ -367,6 +394,9 @@ export const ptOverrides: Record<string, string> = {
         'markdown.toolbar.italic': 'Itálico',
         'markdown.toolbar.strikethrough': 'Tachado',
         'markdown.toolbar.bulletList': 'Lista com marcadores',
+        'markdown.toolbar.quote': 'Citação',
+        'markdown.toolbar.orderedList': 'Lista numerada',
+        'markdown.toolbar.taskList': 'Lista de tarefas',
         'markdown.toolbar.horizontalRule': 'Linha horizontal',
         'markdown.toolbar.link': 'Inserir link',
         'markdown.toolbar.code': 'Código em linha',
@@ -465,7 +495,7 @@ export const ptOverrides: Record<string, string> = {
         'task.aria.dueTime': 'Prazo devido',
         'task.aria.location': 'Localização',
 
-        // Recurrence Labels
+
         'recurrence.weekUnit': 'Semanas',
         'recurrence.ordinalSelectLabel': 'Ordem',
         'recurrence.weekdaySelectLabel': 'Dia da semana',
@@ -507,7 +537,7 @@ export const ptOverrides: Record<string, string> = {
         'recurrence.showFutureInCalendar': 'Mostrar próximas ocorrências no Calendário',
         'recurrence.showFutureInCalendarHint': 'Pré-visualização apenas para planejamento; a próxima tarefa será criada somente após a conclusão desta.',
 
-        // Inbox (Mobile)
+
         'inbox.title': 'Caixa de entrada',
         'inbox.processButton': 'Processar Caixa de entrada',
         'inbox.projectHint': 'Algo que exige mais de uma ação? Ao processar, escolha «Sim, faça disso um projeto» para nomear o resultado e a sua primeira próxima ação.',
@@ -552,7 +582,7 @@ export const ptOverrides: Record<string, string> = {
         'inbox.noProject': 'Nenhum projeto',
         'inbox.skip': 'Pular',
 
-        // Next Actions (Mobile)
+
         'next.title': 'Próximas ações',
         'next.ready': 'tarefas prontas para serem executadas',
         'next.current': 'Ações Atuais',
@@ -563,7 +593,7 @@ export const ptOverrides: Record<string, string> = {
         'next.warningCount': 'itens em Próximas Ações',
         'next.warningHint': 'Considere focar em menos projetos. GTD recomenda manter as Próximas Ações em 10 a 15 itens para maior clareza.',
 
-        // Contact / Contexts (Mobile updates)
+
         'contexts.title': 'Contextos',
         'contexts.filter': 'Filtrar tarefas por contexto',
         'filters.label': 'Filtros',
@@ -588,6 +618,7 @@ export const ptOverrides: Record<string, string> = {
         "filters.taskDates": "Datas das tarefas",
         "filters.anyTime": "Qualquer data",
         "filters.datePreset.next_7_days": "Próximos 7 dias",
+        "filters.datePreset.overdue_next_7_days": "Atrasadas + próximos 7 dias",
         "filters.datePreset.next_14_days": "Próximos 14 dias",
         "filters.datePreset.next_30_days": "Próximos 30 dias",
         "filters.datePreset.upcoming": "Todas as próximas",
@@ -602,7 +633,7 @@ export const ptOverrides: Record<string, string> = {
         'contexts.noContexts': 'Nenhum contexto encontrado. Adicione contextos como @home, @work, @computer às suas tarefas',
         'contexts.noTasks': 'Nenhuma tarefa ativa para este contexto',
 
-        // Board
+
         'board.title': 'Visualização do quadro',
         'board.next': 'Próximas ações',
         'board.todo': 'Pendência',
@@ -613,7 +644,7 @@ export const ptOverrides: Record<string, string> = {
         'board.dragTask': 'Arrastar tarefa',
         'board.delete': 'Excluir',
 
-        // Calendar
+
         'calendar.title': 'Calendário',
         'calendar.tasksAndEvents': 'Tarefas e eventos',
         'calendar.today': 'Hoje',
@@ -671,7 +702,7 @@ export const ptOverrides: Record<string, string> = {
         'shortcuts.captureUnavailable': 'Atalho de captura indisponível',
         'shortcuts.missingTitle': 'O Mindwtr não conseguiu ler um título de tarefa desse link de atalho.',
 
-        // Projects
+
         'projects.title': 'Projetos',
         'projects.useAreaColor': "Usar a cor da área",
         'projects.colorSaveFailed': "Não foi possível salvar a cor.",
@@ -807,7 +838,7 @@ export const ptOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Certifique-se de que cada projeto ativo tenha uma próxima ação.',
         'review.projectsHint': 'Revise cada projeto. Tem pelo menos uma Próxima Ação concreta? Se não, adicione um agora. Marcar projetos concluídos como concluídos.',
         'review.hasNextAction': 'Tem próxima ação',
-        'review.projectDeferred': 'Agendado',
+    'review.projectDeferred': 'Agendado',
         'review.needsAction': 'Precisa de ação',
         'review.noActiveTasks': 'Nenhuma tarefa ativa',
         'review.somedayStep': 'Algum dia/Talvez',
@@ -905,7 +936,7 @@ export const ptOverrides: Record<string, string> = {
         'process.addAnotherAction': 'Adicionar outra ação',
         'process.removeAction': 'Remover ação',
 
-        // Settings
+
         'settings.title': 'Configurações',
         'settings.subtitle': 'Personalize sua experiência Mindwtr',
         'settings.appearance': 'Aparência',
@@ -968,7 +999,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.logClearFailed': 'Não foi possível limpar o arquivo de log.',
         'settings.shareUnavailable': 'O compartilhamento não está disponível neste dispositivo.',
 
-        // Mobile Settings
+
         'settings.useSystem': 'Usar tema do sistema',
         'settings.followDevice': 'Siga as configurações de aparência do dispositivo',
         'settings.darkMode': 'Modo escuro',
@@ -996,6 +1027,14 @@ export const ptOverrides: Record<string, string> = {
         'appLock.unavailable': 'Configure um código do dispositivo ou biometria para usar o bloqueio do app.',
         'appLock.cancelled': 'Mindwtr continua bloqueado.',
         'appLock.failed': 'Falha na autenticação. Tente novamente.',
+        "settings.desktopAppLockDesc": "Pedir Windows Hello ou Touch ID (ou a senha do Mac) ao abrir o Mindwtr e depois que você se afastar. Isso oculta apenas a janela do app; o widget do macOS, a API local e o servidor MCP ainda podem ler seus dados.",
+        "settings.desktopAppLockUnavailable": "Configure o Windows Hello ou uma senha de login do Mac para usar o bloqueio do app.",
+        "appLock.lockNow": "Bloquear Mindwtr",
+        "appLock.lockedReminder": "Lembrete do Mindwtr",
+        "appLock.turnOff": "Desativar o bloqueio do app",
+        "appLock.osCheckUnavailable": "O Windows Hello ou o Touch ID não está disponível neste dispositivo agora.",
+        "appLock.macUnlockReason": "desbloquear e mostrar suas tarefas",
+        "appLock.macEnableReason": "ativar o bloqueio do app",
         'settings.data': 'Dados',
         'settings.menuDesc.general': 'Aparência, idioma, exibição',
         'settings.menuDesc.gtd': 'Captura, revisão, editor de tarefas',
@@ -1259,7 +1298,7 @@ export const ptOverrides: Record<string, string> = {
         'digest.reviewDue': 'Revisão vencida',
         'digest.noItems': 'Não há itens urgentes hoje.',
 
-        // Common
+
         'common.tasks': 'tarefas',
         'common.day': 'dia',
         'common.days': 'dias',
@@ -1354,6 +1393,9 @@ export const ptOverrides: Record<string, string> = {
         'agenda.upcoming': 'Por vir',
         'widget.upcomingStarts': 'Começa',
         'widget.upcomingReturns': 'Retorna',
+        'widget.background': 'Fundo',
+        'widget.backgroundLightText': 'Transparente, texto claro',
+        'widget.backgroundDarkText': 'Transparente, texto escuro',
         'widget.availableActions': 'Ações disponíveis',
         'widget.includeAvailableActions': 'Adicionar próximas ações cuja data de início já chegou',
         'agenda.allClear': 'Tudo limpo!',
@@ -1388,7 +1430,7 @@ export const ptOverrides: Record<string, string> = {
         'someday.empty': 'Nenhum item algum dia/talvez',
         'someday.emptyHint': 'Use o status "Algum dia" para ideias, metas e projetos que você possa querer realizar no futuro',
 
-        // Search
+
         'search.title': 'Pesquisar',
         'search.placeholder': 'Pesquisar tarefas e projetos...',
         'search.scopeHint': 'Tarefas, projetos, pessoas',
@@ -1584,7 +1626,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.externalCalendarUrlPlaceholder': 'https://example.com/calendar.ics',
         'settings.webdavUrlPlaceholder': 'https://example.com/remote.php/dav/files/<username>/mindwtr',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Varredura mental',
         'mindSweep.title': 'Varredura mental',
         'mindSweep.intro': 'Percorra algumas listas de gatilhos e anote tudo o que vier à cabeça. Não filtre nem organize: cada item vai para a caixa de entrada para ser tratado depois.',

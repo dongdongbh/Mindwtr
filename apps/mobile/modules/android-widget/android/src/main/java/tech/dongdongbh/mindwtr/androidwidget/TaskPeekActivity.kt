@@ -9,14 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
-/**
- * The task sheet a widget row opens (#1173): the tapped task's details over
- * the launcher, without starting the app. Everything it shows comes from the
- * stored widget payload — it never reads the database — so it opens instantly
- * and shows exactly what the row already had. "Complete" goes through the same
- * check-off queue as the row's ring, undo window included; "Open" hands over
- * to the app's own deep link.
- */
+
 class TaskPeekActivity : AppCompatActivity() {
   private var taskId: String = ""
 
@@ -26,7 +19,7 @@ class TaskPeekActivity : AppCompatActivity() {
     val payload = WidgetPayloadStore.read(this)
     val item = payload.itemFor(taskId)
     if (item == null) {
-      // The payload moved on since the row was drawn: let the app answer.
+
       finish()
       return
     }
@@ -82,7 +75,7 @@ class TaskPeekActivity : AppCompatActivity() {
     }
   }
 
-  /** Same path as the row's ring, so the undo window and the queue are shared. */
+
   private fun complete() {
     when (CheckoffStore.tapAction(this, taskId)) {
       CheckoffStore.TapAction.TOGGLE_PENDING -> {

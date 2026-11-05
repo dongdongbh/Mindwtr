@@ -34,7 +34,7 @@ test('saved Focus filters toggle off without deletion and delete only through th
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr-data')!).settings.savedFilters)).toEqual(savedBefore);
     await chip.click();
     await page.screenshot({ path: testInfo.outputPath('saved-filter-active.png') });
-    // The separate menu is usable from the keyboard; clearing never enters it.
+
     const menuTrigger = page.getByRole('button', { name: /more.*Desk/i });
     await menuTrigger.focus();
     await page.keyboard.press('Enter');

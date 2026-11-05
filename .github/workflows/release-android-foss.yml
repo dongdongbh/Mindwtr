@@ -30,13 +30,13 @@ concurrency:
 
 jobs:
   android-foss:
-    # Pinned on purpose: this job builds or packages with tools from the runner image,
-    # and `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19. Bump CI first, then this.
+
+
     runs-on: ubuntu-24.04
     name: Android FOSS Build
     timeout-minutes: 90
     env:
-      # Keep Metro/JS bundling stable on CI during release builds.
+
       NODE_OPTIONS: --max-old-space-size=6144
       DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY || secrets.DROPBOX_APP_KEY }}
       FEEDBACK_ENDPOINT_URL: ${{ vars.FEEDBACK_ENDPOINT_URL || vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
@@ -58,7 +58,7 @@ jobs:
           /opt/node-v24.13.1-linux-x64/bin/npm -v
 
       - name: Setup Java
-        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           distribution: temurin
           java-version: 17
@@ -257,7 +257,7 @@ jobs:
           ls -la release-artifacts
 
       - name: Upload Android FOSS artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: release-android-foss
           path: release-artifacts/*

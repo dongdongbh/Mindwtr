@@ -8,7 +8,7 @@ import { buildCopilotConfig } from '../../lib/ai-config';
 
 const predictMetadata = vi.hoisted(() => vi.fn());
 
-// Explicit export list: the hook only reaches for the provider factory.
+
 vi.mock('@mindwtr/core', () => ({
   createAIProvider: () => ({ predictMetadata }),
 }));
@@ -32,8 +32,7 @@ const draft = createTaskDraft({
 });
 const settings = {} as never;
 
-/** Bare host so the hook can run without the whole edit modal — this repo has
- *  no renderHook helper for mobile. */
+
 function CopilotHost({
   setDraftField,
   onResult,
@@ -80,7 +79,7 @@ describe('useTaskEditCopilot suggestion parts', () => {
     await act(async () => {
       create(<CopilotHost setDraftField={setDraftField} onResult={(value) => { copilot = value; }} />);
     });
-    // The debounced request plus the promise it awaits.
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(900);
     });

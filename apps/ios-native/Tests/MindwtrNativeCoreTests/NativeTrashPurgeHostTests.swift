@@ -1,7 +1,7 @@
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Actual JSC bundle, ordinary native journal, SQLite transaction and UUID receipt.
+
 final class NativeTrashPurgeHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
@@ -44,7 +44,7 @@ final class NativeTrashPurgeHostTests: XCTestCase {
     private func assertJournalContentUnchanged(_ saved: Data, file: StaticString = #filePath, line: UInt = #line) throws {
         let before = try object(String(decoding: saved, as: UTF8.self))
         let after = try object(String(contentsOf: journal, encoding: .utf8))
-        // Recovery can re-encode outer object order. The accepted arguments remain byte-exact.
+
         XCTAssertEqual(try json(after), try json(before), file: file, line: line)
         XCTAssertEqual(Data(try XCTUnwrap(after["argumentsJSON"] as? String).utf8),
                        Data(try XCTUnwrap(before["argumentsJSON"] as? String).utf8), file: file, line: line)
@@ -218,8 +218,8 @@ final class NativeTrashPurgeHostTests: XCTestCase {
         try await seed(); let faults = HostIOFaults(), writer = host(faults); _ = try await writer.start()
         let request = try await request(writer)
         var committedReplies = 0
-        // The shared save retries a one-shot lost COMMIT reply. Keep every reply lost
-        // so the native command genuinely remains owed while its SQL receipt is durable.
+
+
         faults.afterSQL = { if $0 == "COMMIT" { committedReplies += 1; throw HostFailure("Injected committed ACK") } }
         await failure("SAVE_FAILED") { _ = try await self.write(writer, request) }
         XCTAssertGreaterThan(committedReplies, 1); try assertEffect()
@@ -447,7 +447,7 @@ final class NativeTrashPurgeHostTests: XCTestCase {
             payloadJSON: checkpoint.payloadJSON)
         try await core.checkpointEditorDraft(independent)
         let owned = try Data(contentsOf: editor.url), request = try await request(core), before = try snapshot()
-        // Archive admission refuses to replace an independent saved editor.
+
         await failure("saved editor draft") { _ = try await self.write(core, request) }
         XCTAssertEqual(try Data(contentsOf: editor.url), owned); XCTAssertEqual(try snapshot(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
@@ -468,8 +468,8 @@ final class NativeTrashPurgeHostTests: XCTestCase {
         root = originalRoot.appendingPathComponent("NativeUITests/" + identifier)
         defer { root = originalRoot }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        // The audited fixture requires this exact basename, canonical namespace
-        // and secret-service owner; every normal test remains on core.sqlite.
+
+
         let isolatedDatabase = root.appendingPathComponent("mindwtr.sqlite")
         let faults = HostIOFaults(); faults.secretService = "mindwtr.native-keychain.fixture." + identifier
         let boot = CoreHost(databaseURL: isolatedDatabase, bundleURL: bundle, faults: faults)
@@ -548,8 +548,8 @@ final class NativeTrashPurgeHostTests: XCTestCase {
     func testTaskAndProjectOnlyPurgePoliciesDetachOnlyLiveLegacyLinks() async throws {
         for mode in ["task", "project"] {
             try await seed(); let core = host(); _ = try await core.start()
-            // Boot normally repairs these links. Stage and verify real saved legacy
-            // links after boot so the purge itself must apply the detach formula.
+
+
             for (id, parent, section) in [("legacy-live", "parent", "section"), ("legacy-section", "", "section")] {
                 try rows("INSERT INTO tasks (id,title,status,projectId,sectionId,tags,contexts,createdAt,updatedAt,rev) VALUES (?,?,'next',?,?,'[]','[]',?,?,1)",
                     [id, id, parent.isEmpty ? NSNull() : parent as Any, section, at, at])
@@ -597,7 +597,7 @@ final class NativeTrashPurgeHostTests: XCTestCase {
             let reply = try object(await write(core, selected)); XCTAssertEqual(reply["count"] as? Int, 3)
             let after = try settings(), attachmentSettings = try XCTUnwrap(after["attachments"] as? [String: Any])
             let queue = try XCTUnwrap(attachmentSettings["pendingRemoteDeletes"] as? [[String: Any]])
-            // RN's cleanup Map keeps the last existing duplicate when it adds new work.
+
             let expected = mode == "order" ? ["existing", "z-task", "a-task", "z-parent", "shared", "a-parent"]
                 : ["existing", "z-task", "a-task", "z-parent", "a-parent"]
             XCTAssertEqual(queue.compactMap { $0["cloudKey"] as? String }, expected, mode)
@@ -678,8 +678,8 @@ final class NativeTrashPurgeHostTests: XCTestCase {
         let tasks = try XCTUnwrap(scope["tasks"] as? [[String: Any]])
         XCTAssertTrue(tasks.contains { $0["id"] as? String == "cascade" })
         scope["tasks"] = tasks.filter { $0["id"] as? String != "cascade" }; prepared["scope"] = scope
-        // The omitted deleted child has no row effect or attachment: the shared
-        // pure effect remains consistent, but it cannot grant saved membership.
+
+
         value["prepared"] = prepared; saved["argumentsJSON"] = try json([json(value)])
         let bytes = Data(try json(saved).utf8); try bytes.write(to: journal)
         let before = try snapshot(), replay = HostIOFaults(); var mutations = 0
@@ -692,7 +692,7 @@ final class NativeTrashPurgeHostTests: XCTestCase {
         try await seed(); let core = host(); _ = try await core.start()
         let id = "\u{feff}exact-é"
         try rows("INSERT INTO tasks (id,title,status,tags,contexts,createdAt,updatedAt,deletedAt,rev) VALUES (?,?,'next','[]','[]',?,?,?,1)", [id, id, at, at, at])
-        // Request comes from a fresh native projection, preserving its exact ID.
+
         await core.close(); let reopened = host(); _ = try await reopened.start()
         let selected = try await request(reopened, tasks: [id], projects: [])
         let answer = try object(await write(reopened, selected)); XCTAssertEqual(answer["count"] as? Int, 1)

@@ -140,18 +140,14 @@ describe('createEmailCaptureController', () => {
         });
     });
 
-    // `createController` types addTasks as the option, not as the mock, so reading the
-    // recorded call needs the cast.
+
     const capturedItems = (addTasks: unknown): Array<Record<string, unknown>> =>
         (addTasks as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Array<Record<string, unknown>>;
 
     const capturedIds = (addTasks: unknown): Array<unknown> =>
         capturedItems(addTasks).map((item) => item.captureId);
 
-    // The "already imported" mark lives on one desktop, so the same email arrives twice
-    // whenever a second desktop watches the mailbox, the app stops between the save and
-    // the mark, or the server renumbers the folder. A capture id computed from the
-    // Message-ID makes core treat all three as the same task.
+
     it('passes a stable capture id derived from the Message-ID', async () => {
         const first = createController();
         await first.controller.pollNow();

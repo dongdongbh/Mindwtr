@@ -91,8 +91,8 @@ describe('Bulk Organize destination creation (#1187)', () => {
         await vi.runAllTimersAsync();
         expect(await outcome).toBe('disk unavailable');
         expect(useTaskStore.getState().persistenceFailure).not.toBeNull();
-        // The failed destination is now visible to pickers. Selecting its row
-        // must retry persistence, not acknowledge an undurable in-memory item.
+
+
         const failedSelection = ensureBulkOrganizeDestinationSaved().then(
             () => 'unexpected success', (error: Error) => error.message,
         );

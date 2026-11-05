@@ -1,3 +1,4 @@
+import { getOnboardingGuideUrl } from './onboarding-guidance';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
@@ -130,7 +131,7 @@ describe('backdated completion picker policy', () => {
     });
 });
 
-// Mirrors the capture: the edit's draft ops, list buffers and typed inputs.
+
 const applyEdit = (task: Task, edit: Edit) => {
     let draft = createTaskDraft(task);
     for (const [field, value] of edit.ops ?? []) draft = setTaskDraftField(draft, field, (value ?? undefined) as never);
@@ -271,6 +272,10 @@ describe('task editor model parity with the mobile editor', () => {
                 fields: fields.split('|')[index].split(',').filter(Boolean),
                 filledCount: filled[index],
                 open: open[id] || filled[index] > 0,
+
+                ...(id === 'scheduling' || id === 'details'
+                    ? { help: expect.objectContaining({ guideUrl: getOnboardingGuideUrl(id, 'mobile', undefined) }) }
+                    : {}),
             })).filter((section) => section.fields.length > 0);
             expect(model.layout, key).toEqual({
                 sections: expectedSections,
@@ -333,7 +338,7 @@ describe('task editor model parity: Someday sections and suggestions', () => {
             ]];
         }));
         expect(tokens).toEqual(snapshot.tokens);
-        // Case, prefix and the typed-token rules, spelled out.
+
         expect(tokens['contexts|@o'][1].map(([value]) => value)).toEqual(['@office', '@office-2', '@outdoors', '@home']);
         expect(tokens['contexts|'][1]).toEqual([]);
         expect(tokens['contexts|@O'][1].map(([value]) => value)).toEqual(tokens['contexts|@o'][1].map(([value]) => value));
@@ -411,18 +416,22 @@ describe('task editor model rules', () => {
         const hidden = { hidden: ['section' as TaskEditorFieldId] };
         expect(layoutOf({ taskPatch: { projectId: 'p' }, hasProjectSections: true, taskEditor: hidden }).all).not.toContain('section');
         expect(layoutOf({ taskPatch: { projectId: 'p', sectionId: 's' }, taskEditor: hidden }).all).toContain('section');
-        // Migrated defaults are not a choice to hide sections.
+
         const migrated = { defaultsVersion: 5, hidden: [...DEFAULT_TASK_EDITOR_HIDDEN] };
         expect(layoutOf({ taskPatch: { projectId: 'p' }, hasProjectSections: true, taskEditor: migrated }).all).toContain('section');
     });
 
-    it('hides action fields for Reference and shows its checklist only with items', () => {
+    it('keeps Reference status and an empty checklist editable while hiding action metadata', () => {
         const reference = { status: 'reference' as const, dueDate: '2026-10-01', priority: 'high' as const, contexts: ['@a'] };
         const plain = layoutOf({ taskPatch: reference });
-        for (const field of ['status', 'dueDate', 'startTime', 'priority', 'contexts', 'checklist'] as const) {
+        for (const field of ['dueDate', 'startTime', 'priority', 'contexts'] as const) {
             expect(plain.all).not.toContain(field);
         }
-        expect(plain.showStatusField).toBe(false);
+        expect(plain.showStatusField).toBe(true);
+        expect(plain.all).toEqual(expect.arrayContaining(['status', 'checklist']));
+        const hidden = layoutOf({ taskPatch: reference, taskEditor: { hidden: ['status', 'checklist'] } });
+        expect(hidden.all).not.toContain('status');
+        expect(hidden.all).not.toContain('checklist');
         const withItems = layoutOf({ taskPatch: { ...reference, checklist: [{ id: 'c', title: 'Item', isCompleted: false }] } });
         expect(withItems.all).toContain('checklist');
     });
@@ -467,10 +476,10 @@ describe('task editor model rules', () => {
         const draft = createTaskDraft(task);
         expect(applyTaskDraftPatch(draft, { completedAt: '2026-09-20T10:00:00.000Z', status: 'done' }))
             .toMatchObject({ status: 'done', completedAt: '2026-09-20T10:00:00.000Z' });
-        // Key order in the patch does not matter.
+
         expect(applyTaskDraftPatch(draft, { status: 'done', completedAt: '2026-09-20T10:00:00.000Z' }))
             .toMatchObject({ status: 'done', completedAt: '2026-09-20T10:00:00.000Z' });
-        // The star wins over Inbox, as in the store.
+
         expect(applyTaskDraftPatch(draft, { focusedToday: true, status: 'inbox' }))
             .toMatchObject({ status: 'next', focusedToday: true });
         const done = createTaskDraft({ ...task, status: 'done', completedAt: '2026-09-20T10:00:00.000Z' });

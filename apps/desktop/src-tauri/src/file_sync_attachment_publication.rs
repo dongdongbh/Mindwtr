@@ -31,10 +31,6 @@ const _: () = assert!(
         == windows_sys::Win32::Foundation::GENERIC_WRITE
 );
 
-// Publication is hardened against crashes and cooperating Mindwtr writers by
-// retaining a mode-0700 private namespace and exact file/directory handles.
-// A malicious same-UID process that can bypass that private namespace is out
-// of scope; ambiguous identity or provider behavior must still fail closed.
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 struct DirectoryIdentity {
@@ -45,8 +41,7 @@ struct DirectoryIdentity {
 #[derive(Debug)]
 struct BoundDirectory {
     identity: DirectoryIdentity,
-    // Retaining the original directory handle prevents its identity from being
-    // recycled while the renderer owns the File Sync lease.
+
     handle: File,
 }
 
@@ -111,8 +106,7 @@ fn directory_identity(file: &File) -> Result<DirectoryIdentity, String> {
     };
 
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: the retained File owns a valid handle and `information` remains
-    // writable for the duration of the call.
+
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
         return Err(format!(
             "Failed to identify File Sync directory handle: {}",
@@ -167,9 +161,7 @@ fn open_directory_no_follow(path: &Path, label: &str) -> Result<BoundDirectory, 
         use windows_sys::Win32::Storage::FileSystem::{
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
         };
-        // FlushFileBuffers requires a handle opened with GENERIC_WRITE. Keep
-        // the retained handle itself flush-capable so publication durability
-        // never reopens a replaceable directory name.
+
         options
             .access_mode(RETAINED_DIRECTORY_ACCESS)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
@@ -241,7 +233,7 @@ impl PublicationRoot {
                     Some(open_directory_no_follow(&attachments_path, "attachments")?);
             }
         }
-        // Catch a root rename/replacement that occurred while opening the child.
+
         self.revalidate_root()?;
         let attachments = self
             .attachments
@@ -350,8 +342,6 @@ fn validate_journal_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// NTFS is case-insensitive and Windows spells one folder as `C:\x`,
-/// `c:/x` or `\\?\C:\x`; compare them as the file system does.
 #[cfg(windows)]
 fn same_directory(left: &Path, right: &Path) -> bool {
     let key = |path: &Path| {
@@ -431,7 +421,7 @@ fn path_to_c_string(path: &Path) -> io::Result<CString> {
 fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
-    // SAFETY: both paths are retained NUL-terminated strings.
+
     let result = unsafe {
         libc::renameat2(
             libc::AT_FDCWD,
@@ -465,7 +455,7 @@ fn move_replace_durably(source: &Path, destination: &Path) -> io::Result<()> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    // SAFETY: both buffers are retained and NUL-terminated.
+
     if unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -489,7 +479,7 @@ fn move_replace_durably(source: &Path, destination: &Path) -> io::Result<()> {
 fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
-    // SAFETY: both paths are retained NUL-terminated strings.
+
     let result =
         unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
     if result == 0 {
@@ -514,7 +504,7 @@ fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    // SAFETY: both buffers are retained and NUL-terminated.
+
     if unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -571,7 +561,6 @@ fn sync_bound_directory(_directory: &BoundDirectory) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<(), String> {
-    // Journal publication/removal uses MOVEFILE_WRITE_THROUGH on Windows.
     Ok(())
 }
 
@@ -885,8 +874,6 @@ pub(crate) fn reserve(
                 continue;
             }
             Err(error) => {
-                // The durable journal intentionally remains: recovery can
-                // distinguish a missing namespace from an ambiguous one.
                 return Err(format!(
                     "Failed to create private attachment publication namespace: {error}"
                 ));
@@ -903,8 +890,6 @@ pub(crate) fn reserve(
         entry.private_directory_identity = Some(private_directory.identity.clone());
         replace_entry(data_dir, &entry)?;
         if let Err(error) = publication_root.validate_entry_identities(&entry) {
-            // The private namespace exists and is journal-owned. Preserve the
-            // journal so restart recovery can remove only that exact identity.
             return Err(error);
         }
         return Ok(PublicationReservation {
@@ -1023,8 +1008,7 @@ fn named_stage_matches_handle(
 
         let name = CString::new(PRIVATE_STAGE_NAME).expect("static stage name has no NUL");
         let mut stat = MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: the retained private directory descriptor is valid and the
-        // output storage is initialized by a successful fstatat call.
+
         if unsafe {
             libc::fstatat(
                 private_directory.handle.as_raw_fd(),
@@ -1099,8 +1083,7 @@ fn publish_exact_stage(
         .expect("file descriptor path has no NUL");
     let target = CString::new(target_name.as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target contains a NUL byte"))?;
-    // `AT_EMPTY_PATH` requires a capability on Linux. The documented
-    // `/proc/self/fd` + `AT_SYMLINK_FOLLOW` form links the exact open inode.
+
     let stage_name = CString::new(PRIVATE_STAGE_NAME).expect("static stage name has no NUL");
     let renamed = publish_linux_with_fallback(
         || {
@@ -1120,9 +1103,6 @@ fn publish_exact_stage(
             }
         },
         || {
-            // Some virtual mounts support same-filesystem rename but not hard
-            // links. The private directory is retained, mode 0700, and the
-            // caller just proved `stage` still names the verified open inode.
             let result = unsafe {
                 libc::renameat2(
                     private_directory.handle.as_raw_fd(),
@@ -1193,10 +1173,7 @@ fn publish_exact_stage(
     use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
     let target = target_name.encode_wide().collect::<Vec<_>>();
-    // NtSetInformationFile consumes the native variable-length record while
-    // preserving the retained RootDirectory-relative namespace operation.
-    // FileNameLength still describes only the UTF-16 payload copied at the
-    // FileName field below.
+
     let fixed = std::mem::size_of::<FILE_RENAME_INFORMATION>();
     let target_bytes = target
         .len()
@@ -1209,8 +1186,7 @@ fn publish_exact_stage(
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target name is too long"))?;
     let target_bytes = u32::try_from(target_bytes)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target name is too long"))?;
-    // `FILE_RENAME_INFORMATION` has pointer alignment. A byte vector does not
-    // promise enough alignment for the typed header.
+
     let words = buffer_bytes.div_ceil(std::mem::size_of::<usize>());
     let mut buffer = vec![0_usize; words];
     let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
@@ -1349,8 +1325,6 @@ pub(crate) fn recover(
                 matching_paths.push(item.path());
             }
         } else if name.ends_with(JOURNAL_TEMP_SUFFIX) || name.ends_with(JOURNAL_CLEARED_SUFFIX) {
-            // This directory is device-local and private to this module. These
-            // names can only be interrupted journal publications/removals.
             let _ = fs::remove_file(item.path());
         }
     }
@@ -1516,7 +1490,6 @@ mod tests {
         assert_eq!(fs::read(&target).expect("published bytes"), bytes);
         assert!(!stage.exists());
 
-        // Keep the production reservation boundary wired to this exact grant.
         let source = include_str!("sync.rs");
         let command = source
             .split_once("pub(crate) fn sync_fs_reserve_attachment_generation(")

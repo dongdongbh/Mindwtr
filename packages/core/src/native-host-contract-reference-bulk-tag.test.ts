@@ -66,8 +66,8 @@ describe('guarded Reference bulk Add tag', () => {
     it('preserves pre-Task741 Reference envelope bytes', async () => {
         clock(); process.env.TZ = 'UTC'; const sqlite = await openSqliteHost(seed());
         try { const command = await prepare(sqlite, request('  @@## new  '));
-            // Captured by executing the exact pre-Task741 implementation, not
-            // rebuilt from the new source or a subset of envelope fields.
+
+
             expect(deterministicHash128(JSON.stringify(command))).toEqual([2217490741, 714767651, 31281605, 2943030739]);
         } finally { await sqlite.close(); }
     });
@@ -116,8 +116,8 @@ describe('Reference Add tag exact authority and durable replay', () => {
             const before = await raw(sqlite); const memory = useTaskStore.getState();
             const replacement = new NativeReceiptSqliteAdapter(sqlite.client(), { rejectConcurrentWrites: true });
             const committing = memory.commitPreparedReferenceTasksAddTag(command.prepared, read.authority);
-            // The first await yields before any application; even another guarded
-            // adapter over this same SQLite connection is a different authority.
+
+
             setStorageAdapter(replacement);
             expect(useTaskStore.getState()).toBe(memory);
             expect(await committing).toMatchObject({ success: false, reason: 'conflict' });
@@ -244,7 +244,7 @@ describe('Reference Add tag exact authority and durable replay', () => {
             await sqlite.restart(undefined, { recoveryLoad: true });
             if (label === 'settings' || label === 'unrelated row') {
                 value(await host(sqlite).commitPreparedReferenceTasksAddTag(command)); const final = await raw(sqlite);
-                // The successful RN-equivalent write also retains this exact prepared token effect.
+
                 const expectedSettings = clone(after.settings);
                 expectedSettings.rows[0].data = JSON.stringify(retainTaxonomyEffects(JSON.parse(expectedSettings.rows[0].data),
                     command.prepared.effect.tasks, command.prepared.effect.projects));

@@ -116,7 +116,7 @@ struct CaptureSheet: View {
                     .accessibilityIdentifier("capture-title")
                 Spacer()
                 Button { model.requestCaptureClose() } label: {
-                    // RN closeButton: 48x48 hit area with -6pt vertical margins (36pt of layout).
+
                     AppIcon(name: "x", size: 18).foregroundStyle(palette.secondary).frame(width: 48, height: 48)
                         .contentShape(Rectangle()).padding(.vertical, -6)
                 }
@@ -570,7 +570,7 @@ private struct CaptureCorners: Shape {
     }
 }
 
-// UITextView preserves pasted newlines, while the keyboard's Done key submits just as RN does.
+
 private struct CaptureTextInput: UIViewRepresentable {
     @Binding var text: String
     let enabled: Bool
@@ -632,7 +632,7 @@ private struct CaptureTextInput: UIViewRepresentable {
         func textViewDidChange(_ view: UITextView) { parent.text = view.text }
         func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             guard parent.enabled else { return false }
-            if text == "\n" { parent.submit(); return false }
+            if text == "\n", view.markedTextRange == nil { parent.submit(); return false }
             return true
         }
     }

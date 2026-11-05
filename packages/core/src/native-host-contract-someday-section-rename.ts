@@ -56,7 +56,7 @@ const readRequest = (input: unknown): NativeSomedaySectionRenameRequest | null =
     return request;
 };
 
-/** Pure journal validation, before SQLite opens. */
+
 export function validateSomedaySectionRenameWrite(input: unknown): NativeHostResult<NativeSomedaySectionRenameResult> {
     const request = readRequest(input);
     return request ? { ok: true, value: { id: request.id, changed: changed(request) } }
@@ -135,8 +135,8 @@ export function createSomedaySectionRenameMethods(deps: {
             const payload = JSON.stringify(request);
             const identity = receipts.checkIdentity(request.requestId, payload);
             if (!identity.ok) return identity;
-            // A no-op never reserves a request or asks the store to save. It still
-            // checks that the exact original target remains present.
+
+
             if (!answer.changed) return target(request);
             const outcome = await receipts.run(request.requestId, payload, async () => {
                 const applied = target(request);
@@ -157,7 +157,7 @@ export function createSomedaySectionRenameMethods(deps: {
                     buildSomedaySectionsSettingsUpdate(settings, planned)));
                 return settleWrite(written, answer);
             });
-            // A saved receipt must not acknowledge a section renamed or deleted later.
+
             return outcome.ok ? target(request) : outcome;
         },
     };

@@ -4,7 +4,7 @@ const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call
 export const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
     Object.keys(value).length === keys.length && keys.every((key) => own(value, key));
 
-/** The host checks UTF-8 bytes, including for a JSON string with non-ASCII text. */
+
 export const isNativeJsonWithinBytes = (value: unknown, limit = 2_000_000): boolean => {
     let json: string;
     try {

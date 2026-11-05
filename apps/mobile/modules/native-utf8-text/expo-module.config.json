@@ -1,0 +1,8 @@
+{
+  "platforms": ["ios"],
+  "ios": {
+    "podspecPath": "ios/MindwtrNativeUtf8Text.podspec",
+    "swiftModuleName": "MindwtrNativeUtf8Text",
+    "modules": ["MindwtrNativeUtf8TextModule"]
+  }
+}

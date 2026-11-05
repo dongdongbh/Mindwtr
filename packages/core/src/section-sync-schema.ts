@@ -37,15 +37,13 @@ export const SECTION_SYNC_SCHEMA_VERSION = schema.schemaVersion;
 export const SECTION_SYNC_FIELD_SCHEMA: readonly SectionSyncFieldSpec[] = schema.fields;
 export const SECTION_SYNC_SCHEMA_FIXTURE: Section = schema.fixture;
 
-// Generated SQLite column list + ensureSectionColumns migration list — see the equivalent
-// comment in project-sync-schema.ts for why this lives here rather than sqlite-adapter.ts.
+
 const SECTION_SQLITE_COLUMN_ENTRIES = deriveSqliteColumnEntries(SECTION_SYNC_FIELD_SCHEMA, 'section-sync-schema');
 
 export const SECTION_SQLITE_COLUMNS: readonly string[] = sqliteColumnsFromEntries(SECTION_SQLITE_COLUMN_ENTRIES);
 export const SECTION_SQLITE_MIGRATION_COLUMNS = sqliteMigrationColumnsFromEntries(SECTION_SQLITE_COLUMN_ENTRIES, 'sections');
 
-// Row codec pair — see the equivalent comment in project-sync-schema.ts. Replaces the
-// hand-written positional literal in saveData() and the private mapSectionRow class method.
+
 const sectionColumnValues = (section: Section): Record<string, unknown> => ({
     id: section.id,
     projectId: section.projectId,
@@ -53,7 +51,7 @@ const sectionColumnValues = (section: Section): Record<string, unknown> => ({
     description: section.description ?? null,
     orderNum: Number.isFinite(section.order) ? section.order : 0,
     isCollapsed: toBool(section.isCollapsed),
-    // NULL = no stored choice, kept apart from an explicit Parallel (false) (#1429).
+
     isSequential: toNullableBool(section.isSequential),
     rev: section.rev ?? null,
     revBy: section.revBy ?? null,
@@ -67,7 +65,7 @@ const sectionColumnValues = (section: Section): Record<string, unknown> => ({
 export const sectionToSqliteRow = (section: Section): unknown[] =>
     sqliteRowFromColumnValues(SECTION_SQLITE_COLUMNS, sectionColumnValues(section));
 
-// `_rowid` fallback matches project's — see the comment in project-sync-schema.ts.
+
 export const sectionFromSqliteRow = (row: Record<string, unknown>): Section => {
     const orderNumRaw = row.orderNum;
     const fallbackOrder = typeof row._rowid === 'number' ? row._rowid : 0;
@@ -84,7 +82,7 @@ export const sectionFromSqliteRow = (row: Record<string, unknown>): Section => {
         createdAt: String(row.createdAt ?? ''),
         updatedAt: String(row.updatedAt ?? ''),
         deletedAt: fromOptional(row.deletedAt as string | null),
-        // NULL reads as absent (see the task codec's project-archive fields, #1156).
+
         deletedAtBeforeProjectArchive: fromOptional(row.deletedAtBeforeProjectArchive as string | null),
         projectArchivedAt: fromOptional(row.projectArchivedAt as string | null),
     };

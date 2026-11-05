@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  # Share the app lock with stable publication, which can also update this flight.
+
   group: msstore-production
   cancel-in-progress: false
 
@@ -27,10 +27,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout release tooling
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
 
@@ -65,7 +65,7 @@ jobs:
           "Verified existing release asset SHA256: $actual" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Checkout tag assets
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag }}
           path: release-source
@@ -88,7 +88,7 @@ jobs:
           "MSIX version: $env:MSIX_VERSION. The executable is unchanged from the published release." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Preserve Store upload files
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: msstore-existing-release-${{ inputs.tag }}
           path: |

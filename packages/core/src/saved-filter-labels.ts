@@ -28,6 +28,7 @@ const DATE_RANGE_PRESET_LABELS: Record<string, string> = {
     overdue: 'Overdue',
     no_date: 'No date',
     next_7_days: 'Next 7 days',
+    overdue_next_7_days: 'Overdue + next 7 days',
     next_14_days: 'Next 14 days',
     next_30_days: 'Next 30 days',
     upcoming: 'All upcoming',
@@ -170,9 +171,7 @@ export function buildAdvancedFilterCriteriaChips(
     return chips;
 }
 
-// Also runs on stored criteria (a saved filter as written), so a value
-// matches by its trimmed text, as the reader shows it, and a value this build
-// does not understand stays.
+
 function removeListItem<T extends string>(values: T[] | undefined, target: string): T[] | undefined {
     if (!Array.isArray(values)) return values;
     const next = values.filter((value) => typeof value !== 'string' || value.trim() !== target);

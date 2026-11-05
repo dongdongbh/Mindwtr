@@ -6,7 +6,7 @@ private final class CalendarPushWritesProvider: NativeCalendarWriteWitnessing, N
     enum Mode { case normal, preflightMissing, confirmedMissing, uncertainMissing }
     var mode = Mode.normal
     var beforeMutation: (() -> Void)?
-    /// Provider-side event state (title, notes) by event ID; tests may edit it as a user would.
+
     var events: [String: (title: String, notes: String)] = [:]
     func clearNotesSuffix(eventID: String, calendarID: String, suffix: String) throws {
         lock.lock(); defer { lock.unlock() }
@@ -154,7 +154,7 @@ final class NativeCalendarPushWritesTests: XCTestCase {
     }
 
     func testMappedCreateRemovesOnlyTheRecoveryMarkerFromCurrentNotes() throws {
-        // Untouched event, a user edit kept around the marker, and a user edit that removed it.
+
         for edit in ["none", "kept", "removed"] {
             let task = "task-" + edit
             let reply = try completed(pipeline.submit(requestJSON: request(), taskID: task))

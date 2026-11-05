@@ -16,8 +16,6 @@ import { remoteSyncDocumentStableJsonPass, toRemoteSyncDocument } from './sync-d
 import { cloneAppData, cloneAppDataPass } from './sync-runtime-utils';
 import type { AppData, Task } from './types';
 
-// D9: every pass a sync cycle runs in slices must return exactly what the same work returns at once. The slicer here yields
-// after every step, the most interleaved run there can be.
 
 import { brokenMerge, incoming, local, MERGE_AT } from './__fixtures__/cooperative-library';
 
@@ -32,8 +30,7 @@ const sliced = async <T>(pass: CooperativePass<T>) => {
     return { value, yields: yields() };
 };
 
-// The same work computed on origin/main 04696d554, before the passes existed (scratch golden.ts over this fixture). Each pass,
-// run at once and in slices, must still give these: a pass that drops an item at a slice boundary changes them.
+
 const GOLDEN = {
     merge: 'stable-v2:129664:cbf134c08e697d71',
     changeFingerprint: 'change-v1:16920:16a930ded3a5d43d',
@@ -112,11 +109,11 @@ describe('slice stats (D9b native-sync-slices diagnostics)', () => {
         const { clock, restore } = fakeClock();
         try {
             const slicer = createSlicer(async () => undefined, 8);
-            clock.at += 5_000; // a network wait: the engine ran nothing
+            clock.at += 5_000;
             await runSliced('test', busy(3, 1, clock), slicer);
             expect(slicer.stats().longestMs).toBeLessThan(5_000);
             expect(slicer.stats().longestMs).toBeLessThanOrEqual(3);
-            // The wait made the first due() true: the pass gave the engine back once, after its first step.
+
             expect(slicer.stats().slices).toBe(1);
         } finally { restore(); }
     });

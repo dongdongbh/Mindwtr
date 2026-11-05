@@ -45,7 +45,7 @@ final class NativeAttachmentAvailabilityStoreTests: XCTestCase {
     private func snapshot(_ generation: Int, payload: String? = nil) throws -> EditorDraftSnapshot {
         EditorDraftSnapshot(sessionID: sessionID, taskID: "task", generation: generation, payloadJSON: try payload ?? opening())
     }
-    // These are structural receipt fixtures, not installer-minted file ownership.
+
     private func operation(_ before: EditorDraftSnapshot, n: Int = 1, kind: String = "owned", phase: Store.Phase = .intent,
                            upperHash: Bool = false, selectedID: String? = nil, reason: Store.Reason? = nil) throws -> Store.AvailabilityOperation {
         let selectedID = selectedID ?? attachmentID, target = "file:///owned/documents/attachments/download-\(n).bin"

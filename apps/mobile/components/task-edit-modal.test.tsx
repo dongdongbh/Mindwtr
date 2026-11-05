@@ -28,6 +28,11 @@ vi.mock('@react-navigation/native', async () => {
 });
 
 const referenceClipboard = vi.hoisted(() => ({ write: vi.fn(), toast: vi.fn() }));
+const widgetLaunchListeners = vi.hoisted(() => new Set<() => string>());
+vi.mock('@/hooks/use-widget-launch', () => ({ subscribeWidgetLaunch: (listener: () => string) => {
+  widgetLaunchListeners.add(listener);
+  return () => { widgetLaunchListeners.delete(listener); };
+} }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: referenceClipboard.write }));
 
 const taskEditStore = vi.hoisted(() => ({ current: null as Record<string, any> | null }));
@@ -116,8 +121,8 @@ vi.mock('../hooks/use-theme-tokens', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: resolveThemeTokens caches its result, so a
-  // fresh literal per call would fake instability the app never sees (#766).
+
+
   const themeColors = {
     bg: '#000',
     cardBg: '#111',
@@ -151,7 +156,7 @@ vi.mock('./task-edit/TaskEditViewTab', () => ({
 }));
 
 vi.mock('./task-edit/TaskEditFormTab', () => ({
-  // The Focus star sits in the form's Title row; render it so tests can press it.
+
   TaskEditFormTab: (props: any) => React.createElement('TaskEditFormTab', props, props.focusStar
     ? React.createElement('FocusStar', {
       testID: 'task-edit-focus-star',
@@ -279,6 +284,25 @@ describe('TaskEditModal', () => {
       expect(editor.onClose).toHaveBeenCalledTimes(1);
       expect(editor.onSave).not.toHaveBeenCalled();
       await act(async () => editor.tree.unmount());
+    });
+
+    it('clears a pristine editor for a same-route widget delivery and preserves an unsaved draft', async () => {
+      const pristine = await openEditor();
+      let outcomes: string[] = [];
+      act(() => { outcomes = [...widgetLaunchListeners].map((listener) => listener()); });
+      expect(outcomes).toContain('closed-clean');
+      expect(pristine.onClose).toHaveBeenCalledOnce();
+      expect(pristine.onSave).not.toHaveBeenCalled();
+      act(() => pristine.tree.unmount());
+
+      const draft = await openEditor();
+      act(() => draft.tree.root.findByType('TaskEditFormTab' as any).props.onTitleDraftChange('Unsaved title'));
+      act(() => { outcomes = [...widgetLaunchListeners].map((listener) => listener()); });
+      expect(outcomes).toContain('preserved-draft');
+      expect(draft.onClose).not.toHaveBeenCalled();
+      expect(draft.onSave).not.toHaveBeenCalled();
+      expect(draft.tree.root.findByType('TaskEditFormTab' as any).props.titleDraft).toBe('Unsaved title');
+      act(() => draft.tree.unmount());
     });
 
     it.each(['title', 'description', 'metadata', 'checklist', 'contexts', 'tags'] as const)(
@@ -425,7 +449,7 @@ describe('TaskEditModal', () => {
       act(() => tree.root.findByType('TaskEditFormTab' as any).props.onTitleDraftChange('Unsaved title'));
     }
     for (const [label, payload] of [
-      ['Copy task link', 'mindwtr://open?task=saved%20%2F%3F%26%23'],
+      ['Copy Mindwtr link', 'mindwtr://open?task=saved%20%2F%3F%26%23'],
       ['Copy task ID', task.id],
     ]) {
       act(() => tree.root.findByProps({ accessibilityLabel: 'common.more' }).props.onPress());
@@ -445,14 +469,14 @@ describe('TaskEditModal', () => {
       createdAt: '2026-10-14T00:00:00.000Z', updatedAt: '2026-10-14T00:00:00.000Z',
       ...(kind === 'projected' ? { isProjectedRecurringTask: true, sourceTaskId: 'recurrence-source' } : {}),
     };
-    // Even a projected instance accidentally present in the list cannot expose a reference.
+
     taskEditStore.current!._allTasks = kind === 'projected' ? [task] : [];
     let tree!: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<TaskEditModal visible task={task} onSave={vi.fn()} onClose={vi.fn()} />);
     });
     act(() => tree.root.findByProps({ accessibilityLabel: 'common.more' }).props.onPress());
-    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task link' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy Mindwtr link' })).toHaveLength(0);
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task ID' })).toHaveLength(0);
     expect(tree.root.findByProps({ accessibilityLabel: 'common.share' })).toBeTruthy();
     expect(referenceClipboard.write).not.toHaveBeenCalled();
@@ -935,8 +959,8 @@ describe('TaskEditModal', () => {
   });
 
   it('mounts a themed alert host inside its modal', () => {
-    // Alerts raised from the editor (e.g. the layout help button) are invisible
-    // on iOS without a host inside the presented modal (#940).
+
+
     let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(
@@ -1092,8 +1116,8 @@ describe('TaskEditModal', () => {
       const viewTab = tree.root.find((node) => (
         node.props.mergedTask?.id === 't1' && typeof node.props.applyChecklistUpdate === 'function'
       ));
-      // The preview keeps the typed-but-not-submitted item here; the save path
-      // reads it synchronously instead of waiting for the input to blur.
+
+
       act(() => {
         viewTab.props.pendingChecklistDraftRef.current = draft;
       });
@@ -1344,6 +1368,34 @@ describe('TaskEditModal', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('hides the Focus star during Reference conversion and keeps Status available (#1416)', async () => {
+    const task: Task = {
+      id: 'reference-conversion', title: 'Reference conversion', status: 'next', contexts: [], tags: [],
+      createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    let tree!: ReturnType<typeof renderer.create>;
+    act(() => { tree = renderer.create(<TaskEditModal visible task={task} onSave={vi.fn()} onClose={vi.fn()} />); });
+    const form = () => tree.root.findByType('TaskEditFormTab' as never);
+    const status = () => form().props.renderField('status');
+    let statusTree!: ReturnType<typeof renderer.create>;
+    act(() => { statusTree = renderer.create(status()); });
+    const choose = (label: string) => {
+      act(() => statusTree.root.find((node) => node.props.accessibilityLabel === `taskEdit.statusLabel: ${label}` && typeof node.type !== 'string').props.onPress());
+      act(() => statusTree.update(status()));
+    };
+    choose('reference');
+    expect(form().props.basicFields).toContain('status');
+    expect(form().props.detailsFields).toContain('checklist');
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' })).toHaveLength(0);
+    choose('next');
+    expect(form().props.draft.status).toBe('next');
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' }).length).toBeGreaterThan(0);
+    choose('reference');
+    expect(form().props.draft.status).toBe('reference');
+    expect(tree.root.findAllByProps({ testID: 'task-edit-focus-star' })).toHaveLength(0);
+    act(() => { statusTree.unmount(); tree.unmount(); });
   });
 
   it('keeps the Focus star in the draft until Save and drops it on discard', async () => {
@@ -1997,7 +2049,7 @@ describe('TaskEditModal', () => {
     );
     const formTab = tree!.root.findAll((node) => typeof node.props.renderField === 'function')[0];
 
-    // A nested form button must receive the first tap while its input owns the keyboard.
+
     expect(findPager().props.keyboardShouldPersistTaps).toBe('handled');
     expect(findPager().props.scrollEnabled).toBe(true);
 
@@ -2181,8 +2233,8 @@ describe('TaskEditModal', () => {
         );
         await Promise.resolve();
       });
-      // The form tab is mocked, so the field props (the editor's recurrence seam)
-      // are read off the element renderField would have mounted.
+
+
       const fieldProps = () => tree.root
         .find((node) => Array.isArray(node.props.basicFields))
         .props.renderField('recurrence').props;

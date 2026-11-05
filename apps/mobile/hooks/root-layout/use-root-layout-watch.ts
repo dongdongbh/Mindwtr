@@ -20,7 +20,7 @@ const WATCH_SNAPSHOT_RELEASE_CHECK = 'v1.3.0/watch-snapshot';
 const WATCH_NUMERIC_BRIDGE_RELEASE_CHECK = 'v1.3.0/watch-numeric-bridge';
 const WATCH_PUBLICATION_COALESCE_MS = 120;
 
-/** The earliest future review time among the tasks: a review coming due can reorder Focus (a waiting step in a sequential project). */
+
 function getNextReviewDueAt(tasks: readonly Task[], nowMs: number): number | null {
   let next: number | null = null;
   for (const task of tasks) {
@@ -51,10 +51,8 @@ export function useRootLayoutWatch({
     let publishing = false;
     let publishAgain = false;
     let lastContextKey = '';
-    // What the context is built from. The Focus screen re-derives on the same
-    // triggers: its data, the local day, the next timed start (#995) and the
-    // next review coming due.
-    // Anything else (UI state, sync status) skips the build entirely.
+
+
     let lastInputs: readonly unknown[] | null = null;
     let nextRevealAt: number | null = null;
     const readInputs = () => {
@@ -172,7 +170,7 @@ export function useRootLayoutWatch({
 
     const nativeListener = addPendingWatchCaptureListener(() => {
       onPendingCapture();
-      // Settlement also emits this edge, after the task save is durable.
+
       forgetPublished();
       requestPublish();
     });
@@ -208,8 +206,8 @@ export function useRootLayoutWatch({
     };
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       if (nextState !== 'active') return;
-      // Foreground is both the retry boundary for failed activation and a
-      // chance to replace context after pairing/session state changed.
+
+
       activated = false;
       void ensureActivated();
     });

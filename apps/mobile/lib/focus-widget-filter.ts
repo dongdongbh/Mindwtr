@@ -1,5 +1,5 @@
-// The Focus screen's widget selection lives in core (focus-widget-filter.ts),
-// which the widget payload builder reads; this app's Focus screen sets it.
+
+
 import {
     focusWidgetFilterKey,
     getFocusWidgetFilter,

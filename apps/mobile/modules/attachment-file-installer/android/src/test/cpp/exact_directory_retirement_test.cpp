@@ -473,7 +473,7 @@ void retains_the_open_parent_across_path_rebind() {
   close(parent_fd);
 }
 
-}  // namespace
+}
 
 int main() {
   try {

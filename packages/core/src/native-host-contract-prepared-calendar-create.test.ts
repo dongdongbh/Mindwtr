@@ -216,8 +216,8 @@ it('uses a frozen existing project ID after a harmless rename and refuses a chan
     const next = value(await host.prepareCalendarComposerCreate({ requestId: nextID, composer: composer(host, 'Paint +Another') }));
     expect(next.kind).toBe('prepared');
     if (next.kind !== 'prepared') return;
-    // A generated project's order is a factory input, not an excuse to reorder
-    // unrelated rows during a stale commit.
+
+
     await useTaskStore.getState().addProject('Order moved', '#94a3b8');
     await flushPendingSave();
     saveData.mockClear();

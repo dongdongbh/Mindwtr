@@ -1,11 +1,6 @@
-/**
- * One-way system-calendar push for desktop.
- *
- * This mirrors the mobile calendar-push lifecycle: scheduled/due tasks become
- * system calendar events, while completed/archived/deleted/undated tasks remove their
- * pushed event. Task-to-event IDs are stored in the local SQLite calendar_sync
- * table through Tauri commands.
- */
+
+
+
 import {
     buildCalendarPushEventFields,
     getTaskCalendarOccurrenceDate,
@@ -94,7 +89,7 @@ const writeLocalStorage = (key: string, value: string): void => {
     try {
         localStorage.setItem(key, value);
     } catch {
-        // Best-effort local preference only.
+
     }
 };
 
@@ -103,7 +98,7 @@ const removeLocalStorage = (key: string): void => {
     try {
         localStorage.removeItem(key);
     } catch {
-        // Best-effort local preference only.
+
     }
 };
 
@@ -282,15 +277,14 @@ function buildEventDetails(task: Task, target: CalendarPushTarget): SystemCalend
         ? sections.find((section) => section.id === task.sectionId)?.title
         : undefined;
     const leadingNote = isProjectedRecurringTask(task) ? formatProjectedRecurrenceNote(task) : undefined;
-    // SystemCalendarEventDetails has no native URL field, so the primary link
-    // rides in the notes (buildCalendarPushEventFields already adds Link: lines).
+
+
     const { notes } = buildCalendarPushEventFields(task, { projectName, sectionName, leadingNote });
     const title = formatCalendarEventTitle(task.title, target.shouldPrefixTitles, projectedOccurrenceDateLabel);
 
     if (hasTimeComponent(dateValue)) {
-        // The pushed event's length comes from the estimate, so it must honour
-        // the feature the same way the in-app calendars do — an estimate written
-        // before the feature was switched off must not keep stretching events.
+
+
         const estimateMinutes = timeEstimateToMinutes(task.timeEstimate, {
             enabled: resolveFeatureFlags(settings).timeEstimates,
         });
@@ -312,11 +306,8 @@ function buildEventDetails(task: Task, target: CalendarPushTarget): SystemCalend
         calendarId: target.id,
         title,
         start: allDayStart.toISOString(),
-        // The two representations serve different consumers: macOS EventKit
-        // reads the instants and counts every day the range touches, so its end
-        // must land inside the same day or the event spans two days (#1065);
-        // Linux builds ICS from the date-only strings, whose DTEND is exclusive
-        // by spec and must stay the next day.
+
+
         end: buildAllDayEndOfDay(startDate).toISOString(),
         startDate: formatLocalDateOnly(allDayStart),
         endDate: formatLocalDateOnly(allDayEnd),
@@ -386,8 +377,7 @@ function createCalendarPushRunPorts(target: CalendarPushTarget): CalendarPushRun
     };
 }
 
-// Serializes every calendar write and coalesces store changes; the runs below
-// stay unqueued so the scheduler owns ordering (#743).
+
 const calendarPushScheduler = createCalendarPushScheduler({
     runFull: () => runFullDesktopCalendarPushSyncUnsafe(),
     runPartial: (taskIds) => runPartialDesktopCalendarPushSyncUnsafe(taskIds),

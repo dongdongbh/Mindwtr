@@ -14,7 +14,7 @@ export const isClarifyResponse = (value: unknown): value is ClarifyResponse => {
     if (value.options.some((option) => !isRecord(option) || typeof option.label !== 'string' || typeof option.action !== 'string')) {
         return false;
     }
-    // Treat null like absent: Structured Outputs returns null for omitted optional fields.
+
     if (value.suggestedAction != null) {
         if (!isRecord(value.suggestedAction)) return false;
         if (value.suggestedAction.title != null && typeof value.suggestedAction.title !== 'string') return false;
@@ -45,7 +45,7 @@ export const isReviewAnalysisResponse = (value: unknown): value is ReviewAnalysi
 
 export const isCopilotResponse = (value: unknown): value is CopilotResponse => {
     if (!isRecord(value)) return false;
-    // Treat null like absent: Structured Outputs returns null for omitted optional fields.
+
     if (value.context != null && typeof value.context !== 'string') return false;
     if (value.timeEstimate != null && typeof value.timeEstimate !== 'string') return false;
     if (value.tags != null && !isStringArray(value.tags)) return false;

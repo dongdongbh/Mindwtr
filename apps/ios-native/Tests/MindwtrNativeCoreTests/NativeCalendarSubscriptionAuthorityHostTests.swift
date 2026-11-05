@@ -95,8 +95,7 @@ private final class CalendarAuthorityProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Real public backup writers and actual shared subscription loading through the production bundle.
-/// URLProtocol substitutes synthetic HTTP transport only; no JSC entry method/store is replaced.
+
 final class NativeCalendarSubscriptionAuthorityHostTests: XCTestCase {
     private struct Library {
         let root: URL
@@ -277,8 +276,8 @@ final class NativeCalendarSubscriptionAuthorityHostTests: XCTestCase {
                 let original = try Data(contentsOf: library.manifest), io = CalendarAuthorityIO(), core = host(library, io: io)
                 _ = try await core.start()
                 if action == .merge {
-                    // Replacement advances the group's revision, so give the incoming merge
-                    // a later revision instead of relying on a same-stamp tie.
+
+
                     try await replace(core, library: library, subscriptions: [], syncEnabled: true,
                         syncStamp: "2098-01-01T00:00:00.000Z")
                 }
@@ -353,7 +352,7 @@ final class NativeCalendarSubscriptionAuthorityHostTests: XCTestCase {
 
     func testSameHostDocumentReplacementBypassesSourceCacheAndUnchangedSourceStillThrottles() async throws {
         let library = try library("source-cache", device: [a]), io = CalendarAuthorityIO()
-        // All entry/loader/parser/writer code remains production; only cache time is held constant.
+
         let clock = root.appendingPathComponent("authority-clock.js")
         try (String(contentsOf: bundle, encoding: .utf8) + "\n;Date.now=()=>1791504000000;\n")
             .write(to: clock, atomically: true, encoding: .utf8)

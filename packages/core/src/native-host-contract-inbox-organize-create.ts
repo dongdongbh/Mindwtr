@@ -11,7 +11,7 @@ import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, EMPTY_BULK_ORGANIZE_DRAFT,
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { buildNewProject } from './store-projects/project-actions';
 import { planAreaAddition, selectAreaAdditionScope, areaAdditionEffect } from './store-projects/area-actions';
-import { compareProjectsByPickerOrder, getProjectChoiceState } from './project-utils';
+import { getProjectChoiceState, sortProjectsForPicker } from './project-utils';
 import { validSection } from './native-host-contract-project-section-rename';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
@@ -109,8 +109,8 @@ const offersCreate = (r: Request, scope: Prepared['scope']): boolean => {
     if (r.kind === 'area' && buildBulkOrganizeDialogModel({ draft: r.draft, projects, areas,
         selectedCount: r.taskIds.length, t: value => value }).area.disabled) return false;
     return r.kind === 'project'
-        ? !getProjectChoiceState([...projects].sort(compareProjectsByPickerOrder), r.name,
-            [...scope.allProjects.map(loadedReferenceBatchProject)].sort(compareProjectsByPickerOrder)).exactMatch
+        ? !getProjectChoiceState(sortProjectsForPicker(projects, scope.allAreas), r.name,
+            sortProjectsForPicker(scope.allProjects.map(loadedReferenceBatchProject), scope.allAreas)).exactMatch
         : !areas.some(area => area.name.toLowerCase() === normalized(r.name));
 };
 export const organizeDestinationCreateEffect = (p: Omit<Prepared, 'effect' | 'result' | 'resolution'>):
@@ -157,8 +157,8 @@ const validScope = (s: unknown, source: Source): s is Prepared['scope'] => {
         && validReferenceBatchArea(restore.area) && Boolean(restore.area.deletedAt)
         && rows(restore.projects, validReferenceBatchProject) && rows(restore.sections, section) && rows(restore.tasks, validReferenceBatchTask);
 };
-// Inbox and restoration are independently ordered saved witnesses. Their overlapping rows
-// must agree, but an Inbox-first union cannot reconstruct the original restoration order.
+
+
 const scopeConsistent = (r: Request, scope: Prepared['scope'], data: NonNullable<ReturnType<typeof scopeData>>): boolean => {
     const inbox = rawReferenceBatchScope(tasksOrganizeScope(scopeRequest(r), data));
     if (!same(inbox, scope.inbox)) return false;

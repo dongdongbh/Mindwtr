@@ -85,12 +85,13 @@ class WidgetCaptureStatusTest {
   }
 
   @Test fun selectedListsResolveAtOpenAndOtherEntrypointsDefaultToInbox() {
-    for (listId in listOf("inbox", "next", "waiting", "someday", "focus", "upcoming", "filter:f1", "context:@home", "tag:#work", "project:p1", "retired")) {
+    for (listId in listOf("inbox", "next", "waiting", "someday", "focus", "upcoming", "filter:f1", "context:@home", "tag:#work", "project:p1", "retired",
+      "group:project:waiting", "group:context:next", "group:none:someday")) {
       val capture = intent(41)
       WidgetListStore.write(context, 41, listId)
       val host = controller(capture).setup()
       val json = save(host.get())
-      assertEquals(PendingCaptureWriter.creationStatus(listId) ?: "inbox", json.getString("defaultStatus"))
+      assertEquals(PendingCaptureWriter.creationStatus(WidgetListStore.baseListId(listId)) ?: "inbox", json.getString("defaultStatus"))
       assertFalse(json.has("status"))
       host.pause().stop().destroy()
     }
@@ -227,7 +228,7 @@ class WidgetCaptureStatusTest {
     session.awaitPermission()
     val host = controller(intent(41)).setup()
     host.newIntent(Intent(context, QuickCaptureActivity::class.java))
-    // ActivityResultRegistry can dispatch before Android has called onStop.
+
     host.get().onMicrophonePermissionResult(true)
     assertEquals(0, recordings)
     assertEquals(QuickCaptureAudioSession.State.PERMISSION, session.snapshot.state)

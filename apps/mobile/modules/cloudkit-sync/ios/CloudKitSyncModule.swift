@@ -12,10 +12,7 @@ private final class CloudKitAttachmentNotFoundException: Exception {
     }
 }
 
-/// The record zone no longer exists on the server: the user cleared Mindwtr's
-/// iCloud data in Settings, or the zone was never created for this account.
-/// Every read and write fails with it until the zone is recreated, so the JS
-/// layer recreates the zone and resets its change token when it sees this code.
+
 private final class CloudKitZoneGoneException: Exception {
     override var reason: String {
         "CloudKit zone was deleted or cleared and must be recreated"
@@ -56,7 +53,6 @@ public class CloudKitSyncModule: Module {
             }
         }
 
-        // MARK: - Account Status
 
         AsyncFunction("getAccountStatus") { () -> String in
             let status = try await self.manager.accountStatus()
@@ -70,7 +66,6 @@ public class CloudKitSyncModule: Module {
             }
         }
 
-        // MARK: - Zone & Subscription Setup
 
         AsyncFunction("ensureZone") { () -> Bool in
             try await self.reportingRetryAfter { try await self.manager.ensureZone() }
@@ -82,10 +77,7 @@ public class CloudKitSyncModule: Module {
             return true
         }
 
-        // MARK: - Incremental Fetch
 
-        /// Fetch changes since a given change token (base64 string).
-        /// Returns { records: { [recordType]: [...json] }, deletedIDs: { [recordType]: [...ids] }, changeToken: string? }
         AsyncFunction("fetchChanges") { (changeTokenBase64: String?) -> [String: Any] in
             do {
                 let result = try await self.reportingRetryAfter {
@@ -97,14 +89,12 @@ public class CloudKitSyncModule: Module {
                 }
                 return self.formatChangeResult(result)
             } catch is ChangeTokenExpiredError {
-                // Return a sentinel so JS knows to do a full fetch
+
                 return ["tokenExpired": true]
             }
         }
 
-        // MARK: - Full Fetch
 
-        /// Fetch all records of a given type. Returns JSON array.
         AsyncFunction("fetchAllRecords") { (recordType: String) -> [[String: Any]] in
             let records = try await self.reportingRetryAfter {
                 try await self.manager.fetchAllRecords(recordType: recordType)
@@ -112,10 +102,7 @@ public class CloudKitSyncModule: Module {
             return records.map { CloudKitRecordMapper.json(from: $0) }
         }
 
-        // MARK: - Save Records
 
-        /// Save records from JSON. Returns array of conflicted record IDs.
-        /// Uses fetch-then-update internally to preserve server system fields.
         AsyncFunction("saveRecords") { (recordType: String, recordsJSON: String) -> [String] in
             guard let data = recordsJSON.data(using: .utf8),
                   let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
@@ -129,7 +116,6 @@ public class CloudKitSyncModule: Module {
             }
         }
 
-        // MARK: - Delete Records
 
         AsyncFunction("deleteRecords") { (recordType: String, recordIDs: [String]) -> Bool in
             try await self.reportingRetryAfter {
@@ -138,7 +124,6 @@ public class CloudKitSyncModule: Module {
             return true
         }
 
-        // MARK: - Attachment Assets
 
         AsyncFunction("saveAttachmentAsset") { (recordName: String, filePath: String, metadata: [String: Any]) -> [String: Any] in
             return try await self.reportingRetryAfter {
@@ -176,13 +161,7 @@ public class CloudKitSyncModule: Module {
         }
     }
 
-    // MARK: - Helpers
 
-    /// CloudKit reports how long to wait before retrying a throttled or
-    /// unavailable request in CKErrorRetryAfterKey, and Apple asks callers to
-    /// wait that long rather than guess. The JS layer only ever sees an error
-    /// string, so append the interval in the fixed form it parses. Attached
-    /// whenever CloudKit supplies the key, not for one error code (#948).
     private func reportingRetryAfter<T>(_ operation: () async throws -> T) async throws -> T {
         do {
             return try await operation()
@@ -195,10 +174,7 @@ public class CloudKitSyncModule: Module {
         }
     }
 
-    /// userDeletedZone: the user removed the app's data from iCloud settings.
-    /// zoneNotFound: the zone does not exist for this account. Both mean the
-    /// zone must be created again before anything else can succeed. A partial
-    /// failure reports the reason on the per-item errors.
+
     private static func isZoneGone(_ error: Error, depth: Int = 0) -> Bool {
         if depth >= 8 { return false }
         let nsError = error as NSError
@@ -223,8 +199,7 @@ public class CloudKitSyncModule: Module {
         ])
     }
 
-    /// A partial failure carries the real reason — including the retry
-    /// interval — on the per-item errors rather than the top-level one.
+
     private static func retryAfterSeconds(in error: Error, depth: Int = 0) -> Double? {
         if depth >= 8 { return nil }
         let nsError = error as NSError
@@ -244,7 +219,7 @@ public class CloudKitSyncModule: Module {
     }
 
     private func formatChangeResult(_ result: CloudKitChangeTracker.ChangeResult) -> [String: Any] {
-        // Group changed records by type
+
         var recordsByType: [String: [[String: Any]]] = [:]
         for record in result.changedRecords {
             let type = record.recordType
@@ -252,7 +227,7 @@ public class CloudKitSyncModule: Module {
             recordsByType[type, default: []].append(json)
         }
 
-        // Group deleted IDs by type
+
         var deletedByType: [String: [String]] = [:]
         for deleted in result.deletedRecordIDs {
             deletedByType[deleted.recordType, default: []].append(deleted.recordName)
@@ -268,9 +243,7 @@ public class CloudKitSyncModule: Module {
         return response
     }
 
-    // MARK: - Push Notification Support
 
-    /// Call this from AppDelegate when a silent push arrives for CloudKit.
     public func handleRemoteNotification(userInfo: [AnyHashable: Any]) {
         Self.handleRemoteNotificationPayload(userInfo)
     }

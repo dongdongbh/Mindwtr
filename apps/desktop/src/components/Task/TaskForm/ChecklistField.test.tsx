@@ -21,7 +21,7 @@ const storedTask = (checklist: Task['checklist'], extra: Partial<Task> = {}): Ta
 } as Task);
 const seedChecklist = (checklist: Task['checklist']) => useTaskStore.setState({ _allTasks: [storedTask(checklist)] });
 
-/** Reports each checklist the field writes to the store for task-1. */
+
 const onStoredChecklist = (report: (updates: Partial<Task>) => void) => useTaskStore.subscribe((state, previous) => {
     const next = state._tasksById.get('task-1')?.checklist;
     if (next !== previous._tasksById.get('task-1')?.checklist) report({ checklist: next });
@@ -438,8 +438,7 @@ describe('ChecklistField', () => {
         fireEvent.change(input, { target: { value: 'Item 1 edited' } });
         expect((getAllByRole('textbox')[0] as HTMLInputElement).value).toBe('Item 1 edited');
 
-        // Simulate a background store refresh (e.g. after sync) delivering an
-        // equal checklist with fresh object identity while the user is typing.
+
         rerender(<ChecklistField {...props} checklist={initialChecklist.map((item) => ({ ...item }))} />);
 
         expect((getAllByRole('textbox')[0] as HTMLInputElement).value).toBe('Item 1 edited');

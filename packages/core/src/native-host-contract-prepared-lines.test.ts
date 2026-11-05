@@ -242,7 +242,7 @@ describe('prepared native multiline capture prerequisite', () => {
         expect(validatePreparedQuickCaptureLines(ascii)).toMatchObject({ ok: true });
         expect(host.prepareQuickCaptureLines({ ...request, options: { ...request.options, note: 'é'.repeat(250_000) } }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // A hostile stored envelope can also exceed the limit independently of its request.
+
         ascii.prepared.tasks.forEach((task) => { task.description = 'é'.repeat(250_000); });
         const before = stateRows();
         expect(validatePreparedQuickCaptureLines(ascii)).toMatchObject({ ok: false });

@@ -22,28 +22,19 @@ const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const resolveTimeoutMs = (value?: number) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS;
 
-// OpenAI reasoning models such as the GPT-5 family and o-series do not support
-// configurable sampling temperature. Some models/endpoints reject explicit
-// temperature values with 400 unsupported_parameter or unsupported_value errors.
-// Detect them so we omit temperature and rely on the model default.
+
 const isReasoningModel = (model: string): boolean => {
     const id = model.trim().toLowerCase();
     return id.startsWith('gpt-5') || /^o\d+(?:-|$)/.test(id);
 };
 
-// Strict JSON Schemas for OpenAI Structured Outputs. Applied only to the official
-// OpenAI endpoint (custom OpenAI-compatible endpoints may not implement json_schema,
-// so those keep the looser json_object). Strict mode requires every property to be
-// listed in `required` with `additionalProperties: false`, so genuinely optional
-// fields are made nullable — the model omits them by returning null.
+
 interface OpenAIResponseSchema {
     name: string;
     schema: Record<string, unknown>;
 }
 
-// Nullable via anyOf rather than `type: [X, 'null']` — LM Studio's MLX structured-output
-// engine (outlines) rejects array-form `type` with "'type' must be a string" (#1012),
-// while both it and OpenAI strict mode accept the anyOf spelling.
+
 const nullable = (schema: Record<string, unknown>): Record<string, unknown> => ({
     anyOf: [schema, { type: 'null' }],
 });
@@ -68,8 +59,8 @@ const CLARIFY_JSON_SCHEMA: OpenAIResponseSchema = {
                     },
                 },
             },
-            // Whole object is nullable (may be absent), but when present it must
-            // carry a non-null title so ClarifySuggestion.title: string stays sound.
+
+
             suggestedAction: nullable({
                 type: 'object',
                 additionalProperties: false,
@@ -185,8 +176,8 @@ async function readOpenAIErrorInfo(response: BufferedAIResponse): Promise<OpenAI
     let code = '';
     let type = '';
     let raw = '';
-    // The timeout helper buffers the body once as text. Parse that copy so a
-    // non-JSON provider error remains available for the fallback message.
+
+
     raw = response.bodyText;
     if (raw) {
         try {
@@ -203,15 +194,13 @@ async function readOpenAIErrorInfo(response: BufferedAIResponse): Promise<OpenAI
                 raw = '';
             }
         } catch {
-            // Not JSON; fall back to the raw body text below.
+
         }
     }
     return { status, message, code, type, raw };
 }
 
-// A pre-Structured-Outputs official model (e.g. a manually-entered gpt-4-turbo)
-// rejects response_format: json_schema with a 400. Detect it so we can retry the
-// same request with the looser json_object rather than failing every AI call.
+
 const isUnsupportedResponseFormatError = (info: OpenAIErrorInfo): boolean => {
     if (info.status !== 400) return false;
     const haystack = `${info.message} ${info.code} ${info.type}`.toLowerCase();
@@ -273,16 +262,11 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
         : undefined;
 
     const extraBodyParams = config.extraBodyParams ?? {};
-    // An explicit temperature in extraBodyParams always wins so users can
-    // override our defaults (e.g. force a value on a reasoning model, or opt
-    // out of temperature entirely by setting it to undefined) if provider
-    // behavior changes in the future.
+
+
     const hasExplicitTemperature = Object.prototype.hasOwnProperty.call(extraBodyParams, 'temperature');
 
-    // Prefer strict Structured Outputs on the official endpoint. Custom endpoints
-    // start with json_object for compatibility, then retry with json_schema if the
-    // server explicitly requires it (LM Studio). response_format stays protected
-    // from extraBodyParams so every operation uses its matching schema.
+
     const jsonSchemaResponseFormat = schema
         ? { type: 'json_schema', json_schema: { name: schema.name, strict: true, schema: schema.schema } }
         : undefined;
@@ -297,9 +281,8 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
             { role: 'system', content: prompt.system },
             { role: 'user', content: prompt.user },
         ],
-        // Reasoning models only support the default temperature; sending an
-        // explicit value returns a 400 unsupported_value error. Skip our
-        // default for them, but never override a user-supplied temperature.
+
+
         ...(hasExplicitTemperature || reasoningModel ? {} : { temperature: 0.2 }),
         response_format: responseFormat,
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
@@ -314,8 +297,7 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
 
     await rateLimit('openai', 250, options?.signal, 'OpenAI');
 
-    // Runs the transient-retry loop for one body and returns the final Response
-    // (ok or a non-retryable error); throws only on network failure after retries.
+
     const dispatch = async (requestBody: unknown): Promise<BufferedAIResponse> => {
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
             throwIfAIRequestAborted(options?.signal, 'OpenAI');
@@ -353,8 +335,7 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
 
     let response = await dispatch(body);
 
-    // Negotiate the opposite structured-output mode when an endpoint names the
-    // one it requires: older official models use json_object; LM Studio uses json_schema.
+
     if (!response.ok && jsonSchemaResponseFormat && response.status === 400) {
         const info = await readOpenAIErrorInfo(response);
         if (usingOfficialOpenAI && isUnsupportedResponseFormatError(info)) {

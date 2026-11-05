@@ -6,7 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The persistent capture notification's restore paths: core's answer applied whole, and every failure in core's log. */
+
 class PersistentCaptureTest {
     private val on = JSONObject().put("post", JSONObject().put("title", "Quick capture").put("text", "Tap").put("channelName", "Capture"))
     private val off = JSONObject().put("post", JSONObject.NULL)
@@ -27,7 +27,7 @@ class PersistentCaptureTest {
         assertEquals(0, lines.size)
     }
 
-    /** Core answers ACTION_FAILED for a switch it cannot read (menuRead throws): nothing is posted or removed, one line is logged. */
+
     @Test fun anUnreadableSwitchKeepsTheNotificationAndIsLogged() {
         val applied = mutableListOf<JSONObject>()
         val lines = mutableListOf<String>()
@@ -37,7 +37,7 @@ class PersistentCaptureTest {
         assertEquals(listOf(PersistentCapture.FAILED), lines)
     }
 
-    /** Off stored, then the process died before the notifier's mirror was cleared: the next start re-pins, the boot removes it. */
+
     @Test fun anInterruptedOffIsUndoneAtTheNextStart() {
         var mirror = true
         var shown = false
@@ -47,12 +47,28 @@ class PersistentCaptureTest {
             log = { _, _ -> })
         assertFalse(shown)
         assertFalse(mirror)
-        // And the start after that one re-pins nothing.
+
         PersistentCapture.startWith(restore = { if (mirror) shown = true }, keep = {})
         assertFalse(shown)
     }
 
-    /** A process start has no engine yet: its failure is kept (one short name) and the next boot's restore logs it once. */
+
+    @Test fun aRestoreTheSwitchOvertookAppliesNothing() {
+        val applied = mutableListOf<JSONObject>()
+        val logged = mutableListOf<String>()
+        val log = { line: String, _: JSONObject -> logged += line }
+        PersistentCapture.restoreWith(read = { PersistentCapture.switchApplied(); on }, granted = { true }, apply = { applied += it }, log = log)
+        PersistentCapture.restoreWith(read = { on }, granted = { PersistentCapture.switchApplied(); true }, apply = { applied += it }, log = log)
+        assertEquals(0, applied.size)
+
+        assertEquals(listOf(PersistentCapture.OVERTAKEN, PersistentCapture.OVERTAKEN), logged)
+
+        PersistentCapture.restoreWith(read = { on }, granted = { true }, apply = { applied += it }, log = log)
+        assertEquals(listOf(on), applied)
+        assertEquals(2, logged.size)
+    }
+
+
     @Test fun aProcessStartFailureReachesTheDiagnosticsLogOnce() {
         var kept: String? = null
         PersistentCapture.startWith(restore = { throw IllegalStateException("no channel") }, keep = { kept = it })

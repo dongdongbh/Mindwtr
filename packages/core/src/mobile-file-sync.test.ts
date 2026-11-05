@@ -3,11 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { FILE_SYNC_ABSENT_FINGERPRINT, createMobileFileSync, type MobileFileSyncFullHost } from './mobile-file-sync';
 import { FileSyncPathOwnerTerminatedError, fileSyncErrorCode, type MobileFileSyncObservedPublication } from './mobile-file-sync-remote';
 import { defaultSyncCryptoPrimitives } from './sync-crypto';
-import { compareSyncTransitionEntryNames, runEnableSyncEncryptionOverRemote, SyncEncryptionRemoteConflictError, type SyncEncryptionLocalState } from './sync-encryption';
+import { compareSyncTransitionEntryNames, runChangeSyncEncryptionPassphraseOverRemote, runDisableSyncEncryptionOverRemote, runEnableSyncEncryptionOverRemote, SyncEncryptionRemoteConflictError, type SyncEncryptionLocalState } from './sync-encryption';
 import type { AppData } from './types';
 
-// File Sync's log contexts never carry the sync folder's path or a document URI: a provider's or the file system's error text
-// quotes them, and they name the user and their files. Each site logs the error's code or name instead.
+
 const PRIVATE = 'private-folder';
 const PATH_DIR = `file:///data/user/0/tech.dongdongbh.mindwtr/files/${PRIVATE}`;
 const SAF_TREE = `content://com.android.externalstorage.documents/tree/primary%3A${PRIVATE}`;
@@ -26,7 +25,7 @@ const fakeHost = (overrides: Partial<MobileFileSyncFullHost>) => {
         log: {
             info: (message: string, context: unknown) => logged.push({ level: 'info', message, context }),
             warn: (message: string, context: unknown) => logged.push({ level: 'warn', message, context }),
-            // The diagnostics builder logs an error line's message and stack: both count as logged text.
+
             error: (error: unknown, context: unknown) => logged.push({
                 level: 'error',
                 message: error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error),
@@ -40,7 +39,7 @@ const fakeHost = (overrides: Partial<MobileFileSyncFullHost>) => {
     return { host, logged, contexts: () => JSON.stringify(logged.map((entry) => entry.context)), all: () => JSON.stringify(logged) };
 };
 
-/** A plain folder in memory; [refuse] makes one file name fail with an error that quotes its path. */
+
 const pathFolder = (refuse?: (name: string) => boolean) => {
     const files = new Map<string, Uint8Array>();
     const leaf = (uri: string) => uri.slice(uri.lastIndexOf('/') + 1);
@@ -374,7 +373,7 @@ describe('File Sync log contexts', () => {
                 readBytes: async (uri: string) => ({ bytes: documents.get(uri)!.bytes, lengthVerified: true }),
                 writeBytes: async (uri: string, bytes: Uint8Array) => { documents.get(uri)!.bytes = bytes; },
                 writeText: async () => undefined,
-                // The provider decorates the write's stage name, as #1113's providers add ".bin".
+
                 createFile: async (_dir: string, name: string) => {
                     const shown = name.startsWith('.mindwtr-et-s-') ? `${name}.bin` : name;
                     documents.set(safChild(shown), { name: shown, bytes: new Uint8Array(0) });
@@ -429,7 +428,6 @@ describe('fileSyncErrorCode', () => {
 });
 
 
-// Synthetic shared-source contract only; this host is not a native owner or provider proof.
 type ObservedCall = { operation: string; uri: string; bytes?: Uint8Array; destination?: string };
 const observedFolder = (initial: Record<string, Uint8Array> = {}) => {
     const folder = pathFolder();
@@ -679,7 +677,7 @@ describe('observed publication capability', () => {
                 expect([...folder.files.keys()].some(name => name.includes('.mindwtr-et-s-'))).toBe(true);
                 expect(folder.counters().lateCalls).toBe(0);
             } else {
-                release.resolve(undefined); expect(await operation.result).toEqual({ state: 'fulfilled', value: undefined });
+                release.resolve(undefined); expect(await operation.result).toMatchObject({ state: 'fulfilled', value: { bytes: payload } });
                 expect(folder.files.get(uri)).toEqual(payload);
             }
             expect(folder.counters().legacyCalls).toBe(0);
@@ -753,13 +751,17 @@ describe('observed publication capability', () => {
     });
 });
 
+
 describe('File Sync encryption enable order', () => {
+
+
     it('seals attachments/ one entry at a time in compareSyncTransitionEntryNames order, whatever the case or punctuation', async () => {
         const folder = pathFolder();
         const encode = (text: string) => new TextEncoder().encode(text);
         folder.files.set(`${PATH_DIR}/data.json`, encode(JSON.stringify(data)));
         const names = ['b.txt', 'B.txt', 'a-1.txt', 'a.1.txt', 'A.txt', '10.txt', '9.txt', '_x.txt', 'Z-z.txt'];
         for (const name of names) folder.files.set(`${PATH_DIR}/attachments/${name}`, encode(name));
+
         folder.port.list = async (dir: string) => [...new Set([...folder.files.keys()]
             .filter((key) => key.startsWith(dir)).map((key) => key.slice(dir.length).split('/')[0]))];
         const sealed: string[] = [];
@@ -779,5 +781,263 @@ describe('File Sync encryption enable order', () => {
 
         expect(sealed).toEqual([...names].sort(compareSyncTransitionEntryNames));
         expect(sealed).toEqual(['10.txt', '9.txt', 'A.txt', 'B.txt', 'Z-z.txt', '_x.txt', 'a-1.txt', 'a.1.txt', 'b.txt']);
+    });
+});
+
+
+const safFolder = (options: { create?: 'decorate' | 'duplicate' | 'return-existing'; lag?: boolean; pathIds?: boolean } = {}) => {
+    const root = `${SAF_TREE}/document/primary%3A${PRIVATE}`;
+    const docs = new Map<string, { parent: string; name: string; bytes: Uint8Array | null; hidden: number }>();
+    const calls = { list: 0, rows: 0, read: 0 };
+    let sequence = 0;
+    let onCall: (op: 'create' | 'write' | 'read', name: string) => void = () => undefined;
+    const add = (parent: string, name: string, bytes: Uint8Array | null, hidden = 0) => {
+        sequence += 1;
+        const uri = `${parent}%2F${encodeURIComponent(name)}${options.pathIds ? '' : `~${sequence}`}`;
+        docs.set(uri, { parent, name, bytes, hidden });
+        return uri;
+    };
+    const row = (uri: string) => ({ uri, name: docs.get(uri)!.name, size: docs.get(uri)!.bytes?.length ?? null });
+    const port = {
+        listChildren: async (dir: string) => {
+            const children = [...docs].filter(([, doc]) => doc.parent === dir && (doc.hidden === 0 || (doc.hidden -= 1, false)))
+                .map(([uri]) => row(uri));
+            calls.list += 1;
+            calls.rows += children.length;
+            return children;
+        },
+        stat: async (uri: string) => (docs.has(uri) ? row(uri) : null),
+        readBytes: async (uri: string) => {
+            calls.read += 1;
+            const doc = docs.get(uri);
+            onCall('read', doc?.name ?? '');
+            if (!doc?.bytes) throw new Error('SAF_DOCUMENT_UNAVAILABLE');
+            return { bytes: doc.bytes, lengthVerified: true };
+        },
+        writeBytes: async (uri: string, bytes: Uint8Array) => { onCall('write', docs.get(uri)!.name); docs.get(uri)!.bytes = bytes; },
+        writeText: async () => undefined,
+        createFile: async (dir: string, name: string) => {
+            onCall('create', name);
+            const existing = [...docs].find(([, doc]) => doc.parent === dir && doc.name === name);
+            if (existing && options.create === 'return-existing') return existing[0];
+            const taken = (candidate: string) => [...docs.values()].some((doc) => doc.parent === dir && doc.name === candidate);
+            let shown = name;
+            if (!options.create || options.create === 'decorate') for (let n = 1; taken(shown); n += 1) shown = `${name} (${n})`;
+            return add(dir, shown, new Uint8Array(0), options.lag ? 1 : 0);
+        },
+        delete: async (uri: string) => { docs.delete(uri); },
+        rename: async (uri: string, name: string) => {
+            const doc = docs.get(uri)!;
+            docs.delete(uri);
+            return { uri: add(doc.parent, name, doc.bytes), name };
+        },
+    };
+    const named = (parent: string) => [...docs.values()].filter((doc) => doc.parent === parent);
+    return { root, docs, calls, port, add, named, peer: (next: typeof onCall) => { onCall = next; } };
+};
+
+const encodeText = (text: string) => new TextEncoder().encode(text);
+const decodeText = (bytes: Uint8Array | null) => (bytes ? new TextDecoder().decode(bytes) : '');
+const memoryKeys = () => {
+    let state: SyncEncryptionLocalState | null = null;
+    let key: Uint8Array | null = null;
+    return {
+        keyCache: { getKey: async () => key, setKey: async (next: Uint8Array) => { key = next; }, clearKey: async () => { key = null; } },
+        localState: { read: () => state, write: (next: SyncEncryptionLocalState | null) => { state = next; } },
+    };
+};
+const CHEAP_KDF = { mKib: 8, t: 1, p: 1 };
+
+
+const enableOver = async (folder: ReturnType<typeof safFolder>) => {
+    folder.add(folder.root, 'data.json', encodeText(JSON.stringify(data)));
+    const attachmentsDir = folder.add(folder.root, 'attachments', null);
+    for (let i = 0; i < 3; i += 1) folder.add(attachmentsDir, `file-${i}.txt`, encodeText(`attachment ${i}`));
+    const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
+    const remote = (await createMobileFileSync(host).createFileSyncEncryptionRemotePort(safChild('data.json')))!;
+    const keys = memoryKeys();
+    const outcome = await runEnableSyncEncryptionOverRemote('correct horse', remote, keys.keyCache, keys.localState, undefined,
+        defaultSyncCryptoPrimitives, CHEAP_KDF).then(() => 'ok', (error: Error) => error.name);
+    return { outcome, logged, keys, attachmentsDir };
+};
+
+describe('File Sync encryption transition guards kept while cutting its cost', () => {
+    it('refuses a create-only write when a peer created the name after the inventory, on a provider that hands it back', async () => {
+        const folder = safFolder({ create: 'return-existing' });
+        let created = false;
+        folder.peer((op, name) => {
+            if (created || op !== 'write' || !name.startsWith('file-')) return;
+            created = true;
+            folder.add(folder.root, 'data.json.enc', encodeText('PEER-GENERATION'));
+        });
+        const { outcome } = await enableOver(folder);
+        expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+        expect(folder.named(folder.root).filter((doc) => doc.name === 'data.json.enc').map((doc) => decodeText(doc.bytes)))
+            .toEqual(['PEER-GENERATION']);
+        expect(folder.named(folder.root).some((doc) => doc.name === 'data.json')).toBe(true);
+    });
+
+    it('refuses a document install when a peer added a second document under its name, on a provider that allows that', async () => {
+        const folder = safFolder({ create: 'duplicate' });
+        let duplicated = false;
+        folder.peer((op, name) => {
+            if (duplicated || op !== 'write' || name !== 'data.json.enc') return;
+            duplicated = true;
+            folder.add(folder.root, 'data.json.enc', encodeText('PEER-DUPLICATE'));
+        });
+        const { outcome } = await enableOver(folder);
+        expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+        expect(folder.named(folder.root).some((doc) => doc.name === 'data.json')).toBe(true);
+    });
+
+    it('fails before moving an original aside when the provider does not list a new document yet', async () => {
+        const folder = safFolder({ lag: true });
+        folder.add(folder.root, 'data.json', encodeText(JSON.stringify(data)));
+        const { host } = fakeHost({ saf: folder.port as never });
+        const sync = createMobileFileSync(host);
+        const current = await sync.readSyncFileVersioned(safChild('data.json'));
+        await expect(sync.writeSyncFile(safChild('data.json'), { ...data, settings: { weekStart: 'monday' } },
+            { expectedFingerprint: current.fingerprint })).rejects.toThrow('another writer');
+        expect(folder.named(folder.root).filter((doc) => doc.name === 'data.json').map((doc) => decodeText(doc.bytes)))
+            .toEqual([JSON.stringify(data)]);
+    });
+
+    for (const pathIds of [false, true]) {
+        it(`refuses to move aside an attachment a peer replaced with a new document, on a provider proved to rename a taken name${pathIds ? ' and naming documents by path' : ''}`, async () => {
+            const folder = safFolder({ pathIds });
+            let replaced = false;
+            folder.peer((op, name) => {
+                if (replaced || op !== 'write' || !name.startsWith('.mindwtr-et-s-')) return;
+                replaced = true;
+                const [uri, doc] = [...folder.docs].find(([, entry]) => entry.name === 'file-0.txt')!;
+                folder.docs.delete(uri);
+                folder.add(doc.parent, 'file-0.txt', encodeText('PEER-REPLACEMENT'));
+            });
+            const { outcome } = await enableOver(folder);
+            expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+
+
+            expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
+                .toEqual(['PEER-REPLACEMENT']);
+            expect([...folder.docs.values()].filter((doc) => doc.name.startsWith('.mindwtr-et-q-')).map((doc) => decodeText(doc.bytes)))
+                .toEqual(pathIds ? ['PEER-REPLACEMENT'] : []);
+        });
+    }
+
+    it('refuses an attachment install when a peer took its name after the old copy was moved aside, keeping both copies', async () => {
+        const folder = safFolder();
+        let taken = false;
+        folder.peer((op, name) => {
+            if (taken || op !== 'read' || !name.startsWith('.mindwtr-et-q-')) return;
+            taken = true;
+            const dir = [...folder.docs.values()].find((doc) => doc.name === name)!.parent;
+            folder.add(dir, 'file-0.txt', encodeText('PEER-COPY'));
+        });
+        const { outcome } = await enableOver(folder);
+        expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+        expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
+            .toEqual(['PEER-COPY']);
+        expect([...folder.docs.values()].filter((doc) => doc.name.startsWith('.mindwtr-et-q-')).map((doc) => decodeText(doc.bytes)))
+            .toEqual(['attachment 0']);
+    });
+
+    it('passes over an empty name probe a cut-off transition left, and removes it at the next probe', async () => {
+        const folder = safFolder();
+        const { outcome, keys, attachmentsDir } = await enableOver(folder);
+        expect(outcome).toBe('ok');
+
+        folder.add(attachmentsDir, '.mindwtr-et-p-mvn0-1-left', new Uint8Array(0));
+        folder.add(attachmentsDir, '.mindwtr-et-p-mvn0-1-left (1)', new Uint8Array(0));
+        const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
+        const remote = (await createMobileFileSync(host).createFileSyncEncryptionRemotePort(safChild('data.json')))!;
+        await runChangeSyncEncryptionPassphraseOverRemote('correct horse', 'battery staple', remote, keys.keyCache, keys.localState,
+            undefined, defaultSyncCryptoPrimitives, CHEAP_KDF);
+        expect(folder.named(attachmentsDir).map((doc) => doc.name).sort()).toEqual(['file-0.txt', 'file-1.txt', 'file-2.txt']);
+        expect(logged.filter((entry) => entry.message === 'File Sync transition chose its name check')
+            .map((entry) => (entry.context as { extra: unknown }).extra))
+            .toEqual([{ releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed', cleaned: 'yes' }]);
+    });
+
+    it('logs the transition line from a transition only, not from a listing that wrote nothing', async () => {
+        const folder = safFolder();
+        const { outcome, logged } = await enableOver(folder);
+        expect(outcome).toBe('ok');
+        const lines = () => logged.filter((entry) => entry.message === 'File Sync transition final check listed names only');
+        expect(lines().map((entry) => (entry.context as { extra: { writes: number } }).extra.writes)).toEqual([4]);
+        const { host, logged: probeLogged } = fakeHost({ saf: folder.port as never });
+        await (await createMobileFileSync(host).createFileSyncEncryptionRemotePort(safChild('data.json')))!.list();
+        expect(probeLogged.some((entry) => entry.message === 'File Sync transition final check listed names only')).toBe(false);
+    });
+});
+
+describe('File Sync encryption transition cost', () => {
+
+
+    const run = async (count: number, create: 'decorate' | 'duplicate' | 'return-existing' = 'decorate') => {
+        const folder = safFolder({ create });
+        const encode = (text: string) => new TextEncoder().encode(text);
+        folder.add(folder.root, 'data.json', encode(JSON.stringify(data)));
+        const attachmentsDir = folder.add(folder.root, 'attachments', null);
+        for (let i = 0; i < count; i += 1) folder.add(attachmentsDir, `file-${i}.txt`, encode(`attachment ${i} `.repeat(20)));
+        const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
+        const sync = createMobileFileSync(host);
+        let state: SyncEncryptionLocalState | null = null;
+        let key: Uint8Array | null = null;
+        const keyCache = { getKey: async () => key, setKey: async (next: Uint8Array) => { key = next; }, clearKey: async () => { key = null; } };
+        const localState = { read: () => state, write: (next: SyncEncryptionLocalState | null) => { state = next; } };
+        const cost = async (transition: () => Promise<unknown>) => {
+            const before = { ...folder.calls };
+            await transition();
+            return { list: folder.calls.list - before.list, read: folder.calls.read - before.read };
+        };
+        const open = async () => (await sync.createFileSyncEncryptionRemotePort(safChild('data.json')))!;
+        const enable = await cost(async () => runEnableSyncEncryptionOverRemote('correct horse', await open(), keyCache, localState,
+            undefined, defaultSyncCryptoPrimitives, { mKib: 8, t: 1, p: 1 }));
+        const sealed = [...folder.docs.values()].filter((doc) => doc.parent === attachmentsDir);
+        expect(sealed).toHaveLength(count);
+        expect(sealed.every((doc) => new TextDecoder().decode(doc.bytes!.subarray(0, 6)) === 'MWENC1')).toBe(true);
+        const disable = await cost(async () => runDisableSyncEncryptionOverRemote(await open(), keyCache, localState));
+        const opened = [...folder.docs.values()].filter((doc) => doc.parent === attachmentsDir);
+        expect(opened.map((doc) => new TextDecoder().decode(doc.bytes!)).sort())
+            .toEqual(Array.from({ length: count }, (_, i) => `attachment ${i} `.repeat(20)).sort());
+        expect(folder.docs.size).toBe(count + 2);
+
+        const lines = logged.filter((entry) => entry.message === 'File Sync transition final check listed names only');
+        expect(lines.map((entry) => (entry.context as { extra: { entries: number; writes: number } }).extra))
+            .toMatchObject([{ entries: count + 10, writes: count + 1 }, { entries: count + 10, writes: count + 1 }]);
+
+        const modes = logged.filter((entry) => entry.message === 'File Sync transition chose its name check')
+            .map((entry) => (entry.context as { extra: { mode: string; outcome: string } }).extra);
+        return { enable, disable, modes };
+    };
+
+    it('costs each attachment at most two folder listings and seven reads, Enable and Disable alike', async () => {
+        const small = await run(10);
+        const large = await run(30);
+        for (const kind of ['enable', 'disable'] as const) {
+            expect((large[kind].list - small[kind].list) / 20, `${kind} listings per attachment`).toBeLessThanOrEqual(2);
+            expect((large[kind].read - small[kind].read) / 20, `${kind} reads per attachment`).toBeLessThanOrEqual(7);
+        }
+    });
+
+    it('lists no folder per attachment on a provider proved to rename a taken name, as Android\'s external storage does', async () => {
+        const small = await run(10);
+        const large = await run(30);
+        for (const kind of ['enable', 'disable'] as const) {
+            expect(large[kind].list - small[kind].list, `${kind} listings for 20 more attachments`).toBe(0);
+        }
+        expect(large.modes).toEqual([{ releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed', cleaned: 'yes' },
+            { releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed', cleaned: 'yes' }]);
+    });
+
+    it('keeps both listings per attachment where the probe sees a taken name kept or handed back', async () => {
+        for (const [create, outcome] of [['duplicate', 'kept-name'], ['return-existing', 'handed-back']] as const) {
+            const small = await run(10, create);
+            const large = await run(30, create);
+            for (const kind of ['enable', 'disable'] as const) {
+                expect((large[kind].list - small[kind].list) / 20, `${create} ${kind} listings per attachment`).toBe(2);
+            }
+            expect(large.modes.map((line) => [line.mode, line.outcome])).toEqual([['full-listing', outcome], ['full-listing', outcome]]);
+        }
     });
 });

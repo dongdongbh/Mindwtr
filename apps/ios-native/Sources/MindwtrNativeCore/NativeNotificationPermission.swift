@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// A passive snapshot; it grants no authority to schedule, remove or request permission.
+
 struct NativeNotificationPermission: Sendable {
     typealias Reader = @Sendable () async throws -> NativeNotificationPermission
     let status: String

@@ -68,7 +68,7 @@ export const referenceTasksRemoveTagScope = (request: TagRequest,
 const tagUpdates = (request: TagRequest, scope: NativeReferenceTasksMoveScope, at: string) =>
     buildBulkTaskTokenUpdates(request.taskIds, buildEntityMap(scope.tasks.map((row) => historyRowLoadProjection(row, at))), 'tags', request.tags, 'remove');
 
-/** Same RN planner as Add tag; only the shared token builder's operation differs. */
+
 export const referenceTasksRemoveTagEffect = (prepared: Pick<TagPrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates'>): NativeReferenceTasksRemoveTagPrepared['effect'] | null =>
     referenceTasksTagEffect(prepared, tagUpdates(prepared.request, prepared.scope, prepared.updateAt),

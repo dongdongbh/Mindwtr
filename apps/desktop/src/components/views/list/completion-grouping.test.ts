@@ -20,8 +20,7 @@ const groupByCompletionDate = (tasks: Task[]) => groupTasks('completedDate', {
     t: (key: string) => key,
 });
 
-// The bucket rules themselves are core's (completion-grouping.test.ts); this
-// only pins that the Done/Archive axis is wired to them.
+
 describe('completedDate axis (#945, #959)', () => {
     it('splits old completions by month instead of one Earlier heading', () => {
         const groups = groupByCompletionDate([

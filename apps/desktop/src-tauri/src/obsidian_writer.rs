@@ -192,57 +192,46 @@ fn atomic_write_text(path: &Path, content: &str) -> Result<(), String> {
     persist_over_existing(temp_file, path)
 }
 
-// `persist` replaces an existing file atomically on every platform Mindwtr
-// ships on (Windows goes through MoveFileEx with MOVEFILE_REPLACE_EXISTING),
-// so there is nothing to delete up front — this used to remove the note before
-// persisting on Windows, which destroyed it outright whenever the persist and
-// the copy fallback both failed.
 fn persist_over_existing(temp_file: NamedTempFile, path: &Path) -> Result<(), String> {
-    let first = match temp_file.persist(path) {
+    let initial_persist_failure = match temp_file.persist(path) {
         Ok(_) => return Ok(()),
         Err(error) => error,
     };
 
-    // The replacement could not land. Move the original aside — never delete
-    // it — so the retries below get a free destination and a replacement that
-    // still fails can be rolled back. A folder that rejects the rename falls
-    // through to the same in-place copy as before: no worse than the old
-    // fallback, and still the only way to update such a note.
-    let aside = path
+    let rollback_path = path
         .file_name()
-        // Dot-prefixed so a leftover copy is skipped by the vault scanner.
         .map(|name| path.with_file_name(format!(".{}.mindwtr-old", name.to_string_lossy())));
-    let moved_aside = path.exists()
-        && aside.as_ref().is_some_and(|aside| {
-            let _ = fs::remove_file(aside);
-            fs::rename(path, aside).is_ok()
+    let original_moved_to_rollback = path.exists()
+        && rollback_path.as_ref().is_some_and(|rollback_path| {
+            let _ = fs::remove_file(rollback_path);
+            fs::rename(path, rollback_path).is_ok()
         });
 
-    let outcome = match first.file.persist(path) {
+    let replacement_result = match initial_persist_failure.file.persist(path) {
         Ok(_) => Ok(()),
-        Err(second) => {
-            let temp_path = second.file.path().to_path_buf();
-            fs::copy(&temp_path, path)
+        Err(retry_persist_failure) => {
+            let failed_replacement_path = retry_persist_failure.file.path().to_path_buf();
+            fs::copy(&failed_replacement_path, path)
                 .map(|_| {
-                    let _ = fs::remove_file(&temp_path);
+                    let _ = fs::remove_file(&failed_replacement_path);
                 })
                 .map_err(|copy_error| {
                     format!(
                         "Failed to replace the Obsidian file: {}, {copy_error}",
-                        second.error
+                        retry_persist_failure.error
                     )
                 })
         }
     };
 
-    if let Some(aside) = aside.filter(|_| moved_aside) {
-        if outcome.is_ok() {
-            let _ = fs::remove_file(&aside);
+    if let Some(rollback_path) = rollback_path.filter(|_| original_moved_to_rollback) {
+        if replacement_result.is_ok() {
+            let _ = fs::remove_file(&rollback_path);
         } else {
-            let _ = fs::rename(&aside, path);
+            let _ = fs::rename(&rollback_path, path);
         }
     }
-    outcome
+    replacement_result
 }
 
 fn is_frontmatter_boundary(line: &str) -> bool {
@@ -416,14 +405,6 @@ fn build_tasknotes_content(title: &str, line_ending: &str) -> String {
     .join(line_ending)
 }
 
-// Every write below is a read-modify-write against a file in the user's vault,
-// and `obsidian_create_tasknotes` also picks a filename it then creates. The
-// main thread used to serialize them for free; now that they run off the UI
-// thread, two toggles in the same note would each read the same content and
-// write back only their own edit, losing the other one in the user's notes.
-// ponytail: one global lock, so a write to note A waits on an unrelated write
-// to note B. These are single user-initiated actions with no bulk caller, so
-// the wait is one file write; make it a per-path lock map if a bulk path lands.
 static VAULT_WRITE_MUTEX: Mutex<()> = Mutex::new(());
 
 fn lock_vault_write() -> Result<std::sync::MutexGuard<'static, ()>, String> {
@@ -432,8 +413,6 @@ fn lock_vault_write() -> Result<std::sync::MutexGuard<'static, ()>, String> {
         .map_err(|_| "Obsidian vault write lock is unavailable".to_string())
 }
 
-// Off the UI thread: a vault on a network share or a FUSE mount makes this
-// read plus atomic write block for as long as the mount takes to answer.
 #[tauri::command(async)]
 pub(crate) fn obsidian_toggle_task(
     app: tauri::AppHandle,
@@ -481,8 +460,6 @@ fn toggle_task_in_vault(
     atomic_write_text(&absolute_path, &rebuild_lines(&lines))
 }
 
-// Off the UI thread, and serialized, for the same reasons as
-// `obsidian_toggle_task`.
 #[tauri::command(async)]
 pub(crate) fn obsidian_toggle_tasknotes(
     app: tauri::AppHandle,
@@ -543,8 +520,6 @@ fn toggle_tasknotes_in_vault(
     atomic_write_text(&absolute_path, &rebuild_lines(&lines))
 }
 
-// Off the UI thread, and serialized: two captures into the same inbox note
-// would otherwise each append to the content the other one read.
 #[tauri::command(async)]
 pub(crate) fn obsidian_create_task(
     app: tauri::AppHandle,
@@ -594,9 +569,6 @@ fn create_task_in_vault(
     atomic_write_text(&absolute_path, &next_content)
 }
 
-// Off the UI thread, and serialized across the whole body: the guard has to
-// span the `exists()` check AND the write, or two creations from the same title
-// in the same second both see a free filename and one overwrites the other.
 #[tauri::command(async)]
 pub(crate) fn obsidian_create_tasknotes(
     app: tauri::AppHandle,
@@ -648,10 +620,6 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    // A temp file on a filesystem other than the vault's, so `persist` fails
-    // with a real cross-device error instead of a simulated one. Returns None
-    // when the two paths turn out to share a device, so the test degrades to a
-    // no-op rather than asserting on a persist that quietly succeeded.
     #[cfg(target_os = "linux")]
     fn cross_device_temp_file(vault_dir: &Path, content: &str) -> Option<NamedTempFile> {
         use std::os::unix::fs::MetadataExt;
@@ -701,8 +669,7 @@ mod tests {
         let Some(replacement) = cross_device_temp_file(temp.path(), "replacement") else {
             return;
         };
-        // Unreadable source: the cross-device persist fails, and so does the
-        // copy fallback, after the original has already been moved aside.
+
         fs::set_permissions(replacement.path(), fs::Permissions::from_mode(0o000))
             .expect("should make the replacement unreadable");
 
@@ -723,8 +690,18 @@ mod tests {
         let path = temp.path().join("Inbox.md");
         let markdown = "---\ntags: [task]\n---\n- [ ] Checklist\n- [ ] Action #task/work\n- [ ] Other #tasks\n";
         fs::write(&path, markdown).unwrap();
-        toggle_task_in_vault(&temp.path().to_string_lossy(), "Inbox.md", 5, "Action #task/work", true).unwrap();
-        assert_eq!(fs::read_to_string(path).unwrap(), markdown.replace("- [ ] Action", "- [x] Action"));
+        toggle_task_in_vault(
+            &temp.path().to_string_lossy(),
+            "Inbox.md",
+            5,
+            "Action #task/work",
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            markdown.replace("- [ ] Action", "- [x] Action")
+        );
     }
 
     #[test]
@@ -819,7 +796,7 @@ mod tests {
             .expect("should create tasknote");
 
         toggle_tasknotes_in_vault(&temp.path().to_string_lossy(), "TaskNotes/Review.md", true)
-        .expect("should update tasknotes status");
+            .expect("should update tasknotes status");
 
         let updated = fs::read_to_string(&file_path).expect("should read updated tasknote");
         assert!(updated.contains("status: done"));
@@ -841,7 +818,7 @@ mod tests {
         .expect("should create tasknote");
 
         toggle_tasknotes_in_vault(&temp.path().to_string_lossy(), "TaskNotes/Review.md", false)
-        .expect("should clear tasknotes completion");
+            .expect("should clear tasknotes completion");
 
         let updated = fs::read_to_string(&file_path).expect("should read updated tasknote");
         assert!(updated.contains("status: open"));

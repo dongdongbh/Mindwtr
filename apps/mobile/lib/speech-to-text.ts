@@ -1,18 +1,19 @@
 import { File } from 'expo-file-system';
 import { Platform } from 'react-native';
 import type {
-  AudioCaptureMode,
-  AudioFieldStrategy,
   OpenAISpeechUpload,
-  SpeechToTaskCaptureConfig,
+  ResolvedSpeechToTextRuntimeSettings,
+  SpeechProvider,
   SpeechToTaskResult,
+  SpeechToTextConfig,
   SpeechToTextSettings,
 } from '@mindwtr/core';
 import {
+  dispatchSpeechCapture,
+  getAudioMimeType,
   normalizeSpeechLanguage,
-  resolveOpenAIParseModel,
-  runRemoteSpeechToTaskCapture,
-  runSpeechToTaskCapture,
+  REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
+  resolveSpeechToTextRuntimeSettings as resolveSpeechToTextRuntimeSettingsForBuild,
 } from '@mindwtr/core';
 import { DEFAULT_GEMINI_STT_MODEL, DEFAULT_OPENAI_STT_MODEL } from '@mindwtr/core/ai-settings-model';
 import { logInfo, logWarn } from './app-log';
@@ -28,7 +29,9 @@ import {
   type WhisperModelLocation,
 } from './whisper-model-store';
 
-export type SpeechProvider = 'openai' | 'gemini' | 'whisper';
+
+export type { ResolvedSpeechToTextRuntimeSettings, SpeechProvider, SpeechToTextConfig };
+export { REMOTE_SPEECH_TO_TEXT_FOSS_ERROR };
 
 export type SpeechToTextResult = SpeechToTaskResult;
 
@@ -49,17 +52,6 @@ export type LocalWhisperAudio = {
   durationMs: number;
 };
 
-export type SpeechToTextConfig = Omit<SpeechToTaskCaptureConfig, 'provider'> & {
-  provider: SpeechProvider;
-  apiKey?: string;
-  model: string;
-  parseModel?: string;
-  modelPath?: string;
-  isFossBuild?: boolean;
-  // Only meaningful for provider 'openai' — see resolveOpenAITranscribeEndpoint.
-  baseUrl?: string;
-};
-
 export type WhisperRealtimeHandle = {
   stop: () => Promise<void>;
   result: Promise<SpeechToTextResult>;
@@ -74,19 +66,9 @@ const LOCAL_WHISPER_BITS_PER_SAMPLE = 16;
 const LOCAL_WHISPER_MIN_DURATION_MS = 150;
 const LOCAL_WHISPER_UNSUPPORTED_AUDIO_ERROR =
   'Local Whisper can only transcribe 16 kHz mono PCM WAV audio.';
-// Core's (ai-settings-model.ts), so the settings screen offers the same defaults this
-// runtime resolves — the two hardcoding their own copies is how the screen kept
-// offering retired gemini-2.5 ids after the catalog refresh.
+
+
 export { DEFAULT_GEMINI_STT_MODEL, DEFAULT_OPENAI_STT_MODEL };
-const DEFAULT_WHISPER_STT_MODEL = 'whisper-tiny';
-const WHISPER_STT_MODEL_IDS = new Set([
-  'whisper-tiny',
-  'whisper-tiny.en',
-  'whisper-base',
-  'whisper-base.en',
-]);
-export const REMOTE_SPEECH_TO_TEXT_FOSS_ERROR =
-  'Remote speech-to-text is not available in FOSS builds.';
 
 type ExpoConstantsExtra = {
   isFossBuild?: unknown;
@@ -155,7 +137,7 @@ type RNFSModule = typeof import('react-native-fs');
 const getWhisperModule = () => {
   if (whisperModuleCache) return whisperModuleCache;
   try {
-    // Use static fallback paths so Metro can bundle this file.
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mod = require('whisper.rn/src/index') as WhisperModule;
@@ -183,7 +165,7 @@ const getWhisperModule = () => {
 const getExpoConstants = (): ExpoConstantsLike | null => {
   if (expoConstantsCache !== undefined) return expoConstantsCache;
   try {
-    // Delay loading expo-constants so non-Expo test environments can import this module.
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('expo-constants') as {
       default?: ExpoConstantsLike | { default?: ExpoConstantsLike };
@@ -210,75 +192,18 @@ export const isMobileFossBuild = (): boolean => parseExtraBool(
   getExpoConstants()?.expoConfig?.extra?.isFossBuild
 );
 
-const getDefaultSpeechModel = (provider: SpeechProvider): string => {
-  if (provider === 'openai') return DEFAULT_OPENAI_STT_MODEL;
-  if (provider === 'gemini') return DEFAULT_GEMINI_STT_MODEL;
-  return DEFAULT_WHISPER_STT_MODEL;
-};
-
-const normalizeSpeechProviderForRuntime = (
-  provider: SpeechToTextSettings['provider'] | undefined,
-  fossBuild: boolean
-): { provider: SpeechProvider; enabledProvider: boolean } => {
-  if (fossBuild) return { provider: 'whisper', enabledProvider: true };
-  if (!provider) return { provider: 'gemini', enabledProvider: true };
-  if (provider === 'parakeet') return { provider: 'whisper', enabledProvider: false };
-  return { provider, enabledProvider: true };
-};
-
-const normalizeSpeechModelForRuntime = (model: string | undefined, provider: SpeechProvider): string => {
-  if (model && (provider !== 'whisper' || WHISPER_STT_MODEL_IDS.has(model))) return model;
-  return getDefaultSpeechModel(provider);
-};
-
-export type ResolvedSpeechToTextRuntimeSettings = {
-  provider: SpeechProvider;
-  enabled: boolean;
-  model: string;
-  modelPath?: string;
-  // Only set for provider 'openai' — see resolveOpenAITranscribeEndpoint.
-  baseUrl?: string;
-  language?: string;
-  mode: AudioCaptureMode;
-  fieldStrategy: AudioFieldStrategy;
-  isFossBuild: boolean;
-};
-
 export const resolveSpeechToTextRuntimeSettings = (
   speech: SpeechToTextSettings | undefined,
   options?: { isFossBuild?: boolean }
-): ResolvedSpeechToTextRuntimeSettings => {
-  const fossBuild = options?.isFossBuild ?? isMobileFossBuild();
-  const normalized = normalizeSpeechProviderForRuntime(speech?.provider, fossBuild);
-  const model = normalizeSpeechModelForRuntime(speech?.model, normalized.provider);
-  return {
-    provider: normalized.provider,
-    enabled: speech?.enabled === true && normalized.enabledProvider,
-    model,
-    modelPath: normalized.provider === 'whisper' ? speech?.offlineModelPath : undefined,
-    baseUrl: normalized.provider === 'openai' ? (speech?.baseUrl?.trim() || undefined) : undefined,
-    language: speech?.language,
-    mode: speech?.mode ?? 'smart_parse',
-    fieldStrategy: speech?.fieldStrategy ?? 'smart',
-    isFossBuild: fossBuild,
-  };
-};
-
-const assertSpeechProviderAllowedForRuntime = (provider: SpeechProvider, fossBuild = isMobileFossBuild()): void => {
-  if (!fossBuild || provider === 'whisper') return;
-  void logWarn('Remote speech-to-text blocked in FOSS build', {
-    scope: 'speech',
-    force: true,
-    extra: { provider },
-  });
-  throw new Error(REMOTE_SPEECH_TO_TEXT_FOSS_ERROR);
-};
+): ResolvedSpeechToTextRuntimeSettings => resolveSpeechToTextRuntimeSettingsForBuild(speech, {
+  isFossBuild: options?.isFossBuild ?? isMobileFossBuild(),
+});
 
 const getWhisperRealtimeModule = () => {
   if (whisperRealtimeModuleCache !== undefined) return whisperRealtimeModuleCache;
   try {
-    // Delay loading Whisper realtime modules so generic task-edit tests can import this file
-    // without a native audio stream implementation in the environment.
+
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const adapterModule = require(
       'whisper.rn/realtime-transcription/adapters/AudioPcmStreamAdapter.js'
@@ -324,27 +249,8 @@ const getExtension = (uri: string) => {
   return match ? match[0] : '.m4a';
 };
 
-const getMimeType = (uri: string) => {
-  const extension = getExtension(uri);
-  switch (extension.toLowerCase()) {
-    case '.aac':
-      return 'audio/aac';
-    case '.mp3':
-      return 'audio/mpeg';
-    case '.wav':
-      return 'audio/wav';
-    case '.caf':
-      return 'audio/x-caf';
-    case '.3gp':
-    case '.3gpp':
-      return 'audio/3gpp';
-    case '.webm':
-      return 'audio/webm';
-    case '.m4a':
-    default:
-      return 'audio/mp4';
-  }
-};
+
+const getMimeType = (uri: string) => getAudioMimeType(getExtension(uri));
 
 type OpenAIUploadStrategy = 'blob' | 'uri';
 
@@ -429,8 +335,8 @@ const withOpenAIUpload = async <T>(
           ...meta,
         },
       });
-      // React Native FormData accepts its URI descriptor at runtime even though
-      // the DOM type used by core only exposes Blob.
+
+
       const result = await send({ part: part as Blob, fileName });
       void logInfo('OpenAI transcription completed', {
         scope: 'speech',
@@ -481,12 +387,8 @@ const withOpenAIUpload = async <T>(
 const MIN_WHISPER_MODEL_BYTES = 5 * 1024 * 1024;
 const WHISPER_REALTIME_SLICE_SEC = 30;
 const WHISPER_REALTIME_BUFFER_SIZE = 2048;
-// Model directory naming, the candidate ladder, the RNFS<->expo-file-system
-// fallback, and URI normalization all live in whisper-model-store.ts now — it's
-// the one place both this read side and the settings write side resolve "where
-// is the model, and is it there." These are thin wrappers kept for the existing
-// call sites in this file and in components that import them directly
-// (use-quick-capture-audio.ts, use-task-edit-attachments.ts).
+
+
 export const resolveWhisperModelPathForConfigAsync = (
   modelId: string | undefined,
   modelPath?: string
@@ -500,7 +402,7 @@ export const ensureWhisperModelPathForConfigAsync = (
 const enableWhisperNativeLogging = async (): Promise<void> => {
   if (whisperNativeLogEnabled) return;
   if (!__DEV__) {
-    // Avoid enabling JNI log callbacks in release builds.
+
     whisperNativeLogEnabled = true;
     return;
   }
@@ -837,8 +739,8 @@ export const startWhisperRealtimeCapture = async (
   };
 
   const audioStream = new whisperRealtime.AudioPcmStreamAdapter();
-  // Android's file transcription path decodes WAV only. Use the realtime helper
-  // there as a PCM/WAV recorder, then transcribe the generated WAV after stop.
+
+
   const enableRealtimeTranscript = Platform.OS !== 'android';
   const transcriptBySlice = new Map<number, string>();
   let completed = false;
@@ -925,7 +827,7 @@ export const startWhisperRealtimeCapture = async (
     try {
       await realtime.release();
     } catch {
-      // Ignore cleanup failures after a failed start.
+
     }
     throw error;
   }
@@ -943,7 +845,7 @@ export const startWhisperRealtimeCapture = async (
       try {
         await realtime.release();
       } catch {
-        // Ignore release failures.
+
       }
       finalize();
     }
@@ -1033,7 +935,7 @@ export const transcribeLocalWhisper = async (input: LocalWhisperAudio, config: S
       const retry = await context.transcribe(audioUri, options).promise;
       text = extractWhisperText(retry).trim();
     } catch {
-      // Ignore retry errors after a successful primary transcription.
+
     }
   }
   if (!text) {
@@ -1054,36 +956,18 @@ export async function processAudioCapture(
   audioUri: string,
   config: SpeechToTextConfig
 ): Promise<SpeechToTextResult> {
-  assertSpeechProviderAllowedForRuntime(config.provider, config.isFossBuild);
-  if (config.provider === 'openai' || config.provider === 'gemini') {
-    const parseModel = resolveOpenAIParseModel(config.parseModel);
-    const retryModel = resolveOpenAIParseModel(config.retryModel ?? 'gpt-4o-mini');
-    return runRemoteSpeechToTaskCapture(
-      { ...config, provider: config.provider, parseModel, retryModel },
-      {
-        readBytes: async () => {
-          const normalizedUri = normalizeAudioUri(audioUri);
-          const fileReadUri = normalizeAudioUriForFileRead(audioUri);
-          const file = new File(fileReadUri);
-          return {
-            bytes: await file.bytes(),
-            mimeType: getMimeType(normalizedUri),
-          };
-        },
-        withOpenAIUpload: (send) => withOpenAIUpload(audioUri, config, send),
-      },
-      {
-        onWarn: (message, error) => {
-          void logWarn(message, {
-            scope: 'speech',
-            extra: { error: error.message },
-          });
-        },
-      }
-    );
-  }
-  return runSpeechToTaskCapture(config, {
-    transcribe: async () => {
+  return dispatchSpeechCapture(config, config.isFossBuild ?? isMobileFossBuild(), {
+    readBytes: async () => {
+      const normalizedUri = normalizeAudioUri(audioUri);
+      const fileReadUri = normalizeAudioUriForFileRead(audioUri);
+      const file = new File(fileReadUri);
+      return {
+        bytes: await file.bytes(),
+        mimeType: getMimeType(normalizedUri),
+      };
+    },
+    withOpenAIUpload: (send) => withOpenAIUpload(audioUri, config, send),
+    transcribeLocal: async () => {
       const localInput = await prepareAudioForLocalWhisper({
         uri: audioUri,
         platform: Platform.OS === 'ios' ? 'ios' : 'android',
@@ -1095,5 +979,6 @@ export async function processAudioCapture(
       }
       return transcribeLocalWhisper(localInput, config);
     },
+    logWarn,
   });
 }

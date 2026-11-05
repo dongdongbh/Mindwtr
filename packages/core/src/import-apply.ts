@@ -1,14 +1,6 @@
-// Shared "apply" step for third-party importers (OmniFocus, TickTick, DGT, Mindwtr CSV) that all
-// parse into the same area/project/(optional section)/task + sourceKey shape. Each importer keeps
-// its own parser and maps its Parsed*Data into ImportSource before calling applyImport; the only
-// importer-specific behaviour left after mapping is id minting (idFor) and, for TickTick, an
-// inbox->next status promotion. Sections are optional on ImportSource — only Mindwtr CSV supplies
-// them today; every other caller is unaffected.
-//
-// Todoist is intentionally NOT unified here: it has no areas, nests tasks/sections per project
-// instead of cross-referencing via sourceKey, and allocates task order differently (index-based,
-// not continuing after existing siblings). Forcing it through this seam would risk changing its
-// behaviour, which the "pure refactor" requirement rules out.
+
+
+
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { safeParseDate } from './date';
 import { ensureDeviceId, getReferenceTaskFieldClears } from './store-helpers';
@@ -68,9 +60,8 @@ export type ImportTaskSource = {
     recurrence?: Task['recurrence'];
     reviewAt?: string;
     sectionSourceKey?: string;
-    /** REQUIRED: idFor('task', sourceKey) is the identity. Every '' collapses to one id, so an
-     *  omitted key silently drops every task but the first (R-07). An importer without a
-     *  natural key must mint a stable one at its own callsite, never here. */
+
+
     sourceKey: string;
     startTime?: string;
     status: TaskStatus;
@@ -82,8 +73,8 @@ export type ImportTaskSource = {
 export type ImportSource = {
     areas: ImportAreaSource[];
     projects: ImportProjectSource[];
-    // Optional: only the Mindwtr CSV importer creates sections today. Absent/empty is a no-op,
-    // so every other caller of applyImport is unaffected.
+
+
     sections?: ImportSectionSource[];
     tasks: ImportTaskSource[];
     warnings: string[];
@@ -100,10 +91,7 @@ export type ImportExecutionResult = {
     warnings: string[];
 };
 
-// OmniFocus/TickTick/DGT's *ImportParseResult types were structurally identical — only the
-// parsed-data and preview shapes differed. Todoist keeps its own distinct type (its field is
-// `parsedProjects`, not `parsedData`, and is never null) since that field name is read directly
-// by desktop/mobile settings UI outside this refactor's scope.
+
 export type ImportParseResult<TData, TPreview> = {
     errors: string[];
     parsedData: TData | null;
@@ -123,7 +111,7 @@ export type ImportApplyOptions = {
     suffix: string;
 };
 
-// The one shared implementation — every importer used to declare this verbatim.
+
 export const resolveUniqueName = (
     title: string,
     usedTitles: Set<string>,
@@ -154,10 +142,7 @@ export const resolveUniqueName = (
     }
 };
 
-// DGT's parser already normalizes its own timestamp strings, so validating-and-passing-through
-// reproduces DGT's exact prior behaviour. TickTick's raw CSV timestamps need `.toISOString()`
-// normalization first — its thin wrapper does that before calling applyImport, so by the time a
-// value reaches here it is either already-normalized or absent, and this still degrades safely.
+
 const resolveTimestamp = (value: string | undefined, fallback: string): string => (
     safeParseDate(value) ? (value as string) : fallback
 );
@@ -205,28 +190,13 @@ export function applyImport(
     });
     const warnings = [...parsed.warnings];
 
-    // Includes tombstones deliberately: a deterministic idFor must see prior deletions so a
-    // re-import can neither duplicate a live entity nor resurrect one the user removed.
+
     const existingAreaById = new Map(nextData.areas.map((area) => [area.id, area]));
     const existingProjectById = new Map(nextData.projects.map((project) => [project.id, project]));
     const existingSectionById = new Map(nextData.sections.map((section) => [section.id, section]));
     const existingTaskIds = new Set(nextData.tasks.map((task) => task.id));
 
-    // Containers have no ID column, so they round-trip by NAME and a container the user
-    // already has under its own id is invisible to the derived-id lookups below: it used to be
-    // re-created AND renamed by the collision suffix, so re-importing an unmodified export
-    // added an empty duplicate project and a "<name> (Mindwtr CSV)" area (V1).
-    //
-    // The tasks carry the identity the containers lack: when a row resolves to a task we
-    // already have, that task's CURRENT container is the one this row's container means. Inert
-    // for the other importers, whose rows never resolve to existing tasks.
-    //
-    // Two things this must NOT do, both regressions of the first version:
-    //   - carry a tombstone. Deleted tasks and deleted containers are skipped, so a re-import
-    //     cannot orphan a new row into a container the user removed.
-    //   - guess when rows disagree. A task moved to another project makes its old project's
-    //     source key ambiguous; first-wins made the destination depend on CSV row order. A
-    //     split verdict drops the carry and lets the derived path decide.
+
     const liveTaskById = new Map(nextData.tasks.map((task) => [task.id, task] as const));
     const carriedProjectIds = new Map<string, Set<string>>();
     const carriedSectionIds = new Map<string, Set<string>>();
@@ -255,7 +225,7 @@ export function applyImport(
             recordCarry(carriedAreaIds, task.areaSourceKey, liveAreaId);
         }
     });
-    // Unanimous verdicts only.
+
     const settle = (map: Map<string, Set<string>>): Map<string, string> => new Map(
         Array.from(map, ([sourceKey, ids]) => [sourceKey, ids.size === 1 ? [...ids][0] : ''] as const)
             .filter((entry): entry is readonly [string, string] => entry[1] !== '')
@@ -359,8 +329,7 @@ export function applyImport(
         importedProjectCount += 1;
     });
 
-    // A section with no matching project (its project was deduped away against a tombstone, or
-    // never created) is dropped along with it — there is nothing to attach it to.
+
     (parsed.sections ?? []).forEach((section) => {
         const projectId = projectIdBySourceKey.get(section.projectSourceKey);
         if (!projectId) return;
@@ -370,9 +339,8 @@ export function applyImport(
             if (!existingSection.deletedAt) sectionIdBySourceKey.set(section.sourceKey, existingSection.id);
             return;
         }
-        // Only a section of the project this row actually resolved to. A task that moved to
-        // another project carries that project's section, which would otherwise pair a
-        // project from one place with a section from another — a state the app cannot produce.
+
+
         const carriedSectionId = liveSectionIdBySourceKey.get(section.sourceKey);
         if (carriedSectionId && existingSectionById.get(carriedSectionId)?.projectId === projectId) {
             sectionIdBySourceKey.set(section.sourceKey, carriedSectionId);
@@ -423,8 +391,7 @@ export function applyImport(
         return 0;
     };
 
-    // "0 imported" with no reason reads as a failure to the user re-importing a file whose
-    // rows they deleted (#1011) — count the skips so the result message can say why.
+
     let skippedExistingTaskCount = 0;
     let skippedDeletedTaskCount = 0;
     parsed.tasks.forEach((task) => {
@@ -478,10 +445,8 @@ export function applyImport(
             revBy: deviceState.deviceId,
             order,
             orderNum: order,
-            // Importers can hand us a reference task that still carries dates,
-            // recurrence or a priority. Clear them here rather than leaving the
-            // task looking scheduled until its first edit wipes them silently
-            // (applyTaskUpdates applies the same clears).
+
+
             ...(status === 'reference' ? getReferenceTaskFieldClears() : {}),
             ...(projectId ? { projectId } : {}),
             ...(sectionId ? { sectionId } : {}),

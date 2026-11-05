@@ -25,7 +25,7 @@ const result = (request: NativeProjectSectionCreateRequest): NativeProjectSectio
 const sameSectionRow = (left: Parameters<typeof sectionToSqliteRow>[0], right: Parameters<typeof sectionToSqliteRow>[0]) =>
     JSON.stringify(sectionToSqliteRow(left)) === JSON.stringify(sectionToSqliteRow(right));
 const validSectionParent = (value: unknown, projectId: string): value is Project => record(value)
-    // Legacy pre-hydration rows can carry null for an optional column; keep the frozen row raw.
+
     && validProject(Object.fromEntries(Object.entries(value).map(([key, part]) =>
         [key, part === null ? undefined : part])), projectId);
 
@@ -38,7 +38,7 @@ const readRequest = (value: unknown): NativeProjectSectionCreateRequest | null =
         ? input as NativeProjectSectionCreateRequest : null;
 };
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedProjectSectionCreate | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

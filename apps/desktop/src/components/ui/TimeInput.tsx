@@ -9,6 +9,8 @@ import {
     type KeyboardEvent,
 } from 'react';
 import { flushSync } from 'react-dom';
+import { isImeComposing } from '../../lib/ime';
+import { getSystemDefaultLocale } from '../../lib/system-locale';
 import {
     normalizeClockTimeInput,
     normalizeTimeFormatSetting,
@@ -19,15 +21,7 @@ import {
 type ResolvedTimeInputFormat = Exclude<TimeFormatSetting, 'system'>;
 
 function getDeviceLocale(): string {
-    if (typeof navigator !== 'undefined') {
-        const locale = String(navigator.languages?.[0] || navigator.language || '').trim();
-        if (locale) return locale;
-    }
-    try {
-        return Intl.DateTimeFormat().resolvedOptions().locale || 'en-US';
-    } catch {
-        return 'en-US';
-    }
+    return getSystemDefaultLocale() || 'en-US';
 }
 
 export function resolveTimeInputFormat(
@@ -73,9 +67,8 @@ export function parseClockTimeDraft(
 
     const compact = trimmed.replace(/\./g, '').replace(/\s+/g, '');
     const match = compact.match(/^(\d{1,2})(?::?(\d{2}))?([ap])m$/i);
-    // A canonical two-digit 24-hour value remains a useful paste/manual-entry
-    // format in 12-hour display mode. A draft such as `1:59` stays incomplete
-    // so adding `PM` does not briefly commit the wrong half of the day.
+
+
     if (!match) {
         if (!/^\d{2}:\d{2}$/.test(trimmed)) return null;
         return normalizeClockTimeInput(trimmed);
@@ -95,21 +88,17 @@ type NativeInputProps = Omit<
 >;
 
 export type TimeInputProps = NativeInputProps & {
-    /** Canonical 24-hour value (`HH:mm`) or an explicit empty value. */
+
     value: string;
-    /** Receives only a complete normalized `HH:mm` value or an explicit clear. */
+
     onChange: (value: string) => void;
-    /** Defaults to the synced desktop preference. Primarily useful for isolated hosts/tests. */
+
     timeFormat?: string | null;
-    /** Defaults to the device locale and controls only the `system` preference. */
+
     locale?: string;
 };
 
-/**
- * Deterministic desktop time entry. Native `type=time` controls may ignore the
- * requested hour cycle, so this keeps a text draft while exposing only
- * canonical `HH:mm` values to date, task, and notification state.
- */
+
 export const TimeInput = forwardRef<HTMLInputElement, TimeInputProps>(function TimeInput({
     value,
     onChange,
@@ -159,8 +148,8 @@ export const TimeInput = forwardRef<HTMLInputElement, TimeInputProps>(function T
     const handleChange = (nextDraft: string) => {
         setDraft(nextDraft);
         const parsed = parseClockTimeDraft(nextDraft, resolvedFormat);
-        // An empty draft may be the first keystroke of a replacement. Commit
-        // an intentional clear only when the user leaves or submits the field.
+
+
         if (parsed !== null && parsed !== '') emitCanonical(parsed);
     };
 
@@ -183,6 +172,7 @@ export const TimeInput = forwardRef<HTMLInputElement, TimeInputProps>(function T
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Enter') {
             const parsed = parseClockTimeDraft(draft, resolvedFormat);
             if (parsed === null) {
@@ -190,8 +180,8 @@ export const TimeInput = forwardRef<HTMLInputElement, TimeInputProps>(function T
                 event.stopPropagation();
                 return;
             }
-            // Enter may submit through a consumer key handler in this event.
-            // Flush a deferred clear before reading its latest callback.
+
+
             if (parsed !== currentCanonicalRef.current) {
                 flushSync(() => emitCanonical(parsed));
             }

@@ -58,7 +58,7 @@ describe('metro config', () => {
       expect(new Set([normal, capture, startup, both]).size).toBe(4);
       expect(load()).toBe(normal);
       expect(load('0', 'false')).toBe(normal);
-      expect(load('true')).toBe(normal); // Capture requires the exact native opt-in.
+      expect(load('true')).toBe(normal);
       expect(load(undefined, ' TRUE ')).toBe(startup);
     } finally {
       previous.forEach((value, index) => {

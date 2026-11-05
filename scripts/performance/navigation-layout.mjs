@@ -78,8 +78,8 @@ try {
       }
     }
   }
-  // Observe intermediate commits as well as animation frames: a completed-view
-  // screenshot cannot catch the outgoing page being resized during navigation.
+
+
   for (const width of [1920]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, locale: 'en-US', colorScheme: 'dark' });
     await context.route('**/*', route => new URL(route.request().url()).origin === server.url ? route.continue() : route.abort());

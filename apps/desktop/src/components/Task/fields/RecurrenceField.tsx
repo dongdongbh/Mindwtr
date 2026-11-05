@@ -71,9 +71,8 @@ export function RecurrenceField({
     openCustomRecurrence,
     buildRecurrenceRRule,
 }: RecurrenceFieldProps) {
-    // Session-only disclosure: once a rule exists the editor rests as a
-    // one-sentence summary, and picking a rule from the resting dropdown lands
-    // you in the expanded editor.
+
+
     const [expanded, setExpanded] = useState(false);
     const showEditor = !editRecurrence || expanded;
     const summary = editRecurrence
@@ -293,9 +292,8 @@ export function RecurrenceField({
                             dateFormatSetting={dateFormatSetting}
                             nativeDateInputLocale={nativeDateInputLocale}
                             dateInputClassName="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            // Inline in the "Ends" row, and there is no empty state:
-                            // clearing it falls back to the default end date, so no
-                            // onClear and no clear button.
+
+
                             className="w-40 max-w-none"
                             onDateChange={(value) => {
                                 onRecurrenceRRuleChange(buildRecurrenceRRule(editRecurrence, {

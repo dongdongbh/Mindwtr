@@ -86,7 +86,7 @@ describe('macos-widget-sync', () => {
         setMacOSUserAgent(true);
 
         startMacWidgetSync();
-        invokeNativeOr.mockClear(); // drop the initial full-sync call on start
+        invokeNativeOr.mockClear();
 
         useTaskStore.setState((state) => ({ ...state, lastDataChangeAt: 1 }));
         useTaskStore.setState((state) => ({ ...state, lastDataChangeAt: 2 }));

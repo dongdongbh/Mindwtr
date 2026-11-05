@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runStoreCommand, useTaskStore, type Task } from '@mindwtr/core';
+import { logInfo, runStoreCommand, useTaskStore, type Task } from '@mindwtr/core';
 
 import {
     DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY,
@@ -14,11 +14,12 @@ vi.mock('../lib/pomodoro-alert', () => ({
     armPomodoroCompletionSound: vi.fn(),
 }));
 
-// The store's durable save (core's flushPendingSave): each test may hold or fail it.
+
 const flush = vi.hoisted(() => ({ impl: async () => undefined as void }));
 vi.mock('@mindwtr/core', async (importOriginal) => ({
     ...await importOriginal<typeof import('@mindwtr/core')>(),
     flushPendingSave: () => flush.impl(),
+    logInfo: vi.fn(),
 }));
 
 const NOW_ISO = new Date().toISOString();
@@ -75,7 +76,7 @@ describe('pomodoro store', () => {
         flush.impl = async () => undefined;
     });
 
-    // A restart: the store reads the task as saved on disk, and the timer reads its stored session again.
+
     const restart = (savedTime: number | undefined, updates: Array<{ id: string; patch: Partial<Task> }>) => {
         useTaskStore.setState({
             tasks: [task({ timeSpentMinutes: savedTime })],
@@ -97,12 +98,12 @@ describe('pomodoro store', () => {
         usePomodoroStore.getState().hydratePomodoro({});
         await vi.waitFor(() => expect(updates).toHaveLength(1));
 
-        // The app quits with the task's save in flight: the disk still holds no time.
+
         flush.impl = async () => undefined;
         const after: Array<{ id: string; patch: Partial<Task> }> = [];
         restart(undefined, after);
         await vi.waitFor(() => expect(after).toEqual([{ id: 'task-1', patch: { timeSpentMinutes: 25 } }]));
-        // Settled: a third start owes nothing.
+
         await vi.waitFor(() => expect(JSON.parse(window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toBeUndefined());
         const third: Array<{ id: string; patch: Partial<Task> }> = [];
         restart(25, third);
@@ -130,7 +131,7 @@ describe('pomodoro store', () => {
         expect(JSON.parse(window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY)!).pendingCredits)
             .toEqual([{ taskId: 'task-1', to: 25 }]);
 
-        // The next commit settles again: the time is already in memory, so only the save is retried.
+
         let saves = 0;
         flush.impl = async () => { saves += 1; };
         usePomodoroStore.getState().commitPomodoro((prev) => ({ ...prev, selectedTaskId: 'task-1', updatedAtMs: Date.now() }));
@@ -140,7 +141,7 @@ describe('pomodoro store', () => {
     });
 
     it('leaves a credit owed from before a restart when the task\'s time moved since', async () => {
-        // It was given (and synced on) before the quit, or another device changed the task: either way, not again.
+
         window.localStorage.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify({
             durations: { focusMinutes: 25, breakMinutes: 5 },
             timerState: { phase: 'break', remainingSeconds: 300, isRunning: false, completedFocusSessions: 1 },
@@ -164,7 +165,7 @@ describe('pomodoro store', () => {
                 useTaskStore.setState({ tasks: current.map((row) => (row.id === id ? { ...row, ...patch } : row)) } as never);
             },
         } as never);
-        // One credit owed from before (5 to 30), and one focus session that finished while the app was closed.
+
         window.localStorage.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify({
             durations: { focusMinutes: 25, breakMinutes: 5 },
             timerState: { phase: 'focus', remainingSeconds: 5, isRunning: true, completedFocusSessions: 1 },
@@ -179,13 +180,47 @@ describe('pomodoro store', () => {
 
         usePomodoroStore.getState().hydratePomodoro({});
         await vi.waitFor(() => expect(saves).toBe(1));
-        // The Agenda's Pomodoro panel mounts and hydrates while the first save still waits.
+
         usePomodoroStore.getState().hydratePomodoro({});
         await vi.waitFor(() => expect(saves).toBeGreaterThanOrEqual(2));
         for (let i = 0; i < 20; i += 1) await Promise.resolve();
         release();
         for (let i = 0; i < 50; i += 1) await Promise.resolve();
         expect(useTaskStore.getState().tasks[0].timeSpentMinutes).toBe(55);
+    });
+
+    it('stores a credit chained from a moved one at its moved time, so a quit before its save credits it once', async () => {
+        useTaskStore.setState({
+            tasks: [task({ timeSpentMinutes: 12 })],
+            _allTasks: [task({ timeSpentMinutes: 12 })],
+            updateTask: async (id: string, patch: Partial<Task>) => {
+                const current = useTaskStore.getState().tasks;
+                useTaskStore.setState({ tasks: current.map((row) => (row.id === id ? { ...row, ...patch } : row)) } as never);
+            },
+        } as never);
+
+        window.localStorage.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify({
+            durations: { focusMinutes: 25, breakMinutes: 5 },
+            timerState: { phase: 'focus', remainingSeconds: 5, isRunning: true, completedFocusSessions: 1 },
+            selectedTaskId: 'task-1',
+            updatedAtMs: Date.now() - 10_000,
+            sessionHistory: { totalCompletedFocusSessions: 1, completedFocusSessionsByTaskId: { 'task-1': 1 } },
+            pendingCredits: [{ taskId: 'task-1', from: 5, to: 30 }],
+        }));
+        usePomodoroStore.getState().hydratePomodoro({});
+
+        usePomodoroStore.getState().commitPomodoro((prev) => ({ ...prev, sessionHistory: { ...prev.sessionHistory,
+            totalCompletedFocusSessions: prev.sessionHistory.totalCompletedFocusSessions + 1,
+            completedFocusSessionsByTaskId: { 'task-1': (prev.sessionHistory.completedFocusSessionsByTaskId['task-1'] ?? 0) + 1 } } }));
+
+        await vi.waitFor(() => expect(JSON.parse(window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY)!).pendingCredits)
+            .toEqual([{ taskId: 'task-1', from: 37, to: 62 }]));
+        expect(useTaskStore.getState().tasks[0].timeSpentMinutes).toBe(37);
+        expect(logInfo).toHaveBeenCalledWith('Pomodoro credit moved onto the task time', {
+            scope: 'pomodoro', context: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' } });
+        const updates: Array<{ id: string; patch: Partial<Task> }> = [];
+        restart(37, updates);
+        await vi.waitFor(() => expect(updates).toEqual([{ id: 'task-1', patch: { timeSpentMinutes: 62 } }]));
     });
 
     it('stores a credit moved by a sync save before giving it, so a quit then credits it once', async () => {
@@ -233,7 +268,7 @@ describe('pomodoro store', () => {
         useTaskStore.setState({
             updateTask: async (id: string, patch: Partial<Task>) => {
                 const current = useTaskStore.getState().tasks;
-                // The store's save fails for good: it records the failure and drops the save.
+
                 useTaskStore.setState({
                     tasks: current.map((row) => (row.id === id ? { ...row, ...patch } : row)),
                     persistenceFailure: { message: 'disk full', at: Date.now() },
@@ -264,7 +299,7 @@ describe('pomodoro store', () => {
         await Promise.resolve();
         await Promise.resolve();
 
-        // The stored session still shows the finished phase, so the next start credits it: this start must not.
+
         expect(updates).toEqual([]);
         vi.mocked(window.localStorage.setItem).mockRestore();
         const after: Array<{ id: string; patch: Partial<Task> }> = [];
@@ -309,11 +344,11 @@ describe('pomodoro store', () => {
         useTaskStore.setState({
             tasks: [task({ timeSpentMinutes: 50 })],
             _allTasks: [task({ timeSpentMinutes: 50 })],
-            // A store command, as the real updateTask is: it waits for the save.
+
             updateTask: (id: string, patch: Partial<Task>) => runStoreCommand(async () => { updates.push({ id, patch }); }),
         } as never);
         seedRunningSession({ selectedTaskId: 'task-1', focusMinutes: 25 });
-        // Another device logged time on the task; the sync save publishes it.
+
         const finish = holdSyncSave(() => useTaskStore.setState({ tasks: [task({ timeSpentMinutes: 60 })] } as never));
 
         usePomodoroStore.getState().hydratePomodoro({});
@@ -338,8 +373,7 @@ describe('pomodoro store', () => {
         expect(usePomodoroStore.getState().snapshot.sessionHistory.totalCompletedFocusSessions).toBe(1);
     });
 
-    // The Start click is the only moment WebKit lets an audible AudioContext be
-    // created, so every stopped→running commit must arm the chime (#528).
+
     it('arms the completion chime on the stopped-to-running transition only', () => {
         vi.mocked(armPomodoroCompletionSound).mockClear();
         usePomodoroStore.getState().hydratePomodoro({});
@@ -350,7 +384,7 @@ describe('pomodoro store', () => {
         }));
         expect(armPomodoroCompletionSound).toHaveBeenCalledTimes(1);
 
-        // A running-to-running tick is not a gesture; no re-arm.
+
         usePomodoroStore.getState().commitPomodoro((prev) => ({
             ...prev,
             timerState: { ...prev.timerState, remainingSeconds: prev.timerState.remainingSeconds - 1 },
@@ -390,20 +424,20 @@ describe('pomodoro store', () => {
         const writesAfterHydrate = writeCount;
         const hydratedAtMs = usePomodoroStore.getState().snapshot.updatedAtMs;
 
-        // Ten seconds of ticking, once per second.
+
         for (let second = 1; second <= 10; second += 1) {
             usePomodoroStore.getState().commitPomodoro((prev) => reconcilePomodoroSnapshot(prev, hydratedAtMs + second * 1000, {}));
         }
         expect(usePomodoroStore.getState().snapshot.timerState.remainingSeconds).toBe(290);
         expect(writeCount).toBe(writesAfterHydrate);
 
-        // The stale stored pair still reconstructs the live clock exactly.
+
         usePomodoroStore.setState({ hasHydrated: false });
         const stored = JSON.parse(window.localStorage.getItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY) ?? '{}');
         const elapsed = Math.floor((hydratedAtMs + 10_000 - stored.updatedAtMs) / 1000);
         expect(stored.timerState.remainingSeconds - elapsed).toBe(290);
 
-        // Pausing is a state transition, so it persists immediately.
+
         usePomodoroStore.getState().commitPomodoro((prev) => ({
             ...prev,
             timerState: { ...prev.timerState, isRunning: false },

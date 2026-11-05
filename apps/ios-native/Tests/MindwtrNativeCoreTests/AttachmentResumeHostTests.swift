@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC, SQLite and real V3 producers; resume grants no file or
-/// editor mutation authority and preserves the original opaque checkpoint.
+
 final class AttachmentResumeHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -40,7 +39,7 @@ final class AttachmentResumeHostTests: XCTestCase {
         let db = try SQLiteBridge(url: database); defer { db.close() }
         return try db.execute(statement, parametersJSON: json(args))
     }
-    // Sort only outer row keys, keeping opaque SQL cell strings unchanged.
+
     private func rows(_ table: String = "tasks") throws -> String { try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM \(table) ORDER BY id").utf8))) }
     private func latest() throws -> EditorDraftSnapshot { try XCTUnwrap(editor.read()?.snapshot) }
     private func record() throws -> Store.MixedRecord { try XCTUnwrap(store.readMixed()) }
@@ -209,8 +208,8 @@ final class AttachmentResumeHostTests: XCTestCase {
         let after = try latest(); _ = try await host.saveAttachmentDraftComplete(saveRequestJSON: request(), expectedSession: after.sessionID, expectedGeneration: after.generation)
         XCTAssertNil(try editor.read()); XCTAssertNil(try store.readMixed()); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         XCTAssertEqual(try Data(contentsOf: target(0)), Data("baseline bytes 0".utf8))
-        // The existing nonempty Save planner settles an opening baseline
-        // tombstone too; resume itself never owns or deletes those bytes.
+
+
         XCTAssertFalse(FileManager.default.fileExists(atPath: target(1).path))
         let persisted = try XCTUnwrap((NativeJSON.jsonObject(with: Data(sql("SELECT attachments FROM tasks WHERE id=?", [taskID]).utf8)) as? [[String: Any]])?.first?["attachments"] as? String)
         XCTAssertEqual((try XCTUnwrap(NativeJSON.jsonObject(with: Data(persisted.utf8)) as? [[String: Any]])).first(where: { $0["id"] as? String == "baseline-1" })?["deletedAt"] as? String, at)
@@ -371,7 +370,7 @@ final class AttachmentResumeHostTests: XCTestCase {
             let summary = try object(await host.readAttachmentDraft())
             XCTAssertEqual(Set(summary.keys), Set(["version", "status", "sessionID", "checkpoint", "operations", "discard"]))
             XCTAssertEqual(summary["version"] as? Int, version); XCTAssertTrue(summary["discard"] is NSNull); try unchanged(before)
-            // Typed V3 methods are public; generic string routing stays sealed.
+
             await refused { _ = try await host.call("checkAttachmentDraftResumeV3", argumentsJSON: "[]") }
             await refused { _ = try await host.call("addProviderAttachmentV3", argumentsJSON: "[]") }; try unchanged(before)
             if version < 3 {

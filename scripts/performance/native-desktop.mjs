@@ -1,5 +1,5 @@
-// Linux only. Real Tauri/WebKitGTK UI with an isolated portable profile and DBus.
-// No personal profile, keyring, sync account, install, reset, or cleanup deletion.
+
+
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -22,8 +22,8 @@ const sizes = (process.env.SIZES ?? '0,1000,10000').split(',').map(Number);
 assert(Number.isInteger(runs) && runs > 0 && runs <= 100, 'RUNS must be 1..100');
 assert(new Set(sizes).size === sizes.length, 'SIZES must not repeat fixtures');
 sizes.forEach(fixture);
-// An archived Benchmark executable allows interleaved A/B checks without
-// rebuilding (or mutating either checkout) between measurements.
+
+
 const binary = process.env.NATIVE_BINARY
   ? resolve(process.env.NATIVE_BINARY)
   : join(root, 'apps/desktop/src-tauri/target/release/mindwtr');
@@ -55,7 +55,7 @@ const dirty = !!execFileSync('git', ['status', '--porcelain'], { cwd: root, enco
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const ownedDrivers = new Set();
 const stopDriver = driver => {
-  if (driver.pid) { try { process.kill(-driver.pid, 'SIGTERM'); } catch { /* Already stopped. */ } }
+  if (driver.pid) { try { process.kill(-driver.pid, 'SIGTERM'); } catch {                        } }
   ownedDrivers.delete(driver);
 };
 process.once('exit', () => { for (const driver of ownedDrivers) stopDriver(driver); });
@@ -74,9 +74,8 @@ for (const size of sizes) {
   const samples = [];
   let viewport;
   let capabilities;
-  // Each iteration owns a fresh native process and data directory. The first
-  // launch imports the fixture. Only refresh AFTER its canonical readiness:
-  // refreshing earlier leaves native migration running behind the second load.
+
+
   for (let run = 0; run <= runs; run++) {
     const profileDir = mkdtempSync(join(directory, `${size}-${run}-`));
     const app = join(profileDir, 'mindwtr');
@@ -159,7 +158,7 @@ for (const size of sizes) {
             && actual.ratio === requestedViewport.ratio;
         }, 'requested viewport (graphical session must be unlocked)');
       }
-      // Onboarding suppresses the main-screen mark; dismiss it through its UI.
+
       await until(async () => {
         const dismissed = await execute('const b=[...document.querySelectorAll("button")].find(b=>b.textContent.trim()==="Skip for now"); if(b){b.click();return true;} return performance.getEntriesByName("mindwtr.interactive_ready").length===1;');
         return dismissed;
@@ -225,8 +224,8 @@ for (const size of sizes) {
       }, 'visible captured task identity');
       sample.captureVisibleAutomationMs = performance.now() - captureStart;
       const expectedCapture = {id: capturedId, title};
-      // One separate read-only SQLite snapshot must contain this exact capture,
-      // not merely an unrelated row that happens to increase the total count.
+
+
       let captureAfter;
       await until(() => {
         captureAfter = readCapture();
@@ -261,13 +260,13 @@ for (const size of sizes) {
       }
       assert.equal(await execute('return window.__nativeViewportDrift'), false, 'Native viewport changed during measured interactions');
       validateNativeViewport(await execute('return {width:innerWidth,height:innerHeight,ratio:devicePixelRatio}'), viewport);
-      // A new WebView loads the canonical native store again after the capture.
+
       await request(`/session/${session}/refresh`, {});
       sample.reloadReadiness = await ready();
       assert.equal((await invoke('get_data')).tasks.filter(task => task.id === capturedId && task.title === title).length, 1, 'Capture did not survive reload');
       await click('css selector', '[data-sidebar-item][data-view="inbox"]');
-      // The synthetic capture is appended at the bottom. Reload starts at the
-      // top, where virtualization correctly leaves that row unmounted.
+
+
       await until(() => execute(`
         const list = document.querySelector('[role="list"][aria-label="Task list"]');
         if (!list) return false;

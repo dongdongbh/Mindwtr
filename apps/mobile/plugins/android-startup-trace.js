@@ -30,13 +30,6 @@ inline fun <T> startupSection(phase: String, block: () -> T): T {
 }
 `;
 
-// ContextAutomationReceiver.kt and ContextAutomationHeadlessService.kt used to be
-// generated here as template strings. They are now real, compiled, lintable
-// Kotlin source in the local Expo module at
-// apps/mobile/modules/context-automation/android/... (mirroring the
-// notification-open-intents module's structure), so this plugin no longer
-// writes them into the app's own package. android-manifest-fixes.js registers
-// them by fully-qualified name.
 
 const selfLaunchGuardFunction = `  private fun isSelfLaunchedIntent(intent: Intent?): Boolean {
     // MainActivity is exported, so any app can start it carrying taskId /
@@ -400,6 +393,41 @@ ${notificationCacheFunction}
     '    pendingNotificationOpenPayload = LinkedHashMap(payload)\n',
     '    NotificationOpenPayloadStore.cache(payload)\n'
   );
+
+  if (!next.includes('import tech.dongdongbh.mindwtr.androidwidget.WidgetLaunchCover')) {
+    next = next.replace('import android.content.Intent\n', 'import android.content.Intent\nimport tech.dongdongbh.mindwtr.androidwidget.WidgetLaunchCover\n');
+  }
+  if (!next.includes('WidgetLaunchCover.receive(this, intent)')) {
+    next = next.replace('    startupMark("native.main_activity.on_create:end")', '    WidgetLaunchCover.receive(this, intent)\n    startupMark("native.main_activity.on_create:end")');
+    next = next.replace('    super.onNewIntent(intent)', '    WidgetLaunchCover.receive(this, intent)\n    super.onNewIntent(intent)');
+  }
+  if (!next.includes('WidgetLaunchCover.cancel(this)')) {
+    next = next.replace('\n  override fun getMainComponentName()', `
+  override fun onPause() {
+    WidgetLaunchCover.cancel(this)
+    super.onPause()
+  }
+
+  override fun onDestroy() {
+    WidgetLaunchCover.cancel(this)
+    super.onDestroy()
+  }
+
+  override fun getMainComponentName()`);
+  }
+  if (!next.includes('WidgetLaunchCover.resume(this)')) {
+    next = next.replace('  override fun onPause() {', `  override fun onResume() {
+    super.onResume()
+    WidgetLaunchCover.resume(this)
+  }
+
+  override fun onPause() {`);
+  }
+  if (!next.includes('import tech.dongdongbh.mindwtr.androidwidget.AndroidWidgetModule')) {
+    next = next.replace('import tech.dongdongbh.mindwtr.androidwidget.WidgetLaunchCover\n', 'import tech.dongdongbh.mindwtr.androidwidget.WidgetLaunchCover\nimport tech.dongdongbh.mindwtr.androidwidget.AndroidWidgetModule\n');
+  }
+  next = next.replace(/WidgetLaunchCover\.receive\(this, intent\)\n(?!    AndroidWidgetModule)/g, 'WidgetLaunchCover.receive(this, intent)\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n');
+  next = next.replace(/    super\.onResume\(\)\n(?!    AndroidWidgetModule)/g, '    super.onResume()\n    AndroidWidgetModule.suppressWidgetModalExitAnimations(this)\n');
 
   return next;
 };

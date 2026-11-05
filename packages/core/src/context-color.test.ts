@@ -8,9 +8,7 @@ import {
     NORD_CONTEXT_COLOR_PALETTE,
 } from './context-color';
 
-// One token per slot, so this table pins the canonical palette's values AND
-// its order — the hash modulo is the palette length, so a reorder or a resize
-// recolors contexts that have already been on screen for months (#974).
+
 const SLOT_TOKENS: Array<[token: string, canonical: string, nord: string, catppuccin: string, dracula: string]> = [
     ['@office', '#2563eb', '#5e81ac', '#8aadf4', '#6272a4'],
     ['@calls', '#0f766e', '#8fbcbb', '#8bd5ca', '#8be9fd'],
@@ -68,10 +66,16 @@ describe('getContextColor', () => {
     it('leaves every other theme on the canonical palette', () => {
         for (const [token, canonical] of SLOT_TOKENS) {
             expect(getContextColor(token, 'sepia')).toBe(canonical);
-            expect(getContextColor(token, 'eink')).toBe(canonical);
             expect(getContextColor(token, 'dark')).toBe(canonical);
             expect(getContextColor(token, undefined)).toBe(canonical);
         }
+    });
+
+    it('stays monochrome on eink', () => {
+        for (const [token] of SLOT_TOKENS) {
+            expect(getContextColor(token, 'eink')).toBe('#000000');
+        }
+        expect(getContextColor('   ', 'eink')).toBe('#000000');
     });
 
     it('themes the empty-context fallback too', () => {

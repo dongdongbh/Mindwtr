@@ -41,9 +41,8 @@ type TaskEditViewTabProps = {
   getRecurrenceRuleValue: (recurrence: Task['recurrence']) => RecurrenceRule | '';
   getRecurrenceStrategyValue: (recurrence: Task['recurrence']) => RecurrenceStrategy;
   applyChecklistUpdate: (checklist: NonNullable<Task['checklist']>) => void;
-  /** Holds add-item text the user has typed but not submitted, so the Save
-   *  button (which lives outside this tab) can fold it into the saved
-   *  checklist instead of relying on the input blurring first. */
+
+
   pendingChecklistDraftRef?: React.MutableRefObject<string>;
   visibleAttachments: Attachment[];
   openAttachment: (attachment: Attachment) => void;

@@ -37,7 +37,7 @@ const logTrashPurgeConfirmed = (count: number): void => {
     try {
         logInfo('Native Trash purge confirmed', { scope: 'native-host', category: 'storage',
             context: { releaseCheck: 'v1.3.5/ios-trash-purge', outcome: 'confirmed', count } });
-    } catch { /* Diagnostics cannot change a durable result. */ }
+    } catch {                                                   }
 };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -49,7 +49,7 @@ const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).si
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 
-// Archive's bounded closed JSON grammar, with both exact revision dictionaries.
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number, path: string): boolean => {
         if (depth > 24) return false;
@@ -66,7 +66,7 @@ const detach = <T>(value: unknown): T | null => {
     return JSON.parse(JSON.stringify(value)) as T;
 };
 const jsonSafe = <T>(value: unknown): T | null => {
-    // Scope rows come from saved storage; check size before allocating the journal copy.
+
     if (!isNativeJsonWithinBytes(value)) return null;
     try { return detach<T>(JSON.parse(JSON.stringify(value))); } catch { return null; }
 };
@@ -102,7 +102,7 @@ const cloudReferences = (request: NativeTrashItemsPurgeRequest, data: Pick<AppDa
         a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 };
 
-/** Complete project/section membership and only the cloud identities used by the existing cleanup helper. */
+
 export const trashItemsPurgeScope = (request: NativeTrashItemsPurgeRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'settings'>): NativeTrashItemsPurgeScope => {
     const selectedTasks = new Set(request.taskIds), selectedProjects = new Set(request.projectIds);
@@ -124,7 +124,7 @@ const sourcesMatch = (request: NativeTrashItemsPurgeRequest, scope: Pick<NativeT
     });
 };
 
-/** Actual RN task-first row policy and the existing all-parent cleanup helper, frozen as one effect. */
+
 export const trashItemsPurgeEffect = (prepared: Pick<NativePreparedTrashItemsPurge,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt'>): NativePreparedTrashItemsPurge['effect'] | null => {
     const { request, scope } = prepared;
@@ -148,8 +148,8 @@ export const trashItemsPurgeEffect = (prepared: Pick<NativePreparedTrashItemsPur
     }
     const pairs = <T extends { id: string }>(before: T[], after: Map<string, T>) =>
         before.flatMap((row) => after.has(row.id) ? [{ before: row, after: after.get(row.id)! }] : []);
-    // Keep saved selected-parent/attachment order for RN's task-first cleanup sequence.
-    // Outside rows contribute only relevant nonpurged cloud identities, including deleted parents/attachments.
+
+
     const parents = <T extends Task | Project>(kind: CloudReferences['kind'], known: T[]): T[] => {
         const ids = new Set(known.map((row) => row.id));
         return [...known, ...scope.references.filter((row) => row.kind === kind && !ids.has(row.id))

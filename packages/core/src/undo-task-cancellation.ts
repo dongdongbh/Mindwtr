@@ -5,7 +5,7 @@ import type { Task } from './types';
 
 type UndoResult = { success: true } | { success: false; error?: string; retryable: boolean };
 
-/** The saved lifecycle fields Cancel's Undo owns; other later edits stay intact. */
+
 export const taskCancellationRestoreFields = (before: Task): Partial<Task> => ({
     status: before.status,
     cancelledAt: before.cancelledAt,
@@ -15,7 +15,7 @@ export const taskCancellationRestoreFields = (before: Task): Partial<Task> => ({
     boardOrder: before.boardOrder,
 });
 
-/** Restore only the fields cancellation changes, leaving later edits alone. */
+
 export function createTaskCancellationUndo(before: Task, cancelledAt: string | undefined): () => Promise<UndoResult> {
     const restoreFields = taskCancellationRestoreFields(before);
     let written = false;
@@ -32,8 +32,7 @@ export function createTaskCancellationUndo(before: Task, cancelledAt: string | u
         && task.cancelledAt === before.cancelledAt
         && task.completedAt === before.completedAt;
 
-    // The cancelled row's check and the restore write are one store command (store-write-gate.ts): a sync save admitted
-    // between them could publish another device's status change, which the restore would then overwrite.
+
     const restore = (): Promise<UndoResult | null> => runStoreCommand(async () => {
         const current = useTaskStore.getState()._tasksById.get(before.id);
         if (!cancelledAt || !current || current.deletedAt || current.purgedAt
@@ -43,8 +42,8 @@ export function createTaskCancellationUndo(before: Task, cancelledAt: string | u
         let applied = false;
         try {
             const write = useTaskStore.getState().updateTask(before.id, restoreFields);
-            // Capture an immediate optimistic write; the failure paths also
-            // check again for stores that apply it after an earlier await.
+
+
             const immediate = useTaskStore.getState()._tasksById.get(before.id);
             applied = immediate !== current && matchesRestoredFields(immediate);
             const result = await write;
@@ -80,8 +79,8 @@ export function createTaskCancellationUndo(before: Task, cancelledAt: string | u
             finished = true;
             return { success: true };
         } catch (error) {
-            // An exhausted save may have dropped its queued snapshot. Requeue the
-            // latest whole state on retry; never repeat the status mutation.
+
+
             retryPersistence = true;
             return { success: false, error: error instanceof Error ? error.message : undefined, retryable: true };
         }

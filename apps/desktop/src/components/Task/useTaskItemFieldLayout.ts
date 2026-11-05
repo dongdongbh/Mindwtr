@@ -50,9 +50,8 @@ export function useTaskItemFieldLayout({
     const savedOrder = settings?.gtd?.taskEditor?.order ?? [];
     const explicitHidden = settings?.gtd?.taskEditor?.hidden;
     const savedHidden = explicitHidden ?? DEFAULT_TASK_EDITOR_HIDDEN;
-    // #1021: reveal the person field while editing a task as Waiting For, so an
-    // existing task can be assigned a person without first customizing the
-    // editor layout. An explicit saved customization that hides the field wins.
+
+
     const isAssignedToExplicitlyHidden = explicitHidden?.includes('assignedTo') ?? false;
     const sectionAssignments = useMemo(
         () => getTaskEditorSectionAssignments(settings?.gtd?.taskEditor),
@@ -157,7 +156,6 @@ export function useTaskItemFieldLayout({
 
     const isFieldVisible = useCallback(
         (fieldId: TaskEditorFieldId) => {
-            if (isReference && fieldId === 'checklist') return hasValue(fieldId);
             if (isReference && referenceHiddenFields.has(fieldId)) return false;
             if (fieldId === 'assignedTo' && editStatus === 'waiting' && !isAssignedToExplicitlyHidden) return true;
             return !hiddenSet.has(fieldId) || hasValue(fieldId);
@@ -194,8 +192,8 @@ export function useTaskItemFieldLayout({
         if (showSectionField) visible.push('section');
         return orderFields(visible);
     }, [orderFields, showAreaField, showProjectField, showSectionField]);
-    // Split the ordered basic fields around the area/project/section selector row so
-    // the row lands where those fields sit in the configured order (#880).
+
+
     const { basicFieldsBeforeOrganizers, basicFieldsAfterOrganizers } = useMemo(() => {
         if (organizerFields.length === 0) {
             return { basicFieldsBeforeOrganizers: basicFields, basicFieldsAfterOrganizers: [] as TaskEditorFieldId[] };

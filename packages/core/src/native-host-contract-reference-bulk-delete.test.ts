@@ -483,7 +483,7 @@ describe('guarded Reference bulk Delete and Undo', () => {
     it.each(['taskAttachments', 'taskRecurrence', 'projectAttachments'] as const)('fails closed on initially corrupt raw %s without any SQL writes or default replacement', async field => {
         clock(); let mutations = 0; const sqlite = await openSqliteHost(seed(), client => ({ ...client, run: async (...args) => { mutations++; return client.run(...args); } }));
         try {
-            // Model a legacy corrupted cell predating the current UPDATE validation trigger.
+
             await sqlite.client().run(`DROP TRIGGER ${field === 'projectAttachments' ? 'projects' : 'tasks'}_validate_update`);
             await sqlite.client().run(field === 'projectAttachments' ? 'UPDATE projects SET attachments = ? WHERE id = ?'
                 : `UPDATE tasks SET ${field === 'taskAttachments' ? 'attachments' : 'recurrence'} = ? WHERE id = ?`, ['{broken', field === 'projectAttachments' ? 'parent-b' : 'source']);

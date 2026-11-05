@@ -28,7 +28,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
     ({ ok: false, error: { code, message } });
 const same = taskEditValuesEqual;
 
-/** Refuse non-JSON inputs and oversized UTF-8 envelopes before a store or SQL write. */
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -63,7 +63,7 @@ const readRequest = (value: unknown): NativeAreaCreateRequest | null => {
         ? input as NativeAreaCreateRequest : null;
 };
 
-/** Pure and usable to validate a cold-start journal before opening SQLite. */
+
 const readPrepared = (value: unknown): NativePreparedAreaCreate | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -141,7 +141,7 @@ export function createAreaCreateMethods(deps: {
                 taken: Boolean(found && !found.deletedAt), normalizedName: normalized(value.name) } };
         },
 
-        /** Used only after retryPending() found no journal; this cannot create or restore an Area. */
+
         probeAreaCreateOutcome(input: NativeAreaCreateRequest): NativeHostResult<NativeAreaCreateResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

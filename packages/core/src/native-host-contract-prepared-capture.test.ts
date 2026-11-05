@@ -66,7 +66,7 @@ describe('prepared native quick capture', () => {
         const { host, options, saveData } = await open();
         process.env.TZ = 'Pacific/Honolulu';
         vi.setSystemTime(new Date('2026-09-26T23:50:00.000Z'));
-        const command = prepare(host, { text: 'Review /due:2026-09-28', options: { ...options, note: 'Frozen note', addAnother: true, startTime: '2026-10-01T14:30:00.000Z' }, captureId: generateUUID() });
+        const command = prepare(host, { text: 'Review /inbox /due:2026-09-28', options: { ...options, note: 'Frozen note', addAnother: true, startTime: '2026-10-01T14:30:00.000Z' }, captureId: generateUUID() });
         expect(command.prepared.task.status).toBe('inbox');
         value(await host.commitPreparedQuickCapture(command));
         const row = taskToSqliteRow(command.prepared.task);
@@ -94,8 +94,8 @@ describe('prepared native quick capture', () => {
         const row = taskToSqliteRow(command.prepared.task);
         saveData.mockClear();
         process.env.TZ = 'America/Los_Angeles';
-        // A backward wall-clock adjustment exercises the same local-day edge in
-        // Node workers, whose process timezone may be fixed when they start.
+
+
         vi.setSystemTime(new Date('2026-09-26T04:30:00.000Z'));
         const restarted = await activate(true);
         expect(taskToSqliteRow(useTaskStore.getState()._tasksById.get(command.prepared.task.id)!)).toEqual(row);
@@ -104,8 +104,8 @@ describe('prepared native quick capture', () => {
         value(await restarted.activate({ writeSafetyReady: true }));
         expect(useTaskStore.getState()._tasksById.get(command.prepared.task.id)?.isFocusedToday).toBe(false);
         expect(saveData).not.toHaveBeenCalled();
-        // Entering recovery from an already-normalized store must also replace
-        // the same-revision cached view with the authoritative persisted row.
+
+
         value(await restarted.activate({ writeSafetyReady: true, recoveryLoad: true }));
         expect(taskToSqliteRow(useTaskStore.getState()._tasksById.get(command.prepared.task.id)!)).toEqual(row);
         expect(value(await restarted.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
@@ -183,8 +183,8 @@ describe('prepared native quick capture', () => {
     it('preserves normalized recurrence through the shared factory, JSON and SQLite codecs', async () => {
         const { host, options } = await open();
         const command = prepare(host, { text: 'Read', options, captureId: generateUUID() });
-        // Quick capture has no recurrence control; exercise the same creation
-        // factory/transport shape without inventing new capture UI semantics.
+
+
         const state = useTaskStore.getState();
         const built = buildNewTask({ title: command.prepared.task.title,
             initialTaskProps: { areaId: undefined, recurrence: { rule: 'weekly', byDay: ['MO', 'FR'], count: 3 } },

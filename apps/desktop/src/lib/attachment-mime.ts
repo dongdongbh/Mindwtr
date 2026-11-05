@@ -1,7 +1,6 @@
-/** Extension → MIME map shared by the image viewer and the web-build cloud fetcher.
- *  Attachments carry `mimeType` whenever the importer could determine one; this is the
- *  fallback for the ones that don't (and, in the web build, for records whose only
- *  filename is the `cloudKey`). */
+
+
+
 const MIME_BY_EXTENSION: Record<string, string> = {
     png: 'image/png',
     jpg: 'image/jpeg',

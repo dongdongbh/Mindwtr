@@ -13,11 +13,6 @@ const GNOME_INTERFACE_SCHEMA: &str = "org.gnome.desktop.interface";
 const GNOME_COLOR_SCHEME_KEY: &str = "color-scheme";
 const GNOME_GTK_THEME_KEY: &str = "gtk-theme";
 
-/// macOS is deliberately absent: the quick-add window is a non-activating
-/// panel, so Mindwtr never becomes the active app and the app the user was in
-/// stays frontmost the whole time. Re-activating it on close would at best be a
-/// no-op and at worst steal focus from an app the user switched to while the
-/// panel was open (#794).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum QuickAddFocusPolicy {
     RestoreWindowsForegroundWindow,
@@ -161,8 +156,6 @@ fn read_gsettings_value(_schema: &str, _key: &str) -> Option<String> {
     None
 }
 
-// KDE never writes GNOME's gsettings keys, so `color-scheme` reads 'default'
-// and this probe reports "light" on a dark Plasma desktop (#989).
 fn is_kde_desktop_value(value: &str) -> bool {
     value
         .to_ascii_lowercase()
@@ -176,14 +169,7 @@ fn is_kde_desktop() -> bool {
         .any(|var| std::env::var(var).is_ok_and(|value| is_kde_desktop_value(&value)))
 }
 
-// The XDG desktop portal's appearance setting is the one cross-desktop dark
-// signal (1 = prefer dark, 2 = prefer light, 0 = no preference). Silencing
-// this probe on KDE and trusting WebKitGTK's own media query was not enough:
-// kde-gtk-config does not reliably propagate Plasma's dark scheme into the
-// GTK settings WebKitGTK reads, so the app still started light on a dark
-// Plasma desktop (#989).
 fn parse_portal_color_scheme(output: &str) -> Option<&'static str> {
-    // gdbus prints `(<uint32 1>,)` for ReadOne and `(<<uint32 1>>,)` for Read.
     let rest = output.split("uint32").nth(1)?;
     let digits: String = rest
         .trim_start()
@@ -199,7 +185,6 @@ fn parse_portal_color_scheme(output: &str) -> Option<&'static str> {
 
 #[cfg(target_os = "linux")]
 fn read_portal_color_scheme() -> Option<&'static str> {
-    // ReadOne first (current portals), Read as the legacy spelling.
     for method in ["ReadOne", "Read"] {
         let output = Command::new("gdbus")
             .args([
@@ -234,10 +219,6 @@ fn read_portal_color_scheme() -> Option<&'static str> {
     None
 }
 
-// Fallback for KDE sessions without a working settings portal: Plasma writes
-// the active color scheme's name into kdeglobals. Only a "dark"-named scheme
-// is trusted — a name without "dark" proves nothing, and forcing light from a
-// name heuristic is exactly the failure mode this probe once had on GNOME.
 fn parse_kde_color_scheme(contents: &str) -> Option<String> {
     let mut in_general = false;
     for line in contents.lines() {
@@ -286,8 +267,6 @@ fn read_kde_color_scheme_preference() -> Option<&'static str> {
     None
 }
 
-// Spawns and waits on `gdbus`/`gsettings` and may read kdeglobals — real
-// process and file I/O, no shared state to race (B1).
 #[tauri::command(async)]
 pub(crate) fn get_system_theme_preference() -> Option<String> {
     if let Some(preference) = read_portal_color_scheme() {
@@ -332,8 +311,7 @@ pub(crate) fn start_portal_theme_watcher(app: tauri::AppHandle) {
             if let Err(error) = portal_result {
                 log::warn!("Linux portal theme watcher stopped: {error}");
             }
-            // KDE's kdeglobals fallback still tracks changes when the portal
-            // cannot supply a signal. This polls a local file, not D-Bus.
+
             if is_kde_desktop() {
                 let mut last = read_kde_color_scheme_preference();
                 loop {
@@ -497,18 +475,12 @@ pub(crate) fn set_global_quick_add_shortcut(
 
 #[tauri::command]
 pub(crate) fn quit_app(app: tauri::AppHandle) {
-    // Close trace (#913): confirms the quit command reached native code; if
-    // the process survives past this line, app.exit itself failed to exit.
     crate::logging::append_native_log_line(
         &app,
         "Close trace: quit_app command invoked, calling app.exit(0)",
     );
     app.exit(0);
-    // app.exit only asks the event loop to exit and returns straight away, so a
-    // line logged right here printed on every healthy quit and read like a
-    // failure in shared logs (#913). Report only if the process is genuinely
-    // still alive well after the request; this thread dies with the process
-    // when the exit works, so a clean quit stays silent.
+
     let watchdog_app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(QUIT_WATCHDOG_SECONDS));
@@ -523,12 +495,19 @@ pub(crate) fn build_tray_menu(
     app: &tauri::AppHandle,
     quick_add: &str,
     show: &str,
+    lock: Option<&str>,
     quit: &str,
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let quick_add_item = MenuItem::with_id(app, "quick_add", quick_add, true, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show", show, true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", quit, true, None::<&str>)?;
-    Menu::with_items(app, &[&quick_add_item, &show_item, &quit_item])
+    match lock {
+        Some(lock) => {
+            let lock_item = MenuItem::with_id(app, "lock", lock, true, None::<&str>)?;
+            Menu::with_items(app, &[&quick_add_item, &show_item, &lock_item, &quit_item])
+        }
+        None => Menu::with_items(app, &[&quick_add_item, &show_item, &quit_item]),
+    }
 }
 
 #[tauri::command]
@@ -536,12 +515,15 @@ pub(crate) fn set_tray_labels(
     app: tauri::AppHandle,
     quick_add: String,
     show: String,
+    lock: Option<String>,
     quit: String,
 ) -> Result<(), String> {
     let Some(tray) = app.tray_by_id("main") else {
         return Ok(());
     };
-    let menu = build_tray_menu(&app, &quick_add, &show, &quit).map_err(|e| e.to_string())?;
+    let lock = lock.filter(|_| crate::app_lock::is_enabled());
+    let menu = build_tray_menu(&app, &quick_add, &show, lock.as_deref(), &quit)
+        .map_err(|e| e.to_string())?;
     tray.set_menu(Some(menu)).map_err(|e| e.to_string())
 }
 
@@ -555,11 +537,6 @@ pub(crate) fn set_tray_visible(app: tauri::AppHandle, visible: bool) -> Result<(
     }
 }
 
-/// Sets the hover text on the tray icon, used to surface today's Focus (#935).
-///
-/// Linux is a deliberate no-op: Tauri lists tray tooltips as unsupported there,
-/// so the call would just error on every Focus change. The frontend still sends
-/// the update rather than branching per platform.
 #[tauri::command]
 pub(crate) fn set_tray_tooltip(
     app: tauri::AppHandle,
@@ -575,23 +552,16 @@ pub(crate) fn set_tray_tooltip(
         let Some(tray) = app.tray_by_id("main") else {
             return Ok(());
         };
+        let tooltip = crate::app_lock::tray_tooltip(tooltip);
         tray.set_tooltip(tooltip.as_deref())
             .map_err(|e| e.to_string())
     }
 }
 
-/// How long the first reveal waits for the UI before showing the window anyway.
-/// A frontend that throws before it can call notify_ui_ready must never leave
-/// the user with no window (#936).
 const MAIN_WINDOW_REVEAL_TIMEOUT_SECONDS: u64 = 4;
 
-/// Gates the first show of the main window, which is built hidden so the
-/// restored geometry and the first paint land off screen (#936).
 #[derive(Default)]
 pub(crate) struct MainWindowReveal {
-    /// This launch is meant to stay hidden — start in tray (#928), or a global
-    /// quick-add hotkey launch. The UI still signals ready; it just must not
-    /// pull the main window up.
     suppressed: AtomicBool,
     shown: AtomicBool,
 }
@@ -602,9 +572,6 @@ impl MainWindowReveal {
     }
 }
 
-/// Shows the main window once. Later calls are no-ops, so the UI-ready signal
-/// and the timeout backstop can both fire without fighting each other, and
-/// neither can re-show a window the user has since closed to the tray.
 pub(crate) fn reveal_main_window(app: &tauri::AppHandle) {
     let state = app.state::<MainWindowReveal>();
     if state.suppressed.load(Ordering::SeqCst) {
@@ -616,7 +583,6 @@ pub(crate) fn reveal_main_window(app: &tauri::AppHandle) {
     show_main(app);
 }
 
-/// Called by the main window's frontend once React has painted its first frame.
 #[tauri::command]
 pub(crate) fn notify_ui_ready(app: tauri::AppHandle) {
     reveal_main_window(&app);
@@ -632,13 +598,6 @@ pub(crate) fn reveal_main_window_after_timeout(app: &tauri::AppHandle) {
     });
 }
 
-/// tao < 0.36 installs its own Wayland CSD titlebar whose buttons stop
-/// responding after any hide -> show cycle (tauri-apps/tauri#11856; fixed
-/// upstream by tao#1218, released in tao 0.36.0, not yet in a published
-/// Tauri). Toggling resizable makes tao's WlHeader rebuild its buttons
-/// (it listens on resizable-notify) with no visible change. Skipped while
-/// maximized — maximizing already re-allocates the titlebar. Delete once
-/// our Tauri ships tao >= 0.36. (#988)
 #[cfg(target_os = "linux")]
 pub(crate) fn nudge_wayland_csd_after_show(window: &tauri::WebviewWindow) {
     if std::env::var("WAYLAND_DISPLAY").is_err() {
@@ -654,15 +613,6 @@ pub(crate) fn nudge_wayland_csd_after_show(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn nudge_wayland_csd_after_show(_window: &tauri::WebviewWindow) {}
 
-/// The single funnel for putting the main window back on screen: the tray menu
-/// and tray click, macOS Dock reopen, a second instance (including the Flatpak listener), the
-/// first reveal after launch, and the quick-add fallback all land here.
-///
-/// The macOS activation policy is restored to Regular before the window
-/// appears — never after — so the window is never on screen while the app is
-/// still an accessory (no Dock icon, no Cmd+Tab, and the menu bar left with
-/// the previously frontmost app). `set_focus` below then activates the app,
-/// which is what actually hands the menu bar over.
 pub(crate) fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = crate::platform::apply_macos_activation_policy(app, false);
@@ -689,9 +639,6 @@ pub(crate) fn show_main_and_emit(app: &tauri::AppHandle) {
     }
 }
 
-/// Turns the freshly built quick-add window into a non-activating panel so it
-/// can take the keyboard without activating Mindwtr (#794). Done once at
-/// creation, not per show, so the very first hotkey press already behaves.
 #[cfg(target_os = "macos")]
 fn convert_quick_add_window_to_panel(window: &tauri::WebviewWindow) {
     let converted = window
@@ -709,9 +656,6 @@ fn convert_quick_add_window_to_panel(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 fn convert_quick_add_window_to_panel(_window: &tauri::WebviewWindow) {}
 
-/// Orders the panel front and gives it the keyboard without activating the app.
-/// False means the window is not a panel (every non-macOS platform, or a failed
-/// conversion), and the caller must fall back to `set_focus`.
 #[cfg(target_os = "macos")]
 fn present_quick_add_panel(window: &tauri::WebviewWindow) -> bool {
     window
@@ -725,10 +669,6 @@ fn present_quick_add_panel(_window: &tauri::WebviewWindow) -> bool {
     false
 }
 
-/// `set_focus` activates the app on macOS, which is exactly what drags the main
-/// window forward (#794) — so the panel path must not call it. Anywhere else,
-/// and whenever the panel conversion failed, the call stays: without it the
-/// window is on screen but cannot be typed into.
 fn quick_add_show_needs_focus_call(os: &str, panel_presented: bool) -> bool {
     !(os == "macos" && panel_presented)
 }
@@ -745,7 +685,7 @@ fn present_x11_quick_add_window(window: &gtk::ApplicationWindow) -> bool {
     else {
         return false;
     };
-    // The server timestamp call hangs without property-change events enabled.
+
     let gdk_window = native.upcast_ref::<gtk::gdk::Window>();
     gdk_window.set_events(gdk_window.events() | gtk::gdk::EventMask::PROPERTY_CHANGE_MASK);
     let timestamp = gdkx11::functions::x11_get_server_time(&native);
@@ -807,7 +747,7 @@ pub(crate) fn create_quick_add_window(app: &tauri::AppHandle) -> Result<(), Stri
         QUICK_ADD_WINDOW_LABEL,
         tauri::WebviewUrl::App(QUICK_ADD_WINDOW_URL.into()),
     );
-    // Portable mode keeps every webview profile inside the portable dir (#855).
+
     if let Some(webview_dir) = crate::storage::portable_webview_data_dir() {
         let _ = std::fs::create_dir_all(&webview_dir);
         builder = builder.data_directory(webview_dir);
@@ -918,6 +858,10 @@ fn quick_add_requires_nonactivating_panel(source: QuickAddRequestSource, os: &st
 }
 
 fn show_quick_add_window_for_source(app: &tauri::AppHandle, source: QuickAddRequestSource) {
+    if crate::app_lock::is_locked() {
+        show_main(app);
+        return;
+    }
     if let Ok(mut pending_target) = app.state::<QuickAddPending>().0.lock() {
         *pending_target = Some(QUICK_ADD_TARGET_WINDOW.to_string());
     }
@@ -1051,7 +995,7 @@ mod tests {
             parse_kde_color_scheme(contents).as_deref(),
             Some("BreezeDark")
         );
-        // The key outside [General] must not match.
+
         let misplaced = "[KDE]\nColorScheme=BreezeDark\n[General]\nName=x\n";
         assert_eq!(parse_kde_color_scheme(misplaced), None);
         assert_eq!(parse_kde_color_scheme(""), None);
@@ -1061,7 +1005,7 @@ mod tests {
     fn kde_scheme_names_only_ever_report_dark() {
         assert_eq!(kde_dark_hint_from_scheme(Some("BreezeDark")), Some("dark"));
         assert_eq!(kde_dark_hint_from_scheme(Some("Fedora Dark")), Some("dark"));
-        // A non-dark name proves nothing; never force light from a name.
+
         assert_eq!(kde_dark_hint_from_scheme(Some("Breeze")), None);
         assert_eq!(kde_dark_hint_from_scheme(None), None);
     }
@@ -1104,8 +1048,6 @@ mod tests {
 
     #[test]
     fn quick_add_focus_policy_is_platform_specific() {
-        // The macOS panel never takes activation away, so nothing is restored
-        // on close — restoring would be the thing that steals focus (#794).
         assert_eq!(
             quick_add_focus_policy_for_os("macos"),
             QuickAddFocusPolicy::None
@@ -1127,8 +1069,7 @@ mod tests {
     #[test]
     fn macos_panel_show_skips_the_activating_focus_call() {
         assert!(!quick_add_show_needs_focus_call("macos", true));
-        // Conversion failed: better a focused main window than a popup that
-        // swallows every keystroke.
+
         assert!(quick_add_show_needs_focus_call("macos", false));
     }
 

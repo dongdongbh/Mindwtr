@@ -48,8 +48,7 @@ import MindSweepModalScreen from '../app/mind-sweep-modal';
 const findByTestId = (tree: renderer.ReactTestRenderer, testID: string) =>
   tree.root.findByProps({ testID });
 
-// findAllByProps matches the composite component and its host element, so host
-// elements are counted directly to keep "one captured row" meaning one row.
+
 const countHostsByTestId = (tree: renderer.ReactTestRenderer, testID: string) =>
   tree.root.findAll((node) => typeof node.type === 'string' && node.props.testID === testID).length;
 

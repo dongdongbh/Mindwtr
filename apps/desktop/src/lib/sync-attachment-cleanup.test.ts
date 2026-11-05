@@ -101,8 +101,8 @@ describe('desktop attachment cleanup freshness', () => {
     });
 
     it('deletes a remote orphan without a version on a server that provides no strong ETag', async () => {
-        // Jianguoyun answers HEAD without an ETag; the cleanup used to refuse the
-        // delete and warn on every cycle forever (device test, 2026-09-02).
+
+
         const appData: AppData = {
             ...buildData(),
             settings: { attachments: { pendingRemoteDeletes: [{
@@ -136,8 +136,8 @@ describe('desktop attachment cleanup freshness', () => {
     });
 
     it('names the error class and sanitized message when a remote delete fails', async () => {
-        // The generic "(status)" message had no cause to diagnose a real
-        // server failure by (device test, 2026-09-02).
+
+
         const appData: AppData = {
             ...buildData(),
             settings: { attachments: { pendingRemoteDeletes: [{
@@ -178,7 +178,7 @@ describe('desktop attachment cleanup freshness', () => {
     });
 
     it('bounds remote cleanup and resumes the retained queue on the next pass', async () => {
-        // Keep the fixture within retention; this test covers batching, not expiry.
+
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'));
         const pendingRemoteDeletes = Array.from({ length: 26 }, (_, index) => ({
@@ -241,8 +241,8 @@ describe('deleteAttachmentFile', () => {
     });
 
     it('removes the profile copy a relocated portable install left under a stale path', async () => {
-        // #1038: the recorded path names the previous profile location, so the
-        // managed-dir check missed the copy and it stayed there forever.
+
+
         fsMocks.remove.mockReset();
         fsMocks.exists.mockImplementation(async (path: string) => path === '/new-profile/attachments/a1.pdf');
 
@@ -290,9 +290,8 @@ describe('deleteAttachmentFile', () => {
     });
 
     it('treats an orphan file that is already gone as cleaned, not a failure', async () => {
-        // The file is already gone, so this is the cleanup succeeding, not
-        // failing; it used to log a warning every cycle regardless (device
-        // test, 2026-09-02).
+
+
         fsMocks.remove.mockReset();
         fsMocks.exists.mockResolvedValue(true);
         const logSyncWarning = vi.fn();
@@ -307,8 +306,7 @@ describe('deleteAttachmentFile', () => {
         expect(logSyncWarning).not.toHaveBeenCalled();
     });
 
-    // Feedback log, Russian Windows 10: Tauri rejects with a plain STRING and Windows localizes
-    // the sentence, so only the code is stable. The warning repeated 35 times per file.
+
     it('treats a localized string rejection for a missing file as cleaned', async () => {
         fsMocks.remove.mockReset();
         fsMocks.exists.mockResolvedValue(true);
@@ -326,8 +324,7 @@ describe('deleteAttachmentFile', () => {
         expect(logSyncWarning).not.toHaveBeenCalled();
     });
 
-    // The same log printed the whole path, Windows user name included, because only Error
-    // objects went through the redaction.
+
     it('redacts the attachment path from a string rejection before it is logged', async () => {
         fsMocks.remove.mockReset();
         fsMocks.exists.mockResolvedValue(true);

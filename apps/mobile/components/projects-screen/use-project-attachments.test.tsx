@@ -116,7 +116,7 @@ type HarnessApi = {
 function Harness({ expose, initial, gated = false }: {
   expose: React.MutableRefObject<HarnessApi | null>;
   initial: Project;
-  /** updateProject as the store runs it: a command behind the write gate (store-write-gate.ts). */
+
   gated?: boolean;
 }) {
   const [selectedProject, setSelectedProject] = React.useState<Project | null>(initial);
@@ -225,7 +225,7 @@ describe('useProjectAttachments download settlement', () => {
     await vi.waitFor(() => expect(availabilityMock.ensureAttachmentAvailableDetailed).toHaveBeenCalled());
     const sibling = makeAttachment(1, { id: 'attachment-2', title: 'Other device.pdf', cloudKey: 'attachments/attachment-2.pdf' });
     const releaseSave = deferred<void>();
-    // Another device's sibling: the sync save holds the gate, then publishes revision 3 [A, B].
+
     const save = runSyncStoreSave(async () => {
       await releaseSave.promise;
       coreStoreState._allProjects = [{ ...coreStoreState._allProjects[0], rev: 3, attachments: [...coreStoreState._allProjects[0].attachments!, sibling] }];
@@ -249,7 +249,7 @@ describe('useProjectAttachments download settlement', () => {
     let tree!: ReturnType<typeof create>;
     coreStoreState._allProjects = [project];
     act(() => { tree = create(<Harness expose={expose} initial={project} gated />); });
-    // Each write is issued while a sync save holds the gate; the save then publishes another device's sibling.
+
     const behindSyncSave = async (siblingId: string, write: () => void) => {
       const releaseSave = deferred<void>();
       const save = runSyncStoreSave(async () => {
@@ -469,7 +469,7 @@ describe('useProjectAttachments download settlement', () => {
   });
 
   it('opens a project file already on this device without rewriting the project', async () => {
-    // Every write bumps the project's revision; an Open that changes nothing must not sync one.
+
     const attachment = makeAttachment(1, { uri: 'file:///managed/attachment-1.pdf', localStatus: 'available' });
     const project = makeProject(attachment);
     coreStoreState._allProjects = [project];

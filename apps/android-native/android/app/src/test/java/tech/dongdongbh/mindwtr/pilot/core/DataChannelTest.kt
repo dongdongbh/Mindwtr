@@ -12,14 +12,14 @@ import java.io.FilterInputStream
 import java.security.MessageDigest
 import java.util.Base64
 
-/** Pass D1c design §3.1: the chunked file channel between Kotlin and core. */
+
 class DataChannelTest {
     @get:Rule val folder = TemporaryFolder()
     private fun file(bytes: ByteArray) = folder.newFile().apply { writeBytes(bytes) }
     private fun sha(bytes: ByteArray) = DataChannel.hex(MessageDigest.getInstance("SHA-256").digest(bytes))
     private fun code(work: () -> Unit) = (runCatching(work).exceptionOrNull() as? DataChannel.Failure)?.code
 
-    /** Every reply of [handle] until "E"; each data reply starts with "D". */
+
     private fun replies(channel: DataChannel, handle: String): List<String> {
         val out = ArrayList<String>()
         while (true) { val reply = channel.read(handle); if (reply == "E") return out; assertTrue(reply.startsWith("D")); out += reply.substring(1) }
@@ -45,7 +45,7 @@ class DataChannelTest {
 
     @Test fun base64ChunksFromShortReadsJoinToTheWholeFilesBase64() {
         val bytes = ByteArray(1000) { (it * 7).toByte() }
-        // The provider hands one byte per read: chunks still hold whole groups of three bytes.
+
         val channel = DataChannel(chunkBytes = 64) { source -> object : FilterInputStream(FileInputStream(source)) {
             override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, minOf(1, len))
         } }
@@ -118,8 +118,7 @@ class DataChannelTest {
         assertEquals(DataChannel.HANDLE, code { channel.close(reader) })
     }
 
-    // D1c code review P2: every recovery snapshot (an operation's and the capture popup's) is written through a handle capped
-    // at core's 128 MiB backup limit, so no snapshot a restore would refuse is ever published; past it the file goes.
+
     @Test fun aRecoveryWriteIsCappedAtTheBackupLimit() {
         assertEquals(128L * 1024 * 1024, DataChannel.RECOVERY_CAP_BYTES)
         val target = File(folder.root, ".capture.pending")

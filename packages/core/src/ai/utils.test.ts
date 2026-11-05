@@ -47,7 +47,7 @@ describe('parseJson', () => {
     });
 
     it('drops a trailing element that is incomplete against the validator', () => {
-        // third object has id+action but its reason string was cut off
+
         const truncated = '{"suggestions":[{"id":"a","action":"keep","reason":"ok"},{"id":"b","action":"archive","reason":"done"},{"id":"c","action":"someday","reason":"la';
         expect(parseJson<Reviewish>(truncated, isReviewish)).toEqual({
             suggestions: [
@@ -71,7 +71,7 @@ describe('parseJson', () => {
     });
 
     it('throws when no validator-complete element can be salvaged', () => {
-        // The first suggestion is cut off before its required fields, so nothing validates.
+
         expect(() => parseJson<Reviewish>('{"suggestions":[{"id":"a","act', isReviewish)).toThrow(/AI JSON parse error:/);
     });
     it('limits repair validation attempts for payloads with many boundaries', () => {

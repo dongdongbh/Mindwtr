@@ -1,4 +1,4 @@
-/** The native Mind Sweep reads and their durable Inbox writes. */
+
 import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { logInfo } from './logger';
 import { MIND_SWEEP_GROUPS, getMindSweepGroups, type MindSweepScope } from './mind-sweep';
@@ -22,12 +22,12 @@ import type { AppSettings, Area, Task } from './types';
 
 export type NativeMindSweepView = Omit<MindSweepView, 'group'> & {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Covers the language, the day and minute, and the state, draft and failure sent. */
+
     revision: string;
-    /** The scope and step as read. The host keeps its captures and sends them back in `state`. */
+
     state: Pick<MindSweepState, 'scope' | 'step'>;
     group: (Omit<NonNullable<MindSweepView['group']>, 'captured'> & {
-        /** `items` is the requested window of this cue list's captures. */
+
         captured: { label: string; total: number; items: string[] } | null;
     }) | null;
 };
@@ -37,7 +37,7 @@ type MindSweepDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     t: () => Translate;
-    /** Data plus display revision: the language and the minute. */
+
     revision: (now: Date) => string;
 };
 
@@ -86,7 +86,7 @@ const request = (value: unknown): NativeMindSweepRequest | null => record(value)
     && typeof value.title === 'string' && value.title.length <= MAX_PREPARED_TITLE && Boolean(value.title.trim())
     ? { requestId: value.requestId, title: value.title } : null;
 
-/** The host's screen state, completed from the first screen's; null when the screen cannot be in it. */
+
 function readState(value: unknown): MindSweepState | null {
     if (value === undefined) return INITIAL_MIND_SWEEP_STATE;
     if (!isObjectRecord(value) || Object.keys(value).some((key) => !STATE_KEYS.has(key))) return null;
@@ -106,11 +106,7 @@ function readState(value: unknown): MindSweepState | null {
     return { scope: scope as MindSweepState['scope'], step: step as number, captured: captured as Record<string, string[]> };
 }
 
-/**
- * Only these factory dependencies influence an unstarred, unprojected Inbox row. The
- * reminder default is read back from the frozen row: a new row inherits it, so its
- * suppression flag records it, and the journal keeps its version-1 shape.
- */
+
 const derive = (input: NativeMindSweepRequest, preparedAt: string, deviceId: string, defaultAreaId: string | null,
     suppressMindwtrReminders: unknown) => {
     const settings = { gtd: defaultAreaId ? { defaultAreaMode: 'fixed', defaultAreaId } : { defaultAreaMode: 'none' },
@@ -124,7 +120,7 @@ const derive = (input: NativeMindSweepRequest, preparedAt: string, deviceId: str
     });
 };
 
-/** Pure journal authority, including terminal-success cleanup before SQLite opens. */
+
 export const validatePreparedMindSweepAdd = (input: unknown): NativeHostResult<NativeMindSweepResult> => {
     try {
         if (!record(input) || !exact(input, ['request', 'prepared']) || !record(input.prepared)) {
@@ -170,7 +166,7 @@ export function createMindSweepMethods(deps: MindSweepDeps) {
     });
 
     return {
-        /** The Android Mind Sweep screen for the host's state, draft and last add. */
+
         getMindSweep(input: {
             state?: Partial<MindSweepState>;
             draft?: string;
@@ -211,7 +207,7 @@ export function createMindSweepMethods(deps: MindSweepDeps) {
             } };
         },
 
-        /** Android's receipt-based add; the request UUID is also the created task ID. */
+
         async addMindSweepItem(input: { requestId: string; title: string }): Promise<NativeHostResult<{ id: string; title: string }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -237,7 +233,7 @@ export function createMindSweepMethods(deps: MindSweepDeps) {
             });
         },
 
-        /** iOS's static guide; Swift owns the open screen state. */
+
         getMindSweepGuide(input: { scope: MindSweepScope }): NativeHostResult<NativeMindSweepGuide> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -320,7 +316,7 @@ export function createMindSweepMethods(deps: MindSweepDeps) {
             if (!saved.ok) return saved;
             try { logInfo('Native iOS Mind Sweep task saved', { scope: 'native-host', category: 'storage',
                 context: { releaseCheck: 'v1.3.3/native-ios-mind-sweep', outcome: receipt ? 'replayed' : 'applied' } }); }
-            catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            catch {                                                               }
             return authority;
         },
     };

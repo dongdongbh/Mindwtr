@@ -1,7 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -36,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -59,6 +60,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -67,7 +69,7 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import java.util.UUID
 
-/** RN's step icons (useReviewModalController STEP_ICONS), by core's step id. */
+
 private fun stepIcon(id: String): ImageVector = when (id) {
     "inbox" -> Lucide.Inbox
     "stale" -> Lucide.History
@@ -79,13 +81,7 @@ private fun stepIcon(id: String): ImageVector = when (id) {
     else -> Lucide.CheckCircle2
 }
 
-/**
- * RN's Weekly Review (components/review-modal.tsx) on core's getWeeklyReview, getWeeklyReviewList and runReviewAction: the
- * header (Close, core's step icon and title, core's "n/m"), core's progress, core's step rail, core's step content (Inbox with
- * Process Inbox; stale tasks and projects; the calendar's task dates; Waiting and Someday with their not-yet-due group;
- * contexts with their tasks; projects with Add task and the expanded project's rows; the summary), RN's toast, and Back and
- * Next (or Finish) at core's checkpoints. The step is core's checkpoint, kept on the device under core's key.
- */
+
 @Composable
 fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
     val theme = LocalTheme.current
@@ -93,7 +89,16 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
     val shown = page
     val view = shown?.view
     val labels = view?.optJSONObject("labels")
-    Column(Modifier.fillMaxSize().background(c.bg).testTag("weekly-review")) {
+    DisposableEffect(Unit) {
+        onDispose {
+            if (screen != MenuScreen.Weekly) {
+                editOwn("weekly") { remove("keepProjectsStep") }
+                model.projectDetails.dismissReviewCompletion()
+            }
+        }
+    }
+    val covered = dialog?.optString("kind") == WEEKLY_COMPLETE_DIALOG
+    Column(Modifier.fillMaxSize().background(c.bg).then(if (covered) Modifier.clearAndSetSemantics { testTag = "weekly-review" } else Modifier.testTag("weekly-review"))) {
         val current = view?.optJSONObject("step")
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             val close = labels?.optString("closeLabel") ?: t("common.close")
@@ -115,7 +120,7 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
         view?.let { StepRail(it) }
         model.error?.let { message ->
             FailureBanner(message) {
-                if (model.failedAction == null) TextButton(onClick = { retryRead() }, enabled = !model.busy, modifier = Modifier.testTag("read-retry")) { Text(t("common.retry")) }
+                if (model.failedAction == null) RetryButton({ retryRead() }, !model.busy, "read-retry")
                 else OwedRetry(model)
             }
         }
@@ -131,15 +136,15 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
             horizontalArrangement = Arrangement.SpaceBetween) {
             val finish = view.optJSONObject("finish")
             if (finish != null) {
-                // RN's share card is not built: its button keeps RN's look, drawn disabled.
+
                 val shape = RoundedCornerShape(12.dp)
-                Row(Modifier.fade(0.45f).padding(end = 12.dp).weight(1f, fill = false).heightIn(min = 48.dp).clip(shape).border(1.dp, c.border, shape)
+                Row(Modifier.fade(0.45f).padding(end = 12.dp).weight(1f, fill = false).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.border, shape)
                     .semantics { contentDescription = finish.getString("shareLabel"); disabled() }.padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Lucide.Share2, null, tint = c.text, modifier = Modifier.size(18.dp))
                     Text(finish.getString("shareLabel"), style = rnText(15, 600), color = c.text, textAlign = TextAlign.Center, maxLines = 2)
                 }
-                // RN's handleFinish: the review closes, then the store review prompt's gate (AboutSettings.kt).
+
                 val activity = androidx.activity.compose.LocalActivity.current
                 PrimaryButton(finish.getString("label"), Modifier.weight(1f), model.failedAction == null) {
                     finishReview()
@@ -161,11 +166,11 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** A 1 dp rule, as RN's borderBottomWidth: 1 under the review header and above its footer. */
+
 @Composable
 fun Rule() = Box(Modifier.fillMaxWidth().height(1.dp).background(LocalTheme.current.colors.border))
 
-/** RN's filled review button (the filled call-to-action colors): Next, Finish, Add. */
+
 @Composable
 fun PrimaryButton(label: String, modifier: Modifier, enabled: Boolean, description: String = label, onClick: () -> Unit) {
     val theme = LocalTheme.current
@@ -175,7 +180,7 @@ fun PrimaryButton(label: String, modifier: Modifier, enabled: Boolean, descripti
     }
 }
 
-/** RN's step rail: core's steps as pills, the current one in the tint wash, a finished one green with a check. */
+
 @Composable
 private fun StepRail(view: JSONObject) {
     val theme = LocalTheme.current
@@ -188,7 +193,7 @@ private fun StepRail(view: JSONObject) {
             val number = step.getInt("number")
             Row(Modifier.widthIn(min = 104.dp, max = 148.dp).height(32.dp).clip(CircleShape)
                 .background(if (current) theme.railCurrent else if (complete) theme.railDone else c.filterBg)
-                .border(1.dp, if (current) c.tint else if (complete) theme.railDoneBorder else c.border, CircleShape).padding(horizontal = 8.dp),
+                .rnBorder(1.dp, if (current) c.tint else if (complete) theme.railDoneBorder else c.border, CircleShape).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(18.dp).clip(CircleShape).background(if (current) c.tint else c.cardBg), contentAlignment = Alignment.Center) {
                     if (complete) Icon(Lucide.CheckCircle2, null, tint = c.text, modifier = Modifier.size(12.dp))
@@ -201,10 +206,7 @@ private fun StepRail(view: JSONObject) {
     Rule()
 }
 
-/**
- * RN's AI analysis on the stale step (review-modal.tsx): Run analysis ("Analyzing..." while it runs), core's error line or RN's
- * empty line, each suggestion with RN's checkbox (an actionable one toggles), and Apply selected (n) through runReviewAction.
- */
+
 @Composable
 private fun ReviewAnalysisCard(model: InboxViewModel, labels: JSONObject) {
     val c = LocalTheme.current.colors
@@ -216,7 +218,7 @@ private fun ReviewAnalysisCard(model: InboxViewModel, labels: JSONObject) {
             Icon(Lucide.Sparkles, null, tint = c.text, modifier = Modifier.size(18.dp))
             Text(labels.getString("aiDesc"), style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.weight(1f))
         }
-        // RN's button keeps its look while it runs; a second tap does nothing.
+
         PrimaryButton(labels.getString(if (running) "aiRunning" else "aiRun"), Modifier.padding(top = 12.dp).fillMaxWidth().testTag("review-ai-run"), true) { ai.runAnalysis() }
         analysis.error?.let { Text(it, style = rnText(14, 400), color = c.danger, modifier = Modifier.padding(top = 12.dp, bottom = 16.dp).testTag("review-ai-error")) }
         if (analysis.ran && !running && analysis.suggestions.isEmpty() && analysis.error == null) {
@@ -228,12 +230,12 @@ private fun ReviewAnalysisCard(model: InboxViewModel, labels: JSONObject) {
             val selected = id in analysis.selected
             val title = suggestion.getString("title")
             val shape = RoundedCornerShape(10.dp)
-            Row(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            Row(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                 .clickable(enabled = actionable, role = Role.Checkbox) { ai.toggleSuggestion(id) }
                 .semantics { contentDescription = title; this.selected = selected }.testTag("review-ai-suggestion").padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val box = RoundedCornerShape(4.dp)
-                Box(Modifier.padding(top = 2.dp).size(18.dp).clip(box).then(if (selected) Modifier.background(c.tint) else Modifier).border(1.dp, c.border, box),
+                Box(Modifier.padding(top = 2.dp).size(18.dp).clip(box).then(if (selected) Modifier.background(c.tint) else Modifier).rnBorder(1.dp, c.border, box),
                     contentAlignment = Alignment.Center) {
                     if (selected) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(12.dp))
                 }
@@ -250,7 +252,7 @@ private fun ReviewAnalysisCard(model: InboxViewModel, labels: JSONObject) {
     }
 }
 
-/** RN's step heading: the step's icon at 22 and core's heading at 24 bold, then core's hint. */
+
 private fun LazyListScope.stepHeading(icon: ImageVector, title: String, hint: String?) = item(key = "heading") {
     val c = LocalTheme.current.colors
     Column {
@@ -262,7 +264,7 @@ private fun LazyListScope.stepHeading(icon: ImageVector, title: String, hint: St
     }
 }
 
-/** A row of the review: RN's task row, with core's status action, Delete and its Undo (runReviewAction). */
+
 @Composable
 private fun ReviewRow(model: InboxViewModel, row: TaskRow) = with(model.menu) {
     TaskRowItem(model, row, status = RowStatus.Badge, actions = RowActions(
@@ -271,7 +273,7 @@ private fun ReviewRow(model: InboxViewModel, row: TaskRow) = with(model.menu) {
     ))
 }
 
-/** A step's empty line, RN's emptyState: centered, 16, the secondary text color. */
+
 private fun LazyListScope.emptyLine(text: String, icon: ImageVector? = null) = item(key = "empty") {
     val c = LocalTheme.current.colors
     Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -280,7 +282,7 @@ private fun LazyListScope.emptyLine(text: String, icon: ImageVector? = null) = i
     }
 }
 
-/** Core's content for the step on screen, drawn as RN's renderStepContent draws it. */
+
 @OptIn(ExperimentalLayoutApi::class)
 private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, labels: JSONObject) {
     val menu = model.menu
@@ -312,7 +314,8 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
         }
         "stale" -> {
             stepHeading(Lucide.History, labels.getString("stale"), labels.getString("staleDesc"))
-            rows(shown.items)
+
+            projectEntries(model, shown.items, labels)
             val projects = shown.collection("staleProjects")
             items(projects, key = { "stale:${it.getString("id")}" }) { project -> InfoCard(project.getString("title"), project.getString("daysLabel")) }
             if (projects.size < shown.collectionTotal("staleProjects")) item(key = "stale-more") { MoreChip(menu.idle) { menu.loadCollection("staleProjects") } }
@@ -324,7 +327,7 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
                 val c = LocalTheme.current.colors
                 Column {
                     val shape = RoundedCornerShape(8.dp)
-                    Text(labels.getString("addTask"), style = rnText(13, 600), color = c.text, modifier = Modifier.padding(bottom = 10.dp).clip(shape).border(1.dp, c.border, shape)
+                    Text(labels.getString("addTask"), style = rnText(13, 600), color = c.text, modifier = Modifier.padding(bottom = 10.dp).clip(shape).rnBorder(1.dp, c.border, shape)
                         .clickable(enabled = menu.idle, role = Role.Button) { model.openCapture() }.padding(horizontal = 10.dp, vertical = 6.dp))
                     Text(labels.getString("calendarDesc"), style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.padding(bottom = 16.dp))
                     CalendarColumn(labels.getString("calendarUpcoming")) {
@@ -345,7 +348,7 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
             stepHeading(if (waiting) Lucide.Clock else Lucide.Lightbulb, labels.getString(if (waiting) "waitingDesc" else "somedayDesc"),
                 labels.getString(if (waiting) "waitingGuide" else "somedayGuide"))
             content.menuText("empty")?.let { emptyLine(it) }
-            // Core lists the rows due now first, then the not-yet-due ones it flags `scheduled`.
+
             val split = shown.items.indexOfFirst { it.json.optBoolean("scheduled") }.takeIf { it >= 0 } ?: shown.items.size
             val later = shown.items.subList(split, shown.items.size)
             rows(shown.items.subList(0, split))
@@ -372,39 +375,36 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
         "projects" -> {
             stepHeading(Lucide.FolderOpen, labels.getString("projectsDesc"), labels.getString("projectsGuide"))
             content.menuText("empty")?.let { emptyLine(it) }
-            items(shown.items, key = { it.key }) { item ->
-                val row = item.row
-                if (row != null) ExpandedTask { ReviewRow(model, row) } else ProjectCard(model, item.json, labels)
-            }
+            projectEntries(model, shown.items, labels)
         }
         else -> item(key = "completed") { CompletedStep(model, content, labels) }
     }
 }
 
-/** RN's small bordered card (a stale project, a calendar task): the title at 14/600 and core's second line. */
+
 @Composable
 private fun InfoCard(title: String, meta: String) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, style = rnText(14, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(meta, style = rnText(12, 400), color = c.secondaryText)
     }
 }
 
-/** RN's calendar column card: core's heading in capitals, then its lines. */
+
 @Composable
 private fun CalendarColumn(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Column(modifier.fillMaxWidth().heightIn(min = 140.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp),
+    Column(modifier.fillMaxWidth().heightIn(min = 140.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText)
         content()
     }
 }
 
-/** One external calendar day (core's day card), its first events and core's "+N more" to fold the rest in and out. */
+
 @Composable
 private fun DayCard(menu: MenuModel, day: JSONObject, labels: JSONObject) {
     val c = LocalTheme.current.colors
@@ -412,7 +412,7 @@ private fun DayCard(menu: MenuModel, day: JSONObject, labels: JSONObject) {
     val open = menu.own("weekly").optJSONObject("days")?.optBoolean(key) == true
     val events = day.getJSONObject("events").menuObjects("items")
     val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(day.getString("title"), style = rnText(12, 700), color = c.secondaryText)
         for (event in if (open) events else events.take(day.getInt("previewCount"))) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -427,7 +427,7 @@ private fun DayCard(menu: MenuModel, day: JSONObject, labels: JSONObject) {
     }
 }
 
-/** RN's context card: the context and core's task count, its first tasks (all while open, More for core's next window), and core's more/less. */
+
 @Composable
 private fun ContextCard(model: InboxViewModel, shown: MenuPage, card: JSONObject, preview: Int, labels: JSONObject) {
     val menu = model.menu
@@ -437,7 +437,7 @@ private fun ContextCard(model: InboxViewModel, shown: MenuPage, card: JSONObject
     val open = menu.own("weekly").optJSONObject("contexts")?.optBoolean(context) == true
     val tasks = shown.collection(name)
     val shape = RoundedCornerShape(10.dp)
-    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)) {
+    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween) {
             Text(context, style = rnText(14, 700), color = c.text)
@@ -445,7 +445,7 @@ private fun ContextCard(model: InboxViewModel, shown: MenuPage, card: JSONObject
         }
         for (task in if (open) tasks else tasks.take(preview)) {
             Text(task.getString("title"), style = rnText(13, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().hairline(c.border, top = true).clickable(enabled = menu.idle, role = Role.Button) { model.openEditor(task.getString("id")) }
+                modifier = Modifier.fillMaxWidth().rnBorderTop(c.border).clickable(enabled = menu.idle, role = Role.Button) { model.openEditor(task.getString("id")) }
                     .padding(horizontal = 10.dp, vertical = 8.dp))
         }
         if (open && tasks.size < shown.collectionTotal(name)) Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) { MoreChip(menu.idle) { menu.loadCollection(name) } }
@@ -457,7 +457,7 @@ private fun ContextCard(model: InboxViewModel, shown: MenuPage, card: JSONObject
     }
 }
 
-/** RN's project card: core's area dot, title, Add task, core's badge and count, and the fold glyph; a tap expands it (core's expanded project). */
+
 @Composable
 private fun ProjectCard(model: InboxViewModel, project: JSONObject, labels: JSONObject) {
     val menu = model.menu
@@ -466,13 +466,13 @@ private fun ProjectCard(model: InboxViewModel, project: JSONObject, labels: JSON
     val title = project.getString("title")
     val expanded = project.getBoolean("expanded")
     val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = menu.idle, role = Role.Button) { menu.expandProject(id) }.semantics { contentDescription = title }.padding(12.dp)) {
         Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(coreColorOrNull(project.menuText("areaColor")) ?: c.tint))
+            Box(Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(project.menuText("areaColor")) ?: c.tint))
             Text(title, style = rnText(16, 600), color = c.text, modifier = Modifier.weight(1f))
             val small = RoundedCornerShape(8.dp)
-            Text(labels.getString("addTask"), style = rnText(12, 600), color = c.text, modifier = Modifier.padding(end = 8.dp).clip(small).border(1.dp, c.border, small)
+            Text(labels.getString("addTask"), style = rnText(12, 600), color = c.text, modifier = Modifier.padding(end = 8.dp).clip(small).rnBorder(1.dp, c.border, small)
                 .clickable(enabled = menu.idle, role = Role.Button) { menu.openProjectTask(id, title) }.padding(horizontal = 8.dp, vertical = 4.dp))
             val badge = project.getJSONObject("badge")
             Text(badge.getString("label"), style = rnText(12, 500), color = coreColorOrNull(badge.getString("color")) ?: c.text,
@@ -485,7 +485,88 @@ private fun ProjectCard(model: InboxViewModel, project: JSONObject, labels: JSON
     }
 }
 
-/** The expanded project's rows: indented, with RN's blue rule on their left. */
+
+private fun LazyListScope.projectEntries(model: InboxViewModel, list: List<MenuItem>, labels: JSONObject) {
+    var open: JSONObject? = null
+    list.forEachIndexed { index, entry ->
+        val row = entry.row
+        val id = open?.getString("id")
+        if (entry.type == "later") {
+            item(key = "later:${entry.key}") { ReviewLater(model, entry.json, "weekly") }
+        } else if (row == null) {
+            open = entry.json.takeIf { it.getBoolean("expanded") }
+            item(key = entry.key) { ProjectCard(model, entry.json, labels) }
+        } else if (id != null && entry.json.menuText("projectId") == id) {
+            item(key = "$id:${entry.key}") { ExpandedTask { ReviewRow(model, row) } }
+        } else item(key = entry.key) { ReviewRow(model, row) }
+
+        val card = open ?: return@forEachIndexed
+        val next = list.getOrNull(index + 1)
+        if (next != null && (next.row != null || next.type == "later") && next.json.menuText("projectId") == card.getString("id")) return@forEachIndexed
+        item(key = "open:${card.getString("id")}") {
+            ExpandedTask { Column(Modifier.padding(bottom = 8.dp)) { OpenProjectLink(model, card); CompleteProjectLink(model, card) } }
+        }
+        open = null
+    }
+}
+
+
+@Composable
+private fun OpenProjectLink(model: InboxViewModel, project: JSONObject) {
+    val menu = model.menu
+    val c = LocalTheme.current.colors
+    val label = project.getString("openLabel")
+    Row(Modifier.clickable(enabled = menu.idle, role = Role.Button) { menu.openProjects(project.getString("id")) }
+        .semantics { contentDescription = label }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Lucide.FolderOpen, null, tint = c.tint, modifier = Modifier.size(14.dp))
+        Text(label, style = rnText(13, 600), color = c.tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+
+@Composable
+private fun CompleteProjectLink(model: InboxViewModel, project: JSONObject) {
+    val menu = model.menu
+    val c = LocalTheme.current.colors
+    val id = project.getString("id")
+    val label = t("projects.complete")
+    Row(Modifier.fade(if (menu.idle) 1f else 0.5f).clickable(enabled = menu.idle, role = Role.Button) {
+        model.projectDetails.askCompleteFromReview(id)
+    }.semantics { contentDescription = label }.testTag("review-complete-project-$id").padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Lucide.CheckCircle2, null, tint = c.tint, modifier = Modifier.size(14.dp))
+        Text(label, style = rnText(13, 600), color = c.tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+
+internal const val WEEKLY_COMPLETE_DIALOG = "weeklyComplete"
+
+
+@Composable
+fun WeeklyProjectCompletePrompt(model: InboxViewModel, completion: JSONObject) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val details = model.projectDetails
+    val enabled = model.menu.idle
+    BackHandler { details.dismissReviewCompletion() }
+    Box(Modifier.fillMaxSize().background(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(12.dp)
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp).testTag("review-complete-project-prompt")) {
+            Text(completion.getString("title"), style = rnText(18, 700), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() })
+            Text(completion.getString("confirm"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
+            Row(Modifier.padding(top = 14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                PromptButton(t("common.cancel"), c.text, enabled, filled = false) { details.dismissReviewCompletion() }
+                PromptButton(t("projects.complete"), theme.filledText, enabled, filled = true) { details.completeFromReview(completion.getString("projectId")) }
+            }
+        }
+    }
+}
+
+
 @Composable
 private fun ExpandedTask(content: @Composable () -> Unit) {
     val theme = LocalTheme.current
@@ -493,7 +574,7 @@ private fun ExpandedTask(content: @Composable () -> Unit) {
         .padding(start = 10.dp)) { content() }
 }
 
-/** RN's last step: the party popper, core's heading and words, this week's look-back and core's checks, and the Mind Sweep nudge. */
+
 @Composable
 private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JSONObject) {
     val c = LocalTheme.current.colors
@@ -503,9 +584,9 @@ private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JS
         Text(labels.getString("completeDesc"), style = rnText(16, 400), color = c.secondaryText, textAlign = TextAlign.Center,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 32.dp))
         val shape = RoundedCornerShape(10.dp)
-        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(shape).border(1.dp, c.border, shape).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             content.optJSONObject("week")?.let { week ->
-                Column(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(week.getString("heading"), style = rnText(14, 600), color = c.secondaryText)
                     val rows = week.getJSONArray("rows")
                     for (index in 0 until rows.length()) SummaryRow(true, rows.getString(index))
@@ -514,7 +595,7 @@ private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JS
             for (check in content.menuObjects("checks")) SummaryRow(check.getBoolean("good"), check.getString("text"))
         }
         val card = RoundedCornerShape(12.dp)
-        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(card).background(c.cardBg).border(1.dp, c.border, card).padding(12.dp),
+        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(card).background(c.cardBg).rnBorder(1.dp, c.border, card).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(labels.getString("mindSweepTitle"), style = rnText(15, 700), color = c.text)
@@ -535,12 +616,12 @@ private fun SummaryRow(good: Boolean, text: String) {
     }
 }
 
-/** RN's Mind Sweep button (the Inbox step's link, the summary's bordered pill): it opens RN's Mind Sweep over the review. */
+
 @Composable
 private fun MindSweepLink(label: String, bordered: Boolean = false, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(18.dp)
-    Row(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = if (bordered) 36.dp else 44.dp).then(if (bordered) Modifier.clip(shape).border(1.dp, c.tint, shape) else Modifier)
+    Row(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = if (bordered) 36.dp else 44.dp).then(if (bordered) Modifier.clip(shape).rnBorder(1.dp, c.tint, shape) else Modifier)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).then(if (bordered) Modifier.padding(horizontal = 12.dp) else Modifier), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (bordered) 6.dp else 8.dp)) {
         Icon(Lucide.Brain, null, tint = c.tint, modifier = Modifier.size(if (bordered) 16.dp else 18.dp))
@@ -549,11 +630,7 @@ private fun MindSweepLink(label: String, bordered: Boolean = false, enabled: Boo
     }
 }
 
-/**
- * RN's project Add task prompt: core's Add task title, the project, the field with core's placeholder, and Cancel, Save & edit
- * and Add. Save sends core's addProjectTask with a request UUID that becomes the task's id, on disk before the call; while its
- * retry is owed the field is locked and Add (or Save & edit) sends it again.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu) {
@@ -567,7 +644,7 @@ fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu
     Box(Modifier.fillMaxSize().background(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.imePadding().padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) {
             Text(labels.getString("addTask"), style = rnText(18, 700), color = c.text, modifier = Modifier.semantics { heading() })
             Text(open.getString("title"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
             val focus = remember { FocusRequester() }
@@ -579,7 +656,7 @@ fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu
                 modifier = Modifier.padding(top = 12.dp).fillMaxWidth().focusRequester(focus).semantics { contentDescription = labels.getString("addTaskPlaceholder") }
                     .testTag("menu-dialog-field"),
                 decorationBox = { inner ->
-                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).border(1.dp, c.border, field).padding(10.dp), contentAlignment = Alignment.CenterStart) {
+                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).rnBorder(1.dp, c.border, field).padding(10.dp), contentAlignment = Alignment.CenterStart) {
                         if (text.isEmpty()) Text(labels.getString("addTaskPlaceholder"), style = rnText(15, 400), color = c.secondaryText)
                         inner()
                     }
@@ -598,19 +675,19 @@ private fun PromptButton(label: String, color: Color, enabled: Boolean, filled: 
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(8.dp)
     Text(label, style = rnText(14, 600), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(shape)
-        .then(if (filled) Modifier.background(theme.filledBg) else Modifier.border(1.dp, theme.colors.border, shape))
+        .then(if (filled) Modifier.background(theme.filledBg) else Modifier.rnBorder(1.dp, theme.colors.border, shape))
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }
         .padding(horizontal = 12.dp, vertical = 12.dp))
 }
 
-/** A review step: core's checkpoint for Back or Next, kept under core's key, then read from its first window. */
+
 internal fun MenuModel.step(checkpoint: String) {
     val key = page?.view?.optString("storageKey")?.ifEmpty { null } ?: return
     prefs.edit().putString(key, checkpoint).apply()
     reload(fresh = true)
 }
 
-/** Finish: core's lastReviewAt under its key (the Weekly Review), the checkpoint deleted, and the review closes, as RN's handleFinish. */
+
 internal fun MenuModel.finishReview() {
     val view = page?.view ?: return
     view.optJSONObject("finish")?.let { finish -> finish.menuText("lastReviewKey")?.let { prefs.edit().putString(it, finish.getString("lastReviewAt")).apply() } }
@@ -618,12 +695,12 @@ internal fun MenuModel.finishReview() {
     closeScreen()
 }
 
-/** RN's toggleExpandedProject: core's expanded project (one at a time), read again. */
+
 internal fun MenuModel.expandProject(id: String) {
     editOwn("weekly") { put("expandedProjectId", if (optString("expandedProjectId") == id) JSONObject.NULL else id) }
     reload()
 }
 
-/** RN's project Add task prompt, with a new request UUID for the task it creates. */
+
 internal fun MenuModel.openProjectTask(projectId: String, title: String) = keepDialog(JSONObject().put("kind", "projectTask").put("projectId", projectId)
     .put("title", title).put("text", "").put("requestId", UUID.randomUUID().toString()))

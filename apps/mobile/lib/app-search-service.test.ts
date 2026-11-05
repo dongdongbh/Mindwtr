@@ -21,8 +21,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     return {
         ...actual,
         useTaskStore: useTaskStoreMock,
-        // The real helper just tags the listener for the notify profiler; identity
-        // passthrough is all this suite needs.
+
+
         nameNotifyListener: (_name: string, listener: Listener) => listener,
     };
 });
@@ -173,7 +173,7 @@ describe('app-search-service', () => {
         readAppSearchIndexingEnabled.mockResolvedValue(true);
         await syncAppSearchIndexingWithPreference();
         expect(isAppSearchIndexingArmed()).toBe(true);
-        expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(1); // seeding full reindex
+        expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(1);
     });
 
     it('enableAppSearchIndexing arms normally when the preference is still on', async () => {
@@ -189,21 +189,20 @@ describe('app-search-service', () => {
         }));
 
         const enabling = enableAppSearchIndexing();
-        await flush(); // let runFullAppSearchReindex's wipe resolve and reach the upsert call
-        // The toggle-off handler flips the persisted preference while the
-        // reindex's upsert is still in flight.
+        await flush();
+
+
         readAppSearchIndexingEnabled.mockResolvedValue(false);
         resolveUpsert();
         await enabling;
 
         expect(isAppSearchIndexingArmed()).toBe(false);
-        // Once from runFullAppSearchReindex's own wipe, once more from the
-        // post-reindex re-check that undoes the upserts it just sent.
+
+
         expect(wipeAppSearchIndexNative).toHaveBeenCalledTimes(2);
     });
 
-    // A toggle-off whose wipe failed (or never ran: the app died) left titles in Android search for good, since the next
-    // start saw the switch off and did nothing. The owed wipe now runs then, and is cleared only once it lands.
+
     it('finishes an owed wipe at the next start, and keeps it owed until a wipe lands', async () => {
         wipeAppSearchIndexNative.mockRejectedValueOnce(new Error('boom'));
         await wipeAppSearchIndex();
@@ -217,15 +216,14 @@ describe('app-search-service', () => {
         expect(clearAppSearchWipeOwed).toHaveBeenCalledTimes(1);
         expect(isAppSearchIndexingArmed()).toBe(false);
 
-        // Nothing owed, switch off: a start does no native work at all.
+
         readAppSearchWipeOwed.mockResolvedValue(false);
         wipeAppSearchIndexNative.mockClear();
         await syncAppSearchIndexingWithPreference();
         expect(wipeAppSearchIndexNative).not.toHaveBeenCalled();
     });
 
-    // A toggle-off can land during a reindex, and the reindex's upsert lands after its wipe: a reindex never settles an
-    // owed wipe (a stale one while the switch is on is harmless; turning it off sets it again).
+
     it('a full reindex (switch on) leaves an owed wipe owed', async () => {
         readAppSearchWipeOwed.mockResolvedValue(true);
         await syncAppSearchIndexingWithPreference();
@@ -245,8 +243,8 @@ describe('app-search-service', () => {
 
     it('still runs removals when the upsert in the same batch fails (#1017 correction)', async () => {
         armAppSearchIndexing();
-        // Seed with two tasks so the next batch carries one upsert (title
-        // change) and one removal (task disappeared) together.
+
+
         storeState.tasks = [task(), task({ id: 't2', title: 'Other' })];
         listeners[0](storeState, { ...storeState, tasks: [] });
         await vi.advanceTimersByTimeAsync(2_000);
@@ -256,7 +254,7 @@ describe('app-search-service', () => {
 
         upsertAppSearchDocuments.mockRejectedValueOnce(new Error('boom'));
         const prevState = { ...storeState };
-        storeState.tasks = [task({ title: 'Buy oat milk' })]; // t1 changes, t2 disappears
+        storeState.tasks = [task({ title: 'Buy oat milk' })];
         listeners[0](storeState, prevState);
         await vi.advanceTimersByTimeAsync(2_000);
         await flush();

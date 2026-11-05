@@ -1,11 +1,13 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ban } from 'lucide-react-native';
-import { areaOrderIdsForIntent, isManageAreaNameTaken, tFallback, type Area, type Project } from '@mindwtr/core';
+import { areaOrderIdsForIntent, sortAreasForOrderDisplay, isManageAreaNameTaken, flushPendingSave, runStoreCommand, useTaskStore, tFallback, type Area, type Project } from '@mindwtr/core';
 
 import { projectsScreenStyles as styles } from './projects-screen.styles';
-import { applyLiveProjectUpdate, getLiveMutableProject } from './project-meta-pickers';
+import { getLiveMutableProject } from './project-meta-pickers';
+import { logInfo } from '../../lib/app-log';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
+import { useEinkSafeColor } from '../../hooks/use-eink-safe-color';
 
 type ThemeColors = {
     border: string;
@@ -17,6 +19,7 @@ type ThemeColors = {
 };
 
 type ProjectAreaModalsProps = {
+    managerAreaId?: string | null;
     addArea: (name: string, options: { color: string }) => void | Promise<unknown>;
     areaListMaxHeight: number;
     areaManagerListMaxHeight: number;
@@ -26,7 +29,7 @@ type ProjectAreaModalsProps = {
     newAreaColor: string;
     newAreaName: string;
     onCloseAreaManager: () => void;
-    onDeleteArea: (id: string) => void;
+    onDeleteArea: (id: string) => unknown;
     onSetExpandedAreaColorId: React.Dispatch<React.SetStateAction<string | null>>;
     onSetNewAreaColor: React.Dispatch<React.SetStateAction<string>>;
     onSetNewAreaName: React.Dispatch<React.SetStateAction<string>>;
@@ -46,10 +49,11 @@ type ProjectAreaModalsProps = {
     t: (key: string) => string;
     tc: ThemeColors;
     updateArea: (id: string, updates: Partial<Area>) => void | Promise<unknown>;
-    updateProject: (id: string, updates: Partial<Project>) => void;
+    updateProject: (id: string, updates: Partial<Project>) => unknown;
 };
 
 export function ProjectAreaModals({
+    managerAreaId = null,
     addArea,
     areaListMaxHeight,
     areaManagerListMaxHeight,
@@ -82,26 +86,90 @@ export function ProjectAreaModals({
     updateProject,
 }: ProjectAreaModalsProps) {
     const keyboardInset = useAndroidKeyboardInset(showAreaManager);
-    // A live area has this name: adding it would create nothing, so Save is off and the line says why.
+    const einkSafe = useEinkSafeColor();
+    const [editingAreaId, setEditingAreaId] = React.useState<string | null>(null);
+    const [areaName, setAreaName] = React.useState('');
+    const [saving, setSaving] = React.useState(false);
+    const savingRef = React.useRef(false);
+    const pendingManager = React.useRef(false);
     const newAreaNameTaken = isManageAreaNameTaken('newArea', newAreaName, sortedAreas);
+    const areaNameTaken = isManageAreaNameTaken('newArea', areaName, sortedAreas.filter((area) => area.id !== editingAreaId));
+    React.useEffect(() => {
+        if (!showAreaManager) return;
+        const area = sortedAreas.find((area) => area.id === managerAreaId);
+        setEditingAreaId(area?.id ?? null);
+        setAreaName(area?.name ?? '');
+
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showAreaManager, managerAreaId]);
     const dismissProjectPickers = React.useCallback(() => {
         onSetShowAreaPicker(false);
         onSetShowAreaManager(false);
     }, [onSetShowAreaManager, onSetShowAreaPicker]);
-    const setProjectArea = React.useCallback((areaId?: string) => {
-        if (!selectedProject) {
-            dismissProjectPickers();
-            return false;
+    const saveChange = async (work: () => Promise<void>, failureLabel = 'common.error') => {
+        if (savingRef.current) return;
+        savingRef.current = true;
+        setSaving(true);
+        try {
+            await runStoreCommand(work);
+        } catch {
+            onShowToast({ title: t('common.error'), message: t(failureLabel), tone: 'error' });
+        } finally {
+            savingRef.current = false;
+            setSaving(false);
         }
-        return applyLiveProjectUpdate({
-            projectId: selectedProject.id,
-            updates: { areaId },
-            updateProject,
-            setSelectedProject: onSetSelectedProject,
-            onBlocked: dismissProjectPickers,
+    };
+    const checkOutcome = (result: unknown) => {
+        if (result && typeof result === 'object' && 'success' in result && result.success === false) {
+            throw new Error('Write rejected');
+        }
+    };
+    const setProjectArea = (areaId?: string) => saveChange(async () => {
+        const project = selectedProject && getLiveMutableProject(selectedProject.id);
+        if (!project) {
+            dismissProjectPickers();
+            return;
+        }
+        if (areaId && !useTaskStore.getState().areas.some((area) => area.id === areaId && !area.deletedAt)) {
+            throw new Error('Area no longer exists');
+        }
+        checkOutcome(await updateProject(project.id, { areaId }));
+        await flushPendingSave();
+        onSetSelectedProject({ ...project, areaId });
+        onSetShowAreaPicker(false);
+        void logInfo('Project management shortcut saved', {
+            scope: 'projects', force: true,
+            extra: { releaseCheck: 'v1.3.8/projects-management-shortcuts', outcome: 'moved' },
         });
-    }, [dismissProjectPickers, onSetSelectedProject, selectedProject, updateProject]);
-
+    }, 'projects.moveProjectFailed');
+    const renameArea = () => saveChange(async () => {
+        const name = areaName.trim();
+        const liveAreas = useTaskStore.getState().areas.filter((area) => !area.deletedAt);
+        const area = liveAreas.find((area) => area.id === editingAreaId);
+        if (!area || !name) throw new Error('Area no longer exists');
+        if (isManageAreaNameTaken('newArea', name, liveAreas.filter((other) => other.id !== area.id))) {
+            onShowToast({ title: t('common.notice'), message: tFallback(t, 'areas.nameExists', 'An area with this name already exists.'), tone: 'warning' });
+            return;
+        }
+        checkOutcome(await updateArea(area.id, { name }));
+        await flushPendingSave();
+        setEditingAreaId(null);
+        void logInfo('Project management shortcut saved', {
+            scope: 'projects', force: true,
+            extra: { releaseCheck: 'v1.3.8/projects-management-shortcuts', outcome: 'renamed' },
+        });
+    });
+    const openManagerFromPicker = () => {
+        if (!selectedProject || !getLiveMutableProject(selectedProject.id)) {
+            dismissProjectPickers();
+            return;
+        }
+        onSetNewAreaName('');
+        onSetNewAreaColor(colors[0] || '#3b82f6');
+        pendingManager.current = Platform.OS === 'ios';
+        onSetShowAreaPicker(false);
+        if (Platform.OS !== 'ios') onSetShowAreaManager(true);
+    };
     React.useEffect(() => {
         if (selectedProject?.status !== 'archived') return;
         dismissProjectPickers();
@@ -114,6 +182,11 @@ export function ProjectAreaModals({
                 transparent
                 animationType="fade"
                 presentationStyle={overlayModalPresentation}
+                onDismiss={() => {
+                    if (!pendingManager.current) return;
+                    pendingManager.current = false;
+                    onSetShowAreaManager(true);
+                }}
                 onRequestClose={() => onSetShowAreaPicker(false)}
             >
                 <Pressable style={styles.overlay} onPress={() => onSetShowAreaPicker(false)}>
@@ -124,25 +197,16 @@ export function ProjectAreaModals({
                         <Text style={[styles.linkModalTitle, { color: tc.text }]}>{t('projects.areaLabel')}</Text>
                         <TouchableOpacity
                             style={[styles.pickerRow, { borderColor: tc.border }]}
-                            onPress={() => {
-                                if (!selectedProject || !getLiveMutableProject(selectedProject.id)) {
-                                    dismissProjectPickers();
-                                    return;
-                                }
-                                onSetShowAreaPicker(false);
-                                onSetNewAreaName('');
-                                onSetNewAreaColor(colors[0] || '#3b82f6');
-                                onSetShowAreaManager(true);
-                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('projects.manageAreas')}
+                            onPress={openManagerFromPicker}
                         >
-                            <Text style={[styles.pickerRowText, { color: tc.secondaryText }]}>+ {t('projects.areaLabel')}</Text>
+                            <Text style={[styles.pickerRowText, { color: tc.secondaryText }]}>{t('projects.manageAreas')}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.pickerRow, { borderColor: tc.border }]}
-                            onPress={() => {
-                                if (!setProjectArea(undefined)) return;
-                                onSetShowAreaPicker(false);
-                            }}
+                            disabled={saving}
+                            onPress={() => { void setProjectArea(undefined); }}
                         >
                             <Text style={[styles.pickerRowText, { color: tc.text }]}>{t('projects.noArea')}</Text>
                         </TouchableOpacity>
@@ -150,13 +214,14 @@ export function ProjectAreaModals({
                             {sortedAreas.map((area) => (
                                 <TouchableOpacity
                                     key={area.id}
+                                    testID={`project-area-picker-${area.id}`}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={area.name}
                                     style={[styles.pickerRow, { borderColor: tc.border }]}
-                                    onPress={() => {
-                                        if (!setProjectArea(area.id)) return;
-                                        onSetShowAreaPicker(false);
-                                    }}
+                                    disabled={saving}
+                                    onPress={() => { void setProjectArea(area.id); }}
                                 >
-                                    <View style={[styles.areaDot, { backgroundColor: area.color || tc.tint }]} />
+                                    <View style={[styles.areaDot, { backgroundColor: einkSafe(area.color || tc.tint) }]} />
                                     <Text style={[styles.pickerRowText, { color: tc.text }]}>{area.name}</Text>
                                 </TouchableOpacity>
                             ))}
@@ -181,7 +246,7 @@ export function ProjectAreaModals({
                         onPress={(event) => event.stopPropagation()}
                     >
                         <View style={styles.areaManagerHeader}>
-                            <Text style={[styles.linkModalTitle, { color: tc.text }]}>{t('projects.areaLabel')}</Text>
+                            <Text style={[styles.linkModalTitle, { color: tc.text }]}>{t('projects.manageAreas')}</Text>
                             <View style={styles.areaSortButtons}>
                                 <TouchableOpacity onPress={sortAreasByName} style={[styles.areaSortButton, { borderColor: tc.border }]}>
                                     <Text style={[styles.areaSortText, { color: tc.secondaryText }]}>{t('projects.sortByName')}</Text>
@@ -201,31 +266,55 @@ export function ProjectAreaModals({
                                 nestedScrollEnabled
                             >
                                 {sortedAreas.map((area, index) => {
+                                    if (managerAreaId && area.id !== managerAreaId) return null;
                                     const inUse = (areaUsage.get(area.id) || 0) > 0;
                                     const isExpanded = expandedAreaColorId === area.id;
                                     return (
                                         <View key={area.id} style={styles.areaManagerItem}>
-                                            <View style={[styles.areaManagerRow, { borderColor: tc.border }]}>
-                                                <View style={styles.areaManagerInfo}>
-                                                    <View style={[styles.areaDot, { backgroundColor: area.color || tc.tint }]} />
-                                                    <Text style={[styles.areaManagerText, { color: tc.text }]}>{area.name}</Text>
-                                                </View>
-                                                <View style={styles.areaManagerActions}>
+                                            <View style={[styles.areaManagerRow, { borderColor: tc.border }, managerAreaId && { flexDirection: 'column', alignItems: 'stretch' }]}>
+                                                <TouchableOpacity
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={`${t('projects.renameArea')}: ${area.name}`}
+                                                    onPress={() => { setEditingAreaId(area.id); setAreaName(area.name); }}
+                                                    style={styles.areaManagerInfo}
+                                                >
+                                                    <View style={[styles.areaDot, { backgroundColor: einkSafe(area.color || tc.tint) }]} />
+                                                    <Text numberOfLines={1} style={[styles.areaManagerText, { color: tc.text }]}>{area.name}</Text>
+                                                </TouchableOpacity>
+                                                <View style={[styles.areaManagerActions, managerAreaId && { flexWrap: 'wrap' }]}>
                                                     <TouchableOpacity
                                                         accessibilityRole="button"
                                                         accessibilityLabel={`${t('projects.moveUp')}: ${area.name}`}
                                                         accessibilityState={{ disabled: index === 0 }}
                                                         disabled={index === 0}
                                                         onPress={() => {
-                                                            const ids = areaOrderIdsForIntent(sortedAreas,
-                                                                { kind: 'moveUp', areaId: area.id });
-                                                            if (ids) void reorderAreas(ids);
+                                                            void saveChange(async () => {
+                                                                const ids = areaOrderIdsForIntent(sortAreasForOrderDisplay(useTaskStore.getState().areas), { kind: 'moveUp', areaId: area.id });
+                                                                if (ids) { await reorderAreas(ids); await flushPendingSave(); }
+                                                            }, 'projects.areaReorderFailed');
                                                         }}
                                                         style={[styles.areaOrderButton, index === 0 && styles.areaOrderButtonDisabled]}
                                                     >
                                                         <Text style={[styles.areaOrderText, { color: tc.text }]}>↑</Text>
                                                     </TouchableOpacity>
+                                                    {managerAreaId ? <TouchableOpacity
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`${t('projects.moveDown')}: ${area.name}`}
+                                                        disabled={index === sortedAreas.length - 1 || saving}
+                                                        style={[styles.areaOrderButton, index === sortedAreas.length - 1 && styles.areaOrderButtonDisabled]}
+                                                        onPress={() => { void saveChange(async () => {
+                                                            const live = sortAreasForOrderDisplay(useTaskStore.getState().areas);
+                                                            const next = live[live.findIndex((entry) => entry.id === area.id) + 1];
+                                                            if (!live.some((entry) => entry.id === area.id) || !next) return;
+                                                            const ids = areaOrderIdsForIntent(live, { kind: 'moveUp', areaId: next.id });
+                                                            if (ids) { await reorderAreas(ids); await flushPendingSave(); }
+                                                        }, 'projects.areaReorderFailed'); }}
+                                                    >
+                                                        <Text style={[styles.areaOrderText, { color: tc.text }]}>↓</Text>
+                                                    </TouchableOpacity> : null}
                                                     <TouchableOpacity
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`${t('projects.changeColor')}: ${area.name}`}
                                                         onPress={() => onSetExpandedAreaColorId(isExpanded ? null : area.id)}
                                                         style={[styles.colorToggleButton, { borderColor: tc.border }]}
                                                     >
@@ -233,17 +322,18 @@ export function ProjectAreaModals({
                                                     </TouchableOpacity>
                                                     <TouchableOpacity
                                                         disabled={inUse}
-                                                        onPress={() => {
-                                                            if (inUse) {
-                                                                onShowToast({
-                                                                    title: tFallback(t, 'common.notice', 'Notice'),
-                                                                    message: tFallback(t, 'projects.areaInUse', 'Area has projects.'),
-                                                                    tone: 'warning',
-                                                                });
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={`${t('common.delete')}: ${area.name}`}
+                                                        onPress={() => { void saveChange(async () => {
+                                                            const live = useTaskStore.getState();
+                                                            if (live.projects.some((project) => !project.deletedAt && project.areaId === area.id)) {
+                                                                onShowToast({ title: t('common.notice'), message: tFallback(t, 'projects.areaInUse', 'Area has projects.'), tone: 'warning' });
                                                                 return;
                                                             }
-                                                            onDeleteArea(area.id);
-                                                        }}
+                                                            if (!live.areas.some((entry) => entry.id === area.id && !entry.deletedAt)) return;
+                                                            checkOutcome(await onDeleteArea(area.id));
+                                                            await flushPendingSave();
+                                                        }); }}
                                                         style={[styles.areaDeleteButton, inUse && styles.areaDeleteButtonDisabled]}
                                                     >
                                                         <Text style={[styles.areaDeleteText, { color: inUse ? tc.secondaryText : '#EF4444' }]}>
@@ -252,6 +342,32 @@ export function ProjectAreaModals({
                                                     </TouchableOpacity>
                                                 </View>
                                             </View>
+                                            {editingAreaId === area.id ? (
+                                                <View>
+                                                    <TextInput
+                                                        accessibilityLabel={t('projects.renameArea')}
+                                                        value={areaName}
+                                                        onChangeText={setAreaName}
+                                                        style={[styles.linkModalInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+                                                    />
+                                                    {areaNameTaken ? <Text style={[styles.linkModalHint, { color: '#EF4444' }]}>{tFallback(t, 'areas.nameExists', 'An area with this name already exists.')}</Text> : null}
+                                                    <View style={styles.linkModalButtons}>
+                                                        <TouchableOpacity style={styles.linkModalButton} onPress={() => setEditingAreaId(null)}>
+                                                            <Text style={[styles.linkModalButtonText, { color: tc.secondaryText }]}>{t('common.cancel')}</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity
+                                                            testID="area-rename-save"
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel={t('common.rename')}
+                                                            disabled={saving || !areaName.trim() || areaNameTaken}
+                                                            style={[styles.linkModalButton, (saving || !areaName.trim() || areaNameTaken) && styles.linkModalButtonDisabled]}
+                                                            onPress={() => { if (areaName.trim() && !areaNameTaken) void renameArea(); }}
+                                                        >
+                                                            <Text style={[styles.linkModalButtonText, { color: tc.tint }]}>{t('common.save')}</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                </View>
+                                            ) : null}
                                             {isExpanded ? (
                                                 <View style={styles.areaColorPickerRow}>
                                                     <TouchableOpacity
@@ -260,15 +376,16 @@ export function ProjectAreaModals({
                                                             styles.colorOption,
                                                             styles.colorOptionNone,
                                                             { borderColor: tc.border },
-                                                            // Not styles.colorOptionSelected (#000 border) — invisible
-                                                            // against this button's transparent fill in dark theme.
-                                                            // The color swatches below stay visible on #000 because
-                                                            // they have a solid fill; this one needs a theme token.
+
+
                                                             !area.color && { borderColor: tc.tint },
                                                         ]}
                                                         onPress={() => {
-                                                            void updateArea(area.id, { color: undefined });
-                                                            onSetExpandedAreaColorId(null);
+                                                            void saveChange(async () => {
+                                                                checkOutcome(await updateArea(area.id, { color: undefined }));
+                                                                await flushPendingSave();
+                                                                onSetExpandedAreaColorId(null);
+                                                            }, 'projects.colorSaveFailed');
                                                         }}
                                                     >
                                                         <Ban size={16} color={tc.secondaryText} />
@@ -282,8 +399,11 @@ export function ProjectAreaModals({
                                                                 (area.color || tc.tint) === color && styles.colorOptionSelected,
                                                             ]}
                                                             onPress={() => {
-                                                                void updateArea(area.id, { color });
-                                                                onSetExpandedAreaColorId(null);
+                                                                void saveChange(async () => {
+                                                                    checkOutcome(await updateArea(area.id, { color }));
+                                                                    await flushPendingSave();
+                                                                    onSetExpandedAreaColorId(null);
+                                                                }, 'projects.colorSaveFailed');
                                                             }}
                                                         />
                                                     ))}
@@ -294,6 +414,19 @@ export function ProjectAreaModals({
                                 })}
                             </ScrollView>
                         )}
+                        {managerAreaId ? (
+                            <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('areas.new')} style={styles.linkModalButton} onPress={() => {
+                                onCloseAreaManager();
+                                onSetNewAreaName('');
+                                onSetNewAreaColor(colors[0] || '#3b82f6');
+
+                                onSetShowAreaManager(true);
+                            }}>
+                                <Text style={[styles.linkModalButtonText, { color: tc.tint }]}>{t('areas.new')}</Text>
+                            </TouchableOpacity>
+                        ) : null}
+                        {!managerAreaId ? <>
+                        <Text style={[styles.helperText, { color: tc.secondaryText }]}>{t('areas.new')}</Text>
                         <TextInput
                             value={newAreaName}
                             onChangeText={onSetNewAreaName}
@@ -326,23 +459,23 @@ export function ProjectAreaModals({
                             <TouchableOpacity
                                 accessibilityRole="button"
                                 accessibilityLabel={t('common.save')}
-                                onPress={() => {
+                                onPress={() => { if (newAreaNameTaken) return; void saveChange(async () => {
                                     const name = newAreaName.trim();
-                                    if (!name || newAreaNameTaken) return;
-                                    if (selectedProject && !getLiveMutableProject(selectedProject.id)) {
-                                        dismissProjectPickers();
-                                        return;
-                                    }
-                                    void addArea(name, { color: newAreaColor });
+                                    const liveAreas = useTaskStore.getState().areas.filter((area) => !area.deletedAt);
+                                    if (!name || isManageAreaNameTaken('newArea', name, liveAreas)) return;
+                                    const created = await addArea(name, { color: newAreaColor });
+                                    if (created === null) throw new Error('Area creation failed');
+                                    await flushPendingSave();
                                     onCloseAreaManager();
                                     onSetNewAreaName('');
-                                }}
-                                disabled={!newAreaName.trim() || newAreaNameTaken}
-                                style={[styles.linkModalButton, (!newAreaName.trim() || newAreaNameTaken) && styles.linkModalButtonDisabled]}
+                                }, 'projects.createAreaFailed'); }}
+                                disabled={saving || !newAreaName.trim() || newAreaNameTaken}
+                                style={[styles.linkModalButton, (saving || !newAreaName.trim() || newAreaNameTaken) && styles.linkModalButtonDisabled]}
                             >
                                 <Text style={[styles.linkModalButtonText, { color: tc.tint }]}>{t('common.save')}</Text>
                             </TouchableOpacity>
                         </View>
+                        </> : null}
                     </Pressable>
                 </Pressable>
             </Modal>

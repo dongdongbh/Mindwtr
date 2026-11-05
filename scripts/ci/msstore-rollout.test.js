@@ -82,7 +82,7 @@ test('CLI requires an explicit submission, a supported action, and a bounded per
     action: 'auto',
     percentage: undefined,
   });
-  // A preflight reads production status before it knows the submission ID.
+
   expect(parseArgs(['--action', 'status'])).toEqual({
     submissionId: undefined,
     action: 'status',
@@ -233,8 +233,8 @@ test('status without a submission ID discovers production and reports whether it
 });
 
 test('a pending submission is reported by status and still refuses every mutation', async () => {
-  // The Windows job repairs a leftover API draft and skips only the Store publish
-  // for one in certification, so a pending submission must not fail the preflight.
+
+
   const pending = { pendingApplicationSubmission: { id: '1152921505701999999' } };
   for (const submission of [submissionId, undefined]) {
     const { calls, run } = fixture({ app: pending });
@@ -245,7 +245,7 @@ test('a pending submission is reported by status and still refuses every mutatio
     expect(calls.map(call => call.method)).toEqual(['GET', 'GET', 'GET']);
   }
 
-  // Only an in-progress rollout of the published submission blocks a release.
+
   const settled = fixture({
     app: pending,
     rollout: { packageRolloutStatus: 'PackageRolloutComplete' },
@@ -538,9 +538,7 @@ pwshTest('Windows routing rejects invalid rollout policy before resolving a Stor
     )),
   ];
 
-  // One PowerShell start for every case: each start costs about half a second.
-  // The workflow text runs unchanged inside a script block; a refusal is caught
-  // and reported as JSON, because pwsh's own stderr is CLIXML with a cut-off message.
+
   const command = [
     "$ErrorActionPreference = 'Stop'",
     "$lines = @('tag=v1.3.0', 'version=1.3.0')",

@@ -1,9 +1,6 @@
 import { pathToFileURL } from 'node:url';
 
-// Keep the fourth component zero: Microsoft reserves it for Store use.
-// Each patch has 98 RC slots followed by its stable package at the next hundred.
-// Slot 99 remains unused so a stable package rebuilt after an early publication
-// can still advance without colliding with the next patch's RC range.
+
 export function msstoreVersion(tag) {
   const match = /^v?([1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?$/.exec(tag);
   if (!match) throw new Error('Expected a stable version or vX.Y.Z-rc.N.');

@@ -1,3 +1,4 @@
+import { getOnboardingGuideUrl, ONBOARDING_TOPIC_COPY } from './onboarding-guidance';
 import {
     formatTimeEstimateLabel,
     isCustomTimeEstimate,
@@ -76,15 +77,7 @@ import type {
     ViewSectionIds,
 } from './types';
 
-/**
- * The task editor's model: which fields show, in which order and section, the
- * lists each field picks from, and how a draft becomes the saved patch. The
- * React Native editor and native hosts both read it, so they show the same
- * fields and save the same result. TaskDraft (task-draft.ts) owns the values.
- */
 
-// Reference is offered from every status, matching desktop (#1155) and the row
-// status badge.
 export const TASK_EDITOR_STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
 export const TASK_EDITOR_PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 export const TASK_EDITOR_ENERGY_LEVEL_OPTIONS: TaskEnergyLevel[] = ['low', 'medium', 'high'];
@@ -98,7 +91,7 @@ export const TASK_EDITOR_RECURRENCE_OPTIONS: ReadonlyArray<{ value: RecurrenceRu
 
 const REFERENCE_HIDDEN_FIELDS = new Set<TaskEditorFieldId>(REFERENCE_HIDDEN_TASK_FIELDS);
 
-/** A project's live sections, by order and then title. */
+
 export function getTaskEditorProjectSections(sections: readonly Section[], projectId: string | undefined): Section[] {
     if (!projectId) return [];
     return sections
@@ -111,7 +104,7 @@ export function getTaskEditorProjectSections(sections: readonly Section[], proje
         });
 }
 
-/** None, then the presets. A stored estimate outside the presets stays selectable; a custom one has its own input. */
+
 export function getTaskEditorTimeEstimateValues(current: TimeEstimate | '' | undefined): Array<TimeEstimate | ''> {
     return ['', ...resolveTimeEstimateOptions(current && !isCustomTimeEstimate(current) ? current : undefined)];
 }
@@ -122,7 +115,7 @@ export function getTaskEditorDailyInterval(rule: RecurrenceRule | '' | undefined
     return parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
 }
 
-/** Monthly recurrence anchors on the due date, else the start, else today. */
+
 export function getTaskEditorMonthlyAnchorSource(task: Task | null, draft: TaskDraft | null): string | undefined {
     return draft ? draft.dueDate || draft.startTime : task?.dueDate || task?.startTime;
 }
@@ -131,7 +124,7 @@ export function resolveTaskEditorMonthlyAnchorDate(source: string | undefined, n
     return safeParseDate(source) ?? now;
 }
 
-/** 'custom' when a monthly rule is not "the anchor's day of the month". */
+
 export function getTaskEditorMonthlyPattern(
     rule: RecurrenceRule | '' | undefined,
     rrule: string,
@@ -141,8 +134,8 @@ export function getTaskEditorMonthlyPattern(
     const parsed = parseRRuleString(rrule);
     const hasByDay = Boolean(parsed.byDay?.length);
     const hasByMonthDay = parsed.byMonthDay && parsed.byMonthDay.length > 0;
-    // A multi-day BYMONTHDAY list is always custom, even when its first day
-    // happens to match the anchor.
+
+
     const isCustomDay = hasByMonthDay
         && (parsed.byMonthDay!.length > 1 || parsed.byMonthDay![0] !== anchorDate.getDate());
     return hasByDay || isCustomDay ? 'custom' : 'date';
@@ -150,14 +143,14 @@ export function getTaskEditorMonthlyPattern(
 
 export type TaskEditorFieldLayoutInput = {
     task: Task | null;
-    /** Null only before the editor has built its draft; values then come from the task. */
+
     draft: TaskDraft | null;
     checklist: Task['checklist'];
     taskEditor: TaskEditorSettings | undefined;
     hasProjectSections: boolean;
     prioritiesEnabled: boolean;
     timeEstimatesEnabled: boolean;
-    /** The text inputs as typed; they can differ from the draft while focused. */
+
     contextInputDraft: string;
     descriptionDraft: string;
     tagInputDraft: string;
@@ -169,7 +162,7 @@ export type TaskEditorFieldLayout = {
     showStatusField: boolean;
 };
 
-/** The visible fields of each section, in the saved order. */
+
 export function getTaskEditorFieldLayout(input: TaskEditorFieldLayoutInput): TaskEditorFieldLayout {
     const { task, draft, taskEditor, prioritiesEnabled, timeEstimatesEnabled } = input;
     const disabledFields = new Set<TaskEditorFieldId>();
@@ -187,10 +180,8 @@ export function getTaskEditorFieldLayout(input: TaskEditorFieldLayoutInput): Tas
 
     const editStatus = draft?.status ?? task?.status;
     const isReference = editStatus === 'reference';
-    // #1021: reveal the person field while editing a task as Waiting For, so an
-    // existing task can be assigned a person without first customizing the
-    // editor layout. An explicit saved customization that hides the field wins.
-    // Match the section field's exception for migration-persisted defaults.
+
+
     const hasPersistedDefaults = Boolean(taskEditor?.defaultsVersion)
         && !taskEditor?.order?.length
         && savedHidden.length === DEFAULT_TASK_EDITOR_HIDDEN.length
@@ -228,7 +219,6 @@ export function getTaskEditorFieldLayout(input: TaskEditorFieldLayoutInput): Tas
         }
     };
     const isVisible = (fieldId: TaskEditorFieldId): boolean => {
-        if (isReference && fieldId === 'checklist') return hasValue(fieldId);
         if (isReference && REFERENCE_HIDDEN_FIELDS.has(fieldId)) return false;
         if (fieldId === 'section') return showSectionField;
         if (fieldId === 'assignedTo' && editStatus === 'waiting' && !isAssignedToExplicitlyHidden) return true;
@@ -248,7 +238,7 @@ export function getTaskEditorFieldLayout(input: TaskEditorFieldLayoutInput): Tas
     };
 }
 
-/** A collapsed section's badge: how many of its fields hold a value. */
+
 export function countTaskEditorFilledFields(
     fieldIds: readonly TaskEditorFieldId[],
     { draft, checklist, attachments }: {
@@ -277,12 +267,7 @@ export function countTaskEditorFilledFields(
     }).length;
 }
 
-/**
- * The editor keeps checklist and attachment buffers beside the shared
- * TaskDraft: both have their own editing lifecycle and deliberately do not
- * live in the scalar field table (ADR 0022 and attachment soft-delete
- * semantics).
- */
+
 export type TaskEditDraft = {
     draft: TaskDraft;
     checklist: Task['checklist'];
@@ -327,9 +312,7 @@ const applyDraftOverrides = (
     return draft === state.draft ? state : { ...state, draft };
 };
 
-/** Serialize a narrow update patch while comparing against TaskDraft's own
- * normalized baseline. This prevents an unrelated edit from rewriting dates
- * merely because the draft uses datetime-local values internally. */
+
 export function buildTaskEditUpdatePatch(
     state: TaskEditDraft,
     task: Task,
@@ -340,9 +323,8 @@ export function buildTaskEditUpdatePatch(
         attachments: finalState.attachments,
     });
     if (!narrowed) return null;
-    // Blank rows are a typing convenience (return mints the next row before it
-    // has text) and never content — they are dropped at save, so a saved task
-    // keeps no trailing empty item (#1045).
+
+
     const cleanedChecklist = finalState.checklist?.filter((item) => item.title.trim() !== '');
     const bothEmpty = (cleanedChecklist?.length ?? 0) === 0 && (task.checklist?.length ?? 0) === 0;
     if (!bothEmpty && areChecklistsDirty({ ...finalState, checklist: cleanedChecklist }, task)) {
@@ -351,7 +333,7 @@ export function buildTaskEditUpdatePatch(
     return narrowed;
 }
 
-/** At save, a section outside the chosen project (or deleted) is dropped. */
+
 export function clearInvalidTaskDraftSection(
     draft: TaskDraft,
     sections: ReadonlyArray<{ id: string; projectId?: string; deletedAt?: string | null }>,
@@ -363,16 +345,13 @@ export function clearInvalidTaskDraftSection(
     return isValid ? draft : setTaskDraftField(draft, 'sectionId', '');
 }
 
-// Status goes first, as the editor sets it before the fields it governs (the
-// backdated completion sets status, then completedAt). An explicit completedAt
-// or star in the same patch then wins over the status cascade where core
-// allows it: a star on an Inbox draft makes it Next, as in the store.
+
 const DRAFT_APPLY_ORDER: TaskDraftField[] = [
     'status',
     ...TASK_DRAFT_FIELD_KEYS.filter((field) => field !== 'status'),
 ];
 
-/** Apply several field edits through setTaskDraftField, in one fixed order. */
+
 export function applyTaskDraftPatch(draft: TaskDraft, patch: Partial<TaskDraft>): TaskDraft {
     let next = draft;
     for (const field of DRAFT_APPLY_ORDER) {
@@ -383,7 +362,7 @@ export function applyTaskDraftPatch(draft: TaskDraft, patch: Partial<TaskDraft>)
     return next;
 }
 
-/** Null initialValue asks the picker to sample the current instant when it opens. */
+
 export function getTaskEditorBackdatedCompletionStart(
     task: Pick<Task, 'status' | 'updatedAt'>,
     draft: Pick<TaskDraft, 'completedAt' | 'timeSpentMinutes'>,
@@ -396,7 +375,7 @@ export function getTaskEditorBackdatedCompletionStart(
     };
 }
 
-/** The picker confirms one instant and, when offered, one normalized minutes value. */
+
 export function resolveTaskEditorBackdatedCompletion(input: {
     completedAt: string;
     timeSpentText?: string;
@@ -412,12 +391,12 @@ export function resolveTaskEditorBackdatedCompletion(input: {
     };
 }
 
-/** How many quick chips a token field offers. */
+
 export const TASK_EDITOR_QUICK_TOKEN_LIMIT = 6;
 
 type TokenPrefix = '@' | '#';
 
-/** The tokens typed in a context or tag input, prefixed and without duplicates. */
+
 export const parseTaskEditorTokenList = (value: string | undefined, tokenPrefix: TokenPrefix): string[] => {
     if (!value) return [];
     const tokens = value
@@ -435,7 +414,7 @@ export const parseTaskEditorTokenList = (value: string | undefined, tokenPrefix:
     return Array.from(new Set(tokens));
 };
 
-/** The token being typed (after the last comma), lowercased and without its prefix. */
+
 export const getTaskEditorActiveTokenQuery = (value: string | undefined, _tokenPrefix?: TokenPrefix): string => {
     if (!value) return '';
     const draft = value.split(',').pop()?.trim() ?? '';
@@ -444,7 +423,7 @@ export const getTaskEditorActiveTokenQuery = (value: string | undefined, _tokenP
     return stripped.toLowerCase();
 };
 
-/** The input after choosing a suggestion for the token being typed. */
+
 export const replaceTaskEditorTrailingToken = (value: string | undefined, token: string): string => {
     const source = value ?? '';
     const lastCommaIndex = source.lastIndexOf(',');
@@ -455,7 +434,7 @@ export const replaceTaskEditorTrailingToken = (value: string | undefined, token:
     return `${head} ${token}, `;
 };
 
-/** The input after tapping a quick chip: the token is added, or removed when present. */
+
 export function toggleTaskEditorToken(value: string, token: string, tokenPrefix: TokenPrefix): string {
     const next = new Set(parseTaskEditorTokenList(value, tokenPrefix));
     if (next.has(token)) {
@@ -466,7 +445,7 @@ export function toggleTaskEditorToken(value: string, token: string, tokenPrefix:
     return Array.from(next).join(', ');
 }
 
-/** Tokens a typed token can complete to: the draft's own first, then the known ones. */
+
 export function getTaskEditorTokenPool(
     editedTokens: readonly string[] | undefined,
     knownTokens: readonly string[],
@@ -476,7 +455,7 @@ export function getTaskEditorTokenPool(
         .filter((item): item is string => Boolean(item?.startsWith(tokenPrefix)));
 }
 
-/** Pool tokens containing the typed token, leaving out those already in the input. */
+
 export function getTaskEditorTokenMatches(
     pool: readonly string[],
     value: string,
@@ -496,23 +475,23 @@ export function getTaskEditorTokenMatches(
 }
 
 export type TaskEditorSuggestions = {
-    /** What the draft field holds for this input text. */
+
     draftValue: string;
-    /** Choices for the text being typed; `text` is the input after choosing one. */
+
     matches: Array<{ value: string; text: string }>;
-    /** Contexts and tags only: the quick chips, most used first; `text` is the input after tapping one. */
+
     quick: Array<{ value: string; selected: boolean; text: string }>;
-    /** Assigned To only: RN's create action checks the displayed matches. */
+
     canCreatePerson?: boolean;
 };
 
-/** A token or person field's suggestions for its input text, as the editor shows them. */
+
 export function getTaskEditorSuggestions(input: {
     field: 'contexts' | 'tags' | 'assignedTo';
     text: string;
-    /** The editor shows 4 matches. */
+
     limit: number;
-    /** Known tokens (the store's derived allContexts or allTags) and their usage. */
+
     knownTokens: readonly string[];
     usage: readonly TaskTokenUsage[];
     people: readonly Person[];
@@ -530,7 +509,7 @@ export function getTaskEditorSuggestions(input: {
         };
     }
     const prefix: TokenPrefix = input.field === 'contexts' ? '@' : '#';
-    // The editor's draft follows the input on every change.
+
     const draftValue = parseTaskEditorTokenList(text, prefix).join(', ');
     const pool = getTaskEditorTokenPool(parseTaskEditorTokenList(draftValue, prefix), input.knownTokens, prefix);
     const selected = new Set(parseTaskEditorTokenList(text, prefix));
@@ -546,7 +525,7 @@ export function getTaskEditorSuggestions(input: {
     };
 }
 
-/** The Someday section picker: No section, then the sections in order. A stale id selects No section. */
+
 export function getSomedaySectionChoices(
     sections: readonly ViewSectionDefinition[],
     selectedId: string | undefined,
@@ -564,23 +543,26 @@ export function getSomedaySectionChoices(
 
 export type TaskEditorLayoutSection = {
     id: TaskEditorSectionId;
-    /** The heading's string key; Basic has no heading and is always open. */
+
     titleKey: string | null;
     fields: TaskEditorFieldId[];
-    /** The heading's badge: fields in the section that hold a value. */
+
     filledCount: number;
-    /** Whether the section starts expanded. */
+
     open: boolean;
+
+
+    help?: { label: string; body: string; readGuide: string; guideError: string; dismiss: string; guideUrl: string };
 };
 
 export type TaskEditorModel = {
     layout: {
-        /** Only sections with fields, in display order. */
+
         sections: TaskEditorLayoutSection[];
         showStatusField: boolean;
-        /** The Someday section picker, shown after the Basic fields while the draft is Someday. */
+
         showSomedaySection: boolean;
-        /** Recurrence field state derived from the draft's rule. */
+
         recurrence: { dailyInterval: number; monthlyPattern: 'date' | 'custom' };
     };
     options: {
@@ -588,32 +570,30 @@ export type TaskEditorModel = {
         priorities: TaskPriority[];
         energyLevels: TaskEnergyLevel[];
         recurrences: Array<{ value: RecurrenceRule | ''; labelKey: string }>;
-        /** Estimates have no fixed string key; labels are formatted in the given language. */
+
         timeEstimates: Array<{ value: TimeEstimate | ''; label: string }>;
-        /** Selectable projects in the draft's area (all areas when it has none). */
+
         projects: Array<{ id: string; title: string; areaId: string | null }>;
-        /** Live sections of the draft's project. */
+
         sections: Array<{ id: string; title: string }>;
         areas: Array<{ id: string; name: string; color: string | null }>;
         contexts: string[];
         tags: string[];
         people: string[];
-        /** Someday section choices; `viewSectionIds` is the draft value after choosing one. */
+
         somedaySections: Array<{ id: string; title: string; selected: boolean; viewSectionIds: ViewSectionIds }>;
     };
-    /**
-     * Each schedule and estimate control's state, labels, and the draft values its
-     * taps write. Labels are formatted in the user's language and date settings.
-     */
+
+
     fields: {
         startTime: TaskEditorDatePart;
         dueDate: TaskEditorDatePart;
         reviewAt: TaskEditorDatePart;
-        /** "Starts after due date" under the start and due fields, or ''. */
+
         dateIssue: string;
-        /** The start field's absolute/relative control; null without a due date. */
+
         relativeStart: TaskEditorRelativeStart | null;
-        /** `weekdays` are the weekly day buttons; `monthlyCustom` is the custom monthly dialog's starting state. */
+
         recurrence: TaskEditorRecurrenceDetails & {
             calendarPreviewHint: string;
             weekdays: ReturnType<typeof getTaskEditorWeekdayButtons>;
@@ -629,29 +609,29 @@ export type TaskEditorModelInput = {
     task: Task;
     draft: TaskDraft;
     settings: AppSettings;
-    /** The store's visible projects, sections, areas, tasks and people. */
+
     projects: Project[];
     sections: readonly Section[];
     areas: readonly Area[];
     tasks: readonly Task[];
     people: readonly Person[];
-    /** Known tokens (the store's derived allContexts and allTags). */
+
     contexts: readonly string[];
     tags: readonly string[];
-    /** The checklist as edited, unsaved items included; the task's saved checklist when omitted. */
+
     checklist?: Task['checklist'];
     t: (key: string) => string;
     now?: Date;
-    /** Formats labels; hosts pass createDateFormatter with the user's settings. */
+
     formatDate?: DateFormatter;
-    /** The app language, for weekday names. */
+
     language?: string;
 };
 
 export type TaskDraftDestinationPicker = {
     query: string;
     destination: {
-        /** Render one combined row at this visible field; null when both are hidden. */
+
         fieldId: 'project' | 'area' | null;
         label: string;
         value: string;
@@ -676,7 +656,7 @@ export type TaskDraftDestinationPicker = {
     };
 };
 
-/** Existing destinations only, with RN's ordering, labels and exact draft move patches. */
+
 export function buildTaskDraftDestinationPicker(input: {
     draft: TaskDraft;
     layout: TaskEditorModel['layout'];
@@ -742,7 +722,7 @@ export function buildTaskDraftDestinationPicker(input: {
     };
 }
 
-/** The editor for one draft, as the React Native editor shows it. */
+
 export function buildTaskEditorModel(input: TaskEditorModelInput): TaskEditorModel {
     const { task, draft, t } = input;
     const flags = resolveFeatureFlags(input.settings);
@@ -788,6 +768,14 @@ export function buildTaskEditorModel(input: TaskEditorModelInput): TaskEditorMod
                     fields: sections[id],
                     filledCount,
                     open: openDefaults[id] || filledCount > 0,
+                    ...(id === 'scheduling' || id === 'details' ? { help: {
+                        label: `${t('onboarding.help')}: ${t(ONBOARDING_TOPIC_COPY[id].title)}`,
+                        body: t(ONBOARDING_TOPIC_COPY[id].body),
+                        readGuide: t('onboarding.readGuide'),
+                        guideError: t('onboarding.guideError'),
+                        dismiss: t('common.dismiss'),
+                        guideUrl: getOnboardingGuideUrl(id, 'mobile', input.language),
+                    } } : {}),
                 };
             }),
             showStatusField,

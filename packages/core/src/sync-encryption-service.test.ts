@@ -19,8 +19,7 @@ import {
     SYNC_PATH_KEY,
 } from './sync-storage-keys';
 
-// Argon2id at the writer's default cost takes seconds in pure JS; the service only needs a
-// deterministic key here. AES-GCM stays real.
+
 const fastCrypto: SyncCryptoPrimitives = {
     ...defaultSyncCryptoPrimitives,
     argon2id: async (pass, salt, _params, dkLen) => Uint8Array.from(
@@ -31,8 +30,7 @@ const fastCrypto: SyncCryptoPrimitives = {
 
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 
-/** A File Sync folder in memory: every artifact carries a generation, writes and removes are
- *  compare-and-set on it. */
+
 const createMemoryFolder = (initial: Record<string, Uint8Array>) => {
     let generation = 0;
     const files = new Map<string, { bytes: Uint8Array; version: string }>();
@@ -68,7 +66,7 @@ type Lease = { id: string };
 const FENCE_NAME = '.mindwtr-sync-fence-v1.json';
 const SERVER_DATE = 'Tue, 27 Aug 2026 12:00:00 GMT';
 
-/** Dropbox's file API over an in-memory folder: revs, conditional upload and delete. */
+
 const createDropboxFolder = (initial: Record<string, Uint8Array>) => {
     const files = new Map(Object.entries(initial));
     const revs = new Map([...files.keys()].map((name) => [name, 1]));
@@ -257,7 +255,7 @@ describe('sync encryption service', () => {
     });
 
     it('sends every Dropbox transition request, the fence included, through the host fetcher', async () => {
-        // Desktop's host fetcher is Tauri's HTTP client; the webview's own fetch must never be used.
+
         vi.stubGlobal('fetch', vi.fn(async () => {
             throw new Error('the default fetch must not be used');
         }));
@@ -314,7 +312,7 @@ describe('sync encryption service', () => {
             undefined,
             {
                 dropboxClientId: 'app',
-                // A peer takes the fence over once this device has persisted `enabled`.
+
                 fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
                     const arg = new Headers(init?.headers).get('Dropbox-API-Arg');
                     const committed = plain.get(SYNC_ENCRYPTION_STATE_KEY)?.includes('"enabled"')
@@ -404,7 +402,7 @@ describe('sync encryption service', () => {
 
         await expect(service.abandonSyncEncryptionTransition()).resolves.toBe('enable');
 
-        // Off here, and this location remembered as partly encrypted: sync stays paused at it until it is repaired.
+
         const scope = await readSyncLocationScope({ getItem: async (key: string) => plain.get(key) ?? null });
         expect(JSON.parse(plain.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({ state: 'off', partlyEncryptedScope: scope });
         await expect(state.isSyncEncryptionBlocked(scope)).resolves.toBe(true);
@@ -417,7 +415,7 @@ describe('sync encryption service', () => {
         const line = logs.find((entry) => entry.extra.releaseCheck === 'v1.3.4/encryption-abandon-setup');
         expect(line).toMatchObject({ force: true, extra: { kind: 'abandon', abandoned: 'enable', outcome: 'ok' } });
 
-        // Nothing unfinished: nothing to abandon, nothing changes.
+
         await expect(service.abandonSyncEncryptionTransition()).resolves.toBeNull();
     });
 
@@ -431,7 +429,7 @@ describe('sync encryption service', () => {
         const { service } = createHarness({ [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: '/sync' }, folder.port);
         await expect(service.probeSyncLocationCiphertext()).resolves.toBe('plaintext');
 
-        // The enable seals attachments one at a time, in order, and the folder stops answering after the first.
+
         const write = folder.port.write;
         let writes = 0;
         folder.port.write = async (name, bytes, version) => {

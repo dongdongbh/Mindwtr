@@ -7,12 +7,8 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
   {
-    // ESLint's core file-discovery always walks recognized JS extensions
-    // regardless of any config's `files:` scoping, so every non-ts/tsx one
-    // must be ignored explicitly to match the old `--ext ts,tsx` restriction
-    // exactly - otherwise coverage/ report artifacts, tailwind/postcss
-    // configs, public/sw.js, and this config file itself end up "linted"
-    // with zero applicable rules.
+
+
     ignores: ['dist/**', 'src-tauri/**', 'node_modules/**', '**/*.js', '**/*.mjs', '**/*.cjs'],
   },
   {
@@ -37,16 +33,12 @@ export default [
     },
     rules: {
       ...js.configs.recommended.rules,
-      // Turns off core rules TypeScript already checks better (no-undef,
-      // no-redeclare, ...) for ts/tsx - the eslintrc-style 'plugin:@typescript-
-      // eslint/recommended' extends chain applied this automatically; flat
-      // config does not, so it must be spread in explicitly or ambient DOM/
-      // lib types (EventListener, FrameRequestCallback, ...) and the JSX
-      // pragma read as undefined globals.
+
+
       ...tsPlugin.configs['flat/eslint-recommended'].rules,
       ...tsPlugin.configs.recommended.rules,
       ...reactHooks.configs['recommended-latest'].rules,
-      // We run with `--max-warnings 0`, so avoid warning-level rules by default.
+
       'no-mixed-spaces-and-tabs': 'off',
       'react-hooks/exhaustive-deps': 'off',
       'react-refresh/only-export-components': 'off',
@@ -61,4 +53,5 @@ export default [
       ],
     },
   },
+  { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },
 ];

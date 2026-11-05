@@ -18,7 +18,7 @@ if SPEC is None or SPEC.loader is None:
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
-# Keep release-plan behavior in the existing Google Play governance suite.
+
 PLAN_TEST_PATH = Path(__file__).with_name("android-play-release-plan.test.py")
 PLAN_TEST_SPEC = importlib.util.spec_from_file_location(
     "android_play_release_plan_test", PLAN_TEST_PATH
@@ -701,8 +701,7 @@ class GooglePlayEditTest(unittest.TestCase):
             transport,
         )
 
-        # A staged publication into an empty production track is accepted, so the
-        # release preflight must not refuse one either.
+
         self.assertIsNone(result["versionCode"])
         self.assertEqual(result["status"], "none")
         self.assertFalse(result["open"])

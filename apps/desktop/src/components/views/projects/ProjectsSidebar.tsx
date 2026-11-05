@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { AlertTriangle, ChevronDown, ChevronRight, ChevronsLeft, Folder, Plus } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import { FocusStarIcon } from '../../FocusStarIcon';
 import { SortableProjectRow } from './SortableRows';
 import { LIST_END_GAP } from '../list/list-toolbar';
-import { isFocusedProjectMissingNextAction, tFallback, type Area, type Project, type ProjectTaskSummary } from '@mindwtr/core';
+import { einkSafeColor, useTaskStore, isFocusedProjectMissingNextAction, tFallback, type Area, type Project, type ProjectTaskSummary } from '@mindwtr/core';
 import { ProjectAreaDropZone } from './project-area-dnd';
 import {
     isProjectAreaCollapsed,
@@ -157,6 +158,7 @@ export function ProjectsSidebar({
     collapseLabel,
     onToggleCollapsed,
 }: ProjectsSidebarProps) {
+    const theme = useTaskStore((state) => state.settings.theme);
     const focusedCount = focusedProjectCount;
     const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
     const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -468,7 +470,7 @@ export function ProjectsSidebar({
                             {target.color && (
                                 <span
                                     className="w-2 h-2 rounded-full border border-border/50"
-                                    style={{ backgroundColor: target.color }}
+                                    style={{ backgroundColor: einkSafeColor(target.color, theme) }}
                                 />
                             )}
                             {target.name}
@@ -490,16 +492,16 @@ export function ProjectsSidebar({
             data-project-navigation-root
             className="w-full h-full min-h-0 flex flex-col gap-4 border-r border-border pr-5 xl:pr-6"
         >
-            <div data-projects-sidebar-header className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                    <h2 className="text-xl font-bold tracking-tight">{t('projects.title')}</h2>
+            <div data-projects-sidebar-header className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex max-w-full flex-none items-center gap-2 min-w-0">
+                    <h2 className="shrink-0 whitespace-nowrap text-xl font-bold tracking-tight">{t('projects.title')}</h2>
                     {areaFilterLabel && (
                         <span className="text-[10px] uppercase tracking-wide bg-muted/40 text-muted-foreground border border-border/60 rounded-full px-2 py-0.5 truncate max-w-[180px]">
                             {t('projects.areaLabel')}: {areaFilterLabel}
                         </span>
                     )}
                 </div>
-                <div className="flex flex-none items-center gap-1">
+                <div className="ml-auto flex flex-none items-center gap-1">
                     {!isCreating && (
                         <button
                             type="button"
@@ -574,6 +576,7 @@ export function ProjectsSidebar({
                             value={newProjectTitle}
                             onChange={(e) => onChangeNewProjectTitle(e.target.value)}
                             onKeyDown={(event) => {
+                                if (isImeComposing(event)) return;
                                 if (event.key === 'Escape') {
                                     event.preventDefault();
                                     onCancelCreate();
@@ -651,7 +654,7 @@ export function ProjectsSidebar({
                                             {area?.color && (
                                                 <span
                                                     className="w-2 h-2 rounded-full border border-border/50"
-                                                    style={{ backgroundColor: area.color }}
+                                                    style={{ backgroundColor: einkSafeColor(area.color, theme) }}
                                                 />
                                             )}
                                             {area?.icon && <span className="text-[10px]">{area.icon}</span>}
@@ -703,7 +706,7 @@ export function ProjectsSidebar({
                                                                 <div data-project-leading-icon className="relative flex h-8 w-8 flex-none items-center justify-center">
                                                                     <Folder
                                                                         className="h-4 w-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0"
-                                                                        style={{ color: getProjectColor(project) }}
+                                                                        style={{ color: einkSafeColor(getProjectColor(project), theme) }}
                                                                     />
                                                                     <span className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                                                                         {handle}
@@ -784,7 +787,7 @@ export function ProjectsSidebar({
                                                         {area?.color && (
                                                             <span
                                                                 className="w-2 h-2 rounded-full border border-border/50"
-                                                                style={{ backgroundColor: area.color }}
+                                                                style={{ backgroundColor: einkSafeColor(area.color, theme) }}
                                                             />
                                                         )}
                                                         {area?.icon && <span className="text-[10px]">{area.icon}</span>}
@@ -830,7 +833,7 @@ export function ProjectsSidebar({
                                                                             <div data-project-leading-icon className="relative flex h-8 w-8 flex-none items-center justify-center">
                                                                                 <Folder
                                                                                     className="h-4 w-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0"
-                                                                                    style={{ color: getProjectColor(project) }}
+                                                                                    style={{ color: einkSafeColor(getProjectColor(project), theme) }}
                                                                                 />
                                                                                 <span className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                                                                                     {handle}
@@ -887,7 +890,7 @@ export function ProjectsSidebar({
                                                         {area?.color && (
                                                             <span
                                                                 className="w-2 h-2 rounded-full border border-border/50"
-                                                                style={{ backgroundColor: area.color }}
+                                                                style={{ backgroundColor: einkSafeColor(area.color, theme) }}
                                                             />
                                                         )}
                                                         {area?.icon && <span className="text-[10px]">{area.icon}</span>}
@@ -932,7 +935,7 @@ export function ProjectsSidebar({
                                                                                 <div data-project-leading-icon className="relative flex h-8 w-8 flex-none items-center justify-center">
                                                                                     <Folder
                                                                                         className="h-4 w-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0"
-                                                                                        style={{ color: getProjectColor(project) }}
+                                                                                        style={{ color: einkSafeColor(getProjectColor(project), theme) }}
                                                                                     />
                                                                                     <span className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                                                                                         {handle}

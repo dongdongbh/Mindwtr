@@ -122,7 +122,7 @@ const setup = (options: {
     encryption: { logSyncEncryptionEvent: async () => undefined },
     installer,
     installerMayBeMissing: () => false,
-    // Skips the WebDAV request spacing; no test here waits on a timer.
+
     timersPaused: () => true,
     uploads: { createUploadTask: options.createUploadTask ?? (() => null) },
   });
@@ -144,7 +144,7 @@ const setup = (options: {
 
 const webdavConfig = { url: `${BASE_URL}/data.json`, username: 'user', password: 'pw' };
 
-/** The host's native file hash (design D9b W7 hashes in native code, never bytes read into JS), over the memory files. */
+
 const nativeHash = (env: ReturnType<typeof setup>) => env.installer.hashAttachmentFileGeneration.mockImplementation(
   async (path: string) => ({ sha256: (await computeSha256Hex(env.memory.read(path)!))!, size: env.memory.read(path)!.byteLength, modificationTimeMs: 1 }),
 );
@@ -371,7 +371,7 @@ describe('WebDAV attachment pass', () => {
     const requests = stubWebdavServer(() => new Response(null, { status: 201 }));
     const { backends, memory, lines, files } = setup({
       maxWebdavBufferedUploadBytes: 8 * 1024 * 1024,
-      // Keep the remote generation selected so prepare really reaches content hashing.
+
       core: { webdavFileExists: async () => true },
     });
     memory.put(LOCAL_URI, LOCAL);
@@ -596,7 +596,7 @@ describe('WebDAV attachment pass', () => {
       };
       return { core, webdavPutFileVersioned, webdavGetFile };
     };
-    // A host whose fetch refuses an oversized body while receiving it (the native hosts' HostIo and NativeHTTPJobs).
+
     const setupBounded = (options: Parameters<typeof setup>[0] = {}) => setup({ boundedWebdavResponses: true, ...options });
     const adoptionLine = (lines: ReturnType<typeof setup>['lines']) => (
       lines.find((line) => line.extra?.releaseCheck === 'v1.3.7/webdav-weak-etag-adopt')
@@ -684,8 +684,8 @@ describe('WebDAV attachment pass', () => {
     });
 
     it('with encryption on and a stale recorded size, never records a plaintext remote copy', async () => {
-      // The recorded size predicts an encrypted length equal to the real plaintext's length; the length check against the
-      // local file's real size is what refuses this copy, and the encrypted-artifact check backs it up.
+
+
       const plaintext = new Uint8Array(encryptedSyncArtifactByteLength(LOCAL.byteLength)).fill(5);
       const server = unversionedServer('W/"weak"', plaintext);
       const { backends, memory, lines } = setupBounded({ core: server.core, crypto: defaultSyncCryptoPrimitives });
@@ -760,8 +760,8 @@ describe('WebDAV attachment pass', () => {
   });
 
   it('records a streamed upload only once a HEAD at the same URL finds its size', async () => {
-    // The native uploader follows a redirect by itself: a 307 stores the file elsewhere and a
-    // 303 stores nothing, yet the task answers 2xx.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 201 })), cancelAsync: vi.fn(async () => undefined) };
     const { backends, memory, lines } = setup({
       createUploadTask: () => task,
@@ -869,7 +869,7 @@ describe('WebDAV attachment pass', () => {
       ['the HEAD finds another size (another writer created it)', { confirmed: false, redirected: false, status: 200 }],
       ['the HEAD finds no file', { confirmed: false, redirected: false, status: 404 }],
     ])('keeps a 412 unsynced for a retry when %s', async (_case, proof) => {
-      // A 412 proves only that some file exists there, not that it holds these bytes.
+
       const { result, lines, logs } = await run(conflict, proof);
 
       expect(attachmentOf(result)?.cloudKey).toBeUndefined();
@@ -1038,9 +1038,9 @@ describe('WebDAV attachment pass', () => {
         nativeHash(env);
         env.memory.put(LOCAL_URI, local);
         await env.backends.syncWebdavAttachments(withAttachment(await remoteOnly(bytes)), webdavConfig, BASE_URL);
-        // The file at the target is not adopted: the GET runs and the installer decides (a different file is kept, never named).
+
         expect(webdavGetFile).toHaveBeenCalledTimes(1);
-        // A hashless attachment has nothing to compare: its target is never hashed.
+
         if (bytes === null) expect(env.installer.hashAttachmentFileGeneration).not.toHaveBeenCalled();
       }
     });
@@ -1052,18 +1052,18 @@ describe('WebDAV attachment pass', () => {
       env.memory.put(LOCAL_URI, LOCAL);
       const data = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(LOCAL))! }));
       const puts = () => requests.filter((request) => request.method === 'PUT').length;
-      // One cycle: the final pending-upload flush and the post-merge pass share the cycle's admission. The PUT reached the
-      // server, but its answer was lost (500): the second phase does not send it again.
+
+
       const cycle = createAttachmentTransferAdmission();
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: cycle });
       expect(puts()).toBe(1);
-      // The next cycle tries once more.
+
       const next = createAttachmentTransferAdmission();
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
       await env.backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
       expect(puts()).toBe(2);
-      // New content is a new key in the same cycle: it transfers once.
+
       env.memory.put(LOCAL_URI, REMOTE);
       const edited = withAttachment(fileAttachment({ fileHash: (await computeSha256Hex(REMOTE))! }));
       await env.backends.syncWebdavAttachments(edited, webdavConfig, BASE_URL, undefined, { phase: 'post-merge', transferAdmission: next });
@@ -1549,8 +1549,8 @@ describe('self-hosted cloud attachment pass', () => {
   });
 
   it('sends every upload through the checked byte PUT, never the native uploader', async () => {
-    // The native uploader follows a redirect by itself (a 303 to /health answers the same
-    // {"ok":true}), and servers before 1.2.7 have no HEAD to prove where the file landed.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 200, body: '{"ok":true}' })), cancelAsync: vi.fn(async () => undefined) };
     const createUploadTask = vi.fn(() => task);
     const cloudPutFile = vi.fn(async () => undefined);
@@ -2071,6 +2071,7 @@ describe('File Sync attachment pass', () => {
 
       memory.put(`${ATTACHMENTS}%2Fr1.txt`, await encryptSyncArtifact(plain('r1.txt'), material, defaultSyncCryptoPrimitives));
       unsized.add('r1.txt');
+
       const next = synced as AppData;
       memory.put(`${MANAGED}att-2.txt`, LOCAL);
       next.tasks[0].attachments!.push(fileAttachment({ id: 'att-2', title: 'att-2.txt', uri: `${MANAGED}att-2.txt` }));

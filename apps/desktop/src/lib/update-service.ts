@@ -1,6 +1,5 @@
-/**
- * Update service for checking GitHub releases and downloading updates.
- */
+
+
 
 import { reportError } from "./report-error";
 import { isFlatpakRuntime, isTauriRuntime } from "./runtime";
@@ -10,9 +9,8 @@ const GITHUB_RELEASES_API =
   "https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest";
 const GITHUB_RELEASES_URL =
   "https://github.com/dongdongbh/Mindwtr/releases/latest";
-// No-API-rate-limit fallback: a public web feed, used only when the REST API
-// returns 403/429 (unauthenticated api.github.com is capped at 60 req/hr per
-// source IP, which shared NAT/VPN exits can blow through).
+
+
 const GITHUB_RELEASES_ATOM_URL =
   "https://github.com/dongdongbh/Mindwtr/releases.atom";
 const MS_STORE_PRODUCT_ID = "9N0V5B0B6FRX";
@@ -202,8 +200,8 @@ const loadTauriFetch = async (): Promise<FetchLike | null> => {
     return cachedTauriFetch;
   }
   if (isFlatpakRuntime()) {
-    // Flatpak builds hit a plugin-http response-body IPC mismatch on update checks.
-    // These checks only need public HTTPS JSON endpoints, so browser fetch is safer here.
+
+
     cachedTauriFetch = null;
     return cachedTauriFetch;
   }
@@ -212,7 +210,7 @@ const loadTauriFetch = async (): Promise<FetchLike | null> => {
     cachedTauriFetch =
       typeof mod.fetch === "function" ? (mod.fetch as FetchLike) : null;
   } catch (error) {
-    // Keep update checks working even if plugin-http is unavailable.
+
     reportError("Failed to load native HTTP client for update checks", error, {
       category: "network",
       toast: false,
@@ -231,15 +229,13 @@ const fetchForUpdates = async (
     try {
       return await tauriFetch(url, init);
     } catch {
-      // Fall back to web fetch if native HTTP fails.
+
     }
   }
   return fetch(url, init);
 };
 
-/**
- * Detect current platform
- */
+
 function detectPlatform(): string {
   const userAgent = navigator.userAgent.toLowerCase();
   if (userAgent.includes("win")) return "windows";
@@ -248,9 +244,7 @@ function detectPlatform(): string {
   return "unknown";
 }
 
-/**
- * Get platform-specific download URL from release assets
- */
+
 function getDownloadUrl(
   assets: GitHubAsset[],
   platform: string,
@@ -286,10 +280,7 @@ const normalizeComparableVersion = (version: string): string => {
   return match?.[0] || cleaned;
 };
 
-/**
- * Compare two semver version strings
- * Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal
- */
+
 export function compareVersions(v1: string, v2: string): number {
   const clean1 = normalizeComparableVersion(v1);
   const clean2 = normalizeComparableVersion(v2);
@@ -341,7 +332,7 @@ export function normalizeInstallSource(
     case "macappstore":
       return "mac-app-store";
     case "aur":
-      // Legacy value from older desktop builds; source package is the safer default.
+
       return "aur-source";
     case "aur-bin":
       return "aur-bin";
@@ -385,8 +376,7 @@ class HttpError extends Error {
 const isRateLimitStatus = (status: number): boolean =>
   status === 403 || status === 429;
 
-// GitHub's atom feed lists entries newest-first; the newest entry's link
-// looks like https://github.com/<owner>/<repo>/releases/tag/<tag>.
+
 const ATOM_RELEASE_TAG_PATTERN = /\/releases\/tag\/(v[0-9][^"<]*)/;
 
 const parseLatestReleaseTagFromAtom = (xml: string): string | null => {
@@ -399,14 +389,11 @@ const parseLatestReleaseTagFromAtom = (xml: string): string | null => {
 const buildGithubTagReleaseUrl = (tag: string): string =>
   `https://github.com/dongdongbh/Mindwtr/releases/tag/${tag}`;
 
-/** Diagnostic only. User-facing copy is the `settings.updateRateLimited`
- * i18n key, resolved by whichever caller has a translator in scope. */
+
 export const UPDATE_RATE_LIMIT_MESSAGE =
   "GitHub REST API and releases.atom are both rate-limited";
 
-/** Thrown when both the GitHub REST API and the releases.atom fallback are
- * rate-limited: the caller should show a calm message instead of the raw
- * HTTP status text. */
+
 export class UpdateRateLimitedError extends Error {
   constructor() {
     super(UPDATE_RATE_LIMIT_MESSAGE);
@@ -450,12 +437,7 @@ type GithubLatestOutcome =
   | { kind: "full"; release: GitHubRelease }
   | { kind: "degraded"; tag: string; releaseUrl: string };
 
-/**
- * Fetch the latest GitHub release, falling back to the no-rate-limit atom
- * feed (tag + release page only, no notes/assets) when the API is
- * rate-limited. Throws UpdateRateLimitedError only when BOTH surfaces are
- * rate-limited; any other error is rethrown as-is.
- */
+
 const fetchGithubLatestWithFallback = async (): Promise<GithubLatestOutcome> => {
   try {
     return { kind: "full", release: await fetchGithubLatestRelease() };
@@ -657,8 +639,8 @@ const fetchSourceVersion = async (
       return fetchHomebrewLatestVersion();
     case "winget":
       return fetchWingetLatestVersion();
-    // Scoop has no canonical feed (any bucket can carry the manifest), so a
-    // manual check reports the GitHub release and defers installs to `scoop update`.
+
+
     case "chocolatey":
       return fetchChocolateyLatestVersion();
     case "aur":
@@ -672,11 +654,7 @@ const fetchSourceVersion = async (
   }
 };
 
-/**
- * Check updates from install source first, with GitHub as fallback.
- * Managed channels (App Store / package managers) stay on their own source
- * when their source lookup succeeds; GitHub is only used if managed lookup fails.
- */
+
 export async function checkForUpdates(
   currentVersion: string,
   options: CheckForUpdatesOptions = {},
@@ -773,8 +751,7 @@ export async function checkForUpdates(
       latestVersion = cleanCurrentVersion;
     }
 
-    // Managed sources pin users to their channel when source lookup succeeds.
-    // If managed lookup fails, allow GitHub to serve as a fallback source.
+
     const allowGitHubOverride =
       !sourceResult || !isManagedInstallSource(installSource);
     if (
@@ -812,20 +789,17 @@ export async function checkForUpdates(
       sourceFallback: Boolean(sourceResult && source === "github-release"),
     };
   } catch (error) {
-    // No translator here. UpdateRateLimitedError carries the marker; callers
-    // with `t` in scope resolve the localized copy (useSettingsAboutPage).
+
+
     reportError("Failed to check for updates", error);
     throw error;
   }
 }
 
-/**
- * Download and install update
- * Opens the download URL in browser - user will download and run installer
- */
+
 export async function downloadUpdate(downloadUrl: string): Promise<void> {
-  // Open the download URL in the default browser
-  // The user will download the installer and run it
+
+
   window.open(downloadUrl, "_blank");
 }
 

@@ -83,8 +83,7 @@ it('preserves the draft after upload failure and permits explicit removal', asyn
     fetcher.mockRestore();
 });
 
-// Real synced records carry `mimeType` (the importer sets it); with a metadata-only
-// attachment that is the only thing the web build can classify on, since `uri` is empty.
+
 const makeAttachment = (title: string, mimeType?: string): Attachment => ({
     id: 'attachment-1',
     kind: 'file',
@@ -102,7 +101,7 @@ describe('useTaskItemAttachments in the web build', () => {
         fetchWebCloudAttachmentTextMock.mockReset();
         retainOpenedWebAttachmentUrlMock.mockReset();
         openAttachmentTargetMock.mockClear();
-        // jsdom has neither; the hook revokes the blob URLs it is handed.
+
         (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectUrlMock;
         revokeObjectUrlMock.mockClear();
     });
@@ -159,7 +158,7 @@ describe('useTaskItemAttachments in the web build', () => {
 
         await waitFor(() => expect(result.current.audioSource).toBe('blob:audio-bytes'));
 
-        // The hook owns the URL it was handed: closing the player revokes it.
+
         act(() => result.current.closeAudio());
         expect(revokeObjectUrlMock).toHaveBeenCalledWith('blob:audio-bytes');
     });

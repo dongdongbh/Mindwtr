@@ -36,9 +36,7 @@ use crate::config::{
     read_dropbox_credential_state, set_keyring_secret, update_dropbox_credential_state,
     write_config_files, CredentialService,
 };
-use crate::file_sync_attachment_publication::{
-    self, PublicationAttempt, PublicationReservation,
-};
+use crate::file_sync_attachment_publication::{self, PublicationAttempt, PublicationReservation};
 use crate::storage::{
     get_config_path, get_secrets_path, read_json_with_retries_decoded,
     read_json_with_retries_validated,
@@ -50,19 +48,18 @@ use crate::sync_crypto::{
 };
 use crate::sync_encryption::{
     begin_sync_encryption_transition, bytes_to_hex, clear_encryption_state_with_fence,
-    encrypted_artifact_name, hex_to_bytes,
-    is_encryption_enabled, is_terminal_error, mark_remote_encrypted_no_key,
-    clear_stale_remote_encrypted_no_key, mark_remote_plaintext, persist_enabled_material_with_fence,
-    plaintext_artifact_name, read_local_state, resolve_key_material, terminal_error,
-    TRANSITION_CHANGE_PASSPHRASE, TRANSITION_DISABLE, TRANSITION_ENABLE,
-    STATE_OFF, SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
-    SYNC_ENCRYPTION_STATE_UNAVAILABLE, SYNC_ENCRYPTION_TERMINAL,
-    sync_encryption_artifact_label, sync_encryption_backend_label, sync_encryption_diagnostic,
-    sync_encryption_kdf_label, sync_encryption_salt_prefix, sync_encryption_salt_prefix_bytes,
-    sync_encryption_scope_label, SyncEncryptionLocalState,
-    SYNC_ENCRYPTION_LOG_ABSENT, SYNC_ENCRYPTION_LOG_EVENT_ERROR,
-    SYNC_ENCRYPTION_LOG_EVENT_REMOTE_READ, SYNC_ENCRYPTION_LOG_EVENT_STATE,
-    SYNC_ENCRYPTION_LOG_EVENT_TRANSITION,
+    clear_stale_remote_encrypted_no_key, encrypted_artifact_name, hex_to_bytes,
+    is_encryption_enabled, is_terminal_error, mark_remote_encrypted_no_key, mark_remote_plaintext,
+    persist_enabled_material_with_fence, plaintext_artifact_name, read_local_state,
+    resolve_key_material, sync_encryption_artifact_label, sync_encryption_backend_label,
+    sync_encryption_diagnostic, sync_encryption_kdf_label, sync_encryption_salt_prefix,
+    sync_encryption_salt_prefix_bytes, sync_encryption_scope_label, terminal_error,
+    SyncEncryptionLocalState, STATE_OFF, SYNC_ENCRYPTION_LOG_ABSENT,
+    SYNC_ENCRYPTION_LOG_EVENT_ERROR, SYNC_ENCRYPTION_LOG_EVENT_REMOTE_READ,
+    SYNC_ENCRYPTION_LOG_EVENT_STATE, SYNC_ENCRYPTION_LOG_EVENT_TRANSITION,
+    SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
+    SYNC_ENCRYPTION_STATE_UNAVAILABLE, SYNC_ENCRYPTION_TERMINAL, TRANSITION_CHANGE_PASSPHRASE,
+    TRANSITION_DISABLE, TRANSITION_ENABLE,
 };
 #[cfg(target_os = "macos")]
 use crate::{
@@ -71,11 +68,10 @@ use crate::{
 };
 use crate::{
     AppConfigToml, DropboxCredentialStateFile, DropboxResolvedCredentialHandle, DropboxTokenBundle,
-    DropboxTokenResponse,
-    APP_NAME, DATA_FILE_NAME, DROPBOX_AUTH_ENDPOINT, DROPBOX_DEFAULT_TOKEN_LIFETIME_SECS,
-    DROPBOX_OAUTH_TIMEOUT_SECS, DROPBOX_REDIRECT_HOST, DROPBOX_REDIRECT_PATH,
-    DROPBOX_REDIRECT_PORT, DROPBOX_REVOKE_ENDPOINT, DROPBOX_SCOPES, DROPBOX_TOKEN_ENDPOINT,
-    DROPBOX_TOKEN_REFRESH_SKEW_MS, KEYRING_DROPBOX_TOKENS,
+    DropboxTokenResponse, APP_NAME, DATA_FILE_NAME, DROPBOX_AUTH_ENDPOINT,
+    DROPBOX_DEFAULT_TOKEN_LIFETIME_SECS, DROPBOX_OAUTH_TIMEOUT_SECS, DROPBOX_REDIRECT_HOST,
+    DROPBOX_REDIRECT_PATH, DROPBOX_REDIRECT_PORT, DROPBOX_REVOKE_ENDPOINT, DROPBOX_SCOPES,
+    DROPBOX_TOKEN_ENDPOINT, DROPBOX_TOKEN_REFRESH_SKEW_MS, KEYRING_DROPBOX_TOKENS,
 };
 
 #[derive(Debug, Default, Serialize)]
@@ -104,7 +100,7 @@ const DROPBOX_MAX_STAGED_CREDENTIALS: usize = 4;
 const DROPBOX_MAX_RESOLVED_CREDENTIAL_HANDLES: usize = 16;
 const DROPBOX_RESOLVED_CREDENTIAL_HANDLE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const DROPBOX_PROMOTION_JOURNAL_VERSION: u8 = 1;
-const KEYRING_DROPBOX_PROMOTION_JOURNAL: &str = "dropbox_promotion_journal_v1";
+pub(crate) const KEYRING_DROPBOX_PROMOTION_JOURNAL: &str = "dropbox_promotion_journal_v1";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum DropboxStartupRecoveryOutcome {
@@ -341,9 +337,7 @@ where
         return Ok(DropboxPreviousCredentials::Empty);
     };
     let tokens = parse_dropbox_token_bundle(&raw)?;
-    // Unknown-keyring promotion is fallback-only and therefore cannot have
-    // written this entry. Exact-candidate bytes may already have existed and
-    // are preserved just like any different valid prior bundle.
+
     Ok(DropboxPreviousCredentials::Bundle(tokens))
 }
 
@@ -497,12 +491,6 @@ where
         Ok(None) => return Ok(()),
         Ok(Some(journal)) => journal,
         Err(initial_error) => {
-            // Once the Dropbox backend has reached its exact durable commit
-            // point, cleanup uncertainty is post-commit. Never turn it into a
-            // rollback by disabling the backend first: doing so would erase the
-            // only commit evidence and a later recovery would restore the old
-            // credentials. Leave both the candidate and backend intact so the
-            // caller can refuse its pending disable and retry cleanup safely.
             let commit_state = read_commit_state().map_err(|_| {
                 "Dropbox credential recovery could not verify the durable sync commit state; recovery remains pending and no state was changed"
                     .to_string()
@@ -580,10 +568,6 @@ where
         ));
     }
 
-    // Keep using the journal value read before the first attempt. A keyring
-    // deletion may succeed while its verification read fails; re-reading at
-    // this point could therefore return `None` and lose the only retained copy
-    // of the previous credential bundle.
     let previous_authority = if matches!(
         journal.previous,
         DropboxPreviousCredentials::UnknownKeyring
@@ -1078,9 +1062,7 @@ where
     if matches!(previous, DropboxPreviousCredentials::UnknownKeyring) {
         return Err("Previous Dropbox keyring state remains unknown".to_string());
     }
-    // Unknown promotion is fallback-only. Remove and verify only those
-    // candidate bytes; the token keyring is untouched even when it happens to
-    // equal the candidate.
+
     clear_candidate_fallback()?;
     if read_active()? != previous.cloned_tokens() {
         return Err(
@@ -1141,17 +1123,6 @@ fn discard_staged_dropbox_credentials_in_store(
     Ok(())
 }
 
-// The saved Proxy URL must reach every native request: env vars
-// (HTTP_PROXY/HTTPS_PROXY) still apply as reqwest defaults when no proxy is
-// configured in the app (#864).
-// TLS backend split (#663, #973): Windows must use native-tls (schannel) —
-// corporate TLS interception like Zscaler needs the OS chain engine
-// (intermediate/enterprise cert stores, AIA fetching), which rustls with
-// native roots cannot do, so it fails with "UnknownIssuer" where curl works.
-// macOS must use rustls — Secure Transport never gained TLS 1.3, so
-// TLS-1.3-only servers reject it with "bad protocol version". Linux keeps
-// rustls with native roots (covers private CAs in the system store).
-// Known ceiling: schannel on Windows 10 has no TLS 1.3, matching 1.1.0-1.1.5.
 pub(crate) fn blocking_http_client_builder(
     proxy_url: Option<&str>,
 ) -> Result<reqwest::blocking::ClientBuilder, String> {
@@ -1209,9 +1180,6 @@ fn cloud_redirect_security_error(
     }
 }
 
-/// reqwest's default `Policy::limited(10)` re-sends the request -- body included -- at
-/// whatever host the Location points at. Sync requests carry the whole document, so both
-/// backends check the redirect target against their own URL rule before following.
 fn redirect_guarded_blocking_http_client(
     proxy_url: Option<&str>,
     label: &'static str,
@@ -1253,9 +1221,6 @@ fn cloud_blocking_http_client(
     })
 }
 
-// The Dropbox token endpoint is a fixed, non-configurable host -- unlike WebDAV/Cloud
-// there is no "allow insecure http" knob, and no reason to ever follow a redirect off
-// api.dropboxapi.com since the POST body carries the refresh token / client id.
 fn dropbox_redirect_security_error(
     next: &reqwest::Url,
     previous: &[reqwest::Url],
@@ -1265,7 +1230,9 @@ fn dropbox_redirect_security_error(
         .and_then(|url| url.host_str().map(str::to_string));
     if is_https_downgrade(next, previous) {
         Some("Dropbox refused an HTTPS to HTTP redirect")
-    } else if next.scheme() != "https" || Some(next.host_str().unwrap_or_default().to_string()) != allowed_host {
+    } else if next.scheme() != "https"
+        || Some(next.host_str().unwrap_or_default().to_string()) != allowed_host
+    {
         Some("Dropbox refused a redirect off the token endpoint")
     } else {
         None
@@ -1623,9 +1590,6 @@ fn wait_for_dropbox_auth_code(
 
                 let state = params.get("state").cloned().unwrap_or_default();
                 if state != expected_state {
-                    // A callback carrying another attempt's state (a reloaded
-                    // tab from an earlier connect, a stale prefetch) is not this
-                    // flow's answer; reject it and keep waiting for the real one.
                     log::warn!(
                         target: "sync",
                         "Ignoring Dropbox OAuth callback with a mismatched state releaseCheck=v1.2.7/dropbox-signin-detached phase=callback-state-mismatch"
@@ -1830,11 +1794,6 @@ where
     }))
 }
 
-/// Whether the credential-state file holds any trace of Dropbox ever being set
-/// up. When it holds none, an unreachable keyring cannot be hiding tokens —
-/// there were never any to hide — so a status probe may answer "not connected"
-/// instead of erroring (#1043: keyring-less WebDAV/self-hosted setups saw a
-/// Dropbox error banner for a service they never used).
 fn dropbox_state_has_credential_evidence(state: &DropboxCredentialStateFile) -> bool {
     state.token_fallback.is_some()
         || state.promotion_journal.is_some()
@@ -1842,9 +1801,6 @@ fn dropbox_state_has_credential_evidence(state: &DropboxCredentialStateFile) -> 
         || state.cloud_provider.trim() == "dropbox"
 }
 
-/// A failed connection-status probe stays an error only while Dropbox evidence
-/// exists (a real setup whose keyring is unreachable deserves the loud path);
-/// with no evidence the probe answers "not connected".
 fn dropbox_status_probe_outcome(
     result: Result<bool, String>,
     has_credential_evidence: bool,
@@ -1990,9 +1946,6 @@ where
     ReadKeyring: FnMut() -> Result<bool, String>,
     DeleteKeyring: FnMut() -> Result<(), String>,
 {
-    // Clear the file fallback first. `read_config` may migrate a legacy file
-    // secret into the keyring, so deleting the keyring first can immediately
-    // recreate the credential from secrets.toml.
     clear_fallback()
         .map_err(|error| format!("Failed to clear Dropbox credential fallback: {error}"))?;
     if fallback_has_tokens()
@@ -2016,9 +1969,6 @@ where
         return Err("Dropbox keyring deletion failed durable read-back verification".to_string());
     }
 
-    // A fallback read can itself trigger the legacy migration. Recheck the
-    // keyring last so success proves both durable locations are empty at the
-    // same point in time.
     if fallback_has_tokens()
         .map_err(|error| format!("Failed to recheck Dropbox credential fallback: {error}"))?
     {
@@ -2052,9 +2002,6 @@ fn clear_dropbox_tokens(app: &tauri::AppHandle) -> Result<(), String> {
 fn publish_dropbox_disconnect_state(app: &tauri::AppHandle) -> Result<(), String> {
     let tombstone = serialize_dropbox_journal_tombstone()?;
     let persisted = update_dropbox_credential_state(app, |state| {
-        // One protected publication removes active fallback authority and
-        // logically clears any promotion journal before either keyring entry
-        // can be deleted or the remote token can be revoked.
         state.token_fallback = None;
         state.promotion_journal = Some(tombstone.clone());
         Ok(())
@@ -2206,9 +2153,6 @@ where
     ClearKeyring: FnMut() -> Result<(), String>,
     ClearFallback: FnMut() -> Result<(), String>,
 {
-    // The owner-only fallback is the authority marker. Its absence means no
-    // transaction and deliberately does not probe the keyring: a clean
-    // profile must remain usable when the OS credential service is absent.
     let Some(raw) = read_fallback()? else {
         return Ok(None);
     };
@@ -2231,10 +2175,6 @@ where
                 }
             }
 
-            // A missing, corrupt, or mismatched keyring journal cannot be
-            // paired with this transaction-bound marker. It is safe to remove
-            // only while both durable backend authorities remain off; callers
-            // otherwise fail closed first and retry cleanup later.
             if !can_cleanup_orphan()? {
                 return Err(
                     "Dropbox credential promotion marker does not match its keyring journal"
@@ -2267,9 +2207,6 @@ where
         }
         DropboxPromotionJournalFallbackRecord::Pending { journal } => Ok(Some(journal)),
         DropboxPromotionJournalFallbackRecord::Cleared { .. } => {
-            // The redacted fallback tombstone is the durable authority. A
-            // stale or unavailable keyring cannot resurrect the resolved
-            // transaction. Cleanup is opportunistic and may be retried.
             if clear_keyring().is_ok() && matches!(read_keyring(), Ok(None)) {
                 let _ = clear_fallback();
             }
@@ -2289,9 +2226,6 @@ where
     WriteFallback: FnMut(&str) -> Result<(), String>,
     ReadFallback: FnMut() -> Result<Option<String>, String>,
 {
-    // The redacted marker is published before the keyring write. It is the
-    // authority bit that distinguishes a clean profile from an interrupted
-    // transaction without duplicating token bytes into secrets.toml.
     let marker = serialize_dropbox_pending_keyring_marker(journal)?;
     write_fallback(&marker)?;
     let persisted_marker = read_fallback()?.ok_or_else(|| {
@@ -2320,9 +2254,6 @@ where
         return Ok(());
     }
 
-    // A failed or uncertain keyring write may have left stale bytes behind.
-    // Publish the owner-only fallback after that attempt so it becomes the
-    // durable authority before active credentials may be overwritten.
     let fallback_payload = serialize_dropbox_pending_journal_fallback(journal)?;
     write_fallback(&fallback_payload)?;
     let persisted = read_fallback()?
@@ -2637,16 +2568,7 @@ fn read_native_durably_disabled_sync_backend(app: &tauri::AppHandle) -> Result<S
     require_durably_disabled_dropbox_backend(read_native_dropbox_recovery_commit_state(app)?)
 }
 
-// Callers serialize this with `DropboxStagedCredentialState`. While a journal
-// exists, the renderer transaction has already durably selected Dropbox and
-// read it back, but has not written `sync_backend = cloud` until after native
-// credential promotion succeeds. Therefore `cloud` is the durable commit
-// marker: a matching candidate is kept; every other backend restores the
-// journaled previous bundle.
 fn recover_dropbox_credentials(app: &tauri::AppHandle) -> Result<(), String> {
-    // Reconcile a process stop between raw config publication and marker
-    // publication before journal inspection. The dedicated marker is the
-    // commit authority even when no credential journal exists.
     read_native_dropbox_recovery_commit_state(app)?;
     recover_dropbox_credentials_fail_closed_with_commit_state(
         || read_native_dropbox_recovery_commit_state(app),
@@ -2680,10 +2602,8 @@ where
             Ok(backend) if backend.trim() == "off" => {
                 Ok(DropboxStartupRecoveryOutcome::SyncDisabled { warning })
             }
-            // The abort reason is the only diagnostic a user ever sees (a
-            // Windows GUI process shows no stderr), so the underlying errors
-            // must ride along — swallowing them cost a full report round-trip
-            // in #1064's portable-mode "won't start".
+
+
             Ok(backend) => Err(format!(
                 "Dropbox credential recovery is uncertain and sync could not be durably disabled (backend: {backend}; recovery: {warning})"
             )),
@@ -2775,10 +2695,6 @@ fn run_dropbox_oauth(
         query.append_pair("state", &state);
     }
 
-    // Detached: `open::that` waits for the launched program to exit. With a
-    // handler that stays alive (a browser started for this URL, or a misregistered
-    // default such as a chat app) the callback listener below never ran, the
-    // sign-in page spun on the redirect, and the Connect button stayed dead.
     open::that_detached(authorize_url.as_str())
         .map_err(|error| format!("Failed to open Dropbox authorization URL: {error}"))?;
     log::info!(
@@ -2835,9 +2751,6 @@ fn validate_sync_dir(path: &PathBuf) -> Result<PathBuf, String> {
         fs::create_dir_all(path).map_err(|e| e.to_string())?;
     }
 
-    // Virtual filesystems (WinFSP/rclone mounts) cannot serve the final-path
-    // query canonicalize needs (os error 1005) even though the directory
-    // works; fall back to the path validated above.
     let Ok(canonical) = fs::canonicalize(path) else {
         return Ok(path.clone());
     };
@@ -2874,11 +2787,6 @@ fn resolve_sync_dir(app: &tauri::AppHandle, path: Option<String>) -> Result<Path
     validate_sync_dir(&candidate)
 }
 
-// A candidate dir reaches the sync-file commands through the activation
-// probe BEFORE set_sync_path has granted it to the webview fs scope, and the
-// probe's attachment step runs through the fs plugin (scope-checked) — without
-// this grant every candidate probe dies on "forbidden path" and a new sync
-// folder can never be verified or saved (#1001).
 fn resolve_sync_dir_granting_scope(
     app: &tauri::AppHandle,
     path: String,
@@ -2937,7 +2845,6 @@ pub(crate) fn expand_tauri_fs_scope(app: &tauri::AppHandle, dir: &Path) {
     }
 }
 
-// Single locked read (configured_sync_dir -> read_config), no write (B2).
 #[tauri::command(async)]
 pub(crate) fn get_sync_path(app: tauri::AppHandle) -> Result<String, String> {
     Ok(configured_sync_dir(&app)?
@@ -2945,7 +2852,6 @@ pub(crate) fn get_sync_path(app: tauri::AppHandle) -> Result<String, String> {
         .unwrap_or_default())
 }
 
-// Held across the whole read+mutate+write (B2) — see lock_config_read_modify_write.
 #[tauri::command(async)]
 pub(crate) fn clear_sync_path(app: tauri::AppHandle) -> Result<bool, String> {
     let _config_guard = lock_config_read_modify_write()?;
@@ -2957,8 +2863,6 @@ pub(crate) fn clear_sync_path(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
-// Off the UI thread: validation creates the folder and round-trips a write test
-// on a path the user just picked, which may be a slow mount.
 #[tauri::command(async)]
 pub(crate) fn set_sync_path(
     app: tauri::AppHandle,
@@ -2968,7 +2872,6 @@ pub(crate) fn set_sync_path(
     let sanitized_path = resolve_sync_dir(&app, Some(sync_path))?;
     probe_sync_dir(&sanitized_path)?;
 
-    // Inform the user when they point sync at an iCloud Drive path.
     let icloud = is_icloud_path(&sanitized_path);
     if icloud {
         log::info!(
@@ -2981,9 +2884,6 @@ pub(crate) fn set_sync_path(
     #[cfg(target_os = "macos")]
     let bookmark = create_sync_path_bookmark(&sanitized_path);
 
-    // Held across the whole read+mutate+write (B3, same pattern as
-    // clear_sync_path) — closes the pre-existing race this command shared
-    // with clear_sync_path before B2 fixed that one.
     let _config_guard = lock_config_read_modify_write()?;
     let mut config = read_config(&app);
     config.sync_path = Some(sync_dir_to_display_string(&sanitized_path));
@@ -3002,13 +2902,8 @@ pub(crate) fn set_sync_path(
     }))
 }
 
-// A non-persisting re-check for the explicit settings action. Keep this off
-// ordinary sync cycles; `set_sync_path` performs the only automatic probe.
 #[tauri::command(async)]
-pub(crate) fn test_sync_path(
-    app: tauri::AppHandle,
-    sync_path: String,
-) -> Result<bool, String> {
+pub(crate) fn test_sync_path(app: tauri::AppHandle, sync_path: String) -> Result<bool, String> {
     let sanitized_path = resolve_sync_dir_granting_scope(&app, sync_path)?;
     probe_sync_dir(&sanitized_path)?;
     Ok(true)
@@ -3161,8 +3056,6 @@ pub(crate) fn assert_webdav_url_allowed(
     }
 }
 
-/// A configured WebDAV URL may carry `user:pass@` userinfo, and these messages reach the
-/// user's error toast. Mirrors core's `sanitizeUrl`: drop the userinfo, keep the rest.
 fn redact_url_userinfo(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(mut parsed) if !parsed.username().is_empty() || parsed.password().is_some() => {
@@ -3266,11 +3159,6 @@ fn is_webdav_mkcol_conflict_error(error: &str) -> bool {
     error.starts_with("WebDAV MKCOL failed (409")
 }
 
-// One-line, size-capped server response excerpt for WebDAV error strings. The
-// strings travel through the JS bridge into the shared log, where the exact
-// method + final URL + status + server body are what distinguish a wrong URL
-// from a server-side refusal (#898: Koofr 405s that manual testing could not
-// reproduce because the failing request was never logged precisely).
 fn webdav_error_body_snippet(body: &str) -> String {
     let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
@@ -3280,23 +3168,17 @@ fn webdav_error_body_snippet(body: &str) -> String {
     format!(": {snippet}")
 }
 
-/// `https://host/dav/data.json?x=1` -> `https://host/dav/data.json.enc?x=1`. The `.enc` marker
-/// belongs on the path, never after the query — `normalize_webdav_url` preserves a `?`/`#`
-/// suffix, so a naive append would corrupt it.
 fn encrypted_webdav_url(url: &str) -> String {
     let split = url.find(['?', '#']).unwrap_or(url.len());
     let (path, suffix) = url.split_at(split);
     format!("{}{suffix}", encrypted_artifact_name(path))
 }
 
-/// Classifies MWENC1 bytes found where JSON was expected. Ciphertext is never "invalid JSON"
-/// to repair (decision #4); an off-state device instead learns the remote is encrypted.
-/// A non-empty, non-MWENC1 artifact — a plaintext sync document sitting where a keyed device
-/// expects ciphertext. Mirrors core's `isPlaintextSyncArtifact`; an empty or whitespace-only
-/// file is evidence of nothing.
 fn is_plaintext_sync_artifact(bytes: &[u8]) -> bool {
-    matches!(inspect_sync_artifact(bytes), SyncArtifactInspection::Plaintext)
-        && bytes.iter().any(|byte| *byte > 0x20)
+    matches!(
+        inspect_sync_artifact(bytes),
+        SyncArtifactInspection::Plaintext
+    ) && bytes.iter().any(|byte| *byte > 0x20)
 }
 
 fn webdav_encrypted_discovery(bytes: &[u8]) -> Option<String> {
@@ -3307,9 +3189,6 @@ fn webdav_encrypted_discovery(bytes: &[u8]) -> Option<String> {
     }
 }
 
-/// The in-band discovery marker `persist_discovery_and_reduce` parses back via
-/// `parse_encrypted_discovery` -- the one encoder for every seam that reports ciphertext
-/// this device has no (usable) key for.
 fn encrypted_discovery_marker(header: &ParsedHeaderFields) -> String {
     format!(
         "{SYNC_ENCRYPTION_REMOTE_ENCRYPTED}:{}:{}:{}:{}",
@@ -3320,13 +3199,6 @@ fn encrypted_discovery_marker(header: &ParsedHeaderFields) -> String {
     )
 }
 
-/// A valid MWENC1 artifact sealed under a DIFFERENT salt than `material` is proof this
-/// device's key belongs to another encryption generation (a passphrase set before the first
-/// sync while a peer encrypted the remote, or a peer's rotation). Decrypting would only fail
-/// as Auth, indistinguishable from a wrong passphrase -- report the discovery marker instead
-/// so the command layer downgrades to `remote-encrypted-no-key` and the unlock prompt (which
-/// re-derives from the remote's own salt) can heal it. Matching-salt and non-encrypted bytes
-/// return None: those cases keep their existing decrypt/terminal behavior.
 fn foreign_salt_discovery(bytes: &[u8], material: &SyncKeyMaterial) -> Option<String> {
     match inspect_sync_artifact(bytes) {
         SyncArtifactInspection::Encrypted(header) if header.salt != material.salt => {
@@ -3360,9 +3232,9 @@ fn webdav_fetch_optional_bytes(
             webdav_error_body_snippet(&body)
         ));
     }
-    let bytes = response
-        .bytes()
-        .map_err(|error| format!("Invalid WebDAV response: error reading response body: {error}"))?;
+    let bytes = response.bytes().map_err(|error| {
+        format!("Invalid WebDAV response: error reading response body: {error}")
+    })?;
     Ok(Some(bytes.to_vec()))
 }
 
@@ -3389,15 +3261,10 @@ fn webdav_get_json_blocking(
             .send()
             .map_err(|e| format_reqwest_send_error("WebDAV request failed", &e))
     };
-    let fetch = |target: &str| {
-        webdav_fetch_optional_bytes(&client, target, &username, &password)
-    };
+    let fetch = |target: &str| webdav_fetch_optional_bytes(&client, target, &username, &password);
     let response = get(&url)?;
 
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        // Detection (decision #2): only once the read at this device's own name has already come
-        // back missing — a populated remote's steady reads succeed and never issue this probe, so
-        // an existing install sees zero extra requests (invariant #1).
         if let Some(discovery) = webdav_absent_document_discovery(&fetch, &plain_url, material)? {
             return Err(discovery);
         }
@@ -3455,7 +3322,6 @@ fn webdav_get_json_blocking(
         });
     }
     let data = serde_json::from_str::<Value>(normalized_body).map_err(|e| {
-        // Inspect the ORIGINAL bytes, not the lossy UTF-8 text, before conceding "invalid JSON".
         webdav_encrypted_discovery(&body_bytes).unwrap_or_else(|| {
             invalid_webdav_document_error(
                 format!("Invalid WebDAV response: error decoding response body: {e}"),
@@ -3470,8 +3336,6 @@ fn webdav_get_json_blocking(
     })
 }
 
-/// What a document missing at THIS device's own artifact name means, given its posture. Taking
-/// the fetch as a bytes-or-nothing closure keeps the decision unit-testable without a server.
 fn webdav_absent_document_discovery<Fetch>(
     fetch: &Fetch,
     plain_url: &str,
@@ -3481,7 +3345,6 @@ where
     Fetch: Fn(&str) -> Result<Option<Vec<u8>>, String>,
 {
     match material {
-        // Off-state: ciphertext a peer wrote, which this device needs the passphrase for.
         None => {
             let Some(bytes) = fetch(&encrypted_webdav_url(plain_url))? else {
                 return Ok(None);
@@ -3489,13 +3352,15 @@ where
             if bytes.iter().all(|byte| *byte <= 0x20) {
                 return Ok(None);
             }
-            Ok(Some(webdav_encrypted_discovery(&bytes).unwrap_or_else(|| {
-                terminal_error("Plaintext was found at the encrypted WebDAV artifact name".to_string())
-            })))
+            Ok(Some(webdav_encrypted_discovery(&bytes).unwrap_or_else(
+                || {
+                    terminal_error(
+                        "Plaintext was found at the encrypted WebDAV artifact name".to_string(),
+                    )
+                },
+            )))
         }
-        // Keyed: the plaintext a peer's disable transition restored. Reporting an empty remote
-        // here would merge this device's whole store into a fresh plaintext generation and fork
-        // the folder — and this device never follows the remote down to plaintext on its own.
+
         Some(_) => {
             let Some(bytes) = fetch(plain_url)? else {
                 return Ok(None);
@@ -3555,7 +3420,7 @@ fn webdav_put_json_blocking(
 
     let payload = serde_json::to_string_pretty(&data)
         .map_err(|e| format!("Failed to encode WebDAV payload: {e}"))?;
-    // Encryption wraps the already-serialized document; nothing above this line differs.
+
     let (payload, content_type): (Vec<u8>, &str) = match material {
         None => (payload.into_bytes(), "application/json"),
         Some(material) => (
@@ -3652,8 +3517,6 @@ fn cloud_request_builder(
     }
 }
 
-/// A bare 405 from a cloud sync URL usually means the URL points at
-/// something other than a Mindwtr sync server (e.g. the wrong port).
 fn wrong_sync_server_hint(status: reqwest::StatusCode) -> &'static str {
     if status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
         " — this URL may not be a Mindwtr sync server (check host and port)"
@@ -3662,9 +3525,6 @@ fn wrong_sync_server_hint(status: reqwest::StatusCode) -> &'static str {
     }
 }
 
-/// A 413 on the sync document write: name both sizes and the server setting to raise.
-/// Same wording as core `cloud.ts`. The cloud server sends `limitBytes`; a proxy's 413
-/// does not, so the hint also names the proxy.
 fn cloud_data_too_large_message(body_bytes: usize, response_body: &str) -> String {
     let limit_bytes = serde_json::from_str::<Value>(response_body)
         .ok()
@@ -3750,7 +3610,6 @@ fn cloud_put_json_blocking(
     cloud_put_payload(&client, &url, &token, payload)
 }
 
-/// Same ceiling as core's `MAX_ERROR_BODY_BYTES`: an error body is read only this far.
 const CLOUD_ERROR_BODY_MAX_BYTES: usize = 64 * 1024;
 
 fn cloud_put_payload(
@@ -3772,7 +3631,7 @@ fn cloud_put_payload(
         let _ = response
             .take(CLOUD_ERROR_BODY_MAX_BYTES as u64 + 1)
             .read_to_end(&mut body);
-        // Over the cap: not the cloud server's small JSON answer, so no limit is named.
+
         let body = if body.len() > CLOUD_ERROR_BODY_MAX_BYTES {
             String::new()
         } else {
@@ -3810,9 +3669,6 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    /// A bare object with no recognised surface is not a sync document — it is what a torn
-    /// read leaves behind. Accepting it would normalize into an empty remote and let this
-    /// device's snapshot overwrite peer edits.
     #[test]
     fn a_payload_without_any_recognised_surface_is_invalid() {
         assert!(sync_payload_is_valid(&serde_json::json!({})).is_err());
@@ -3826,9 +3682,6 @@ mod tests {
     const WEBDAV_TEST_SCOPE: &str =
         r#"["webdav","https://dav.example.com/remote.php/dav/","alice"]"#;
 
-    /// The file-backend gate is also the native WebDAV commands' gate, so its lines must name
-    /// the backend the cycle actually ran against. A line reading `backend=file` beside
-    /// `activeScope=webdav#…` contradicts itself and misleads whoever reads the shared log.
     #[test]
     fn a_sync_encryption_state_line_names_the_webdav_backend_on_a_webdav_cycle() {
         let line = sync_encryption_state_line(None, Some(WEBDAV_TEST_SCOPE), false, "proceed");
@@ -3838,12 +3691,8 @@ mod tests {
         assert!(!line.contains("dav.example.com"), "{line}");
         assert!(!line.contains("alice"), "{line}");
 
-        let file_line = sync_encryption_state_line(
-            None,
-            Some(r#"["file","/home/u/Sync"]"#),
-            true,
-            "proceed",
-        );
+        let file_line =
+            sync_encryption_state_line(None, Some(r#"["file","/home/u/Sync"]"#), true, "proceed");
         assert!(file_line.contains("backend=file"), "{file_line}");
         assert!(!file_line.contains("/home/u/Sync"), "{file_line}");
     }
@@ -3855,17 +3704,20 @@ mod tests {
             Some(SYNC_ENCRYPTION_REMOTE_PLAINTEXT),
         )
         .expect("a discovery failure emits the pair");
-        assert!(read_line.contains("decision=plaintext-discovered"), "{read_line}");
+        assert!(
+            read_line.contains("decision=plaintext-discovered"),
+            "{read_line}"
+        );
         let error_line = error_line.expect("a discovery failure emits the error line");
         assert!(error_line.contains("backend=webdav"), "{error_line}");
         assert!(!error_line.contains("backend=file"), "{error_line}");
         assert!(!error_line.contains("dav.example.com"), "{error_line}");
 
-        // An ordinary IO failure stays out of this trail entirely.
-        assert!(
-            sync_encryption_remote_read_lines(Some(WEBDAV_TEST_SCOPE), Some("connection reset"))
-                .is_none()
-        );
+        assert!(sync_encryption_remote_read_lines(
+            Some(WEBDAV_TEST_SCOPE),
+            Some("connection reset")
+        )
+        .is_none());
     }
 
     #[test]
@@ -3960,7 +3812,9 @@ mod tests {
         use std::io::{Read, Write};
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback listener");
-        listener.set_nonblocking(true).expect("nonblocking listener");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
         let addr = listener.local_addr().expect("listener addr");
         let client = std::thread::spawn(move || {
             let mut answers = Vec::new();
@@ -3992,7 +3846,6 @@ mod tests {
     fn blocking_http_client_routes_requests_through_configured_proxy() {
         use std::io::{Read, Write};
 
-        // Fake proxy: accept one connection, capture the request line, answer.
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake proxy");
         let proxy_addr = listener.local_addr().expect("proxy addr");
         let handle = std::thread::spawn(move || {
@@ -4008,8 +3861,7 @@ mod tests {
 
         let client =
             blocking_http_client(Some(&format!("http://{proxy_addr}"))).expect("client with proxy");
-        // The target host does not resolve; reaching our listener proves the
-        // request went to the proxy instead of connecting directly.
+
         let _ = client.get("http://mindwtr-proxy-test.invalid/ping").send();
 
         let request = handle.join().expect("proxy thread");
@@ -4088,14 +3940,17 @@ mod tests {
         }
 
         let client = cloud_blocking_http_client(None, true).expect("client");
-        let refusal = r#"{"error":"Payload too large: the limit is 2000000 bytes","limitBytes":2000000}"#;
+        let refusal =
+            r#"{"error":"Payload too large: the limit is 2000000 bytes","limitBytes":2000000}"#;
         let (url, server) = serve_413(refusal.to_string());
         let error = cloud_put_payload(&client, &url, "", "{}".to_string()).expect_err("413");
         server.join().expect("server thread");
         assert_eq!(error, cloud_data_too_large_message(2, refusal));
-        assert!(error.contains("(2000000 bytes)"), "unexpected error: {error}");
+        assert!(
+            error.contains("(2000000 bytes)"),
+            "unexpected error: {error}"
+        );
 
-        // An error body over the cap is not read whole; the message falls back to no limit.
         let oversized = format!(
             r#"{{"limitBytes":2000000,"pad":"{}"}}"#,
             "x".repeat(CLOUD_ERROR_BODY_MAX_BYTES)
@@ -4119,7 +3974,7 @@ mod tests {
             let (mut stream, _) = listener.accept().expect("accept cloud request");
             let mut request = [0u8; 4096];
             let _ = stream.read(&mut request);
-            // Promise far more than is sent, send past the cap, then hold the connection open.
+
             let head = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 10485760\r\n\r\n";
             let _ = stream.write_all(head.as_bytes());
             let _ = stream.write_all(&vec![b' '; 2 * CLOUD_ERROR_BODY_MAX_BYTES]);
@@ -4128,12 +3983,20 @@ mod tests {
 
         let client = cloud_blocking_http_client(None, true).expect("client");
         let started = Instant::now();
-        let error = cloud_put_payload(&client, &format!("http://{address}/v1/data"), "", "{}".to_string())
-            .expect_err("413");
+        let error = cloud_put_payload(
+            &client,
+            &format!("http://{address}/v1/data"),
+            "",
+            "{}".to_string(),
+        )
+        .expect_err("413");
         let elapsed = started.elapsed();
         let _ = done_sender.send(());
         server.join().expect("server thread");
-        assert!(elapsed < Duration::from_secs(5), "read waited for the held body: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "read waited for the held body: {elapsed:?}"
+        );
         assert_eq!(error, cloud_data_too_large_message(2, ""));
     }
 
@@ -4491,15 +4354,16 @@ mod tests {
         fs::write(&primary, b"placeholder").expect("seed path for eviction check");
         let mut reads = 0;
         let mut waits = 0;
-        let mut read_bytes = |_path: &Path| {
-            reads += 1;
-            if reads == 1 {
-                Ok(b"{\"tasks\":[".to_vec())
-            } else {
-                Ok(b"\xef\xbb\xbf{\"tasks\":[{\"id\":\"new-primary\"}]} trailing-provider-bytes"
+        let mut read_bytes =
+            |_path: &Path| {
+                reads += 1;
+                if reads == 1 {
+                    Ok(b"{\"tasks\":[".to_vec())
+                } else {
+                    Ok(b"\xef\xbb\xbf{\"tasks\":[{\"id\":\"new-primary\"}]} trailing-provider-bytes"
                     .to_vec())
-            }
-        };
+                }
+            };
         let mut is_evicted = |_path: &Path| Ok(false);
         let mut durations = Vec::new();
         let mut wait = |duration: Duration| {
@@ -4518,13 +4382,15 @@ mod tests {
         .expect("second retained read recovers the complete primary");
 
         assert_eq!(value["tasks"][0]["id"], "new-primary");
-        assert_eq!(reads, 2, "primary retries before considering recovery files");
+        assert_eq!(
+            reads, 2,
+            "primary retries before considering recovery files"
+        );
         assert_eq!(waits, 1);
         assert_eq!(durations, vec![Duration::from_millis(120)]);
 
         let source = include_str!("sync.rs");
-        // Build the needles so this test's own source cannot satisfy split_once before the
-        // implementation. The source-bearing helper owns both recovery ordering and metadata.
+
         let helper_start = ["fn read_sync_file_with_source_from_retained_root_with", "("].concat();
         let helper_end = ["\nfn read_sync_file_from_retained_root_with", "("].concat();
         let retained_reader = source
@@ -4586,8 +4452,11 @@ mod tests {
         let displaced = parent.path().join("displaced-sync");
         fs::create_dir(&sync_dir).expect("create sync root");
         let primary = sync_dir.join(DATA_FILE_NAME);
-        fs::write(sync_dir.join(format!(".{DATA_FILE_NAME}.icloud")), b"placeholder")
-            .expect("seed retained placeholder");
+        fs::write(
+            sync_dir.join(format!(".{DATA_FILE_NAME}.icloud")),
+            b"placeholder",
+        )
+        .expect("seed retained placeholder");
         let lock = acquire_sync_lock(&sync_dir).expect("acquire retained authority");
         let root = RetainedSyncRoot::new(&sync_dir, &lock);
         fs::rename(&sync_dir, &displaced).expect("displace retained root");
@@ -4608,7 +4477,10 @@ mod tests {
         .expect("inspect held root");
 
         assert!(evicted, "the held root's placeholder is authoritative");
-        assert_eq!(fs::read(&primary).expect("replacement untouched").len(), 100);
+        assert_eq!(
+            fs::read(&primary).expect("replacement untouched").len(),
+            100
+        );
         release_sync_lock(&lock);
     }
 
@@ -4617,10 +4489,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let lexically_later = dir.path().join("mindwtr-backup-z.json");
         let actually_newer = dir.path().join("mindwtr-backup-a.json");
-        fs::write(&lexically_later, br#"{"tasks":[{"id":"older"}]}"#)
-            .expect("write older seed");
-        fs::write(&actually_newer, br#"{"tasks":[{"id":"newer"}]}"#)
-            .expect("write newer seed");
+        fs::write(&lexically_later, br#"{"tasks":[{"id":"older"}]}"#).expect("write older seed");
+        fs::write(&actually_newer, br#"{"tasks":[{"id":"newer"}]}"#).expect("write newer seed");
         OpenOptions::new()
             .read(true)
             .write(true)
@@ -4701,13 +4571,9 @@ mod tests {
         let seeds = retained_seed_backup_files(&root, ".json")
             .expect("enumerate through retained root authority");
         assert_eq!(seeds.len(), 1);
-        let retained = read_sync_candidate_from_retained_root(
-            &root,
-            &seeds[0],
-            1,
-            SyncFileCrypto::Off,
-        )
-        .expect("read seed through retained root authority");
+        let retained =
+            read_sync_candidate_from_retained_root(&root, &seeds[0], 1, SyncFileCrypto::Off)
+                .expect("read seed through retained root authority");
         assert_eq!(retained["tasks"][0]["id"], "retained");
         assert!(fs::read_dir(&sync_dir)
             .expect("replacement root")
@@ -5151,8 +5017,6 @@ mod tests {
 
     #[test]
     fn unsupported_flock_is_not_treated_as_contention_or_a_safe_lock() {
-        // ENOSYS/EOPNOTSUPP from flock is an unavailable safety capability,
-        // not contention and never permission to continue lockless.
         #[cfg(target_os = "linux")]
         {
             let enosys = std::io::Error::from_raw_os_error(38);
@@ -5170,12 +5034,9 @@ mod tests {
     fn renderer_cycle_lease_blocks_native_transitions_until_release() {
         let dir = tempfile::tempdir().expect("temp dir");
         let state = FileSyncLeaseState::default();
-        let token = acquire_file_sync_lease_for_dir(&state, dir.path(), "main")
-            .expect("cycle lease");
+        let token =
+            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("cycle lease");
 
-        // Enable, passphrase change and disable all enter through
-        // `acquire_sync_lock`; none may cross the ordinary cycle's final
-        // revalidation/persistence boundary while its opaque handle is held.
         for transition in ["enable", "change-passphrase", "disable"] {
             assert_eq!(
                 acquire_sync_lock(dir.path())
@@ -5333,8 +5194,7 @@ mod tests {
     fn renderer_document_write_revalidates_the_lock_at_the_canonical_rename_boundary() {
         let dir = tempfile::tempdir().expect("temp dir");
         let document_path = dir.path().join(DATA_FILE_NAME);
-        fs::write(&document_path, br#"{"tasks":[{"id":"original"}]}"#)
-            .expect("seed document");
+        fs::write(&document_path, br#"{"tasks":[{"id":"original"}]}"#).expect("seed document");
         let document_before = fs::read(&document_path).expect("read seeded document");
         let state = FileSyncLeaseState::default();
         let token =
@@ -5347,12 +5207,9 @@ mod tests {
             let displaced_lock = sync_dir.join(".mindwtr.lock.displaced");
             let mut replaced = false;
             let mut validate_lease = || {
-                if !replaced
-                    && fs::metadata(&document_tmp)
-                        .is_ok_and(|metadata| metadata.len() > 0)
+                if !replaced && fs::metadata(&document_tmp).is_ok_and(|metadata| metadata.len() > 0)
                 {
-                    fs::rename(&lock_path, &displaced_lock)
-                        .map_err(|error| error.to_string())?;
+                    fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
                     fs::write(&lock_path, b"peer lock").map_err(|error| error.to_string())?;
                     replaced = true;
                 }
@@ -5369,7 +5226,10 @@ mod tests {
         })
         .expect_err("lock replacement at the rename boundary must abort");
 
-        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
         assert_eq!(
             fs::read(&document_path).expect("read unchanged document"),
             document_before
@@ -5417,7 +5277,10 @@ mod tests {
         .expect_err("Windows replacement must abort after lock identity loss");
 
         assert!(replaced);
-        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
         assert!(!document.exists(), "no later install mutation may run");
         assert_eq!(
             fs::read(&document_previous).expect("old generation recoverable"),
@@ -5427,11 +5290,9 @@ mod tests {
             document_tmp.exists(),
             "the stale authority must not clean the staged name after identity loss"
         );
-        assert!(
-            fs::read_to_string(&document_tmp)
-                .expect("staged replacement")
-                .contains("replacement")
-        );
+        assert!(fs::read_to_string(&document_tmp)
+            .expect("staged replacement")
+            .contains("replacement"));
         release_sync_lock(&lock);
     }
 
@@ -5440,8 +5301,7 @@ mod tests {
     fn renderer_document_write_revalidates_before_publishing_the_backup() {
         let dir = tempfile::tempdir().expect("temp dir");
         let document_path = dir.path().join(DATA_FILE_NAME);
-        fs::write(&document_path, br#"{"tasks":[{"id":"original"}]}"#)
-            .expect("seed document");
+        fs::write(&document_path, br#"{"tasks":[{"id":"original"}]}"#).expect("seed document");
         let document_before = fs::read(&document_path).expect("read seeded document");
         let state = FileSyncLeaseState::default();
         let token =
@@ -5455,8 +5315,7 @@ mod tests {
             let mut replaced = false;
             let mut validate_lease = || {
                 if !replaced && backup_tmp.exists() {
-                    fs::rename(&lock_path, &displaced_lock)
-                        .map_err(|error| error.to_string())?;
+                    fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
                     fs::write(&lock_path, b"peer lock").map_err(|error| error.to_string())?;
                     replaced = true;
                 }
@@ -5473,7 +5332,10 @@ mod tests {
         })
         .expect_err("lock replacement before backup publication must abort");
 
-        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
         assert_eq!(
             fs::read(&document_path).expect("read unchanged document"),
             document_before
@@ -5494,8 +5356,8 @@ mod tests {
         let sync_root = temp.path().join("sync-root");
         fs::create_dir(&sync_root).expect("sync root");
         let state = FileSyncLeaseState::default();
-        let token = acquire_file_sync_lease_for_dir(&state, &sync_root, "main")
-            .expect("cycle lease");
+        let token =
+            acquire_file_sync_lease_for_dir(&state, &sync_root, "main").expect("cycle lease");
 
         let original_root = temp.path().join("original-sync-root");
         fs::rename(&sync_root, &original_root).expect("move leased root");
@@ -5505,7 +5367,10 @@ mod tests {
 
         let error = with_file_sync_lease(&state, &token, "main", |_| Ok(()))
             .expect_err("replaced root must invalidate the held lease");
-        assert!(error.contains("root authority changed"), "unexpected error: {error}");
+        assert!(
+            error.contains("root authority changed"),
+            "unexpected error: {error}"
+        );
         assert_eq!(
             fs::read(replacement_marker).expect("replacement untouched"),
             b"replacement"
@@ -5788,11 +5653,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn write_refusing_lock_file_still_grants_the_sync_lock() {
-        // A cache-off rclone VFS mount refuses to write-open an existing file
-        // (#1001) — it logged an error on every sync while the lock still
-        // worked. A read-only mode bit is the local stand-in for that refusal:
-        // the lock must be taken through a handle that never asks for write
-        // access, on the same stable inode.
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().expect("temp dir");
         let lock_path = dir.path().join(".mindwtr.lock");
@@ -5816,14 +5676,8 @@ mod tests {
 
     #[test]
     fn sync_writes_never_copy_through_a_presizing_copy() {
-        // `fs::copy` presizes the destination (`CopyFileExW` on Windows), which
-        // a cache-off rclone VFS refuses with a per-sync `Truncate: Can't change
-        // size` error (#1001). Nothing on the sync write path may reintroduce
-        // it; the refusal is invisible on a local filesystem, so guard the
-        // source instead.
         let source = include_str!("sync.rs");
-        // Built at runtime: spelling the declaration out as a literal would make
-        // this test's own source the first match and guard nothing.
+
         let declaration = format!("fn {}(", "write_sync_file_to_dir");
         assert_eq!(
             source.matches(&declaration).count(),
@@ -5837,10 +5691,7 @@ mod tests {
             .split_once("\n#[tauri::command")
             .expect("end of write_sync_file_to_dir")
             .0;
-        // The slice runs to the next command attribute, so it spans both the thin
-        // `write_sync_file_to_dir` delegate and the `_with` function holding the real write.
-        // Pin that: a refactor that moves the actual write out of this span would otherwise
-        // leave the guard scanning a one-line wrapper and silently guarding nothing.
+
         let atomic_helper_call = format!("{}(", "atomic_retained_tmp_write_then_rename_with");
         assert!(
             body.contains(&atomic_helper_call),
@@ -5882,14 +5733,10 @@ mod tests {
             .split_once("\nconst SYNC_FOLDER_PROBE_BYTES")
             .expect("end of atomic helper")
             .0;
-        for required in [
-            "root.create_new(",
-            ".write_all(",
-            ".sync_all(",
-            ".rename(",
-        ] {
+        let helper_tokens: String = helper_body.split_whitespace().collect();
+        for required in ["root.create_new(", ".write_all(", ".sync_all(", ".rename("] {
             assert!(
-                helper_body.contains(required),
+                helper_tokens.contains(required),
                 "the shared helper must own the atomic write primitive {required}"
             );
         }
@@ -5953,7 +5800,7 @@ mod tests {
             .split_once(&real_write_declaration)
             .expect("write_sync_file_to_dir_with")
             .1
-            .split_once("\n// Off the UI thread for the same reason as `read_sync_file`")
+            .split_once("\n#[tauri::command(async)]")
             .expect("end of write_sync_file_to_dir_with")
             .0;
         assert!(
@@ -6008,7 +5855,7 @@ mod tests {
             .split_once(&write_command_declaration)
             .expect("write_sync_file")
             .1
-            .split_once("\n// ---------------------------------------------------------------------------")
+            .split_once("\nconst SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX")
             .expect("end of write_sync_file")
             .0;
         assert!(
@@ -6117,8 +5964,7 @@ mod tests {
         let mut published_peer = false;
         let mut before_stage = |stage: AtomicWriteStage| {
             if stage == AtomicWriteStage::Rename && !published_peer {
-                fs::write(&peer_file, b"peer-generation")
-                    .map_err(|error| error.to_string())?;
+                fs::write(&peer_file, b"peer-generation").map_err(|error| error.to_string())?;
                 published_peer = true;
             }
             Ok(())
@@ -6342,7 +6188,10 @@ mod tests {
         .expect_err("name-swapped temp leaf must be rejected");
 
         assert_eq!(error.stage, AtomicWriteStage::Rename);
-        assert_eq!(fs::read(&unrelated).expect("unrelated remains"), b"unrelated");
+        assert_eq!(
+            fs::read(&unrelated).expect("unrelated remains"),
+            b"unrelated"
+        );
         assert_eq!(
             fs::read(&tmp_file).expect("replacement hardlink remains"),
             b"unrelated"
@@ -6372,7 +6221,10 @@ mod tests {
         .expect_err("probe destination must be create-new");
 
         assert_eq!(error.stage, AtomicWriteStage::Rename);
-        assert_eq!(fs::read(&final_file).expect("destination remains"), b"pre-existing");
+        assert_eq!(
+            fs::read(&final_file).expect("destination remains"),
+            b"pre-existing"
+        );
         assert!(!tmp_file.exists(), "owned temp is cleaned up");
     }
 
@@ -6397,10 +6249,15 @@ mod tests {
             .take()
             .expect("rename failure retains invocation-owned temp");
 
-        publication.verify_at(&tmp_file).expect("temp identity remains exact");
+        publication
+            .verify_at(&tmp_file)
+            .expect("temp identity remains exact");
         assert_eq!(fs::read(&tmp_file).expect("read temp"), b"fallback bytes");
         drop(publication);
-        assert!(!tmp_file.exists(), "dropping the owner cleans only its temp");
+        assert!(
+            !tmp_file.exists(),
+            "dropping the owner cleans only its temp"
+        );
     }
 
     #[test]
@@ -6431,7 +6288,10 @@ mod tests {
         assert!(error.contains("replaced"));
         drop(publication);
 
-        assert_eq!(fs::read(&final_file).expect("replacement remains"), b"unrelated");
+        assert_eq!(
+            fs::read(&final_file).expect("replacement remains"),
+            b"unrelated"
+        );
         assert_eq!(
             fs::read(&moved_owned_file).expect("owned node remains available"),
             b"invocation-owned"
@@ -6528,11 +6388,9 @@ mod tests {
             fs::read(displaced_dir.join(DATA_FILE_NAME)).expect("retained-root document"),
             b"retained-root"
         );
-        assert!(
-            revalidate_sync_lock(&lock, &sync_dir)
-                .expect_err("caller finalization must reject rebound root")
-                .contains("root authority changed")
-        );
+        assert!(revalidate_sync_lock(&lock, &sync_dir)
+            .expect_err("caller finalization must reject rebound root")
+            .contains("root authority changed"));
         publication.keep();
         release_sync_lock(&lock);
     }
@@ -6607,7 +6465,10 @@ mod tests {
 
         assert!(is_retained_cleanup_authority_error(&error));
         assert_eq!(validations, 1, "authority validation must be terminal");
-        assert_eq!(fs::read(&owned).expect("owned stage remains"), b"owned-stage");
+        assert_eq!(
+            fs::read(&owned).expect("owned stage remains"),
+            b"owned-stage"
+        );
         release_sync_lock(&lock);
     }
 
@@ -6633,7 +6494,10 @@ mod tests {
         let mut authority = |mutation_path: &Path| {
             validations += 1;
             if validations == 3 {
-                assert!(!owned.exists(), "owned leaf has already moved to quarantine");
+                assert!(
+                    !owned.exists(),
+                    "owned leaf has already moved to quarantine"
+                );
                 assert!(
                     mutation_path
                         .file_name()
@@ -6645,8 +6509,6 @@ mod tests {
                 fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
                 fs::write(&lock_path, b"replacement lock").map_err(|error| error.to_string())?;
             } else if validations > 3 && displaced_lock.exists() {
-                // Model a transient pathname restoration. Cleanup must never
-                // call us again and continue deleting after the first marker.
                 fs::remove_file(&lock_path).map_err(|error| error.to_string())?;
                 fs::rename(&displaced_lock, &lock_path).map_err(|error| error.to_string())?;
             }
@@ -6706,9 +6568,7 @@ mod tests {
                 if validations == 2 {
                     fs::rename(&destination, &linked_generation)?;
                     fs::rename(&peer, &destination)?;
-                    return Err(std::io::Error::other(
-                        "injected source retirement failure",
-                    ));
+                    return Err(std::io::Error::other("injected source retirement failure"));
                 }
                 Ok(())
             },
@@ -6932,7 +6792,10 @@ mod tests {
         .expect_err("post-link authority loss must abort source retirement");
 
         assert!(is_retained_cleanup_authority_error(&error.detail));
-        assert!(error.owned_temp.is_none(), "lost authority cannot own cleanup");
+        assert!(
+            error.owned_temp.is_none(),
+            "lost authority cannot own cleanup"
+        );
         assert_eq!(
             fs::read(&destination).expect("linked generation remains"),
             b"owned-generation"
@@ -6982,7 +6845,10 @@ mod tests {
 
         assert_eq!(error.stage, AtomicWriteStage::Rename);
         assert!(is_retained_cleanup_authority_error(&error.detail));
-        assert!(error.owned_temp.is_none(), "lost authority cannot own cleanup");
+        assert!(
+            error.owned_temp.is_none(),
+            "lost authority cannot own cleanup"
+        );
         assert_eq!(
             fs::read(&destination).expect("linked generation remains"),
             b"owned-generation"
@@ -7113,18 +6979,17 @@ mod tests {
         let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
         let root = RetainedSyncRoot::new(dir.path(), &lock);
         let mut before_stage = |_stage: AtomicWriteStage| Ok::<(), String>(());
-        let mut partial_link = |
-            _root: &RetainedSyncRoot<'_>,
-            source: &Path,
-            destination: &Path,
-            validate: &mut dyn FnMut() -> Result<(), String>,
-        | {
-            validate()?;
-            fs::hard_link(source, destination).map_err(|error| error.to_string())?;
-            Err(format!(
-                "{RETAINED_LINKED_DESTINATION_PRESERVED}: injected source retirement failure"
-            ))
-        };
+        let mut partial_link =
+            |_root: &RetainedSyncRoot<'_>,
+             source: &Path,
+             destination: &Path,
+             validate: &mut dyn FnMut() -> Result<(), String>| {
+                validate()?;
+                fs::hard_link(source, destination).map_err(|error| error.to_string())?;
+                Err(format!(
+                    "{RETAINED_LINKED_DESTINATION_PRESERVED}: injected source retirement failure"
+                ))
+            };
 
         let mut error = atomic_retained_tmp_write_then_rename_with(
             &root,
@@ -7137,14 +7002,23 @@ mod tests {
         )
         .expect_err("partial fallback publication must remain an error");
 
-        assert!(!final_file.exists(), "the exact partial destination is retired");
-        assert!(tmp_file.exists(), "the source remains owned until error disposal");
+        assert!(
+            !final_file.exists(),
+            "the exact partial destination is retired"
+        );
+        assert!(
+            tmp_file.exists(),
+            "the source remains owned until error disposal"
+        );
         let mut owned_temp = error.owned_temp.take().expect("owned retained source");
         owned_temp.keep();
         owned_temp
             .remove_with(&tmp_file, &mut |_path| Ok(()))
             .expect("explicit caller-authorized source cleanup");
-        assert!(!tmp_file.exists(), "the source owner retires its exact stage");
+        assert!(
+            !tmp_file.exists(),
+            "the source owner retires its exact stage"
+        );
         release_sync_lock(&lock);
     }
 
@@ -7158,20 +7032,19 @@ mod tests {
         let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
         let root = RetainedSyncRoot::new(dir.path(), &lock);
         let mut before_stage = |_stage: AtomicWriteStage| Ok::<(), String>(());
-        let mut partial_link = |
-            _root: &RetainedSyncRoot<'_>,
-            source: &Path,
-            destination: &Path,
-            validate: &mut dyn FnMut() -> Result<(), String>,
-        | {
-            validate()?;
-            fs::hard_link(source, destination).map_err(|error| error.to_string())?;
-            fs::rename(destination, &displaced_link).map_err(|error| error.to_string())?;
-            fs::write(destination, b"peer-generation").map_err(|error| error.to_string())?;
-            Err(format!(
-                "{RETAINED_LINKED_DESTINATION_PRESERVED}: injected raced retirement failure"
-            ))
-        };
+        let mut partial_link =
+            |_root: &RetainedSyncRoot<'_>,
+             source: &Path,
+             destination: &Path,
+             validate: &mut dyn FnMut() -> Result<(), String>| {
+                validate()?;
+                fs::hard_link(source, destination).map_err(|error| error.to_string())?;
+                fs::rename(destination, &displaced_link).map_err(|error| error.to_string())?;
+                fs::write(destination, b"peer-generation").map_err(|error| error.to_string())?;
+                Err(format!(
+                    "{RETAINED_LINKED_DESTINATION_PRESERVED}: injected raced retirement failure"
+                ))
+            };
 
         let mut error = atomic_retained_tmp_write_then_rename_with(
             &root,
@@ -7185,7 +7058,10 @@ mod tests {
         .expect_err("raced partial publication must remain an error");
 
         assert!(error.detail.contains("preserved an ambiguous generation"));
-        assert_eq!(fs::read(&final_file).expect("peer remains"), b"peer-generation");
+        assert_eq!(
+            fs::read(&final_file).expect("peer remains"),
+            b"peer-generation"
+        );
         assert_eq!(
             fs::read(&displaced_link).expect("linked generation preserved"),
             b"probe-generation"
@@ -7227,7 +7103,10 @@ mod tests {
             validations, 8,
             "each mutation is fenced before/after and each rename revalidates at its OS boundary"
         );
-        assert_eq!(fs::read(&target).expect("installed target"), b"new-generation");
+        assert_eq!(
+            fs::read(&target).expect("installed target"),
+            b"new-generation"
+        );
         assert!(!replacement.exists());
         assert!(!previous.exists());
         release_sync_lock(&lock);
@@ -7298,9 +7177,6 @@ mod tests {
 
     #[test]
     fn windows_directory_parser_accepts_a_packed_final_name_at_the_field_offset() {
-        // On x64 FILE_ID_BOTH_DIR_INFO has trailing structure padding: the
-        // FileName field starts at byte 104 even though size_of - 2 is 110.
-        // A final one-code-unit name can therefore validly end at byte 106.
         assert_eq!(
             retained_directory_name_range(0, 104, 2, 106).expect("packed final entry"),
             104..106
@@ -7313,9 +7189,6 @@ mod tests {
         assert!(retained_directory_name_range(usize::MAX, 104, 2, usize::MAX).is_err());
         assert!(retained_directory_entry_range(0, 112, 106).is_err());
 
-        // Git may materialize this source with CRLF on Windows. Normalize the
-        // fixture before inspecting it so the safety regression tests code,
-        // not checkout line-ending policy.
         let source = include_str!("sync.rs").replace("\r\n", "\n");
         let windows_enumerator = source
             .split_once("#[cfg(target_os = \"windows\")]\nfn retained_root_list_names")
@@ -7324,9 +7197,9 @@ mod tests {
             .split_once("\nfn retained_directory_name_range")
             .expect("end of Windows retained enumerator")
             .0;
-        assert!(windows_enumerator.contains(
-            "std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName)"
-        ));
+        assert!(
+            windows_enumerator.contains("std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName)")
+        );
         assert!(!windows_enumerator.contains(
             "std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>()\n                - std::mem::size_of::<u16>()"
         ));
@@ -7459,10 +7332,7 @@ mod tests {
 
     #[test]
     fn sync_folder_probe_reports_delete_failure_and_retries_cleanup() {
-        assert_folder_probe_failure(
-            ProbeFailureStage::Delete,
-            "Could not remove the test file",
-        );
+        assert_folder_probe_failure(ProbeFailureStage::Delete, "Could not remove the test file");
     }
 
     #[test]
@@ -7491,22 +7361,25 @@ mod tests {
         )
         .expect_err("post-publication authority loss must fail closed");
 
-        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
         assert_eq!(
             fs::read(&final_file).expect("published bytes remain recoverable"),
             SYNC_FOLDER_PROBE_BYTES
         );
-        assert!(!tmp_file.exists(), "publication already consumed the temp leaf");
-        assert!(displaced_lock.exists(), "original authority remains observable");
+        assert!(
+            !tmp_file.exists(),
+            "publication already consumed the temp leaf"
+        );
+        assert!(
+            displaced_lock.exists(),
+            "original authority remains observable"
+        );
     }
 
-    // ---------------------------------------------------------------
-    // Sync encryption at the file-sync seam (#1056 phase 2)
-    // ---------------------------------------------------------------
-
     fn test_material(seed: u8) -> SyncKeyMaterial {
-        // The seam never derives; it is handed material. Skipping Argon2 here keeps these
-        // tests fast without weakening what they check.
         SyncKeyMaterial {
             key: [seed; KEY_LEN],
             salt: [seed; SALT_LEN],
@@ -7520,14 +7393,15 @@ mod tests {
 
     #[test]
     fn encryption_off_writes_exactly_what_it_wrote_before_the_feature() {
-        // Backward-compat invariant #1: an install that never opts in must be byte-for-byte
-        // and path-for-path unchanged.
         let dir = tempfile::tempdir().expect("temp dir");
         let data = serde_json::json!({ "tasks": [{ "id": "a" }] });
         write_sync_file_to_dir(dir.path(), data.clone(), None).expect("write");
 
         let written = fs::read_to_string(dir.path().join(DATA_FILE_NAME)).expect("read");
-        assert_eq!(written, serde_json::to_string_pretty(&data).expect("pretty"));
+        assert_eq!(
+            written,
+            serde_json::to_string_pretty(&data).expect("pretty")
+        );
         assert!(!dir.path().join("data.json.enc").exists());
         assert!(!dir.path().join("data.json.tmp").exists());
     }
@@ -7544,14 +7418,23 @@ mod tests {
         assert!(dir.path().join("data.json.enc").exists());
         assert!(!dir.path().join(DATA_FILE_NAME).exists());
         let raw = fs::read(dir.path().join("data.json.enc")).expect("read raw");
-        assert!(matches!(inspect_sync_artifact(&raw), SyncArtifactInspection::Encrypted(_)));
-        assert!(!raw.starts_with(b"{"), "the document on disk must not be readable JSON");
+        assert!(matches!(
+            inspect_sync_artifact(&raw),
+            SyncArtifactInspection::Encrypted(_)
+        ));
+        assert!(
+            !raw.starts_with(b"{"),
+            "the document on disk must not be readable JSON"
+        );
 
         let read = read_sync_file_versioned_from_dir_with(dir.path(), crypto).expect("read");
         assert_eq!(read.data["tasks"][0]["id"], "encrypted");
         assert_eq!(read.source, "primary");
-        // Fingerprints stay plaintext-domain, so they match a plaintext write of the same doc.
-        assert_eq!(read.fingerprint, sync_document_fingerprint(&read.data).expect("fingerprint"));
+
+        assert_eq!(
+            read.fingerprint,
+            sync_document_fingerprint(&read.data).expect("fingerprint")
+        );
     }
 
     #[test]
@@ -7560,10 +7443,20 @@ mod tests {
         let material = test_material(1);
         let crypto = SyncFileCrypto::Enabled(&material);
 
-        write_sync_file_to_dir_with(dir.path(), serde_json::json!({ "tasks": [{ "id": "one" }] }), None, crypto)
-            .expect("first write");
-        write_sync_file_to_dir_with(dir.path(), serde_json::json!({ "tasks": [{ "id": "two" }] }), None, crypto)
-            .expect("second write");
+        write_sync_file_to_dir_with(
+            dir.path(),
+            serde_json::json!({ "tasks": [{ "id": "one" }] }),
+            None,
+            crypto,
+        )
+        .expect("first write");
+        write_sync_file_to_dir_with(
+            dir.path(),
+            serde_json::json!({ "tasks": [{ "id": "two" }] }),
+            None,
+            crypto,
+        )
+        .expect("second write");
 
         assert!(dir.path().join("data.json.enc.bak").exists());
         let backup = read_sync_candidate_with(&dir.path().join("data.json.enc.bak"), 1, crypto)
@@ -7573,9 +7466,6 @@ mod tests {
 
     #[test]
     fn a_wrong_key_read_is_terminal_and_never_degrades_into_recovery() {
-        // The data-loss guardrail (decision #4): ciphertext this device cannot open may be a
-        // peer's perfectly good newer generation. It must stop the run, not walk the recovery
-        // chain and certainly not "repair" anything.
         let dir = tempfile::tempdir().expect("temp dir");
         let real = test_material(1);
         let primary = seal(br#"{"tasks":[{"id":"remote"}]}"#, &real);
@@ -7583,46 +7473,51 @@ mod tests {
         fs::write(dir.path().join("data.json.enc"), &primary).expect("write primary");
         fs::write(dir.path().join("data.json.enc.bak"), &backup).expect("write backup");
 
-        // Same salt, different key: a genuine wrong passphrase within the same encryption
-        // generation (the different-salt shape is a discovery instead — see the next test).
-        let wrong = SyncKeyMaterial { key: [2; KEY_LEN], salt: real.salt, params: real.params };
-        let error = read_sync_file_versioned_from_dir_with(
-            dir.path(),
-            SyncFileCrypto::Enabled(&wrong),
-        )
-        .expect_err("a wrong key must fail the read");
+        let wrong = SyncKeyMaterial {
+            key: [2; KEY_LEN],
+            salt: real.salt,
+            params: real.params,
+        };
+        let error =
+            read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&wrong))
+                .expect_err("a wrong key must fail the read");
 
-        assert!(is_terminal_error(&error), "expected a terminal error, got: {error}");
-        // Nothing moved, nothing was rewritten, nothing fell back to the backup's contents.
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("primary"), primary);
-        assert_eq!(fs::read(dir.path().join("data.json.enc.bak")).expect("backup"), backup);
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("primary"),
+            primary
+        );
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc.bak")).expect("backup"),
+            backup
+        );
         assert!(!dir.path().join("data.json.enc.previous").exists());
     }
 
     #[test]
     fn a_foreign_salt_read_reports_a_no_key_discovery_instead_of_a_dead_end() {
-        // A passphrase set before the first sync (or a peer's rotation) leaves this device
-        // holding a key derived from a different salt than the artifacts on disk. That is
-        // provably a generation mismatch, not corruption: the read must surface the discovery
-        // marker so the command layer downgrades to remote-encrypted-no-key and the unlock
-        // prompt can re-derive the key from the artifact's own salt.
         let dir = tempfile::tempdir().expect("temp dir");
         let remote = test_material(1);
         let primary = seal(br#"{"tasks":[{"id":"remote"}]}"#, &remote);
         fs::write(dir.path().join("data.json.enc"), &primary).expect("write primary");
 
         let foreign = test_material(2);
-        let error = read_sync_file_versioned_from_dir_with(
-            dir.path(),
-            SyncFileCrypto::Enabled(&foreign),
-        )
-        .expect_err("a foreign-salt read must fail the read");
+        let error =
+            read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&foreign))
+                .expect_err("a foreign-salt read must fail the read");
 
         let (salt, params) = parse_encrypted_discovery(&error).expect("a discovery marker");
         assert_eq!(salt, remote.salt);
         assert_eq!(params, remote.params);
-        // Nothing moved, nothing was rewritten.
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("primary"), primary);
+
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("primary"),
+            primary
+        );
     }
 
     #[test]
@@ -7634,14 +7529,18 @@ mod tests {
         sealed[last] ^= 0xff;
         fs::write(dir.path().join("data.json.enc"), &sealed).expect("write");
 
-        let error = read_sync_file_versioned_from_dir_with(
-            dir.path(),
-            SyncFileCrypto::Enabled(&material),
-        )
-        .expect_err("tampered bytes must fail the read");
+        let error =
+            read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&material))
+                .expect_err("tampered bytes must fail the read");
 
-        assert!(is_terminal_error(&error), "expected a terminal error, got: {error}");
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("primary"), sealed);
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("primary"),
+            sealed
+        );
     }
 
     #[test]
@@ -7662,9 +7561,18 @@ mod tests {
         )
         .expect_err("a wrong key must refuse the write");
 
-        assert!(is_terminal_error(&error), "expected a terminal error, got: {error}");
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("primary"), primary);
-        assert_eq!(fs::read(dir.path().join("data.json.enc.bak")).expect("backup"), backup);
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("primary"),
+            primary
+        );
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc.bak")).expect("backup"),
+            backup
+        );
         assert!(!dir.path().join("data.json.enc.bak.previous").exists());
         assert!(!dir.path().join("data.json.enc.tmp").exists());
     }
@@ -7716,11 +7624,9 @@ mod tests {
         fs::create_dir(&plaintext).expect("unreadable plaintext artifact");
         let material = test_material(1);
 
-        let error = read_sync_file_versioned_from_dir_with(
-            dir.path(),
-            SyncFileCrypto::Enabled(&material),
-        )
-        .expect_err("an unreadable plaintext generation must fail closed");
+        let error =
+            read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&material))
+                .expect_err("an unreadable plaintext generation must fail closed");
 
         assert!(
             error.contains("Failed to inspect sync artifact"),
@@ -7731,18 +7637,26 @@ mod tests {
             "the peer generation must remain untouched"
         );
         assert!(
-            !dir.path().join(encrypted_artifact_name(DATA_FILE_NAME)).exists(),
+            !dir.path()
+                .join(encrypted_artifact_name(DATA_FILE_NAME))
+                .exists(),
             "the read must not create an encrypted fork"
         );
     }
 
     #[test]
     fn an_off_state_device_with_a_populated_plaintext_remote_ignores_the_enc_name_entirely() {
-        // Invariant #1: an existing install must not change behavior, and must not start
-        // reading (or erroring on) a name it never looked at before.
         let dir = tempfile::tempdir().expect("temp dir");
-        fs::write(dir.path().join(DATA_FILE_NAME), br#"{"tasks":[{"id":"plain"}]}"#).expect("plain");
-        fs::write(dir.path().join("data.json.enc"), b"not even a valid container").expect("enc");
+        fs::write(
+            dir.path().join(DATA_FILE_NAME),
+            br#"{"tasks":[{"id":"plain"}]}"#,
+        )
+        .expect("plain");
+        fs::write(
+            dir.path().join("data.json.enc"),
+            b"not even a valid container",
+        )
+        .expect("enc");
 
         let read = read_sync_file_versioned_from_dir(dir.path()).expect("plaintext read");
         assert_eq!(read.data["tasks"][0]["id"], "plain");
@@ -7751,8 +7665,6 @@ mod tests {
 
     #[test]
     fn plain_named_ciphertext_is_classified_before_the_recovery_chain_can_rotate_it() {
-        // A peer that wrote MWENC1 under the plain name (or a partially-migrated folder) must
-        // not look like "corrupt JSON, fall through to the backup and repair".
         let dir = tempfile::tempdir().expect("temp dir");
         let material = test_material(1);
         fs::write(
@@ -7760,20 +7672,34 @@ mod tests {
             seal(br#"{"tasks":[{"id":"remote"}]}"#, &material),
         )
         .expect("write");
-        fs::write(dir.path().join("data.json.bak"), br#"{"tasks":[{"id":"stale"}]}"#).expect("bak");
+        fs::write(
+            dir.path().join("data.json.bak"),
+            br#"{"tasks":[{"id":"stale"}]}"#,
+        )
+        .expect("bak");
 
         let error = read_sync_file_versioned_from_dir(dir.path())
             .expect_err("plain-named ciphertext must not resolve to the stale backup");
-        assert!(parse_encrypted_discovery(&error).is_some(), "unexpected error: {error}");
+        assert!(
+            parse_encrypted_discovery(&error).is_some(),
+            "unexpected error: {error}"
+        );
     }
 
     fn seed_transition_folder(dir: &Path) {
         fs::write(dir.join(DATA_FILE_NAME), br#"{"tasks":[{"id":"current"}]}"#).expect("data");
         fs::write(dir.join("data.json.bak"), br#"{"tasks":[{"id":"backup"}]}"#).expect("bak");
-        fs::write(dir.join("mindwtr-backup-2026-01-01.json"), br#"{"tasks":[{"id":"seed"}]}"#)
-            .expect("seed");
+        fs::write(
+            dir.join("mindwtr-backup-2026-01-01.json"),
+            br#"{"tasks":[{"id":"seed"}]}"#,
+        )
+        .expect("seed");
         fs::create_dir_all(dir.join("attachments")).expect("attachments dir");
-        fs::write(dir.join("attachments").join("a1.png"), b"\x89PNG attachment bytes").expect("att");
+        fs::write(
+            dir.join("attachments").join("a1.png"),
+            b"\x89PNG attachment bytes",
+        )
+        .expect("att");
     }
 
     #[test]
@@ -7781,32 +7707,47 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
 
-        let material = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
+        let material =
+            enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
 
-        for name in ["data.json.enc", "data.json.enc.bak", "mindwtr-backup-2026-01-01.json.enc"] {
-            let bytes = fs::read(dir.path().join(name)).unwrap_or_else(|_| panic!("missing {name}"));
+        for name in [
+            "data.json.enc",
+            "data.json.enc.bak",
+            "mindwtr-backup-2026-01-01.json.enc",
+        ] {
+            let bytes =
+                fs::read(dir.path().join(name)).unwrap_or_else(|_| panic!("missing {name}"));
             assert!(
-                matches!(inspect_sync_artifact(&bytes), SyncArtifactInspection::Encrypted(_)),
+                matches!(
+                    inspect_sync_artifact(&bytes),
+                    SyncArtifactInspection::Encrypted(_)
+                ),
                 "{name} must be an MWENC1 container"
             );
-            decrypt_sync_artifact(&bytes, &material.key).unwrap_or_else(|_| panic!("{name} must decrypt"));
+            decrypt_sync_artifact(&bytes, &material.key)
+                .unwrap_or_else(|_| panic!("{name} must decrypt"));
         }
-        for name in [DATA_FILE_NAME, "data.json.bak", "mindwtr-backup-2026-01-01.json"] {
-            assert!(!dir.path().join(name).exists(), "{name} must be gone once its .enc verified");
+        for name in [
+            DATA_FILE_NAME,
+            "data.json.bak",
+            "mindwtr-backup-2026-01-01.json",
+        ] {
+            assert!(
+                !dir.path().join(name).exists(),
+                "{name} must be gone once its .enc verified"
+            );
         }
-        // Attachments keep their exact name — cloudKey is identity-keyed and immutable.
-        let attachment = fs::read(dir.path().join("attachments").join("a1.png")).expect("attachment");
+
+        let attachment =
+            fs::read(dir.path().join("attachments").join("a1.png")).expect("attachment");
         assert_eq!(
             decrypt_sync_artifact(&attachment, &material.key).expect("attachment decrypts"),
             b"\x89PNG attachment bytes"
         );
 
-        // The folder now reads back through the encrypted seam.
-        let read = read_sync_file_versioned_from_dir_with(
-            dir.path(),
-            SyncFileCrypto::Enabled(&material),
-        )
-        .expect("read after enable");
+        let read =
+            read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&material))
+                .expect("read after enable");
         assert_eq!(read.data["tasks"][0]["id"], "current");
     }
 
@@ -7814,14 +7755,16 @@ mod tests {
     fn an_interrupted_enable_leaves_both_generations_and_a_re_run_completes() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
-        let first = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
+        let first =
+            enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
 
-        // Simulate a crash between "wrote the .enc" and "removed the plaintext": both
-        // generations present. A re-run must reuse the salt already committed to the folder
-        // (deriving a second key under a fresh salt would orphan everything the first run
-        // wrote) and converge.
-        fs::write(dir.path().join("data.json.bak"), br#"{"tasks":[{"id":"backup"}]}"#).expect("bak");
-        let second = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("re-run");
+        fs::write(
+            dir.path().join("data.json.bak"),
+            br#"{"tasks":[{"id":"backup"}]}"#,
+        )
+        .expect("bak");
+        let second =
+            enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("re-run");
 
         assert_eq!(second.salt, first.salt);
         assert_eq!(second.key, first.key);
@@ -7862,7 +7805,8 @@ mod tests {
     fn enable_binds_the_attachment_inventory_to_the_snapshotted_document_generation() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
-        let peer_document = br#"{"tasks":[{"id":"peer","attachments":[{"cloudKey":"attachments/a2.png"}]}]}"#;
+        let peer_document =
+            br#"{"tasks":[{"id":"peer","attachments":[{"cloudKey":"attachments/a2.png"}]}]}"#;
         let peer_attachment = b"peer attachment generation";
 
         let error = enable_sync_encryption_in_dir_with(
@@ -7871,8 +7815,11 @@ mod tests {
             || {
                 fs::write(dir.path().join(DATA_FILE_NAME), peer_document)
                     .map_err(|error| error.to_string())?;
-                fs::write(dir.path().join("attachments").join("a2.png"), peer_attachment)
-                    .map_err(|error| error.to_string())?;
+                fs::write(
+                    dir.path().join("attachments").join("a2.png"),
+                    peer_attachment,
+                )
+                .map_err(|error| error.to_string())?;
                 Ok(())
             },
             |_, _, _| Ok(()),
@@ -7902,18 +7849,22 @@ mod tests {
 
     #[test]
     fn an_enable_interrupted_during_the_attachment_phase_resumes_under_the_same_key() {
-        // Enable seals attachments before it writes any `.enc` document, so this crash window
-        // leaves sealed attachments and no encrypted document to recover the salt from. If the
-        // re-run drew a fresh salt, those attachments — skipped next pass as "already
-        // encrypted" — would never open again.
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
-        let material = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
+        let material =
+            enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
 
-        // Rewind to exactly that window: documents back to plaintext, attachment still sealed.
         for (enc, plain, contents) in [
-            ("data.json.enc", DATA_FILE_NAME, br#"{"tasks":[{"id":"current"}]}"#.as_slice()),
-            ("data.json.enc.bak", "data.json.bak", br#"{"tasks":[{"id":"backup"}]}"#.as_slice()),
+            (
+                "data.json.enc",
+                DATA_FILE_NAME,
+                br#"{"tasks":[{"id":"current"}]}"#.as_slice(),
+            ),
+            (
+                "data.json.enc.bak",
+                "data.json.bak",
+                br#"{"tasks":[{"id":"backup"}]}"#.as_slice(),
+            ),
             (
                 "mindwtr-backup-2026-01-01.json.enc",
                 "mindwtr-backup-2026-01-01.json",
@@ -7924,14 +7875,21 @@ mod tests {
             fs::write(dir.path().join(plain), contents).expect("restore plaintext");
         }
         assert!(matches!(
-            inspect_sync_artifact(&fs::read(dir.path().join("attachments").join("a1.png")).expect("att")),
+            inspect_sync_artifact(
+                &fs::read(dir.path().join("attachments").join("a1.png")).expect("att")
+            ),
             SyncArtifactInspection::Encrypted(_)
         ));
 
-        let resumed = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("resume");
+        let resumed =
+            enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("resume");
 
-        assert_eq!(resumed.salt, material.salt, "the resumed run must reuse the committed salt");
-        let attachment = fs::read(dir.path().join("attachments").join("a1.png")).expect("attachment");
+        assert_eq!(
+            resumed.salt, material.salt,
+            "the resumed run must reuse the committed salt"
+        );
+        let attachment =
+            fs::read(dir.path().join("attachments").join("a1.png")).expect("attachment");
         assert_eq!(
             decrypt_sync_artifact(&attachment, &resumed.key).expect("attachment still opens"),
             b"\x89PNG attachment bytes"
@@ -7942,8 +7900,8 @@ mod tests {
     fn enable_converges_every_authenticated_generation_under_the_selected_key() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
-        let selected = enable_sync_encryption_in_dir(dir.path(), "shared passphrase")
-            .expect("initial enable");
+        let selected =
+            enable_sync_encryption_in_dir(dir.path(), "shared passphrase").expect("initial enable");
         let abandoned = derive_sync_key_material(
             "shared passphrase",
             [41; SALT_LEN],
@@ -7961,7 +7919,10 @@ mod tests {
         let resumed = enable_sync_encryption_in_dir(dir.path(), "shared passphrase")
             .expect("resume mixed-salt enable");
 
-        assert_eq!(resumed.salt, selected.salt, "the base document remains authoritative");
+        assert_eq!(
+            resumed.salt, selected.salt,
+            "the base document remains authoritative"
+        );
         assert_eq!(
             decrypt_sync_artifact(
                 &fs::read(&attachment_path).expect("converged attachment"),
@@ -8003,9 +7964,18 @@ mod tests {
         .expect_err("a foreign generation must fail the read-only preflight");
 
         assert!(is_terminal_error(&error), "unexpected error: {error}");
-        assert!(!journal_started.get(), "preflight failure must not start the journal");
-        assert_eq!(fs::read(&document_path).expect("document after"), document_before);
-        assert_eq!(fs::read(&attachment_path).expect("attachment after"), foreign_attachment);
+        assert!(
+            !journal_started.get(),
+            "preflight failure must not start the journal"
+        );
+        assert_eq!(
+            fs::read(&document_path).expect("document after"),
+            document_before
+        );
+        assert_eq!(
+            fs::read(&attachment_path).expect("attachment after"),
+            foreign_attachment
+        );
     }
 
     #[test]
@@ -8018,13 +7988,18 @@ mod tests {
             .expect("rotate");
         assert_ne!(next.salt, first.salt, "rotation must draw a fresh salt");
         let rotated = fs::read(dir.path().join("data.json.enc")).expect("rotated document");
-        assert!(decrypt_sync_artifact(&rotated, &first.key).is_err(), "the old key must be dead");
+        assert!(
+            decrypt_sync_artifact(&rotated, &first.key).is_err(),
+            "the old key must be dead"
+        );
         decrypt_sync_artifact(&rotated, &next.key).expect("the new key must open it");
 
         disable_sync_encryption_in_dir(dir.path(), &next.key).expect("disable");
         assert!(!dir.path().join("data.json.enc").exists());
         assert_eq!(
-            read_sync_file_versioned_from_dir(dir.path()).expect("plaintext read").data["tasks"][0]["id"],
+            read_sync_file_versioned_from_dir(dir.path())
+                .expect("plaintext read")
+                .data["tasks"][0]["id"],
             "current"
         );
         assert_eq!(
@@ -8086,8 +8061,12 @@ mod tests {
     #[test]
     fn transition_quarantine_cas_preserves_racing_replace_remove_and_create_generations() {
         fn replace_quarantine_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
-            let parent = target.parent().ok_or_else(|| "target has no parent".to_string())?;
-            let leaf = target.file_name().ok_or_else(|| "target has no leaf".to_string())?;
+            let parent = target
+                .parent()
+                .ok_or_else(|| "target has no parent".to_string())?;
+            let leaf = target
+                .file_name()
+                .ok_or_else(|| "target has no leaf".to_string())?;
             for entry in fs::read_dir(parent).map_err(|error| error.to_string())? {
                 let path = entry.map_err(|error| error.to_string())?.path();
                 if !path
@@ -8256,7 +8235,10 @@ mod tests {
         )
         .expect_err("a changed quarantine must not be deleted after install");
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
-        assert_eq!(fs::read(&changed_quarantine_target).expect("installed bytes"), b"ours");
+        assert_eq!(
+            fs::read(&changed_quarantine_target).expect("installed bytes"),
+            b"ours"
+        );
         assert!(dir.path().read_dir().expect("list").any(|entry| {
             let path = entry.expect("entry").path().join("changed-quarantine.bin");
             path.exists() && fs::read(path).expect("changed quarantine") == b"peer-quarantine"
@@ -8280,8 +8262,12 @@ mod tests {
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(!changed_remove_target.exists());
         assert!(dir.path().read_dir().expect("list").any(|entry| {
-            let path = entry.expect("entry").path().join("changed-remove-quarantine.bin");
-            path.exists() && fs::read(path).expect("changed quarantine") == b"peer-remove-quarantine"
+            let path = entry
+                .expect("entry")
+                .path()
+                .join("changed-remove-quarantine.bin");
+            path.exists()
+                && fs::read(path).expect("changed quarantine") == b"peer-remove-quarantine"
         }));
     }
 
@@ -8317,7 +8303,8 @@ mod tests {
     #[test]
     fn transition_move_flushes_source_and_destination_metadata_in_order() {
         let source = PathBuf::from("/sync/attachments/item.bin");
-        let destination = PathBuf::from("/sync/attachments/.mindwtr-encryption-quarantine/item.bin");
+        let destination =
+            PathBuf::from("/sync/attachments/.mindwtr-encryption-quarantine/item.bin");
         let events = std::cell::RefCell::new(Vec::new());
 
         finish_transition_move_durably_with(
@@ -8395,10 +8382,7 @@ mod tests {
                         "cache-off mount refuses existing-file writes",
                     ));
                 }
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)?;
+                let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
                 file.write_all(bytes)?;
                 file.sync_all()
             },
@@ -8416,7 +8400,11 @@ mod tests {
             b"safe encrypted generation"
         );
         assert_eq!(
-            scratch.directory.read_dir().expect("scratch entries").count(),
+            scratch
+                .directory
+                .read_dir()
+                .expect("scratch entries")
+                .count(),
             1,
             "the create-new sibling must be consumed by the replacement move"
         );
@@ -8439,10 +8427,7 @@ mod tests {
             &scratch,
             Some(&replacement),
             |path, bytes| {
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)?;
+                let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
                 file.write_all(bytes)?;
                 file.sync_all()
             },
@@ -8531,7 +8516,10 @@ mod tests {
         .expect_err("unflushed file deletion must abort cleanup");
 
         assert!(error.contains("injected deletion flush failure"));
-        assert!(!directory_removed.get(), "the recovery directory must remain discoverable");
+        assert!(
+            !directory_removed.get(),
+            "the recovery directory must remain discoverable"
+        );
     }
 
     #[test]
@@ -8560,7 +8548,11 @@ mod tests {
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
 
         let retained = collect_transition_recovery_artifacts(dir.path()).expect("collect retained");
-        assert_eq!(retained.len(), 2, "stage and quarantine must both be retained");
+        assert_eq!(
+            retained.len(),
+            2,
+            "stage and quarantine must both be retained"
+        );
         assert!(retained.iter().all(|path| matches!(
             inspect_sync_artifact(&fs::read(path).expect("retained plaintext")),
             SyncArtifactInspection::Plaintext
@@ -8594,7 +8586,8 @@ mod tests {
                 .unwrap_or_else(|_| panic!("{} must decrypt under rotated key", path.display()));
         }
 
-        disable_sync_encryption_in_dir(dir.path(), &next.key).expect("disable retained generations");
+        disable_sync_encryption_in_dir(dir.path(), &next.key)
+            .expect("disable retained generations");
         assert_eq!(
             collect_transition_recovery_artifacts(dir.path()).expect("collect opened retained"),
             retained
@@ -8605,6 +8598,60 @@ mod tests {
                 SyncArtifactInspection::Plaintext
             ));
         }
+    }
+
+    #[test]
+    fn sync_folder_attachments_seal_in_byte_order_for_mixed_case_and_punctuation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let attachments = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME);
+        fs::create_dir_all(attachments.join("Archive")).expect("subfolder");
+
+        let names = [
+            "b.txt", "C.txt", "a-1.txt", "a.1.txt", "A.txt", "10.txt", "9.txt", "_x.txt", "Z-z.txt",
+        ];
+        for name in names {
+            fs::write(attachments.join(name), name).expect("attachment");
+        }
+        fs::write(attachments.join("Archive").join("x.txt"), b"x").expect("nested attachment");
+
+        let found = collect_sync_folder_attachments(dir.path()).expect("collect attachments");
+        let relative: Vec<String> = found
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&attachments)
+                    .expect("inside attachments")
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            relative,
+            [
+                "10.txt",
+                "9.txt",
+                "A.txt",
+                "Archive/x.txt",
+                "C.txt",
+                "Z-z.txt",
+                "_x.txt",
+                "a-1.txt",
+                "a.1.txt",
+                "b.txt"
+            ]
+        );
+    }
+
+    #[test]
+    fn mobile_transition_scratch_names_match_the_marker_anywhere() {
+        assert!(is_transition_scratch(".mindwtr-et-p-mvndgro7-1-7n0cin2o"));
+        assert!(is_transition_scratch(
+            ".mindwtr-et-p-mvndgro7-1-7n0cin2o (1)"
+        ));
+        assert!(is_transition_scratch(
+            " (1).mindwtr-et-p-mvndgro7-1-7n0cin2o"
+        ));
+        assert!(is_transition_scratch("data.json.enctransition"));
+        assert!(!is_transition_scratch("photo (1).png"));
     }
 
     #[test]
@@ -8670,8 +8717,14 @@ mod tests {
         })
         .expect_err("a recovery enumeration failure must abort the transition");
 
-        assert!(error.contains("injected traversal failure"), "unexpected error: {error}");
-        assert!(error.contains(&blocked.display().to_string()), "unexpected error: {error}");
+        assert!(
+            error.contains("injected traversal failure"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains(&blocked.display().to_string()),
+            "unexpected error: {error}"
+        );
     }
 
     #[cfg(unix)]
@@ -8718,8 +8771,14 @@ mod tests {
         )
         .expect_err("journal failure must abort enable");
         assert_eq!(error, "journal blocked enable");
-        assert_eq!(fs::read(dir.path().join(DATA_FILE_NAME)).expect("plaintext after"), plaintext);
-        assert_eq!(fs::read(&attachment_path).expect("attachment after"), attachment_plaintext);
+        assert_eq!(
+            fs::read(dir.path().join(DATA_FILE_NAME)).expect("plaintext after"),
+            plaintext
+        );
+        assert_eq!(
+            fs::read(&attachment_path).expect("attachment after"),
+            attachment_plaintext
+        );
         assert!(!dir.path().join("data.json.enc").exists());
 
         let material = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
@@ -8734,8 +8793,14 @@ mod tests {
         )
         .expect_err("journal failure must abort disable");
         assert_eq!(error, "journal blocked disable");
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("encrypted after"), encrypted);
-        assert_eq!(fs::read(&attachment_path).expect("attachment after"), encrypted_attachment);
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("encrypted after"),
+            encrypted
+        );
+        assert_eq!(
+            fs::read(&attachment_path).expect("attachment after"),
+            encrypted_attachment
+        );
         assert!(!dir.path().join(DATA_FILE_NAME).exists());
 
         let error = change_sync_encryption_passphrase_in_dir_with(
@@ -8747,8 +8812,14 @@ mod tests {
         )
         .expect_err("journal failure must abort rotation");
         assert_eq!(error, "journal blocked rotation");
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("rotated after"), encrypted);
-        assert_eq!(fs::read(&attachment_path).expect("attachment after"), encrypted_attachment);
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("rotated after"),
+            encrypted
+        );
+        assert_eq!(
+            fs::read(&attachment_path).expect("attachment after"),
+            encrypted_attachment
+        );
     }
 
     #[cfg(unix)]
@@ -8783,8 +8854,14 @@ mod tests {
         )
         .expect_err("replaced compatibility lock must abort finalization");
 
-        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
-        assert!(journal_pending.get(), "restart recovery must remain explicit");
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            journal_pending.get(),
+            "restart recovery must remain explicit"
+        );
         assert!(!persisted.get(), "enabled key/state must not commit");
     }
 
@@ -8794,11 +8871,8 @@ mod tests {
         seed_transition_folder(dir.path());
         let material = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
         let encrypted_path = dir.path().join(encrypted_artifact_name("data.json.bak"));
-        let peer = encrypt_sync_artifact(
-            br#"{"tasks":[{"id":"peer"}]}"#,
-            &material,
-        )
-        .expect("peer generation");
+        let peer = encrypt_sync_artifact(br#"{"tasks":[{"id":"peer"}]}"#, &material)
+            .expect("peer generation");
         let journal_pending = Cell::new(false);
         let persisted = Cell::new(false);
 
@@ -8828,8 +8902,14 @@ mod tests {
         .expect_err("a peer replacement must abort the no-op resume");
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
-        assert!(journal_pending.get(), "the retry journal must remain pending");
-        assert!(!persisted.get(), "the stale key state must not be persisted");
+        assert!(
+            journal_pending.get(),
+            "the retry journal must remain pending"
+        );
+        assert!(
+            !persisted.get(),
+            "the stale key state must not be persisted"
+        );
         assert_eq!(
             fs::read(&encrypted_path).expect("peer generation retained"),
             peer
@@ -8854,11 +8934,8 @@ mod tests {
                 Ok(())
             },
             |_, next, generation| {
-                let peer = encrypt_sync_artifact(
-                    br#"{"tasks":[{"id":"peer"}]}"#,
-                    next,
-                )
-                .map_err(|error| terminal_error(error))?;
+                let peer = encrypt_sync_artifact(br#"{"tasks":[{"id":"peer"}]}"#, next)
+                    .map_err(|error| terminal_error(error))?;
                 finalize_enabled_file_generation_with(
                     generation,
                     next,
@@ -8877,8 +8954,14 @@ mod tests {
         .expect_err("a peer replacement must abort key persistence");
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
-        assert!(journal_pending.get(), "the retry journal must remain pending");
-        assert!(!persisted.get(), "the stale key state must not be persisted");
+        assert!(
+            journal_pending.get(),
+            "the retry journal must remain pending"
+        );
+        assert!(
+            !persisted.get(),
+            "the stale key state must not be persisted"
+        );
     }
 
     #[test]
@@ -8910,10 +8993,19 @@ mod tests {
         .expect_err("rotation must not commit while plaintext documents remain");
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
-        assert!(!journal_started.get(), "posture preflight must run before the journal");
+        assert!(
+            !journal_started.get(),
+            "posture preflight must run before the journal"
+        );
         assert!(!persisted.get(), "the new key must not be persisted");
-        assert_eq!(fs::read(&encrypted_path).expect("encrypted retained"), encrypted_before);
-        assert_eq!(fs::read(&plaintext_path).expect("plaintext retained"), plaintext);
+        assert_eq!(
+            fs::read(&encrypted_path).expect("encrypted retained"),
+            encrypted_before
+        );
+        assert_eq!(
+            fs::read(&plaintext_path).expect("plaintext retained"),
+            plaintext
+        );
     }
 
     #[test]
@@ -8943,7 +9035,10 @@ mod tests {
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(!persisted.get(), "the key must not be persisted");
-        assert_eq!(fs::read(&late).expect("late bytes retained"), b"late plaintext");
+        assert_eq!(
+            fs::read(&late).expect("late bytes retained"),
+            b"late plaintext"
+        );
     }
 
     #[test]
@@ -9002,7 +9097,10 @@ mod tests {
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(!persisted.get(), "disabled state must not be persisted");
-        assert!(!attachment.exists(), "the peer removal remains authoritative");
+        assert!(
+            !attachment.exists(),
+            "the peer removal remains authoritative"
+        );
     }
 
     #[test]
@@ -9047,8 +9145,7 @@ mod tests {
         seed_transition_folder(dir.path());
         let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
         let recovery = dir.path().join(".mindwtr-et-peer-change");
-        let retained =
-            encrypt_sync_artifact(b"retained recovery", &first).expect("seal retained");
+        let retained = encrypt_sync_artifact(b"retained recovery", &first).expect("seal retained");
         fs::write(&recovery, retained).expect("write retained recovery");
         let peer = b"peer recovery generation";
         let persisted = Cell::new(false);
@@ -9134,9 +9231,15 @@ mod tests {
         .expect_err("a peer replacement must abort disabled-state persistence");
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
-        assert!(journal_pending.get(), "the retry journal must remain pending");
+        assert!(
+            journal_pending.get(),
+            "the retry journal must remain pending"
+        );
         assert!(!persisted.get(), "disabled state must not be persisted");
-        assert_eq!(fs::read(&backup_path).expect("peer generation retained"), peer);
+        assert_eq!(
+            fs::read(&backup_path).expect("peer generation retained"),
+            peer
+        );
     }
 
     #[test]
@@ -9207,7 +9310,10 @@ mod tests {
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(!persisted.get(), "the stale key must not be persisted");
-        assert_eq!(fs::read(&peer_path).expect("peer generation retained"), peer);
+        assert_eq!(
+            fs::read(&peer_path).expect("peer generation retained"),
+            peer
+        );
     }
 
     #[test]
@@ -9243,9 +9349,18 @@ mod tests {
         .expect_err("an unknown generation must fail the read-only preflight");
 
         assert!(is_terminal_error(&error), "unexpected error: {error}");
-        assert!(!journal_started.get(), "preflight failure must not start the journal");
-        assert_eq!(fs::read(&document_path).expect("document after"), document_before);
-        assert_eq!(fs::read(&attachment_path).expect("attachment after"), foreign_attachment);
+        assert!(
+            !journal_started.get(),
+            "preflight failure must not start the journal"
+        );
+        assert_eq!(
+            fs::read(&document_path).expect("document after"),
+            document_before
+        );
+        assert_eq!(
+            fs::read(&attachment_path).expect("attachment after"),
+            foreign_attachment
+        );
     }
 
     #[test]
@@ -9280,9 +9395,18 @@ mod tests {
         .expect_err("a foreign generation must fail the read-only preflight");
 
         assert!(is_terminal_error(&error), "unexpected error: {error}");
-        assert!(!journal_started.get(), "preflight failure must not start the journal");
-        assert_eq!(fs::read(&document_path).expect("document after"), document_before);
-        assert_eq!(fs::read(&attachment_path).expect("attachment after"), foreign_attachment);
+        assert!(
+            !journal_started.get(),
+            "preflight failure must not start the journal"
+        );
+        assert_eq!(
+            fs::read(&document_path).expect("document after"),
+            document_before
+        );
+        assert_eq!(
+            fs::read(&attachment_path).expect("attachment after"),
+            foreign_attachment
+        );
     }
 
     #[test]
@@ -9295,13 +9419,17 @@ mod tests {
         let error = disable_sync_encryption_in_dir(dir.path(), &test_material(9).key)
             .expect_err("a wrong key must not disable");
 
-        assert!(is_terminal_error(&error), "expected a terminal error, got: {error}");
-        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("after"), before);
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("after"),
+            before
+        );
         assert!(!dir.path().join(DATA_FILE_NAME).exists());
     }
 
-    /// Magic present, header short — `inspect_sync_artifact` reports `Unsupported`. Neither
-    /// plaintext to seal nor ciphertext to open, so every transition must refuse it.
     fn truncated_container() -> Vec<u8> {
         let mut bytes = b"MWENC1".to_vec();
         bytes.extend_from_slice(&[0u8; 14]);
@@ -9318,8 +9446,14 @@ mod tests {
         let error = enable_sync_encryption_in_dir(dir.path(), "correct horse battery")
             .expect_err("an unsupported container must not be double-wrapped");
 
-        assert!(is_terminal_error(&error), "expected a terminal error, got: {error}");
-        assert_eq!(fs::read(&attachment).expect("attachment"), truncated_container());
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+        assert_eq!(
+            fs::read(&attachment).expect("attachment"),
+            truncated_container()
+        );
         assert!(!dir.path().join("data.json.enc").exists());
         assert!(dir.path().join(DATA_FILE_NAME).exists());
     }
@@ -9328,34 +9462,45 @@ mod tests {
     fn disable_refuses_an_unsupported_container_instead_of_skipping_it_as_plaintext() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
-        let material = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
+        let material =
+            enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
         let attachment = dir.path().join("attachments").join("a1.png");
         fs::write(&attachment, truncated_container()).expect("plant");
 
         let error = disable_sync_encryption_in_dir(dir.path(), &material.key)
             .expect_err("an unsupported container must not be silently left behind");
 
-        assert!(is_terminal_error(&error), "expected a terminal error, got: {error}");
-        assert_eq!(fs::read(&attachment).expect("attachment"), truncated_container());
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+        assert_eq!(
+            fs::read(&attachment).expect("attachment"),
+            truncated_container()
+        );
         assert!(dir.path().join("data.json.enc").exists());
         assert!(!dir.path().join(DATA_FILE_NAME).exists());
     }
 
     #[test]
     fn an_enabled_device_treats_a_peer_disabled_folder_as_terminal_rather_than_empty() {
-        // The inverse of `plain_named_ciphertext_is_classified_before_...`: a peer ran the
-        // disable transition, so `data.json.enc` is gone and `data.json` is back. Reporting an
-        // empty remote here would merge this device's whole store into a fresh plaintext
-        // generation and fork the folder permanently.
         let dir = tempfile::tempdir().expect("temp dir");
         let material = test_material(2);
-        fs::write(dir.path().join(DATA_FILE_NAME), br#"{"tasks":[{"id":"peer"}]}"#).expect("plain");
+        fs::write(
+            dir.path().join(DATA_FILE_NAME),
+            br#"{"tasks":[{"id":"peer"}]}"#,
+        )
+        .expect("plain");
 
-        let error = read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&material))
-            .expect_err("a plaintext-restored folder must not read as empty");
+        let error =
+            read_sync_file_versioned_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&material))
+                .expect_err("a plaintext-restored folder must not read as empty");
 
         assert_eq!(error, SYNC_ENCRYPTION_REMOTE_PLAINTEXT);
-        assert!(is_terminal_error(&error), "the sentinel must classify as terminal");
+        assert!(
+            is_terminal_error(&error),
+            "the sentinel must classify as terminal"
+        );
         assert_eq!(
             fs::read(dir.path().join(DATA_FILE_NAME)).expect("plain"),
             br#"{"tasks":[{"id":"peer"}]}"#
@@ -9366,17 +9511,16 @@ mod tests {
     fn an_enabled_device_still_reads_a_genuinely_empty_folder_as_empty() {
         let dir = tempfile::tempdir().expect("temp dir");
         let material = test_material(3);
-        let read = read_sync_file_with_source_from_dir_with(dir.path(), SyncFileCrypto::Enabled(&material))
-            .expect("an empty folder is not a fork");
+        let read = read_sync_file_with_source_from_dir_with(
+            dir.path(),
+            SyncFileCrypto::Enabled(&material),
+        )
+        .expect("an empty folder is not a fork");
         assert_eq!(read.source, SyncFileReadSource::Empty);
     }
 
     #[test]
     fn a_stale_plaintext_fork_from_an_old_client_never_shadows_or_loses_the_encrypted_document() {
-        // Backward-compat #3: an un-updated peer cannot read `data.json.enc`, sees the data
-        // file missing, and may write a stale plaintext `data.json` alongside it. `.enc` stays
-        // authoritative and readers never delete or "repair" the fork — a later transition may
-        // clean it up, a read never does.
         let dir = tempfile::tempdir().expect("temp dir");
         let material = test_material(1);
         let sealed = seal(br#"{"tasks":[{"id":"encrypted-truth"}]}"#, &material);
@@ -9389,25 +9533,17 @@ mod tests {
         assert_eq!(read.data["tasks"][0]["id"], "encrypted-truth");
         assert_eq!(read.source, "primary");
 
-        // S4 (mandate #3, the write half): B eventually updates and provides the
-        // passphrase. What lands back on the remote must be the result of merging B's
-        // OWN diverged local changes (which is what its stale plaintext fork actually
-        // represents — B kept syncing against it while it couldn't read `.enc`) into the
-        // authoritative encrypted document, losslessly. Rust doesn't run the field-level
-        // merge algorithm itself (that's core's `mergeAppDataWithStats`, exercised under
-        // encryption separately in packages/core/src/sync-encryption-cycle.test.ts) — its
-        // job is the write seam, so this constructs the union a real merge would produce
-        // (both task ids present) and proves the write seam carries it through intact,
-        // encrypted, and without touching the stale fork.
         let merged = serde_json::json!({ "tasks": [
             { "id": "encrypted-truth" },
             { "id": "stale-fork-from-old-client" },
         ] });
-        write_sync_file_to_dir_with(dir.path(), merged, Some(&read.fingerprint), crypto).expect("write");
+        write_sync_file_to_dir_with(dir.path(), merged, Some(&read.fingerprint), crypto)
+            .expect("write");
 
-        // The stale fork is left in place — a transition may clean it up later, a read
-        // or write never does.
-        assert_eq!(fs::read(dir.path().join(DATA_FILE_NAME)).expect("fork"), stale);
+        assert_eq!(
+            fs::read(dir.path().join(DATA_FILE_NAME)).expect("fork"),
+            stale
+        );
 
         let reread = read_sync_file_versioned_from_dir_with(dir.path(), crypto).expect("re-read");
         let ids: Vec<&str> = reread.data["tasks"]
@@ -9416,8 +9552,14 @@ mod tests {
             .iter()
             .map(|task| task["id"].as_str().expect("id"))
             .collect();
-        assert!(ids.contains(&"encrypted-truth"), "lost device A's change: {ids:?}");
-        assert!(ids.contains(&"stale-fork-from-old-client"), "lost device B's diverged change: {ids:?}");
+        assert!(
+            ids.contains(&"encrypted-truth"),
+            "lost device A's change: {ids:?}"
+        );
+        assert!(
+            ids.contains(&"stale-fork-from-old-client"),
+            "lost device B's diverged change: {ids:?}"
+        );
     }
 
     #[test]
@@ -9471,9 +9613,11 @@ mod tests {
         assert!(webdav_write_condition_for_request(None, true, false, false)
             .expect_err("non-off state must fail")
             .contains("SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE"));
-        assert!(webdav_write_condition_for_request(Some("\"v1\""), true, false, true)
-            .expect_err("mixed legacy and conditional mode must fail")
-            .contains("cannot also use an expected ETag"));
+        assert!(
+            webdav_write_condition_for_request(Some("\"v1\""), true, false, true)
+                .expect_err("mixed legacy and conditional mode must fail")
+                .contains("cannot also use an expected ETag")
+        );
     }
 
     #[test]
@@ -9501,9 +9645,8 @@ mod tests {
         assert_eq!(salt, material.salt);
         assert_eq!(params, material.params);
 
-        // A present-but-unreadable header is still never "repair me".
         let mut unsupported = sealed.clone();
-        unsupported[6] = 0x7f; // format_version
+        unsupported[6] = 0x7f;
         let error = webdav_encrypted_discovery(&unsupported).expect("unsupported is classified");
         assert!(is_terminal_error(&error), "unexpected error: {error}");
 
@@ -9520,26 +9663,38 @@ mod tests {
             }
         };
 
-        // Keyed device, `.enc` gone, plaintext back: a peer disabled encryption at the sync
-        // location. Reading that as an empty remote merges into a fresh generation and forks.
         let plaintext_restored = serving(PLAIN, br#"{"tasks":[]}"#.to_vec());
-        let discovery = webdav_absent_document_discovery(&plaintext_restored, PLAIN, Some(&material))
-            .expect("probe")
-            .expect("a plaintext-restored remote must not read as empty");
+        let discovery =
+            webdav_absent_document_discovery(&plaintext_restored, PLAIN, Some(&material))
+                .expect("probe")
+                .expect("a plaintext-restored remote must not read as empty");
         assert_eq!(discovery, SYNC_ENCRYPTION_REMOTE_PLAINTEXT);
-        assert!(is_terminal_error(&discovery), "the sentinel must classify as terminal");
+        assert!(
+            is_terminal_error(&discovery),
+            "the sentinel must classify as terminal"
+        );
 
-        // Genuinely empty remote: nothing at either name, for either posture.
         let empty = |_: &str| -> Result<Option<Vec<u8>>, String> { Ok(None) };
-        assert!(webdav_absent_document_discovery(&empty, PLAIN, Some(&material)).expect("probe").is_none());
-        assert!(webdav_absent_document_discovery(&empty, PLAIN, None).expect("probe").is_none());
+        assert!(
+            webdav_absent_document_discovery(&empty, PLAIN, Some(&material))
+                .expect("probe")
+                .is_none()
+        );
+        assert!(webdav_absent_document_discovery(&empty, PLAIN, None)
+            .expect("probe")
+            .is_none());
 
-        // Off-state device still discovers the ciphertext a peer wrote.
-        let sealed = serving("https://host/dav/data.json.enc", seal(br#"{"tasks":[]}"#, &material));
+        let sealed = serving(
+            "https://host/dav/data.json.enc",
+            seal(br#"{"tasks":[]}"#, &material),
+        );
         let off_state = webdav_absent_document_discovery(&sealed, PLAIN, None)
             .expect("probe")
             .expect("an off-state device must discover the encrypted remote");
-        assert!(parse_encrypted_discovery(&off_state).is_some(), "unexpected error: {off_state}");
+        assert!(
+            parse_encrypted_discovery(&off_state).is_some(),
+            "unexpected error: {off_state}"
+        );
 
         let wrong_encrypted_name = serving(
             "https://host/dav/data.json.enc",
@@ -9562,16 +9717,21 @@ mod tests {
         assert!(webdav_absent_document_discovery(&unavailable, PLAIN, None)
             .expect_err("fallback errors must propagate")
             .contains("500"));
-        assert!(webdav_absent_document_discovery(&unavailable, PLAIN, Some(&material))
-            .expect_err("fallback errors must propagate")
-            .contains("500"));
+        assert!(
+            webdav_absent_document_discovery(&unavailable, PLAIN, Some(&material))
+                .expect_err("fallback errors must propagate")
+                .contains("500")
+        );
     }
 
     #[test]
     fn webdav_optional_fetch_suppresses_only_an_actual_http_404() {
         use std::io::{Read, Write};
 
-        fn serve(status: &'static str, body: &'static str) -> (String, std::thread::JoinHandle<()>) {
+        fn serve(
+            status: &'static str,
+            body: &'static str,
+        ) -> (String, std::thread::JoinHandle<()>) {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind WebDAV test server");
             let address = listener.local_addr().expect("server address");
             let handle = std::thread::spawn(move || {
@@ -9582,7 +9742,9 @@ mod tests {
                     "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len(),
                 );
-                stream.write_all(response.as_bytes()).expect("write WebDAV response");
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write WebDAV response");
             });
             (format!("http://{address}/data.json.enc"), handle)
         }
@@ -9598,18 +9760,19 @@ mod tests {
         let (failed_url, failed_server) = serve("500 Internal Server Error", "backend unavailable");
         let error = webdav_fetch_optional_bytes(&client, &failed_url, "user", "pass")
             .expect_err("500 must not mean missing");
-        assert!(error.contains("500 Internal Server Error"), "unexpected error: {error}");
-        assert!(error.contains("backend unavailable"), "unexpected error: {error}");
+        assert!(
+            error.contains("500 Internal Server Error"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("backend unavailable"),
+            "unexpected error: {error}"
+        );
         failed_server.join().expect("500 server");
     }
 
     #[test]
     fn webdav_reads_ask_for_the_bytes_as_stored_with_identity_encoding() {
-        // A compressing proxy in front of the server (nginx, Apache mod_deflate,
-        // Cloudflare) otherwise serves data.json with a mutated ETag (weak `W/…`
-        // or mod_deflate's `-gzip` suffix) while the conditional write is checked
-        // against the stored one — every overwrite then 412s forever. Same trap
-        // as the TS client's `Accept-Encoding: identity` (#1056).
         use std::io::{Read, Write};
         use std::sync::mpsc;
 
@@ -9626,7 +9789,9 @@ mod tests {
                 "HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len(),
             );
-            stream.write_all(response.as_bytes()).expect("write WebDAV response");
+            stream
+                .write_all(response.as_bytes())
+                .expect("write WebDAV response");
         });
 
         let client = blocking_http_client(None).expect("client");
@@ -9636,7 +9801,9 @@ mod tests {
 
         let request = request_receiver.recv().expect("captured request");
         assert!(
-            request.to_ascii_lowercase().contains("accept-encoding: identity"),
+            request
+                .to_ascii_lowercase()
+                .contains("accept-encoding: identity"),
             "WebDAV reads must ask for the bytes as stored; got: {request}"
         );
     }
@@ -9684,10 +9851,6 @@ mod tests {
         release_sync_lock(&owner);
     }
 
-    /// Slices `source` from the start of `fn <name>(` to the next top-level
-    /// item declaration, the same boundary `write_sync_file_to_dir`'s check
-    /// above uses. `name` is built at runtime by the caller (not spelled out
-    /// as a literal), so this test's own source text can never be the match.
     fn find_function_body<'a>(source: &'a str, name: &str) -> &'a str {
         let declaration = format!("fn {name}(");
         assert_eq!(
@@ -9708,16 +9871,6 @@ mod tests {
         &after_decl[..body_end]
     }
 
-    // I1/V3: every command that writes config.toml through a CRED-only path
-    // (update_bound_credential, publish_sync_backend_paths_with, the torn-
-    // publication repair or migration writers inside read_sync_backend_
-    // publication_state/read_dropbox_credential_state/read_sync_configuration_
-    // pair) must hold lock_config_read_modify_write() as its outermost lock,
-    // or a concurrent RMW-guarded writer's read..write gap can silently
-    // revert it (I1). This list is transcribed from the real call sites, not
-    // generated, so it only catches a guard actually being REMOVED - it
-    // won't notice a new writer added without one. Red-checked by deleting
-    // one guard and confirming the assertion for that function fails.
     #[test]
     fn every_config_toml_writer_holds_the_outer_rmw_lock() {
         let config_source = include_str!("config.rs");
@@ -9754,6 +9907,11 @@ mod tests {
                 include_str!("local_api.rs"),
                 "write_local_api_config",
             ),
+            (
+                "app_lock.rs",
+                include_str!("app_lock.rs"),
+                "write_app_lock_config",
+            ),
             ("sync.rs", include_str!("sync.rs"), "clear_sync_path"),
             ("sync.rs", include_str!("sync.rs"), "set_sync_path"),
         ];
@@ -9769,13 +9927,6 @@ mod tests {
         }
     }
 
-    // The activation probe hands these commands a candidate dir BEFORE
-    // set_sync_path has granted it to the webview fs scope, while the probe's
-    // attachment step goes through the scope-checked fs plugin. Every
-    // override branch must therefore resolve through the scope-granting
-    // helper, or candidate probes die on "forbidden path" and a new sync
-    // folder can never be saved (#1001). Red-checked by swapping one call
-    // back to plain resolve_sync_dir.
     #[test]
     fn sync_file_commands_grant_fs_scope_for_override_paths() {
         let source = include_str!("sync.rs");
@@ -9794,12 +9945,6 @@ mod tests {
         }
     }
 
-    // #1037: tauri-plugin-fs declares exists/mkdir/remove/rename as plain
-    // `#[tauri::command]`, so the file-sync attachment step ran hundreds of
-    // syscalls on the Tauri main thread and froze the window against a slow
-    // mount. The webview only has an off-thread replacement if these four are
-    // registered — their (async) declaration is enforced separately by
-    // every_plain_tauri_command_is_explicitly_allowed_on_the_main_thread.
     #[test]
     fn sync_folder_fs_commands_are_registered() {
         let source = include_str!("lib.rs");
@@ -9825,10 +9970,6 @@ mod tests {
         }
     }
 
-    // Fixtures build on std::env::temp_dir(): a hardcoded "/home/u/..." is not
-    // an absolute path on Windows and its ancestry crosses a symlink on the
-    // macOS runners, which made this test fail on both platforms while the
-    // Linux run stayed green.
     #[test]
     fn sync_fs_paths_are_confined_to_the_managed_dir_and_the_granted_scope() {
         let root = std::env::temp_dir();
@@ -9838,7 +9979,7 @@ mod tests {
             &managed,
             false
         ));
-        // The sync folder is only ever reachable through the runtime fs scope.
+
         assert!(sync_fs_path_is_allowed(
             &root.join("mindwtr-sync-fs-test-sync/attachments/a.txt"),
             &managed,
@@ -9849,7 +9990,7 @@ mod tests {
             &managed,
             false
         ));
-        // Traversal must not walk out of the managed dir, scope or no scope.
+
         assert!(!sync_fs_path_is_allowed(
             &managed.join("../../.ssh/id_ed25519"),
             &managed,
@@ -9898,17 +10039,20 @@ mod tests {
             outcome,
             FileSyncAttachmentGenerationPublication::AlreadyExists
         );
-        assert_eq!(fs::read(&target).expect("existing target"), b"crash-truncated");
+        assert_eq!(
+            fs::read(&target).expect("existing target"),
+            b"crash-truncated"
+        );
         assert_eq!(
             fs::read(&peer_winner).expect("peer winner remains"),
             b"peer winner"
         );
-        assert!(scratch.exists(), "a collision must preserve the owned scratch");
+        assert!(
+            scratch.exists(),
+            "a collision must preserve the owned scratch"
+        );
     }
 
-    // `File::sync_all` requires a write-capable handle on Windows. Keep this
-    // test platform-neutral so the Windows native job exercises that contract
-    // instead of accepting the read-only handle that Unix permits.
     #[test]
     fn attachment_generation_verification_flushes_a_writable_scratch_handle() {
         let dir = tempfile::tempdir().expect("generation flush test dir");
@@ -9958,9 +10102,6 @@ mod tests {
         assert_eq!(fs::read(&scratch).expect("owned scratch"), b"different");
     }
 
-    // The managed dir itself may legitimately sit behind a symlink (portable
-    // installs, symlinked $HOME or XDG dirs, macOS's /var and /home): only
-    // symlinks BELOW the trust root are traversal.
     #[cfg(unix)]
     #[test]
     fn sync_fs_paths_allow_a_managed_dir_behind_a_symlinked_ancestor() {
@@ -9997,21 +10138,13 @@ mod tests {
         ));
     }
 
-    /// (name, is_async) for every `#[tauri::command...]` declaration found in
-    /// `source`, in source order. Scans forward from each attribute occurrence
-    /// (not backward from a known name), so it finds commands this test never
-    /// heard of — the whole point of inverting the old hardcoded-list check.
     fn tauri_command_declarations(source: &str) -> Vec<(String, bool)> {
         let marker = "#[tauri::command";
         let mut declarations = Vec::new();
         let mut cursor = 0usize;
         while let Some(relative) = source[cursor..].find(marker) {
             let attr_start = cursor + relative;
-            // A real attribute starts its own line (only whitespace before it
-            // since the last newline). This crate's source also mentions the
-            // literal text `#[tauri::command` inside comments and this very
-            // test's own strings — those aren't line-starting and must not
-            // count as a declaration.
+
             let line_start = source[..attr_start].rfind('\n').map_or(0, |i| i + 1);
             let is_real_attribute = source[line_start..attr_start].trim().is_empty();
             if !is_real_attribute {
@@ -10020,10 +10153,7 @@ mod tests {
             }
             let after_attr = &source[attr_start + marker.len()..];
             let attribute_is_async = after_attr.starts_with("(async)");
-            // The real declaration follows within a handful of lines
-            // (attribute, maybe another attribute or doc comment, then
-            // `pub(crate) [async] fn name(`). Bound the search so a later,
-            // unrelated `fn ` deep in the file can't be mistaken for it.
+
             let window_len = after_attr.len().min(400);
             let window = &after_attr[..window_len];
             let fn_relative = window
@@ -10031,12 +10161,7 @@ mod tests {
                 .unwrap_or_else(|| panic!(
                     "no `fn` declaration within 400 chars after a #[tauri::command] attribute at byte {attr_start}"
                 ));
-            // `#[tauri::command]` (no `(async)`) on an `async fn` already runs
-            // off the main thread — Tauri hands async fns to the async
-            // runtime regardless of the attribute. `(async)` is specifically
-            // for moving a blocking (sync) fn to the blocking pool. So a
-            // command is safe if EITHER the attribute says (async) OR the fn
-            // itself is declared `async fn`.
+
             let fn_is_async = window[..fn_relative].trim_end().ends_with("async");
             let is_async = attribute_is_async || fn_is_async;
             let after_fn = &window[fn_relative + "fn ".len()..];
@@ -10050,19 +10175,6 @@ mod tests {
 
     #[test]
     fn every_plain_tauri_command_is_explicitly_allowed_on_the_main_thread() {
-        // A plain `#[tauri::command]` on a blocking fn runs on the Tauri
-        // main/event-loop thread, so any real I/O in its body freezes the
-        // whole window until it returns — a slow sync mount, an IMAP round
-        // trip, an Obsidian vault write on a network share or FUSE mount, a
-        // snapshot/query against SQLite on a cache-off rclone/WinFSP mount
-        // (R-01, storage.rs's five snapshot/query/search commands — the
-        // hardcoded 11-name list this test used to check missed them
-        // entirely; this scans every command in the crate instead).
-        //
-        // Each entry: (command name, one-line reason it's safe as-is — pure
-        // in-memory/state access, or an OS window/tray/hotkey API call that
-        // is inherently main-thread-bound in most GUI toolkits, not merely
-        // "fast today". Every entry below was read end to end before listing.
         const ALLOWED_MAIN_THREAD_COMMANDS: &[(&str, &str)] = &[
             (
                 "consume_quick_add_pending",
@@ -10134,26 +10246,8 @@ mod tests {
             ),
         ];
 
-        // Known-unfixed debt this inversion uncovered beyond R-01's five
-        // (each does real file/keyring/SQLite/EventKit/process I/O — read
-        // every one before trusting this comment, don't extend it casually).
-        // Shrink-only: never add a name here — a new plain command must
-        // become (async) or get a justified ALLOWED_MAIN_THREAD_COMMANDS
-        // entry. Remove an entry in the same commit that fixes it; the test
-        // below fails if an entry here is no longer a plain command, so a fix
-        // that forgets to remove its own baseline line doesn't silently pass.
-        // B3 emptied this baseline: config.rs's 19 getters/setters are now
-        // (async), each either behind lock_config_read_modify_write, already
-        // covered by an internal lock_dropbox_credential_state hold, or a
-        // pure read with no write branch; ui.rs's two shutdown commands moved
-        // to ALLOWED_MAIN_THREAD_COMMANDS above with a documented rationale.
-        // Stays empty — see the comment above this const for what refills it.
         const KNOWN_BLOCKING_COMMANDS: &[&str] = &[];
 
-        // Enumerated, not hand-listed: the roster this replaced named 16 files
-        // and silently skipped macos_widget.rs for its whole life, so the one
-        // command it added never faced this check. A new module is now covered
-        // the moment it lands.
         let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut sources: Vec<(String, String)> = std::fs::read_dir(&src_dir)
             .expect("should read the crate's src directory")
@@ -10171,7 +10265,7 @@ mod tests {
             })
             .collect();
         sources.sort();
-        // A mistyped directory would enumerate nothing and pass vacuously.
+
         assert!(
             sources.len() >= 16,
             "expected the whole crate's sources, found {}",
@@ -10223,9 +10317,7 @@ mod tests {
                 ));
             }
         }
-        // Shrink-only: a baseline entry that's no longer a plain command means
-        // its fix landed without removing the debt marker — fail so that
-        // removal happens in the same commit as the fix, not forgotten.
+
         for stale in known_blocking.difference(&seen_known_blocking) {
             violations.push(format!(
                 "{stale} is listed in KNOWN_BLOCKING_COMMANDS but is no longer a \
@@ -10241,9 +10333,6 @@ mod tests {
 
     #[test]
     fn empty_remote_app_data_includes_every_app_data_array_surface() {
-        // Regression for #990: a fresh sync folder handed the JS sync cycle a
-        // partial remote (missing `sections`/`people`), which crashed
-        // downstream code that assumes every AppData array is present.
         let payload = empty_remote_app_data();
         for field in ["tasks", "projects", "sections", "areas", "people"] {
             assert!(
@@ -10836,8 +10925,6 @@ mod tests {
         })
         .expect_err("transient read failure must be reported");
 
-        // An explicit disconnect could make this closure succeed, but status
-        // inspection never receives or invokes a deletion capability.
         let potentially_successful_delete = || {
             clear_attempts.set(clear_attempts.get() + 1);
             Ok::<(), String>(())
@@ -11497,8 +11584,6 @@ mod tests {
             |_payload| panic!("a valid tombstone must not be replaced during cleanup"),
             || Ok(fallback.borrow().clone()),
             || Ok(Some(keyring.clone())),
-            // Some keyring backends can report success even though a later
-            // read still returns stale bytes.
             || Ok(()),
             || panic!("unverified keyring deletion must retain the tombstone"),
         )
@@ -12045,8 +12130,6 @@ mod tests {
                         cloud_provider_authority: "native".to_string(),
                     }
                 } else {
-                    // Models a concurrent atomic publication completing before
-                    // the second guard immediately ahead of credential write.
                     DropboxRecoveryCommitState {
                         raw_backend: "cloud".to_string(),
                         backend_marker: "cloud".to_string(),
@@ -12102,18 +12185,18 @@ mod tests {
             .expect("verified off is safe containment"),
             DropboxStartupRecoveryOutcome::SyncDisabled { .. }
         ));
-        let not_disabled = classify_dropbox_startup_recovery_with(
-            Err("recovery warning".to_string()),
-            || Ok("cloud".to_string()),
-        )
-        .expect_err("non-off backend must fail closed");
+        let not_disabled =
+            classify_dropbox_startup_recovery_with(Err("recovery warning".to_string()), || {
+                Ok("cloud".to_string())
+            })
+            .expect_err("non-off backend must fail closed");
         assert!(not_disabled.contains("recovery warning"));
         assert!(not_disabled.contains("cloud"));
-        let unverified = classify_dropbox_startup_recovery_with(
-            Err("recovery warning".to_string()),
-            || Err("backend unreadable".to_string()),
-        )
-        .expect_err("unreadable state must fail closed");
+        let unverified =
+            classify_dropbox_startup_recovery_with(Err("recovery warning".to_string()), || {
+                Err("backend unreadable".to_string())
+            })
+            .expect_err("unreadable state must fail closed");
         assert!(unverified.contains("backend unreadable"));
         assert!(unverified.contains("recovery warning"));
     }
@@ -12658,8 +12741,6 @@ mod tests {
         )
         .expect("stage candidate");
 
-        // Candidate discard has no durable credential side effect, so an
-        // already-active backend must not turn expiration cleanup into a wedge.
         discard_staged_dropbox_credentials_in_store(
             &mut entries,
             "opaque-handle",
@@ -13227,9 +13308,6 @@ mod tests {
         assert!(!first.starts_with("Local\\"));
     }
 
-    // T7: is_sync_lock_contention is defined far below this module (it's regular,
-    // non-test code after mod tests closes elsewhere in this file) but is visible
-    // here via `use super::*;` above — Rust module resolution isn't order-dependent.
     #[cfg(windows)]
     #[test]
     fn windows_lock_violation_error_is_sync_lock_contention() {
@@ -13249,7 +13327,11 @@ mod tests {
     }
 
     fn cheap_encrypted_artifact(passphrase: &str) -> Vec<u8> {
-        let params = SyncCryptoKdfParams { m_kib: 64, t: 1, p: 1 };
+        let params = SyncCryptoKdfParams {
+            m_kib: 64,
+            t: 1,
+            p: 1,
+        };
         let material = derive_sync_key_material(passphrase, random_salt(), params)
             .expect("derive test key material");
         crate::sync_crypto::encrypt_sync_artifact(b"{\"tasks\":[]}", &material)
@@ -13259,10 +13341,9 @@ mod tests {
     #[test]
     fn passphrase_verify_accepts_correct_passphrase_on_stable_bytes() {
         let artifact = cheap_encrypted_artifact("correct horse");
-        let outcome = verify_sync_passphrase_with_reread("correct horse", "test", || {
-            Ok(artifact.clone())
-        })
-        .expect("verify should not error");
+        let outcome =
+            verify_sync_passphrase_with_reread("correct horse", "test", || Ok(artifact.clone()))
+                .expect("verify should not error");
         assert!(outcome.is_some());
     }
 
@@ -13276,7 +13357,7 @@ mod tests {
         })
         .expect("verify should not error");
         assert!(outcome.is_none());
-        // One initial read plus exactly one reread confirming the bytes settled.
+
         assert_eq!(reads, 2);
     }
 
@@ -13289,7 +13370,11 @@ mod tests {
         let mut reads = 0;
         let outcome = verify_sync_passphrase_with_reread("correct horse", "test", move || {
             reads += 1;
-            Ok(if reads == 1 { torn.clone() } else { artifact.clone() })
+            Ok(if reads == 1 {
+                torn.clone()
+            } else {
+                artifact.clone()
+            })
         })
         .expect("verify should not error");
         assert!(outcome.is_some());
@@ -13299,8 +13384,7 @@ mod tests {
     fn passphrase_provisioning_holds_the_sync_lock_through_key_persistence() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
-        enable_sync_encryption_in_dir(dir.path(), "correct horse")
-            .expect("seed encrypted folder");
+        enable_sync_encryption_in_dir(dir.path(), "correct horse").expect("seed encrypted folder");
 
         let sync_dir = Arc::new(dir.path().to_path_buf());
         let barrier = Arc::new(std::sync::Barrier::new(2));
@@ -13339,9 +13423,6 @@ mod tests {
         assert!(persisted.get());
     }
 
-    // #1138 (5): Unlock against a location with nothing encrypted on it. From a stale
-    // `remote-encrypted-no-key` state that is the exit -- without it the read below fails with
-    // "Failed to read .../data.json.enc" and the lock can never be cleared.
     #[test]
     fn passphrase_provisioning_clears_a_stale_no_key_state_when_nothing_is_encrypted_here() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -13366,11 +13447,12 @@ mod tests {
         assert_eq!(outcome, "no-encrypted-remote");
         assert!(cleared.get());
         assert!(!persisted.get(), "no key may be committed on this path");
-        assert!(!dir.path().join(encrypted_artifact_name(DATA_FILE_NAME)).exists());
+        assert!(!dir
+            .path()
+            .join(encrypted_artifact_name(DATA_FILE_NAME))
+            .exists());
     }
 
-    // The negative half: a device holding a key finds no `.enc`, which is remote-plaintext's
-    // business, so nothing is cleared and the read error still surfaces.
     #[test]
     fn passphrase_provisioning_still_fails_when_no_stale_no_key_state_is_present() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -13388,7 +13470,10 @@ mod tests {
         )
         .expect_err("a missing encrypted document is still an error from a keyed state");
 
-        assert!(error.contains("Failed to read"), "unexpected error: {error}");
+        assert!(
+            error.contains("Failed to read"),
+            "unexpected error: {error}"
+        );
         assert!(!persisted.get());
     }
 
@@ -13398,14 +13483,9 @@ mod tests {
         seed_transition_folder(dir.path());
         let material = enable_sync_encryption_in_dir(dir.path(), "correct horse")
             .expect("seed encrypted folder");
-        let changed_path = dir
-            .path()
-            .join(encrypted_artifact_name("data.json.bak"));
-        let peer = encrypt_sync_artifact(
-            br#"{"tasks":[{"id":"peer"}]}"#,
-            &material,
-        )
-        .expect("peer generation");
+        let changed_path = dir.path().join(encrypted_artifact_name("data.json.bak"));
+        let peer = encrypt_sync_artifact(br#"{"tasks":[{"id":"peer"}]}"#, &material)
+            .expect("peer generation");
         let persisted = Cell::new(false);
 
         let error = provide_sync_encryption_passphrase_in_dir_with(
@@ -13422,7 +13502,10 @@ mod tests {
 
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(!persisted.get(), "stale key material must not be committed");
-        assert_eq!(fs::read(&changed_path).expect("peer generation retained"), peer);
+        assert_eq!(
+            fs::read(&changed_path).expect("peer generation retained"),
+            peer
+        );
     }
 }
 
@@ -13431,8 +13514,6 @@ pub(crate) fn get_dropbox_redirect_uri() -> String {
     dropbox_redirect_uri()
 }
 
-// Already holds state.inner across its whole body, same convention every
-// caller of recover_dropbox_credentials follows (B2).
 #[tauri::command(async)]
 pub(crate) fn is_dropbox_connected(
     app: tauri::AppHandle,
@@ -13445,7 +13526,7 @@ pub(crate) fn is_dropbox_connected(
         let normalized_client_id = normalize_dropbox_client_id(&client_id)?;
         is_dropbox_connected_with(&normalized_client_id, || read_dropbox_tokens(&app))
     })();
-    // An unreadable state file proves nothing either way; keep the error then.
+
     let has_evidence = read_dropbox_credential_state(&app)
         .map(|state| dropbox_state_has_credential_evidence(&state))
         .unwrap_or(true);
@@ -13612,7 +13693,6 @@ where
     Ok(true)
 }
 
-// Already holds state.inner across its whole body (B2).
 #[tauri::command(async)]
 pub(crate) fn recover_dropbox_credentials_before_sync_configuration(
     app: tauri::AppHandle,
@@ -13709,7 +13789,6 @@ pub(crate) async fn rollback_staged_dropbox_credentials(
     .map_err(|error| format!("Dropbox credential rollback task failed: {error}"))?
 }
 
-// Already holds state.inner across its whole body (B2).
 #[tauri::command(async)]
 pub(crate) fn finalize_staged_dropbox_credentials(
     app: tauri::AppHandle,
@@ -13905,8 +13984,7 @@ struct WindowsSyncRootSemaphore {
 }
 
 #[cfg(target_os = "windows")]
-// The handle is an owned kernel object and is only released while the enclosing
-// File Sync lease is exclusively borrowed or dropped.
+
 unsafe impl Send for WindowsSyncRootSemaphore {}
 
 #[cfg(target_os = "windows")]
@@ -13915,11 +13993,6 @@ impl Drop for WindowsSyncRootSemaphore {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Threading::ReleaseSemaphore;
 
-        // A semaphore is deliberately used instead of a named mutex: Windows
-        // mutexes are recursive and thread-affine, so two renderer commands on
-        // one runtime thread could both enter and a different drop thread could
-        // not release ownership. The count-one semaphore is process-crossing,
-        // non-recursive, and may be released from the drop thread.
         if unsafe { ReleaseSemaphore(self.handle, 1, std::ptr::null_mut()) } == 0 {
             log::warn!(
                 "Failed to release stable File Sync root authority: {}",
@@ -13938,9 +14011,6 @@ struct HeldFileSyncLease {
     publication_root: file_sync_attachment_publication::PublicationRoot,
 }
 
-/// Opaque, process-bounded File Sync leases held for a complete renderer sync
-/// cycle. The stable `.mindwtr.lock` inode is shared with native encryption
-/// transitions; a renderer cannot forge a token for a different folder.
 #[derive(Debug, Default)]
 pub(crate) struct FileSyncLeaseState {
     leases: Mutex<HashMap<String, HeldFileSyncLease>>,
@@ -14001,7 +14071,7 @@ fn sync_lock_identity(file: &File, require_directory: bool) -> Result<SyncLockId
     };
 
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: `file` owns a live handle and the output structure is writable.
+
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
         return Err(format!(
             "Failed to identify File Sync lease authority: {}",
@@ -14054,7 +14124,8 @@ fn open_sync_root_authority(sync_dir: &Path) -> Result<File, String> {
 
 #[cfg(unix)]
 fn acquire_sync_root_authority(root: &File, _identity: &SyncLockIdentity) -> Result<(), String> {
-    root.try_lock_exclusive().map_err(|error| sync_lock_error_message(&error))
+    root.try_lock_exclusive()
+        .map_err(|error| sync_lock_error_message(&error))
 }
 
 #[cfg(any(test, target_os = "windows"))]
@@ -14074,13 +14145,11 @@ fn acquire_sync_root_authority(
     use windows_sys::Win32::System::Threading::{CreateSemaphoreW, WaitForSingleObject};
 
     let name = windows_sync_root_authority_name(identity);
-    let wide = name.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
-    // `Global\\` is shared by every logon session. A null SECURITY_ATTRIBUTES
-    // pointer deliberately applies the creator token's default DACL, so the
-    // same account can reopen the authority across sessions without granting
-    // other users access. Do not fall back to `Local\\` if creation is denied:
-    // that would silently split the stable authority into concurrent owners.
-    // SAFETY: the name is NUL-terminated and remains alive through the call.
+    let wide = name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+
     let handle = unsafe { CreateSemaphoreW(std::ptr::null(), 1, 1, wide.as_ptr()) };
     if handle.is_null() {
         return Err(format!(
@@ -14088,7 +14157,7 @@ fn acquire_sync_root_authority(
             std::io::Error::last_os_error()
         ));
     }
-    // SAFETY: `handle` is a live semaphore handle owned by this function.
+
     match unsafe { WaitForSingleObject(handle, 0) } {
         WAIT_OBJECT_0 => Ok(WindowsSyncRootSemaphore { handle }),
         WAIT_TIMEOUT => {
@@ -14098,17 +14167,13 @@ fn acquire_sync_root_authority(
         _ => {
             let error = std::io::Error::last_os_error();
             unsafe { CloseHandle(handle) };
-            Err(format!("Failed to acquire stable File Sync root authority: {error}"))
+            Err(format!(
+                "Failed to acquire stable File Sync root authority: {error}"
+            ))
         }
     }
 }
 
-/// Taking the lock needs no write access — `flock` accepts a read-only
-/// descriptor and `LockFileEx` accepts a `GENERIC_READ` handle — so ask for it
-/// only when the file has to be created. Write-opening an *existing* file is
-/// what a cache-off rclone VFS mount refuses: it hands back a write handle,
-/// then refuses at close, logging an error on every sync (#1001). Creating a
-/// missing file is the one write those mounts always allow.
 fn open_sync_lock_file(lock_path: &Path, writable: bool) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
@@ -14130,11 +14195,6 @@ fn open_sync_lock_file(lock_path: &Path, writable: bool) -> std::io::Result<File
 }
 
 fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
-    // Current versions use the retained root inode/kernel identity as the
-    // unreplaceable authority. The named lock file remains locked second so an
-    // older cooperating client still serializes with us. A malicious same-UID
-    // process that can replace an already-open root is outside this boundary;
-    // every pathname identity is nevertheless revalidated before finalization.
     let sync_root = open_sync_root_authority(sync_dir)?;
     let sync_root_identity = sync_lock_identity(&sync_root, true)?;
     #[cfg(unix)]
@@ -14144,10 +14204,6 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
 
     let lock_path = sync_dir.join(".mindwtr.lock");
     let file = open_sync_lock_file(&lock_path, false)
-        // Any refusal of the read-only open — a lock file that does not exist
-        // yet, a mount that answers oddly — falls back to the writable open used
-        // before #1001, so the set of filesystems that can take the lock at all
-        // only grows.
         .or_else(|_| open_sync_lock_file(&lock_path, true))
         .map_err(|error| format!("Failed to open sync lock: {error}"))?;
     let file_identity = sync_lock_identity(&file, false)?;
@@ -14170,9 +14226,6 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
         Err(error) => error,
     };
 
-    // No documented `flock`/`LockFileEx` implementation refuses a read-only
-    // handle, but sync must not break outright on a filesystem that disagrees:
-    // retry on the writable handle this used before #1001.
     log::warn!(
         "Sync lock rejected on a read-only handle ({read_only_error}); retrying with a writable handle"
     );
@@ -14227,9 +14280,7 @@ fn normalize_lease_sync_dir(sync_dir: &Path) -> PathBuf {
     let Ok(canonical) = fs::canonicalize(sync_dir) else {
         return sync_dir.to_path_buf();
     };
-    // Windows canonicalizes to the verbatim `\\?\C:\...` form, but the app
-    // builds attachment targets as `C:\...`; the two never compared equal, so
-    // every File Sync attachment upload was refused at generation-reserve.
+
     let simplified = dunce::simplified(&canonical);
     if simplified != canonical.as_path() {
         log::info!(
@@ -14286,8 +14337,6 @@ fn with_file_sync_lease<T, F>(
 where
     F: FnOnce(&mut HeldFileSyncLease) -> Result<T, String>,
 {
-    // Keep the map guard for the whole operation so a concurrent release cannot
-    // drop the OS lock between token validation and the final journal/file write.
     let mut leases = state
         .leases
         .lock()
@@ -14332,8 +14381,6 @@ fn release_file_sync_lease_token(
     validation
 }
 
-/// Release only leases whose renderer window has been destroyed. A live
-/// renderer's lease is never reclaimed by age or by another window.
 pub(crate) fn release_file_sync_leases_for_window(
     state: &FileSyncLeaseState,
     owner_window_label: &str,
@@ -14376,8 +14423,9 @@ pub(crate) fn acquire_file_sync_lease(
 ) -> Result<String, String> {
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
-        None => configured_sync_dir(&app)?
-            .ok_or_else(|| "Sync path is not configured".to_string())?,
+        None => {
+            configured_sync_dir(&app)?.ok_or_else(|| "Sync path is not configured".to_string())?
+        }
     };
     let token = acquire_file_sync_lease_for_dir(&state, &sync_dir, window.label())?;
     let recovery = with_file_sync_lease(&state, &token, window.label(), |lease| {
@@ -14388,7 +14436,6 @@ pub(crate) fn acquire_file_sync_lease(
         .map(|_| ())
     });
     if let Err(error) = recovery {
-        // Recovery failed closed before the token escaped to the renderer.
         let _ = release_file_sync_lease_token(&state, &token, window.label());
         return Err(error);
     }
@@ -14404,10 +14451,6 @@ pub(crate) fn release_file_sync_lease(
     release_file_sync_lease_token(&state, &token, window.label())
 }
 
-/// The "no remote yet" payload for a fresh sync folder. Must include every
-/// array/object surface on core `AppData` (packages/core/src/types.ts) —
-/// omitting one here hands the JS sync cycle a partial remote payload that
-/// crashes downstream code assuming every array is present (#990).
 fn empty_remote_app_data() -> serde_json::Value {
     serde_json::json!({
         "tasks": [],
@@ -14441,20 +14484,11 @@ fn sync_parent_directory_for_durability(path: &Path) -> std::io::Result<()> {
 
     #[cfg(not(unix))]
     {
-        // Rust's portable File API cannot open a Windows directory for
-        // FlushFileBuffers. The replacement file itself is still flushed;
-        // Unix platforms additionally persist the rename metadata above.
         let _ = path;
         Ok(())
     }
 }
 
-/// Direct-child I/O rooted at the exact directory handle retained by the File
-/// Sync lease. Absolute paths are accepted only to validate/derive a single
-/// leaf name; every native operation below is issued relative to `directory`.
-/// This closes crashes and races with cooperating clients/providers. A malicious
-/// same-UID process that can mutate private process handles remains outside the
-/// File Sync threat boundary.
 #[derive(Clone, Copy)]
 enum RetainedRootRenameStrategy {
     Native,
@@ -14504,12 +14538,14 @@ impl<'a> RetainedSyncRoot<'a> {
                 "File Sync operation escaped the retained root",
             ));
         }
-        path.file_name().filter(|name| !name.is_empty()).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "File Sync operation has no direct-child leaf",
-            )
-        })
+        path.file_name()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "File Sync operation has no direct-child leaf",
+                )
+            })
     }
 
     fn open_read(&self, path: &Path) -> std::io::Result<File> {
@@ -14613,7 +14649,11 @@ fn retained_root_open(
     use std::os::fd::{AsRawFd as _, FromRawFd as _};
 
     let leaf = retained_root_leaf_c_string(leaf)?;
-    let mut flags = if writable { libc::O_RDWR } else { libc::O_RDONLY };
+    let mut flags = if writable {
+        libc::O_RDWR
+    } else {
+        libc::O_RDONLY
+    };
     flags |= libc::O_CLOEXEC | libc::O_NOFOLLOW;
     if create_new {
         flags |= libc::O_CREAT | libc::O_EXCL;
@@ -14646,8 +14686,8 @@ fn retained_root_open(
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
     use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
     use windows_sys::Wdk::Storage::FileSystem::{
-        NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
-        FILE_OPEN_REPARSE_POINT, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT,
+        NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
+        FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT,
     };
     use windows_sys::Win32::Foundation::{
         RtlNtStatusToDosError, GENERIC_READ, GENERIC_WRITE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
@@ -14664,7 +14704,10 @@ fn retained_root_open(
         .checked_mul(std::mem::size_of::<u16>())
         .and_then(|length| u16::try_from(length).ok())
         .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "File Sync leaf is too long")
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "File Sync leaf is too long",
+            )
         })?;
     let unicode = UNICODE_STRING {
         Length: byte_len,
@@ -14708,9 +14751,9 @@ fn retained_root_open(
         )
     };
     if status < 0 {
-        return Err(std::io::Error::from_raw_os_error(unsafe {
-            RtlNtStatusToDosError(status)
-        } as i32));
+        return Err(std::io::Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosError(status) } as i32,
+        ));
     }
     let file = unsafe { File::from_raw_handle(handle) };
     if !file.metadata()?.is_file()
@@ -14892,8 +14935,6 @@ fn retained_root_rename(
         return Err(std::io::Error::last_os_error());
     }
     if rename_strategy.force_link_fallback() {
-        // Keep the deterministic test seam's validation sequence aligned with
-        // Linux/macOS, where one native no-replace attempt precedes fallback.
         before_mutation()?;
     }
     retained_root_link_then_unlink_no_replace(
@@ -14911,12 +14952,7 @@ fn retained_root_link_then_unlink_no_replace(
     destination: &CStr,
     before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    retained_root_link_then_unlink_no_replace_with(
-        directory,
-        source,
-        destination,
-        before_mutation,
-    )
+    retained_root_link_then_unlink_no_replace_with(directory, source, destination, before_mutation)
 }
 
 #[cfg(unix)]
@@ -14965,13 +15001,7 @@ where
         ))
         .expect("generated quarantine name contains no NUL");
         let quarantine_leaf = OsStr::from_bytes(quarantine.as_bytes());
-        let reservation = match retained_root_open(
-            directory,
-            quarantine_leaf,
-            true,
-            true,
-            false,
-        ) {
+        let reservation = match retained_root_open(directory, quarantine_leaf, true, true, false) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(retained_linked_destination_preserved_error(error)),
@@ -14990,24 +15020,15 @@ where
         } != 0
         {
             let error = std::io::Error::last_os_error();
-            // This invocation reserved the private leaf create-new. Replacing
-            // that placeholder cannot overwrite a peer-owned quarantine.
+
             if let Err(authority_error) = before_mutation() {
-                return Err(retained_linked_destination_preserved_error(
-                    authority_error,
-                ));
+                return Err(retained_linked_destination_preserved_error(authority_error));
             }
             let _ = unsafe { libc::unlinkat(directory.as_raw_fd(), quarantine.as_ptr(), 0) };
             return Err(retained_linked_destination_preserved_error(error));
         }
 
-        let quarantined = retained_root_open(
-            directory,
-            quarantine_leaf,
-            false,
-            false,
-            false,
-        );
+        let quarantined = retained_root_open(directory, quarantine_leaf, false, false, false);
         let matches_source = quarantined
             .ok()
             .and_then(|file| native_file_identity(&file).ok())
@@ -15037,9 +15058,6 @@ where
 
 #[cfg(unix)]
 fn retained_linked_destination_preserved_error(error: std::io::Error) -> std::io::Error {
-    // Publication has already created the destination. Preserve both names on
-    // every retirement ambiguity so the caller can quarantine only the exact
-    // destination generation it owns.
     if error
         .to_string()
         .starts_with(RETAINED_CLEANUP_AUTHORITY_LOST)
@@ -15053,8 +15071,7 @@ fn retained_linked_destination_preserved_error(error: std::io::Error) -> std::io
     ))
 }
 
-const RETAINED_LINKED_DESTINATION_PRESERVED: &str =
-    "RETAINED_LINKED_DESTINATION_PRESERVED";
+const RETAINED_LINKED_DESTINATION_PRESERVED: &str = "RETAINED_LINKED_DESTINATION_PRESERVED";
 
 #[cfg(target_os = "windows")]
 fn retained_root_rename(
@@ -15076,10 +15093,7 @@ fn retained_root_rename(
     let source_file = retained_root_open(directory, source, true, false, false)?;
     let source_identity = native_file_identity(&source_file)?;
     let target = destination.encode_wide().collect::<Vec<_>>();
-    // NtSetInformationFile consumes the native variable-length record while
-    // preserving the retained RootDirectory-relative namespace operation.
-    // FileNameLength still describes only the UTF-16 payload copied at the
-    // FileName field below.
+
     let fixed = std::mem::size_of::<FILE_RENAME_INFORMATION>();
     let target_bytes = target
         .len()
@@ -15109,9 +15123,7 @@ fn retained_root_rename(
         )
     })?;
     let words = buffer_bytes.div_ceil(std::mem::size_of::<usize>());
-    // `FILE_RENAME_INFORMATION` has pointer alignment; a byte vector does not
-    // promise enough alignment for the typed header even though system allocators
-    // often happen to provide it.
+
     let mut buffer = vec![0_usize; words];
     let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
     let mut status_block = IO_STATUS_BLOCK::default();
@@ -15316,15 +15328,12 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::Foundation::ERROR_NO_MORE_FILES;
     use windows_sys::Win32::Storage::FileSystem::{
-        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
-        GetFileInformationByHandleEx, FILE_ID_BOTH_DIR_INFO,
+        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
+        FILE_ID_BOTH_DIR_INFO,
     };
 
     let buffer_bytes: usize = 64 * 1024;
-    // The provider may pack a final filename through the exact end of the
-    // advertised payload even though Rust's typed structure includes trailing
-    // padding after FileName. Keep initialized padding outside the payload so
-    // forming the typed reference below never extends beyond the allocation.
+
     let allocation_bytes = buffer_bytes
         .checked_add(std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>())
         .ok_or_else(|| {
@@ -15408,7 +15417,8 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
                 name_range.end,
                 fixed,
                 buffer_bytes,
-            )? else {
+            )?
+            else {
                 break;
             };
             offset = next_offset;
@@ -15445,14 +15455,12 @@ fn retained_directory_name_range(
     file_name_bytes: usize,
     buffer_bytes: usize,
 ) -> std::io::Result<std::ops::Range<usize>> {
-    let start = entry_offset
-        .checked_add(file_name_offset)
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "File Sync directory enumeration name offset overflowed",
-            )
-        })?;
+    let start = entry_offset.checked_add(file_name_offset).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration name offset overflowed",
+        )
+    })?;
     let end = start.checked_add(file_name_bytes).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -15530,13 +15538,6 @@ fn retained_root_list_names(_directory: &File) -> std::io::Result<Vec<OsString>>
     ))
 }
 
-/// `fs::copy` presizes the destination before writing it — `CopyFileExW` on
-/// Windows, an explicit size change elsewhere — and a cache-off rclone VFS
-/// refuses any size change ("WriteFileHandle: Truncate: Can't change size",
-/// #1001), logging an error per sync even though the bytes still land. Writing
-/// the destination sequentially through one freshly created handle is the write
-/// shape those mounts always allow, and flushing that same handle avoids
-/// reopening the file for write afterwards, which they also refuse.
 #[cfg(test)]
 fn copy_file_sequentially(source: &Path, destination: &Path) -> std::io::Result<()> {
     let contents = fs::read(source)?;
@@ -15598,9 +15599,8 @@ fn native_file_identity(file: &File) -> std::io::Result<NativeFileIdentity> {
     };
 
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
-    let succeeded = unsafe {
-        GetFileInformationByHandle(file.as_raw_handle() as _, &mut information)
-    };
+    let succeeded =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut information) };
     if succeeded == 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -15676,16 +15676,14 @@ impl OwnedAtomicPublication {
     where
         BeforeRemove: FnMut(&Path) -> Result<(), String>,
     {
-        if fs::symlink_metadata(path).is_err_and(|error| {
-            error.kind() == std::io::ErrorKind::NotFound
-        }) {
+        if fs::symlink_metadata(path)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
             return Ok(());
         }
         self.verify_at(path)?;
         let first_result = before_remove(path);
         if first_result.is_err() && self.verify_at(path).is_ok() {
-            // Keep the stage-specific first error, but make the same one-time
-            // best-effort retry the probe historically promised.
             if before_remove(path).is_ok() && self.verify_at(path).is_ok() {
                 let _ = fs::remove_file(path);
             }
@@ -15694,7 +15692,6 @@ impl OwnedAtomicPublication {
         self.verify_at(path)?;
         fs::remove_file(path).map_err(|error| error.to_string())
     }
-
 }
 
 #[cfg(test)]
@@ -15713,11 +15710,6 @@ fn remove_if_owned(path: &Path, identity: NativeFileIdentity) {
     }
 }
 
-/// The one atomic write shape shared by real file sync and folder probing.
-/// Keep the newly-created handle open through `write_all` and `sync_all`, then
-/// release it before renaming. Virtual filesystems can refuse the flush lazily,
-/// so the checked `sync_all` is part of the contract; the optional override only
-/// preserves the existing Windows replacement behavior.
 #[cfg(test)]
 fn atomic_tmp_write_then_rename_with<BeforeStage>(
     tmp_file: &Path,
@@ -15815,11 +15807,13 @@ where
         path: destination.to_path_buf(),
         cleanup_on_drop: true,
     };
-    publication.verify_at(destination).map_err(|detail| AtomicWriteError {
-        stage: AtomicWriteStage::Rename,
-        detail,
-        owned_temp: None,
-    })?;
+    publication
+        .verify_at(destination)
+        .map_err(|detail| AtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail,
+            owned_temp: None,
+        })?;
     Ok(publication)
 }
 
@@ -15900,9 +15894,7 @@ where
                     })?;
                     return Err(preservation);
                 }
-                // The quarantine name is invocation-private and allocated with
-                // a no-replace move. Cooperative peers never target it, so the
-                // unlink cannot remove a shared canonical generation.
+
                 before_mutation(RetainedCleanupMutation::Remove, &quarantine)?;
                 root.remove(&quarantine)
                     .map_err(|error| format!("Failed to remove quarantined probe file: {error}"))?;
@@ -15962,7 +15954,11 @@ impl OwnedRetainedRootPublication {
     where
         BeforeRemove: FnMut(&Path) -> Result<(), String>,
     {
-        if !self.root().exists(path).map_err(|error| error.to_string())? {
+        if !self
+            .root()
+            .exists(path)
+            .map_err(|error| error.to_string())?
+        {
             return Ok(());
         }
         self.verify_at(path)?;
@@ -15988,7 +15984,9 @@ impl OwnedRetainedRootPublication {
                 if is_retained_cleanup_authority_error(&cleanup_error) {
                     return Err(cleanup_error);
                 }
-                return Err(format!("{first_error}; cleanup retry failed safely: {cleanup_error}"));
+                return Err(format!(
+                    "{first_error}; cleanup retry failed safely: {cleanup_error}"
+                ));
             }
             return Err(first_error);
         }
@@ -16009,10 +16007,6 @@ impl OwnedRetainedRootPublication {
 impl Drop for OwnedRetainedRootPublication {
     fn drop(&mut self) {
         if self.cleanup_on_drop {
-            // An owner cannot retain the caller's live lock/root validator. Mutating here would
-            // turn any authority-loss error into an unguarded cleanup retry during unwinding.
-            // Production callers disarm Drop before explicit fenced cleanup; otherwise preserve
-            // the exact invocation-owned bytes for recovery rather than guessing authority.
             log::warn!("Preserved a File Sync temporary publication because cleanup authority was unavailable");
         }
     }
@@ -16042,11 +16036,13 @@ where
         detail,
         owned_temp: None,
     })?;
-    let mut file = root.create_new(tmp_file).map_err(|error| RetainedAtomicWriteError {
-        stage: AtomicWriteStage::Create,
-        detail: error.to_string(),
-        owned_temp: None,
-    })?;
+    let mut file = root
+        .create_new(tmp_file)
+        .map_err(|error| RetainedAtomicWriteError {
+            stage: AtomicWriteStage::Create,
+            detail: error.to_string(),
+            owned_temp: None,
+        })?;
     let identity = native_file_identity(&file).map_err(|error| RetainedAtomicWriteError {
         stage: AtomicWriteStage::Create,
         detail: format!("Could not identify newly-created temp file: {error}"),
@@ -16131,14 +16127,9 @@ where
             before_stage(AtomicWriteStage::Rename)
         }),
         None => root
-            .rename(
-                tmp_file,
-                destination,
-                destination_may_exist,
-                &mut || {
-                    before_stage(AtomicWriteStage::Rename).map_err(std::io::Error::other)
-                },
-            )
+            .rename(tmp_file, destination, destination_may_exist, &mut || {
+                before_stage(AtomicWriteStage::Rename).map_err(std::io::Error::other)
+            })
             .map_err(|error| error.to_string()),
     };
     if let Err(mut detail) = rename_result {
@@ -16244,9 +16235,8 @@ where
     let root = RetainedSyncRoot::new(sync_dir, &sync_lock);
 
     let result = (|| -> Result<(), String> {
-        revalidate_sync_lock(&sync_lock, sync_dir).map_err(|error| {
-            sync_folder_probe_stage_error(AtomicWriteStage::Create, &error)
-        })?;
+        revalidate_sync_lock(&sync_lock, sync_dir)
+            .map_err(|error| sync_folder_probe_stage_error(AtomicWriteStage::Create, &error))?;
         let mut guarded_before_stage = |stage: AtomicWriteStage| {
             before_stage(stage)?;
             revalidate_sync_lock(&sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
@@ -16263,8 +16253,6 @@ where
             Ok(publication) => publication,
             Err(mut error) => {
                 if let Some(mut owned_temp) = error.owned_temp.take() {
-                    // The error owner starts armed for safety if a caller forgets it, but Drop
-                    // cannot revalidate this live lease. Disarm before explicit fenced cleanup.
                     owned_temp.keep();
                     let owned_path = owned_temp.path();
                     let mut guarded_cleanup = |path: &Path| {
@@ -16284,9 +16272,7 @@ where
                 return Err(sync_folder_probe_stage_error(error.stage, &error.detail));
             }
         };
-        // Once publication succeeds, implicit Drop cleanup is no longer safe:
-        // any later error may be the evidence that this invocation lost its
-        // lock/root authority. All cleanup below is explicit and fenced.
+
         publication.keep();
 
         if let Err(error) = revalidate_sync_lock(&sync_lock, sync_dir) {
@@ -16339,13 +16325,11 @@ where
             before_remove(path)?;
             revalidate_sync_lock(&sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
         };
-        publication.remove_with(final_file, &mut guarded_before_remove)
+        publication
+            .remove_with(final_file, &mut guarded_before_remove)
             .map_err(|error| format!("Could not remove the test file: {error}"))
     })();
 
-    // Failed write stages clean up only the exact temp identity they created.
-    // A failed final delete is retried by the publication owner inside the
-    // successful-write branch above; unowned pre-existing leaves are untouched.
     release_sync_lock(&sync_lock);
     result
 }
@@ -16393,10 +16377,7 @@ fn probe_sync_dir(sync_dir: &Path) -> Result<(), String> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let base = format!(
-        ".mindwtr-folder-probe-{}-{nonce}",
-        std::process::id()
-    );
+    let base = format!(".mindwtr-folder-probe-{}-{nonce}", std::process::id());
     let tmp_file = sync_dir.join(format!("{base}.tmp"));
     let final_file = sync_dir.join(base);
     probe_sync_dir_at(sync_dir, &tmp_file, &final_file)
@@ -16516,7 +16497,7 @@ where
         root.rename(target, previous, false, &mut || {
             validate().map_err(std::io::Error::other)
         })
-            .map_err(|error| format!("Failed to preserve the current {description}: {error}"))?;
+        .map_err(|error| format!("Failed to preserve the current {description}: {error}"))?;
         validate()?;
     }
 
@@ -16535,9 +16516,7 @@ where
             }
             Ok(())
         }
-        Err(replace_error)
-            if is_retained_cleanup_authority_error(&replace_error.to_string()) =>
-        {
+        Err(replace_error) if is_retained_cleanup_authority_error(&replace_error.to_string()) => {
             Err(replace_error.to_string())
         }
         Err(replace_error) if !target_was_present => Err(format!(
@@ -16564,9 +16543,6 @@ where
     }
 }
 
-/// How the file backend should treat the bytes on disk for this operation. `Off` is the
-/// pre-feature path and must stay byte-for-byte identical to it (backward-compat invariant #1):
-/// same filenames, same recovery chain, same errors, no extra IO.
 #[derive(Clone, Copy)]
 pub(crate) enum SyncFileCrypto<'a> {
     Off,
@@ -16585,9 +16561,6 @@ impl<'a> SyncFileCrypto<'a> {
         matches!(self, Self::Enabled(_))
     }
 
-    /// The base document name every sibling path is derived from: `data.json` when off,
-    /// `data.json.enc` when on. `.bak`/`.tmp`/`.previous` still append to it, which is exactly
-    /// core's `syncEncryptedArtifactName` mapping (`data.json.bak` -> `data.json.enc.bak`).
     fn data_base(self) -> String {
         if self.is_on() {
             encrypted_artifact_name(DATA_FILE_NAME)
@@ -16602,9 +16575,7 @@ fn sync_payload_is_valid(value: &Value) -> Result<(), String> {
         let Some(object) = value.as_object() else {
             return Err("Invalid sync payload shape: expected an object".to_string());
         };
-        // A document with no recognised surface at all is what a torn read leaves behind (an
-        // interior fragment, or an empty object from a zero-length file). Normalizing it would
-        // fabricate an empty remote and let this device's snapshot overwrite peer edits.
+
         let recognised_surfaces = [
             "tasks", "projects", "sections", "areas", "people", "settings", "version",
         ];
@@ -16674,10 +16645,6 @@ fn read_sync_candidate(path: &Path, attempts: usize) -> Result<Value, String> {
     read_json_with_retries_validated(path, attempts, sync_payload_is_valid)
 }
 
-/// Decrypt-then-validate. A decrypt failure is a TERMINAL error, never "invalid JSON, try the
-/// next recovery candidate": ciphertext this device cannot open may be a peer's perfectly good
-/// newer generation, or simply the wrong passphrase. Fail closed — the caller stops the run,
-/// nothing is rotated, nothing is repaired, nothing is deleted (pinned decision #4).
 fn read_encrypted_sync_candidate(
     path: &Path,
     attempts: usize,
@@ -16693,8 +16660,9 @@ fn read_encrypted_sync_candidate(
             }
             let plaintext = decrypt_sync_artifact(&bytes, &material.key)
                 .map_err(|error| terminal_error(error))?;
-            String::from_utf8(plaintext)
-                .map_err(|error| terminal_error(format!("decrypted sync payload is not UTF-8: {error}")))
+            String::from_utf8(plaintext).map_err(|error| {
+                terminal_error(format!("decrypted sync payload is not UTF-8: {error}"))
+            })
         },
         sync_payload_is_valid,
     )
@@ -16784,7 +16752,10 @@ where
     if !macos_semantics {
         return Ok(false);
     }
-    if path.extension().is_some_and(|extension| extension == "icloud") {
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "icloud")
+    {
         return Ok(true);
     }
     let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(OsStr::to_str))
@@ -16840,8 +16811,7 @@ where
             }
             continue;
         } else {
-            match read_bytes(path)
-                .and_then(|bytes| read_sync_candidate_bytes_with(&bytes, crypto))
+            match read_bytes(path).and_then(|bytes| read_sync_candidate_bytes_with(&bytes, crypto))
             {
                 Ok(value) => return Ok(value),
                 Err(error) => last_error = Some(error),
@@ -16858,9 +16828,9 @@ fn retained_seed_backup_files(
     root: &RetainedSyncRoot<'_>,
     seed_suffix: &str,
 ) -> Result<Vec<PathBuf>, String> {
-    let names = root.list_direct_child_names().map_err(|error| {
-        format!("Failed to enumerate retained File Sync root: {error}")
-    })?;
+    let names = root
+        .list_direct_child_names()
+        .map_err(|error| format!("Failed to enumerate retained File Sync root: {error}"))?;
     let mut candidates: Vec<(SystemTime, String, String, PathBuf)> = Vec::new();
     for name in names {
         let Some(name_text) = name.to_str() else {
@@ -16883,15 +16853,10 @@ fn retained_seed_backup_files(
         candidates.push((modified, lower, name_text.to_string(), path));
     }
     sort_retained_seed_candidates(&mut candidates);
-    Ok(candidates
-        .into_iter()
-        .map(|(_, _, _, path)| path)
-        .collect())
+    Ok(candidates.into_iter().map(|(_, _, _, path)| path).collect())
 }
 
-fn sort_retained_seed_candidates(
-    candidates: &mut [(SystemTime, String, String, PathBuf)],
-) {
+fn sort_retained_seed_candidates(candidates: &mut [(SystemTime, String, String, PathBuf)]) {
     candidates.sort_by(|left, right| {
         right
             .0
@@ -16972,9 +16937,7 @@ fn read_sync_file_with_source_from_retained_root_with(
     };
     let detect_opposite_generation = || -> Result<Option<String>, String> {
         if !crypto.is_on() {
-            let encrypted = root
-                .sync_dir
-                .join(encrypted_artifact_name(DATA_FILE_NAME));
+            let encrypted = root.sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
             if root.exists(&encrypted).map_err(|error| error.to_string())? {
                 let bytes = root.read(&encrypted).map_err(|error| error.to_string())?;
                 return Ok(match inspect_sync_artifact(&bytes) {
@@ -17096,9 +17059,6 @@ struct SyncFileRead {
     source: SyncFileReadSource,
 }
 
-/// `Ok(None)` means "no usable candidate here, keep walking the chain". `Err` is reserved for
-/// the terminal encryption class, which must stop the walk instead of degrading into a
-/// recovery/repair (decision #4).
 fn read_sync_backup(
     backup_file: &Path,
     previous_file: &Path,
@@ -17141,8 +17101,6 @@ fn read_sync_recovery(
     read_sync_backup(backup_file, backup_previous_file, crypto)
 }
 
-/// Encryption-off shorthand. Only the tests still call it directly; every command resolves
-/// this device's posture first and goes through the `_with` form.
 #[cfg(test)]
 fn read_sync_file_with_source_from_dir(sync_dir: &Path) -> Result<SyncFileRead, String> {
     read_sync_file_with_source_from_dir_with(sync_dir, SyncFileCrypto::Off)
@@ -17163,8 +17121,7 @@ fn read_sync_file_with_source_from_dir_with(
     } else {
         legacy_name
     });
-    // Seed backups the transition converted keep their base name plus `.enc`; an off-state
-    // device keeps looking at exactly the `.json` names it always did.
+
     let seed_suffix = if crypto.is_on() { ".json.enc" } else { ".json" };
 
     let find_seed_backup_files = |dir: &Path| -> Vec<PathBuf> {
@@ -17262,12 +17219,7 @@ fn read_sync_file_with_source_from_dir_with(
         if let Some(result) = read_seed_or_legacy_file() {
             return result;
         }
-        // Detection (decision #2): only once the whole chain for THIS device's generation has
-        // come up empty — which is exactly the "first sync" / "a peer flipped encryption at
-        // the sync location" shape. A populated folder never gets here, so an existing install
-        // pays no extra IO for this (invariant #1). Off-state looks for ciphertext; a keyed
-        // device looks for the plaintext a peer's disable transition restored, because
-        // treating that as an empty remote would merge into a fresh generation and fork.
+
         if !crypto.is_on() {
             if let Some(discovery) = detect_encrypted_sync_document(sync_dir)? {
                 return Err(discovery);
@@ -17290,8 +17242,7 @@ fn read_sync_file_with_source_from_dir_with(
             if is_terminal_error(&primary_err) {
                 return Err(primary_err);
             }
-            // A plain-named file whose bytes are MWENC1 is not "invalid JSON to repair"
-            // (decision #4) — classify it before the recovery chain can rotate anything.
+
             if !crypto.is_on() {
                 if let Some(discovery) = classify_encrypted_bytes(&sync_file)? {
                     return Err(discovery);
@@ -17310,9 +17261,6 @@ fn read_sync_file_with_source_from_dir_with(
     }
 }
 
-/// Encodes an MWENC1 discovery as `SYNC_ENCRYPTION_REMOTE_ENCRYPTED:<saltHex>:<mKib>:<t>:<p>`.
-/// The command layer parses it, persists `remote-encrypted-no-key`, and hands TS the bare
-/// sentinel — keeping the AppHandle-free `*_from_dir` functions directly unit-testable.
 fn read_sync_artifact_if_present(path: &Path) -> Result<Option<Vec<u8>>, String> {
     match fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
@@ -17330,17 +17278,17 @@ fn classify_encrypted_bytes(path: &Path) -> Result<Option<String>, String> {
     };
     Ok(match inspect_sync_artifact(&bytes) {
         SyncArtifactInspection::Encrypted(header) => Some(encrypted_discovery_marker(&header)),
-        // A header that is present but unreadable is still never "repair me".
+
         SyncArtifactInspection::Unsupported(reason) => Some(terminal_error(reason)),
         SyncArtifactInspection::Plaintext => None,
     })
 }
 
-/// True when a non-empty, non-MWENC1 sync document sits at the plaintext name. Mirrors core's
-/// `isPlaintextSyncArtifact`; an empty or whitespace-only file is evidence of nothing.
 fn plaintext_sync_document_exists(sync_dir: &Path) -> Result<bool, String> {
-    Ok(read_sync_artifact_if_present(&sync_dir.join(DATA_FILE_NAME))?
-        .is_some_and(|bytes| is_plaintext_sync_artifact(&bytes)))
+    Ok(
+        read_sync_artifact_if_present(&sync_dir.join(DATA_FILE_NAME))?
+            .is_some_and(|bytes| is_plaintext_sync_artifact(&bytes)),
+    )
 }
 
 fn detect_encrypted_sync_document(sync_dir: &Path) -> Result<Option<String>, String> {
@@ -17348,8 +17296,12 @@ fn detect_encrypted_sync_document(sync_dir: &Path) -> Result<Option<String>, Str
     classify_encrypted_bytes(&encrypted)
 }
 
-pub(crate) fn parse_encrypted_discovery(error: &str) -> Option<([u8; SALT_LEN], SyncCryptoKdfParams)> {
-    let rest = error.strip_prefix(SYNC_ENCRYPTION_REMOTE_ENCRYPTED)?.strip_prefix(':')?;
+pub(crate) fn parse_encrypted_discovery(
+    error: &str,
+) -> Option<([u8; SALT_LEN], SyncCryptoKdfParams)> {
+    let rest = error
+        .strip_prefix(SYNC_ENCRYPTION_REMOTE_ENCRYPTED)?
+        .strip_prefix(':')?;
     let mut parts = rest.split(':');
     let salt = <[u8; SALT_LEN]>::try_from(hex_to_bytes(parts.next()?)?.as_slice()).ok()?;
     let m_kib = parts.next()?.parse().ok()?;
@@ -17386,7 +17338,7 @@ fn read_sync_file_versioned_from_dir(sync_dir: &Path) -> Result<SyncFileReadResu
     read_sync_file_versioned_from_dir_with(sync_dir, SyncFileCrypto::Off)
 }
 
-#[allow(dead_code)] // Pathname reader retained only for focused recovery/crypto tests.
+#[allow(dead_code)]
 fn read_sync_file_versioned_from_dir_with(
     sync_dir: &Path,
     crypto: SyncFileCrypto<'_>,
@@ -17415,10 +17367,9 @@ fn read_sync_file_versioned_from_retained_root_with(
     })
 }
 
-/// Resolves this device's encryption posture for a file-backend operation. Enabled-but-no-key
-/// fails closed rather than silently reading/writing the plaintext names, which would fork the
-/// folder into two generations.
-fn resolve_sync_encryption_material(app: &tauri::AppHandle) -> Result<Option<SyncKeyMaterial>, String> {
+fn resolve_sync_encryption_material(
+    app: &tauri::AppHandle,
+) -> Result<Option<SyncKeyMaterial>, String> {
     let enabled = is_encryption_enabled(app)?;
     let resolved = if enabled {
         let material = resolve_key_material(app)?;
@@ -17432,27 +17383,25 @@ fn resolve_sync_encryption_material(app: &tauri::AppHandle) -> Result<Option<Syn
     } else {
         None
     };
-    // One `state` line per file-backend operation, at the same seam that decides whether this
-    // device encrypts. The mobile and desktop-TS gates emit the identical line per cycle.
+
     log_sync_encryption_state(app, resolved.is_some(), "proceed");
     Ok(resolved)
 }
 
-/// The `[sync-encryption] state` line for the file backend. Reads only what the sidecar
-/// already holds -- never the key, never the passphrase.
 fn log_sync_encryption_state(app: &tauri::AppHandle, has_material: bool, decision: &str) {
     let state = read_local_state(app).ok().flatten();
     let active_scope = sync_location_scope(app, None);
     log::info!(
         "{}",
-        sync_encryption_state_line(state.as_ref(), active_scope.as_deref(), has_material, decision)
+        sync_encryption_state_line(
+            state.as_ref(),
+            active_scope.as_deref(),
+            has_material,
+            decision
+        )
     );
 }
 
-/// Pure builder for that line, so the field wiring is testable without an `AppHandle`.
-/// `backend` comes from the active scope, never a literal: `resolve_sync_encryption_material`
-/// is also the native WebDAV commands' gate, and a line reading `backend=file` next to
-/// `activeScope=webdav#…` would contradict itself.
 fn sync_encryption_state_line(
     state: Option<&SyncEncryptionLocalState>,
     active_scope: Option<&str>,
@@ -17460,44 +17409,49 @@ fn sync_encryption_state_line(
     decision: &str,
 ) -> String {
     sync_encryption_diagnostic(
-            SYNC_ENCRYPTION_LOG_EVENT_STATE,
-            &[
-                ("backend", sync_encryption_backend_label(active_scope)),
-                ("trigger", "auto".to_string()),
-                (
-                    "state",
+        SYNC_ENCRYPTION_LOG_EVENT_STATE,
+        &[
+            ("backend", sync_encryption_backend_label(active_scope)),
+            ("trigger", "auto".to_string()),
+            (
+                "state",
+                state
+                    .as_ref()
+                    .map(|value| value.state.clone())
+                    .unwrap_or_else(|| STATE_OFF.to_string()),
+            ),
+            ("hasMaterial", has_material.to_string()),
+            (
+                "saltPrefix",
+                sync_encryption_salt_prefix(state.as_ref().and_then(|value| value.salt.as_deref())),
+            ),
+            (
+                "kdf",
+                sync_encryption_kdf_label(
                     state
                         .as_ref()
-                        .map(|value| value.state.clone())
-                        .unwrap_or_else(|| STATE_OFF.to_string()),
+                        .and_then(|value| value.kdf_params)
+                        .map(Into::into),
                 ),
-                ("hasMaterial", has_material.to_string()),
-                (
-                    "saltPrefix",
-                    sync_encryption_salt_prefix(state.as_ref().and_then(|value| value.salt.as_deref())),
-                ),
-                (
-                    "kdf",
-                    sync_encryption_kdf_label(
-                        state.as_ref().and_then(|value| value.kdf_params).map(Into::into),
-                    ),
-                ),
-                (
-                    "incompleteTransition",
+            ),
+            (
+                "incompleteTransition",
+                state
+                    .as_ref()
+                    .and_then(|value| value.incomplete_transition.clone())
+                    .unwrap_or_else(|| SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+            ),
+            (
+                "discoveredScope",
+                sync_encryption_scope_label(
                     state
                         .as_ref()
-                        .and_then(|value| value.incomplete_transition.clone())
-                        .unwrap_or_else(|| SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
+                        .and_then(|value| value.discovered_scope.as_deref()),
                 ),
-                (
-                    "discoveredScope",
-                    sync_encryption_scope_label(
-                        state.as_ref().and_then(|value| value.discovered_scope.as_deref()),
-                    ),
-                ),
-                ("activeScope", sync_encryption_scope_label(active_scope)),
-                ("decision", decision.to_string()),
-            ],
+            ),
+            ("activeScope", sync_encryption_scope_label(active_scope)),
+            ("decision", decision.to_string()),
+        ],
     )
 }
 
@@ -17508,8 +17462,6 @@ fn crypto_for<'a>(material: &'a Option<SyncKeyMaterial>) -> SyncFileCrypto<'a> {
     }
 }
 
-/// Turns an in-band discovery marker into persisted `remote-encrypted-no-key` state plus the
-/// bare sentinel TS classifies on. Anything else passes through untouched.
 fn persist_discovery_and_reduce_with<T, MarkEncrypted, MarkPlaintext>(
     result: Result<T, String>,
     mut mark_encrypted: MarkEncrypted,
@@ -17534,17 +17486,12 @@ where
     }
 }
 
-/// #1138: the sync location a discovery persisted here is bound to. Mirrors core's
-/// `buildSyncLocationScope` byte-for-byte (`JSON.stringify([...])` and `serde_json` agree on
-/// an array of strings/nulls), so a state written by the Rust file/WebDAV seams and one
-/// written by the TS seams describe the same location the same way.
-///
-/// `path_override` is the candidate folder an activation probe reads instead of the persisted
-/// one -- the scope must name what this operation actually touched, or a probe's discovery
-/// would be bound to the configuration it is about to replace.
 fn sync_location_scope(app: &tauri::AppHandle, path_override: Option<&str>) -> Option<String> {
     fn field(value: Option<&String>) -> Option<String> {
-        value.map(|value| value.trim()).filter(|value| !value.is_empty()).map(str::to_string)
+        value
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
     }
     fn encode(parts: Vec<Option<String>>) -> Option<String> {
         serde_json::to_string(&parts).ok()
@@ -17567,8 +17514,8 @@ fn sync_location_scope(app: &tauri::AppHandle, path_override: Option<&str>) -> O
             field(config.webdav_username.as_ref()),
         ]),
         "cloud" => {
-            let provider =
-                field(config.sync_cloud_provider.as_ref()).unwrap_or_else(|| "selfhosted".to_string());
+            let provider = field(config.sync_cloud_provider.as_ref())
+                .unwrap_or_else(|| "selfhosted".to_string());
             if provider == "dropbox" {
                 return encode(vec![Some("cloud".to_string()), Some("dropbox".to_string())]);
             }
@@ -17596,10 +17543,6 @@ fn persist_discovery_and_reduce<T>(
     )
 }
 
-/// The `[sync-encryption] remote-read` line for the file/WebDAV read seams, plus the
-/// `[sync-encryption] error` line that ties the sentinel TS classifies on back to the read
-/// that produced it. Emitted before the discovery is persisted, so a shared log always shows
-/// what the folder held before it shows the refusal.
 fn log_file_remote_read<T>(scope: Option<&str>, result: &Result<T, String>) {
     let Some((read_line, error_line)) =
         sync_encryption_remote_read_lines(scope, result.as_ref().err().map(String::as_str))
@@ -17612,9 +17555,6 @@ fn log_file_remote_read<T>(scope: Option<&str>, result: &Result<T, String>) {
     }
 }
 
-/// Pure builder for that pair -- `None` when the failure is an ordinary IO/parse error, which
-/// is not this trail's business. `backend` is derived from the scope this read was bound to,
-/// never a literal: the same seam serves the file backend and the native WebDAV commands.
 fn sync_encryption_remote_read_lines(
     scope: Option<&str>,
     error: Option<&str>,
@@ -17658,7 +17598,6 @@ fn sync_encryption_remote_read_lines(
                     Some(error),
                 )
             } else {
-                // An ordinary IO/parse failure: not this trail's business.
                 return None;
             }
         }
@@ -17681,10 +17620,6 @@ fn sync_encryption_remote_read_lines(
         sync_encryption_diagnostic(
             SYNC_ENCRYPTION_LOG_EVENT_ERROR,
             &[
-                // The error text itself is a fixed sentinel plus a salt/params tuple, so
-                // the sentinel field carries everything a reader needs. Deliberately not
-                // logging the raw string: it is the only place a future change could add
-                // a path or a URL to this line.
                 ("errorName", "SyncEncryptionRemoteError".to_string()),
                 ("sentinel", sentinel),
                 ("backend", sync_encryption_backend_label(scope)),
@@ -17704,7 +17639,6 @@ pub(crate) fn read_sync_file(
     path: Option<String>,
     lease_token: String,
 ) -> Result<serde_json::Value, String> {
-    // #1138: bind any discovery this read persists to the folder it actually read.
     let path_scope = path.as_ref().map(|value| value.trim().to_string());
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
@@ -17732,7 +17666,6 @@ pub(crate) fn read_sync_file_versioned(
     path: Option<String>,
     lease_token: String,
 ) -> Result<SyncFileReadResult, String> {
-    // #1138: bind any discovery this read persists to the folder it actually read.
     let path_scope = path.as_ref().map(|value| value.trim().to_string());
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
@@ -17852,8 +17785,6 @@ where
         };
         validate_authority()?;
         if let Some(expected_fingerprint) = expected_fingerprint {
-            // Fingerprints stay plaintext-domain: the read below decrypts first, so the same
-            // document fingerprints identically before and after a re-encryption (decision #9).
             let current = read_sync_file_from_retained_root_with(&root, crypto)?;
             let current_fingerprint = sync_document_fingerprint(&current)?;
             if current_fingerprint != expected_fingerprint {
@@ -17864,10 +17795,7 @@ where
         let existing_primary = if root.exists(&sync_file).map_err(|error| error.to_string())? {
             match read_sync_candidate_from_retained_root(&root, &sync_file, 1, crypto) {
                 Ok(_) => Some(true),
-                // Fail closed: ciphertext we cannot open may be a peer's newer generation.
-                // Refuse to write over it at all — do not rotate, do not overwrite, do not
-                // "repair" (decision #4). Unlike a plain unparseable file, this is never a
-                // corrupt-remote-we-should-replace signal.
+
                 Err(error) if is_terminal_error(&error) => return Err(error),
                 Err(_) => Some(false),
             }
@@ -17876,15 +17804,11 @@ where
         };
 
         if existing_primary == Some(true) {
-            // Overwriting the backup in place needs O_TRUNC, which rclone/WinFSP
-            // mounts refuse without a VFS write cache — so the .bak silently
-            // stopped updating there (#1001). Write a fresh temp name (a new
-            // file, always allowed) and rename over the old backup, the same
-            // shape the data file itself uses.
             let backup_tmp = sync_dir.join(format!("{data_base}.bak.tmp"));
             validate_authority()?;
             let backup_copy = (|| -> Result<(), String> {
-                root.remove(&backup_tmp).map_err(|error| error.to_string())?;
+                root.remove(&backup_tmp)
+                    .map_err(|error| error.to_string())?;
                 let primary_bytes = root.read(&sync_file).map_err(|error| error.to_string())?;
                 root.write_new(&backup_tmp, &primary_bytes)
                     .map_err(|error| error.to_string())?;
@@ -17912,11 +17836,11 @@ where
                     root.rename(&backup_tmp, &backup_file, true, &mut || {
                         validate_authority().map_err(std::io::Error::other)
                     })
-                        .map_err(|error| error.to_string())
+                    .map_err(|error| error.to_string())
                 };
                 let directory_flush = root.sync_directory().map_err(|error| {
-                        format!("Failed to flush sync backup directory metadata: {error}")
-                    });
+                    format!("Failed to flush sync backup directory metadata: {error}")
+                });
                 validate_authority()?;
                 if let Err(err) = replacement.and(directory_flush) {
                     log::warn!("Sync backup replacement failed: {err}");
@@ -17925,42 +17849,32 @@ where
         }
 
         let content = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-        // Encryption wraps the already-serialized bytes and changes nothing above this line:
-        // the document, its pretty-printing, and its fingerprint are all plaintext-domain.
+
         let content: Vec<u8> = match crypto.material() {
             None => content.into_bytes(),
             Some(material) => encrypt_sync_artifact(content.as_bytes(), material)
                 .map_err(|error| terminal_error(error))?,
         };
 
-        // This is the final boundary before any canonical document mutation.
-        // A renderer-held lease supplies its retained root/legacy-lock validator;
-        // a self-acquired write validates the lock it owns locally. The second
-        // check below binds the reported success to the same authority.
         validate_authority()?;
 
-        let windows_replacement = windows_semantics
-            && root
-                .exists(&sync_file)
-                .map_err(|error| error.to_string())?;
-        // Windows cannot rename over an existing destination. Move the primary
-        // aside so a failed installation can roll back without depending on the
-        // best-effort backup copy. New destinations use the helper's normal rename.
-        let mut replace_existing = |
-            retained_root: &RetainedSyncRoot<'_>,
-            from: &Path,
-            to: &Path,
-            validate: &mut dyn FnMut() -> Result<(), String>,
-        | {
-            replace_retained_file_preserving_previous(
-                retained_root,
-                from,
-                to,
-                &primary_previous_file,
-                "sync file",
-                validate,
-            )
-        };
+        let windows_replacement =
+            windows_semantics && root.exists(&sync_file).map_err(|error| error.to_string())?;
+
+        let mut replace_existing =
+            |retained_root: &RetainedSyncRoot<'_>,
+             from: &Path,
+             to: &Path,
+             validate: &mut dyn FnMut() -> Result<(), String>| {
+                replace_retained_file_preserving_previous(
+                    retained_root,
+                    from,
+                    to,
+                    &primary_previous_file,
+                    "sync file",
+                    validate,
+                )
+            };
         let rename_override: Option<
             &mut dyn FnMut(
                 &RetainedSyncRoot<'_>,
@@ -18042,8 +17956,7 @@ where
                             publication.keep();
                             return Err(authority_error);
                         }
-                        // Drop cannot retain the live authority validator. From here cleanup is
-                        // explicit, so disarm it before any fenced mutation can fail.
+
                         publication.keep();
                         let mut before_remove = |_owned_path: &Path| {
                             validate_authority().map_err(retained_cleanup_authority_error)
@@ -18088,9 +18001,6 @@ where
     result
 }
 
-// Off the UI thread for the same reason as `read_sync_file`; concurrent writers
-// are serialized by `acquire_sync_lock`, and stale readers are rejected by the
-// expected fingerprint check while that lock is held.
 #[tauri::command(async)]
 pub(crate) fn write_sync_file(
     app: tauri::AppHandle,
@@ -18134,39 +18044,17 @@ pub(crate) fn write_sync_file(
     )
 }
 
-// ---------------------------------------------------------------------------
-// File-sync encryption transitions (#1056 decision #3).
-//
-// Explicit maintenance operations, never a sync-cycle side effect. They hold the same sync
-// lock every write holds, they touch the REMOTE (sync-folder) artifact set only — local
-// SQLite and the local attachments directory are never rewritten, so an interrupted or
-// wrong-passphrase run always leaves the user's full local dataset intact — and every
-// artifact is written, read back and decrypt-verified before its predecessor is removed, so
-// a crash mid-run leaves both generations present and re-running resumes.
-//
-// WebDAV and Dropbox transitions do NOT come through here: they run core's shared
-// `runEnableSyncEncryptionOverRemote` family from TS, because enumerating a remote's
-// attachments is a TS-side concern (the sync document is the attachment index) and one
-// shared implementation for those two backends beats a second Rust one. Rust still owns the
-// per-cycle WebDAV crypto seam (`webdav_get_json`/`webdav_put_json`) below.
-// ---------------------------------------------------------------------------
-
 const SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX: &str = ".enctransition";
 const SYNC_ENCRYPTION_STAGE_DIR_PREFIX: &str = ".mindwtr-encryption-stage-";
 const SYNC_ENCRYPTION_QUARANTINE_DIR_PREFIX: &str = ".mindwtr-encryption-quarantine-";
 const SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX: &str = ".mindwtr-et-";
-/// Mirrors ATTACHMENTS_DIR_NAME in packages/core/src/attachment-paths.ts.
+
 const SYNC_ATTACHMENTS_DIR_NAME: &str = "attachments";
 
-/// Every artifact in the folder the transition must convert. Retained recovery generations
-/// and attachments are converted before non-base documents, then the base document last. A
-/// reader that finds `data.json.enc` must never find it referencing a `.bak` or attachment
-/// that is not itself already migrated.
 struct SyncFolderArtifacts {
     attachments: Vec<SyncDocumentGeneration>,
     documents: Vec<SyncDocumentGeneration>,
-    /// Retained generations from an earlier failed/conflicted transition. They keep their
-    /// exact path and are transformed in place like attachments; never rename or delete them.
+
     recovery: Vec<SyncDocumentGeneration>,
 }
 
@@ -18189,11 +18077,8 @@ fn is_transition_recovery_dir(name: &str) -> bool {
 }
 
 fn is_transition_scratch(name: &str) -> bool {
-    // Only names Mindwtr itself reserves for encryption-transition recovery are scratch.
-    // Attachment cloud keys preserve a user's original extension, so `.tmp`, `.previous`,
-    // `.lock`, and dot-prefixed names are all legitimate attachment generations.
     name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
-        || name.starts_with(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
+        || name.contains(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
 }
 
 fn transition_directory_entries(dir: &Path) -> Result<fs::ReadDir, String> {
@@ -18262,9 +18147,17 @@ fn collect_sync_folder_attachments(sync_dir: &Path) -> Result<Vec<PathBuf>, Stri
             let name = path
                 .file_name()
                 .and_then(|value| value.to_str())
-                .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
+                .ok_or_else(|| {
+                    format!(
+                        "Sync transition path is not valid UTF-8: {}",
+                        path.display()
+                    )
+                })?;
             let file_type = entry.file_type().map_err(|error| {
-                format!("Failed to inspect sync transition artifact {}: {error}", path.display())
+                format!(
+                    "Failed to inspect sync transition artifact {}: {error}",
+                    path.display()
+                )
             })?;
             if file_type.is_symlink() {
                 return Err(format!(
@@ -18273,8 +18166,6 @@ fn collect_sync_folder_attachments(sync_dir: &Path) -> Result<Vec<PathBuf>, Stri
                 ));
             }
             if file_type.is_dir() {
-                // Retained transition directories are snapshotted separately as in-place
-                // recovery generations, so they cannot be duplicated in the attachment set.
                 if is_transition_recovery_dir(name) {
                     continue;
                 }
@@ -18297,10 +18188,6 @@ fn collect_sync_folder_attachments(sync_dir: &Path) -> Result<Vec<PathBuf>, Stri
     Ok(found)
 }
 
-/// Snapshots every file retained by a failed transition before the next transition starts.
-/// Nested recovery directories are possible when recovery itself conflicts, so the walk keeps
-/// an explicit `inside_recovery` bit and preserves every divergent generation independently.
-/// Legacy sibling `.enctransition` files are included as well.
 fn collect_transition_recovery_artifacts_with<ReadDir>(
     sync_dir: &Path,
     mut read_dir: ReadDir,
@@ -18328,9 +18215,14 @@ where
             let name = path
                 .file_name()
                 .and_then(|value| value.to_str())
-                .ok_or_else(|| format!("Sync recovery path is not valid UTF-8: {}", path.display()))?;
+                .ok_or_else(|| {
+                    format!("Sync recovery path is not valid UTF-8: {}", path.display())
+                })?;
             let file_type = entry.file_type().map_err(|error| {
-                format!("Failed to inspect sync recovery artifact {}: {error}", path.display())
+                format!(
+                    "Failed to inspect sync recovery artifact {}: {error}",
+                    path.display()
+                )
             })?;
             if file_type.is_symlink() {
                 return Err(format!(
@@ -18349,10 +18241,7 @@ where
                     path.display()
                 ));
             }
-            if inside_recovery
-                || name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
-                || name.starts_with(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
-            {
+            if inside_recovery || is_transition_scratch(name) {
                 found.push(path);
             }
         }
@@ -18365,8 +18254,6 @@ fn collect_transition_recovery_artifacts(sync_dir: &Path) -> Result<Vec<PathBuf>
     collect_transition_recovery_artifacts_with(sync_dir, |path| fs::read_dir(path))
 }
 
-/// `encrypting` selects which generation to look for: the plaintext names when enabling, the
-/// `.enc` names when disabling. Passphrase rotation reuses the `.enc` side.
 fn collect_sync_folder_artifacts(
     sync_dir: &Path,
     encrypting: bool,
@@ -18377,10 +18264,14 @@ fn collect_sync_folder_artifacts(
         encrypted_artifact_name(DATA_FILE_NAME)
     };
     let legacy_plain = format!("{}-sync.json", APP_NAME);
-    let legacy = if encrypting { legacy_plain.clone() } else { encrypted_artifact_name(&legacy_plain) };
+    let legacy = if encrypting {
+        legacy_plain.clone()
+    } else {
+        encrypted_artifact_name(&legacy_plain)
+    };
 
     let mut documents: Vec<PathBuf> = Vec::new();
-    // Non-base first; the base document is pushed last, below.
+
     for name in [
         format!("{base}.bak"),
         format!("{base}.bak.previous"),
@@ -18393,8 +18284,6 @@ fn collect_sync_folder_artifacts(
         }
     }
 
-    // Seed backups (`mindwtr-backup-*.json` / `data-backup-*.json`), the same set the recovery
-    // chain reads. Encrypted ones carry the `.json.enc` tail.
     let seed_suffix = if encrypting { ".json" } else { ".json.enc" };
     let mut seeds: Vec<PathBuf> = Vec::new();
     for entry in transition_directory_entries(sync_dir)? {
@@ -18408,7 +18297,12 @@ fn collect_sync_folder_artifacts(
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
-            .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
+            .ok_or_else(|| {
+                format!(
+                    "Sync transition path is not valid UTF-8: {}",
+                    path.display()
+                )
+            })?;
         let lower = name.to_ascii_lowercase();
         if !(lower.starts_with("mindwtr-backup-") || lower.starts_with("data-backup-"))
             || !lower.ends_with(seed_suffix)
@@ -18416,7 +18310,10 @@ fn collect_sync_folder_artifacts(
             continue;
         }
         let file_type = entry.file_type().map_err(|error| {
-            format!("Failed to inspect sync transition artifact {}: {error}", path.display())
+            format!(
+                "Failed to inspect sync transition artifact {}: {error}",
+                path.display()
+            )
         })?;
         if file_type.is_symlink() {
             return Err(format!(
@@ -18440,9 +18337,6 @@ fn collect_sync_folder_artifacts(
         documents.push(base_path);
     }
 
-    // Bind the attachment worklist to this exact document generation. A peer generation
-    // visible before these reads is followed by the fresh attachment enumeration below;
-    // one that lands during enumeration invalidates the snapshot before mutation starts.
     let documents = documents
         .into_iter()
         .map(snapshot_sync_document)
@@ -18471,8 +18365,8 @@ fn transition_artifact_fingerprint(bytes: &[u8]) -> String {
 }
 
 fn snapshot_sync_document(path: PathBuf) -> Result<SyncDocumentGeneration, String> {
-    let bytes = fs::read(&path)
-        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let bytes =
+        fs::read(&path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
     let version = transition_artifact_fingerprint(&bytes);
     Ok(SyncDocumentGeneration {
         path,
@@ -18558,7 +18452,12 @@ fn managed_sync_document_names(sync_dir: &Path) -> Result<BTreeSet<String>, Stri
 fn sync_attachment_relative_path(sync_dir: &Path, path: &Path) -> Result<PathBuf, String> {
     path.strip_prefix(sync_dir)
         .map(Path::to_path_buf)
-        .map_err(|_| format!("Sync transition artifact escaped its root: {}", path.display()))
+        .map_err(|_| {
+            format!(
+                "Sync transition artifact escaped its root: {}",
+                path.display()
+            )
+        })
 }
 
 fn snapshot_managed_sync_attachment_generations(
@@ -18701,7 +18600,12 @@ fn set_expected_managed_sync_document_generation(
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
-        .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
+        .ok_or_else(|| {
+            format!(
+                "Sync transition path is not valid UTF-8: {}",
+                path.display()
+            )
+        })?;
     generation.versions.insert(name.to_string(), version);
     Ok(())
 }
@@ -18729,9 +18633,11 @@ fn set_expected_managed_sync_recovery_generation(
 fn require_no_managed_plaintext_document_generations(
     generation: &ManagedSyncDocumentGenerations,
 ) -> Result<(), String> {
-    if generation.versions.iter().any(|(name, version)| {
-        version.is_some() && plaintext_artifact_name(name) == *name
-    }) {
+    if generation
+        .versions
+        .iter()
+        .any(|(name, version)| version.is_some() && plaintext_artifact_name(name) == *name)
+    {
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
     Ok(())
@@ -18746,8 +18652,8 @@ fn validate_expected_encrypted_base(
         return Ok(());
     };
     let path = generation.sync_dir.join(name);
-    let bytes = fs::read(&path)
-        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let bytes =
+        fs::read(&path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
     if transition_artifact_fingerprint(&bytes) != *expected {
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
@@ -18805,7 +18711,7 @@ fn move_transition_path_durably(source: &Path, destination: &Path) -> std::io::R
 
     let source = transition_path_wide(source);
     let destination = transition_path_wide(destination);
-    // SAFETY: both path buffers are NUL-terminated and remain alive for the call.
+
     if unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -18832,7 +18738,7 @@ fn replace_transition_path_durably(source: &Path, destination: &Path) -> std::io
 
     let source = transition_path_wide(source);
     let destination = transition_path_wide(destination);
-    // SAFETY: both path buffers are NUL-terminated and remain alive for the call.
+
     if unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -18968,9 +18874,6 @@ fn copy_file_create_new(source: &Path, target: &Path) -> Result<(), String> {
 }
 
 fn restore_quarantined_generation(quarantine: &TransitionScratch, target: &Path) {
-    // Conflict recovery is deliberately best-effort and non-destructive: create_new cannot
-    // overwrite a peer that already restored/created the canonical name, and the exact bytes
-    // atomically displaced into quarantine remain there if restoration is not possible.
     let _ = copy_file_create_new(&quarantine.path, target);
 }
 
@@ -19043,9 +18946,7 @@ where
     let safe_path = safe_path.ok_or_else(|| {
         "Failed to allocate a unique safe transition recovery generation".to_string()
     })?;
-    // `scratch.path` is a uniquely owned, fingerprint-verified quarantine. Replacing it is safe;
-    // reopening it with O_TRUNC is not (cache-off rclone/WinFSP refuses existing-file size
-    // changes). If the move fails, retain both the original and the flushed safe sibling.
+
     replace(&safe_path, &scratch.path).map_err(|error| {
         format!(
             "Failed to install safe transition recovery generation {}: {error}",
@@ -19063,10 +18964,7 @@ fn replace_transition_scratch_with_safe_generation(
         scratch,
         replacement,
         |path, bytes| {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)?;
+            let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
             file.write_all(bytes)?;
             file.sync_all()
         },
@@ -19102,8 +19000,7 @@ where
             )
         })?;
     }
-    // Flush even when the file was already absent: a retry must durably acknowledge the
-    // earlier deletion before the containing recovery directory can disappear.
+
     sync_parent(&scratch.path).map_err(|error| {
         format!("Failed to flush transition recovery directory metadata: {error}")
     })?;
@@ -19121,23 +19018,20 @@ fn cleanup_transition_scratch(
     scratch: TransitionScratch,
     durable_replacement: Option<&Path>,
 ) -> Result<(), String> {
-    // On Windows, MOVEFILE_WRITE_THROUGH makes the recovery-name displacement durable. A
-    // verified current-posture generation is copied over quarantine bytes first, so even if
-    // the subsequent delete is resurrected by a filesystem that cannot flush directories,
-    // no plaintext or obsolete-key generation can reappear after state commit.
     replace_transition_scratch_with_safe_generation(&scratch, durable_replacement)?;
     let cleanup_directory = scratch.directory.with_extension("cleanup");
-    let leaf = scratch
-        .path
-        .file_name()
-        .ok_or_else(|| format!("Transition scratch has no file name: {}", scratch.path.display()))?;
+    let leaf = scratch.path.file_name().ok_or_else(|| {
+        format!(
+            "Transition scratch has no file name: {}",
+            scratch.path.display()
+        )
+    })?;
     finish_transition_move_durably_with(
         &scratch.directory,
         &cleanup_directory,
         |source, destination| {
-            move_transition_path_durably(source, destination).map_err(|error| {
-                format!("Failed to prepare transition scratch cleanup: {error}")
-            })
+            move_transition_path_durably(source, destination)
+                .map_err(|error| format!("Failed to prepare transition scratch cleanup: {error}"))
         },
         sync_parent_directory_for_durability,
     )?;
@@ -19189,8 +19083,6 @@ where
     }
     hook(TransitionMutationPoint::BeforeRemoveCommit, path)?;
     if path.exists() {
-        // A peer created a new canonical generation after quarantine. Keep both it and the
-        // exact displaced generation; never call remove_file on either one.
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
     require_quarantined_generation(&quarantine, expected, path)?;
@@ -19204,25 +19096,15 @@ fn remove_transition_artifact_if_version(
     expected: &str,
     durable_replacement: &Path,
 ) -> Result<(), String> {
-    remove_transition_artifact_if_version_with_hook(
-        path,
-        expected,
-        durable_replacement,
-        |_, _| Ok(()),
-    )
+    remove_transition_artifact_if_version_with_hook(path, expected, durable_replacement, |_, _| {
+        Ok(())
+    })
 }
 
-/// An artifact whose MWENC1 header is present but unreadable (truncated, a future format
-/// version, a cost above the accepted ceiling) is neither plaintext to seal nor ciphertext we
-/// can open. Every transition raises this instead of guessing: sealing it would double-wrap a
-/// container nothing can recover, and skipping it would silently leave it behind. Mirrors
-/// core's `unsupportedArtifact`.
 fn unsupported_artifact(path: &Path, reason: String) -> String {
     terminal_error(format!("{}: {reason}", path.display()))
 }
 
-/// Writes `bytes` at `target` through a scratch file, then reads it back and runs `verify`
-/// before returning. Nothing downstream may delete a predecessor until this has succeeded.
 fn write_and_verify<Verify>(
     target: &Path,
     bytes: &[u8],
@@ -19287,16 +19169,22 @@ fn seal_artifact_generation_in_place(
         }
         SyncArtifactInspection::Plaintext => {}
     }
-    let sealed = encrypt_sync_artifact(&artifact.bytes, material)
-        .map_err(|error| terminal_error(error))?;
-    write_and_verify(&artifact.path, &sealed, Some(&artifact.version), |written| {
-        let plain = decrypt_sync_artifact(written, &material.key).map_err(|error| terminal_error(error))?;
-        if plain == artifact.bytes {
-            Ok(())
-        } else {
-            Err(SYNC_FILE_WRITE_CONFLICT.to_string())
-        }
-    })?;
+    let sealed =
+        encrypt_sync_artifact(&artifact.bytes, material).map_err(|error| terminal_error(error))?;
+    write_and_verify(
+        &artifact.path,
+        &sealed,
+        Some(&artifact.version),
+        |written| {
+            let plain = decrypt_sync_artifact(written, &material.key)
+                .map_err(|error| terminal_error(error))?;
+            if plain == artifact.bytes {
+                Ok(())
+            } else {
+                Err(SYNC_FILE_WRITE_CONFLICT.to_string())
+            }
+        },
+    )?;
     Ok(transition_artifact_fingerprint(&sealed))
 }
 
@@ -19410,12 +19298,16 @@ fn open_artifact_generation_in_place(
         }
         SyncArtifactInspection::Encrypted(_) => {}
     }
-    let plain = decrypt_sync_artifact(&artifact.bytes, key).map_err(|error| terminal_error(error))?;
+    let plain =
+        decrypt_sync_artifact(&artifact.bytes, key).map_err(|error| terminal_error(error))?;
     write_and_verify(&artifact.path, &plain, Some(&artifact.version), |written| {
         if written == plain {
             Ok(())
         } else {
-            Err(format!("Failed to verify {} after write", artifact.path.display()))
+            Err(format!(
+                "Failed to verify {} after write",
+                artifact.path.display()
+            ))
         }
     })?;
     Ok(transition_artifact_fingerprint(&plain))
@@ -19431,14 +19323,19 @@ fn rewrap_artifact_generation_in_place(
     recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
 ) -> Result<String, String> {
     if decrypt_sync_artifact(&bytes, &next.key).is_ok() {
-        return Ok(version.to_string()); // already migrated under the new key (resume)
+        return Ok(version.to_string());
     }
     let plain = if let Ok(plain) = decrypt_sync_artifact(&bytes, old_key) {
         plain
     } else {
         let header = match inspect_sync_artifact(&bytes) {
             SyncArtifactInspection::Encrypted(header) => header,
-            _ => return Err(terminal_error(format!("{} is not a valid MWENC1 container", path.display()))),
+            _ => {
+                return Err(terminal_error(format!(
+                    "{} is not a valid MWENC1 container",
+                    path.display()
+                )))
+            }
         };
         let recovered = if let Some(material) = recovered_by_salt.get(&header.salt) {
             material.clone()
@@ -19452,7 +19349,8 @@ fn rewrap_artifact_generation_in_place(
     };
     let sealed = encrypt_sync_artifact(&plain, next).map_err(|error| terminal_error(error))?;
     write_and_verify(path, &sealed, Some(version), |written| {
-        let verified = decrypt_sync_artifact(written, &next.key).map_err(|error| terminal_error(error))?;
+        let verified =
+            decrypt_sync_artifact(written, &next.key).map_err(|error| terminal_error(error))?;
         if verified == plain {
             Ok(())
         } else {
@@ -19527,15 +19425,9 @@ fn preflight_enable_transition(
     let mut recovered_by_salt = HashMap::new();
     let mut selected = None;
 
-    // collect_sync_folder_artifacts orders the base document last, so reverse traversal makes
-    // data.json.enc authoritative when it exists. Every remaining generation is still opened
-    // read-only before the journal can start.
     for document in encrypted_artifacts.documents.iter().rev() {
-        let material = authenticate_encrypted_named_document(
-            document,
-            passphrase,
-            &mut recovered_by_salt,
-        )?;
+        let material =
+            authenticate_encrypted_named_document(document, passphrase, &mut recovered_by_salt)?;
         if selected.is_none() {
             selected = Some(material);
         }
@@ -19579,12 +19471,8 @@ fn preflight_enable_transition(
 
     let material = match selected {
         Some(material) => material,
-        None => derive_sync_key_material(
-            passphrase,
-            random_salt(),
-            SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
-        )
-        .map_err(|error| terminal_error(error))?,
+        None => derive_sync_key_material(passphrase, random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS)
+            .map_err(|error| terminal_error(error))?,
     };
     Ok(EnableTransitionPreflight {
         plaintext_artifacts,
@@ -19604,12 +19492,7 @@ fn enable_sync_encryption_in_dir(
         passphrase,
         || Ok(()),
         |_lock, material, generation| {
-            finalize_enabled_file_generation_with(
-                generation,
-                material,
-                || Ok(()),
-                |_| Ok(()),
-            )
+            finalize_enabled_file_generation_with(generation, material, || Ok(()), |_| Ok(()))
         },
     )
 }
@@ -19636,14 +19519,11 @@ where
             material,
             mut recovered_by_salt,
         } = preflight_enable_transition(sync_dir, passphrase)?;
-        let mut generation =
-            snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        let mut generation = snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         require_captured_sync_attachment_generations(&generation, &artifacts.attachments)?;
         require_captured_sync_recovery_generations(&generation, &artifacts.recovery)?;
         before_mutation()?;
-        // The collection is a fixed pre-transition snapshot. Scratch created by the writes
-        // below is therefore never recursively added, while every retained generation from
-        // an earlier attempt must be sealed before enabled state can be committed.
+
         for artifact in &artifacts.recovery {
             let version = converge_enable_artifact_generation_in_place(
                 artifact,
@@ -19728,7 +19608,7 @@ where
                 })?;
                 transition_artifact_fingerprint(&sealed)
             };
-            // Only now, with the ciphertext on disk and proven readable, does the plaintext go.
+
             remove_transition_artifact_if_version(path, &document.version, &target)?;
             set_expected_managed_sync_document_generation(
                 &mut generation,
@@ -19773,18 +19653,12 @@ where
             preflight_artifact_for_disable(&document.path, &document.bytes, key, true)?;
         }
         for attachment in &artifacts.attachments {
-            preflight_artifact_for_disable(
-                &attachment.path,
-                &attachment.bytes,
-                key,
-                false,
-            )?;
+            preflight_artifact_for_disable(&attachment.path, &attachment.bytes, key, false)?;
         }
         for artifact in &artifacts.recovery {
             preflight_artifact_for_disable(&artifact.path, &artifact.bytes, key, false)?;
         }
-        let mut generation =
-            snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        let mut generation = snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         require_captured_sync_attachment_generations(&generation, &artifacts.attachments)?;
         require_captured_sync_recovery_generations(&generation, &artifacts.recovery)?;
         before_mutation()?;
@@ -19818,7 +19692,8 @@ where
                 }
                 SyncArtifactInspection::Encrypted(_) => {}
             }
-            let plain = decrypt_sync_artifact(&bytes, key).map_err(|error| terminal_error(error))?;
+            let plain =
+                decrypt_sync_artifact(&bytes, key).map_err(|error| terminal_error(error))?;
             let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
@@ -19868,12 +19743,7 @@ fn change_sync_encryption_passphrase_in_dir(
         next_passphrase,
         || Ok(()),
         |_lock, material, generation| {
-            finalize_enabled_file_generation_with(
-                generation,
-                material,
-                || Ok(()),
-                |_| Ok(()),
-            )
+            finalize_enabled_file_generation_with(generation, material, || Ok(()), |_| Ok(()))
         },
     )
 }
@@ -19893,8 +19763,12 @@ where
         &ManagedSyncDocumentGenerations,
     ) -> Result<(), String>,
 {
-    let next = derive_sync_key_material(next_passphrase, random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS)
-        .map_err(|error| terminal_error(error))?;
+    let next = derive_sync_key_material(
+        next_passphrase,
+        random_salt(),
+        SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+    )
+    .map_err(|error| terminal_error(error))?;
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
@@ -19929,8 +19803,7 @@ where
                 false,
             )?;
         }
-        let mut generation =
-            snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        let mut generation = snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         require_captured_sync_attachment_generations(&generation, &artifacts.attachments)?;
         require_captured_sync_recovery_generations(&generation, &artifacts.recovery)?;
         require_no_managed_plaintext_document_generations(&generation)?;
@@ -19989,14 +19862,7 @@ where
     result.map(|()| next)
 }
 
-/// Start/end lines around one file-backend encryption transition. Same event, same fields as
-/// the TS transitions emit; the file backend is the one whose transition logic lives in Rust.
-fn log_sync_encryption_transition(
-    kind: &str,
-    phase: &str,
-    outcome: &str,
-    error: Option<&str>,
-) {
+fn log_sync_encryption_transition(kind: &str, phase: &str, outcome: &str, error: Option<&str>) {
     let line = sync_encryption_diagnostic(
         SYNC_ENCRYPTION_LOG_EVENT_TRANSITION,
         &[
@@ -20011,9 +19877,6 @@ fn log_sync_encryption_transition(
                     .map(|_| "SyncEncryptionTransitionError".to_string())
                     .unwrap_or_else(|| SYNC_ENCRYPTION_LOG_ABSENT.to_string()),
             ),
-            // Rust transition failures are already sentinel-prefixed strings built in this
-            // crate; none of them can contain a passphrase or key bytes, and the sentinel is
-            // the part a reader matches on.
             (
                 "sentinel",
                 error
@@ -20029,12 +19892,7 @@ fn log_sync_encryption_transition(
     }
 }
 
-/// The sentinel prefix inside a transition failure, or `-`. Never the raw message: a file
-/// backend error can carry the sync folder path.
 fn sync_encryption_transition_sentinel(error: &str) -> String {
-    // The same list core's `findSyncEncryptionSentinel` carries, longest first so a sentinel
-    // that is a prefix of another can never shadow it. Missing an entry here costs a reader
-    // the one word that names the failure.
     for sentinel in [
         "SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE",
         "SYNC_ENCRYPTION_TRANSITION_INCOMPLETE",
@@ -20052,7 +19910,6 @@ fn sync_encryption_transition_sentinel(error: &str) -> String {
     SYNC_ENCRYPTION_LOG_ABSENT.to_string()
 }
 
-/// Wraps one transition body in its start/end diagnostics.
 fn with_sync_encryption_transition_log<T>(
     kind: &str,
     run: impl FnOnce() -> Result<T, String>,
@@ -20086,10 +19943,6 @@ fn cached_key_or_err(app: &tauri::AppHandle) -> Result<[u8; KEY_LEN], String> {
         .ok_or_else(|| terminal_error("sync encryption is not unlocked on this device"))
 }
 
-/// Turns the whole folder's remote artifact set into `.enc` counterparts and caches the key.
-/// The enabled state is persisted only after the conversion has fully succeeded — the same
-/// "never persist a backend flag before its first successful round-trip" rule the staged
-/// credential family follows (#1034).
 #[tauri::command(async)]
 pub(crate) fn enable_sync_encryption(
     app: tauri::AppHandle,
@@ -20097,23 +19950,25 @@ pub(crate) fn enable_sync_encryption(
     path: Option<String>,
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
-    with_sync_encryption_transition_log(TRANSITION_ENABLE, || enable_sync_encryption_in_dir_with(
-        &sync_dir,
-        &passphrase,
-        || begin_sync_encryption_transition(&app, TRANSITION_ENABLE),
-        |lock, material, generation| {
-            finalize_enabled_file_generation_with(
-                generation,
-                material,
-                || revalidate_sync_lock(lock, &sync_dir),
-                |verified| {
-                    persist_enabled_material_with_fence(&app, verified, || {
-                        revalidate_sync_lock(lock, &sync_dir)
-                    })
-                },
-            )
-        },
-    ))?;
+    with_sync_encryption_transition_log(TRANSITION_ENABLE, || {
+        enable_sync_encryption_in_dir_with(
+            &sync_dir,
+            &passphrase,
+            || begin_sync_encryption_transition(&app, TRANSITION_ENABLE),
+            |lock, material, generation| {
+                finalize_enabled_file_generation_with(
+                    generation,
+                    material,
+                    || revalidate_sync_lock(lock, &sync_dir),
+                    |verified| {
+                        persist_enabled_material_with_fence(&app, verified, || {
+                            revalidate_sync_lock(lock, &sync_dir)
+                        })
+                    },
+                )
+            },
+        )
+    })?;
     Ok(())
 }
 
@@ -20124,18 +19979,18 @@ pub(crate) fn disable_sync_encryption(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let key = cached_key_or_err(&app)?;
-    with_sync_encryption_transition_log(TRANSITION_DISABLE, || disable_sync_encryption_in_dir_with(
-        &sync_dir,
-        &key,
-        || begin_sync_encryption_transition(&app, TRANSITION_DISABLE),
-        |lock, generation| {
-            revalidate_sync_lock(lock, &sync_dir)?;
-            require_managed_sync_document_generations(generation)?;
-            clear_encryption_state_with_fence(&app, || {
-                revalidate_sync_lock(lock, &sync_dir)
-            })
-        },
-    ))
+    with_sync_encryption_transition_log(TRANSITION_DISABLE, || {
+        disable_sync_encryption_in_dir_with(
+            &sync_dir,
+            &key,
+            || begin_sync_encryption_transition(&app, TRANSITION_DISABLE),
+            |lock, generation| {
+                revalidate_sync_lock(lock, &sync_dir)?;
+                require_managed_sync_document_generations(generation)?;
+                clear_encryption_state_with_fence(&app, || revalidate_sync_lock(lock, &sync_dir))
+            },
+        )
+    })
 }
 
 #[tauri::command(async)]
@@ -20146,44 +20001,36 @@ pub(crate) fn change_sync_encryption_passphrase(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let old_key = cached_key_or_err(&app)?;
-    with_sync_encryption_transition_log(TRANSITION_CHANGE_PASSPHRASE, || change_sync_encryption_passphrase_in_dir_with(
-        &sync_dir,
-        &old_key,
-        &next_passphrase,
-        || begin_sync_encryption_transition(&app, TRANSITION_CHANGE_PASSPHRASE),
-        |lock, material, generation| {
-            finalize_enabled_file_generation_with(
-                generation,
-                material,
-                || revalidate_sync_lock(lock, &sync_dir),
-                |verified| {
-                    persist_enabled_material_with_fence(&app, verified, || {
-                        revalidate_sync_lock(lock, &sync_dir)
-                    })
-                },
-            )
-        },
-    ))?;
+    with_sync_encryption_transition_log(TRANSITION_CHANGE_PASSPHRASE, || {
+        change_sync_encryption_passphrase_in_dir_with(
+            &sync_dir,
+            &old_key,
+            &next_passphrase,
+            || begin_sync_encryption_transition(&app, TRANSITION_CHANGE_PASSPHRASE),
+            |lock, material, generation| {
+                finalize_enabled_file_generation_with(
+                    generation,
+                    material,
+                    || revalidate_sync_lock(lock, &sync_dir),
+                    |verified| {
+                        persist_enabled_material_with_fence(&app, verified, || {
+                            revalidate_sync_lock(lock, &sync_dir)
+                        })
+                    },
+                )
+            },
+        )
+    })?;
     Ok(())
 }
 
-/// Core of the passphrase check, with the artifact read injected so the
-/// stable-bytes rule is testable without an AppHandle.
-///
-/// An AES-GCM auth failure is also what a torn read of a file another device is
-/// mid-writing produces (network mounts don't guarantee atomic visibility), and
-/// reporting that as "wrong passphrase" sent a tester chasing a passphrase that
-/// was correct (#1056). A wrong passphrase fails the same way against a settled
-/// file, so an auth failure only counts once the bytes read stable.
 fn verify_sync_passphrase_with_reread(
     passphrase: &str,
     artifact_label: &str,
     mut read_artifact: impl FnMut() -> Result<Vec<u8>, String>,
 ) -> Result<Option<SyncKeyMaterial>, String> {
     let mut bytes = read_artifact()?;
-    // ponytail: bounded reread loop, not a folder lock — a concurrent writer can
-    // still slip between the auth failure and the reread, and the next attempt
-    // by the user covers that.
+
     for attempt in 0..3 {
         let header = match inspect_sync_artifact(&bytes) {
             SyncArtifactInspection::Encrypted(header) => header,
@@ -20216,10 +20063,7 @@ fn provide_sync_encryption_passphrase_in_dir_with<BeforeFinalize, Persist, Clear
     passphrase: &str,
     before_finalize: BeforeFinalize,
     persist: Persist,
-    // #1138: called only when this folder holds no encrypted document at all. Returns true
-    // when it cleared a stale `remote-encrypted-no-key` state (the lock described a location
-    // this device has left behind, and it holds no key, so nothing is lost). Injected so the
-    // AppHandle-free directory tests can drive both answers.
+
     clear_stale_no_key: ClearStale,
 ) -> Result<String, String>
 where
@@ -20227,15 +20071,10 @@ where
     Persist: FnOnce(&SyncFileLock, &SyncKeyMaterial) -> Result<(), String>,
     ClearStale: FnOnce() -> Result<bool, String>,
 {
-    // Passphrase verification is a read-modify-persist operation over the remote folder's
-    // exact generation. Hold the same lock as ordinary File Sync and transitions from the
-    // first authentication read until the enabled material is durable; otherwise a writer can
-    // replace the authenticated generation before the local key/state commit.
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| {
         let encrypted = sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
-        // Checked under the same folder lock the verification holds, so nothing can create the
-        // document between this look and the read below.
+
         if !encrypted.exists() && clear_stale_no_key()? {
             return Ok("no-encrypted-remote".to_string());
         }
@@ -20245,11 +20084,8 @@ where
         })?;
         match outcome {
             Some(material) => {
-                let generation = snapshot_managed_sync_document_generations(
-                    sync_dir,
-                    Some(&material),
-                    true,
-                )?;
+                let generation =
+                    snapshot_managed_sync_document_generations(sync_dir, Some(&material), true)?;
                 finalize_enabled_file_generation_with(
                     &generation,
                     &material,
@@ -20268,8 +20104,6 @@ where
     result
 }
 
-/// Validates a passphrase against the folder's current `.enc` base document. Never mutates the
-/// remote either way: a wrong passphrase is a plain answer, not an error and not a write.
 #[tauri::command(async)]
 pub(crate) fn provide_sync_encryption_passphrase(
     app: tauri::AppHandle,
@@ -20277,9 +20111,7 @@ pub(crate) fn provide_sync_encryption_passphrase(
     path: Option<String>,
 ) -> Result<String, String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
-    // `unlock` reports its answer rather than throwing it: a wrong passphrase is an Ok value,
-    // so the end line takes the returned outcome verbatim ("ok" | "wrong-passphrase" |
-    // "no-encrypted-remote"), which is exactly the fixed outcome vocabulary.
+
     log_sync_encryption_transition("unlock", "start", SYNC_ENCRYPTION_LOG_ABSENT, None);
     let result = provide_sync_encryption_passphrase_in_dir_with(
         &sync_dir,
@@ -20299,20 +20131,6 @@ pub(crate) fn provide_sync_encryption_passphrase(
     result
 }
 
-// tauri-plugin-fs declares `exists`, `mkdir`, `remove` and `rename` as plain
-// `#[tauri::command]`, so each of those runs its syscall on the Tauri main
-// thread. The attachment step of a file sync makes one `exists` per attachment
-// plus a mkdir/rename/remove per copy against the sync folder, and on a slow
-// mount (rclone/WinFSP, network share) that starves the Win32 message pump for
-// the whole run — Windows paints "Mindwtr (Not Responding)" (#1037). These are
-// the same four operations off the UI thread. Absolute paths only: the
-// base-directory-relative plugin calls all land on local app data, which is
-// never the slow side.
-// The same two path families the fs plugin accepts for these calls: the runtime
-// scope (the sync folder, granted by expand_tauri_fs_scope) and the managed data
-// dir (granted through the static capability, which a non-plugin command cannot
-// read back). Traversal and symlink components are rejected so a lexical grant
-// cannot be redirected outside either allowed tree.
 fn sync_fs_path_is_allowed(path: &Path, managed_dir: &Path, scope_allows: bool) -> bool {
     if !path.is_absolute()
         || path
@@ -20321,19 +20139,8 @@ fn sync_fs_path_is_allowed(path: &Path, managed_dir: &Path, scope_allows: bool) 
     {
         return false;
     }
-    // Reject symlinks below the trust root only — never in the root's own
-    // ancestry. macOS reaches real paths through symlinks (/var, /tmp, /home),
-    // and symlinked $HOME/XDG data dirs are common on Linux, so walking from
-    // "/" forbade every sync-folder operation for those setups (it also failed
-    // this crate's macOS CI, whose runners have a symlinked /home). Below the
-    // root the walk stays: a symlink lexically inside the managed dir can point
-    // anywhere, which is the traversal this guard exists to stop.
+
     let Ok(suffix) = path.strip_prefix(managed_dir) else {
-        // Not under the managed dir: the sync folder, reachable only through
-        // the runtime fs scope. The scope grant (expand_tauri_fs_scope on the
-        // user's own folder pick) is the authority there, matching the fs
-        // plugin reachability these commands replaced (#1037) — and a sync
-        // folder on a virtual mount may not answer per-component stats at all.
         return scope_allows;
     };
     let mut candidate = managed_dir.to_path_buf();
@@ -20342,8 +20149,7 @@ fn sync_fs_path_is_allowed(path: &Path, managed_dir: &Path, scope_allows: bool) 
         match fs::symlink_metadata(&candidate) {
             Ok(metadata) if metadata.file_type().is_symlink() => return false,
             Ok(_) => {}
-            // Missing trailing components are valid for exists/create/write
-            // operations. Their nearest existing ancestor was already checked.
+
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
             Err(_) => return false,
         }
@@ -20467,15 +20273,16 @@ pub(crate) fn sync_fs_reserve_attachment_generation(
             expected_size,
             &expected_sha256,
         )?;
-        // The plugin's runtime scope uses literal leading dots on Unix even
-        // when its command scope permits dotfiles. Grant only this reserved file.
+
         if let Err(error) = app.fs_scope().allow_file(&reservation.scratch_path) {
             file_sync_attachment_publication::abandon(
                 &data_dir,
                 &mut lease.publication_root,
                 &reservation.operation_id,
             )?;
-            return Err(format!("Failed to grant attachment staging access: {error}"));
+            return Err(format!(
+                "Failed to grant attachment staging access: {error}"
+            ));
         }
         log::info!(
             "File Sync attachment staging access granted extra.releaseCheck=v1.3.5/file-sync-staging-scope"
@@ -20540,15 +20347,11 @@ pub(crate) fn sync_fs_exists(app: tauri::AppHandle, path: String) -> Result<bool
 
 #[derive(serde::Serialize)]
 pub(crate) struct SyncFsStat {
-    /// Milliseconds since the Unix epoch, matching the JS side's `LocalFileStat.mtimeMs`.
     #[serde(rename = "mtimeMs")]
     mtime_ms: u64,
     size: u64,
 }
 
-// #1057 (review S5): a linked attachment's path can point at the same slow mount as
-// the sync folder itself, same as `sync_fs_exists` above — this must not go through
-// the fs plugin's plain (main-thread) `stat` command for a non-managed-dir path.
 #[tauri::command(async)]
 pub(crate) fn sync_fs_stat(app: tauri::AppHandle, path: String) -> Result<SyncFsStat, String> {
     let metadata = fs::metadata(sync_fs_path(&app, path)?).map_err(|error| error.to_string())?;
@@ -20571,10 +20374,6 @@ pub(crate) fn sync_fs_create_dir(app: tauri::AppHandle, path: String) -> Result<
 
 #[tauri::command(async)]
 pub(crate) fn sync_fs_remove_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    // Idempotent like mobile's file-backend delete: a missing target means the
-    // delete already happened (e.g. the user removed the file by hand), and an
-    // error here would requeue it as a retryable pending attachment delete
-    // that can never succeed (#1064).
     match fs::remove_file(sync_fs_path(&app, path)?) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

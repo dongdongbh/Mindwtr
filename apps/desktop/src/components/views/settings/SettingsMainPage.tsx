@@ -130,7 +130,7 @@ export type SettingsMainPageProps = {
     onDensityChange: (mode: DensityMode) => void;
     textSizeMode: TextSizeMode;
     onTextSizeChange: (mode: TextSizeMode) => void;
-    /** '' = app default, else an installed family name. */
+
     fontFamily: string;
     onFontFamilyChange: (value: string) => void;
     showTaskAge: boolean;
@@ -243,9 +243,8 @@ export function SettingsMainPage({
         archived: t.navHistory,
         trash: t.navTrash,
     };
-    // The sidebar shows Done and Archived as one History entry and hides it only
-    // when both ids are hidden (Layout.tsx), so the roster offers one History
-    // toggle that writes both. The stored ids are unchanged.
+
+
     const sidebarViewOptions = HIDEABLE_SIDEBAR_VIEW_IDS
         .filter((id) => (id !== 'timeline' || timelineEnabled) && id !== 'archived')
         .map((id) => ({
@@ -255,7 +254,7 @@ export function SettingsMainPage({
 
     return (
         <div className="space-y-5">
-            {/* Look & Feel */}
+            {                 }
             <SettingsSectionHeader>{t.lookAndFeel}</SettingsSectionHeader>
             <SettingsCard>
                 <SettingRow padded
@@ -318,8 +317,8 @@ export function SettingsMainPage({
                         onCheckedChange={() => onShowTaskAgeChange(!showTaskAge)}
                     />
                 </SettingRow>
-            {/* Folded by default: the roster is a one-time customization, not a
-                daily control, and a dozen always-open toggles would dominate the card. */}
+            {
+                                                                                          }
             <div data-settings-key="sidebarViews" className="p-4 flex flex-col gap-3">
                     <button
                         type="button"
@@ -364,7 +363,7 @@ export function SettingsMainPage({
                 </div>
             </SettingsCard>
 
-            {/* Localization */}
+            {                  }
             <SettingsSectionHeader>{t.localization}</SettingsSectionHeader>
             <SettingsCard>
                 <SettingRow padded
@@ -405,9 +404,9 @@ export function SettingsMainPage({
                         onChange={(e) => onWeekStartChange(e.target.value as WeekStart)}
                         className={selectCls}
                     >
-                        {/* Both "System default" labels show what they resolve to:
-                            the runtime locale decides, which on a customized OS can
-                            differ from the OS setting (#1006). */}
+                        {
+
+                                                                  }
                         <option value="system">{`${t.weekStartSystem} (${normalizeWeekStartSetting('system') === 'monday' ? t.weekStartMonday : normalizeWeekStartSetting('system') === 'saturday' ? t.weekStartSaturday : t.weekStartSunday})`}</option>
                         <option value="sunday">{t.weekStartSunday}</option>
                         <option value="monday">{t.weekStartMonday}</option>
@@ -433,9 +432,9 @@ export function SettingsMainPage({
                         onChange={(e) => onDateFormatChange(e.target.value as DateFormatSetting)}
                         className={selectCls}
                     >
-                        {/* Show what "System default" resolves to — the runtime
-                            locale's short date, which on a customized OS can
-                            differ from the OS format (#1006). */}
+                        {
+
+                                                                 }
                         <option value="system">{`${t.dateFormatSystem} (${new Date().toLocaleDateString()})`}</option>
                         <option value="dmy">{t.dateFormatDmy}</option>
                         <option value="mdy">{t.dateFormatMdy}</option>
@@ -487,7 +486,7 @@ export function SettingsMainPage({
                 </SettingRow>
             </SettingsDisclosureCard>
 
-            {/* Input */}
+            {           }
             <SettingsSectionHeader>{t.input}</SettingsSectionHeader>
             <SettingsCard>
                 <SettingRow padded
@@ -530,13 +529,7 @@ export function SettingsMainPage({
     );
 }
 
-// A combobox over the fonts installed on this computer, listed by the desktop
-// shell (no browser permission involved). Focusing clears the field so the whole
-// list opens at once (the current font stays visible as the placeholder); typing
-// narrows it; an exact pick applies; leaving without a pick restores the value.
-// "App default" is the first entry and already resolves to the OS interface font
-// on every platform. The plain web build has no native list, so there the field
-// takes a typed name as-is (#1244).
+
 function FontFamilyControl({
     t,
     value,

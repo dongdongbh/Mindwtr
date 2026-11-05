@@ -1,4 +1,3 @@
-"""Real-Git safety tests; fixtures stay on the disk-backed user home."""
 
 import contextlib
 import importlib.util
@@ -459,7 +458,7 @@ class CleanupTests(unittest.TestCase):
             return result
         service.archive = archive_then_commit
         item = self.candidate(service.run(apply=True))
-        # The admission baseline remains the fetched pre-copy origin commit.
+
         self.assertEqual(item["reason"], "recheck_not_merged_into_origin_main")
         self.assertTrue(self.worktree.exists())
 

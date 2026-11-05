@@ -20,9 +20,7 @@ import { viOverrides } from './i18n/locales/vi';
 import { zhHans } from './i18n/locales/zh-Hans';
 import { zhHant } from './i18n/locales/zh-Hant';
 
-// Every locale that ships the frozen quickAdd.help sentence. The stripping is a
-// literal-ish pattern, so it has to be proven against each translation rather
-// than English alone.
+
 const HELP_BY_LOCALE: Record<string, Record<string, string>> = {
     en, cs: csOverrides, da: daOverrides, de: deOverrides, es: esOverrides, fa: faOverrides, fr: frOverrides,
     hu: huOverrides, it: itOverrides, ja: jaOverrides, ko: koOverrides, nl: nlOverrides, pl: plOverrides,
@@ -44,8 +42,8 @@ describe('formatQuickAddHelp', () => {
             expect(source.match(/\/estimate:/g), locale).toHaveLength(1);
             const stripped = formatQuickAddHelp(source, { priorities: false, timeEstimates: true });
             expect(stripped, locale).not.toContain('/priority:');
-            // Only the token goes: neighbouring commands survive and no doubled
-            // separator is left behind.
+
+
             expect(stripped, locale).toContain('/energy:');
             expect(stripped, locale).toContain('/next');
             expect(stripped, locale).not.toMatch(/[,،、]\s*[,،、]/u);

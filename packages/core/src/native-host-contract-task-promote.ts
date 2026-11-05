@@ -91,7 +91,7 @@ const expectedPromotion = (prepared: NativePreparedTaskMove) => {
         projectId: request.requestId });
 };
 
-/** Pure journal validation, including on a cold boot before SQLite is opened. */
+
 const readPrepared = (value: unknown): NativePreparedTaskPromotion | null => {
     const input = detach<Record<string, unknown>>(value);
     if (!input || !exact(input, ['request', 'prepared']) || !record(input.prepared)) return null;

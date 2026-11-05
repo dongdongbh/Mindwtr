@@ -320,10 +320,34 @@ class WidgetPayloadTest {
 
     assertEquals(setOf("focus", "waiting", "filter:f1"), payload.lists.keys)
     assertEquals("Reply from Sam", payload.listFor("waiting").items[0].title)
-    // An unpublished project cannot borrow Focus rows under another title.
+
     assertEquals("Focus", payload.listFor("project:gone").title)
     assertEquals("Saved filters", payload.listTitles["savedFilters"])
     assertEquals(2, TasksWidgetFactory.buildRows(payload.listFor("focus")).size)
+  }
+
+  @Test
+  fun aFocusWidgetWithAvailableActionsDrawsItsOwnVariantAsFocus() {
+    val root = JSONObject(sample)
+    val variant = listPayload("Focus", sections = sections("Available actions", "s"), openUri = "mindwtr:///focus")
+      .put("dateLabel", "Saturday, Sep 6")
+    root.getJSONObject("lists").put(WidgetListStore.FOCUS_AVAILABLE_LIST, variant)
+    val payload = WidgetPayload.parse(root.toString())!!
+
+
+    assertEquals("focus", WidgetListStore.displayListId("focus", focusAvailable = false))
+    val listId = WidgetListStore.displayListId("focus", focusAvailable = true)
+    assertEquals(WidgetListStore.FOCUS_AVAILABLE_LIST, payload.resolvedListId(listId))
+    assertEquals(listOf("s"), payload.listFor(listId).sections.flatMap { section -> section.items.map { it.id } })
+    assertEquals("mindwtr:///focus", payload.lists.getValue(listId).openUri)
+    assertEquals("mindwtr:///focus", payload.openUriFor(listId))
+    val chrome = WidgetRenderer.tasksChrome(payload, listId)
+    assertEquals("Saturday, Sep 6", chrome.title)
+    assertEquals(payload.subtitle, chrome.subtitle)
+
+    assertEquals("waiting", WidgetListStore.displayListId("waiting", focusAvailable = true))
+    assertEquals("a", WidgetPayload.parse(sample)!!.listFor(listId).items.single().id)
+    assertEquals("focus", WidgetListStore.baseListId(listId))
   }
 
   @Test
@@ -356,9 +380,7 @@ class WidgetPayloadTest {
   fun aListPickedButNotPublishedYetKeepsItsOwnNameAndStaysEmpty() {
     val payload = WidgetPayload.parse(sample)!!
 
-    // The chooser can name every list; the app builds the rows on its next
-    // publish. Until then the widget must not show the Focus rows under the
-    // picked list's title.
+
     val pending = payload.listFor("inbox")
     assertEquals("Inbox", pending.title)
     assertTrue(pending.items.isEmpty())
@@ -374,7 +396,7 @@ class WidgetPayloadTest {
     assertEquals(listOf("f1"), payload.savedFilters.map { it.id })
     assertEquals("Errands", payload.titleFor("filter:f1"))
     assertEquals("Post the parcel", payload.listFor("filter:f1").items[0].title)
-    // A filter the user deleted is in neither the lists nor the options.
+
     assertNull(payload.titleFor("filter:gone"))
     assertEquals("Focus", payload.listFor("filter:gone").title)
   }
@@ -390,7 +412,7 @@ class WidgetPayloadTest {
     assertEquals("Today 09:00", item.startLabel)
     assertEquals("High", item.priorityLabel)
     assertEquals("Complete", payload.taskPeek.complete)
-    // Rows that live only inside a named list are reachable too.
+
     assertEquals("Reply from Sam", payload.itemFor("w")?.title)
     assertNull(payload.itemFor("nope"))
     assertNull(payload.itemFor(""))

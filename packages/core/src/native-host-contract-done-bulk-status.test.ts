@@ -115,7 +115,7 @@ describe('guarded Done bulk Move status', () => {
                 expect(await host.commitPreparedArchivedTasksRestore(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
                 expect(sql).not.toHaveBeenCalled();
             }
-            // The store guard itself must not turn a malformed tag into Inbox.
+
             const durable = value(await import('./native-host-contract-area-durable').then((module) => module.readAreaDurableData(false, true)));
             for (const rawRequest of [{ ...command.request, source: 'other' }, { ...command.request, status: 'done' }, { ...command.request, source: undefined }]) {
                 const input = { ...command.prepared, request: rawRequest }; const before = await raw(sqlite);
@@ -255,7 +255,7 @@ describe('guarded Done bulk Move status', () => {
         const sqlite = await setup();
         try {
             const host = methods(); const command = await prepare(host, request('next')); const before = await raw(sqlite); value(await host.commitPreparedArchivedTasksRestore(command)); const actual = await raw(sqlite);
-            expect(actual).not.toEqual(expectedRaw); // Strict legacy all-nine raw parity remains FAIL.
+            expect(actual).not.toEqual(expectedRaw);
             const differences = [];
             for (const table of Object.keys(actual)) {
                 const left = expectedRaw![table] as Array<Record<string, unknown>>; const right = actual[table] as Array<Record<string, unknown>>;

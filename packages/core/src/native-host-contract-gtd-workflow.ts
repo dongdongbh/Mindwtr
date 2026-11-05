@@ -433,7 +433,7 @@ const validArchiveEffects = (request: NativeGtdWorkflowRequest, prepared: Record
     return true;
 };
 
-/** Pure validation of the frozen edit and its scalar/group receipt before storage opens. */
+
 const readPrepared = (input: unknown): NativePreparedGtdWorkflow | null => {
     if (!isNativeJsonWithinBytes(input, 2_000_000)) return null;
     const envelope = detach<Record<string, unknown>>(input);
@@ -507,9 +507,8 @@ export function createGtdWorkflowMethods(deps: { readiness: () => NativeHostResu
                     ? { type: edit.type, field: edit.field, value: edit.value, changed }
             : { type: edit.type, value: edit.value, changed };
     const hubFor = (data: AppData): GtdSettingsModel['hub'] => {
-        // The full shared model also builds six unavailable subpages. Keep their
-        // malformed legacy siblings out of this hub-only display projection;
-        // the raw saved Settings object remains the write authority.
+
+
         const gtd = data.settings.gtd;
         const display = { ...data.settings, gtd: { defaultScheduleTime: gtd?.defaultScheduleTime,
             focusTaskLimit: gtd?.focusTaskLimit, focusIncludeStartDates: gtd?.focusIncludeStartDates,
@@ -520,8 +519,8 @@ export function createGtdWorkflowMethods(deps: { readiness: () => NativeHostResu
     const pomodoroFor = (data: AppData): GtdSettingsModel['pomodoro'] => {
         const raw = data.settings.gtd?.pomodoro;
         const features = data.settings.features;
-        // Display only selected inputs; unsupported raw cells stay untouched and
-        // their null witnesses disable edits rather than silently repairing them.
+
+
         const display = { features: { pomodoro: features?.pomodoro === true }, gtd: { pomodoro: {
             linkTask: raw?.linkTask === true, autoStartBreaks: raw?.autoStartBreaks === true,
             autoStartFocus: raw?.autoStartFocus === true, completionAlert: raw?.completionAlert !== false,
@@ -535,8 +534,8 @@ export function createGtdWorkflowMethods(deps: { readiness: () => NativeHostResu
             taskOpenMode: 'automatic', t: deps.t() }).archive;
     };
     const reviewFor = (data: AppData): GtdSettingsModel['review'] => {
-        // Only the two Review fields are display inputs; other legacy GTD
-        // subpages stay out of this read while raw Settings remains authority.
+
+
         const gtd = data.settings.gtd;
         const display = { ...data.settings, gtd: {
             dailyReview: { includeFocusStep: gtd?.dailyReview?.includeFocusStep },

@@ -1,10 +1,6 @@
-/**
- * Test support only (imported by the menu-views tests; not exported).
- * Replays the frozen React Native list-view scenarios (menu-views-parity.fixtures.json,
- * captured by apps/mobile/components/views/menu-views-parity.test.tsx) through
- * core: either core's models and write plans directly, or the native host
- * contract. Both produce the observations the mobile harness recorded.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import {
@@ -90,10 +86,10 @@ export const loadMenuViewsFixture = (): MenuViewsFixture => JSON.parse(
     readFileSync(new URL('./menu-views-parity.fixtures.json', import.meta.url), 'utf8'),
 );
 
-// A created task's ID; a new section's (mobile names it someday-…, the contract by its request UUID).
+
 const UUID_OR_SECTION_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|someday-[0-9a-z]+-[0-9a-z]+/g;
 
-/** The store writes a scenario asks for, with created ids named after their titles. */
+
 export function createWriteRecorder() {
     const log: unknown[] = [];
     const createdIds = new Map<string, string>();
@@ -115,7 +111,7 @@ type RecordedActions = 'updateTask' | 'deleteTask' | 'addTask' | 'updateProject'
 let realActions: Pick<ReturnType<typeof useTaskStore.getState>, RecordedActions> | null = null;
 export const getRealStoreActions = () => realActions!;
 
-/** Load the scenario's data through the store and record the writes the screens use, as the harness does. */
+
 export async function seedMenuViewsStore(
     fixture: MenuViewsFixture,
     scenario: MenuViewScenario,
@@ -190,7 +186,7 @@ const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: str
     return result.value;
 };
 
-/** The screen's visible tasks and area lookups, as mobile's useVisibleTaskContext derives them. */
+
 const visibleContext = () => {
     const state = useTaskStore.getState();
     const areas = sortAreasForDisplay(state.areas);
@@ -201,13 +197,7 @@ const visibleContext = () => {
     return { state, areaById, resolvedAreaFilter, visibleTasks };
 };
 
-/**
- * What the comparison reads: the parts of an observation that are the screen's
- * logic. Mobile's render details that the contract does not own are reduced to
- * what a user sees (an empty state only shows with no rows; the move dialog is
- * its choices; the tab bar is its quick-access tab; device view-state storage
- * is dropped).
- */
+
 export function projectObservation(screen: Screen, observation: Observation, t: Translate): Observation {
     if ('opened' in observation) return { opened: projectObservation(screen, observation.opened as Observation, t) };
     if ('created' in observation) return observation;
@@ -218,7 +208,7 @@ export function projectObservation(screen: Screen, observation: Observation, t: 
         next.empty = observation.empty && rows.length === 0 ? observation.empty : null;
     }
     if (screen === 'someday') {
-        // Headings offer Add task; the pre-grouping order is not shown.
+
         const rows = observation.rows as unknown[][];
         next.canAddToSection = observation.canAddToSection === true && rows.some((row) => row[0] === 'heading');
         delete next.tasks;
@@ -243,7 +233,7 @@ type SomedaySession = {
     selection: string[];
     moveTargets: string[] | null;
     undo: { previous: SomedaySectionAssignment[]; sectionId: string | null } | null;
-    /** The contract's move to undo. */
+
     undoRequestId: string | null;
 };
 
@@ -262,7 +252,7 @@ const filterEditOf = (action: MenuViewAction): ListFilterEdit => (
     { type: FILTER_EDITS[action[1] as string], value: action[2] } as ListFilterEdit
 );
 
-/** Replays one scenario. With `contract`, every read and write goes through the native host contract. */
+
 export async function replayMenuViewsScenario(options: {
     fixture: MenuViewsFixture;
     scenario: MenuViewScenario;
@@ -286,21 +276,21 @@ export async function replayMenuViewsScenario(options: {
             await store().updateTask(id, { status });
         }
     };
-    // The row's delete moves the task to Trash through the store; the contract has no delete yet.
+
     const remove = async (id: string) => { await store().deleteTask(id); };
     const activate = async (id: string) => {
         if (!contract) {
             await store().updateProject(id, { status: 'active' });
             return;
         }
-        // The parked row's revision, as the screen showed it.
+
         const window = { offset: 0, limit: 1 };
         const { deferred } = scenario.screen === 'waiting' ? ok(contract.getWaitingView(window)) : ok(contract.getSomedayView(window));
         const row = deferred!.rows.items.find((entry) => entry.id === id)!;
         ok(await contract.activateProject({ projectId: id, projectRevision: row.projectRevision }));
     };
 
-    // ------------------------------------------------------------------ More
+
     if (scenario.screen === 'more') {
         let open = false;
         let pushes: string[] = [];
@@ -343,7 +333,7 @@ export async function replayMenuViewsScenario(options: {
         return observations;
     }
 
-    // --------------------------------------------------------------- Waiting
+
     if (scenario.screen === 'waiting') {
         let person = '';
         const observe = (): Observation => {
@@ -409,7 +399,7 @@ export async function replayMenuViewsScenario(options: {
         return observations;
     }
 
-    // --------------------------------------------------------------- Someday
+
     if (scenario.screen === 'someday') {
         const session: SomedaySession = {
             sortBy: 'default', groupBy: 'viewSection', showDetails: false, filters: EMPTY_LIST_FILTER_STATE,
@@ -444,7 +434,7 @@ export async function replayMenuViewsScenario(options: {
             const choices = Array.isArray(dialog.choices) ? dialog.choices : dialog.choices.items;
             return { title: dialog.title, choices: choices.map((choice) => ({ id: choice.sectionId ?? '', title: choice.title, selected: choice.selected })) };
         };
-        // The native Android host draws parked projects inside their section, as React Native does (#1319).
+
         const somedayRead = (limit: number) => ok(contract!.getSomedayView({
             sortBy: session.sortBy, groupBy: session.groupBy, showDetails: session.showDetails,
             filters: session.filters, projectsInSections: true, offset: 0, limit,
@@ -568,7 +558,7 @@ export async function replayMenuViewsScenario(options: {
             const failed = () => { toasts.push(['error', text.errorTitle, text.moveFailed, null]); };
             const ids = session.moveTargets!;
             if (contract) {
-                // Each task's revision as the list showed it.
+
                 const rows = somedayRead(100).items.flatMap((item) => (item.type === 'task' ? [item.row] : []));
                 const taskRevisions = Object.fromEntries(ids.map((id) => [id, rows.find((row) => row.id === id)!.taskRevision]));
                 const result = ok(await contract.moveSomedayTasksToSection({ taskIds: ids, sectionId: destination, requestId: generateUUID(), taskRevisions }));
@@ -680,7 +670,7 @@ export async function replayMenuViewsScenario(options: {
         return observations;
     }
 
-    // ------------------------------------------------------ Someday sections
+
     if (scenario.screen === 'someday-sections') {
         let renaming: { id: string; title: string } | null = null;
         let alerts: unknown[] = [];
@@ -754,7 +744,7 @@ export async function replayMenuViewsScenario(options: {
         return observations;
     }
 
-    // --------------------------------------------------- Reference and Done
+
     const kind: StatusListKind = scenario.screen === 'reference' ? 'reference' : 'done';
     let storedReferenceGroupBy = scenario.storage?.[REFERENCE_GROUP_BY_KEY] ?? null;
     const initialReferenceGroupBy = (TASK_LIST_GROUP_OPTIONS as readonly string[]).includes(storedReferenceGroupBy ?? '')
@@ -891,7 +881,7 @@ export async function replayMenuViewsScenario(options: {
             return;
         }
         session.filters = applyListFilterEdit(session.filters, edit);
-        // Mobile's Clear also turns archived projects off.
+
         if (edit.type === 'clear') session.includeArchived = false;
     };
     push(observe(true));

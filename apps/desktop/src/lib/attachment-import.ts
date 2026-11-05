@@ -9,11 +9,10 @@ export type ImportPickedFileResult =
     | { attachment: Attachment }
     | { errorKey: 'attachments.fileTooLarge' | 'attachments.fileNotReadable' };
 
-// Browse for a file to LINK to (pointer, no copy) — fills the link prompt
-// with the picked path instead of importing the bytes.
+
 export async function browseForLinkTarget(dialogTitle: string): Promise<string | null> {
     if (isSandboxMode()) return null;
-    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { open } = await import('./native-dialog');
     const selected = await open({
         multiple: false,
         directory: false,
@@ -22,12 +21,10 @@ export async function browseForLinkTarget(dialogTitle: string): Promise<string |
     return typeof selected === 'string' ? selected : null;
 }
 
-// "Link folder…": pick a folder and point at it. Nothing is copied or
-// uploaded. The native side keeps a device-local bookmark on the sandboxed
-// App Store build so the folder still opens after a relaunch.
+
 export async function pickFolderLinkAttachment(dialogTitle: string): Promise<Attachment | null> {
     if (isSandboxMode()) return null;
-    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { open } = await import('./native-dialog');
     const selected = await open({
         multiple: false,
         directory: true,
@@ -56,9 +53,7 @@ export async function pickFolderLinkAttachment(dialogTitle: string): Promise<Att
     return attachment;
 }
 
-// Copies the picked file into the app-managed attachments dir (via the Rust
-// side, which is not bound by the webview fs scope) so the attachment owns its
-// bytes and never depends on the original path again.
+
 export async function importPickedFileAttachment(selectedPath: string): Promise<ImportPickedFileResult> {
     if (isSandboxMode()) return { errorKey: 'attachments.fileNotReadable' };
     const title = selectedPath.split(/[/\\]/).pop() || selectedPath;
@@ -96,9 +91,7 @@ export async function importPickedFileAttachment(selectedPath: string): Promise<
     }
 }
 
-// A dropped file arrives as bytes with no OS path, so it can't go through
-// the Rust copier (import_attachment_file). Write it into the same
-// managed attachments dir directly from the webview instead.
+
 export async function importDroppedFileAttachment(file: File): Promise<ImportPickedFileResult> {
     if (isSandboxMode()) return { errorKey: 'attachments.fileNotReadable' };
     if (file.size > DEFAULT_MAX_FILE_SIZE_BYTES) {

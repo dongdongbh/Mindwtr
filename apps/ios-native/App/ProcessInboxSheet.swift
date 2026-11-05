@@ -406,6 +406,7 @@ struct ProcessInboxSheet: View {
                     if !project.object("current").isEmpty {
                         option(project.object("current"), id: "process-inbox-project-current")
                     }
+
                     let sections = project.object("sections")
                     if !sections.isEmpty {
                         Text(sections.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
@@ -641,7 +642,7 @@ struct ProcessInboxSheet: View {
             .padding(12).frame(maxWidth: .infinity, minHeight: 44)
             .background(palette.input, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
-            // Pure text reads leave controls enabled, so focus survives typing.
+
             .disabled(!enabled)
             .contentShape(Rectangle())
             .onTapGesture { if enabled { focusedField = field } }

@@ -14,9 +14,7 @@ const TASK_STATUSES: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'ref
 const CONCRETE_THEMES = SETTINGS_THEME_VALUES.filter((theme): theme is Exclude<AppTheme, 'system'> => theme !== 'system');
 const FIXED_THEMES = CONCRETE_THEMES.filter((theme): theme is Exclude<AppTheme, 'system' | 'system-oled'> => theme !== 'system-oled');
 
-// The one place the intended light/dark split is stated independently of the
-// registry — without it the tests below would only prove the registry agrees
-// with itself. A theme missing here has no expected scheme, so the loop fails.
+
 const EXPECTED_SCHEMES: Record<Exclude<AppTheme, 'system' | 'system-oled'>, ThemeColorScheme> = {
     'light': 'light',
     'dark': 'dark',
@@ -53,12 +51,12 @@ describe('themeDescriptor', () => {
         for (const theme of CONCRETE_THEMES) {
             expect(themeDescriptor(theme)).toBe(THEME_DESCRIPTORS[theme]);
         }
-        // 'system' has no fixed identity, and stored preferences are untrusted
-        // strings — both must read as "not a theme" rather than as a default.
+
+
         expect(themeDescriptor('system')).toBeUndefined();
         expect(themeDescriptor('draculaa')).toBeUndefined();
         expect(themeDescriptor(undefined)).toBeUndefined();
-        // Inherited Object.prototype keys must not read as themes.
+
         expect(themeDescriptor('constructor')).toBeUndefined();
         expect(themeDescriptor('toString')).toBeUndefined();
     });
@@ -113,7 +111,7 @@ describe('STATUS_COLORS_BY_THEME', () => {
 
     it('keeps every status distinguishable within each new theme', () => {
         for (const key of ['catppuccin-macchiato', 'dracula', 'gruvbox-light', 'gruvbox-dark'] as const) {
-            // archived deliberately mirrors inbox, as it does in every other theme.
+
             const hues = TASK_STATUSES.filter((status) => status !== 'archived')
                 .map((status) => STATUS_COLORS_BY_THEME[key][status].text);
             expect(new Set(hues).size).toBe(hues.length);

@@ -187,7 +187,7 @@ describe('selected Task Download private JS producer', () => {
         const f = fixture(); f.secret(null);
         const selected = createNativeTaskAttachmentPreparation(f.bindings, f.channels);
         await selected.prepareAttachmentAvailableDetailed(attachment());
-        await selected.prepareAttachmentAvailableDetailed(attachment()); // second callback is refused; reads remain cached
+        await selected.prepareAttachmentAvailableDetailed(attachment());
         expect(f.secretCalls).toEqual(['mindwtr_webdav_password']); expect(f.legacyCalls).toEqual(['@mindwtr_webdav_password']);
         await f.run(); expect(f.secretCalls).toEqual(['mindwtr_webdav_password', 'mindwtr_webdav_password']);
     });

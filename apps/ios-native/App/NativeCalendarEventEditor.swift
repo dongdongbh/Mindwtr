@@ -4,7 +4,7 @@ enum NativeCalendarEventEditorOutcome: String {
     case cancelled, saved, deleted
 }
 
-/// The editor's actual UUID lifetime; independent of Calendar page publication.
+
 struct NativeCalendarEventEditorLifetime {
     enum Phase { case unstarted, started, closed }
     let id: UUID
@@ -60,7 +60,7 @@ import UIKit
 import EventKitUI
 import MindwtrNativeCore
 
-/// Privacy and dismissal are confined to this editor's actual UIKit owner.
+
 @MainActor
 final class NativeCalendarEventEditorOwnedUI {
     private var cover: UIView?
@@ -68,7 +68,7 @@ final class NativeCalendarEventEditorOwnedUI {
     func conceal(_ editor: UIViewController) {
         guard editor.isViewLoaded else { return }
         let content = editor.view!
-        // A full-screen child can detach editor.view; follow only its owned chain.
+
         var container: UIView = content
         var controller: UIViewController? = editor
         while let owned = controller {
@@ -125,20 +125,20 @@ final class NativeCalendarEventEditorPresentation: Identifiable {
         lifetime = NativeCalendarEventEditorLifetime(id: id)
     }
 
-    /// Synchronous privacy protection, including when App lock is disabled.
+
     func concealAndCancel() {
         lifetime.cancel()
         guard !resourcesReleased else { return }
         keepCovered()
-        // cancelEditing does not call the edit delegate. The model still closes
-        // its binding, and this host owns actual dismissal completion.
+
+
         if lifetime.requiresDraftCancellation, !draftCancelled, let editor {
             draftCancelled = true
             editor.cancelEditing()
         }
     }
 
-    /// Called only after confirmed dismissal, or cancellation before any start.
+
     func finishDismissal() {
         lifetime.finish(id)
         guard !resourcesReleased else { return }
@@ -148,7 +148,7 @@ final class NativeCalendarEventEditorPresentation: Identifiable {
         editor = nil
         delegate = nil
         host = nil
-        // wasPresented/outcome remain terminal witnesses for the model.
+
     }
 
     fileprivate func claim(_ host: NativeCalendarEventEditorHost) -> Bool {
@@ -174,7 +174,7 @@ final class NativeCalendarEventEditorPresentation: Identifiable {
     }
 }
 
-/// A stable root child owns UIKit presentation, including pre-mount cancellation.
+
 @MainActor
 struct NativeCalendarEventEditor: UIViewControllerRepresentable {
     let presentation: NativeCalendarEventEditorPresentation?
@@ -267,7 +267,7 @@ fileprivate final class NativeCalendarEventEditorHost: UIViewController {
             return
         }
         guard anchorAvailable(for: next) else { return }
-        // No await between exact admission, claim and the actual present call.
+
         guard configuration.canPresent(next.id), next.claim(self) else { return }
         active = next
         activeRequestDismiss = configuration.requestDismiss
@@ -284,7 +284,7 @@ fileprivate final class NativeCalendarEventEditorHost: UIViewController {
         guard canShow(next) else {
             next.concealAndCancel()
             activeRequestDismiss?(next.id, .cancelled)
-            complete(next) // The editor has not been submitted to UIKit.
+            complete(next)
             return
         }
         present(editor, animated: true) { [self, next] in
@@ -295,7 +295,7 @@ fileprivate final class NativeCalendarEventEditorHost: UIViewController {
                 dismissIfNeeded(next)
             }
         }
-        // This is our UIKit presentation, not a SwiftUI-owned adaptive delegate.
+
         editor.presentationController?.delegate = delegate
     }
 
@@ -347,8 +347,8 @@ fileprivate final class NativeCalendarEventEditorHost: UIViewController {
     func delegateCompleted(_ presentation: NativeCalendarEventEditorPresentation, outcome: NativeCalendarEventEditorOutcome) {
         guard active === presentation, presentation.completeDelegate(outcome) else { return }
         activeRequestDismiss?(presentation.id, outcome)
-        // The model binding update normally performs this; do not retain a
-        // completed editor if that SwiftUI update is delayed by another view.
+
+
         presentation.concealAndCancel()
         dismissIfNeeded(presentation)
     }
@@ -364,8 +364,8 @@ fileprivate final class NativeCalendarEventEditorHost: UIViewController {
               let editor = presentation.controller,
               let presenter = NativeCalendarEventEditorOwnedUI.dismissalPresenter(for: editor) else { return }
         dismissalInFlight = true
-        // Dismissing editor itself can dismiss only a nested screen. Its exact
-        // presenter closes the editor and every controller above it together.
+
+
         presenter.dismiss(animated: viewIfLoaded?.window != nil) { [self, presentation] in
             complete(presentation)
         }

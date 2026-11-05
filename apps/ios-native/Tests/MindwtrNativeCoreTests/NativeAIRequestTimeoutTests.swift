@@ -81,7 +81,7 @@ private final class AIRequestTimeoutNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Actual production bundle/JSC/SQLite. These are authored Apple checks, not Linux or device acceptance.
+
 final class NativeAIRequestTimeoutTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -289,8 +289,8 @@ final class NativeAIRequestTimeoutTests: XCTestCase {
 
     func testCancellationAfterJournalAndActualCommitFailureRetainsExactWarmRetryAndRejectsGenericRecovery() async throws {
         try await seed(configured())
-        // Hold only delivery of the first real commit's terminal reply until its caller cancels.
-        // The production route, store action, SQLite COMMIT and raw retry remain unchanged.
+
+
         let suffix = """
         ;(() => {
             const commit = MindwtrHost.iosAIRequestTimeoutCommit, poll = MindwtrHost.poll, cancel = MindwtrHost.cancel;

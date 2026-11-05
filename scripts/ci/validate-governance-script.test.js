@@ -3,9 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
-// The CI governance job and `bun run verify` run one script, so a check added to CI
-// also runs locally. These are the commands the job ran before the script existed,
-// in their order.
+
 const GOVERNANCE_COMMANDS = [
   "bun run i18n:check",
   "python3 scripts/ci/prepare-ubuntu-apt.test.py",
@@ -54,7 +52,7 @@ test("the governance script keeps the CI commands in order", () => {
   }
 });
 
-// A missing tool may only skip a check on a contributor machine, never in CI.
+
 test.each([
   ["locally", {}, 0, "SKIP Example check: python3 is not installed"],
   ["in CI", { CI: "true" }, 1, "Example check needs python3, which is not installed"],

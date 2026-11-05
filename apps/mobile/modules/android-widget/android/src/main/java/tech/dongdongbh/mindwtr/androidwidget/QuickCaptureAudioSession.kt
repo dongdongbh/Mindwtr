@@ -1,10 +1,6 @@
 package tech.dongdongbh.mindwtr.androidwidget
 
-/**
- * Retained state machine for one quick-capture dialog. Android recreation may
- * replace the Activity, but it must not replace the in-flight recorder/draft,
- * typed title/description, or publication retry state.
- */
+
 internal class QuickCaptureAudioSession(
   private val startRecorder: ((QuickCaptureAudioRecorder.Outcome) -> Unit) -> RecordingControl,
   private val publishAudio: (QuickCaptureAudioDraft, String, String, (Boolean) -> Unit) -> Unit,
@@ -144,7 +140,7 @@ internal class QuickCaptureAudioSession(
     recorder?.stop()
   }
 
-  /** Stop visible recording and persist a usable result without an Activity. */
+
   fun onHostStopped() {
     if (discardRequested) return
     when (state) {
@@ -171,14 +167,14 @@ internal class QuickCaptureAudioSession(
     }
   }
 
-  /** Returns true only once so queued feedback cannot duplicate. */
+
   fun consumeSaved(): Boolean {
     if (state != State.SAVED || savedConsumed) return false
     savedConsumed = true
     return true
   }
 
-  /** Ends the retained session after the legacy text writer has durably queued. */
+
   fun completeTextCapture() {
     if (state != State.IDLE) return
     title = ""
@@ -188,7 +184,7 @@ internal class QuickCaptureAudioSession(
     notifyChanged()
   }
 
-  /** Returns true when the dialog should close; otherwise only audio was cancelled. */
+
   fun cancelAudioOrClose(): Boolean {
     if (state == State.SAVING) return false
     val activeRecorder = recorder
@@ -223,9 +219,8 @@ internal class QuickCaptureAudioSession(
     ownerCleared = true
     observer = null
     observerToken = null
-    // noHistory may clear the Activity after Home/onStop. That is an
-    // interruption, not explicit Cancel: let the retained callbacks finish the
-    // same stop/publish sequence even though no UI owner remains.
+
+
     when (state) {
       State.PERMISSION -> {
         activePermissionRequestId = null
@@ -301,7 +296,7 @@ internal class QuickCaptureAudioSession(
   }
 }
 
-/** Activity-local permission delivery state with an explicit STARTED gate. */
+
 internal class QuickCapturePermissionOwner {
   private var requestId: Long? = null
   private var started = false
@@ -330,11 +325,7 @@ internal class QuickCapturePermissionOwner {
   }
 }
 
-/**
- * A noHistory Activity loses its ViewModelStore after Home. Retain only its
- * small in-process session so a failed publication remains reachable on the
- * next native quick-capture open; terminal sessions remove themselves.
- */
+
 internal object QuickCaptureAudioSessionStore {
   private val retained = mutableMapOf<String, QuickCaptureAudioSession>()
 

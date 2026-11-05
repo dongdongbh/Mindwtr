@@ -98,7 +98,7 @@ describe('App lock SQLite receipt', () => {
         const receipt = first.db.prepare('SELECT method, reply FROM native_request_receipts WHERE request_id = ?').get(ID) as { method: string; reply: string };
         expect(receipt.method).toBe(JSON.stringify(['appLock', true, true, false, null]));
         expect(JSON.parse(receipt.reply)).toEqual({ changed: true, value: true });
-        // An outside writer's later local choice may differ; this UUID still answers its first result.
+
         const changed = await first.adapter.getData();
         changed.settings.security = { mobileAppLockEnabled: false, sibling: 'later' } as never;
         await first.adapter.saveData(changed);
@@ -119,7 +119,7 @@ describe('App lock SQLite receipt', () => {
         const plan = await first.host.prepareAppLock(request);
         if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
         const envelope = { request, prepared: plan.value.prepared };
-        // Process death after native journal creation but before core Commit.
+
         first.db.close(); databases.splice(databases.indexOf(first.db), 1);
         const cold = await open(path);
         expect(await cold.host.commitPreparedAppLock(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -128,7 +128,7 @@ describe('App lock SQLite receipt', () => {
         await cold.adapter.saveData(saved);
         expect(await cold.host.commitPreparedAppLock(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         saved = await cold.adapter.getData();
-        saved.settings.security = { sibling: 'keep' } as never; // A→B→A still cannot authorize the old UUID.
+        saved.settings.security = { sibling: 'keep' } as never;
         await cold.adapter.saveData(saved);
         expect(await cold.host.commitPreparedAppLock(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(cold.db.prepare('SELECT COUNT(*) AS n FROM native_request_receipts').get()).toMatchObject({ n: 0 });

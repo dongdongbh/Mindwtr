@@ -123,7 +123,7 @@ const PIXELS_PER_MINUTE = 1.4;
 const DAY_TIMELINE_MINUTES = CALENDAR_DAY_MINUTES;
 const SNAP_MINUTES = CALENDAR_SNAP_MINUTES;
 type CalendarTaskComposerMode = CalendarComposerMode;
-/** Shared composer state plus the mobile day and free-text time input. */
+
 type CalendarTaskComposerState = CalendarViewComposerState;
 
 const isSameDay = isSameCalendarDate;
@@ -136,8 +136,8 @@ export function useCalendarViewController() {
   const { tasks, allTasks, projects, sections, areas, addTask, addProject, updateTask, deleteTask, people, updateSettings, settings } = useTaskStore((state) => ({
     tasks: state.tasks,
     people: state.people,
-    // Archived tasks are absent from the visible `tasks` projection, so the
-    // completed look-back reads the full list like the Archive screen (#955).
+
+
     allTasks: state._allTasks,
     projects: state.projects,
     sections: state.sections,
@@ -255,9 +255,7 @@ export function useCalendarViewController() {
     });
     if (nextVisibleDays === null) return;
 
-    // A pan gesture emits many frames for each integer tick. Record the
-    // requested value before persistence so stale callback closures cannot
-    // enqueue the same settings write on every frame.
+
     requestedCalendarWeekVisibleDaysRef.current = nextVisibleDays;
     updateSettings({
       calendar: {
@@ -317,10 +315,7 @@ export function useCalendarViewController() {
     weekStartTime,
   }), [selectedDate, viewMode, weekStartTime]);
 
-  // The same visible-window bounds used to fetch/clip external calendar events
-  // below double as the recurrence range: whatever window the month grid, week
-  // strip, or schedule list is currently showing is exactly what a "show future
-  // recurrence" task should paint every occurrence into (#calendar-range-projection).
+
   const externalCalendarRange = useMemo(() => getCalendarVisibleRange({
     calendarSystem,
     currentMonthDate,
@@ -329,18 +324,15 @@ export function useCalendarViewController() {
     weekStartTime,
   }), [calendarSystem, currentMonthDate, selectedDate, viewMode, weekStartTime]);
 
-  // Primitive bounds, not the `externalCalendarRange` object: in month mode the window's actual
-  // start/end don't change when the selected day or week-start reference does, but the object's
-  // identity does, and re-expanding every recurring task's whole range on every day tap is exactly
-  // the "unrelated state change" P19 says must not re-enumerate.
+
   const externalRangeStartMs = externalCalendarRange.rangeStart.getTime();
   const externalRangeEndMs = externalCalendarRange.rangeEnd.getTime();
   const externalRangeKey = `${externalRangeStartMs}:${externalRangeEndMs}`;
   const recurrenceProjectionDayKey = calendarDateKey(new Date(nowTick));
   const recurrenceProjectedAtIso = useMemo(
     () => new Date(nowTick).toISOString(),
-    // A calendar projection changes at a local-day boundary, not on every
-    // minute tick used by the current-time line and planning suggestions.
+
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [recurrenceProjectionDayKey],
   );
@@ -474,10 +466,8 @@ export function useCalendarViewController() {
   );
 
   useEffect(() => {
-    // The "now" tick only needs to run while the app is on screen: a
-    // backgrounded calendar view has nothing rendering its current-time line
-    // or day-keyed planning candidates, so ticking there just wakes the JS
-    // thread for no visible effect.
+
+
     const startNowTick = () => {
       if (nowTickIntervalRef.current) return;
       setNowTick(Date.now());
@@ -489,8 +479,7 @@ export function useCalendarViewController() {
       nowTickIntervalRef.current = null;
     };
 
-    // iOS reports 'inactive' (not 'active') during a cold launch's initial
-    // AppState read, so only treat 'background' as not-yet-active (correction #6).
+
     if (appStateRef.current !== 'background') startNowTick();
 
     const subscription = AppState.addEventListener('change', (nextAppState) => {
@@ -525,9 +514,8 @@ export function useCalendarViewController() {
       projects,
       sections,
     });
-    // Planning candidates recompute at most once per local day, not on every
-    // minute tick: nowTick only sets the "now" instant used for date/sort
-    // comparisons, mirrored from recurrenceProjectedAtIso above.
+
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaVisibleTasks, recurrenceProjectionDayKey, prioritiesEnabled, projects, sections, selectedDate]);
 
@@ -701,7 +689,7 @@ export function useCalendarViewController() {
   }, [pendingScrollMinutes, scrollTimelineToMinutes, selectedDate, viewMode]);
 
   useEffect(() => {
-    // Runs after persisted view-mode/date restore above so day switches keep the user's previous timeline anchor.
+
     if (viewMode !== 'day' || !selectedDate || pendingScrollMinutes != null) return;
     if (lastDefaultTimelineScrollKeyRef.current !== 'day') return;
     if (lastDayTimelineRestoreKeyRef.current === selectedDayKey) return;
@@ -850,7 +838,7 @@ export function useCalendarViewController() {
         void createTaskFromExternalEvent(event);
       },
       openInCalendar: () => {
-        // The iOS alert callback runs before its native dismissal finishes.
+
         if (Platform.OS === 'ios') setTimeout(() => openExternalEventInCalendar(event), 500);
         else openExternalEventInCalendar(event);
       },

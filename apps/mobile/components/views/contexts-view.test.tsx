@@ -44,6 +44,11 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   };
 });
 
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+vi.mock('@/lib/use-android-keyboard-inset', () => ({ useKeyboardInset: () => 0 }));
+
 vi.mock('expo-router', () => ({
   useLocalSearchParams: () => ({}),
 }));
@@ -61,7 +66,7 @@ vi.mock('@/contexts/toast-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -106,6 +111,11 @@ vi.mock('react-native-gesture-handler', () => ({
 }));
 
 vi.mock('lucide-react-native', () => ({
+  SlidersHorizontal: (props: any) => React.createElement('SlidersHorizontal', props),
+  ChevronDown: (props: any) => React.createElement('ChevronDown', props),
+  ChevronRight: (props: any) => React.createElement('ChevronRight', props),
+  ChevronUp: (props: any) => React.createElement('ChevronUp', props),
+  Flag: (props: any) => React.createElement('Flag', props),
   ArrowUpDown: (props: any) => React.createElement('ArrowUpDown', props),
   CheckCircle2: (props: any) => React.createElement('CheckCircle2', props),
   Tag: (props: any) => React.createElement('Tag', props),
@@ -116,6 +126,7 @@ vi.mock('react-native', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-native')>();
   return {
     ...actual,
+    Modal: ({ visible, children, ...props }: any) => visible ? React.createElement('Modal', props, children) : null,
     FlatList: ({ data = [], renderItem, keyExtractor, ListEmptyComponent, ...props }: any) => (
       React.createElement(
         'FlatList',
@@ -131,7 +142,7 @@ vi.mock('react-native', async (importOriginal) => {
 });
 
 describe('ContextsView', () => {
-  // Contexts follows the shared list sort, so it offers the same Sort control as the task lists (#1415).
+
   it('shows the shared list sort, writes settings.taskSortBy, and orders rows by it', async () => {
     const original = { settings: storeState.settings, updateSettings: storeState.updateSettings };
     storeState.tasks = [
@@ -167,7 +178,7 @@ describe('ContextsView', () => {
       expect(titles()).toEqual(['Alpha', 'Bravo']);
       expect(tree.root.findAllByType(TouchableOpacity).some((node) => node.props.accessibilityLabel === 'sort.label: sort.title')).toBe(true);
 
-      // Priorities off: the option is hidden and a stored priority sort orders as default.
+
       storeState.settings = { ...storeState.settings, taskSortBy: 'priority', features: { priorities: false } };
       await act(async () => { tree.update(<ContextsView />); });
       expect(titles()).toEqual(['Bravo', 'Alpha']);
@@ -224,7 +235,7 @@ describe('ContextsView', () => {
     expect(tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')).toHaveLength(2);
   });
 
-  // #1428: a nested chip after its parent chip shows only "/leaf"; its accessibility label stays full.
+
   it('shows nested chips after their parent with a short label', async () => {
     storeState.tasks = [
       { ...makeTask('emma', 'Emma'), contexts: ['@person/emma'], tags: [] },
@@ -246,13 +257,13 @@ describe('ContextsView', () => {
     ]);
     await act(async () => { chips()[2].props.onPress(); });
     expect(tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem').map((node) => node.props.task.title)).toEqual(['Todd']);
-    // The search hides the parent: the child shows its full token.
+
     const search = tree.root.findAllByType(TextInput).find((node) => node.props.placeholder === 'contexts.search')!;
     await act(async () => { search.props.onChangeText('todd'); });
     expect(shown()).toEqual([['@person/todd (1)', '@person/todd']]);
   });
 
-  // #1427: a tap switches to the chip; a long-press (or the screen reader's long-press action) adds it.
+
   it('switches context on tap and combines on long-press', async () => {
     storeState.tasks = [
       { ...makeTask('alice', 'Alice only'), contexts: ['@alice'], tags: [] },
@@ -352,7 +363,7 @@ describe('ContextsView', () => {
       storeState._tasksById = new Map(tasks.map((task) => [task.id, task]));
     };
     const original = storeState.batchUpdateTasks;
-    // batchUpdateTasks as the store runs it: a command behind the write gate (store-write-gate.ts).
+
     storeState.batchUpdateTasks = vi.fn((updates) => runStoreCommand(async () => {
       const byId = new Map(updates.map((entry) => [entry.id, entry.updates]));
       setTasks(storeState.tasks.map((task) => ({ ...task, ...byId.get(task.id) })));
@@ -369,7 +380,7 @@ describe('ContextsView', () => {
 
       let release!: () => void;
       const held = new Promise<void>((resolve) => { release = resolve; });
-      // Another device's tag: the sync save holds the gate, then publishes it.
+
       const save = runSyncStoreSave(async () => {
         await held;
         setTasks([{ ...storeState.tasks[0], rev: 3, tags: ['#old', '#remote'] }]);
@@ -385,7 +396,7 @@ describe('ContextsView', () => {
     }
   });
 
-  // Same exit as the task lists' bulk bar: an X icon button, not a "Done" text that reads like the task status (#1415).
+
   it('exits selection with the X icon button labelled bulk.exitSelect', async () => {
     storeState.tasks = [makeTask('task-1', 'First')];
     storeState._tasksById = new Map(storeState.tasks.map((task) => [task.id, task]));
@@ -409,8 +420,7 @@ describe('ContextsView', () => {
     }
   });
 
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
   it('hands rows stable prop references across a re-render', async () => {
     storeState.tasks = [makeTask('task-1', 'First'), makeTask('task-2', 'Second')];
 

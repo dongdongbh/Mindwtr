@@ -11,7 +11,6 @@ import {
     CALENDAR_WEEK_ALL_DAY_ITEMS,
     getCalendarAllDayLane,
     formatCalendarAllDayMore,
-    getCalendarAllDayChipTones,
     getCalendarDayAllDayTones,
     getCalendarWeekAllDayTones,
     compactHourLabel,
@@ -30,6 +29,11 @@ import {
     getCalendarMovedStart,
     getCalendarMonthCell,
     getCalendarMonthCellAccessibilityLabel,
+    CALENDAR_DAY_ALL_DAY_ITEMS,
+    formatCalendarAllDayMore,
+    getCalendarAllDayLane,
+    getCalendarDayAllDayTones,
+    getCalendarWeekAllDayTones,
     planCalendarTaskMove,
     indexCalendarScheduledTasks,
     calendarDateKey,
@@ -79,7 +83,7 @@ describe('calendar views parity with the frozen React Native fixture', () => {
         expect(formatCalendarAllDayMore(2, (key) => key === 'calendar.more' ? 'more' : key)).toBe('+2 more');
     });
 
-    it('keeps real lane order before recurring projections and uses new chip tones without changing legacy helpers', () => {
+    it('keeps real lane order before recurring projections and draws each all-day chip tone', () => {
         const base = { ...fixture.tasks[0], startTime: '2026-10-28', dueDate: '2026-10-28' };
         const scheduled: CalendarDayItem = { id: 'scheduled', kind: 'scheduled', start: null, task: base, title: 'Scheduled' };
         const deadline: CalendarDayItem = { ...scheduled, id: 'deadline', kind: 'deadline' };
@@ -92,15 +96,13 @@ describe('calendar views parity with the frozen React Native fixture', () => {
         expect(getCalendarAllDayLane(input, 3).items).toEqual([scheduled, event, deadline]);
         expect(getCalendarAllDayLane(input, 3, true).items).toEqual([scheduled, event, deadline, completed, projected]);
         expect(input[0]).toBe(projected);
-        expect(getCalendarAllDayChipTones(scheduled, 'week')).toMatchObject({ fill: 'input', accent: 'tint', text: 'text', struck: false });
-        expect(getCalendarAllDayChipTones(deadline, 'day')).toMatchObject({ fill: 'input', accent: 'danger', disabled: false });
-        expect(getCalendarAllDayChipTones(event, 'day')).toMatchObject({ fill: 'secondary', accent: 'source', text: 'text' });
-        expect(getCalendarAllDayChipTones(completed, 'week')).toEqual(getCalendarAllDayChipTones(completed, 'day'));
-        expect(getCalendarAllDayChipTones(completed, 'day')).toEqual({ fill: 'secondary', accent: 'secondary', text: 'secondary', dashed: false, struck: true, disabled: true });
-        expect(getCalendarAllDayChipTones(projected, 'week')).toMatchObject({ text: 'tint', accent: 'tint', dashed: true, disabled: true });
-        expect(getCalendarAllDayChipTones(projected, 'day').disabled).toBe(false);
-        expect(getCalendarDayAllDayTones(completed)).toEqual({ text: 'text', disabled: true });
-        expect(getCalendarWeekAllDayTones(scheduled)).toMatchObject({ accent: 'danger' });
+        expect(getCalendarWeekAllDayTones(scheduled)).toMatchObject({ fill: 'input', accent: 'tint', text: 'text', struck: false });
+        expect(getCalendarDayAllDayTones(deadline)).toMatchObject({ fill: 'input', accent: 'danger', disabled: false });
+        expect(getCalendarDayAllDayTones(event)).toMatchObject({ fill: 'secondary', accent: 'source', text: 'text' });
+        expect(getCalendarWeekAllDayTones(completed)).toEqual(getCalendarDayAllDayTones(completed));
+        expect(getCalendarDayAllDayTones(completed)).toEqual({ fill: 'secondary', accent: 'secondary', text: 'secondary', dashed: false, struck: true, disabled: true });
+        expect(getCalendarWeekAllDayTones(projected)).toMatchObject({ text: 'tint', accent: 'tint', dashed: true, disabled: true });
+        expect(getCalendarDayAllDayTones(projected).disabled).toBe(false);
     });
 
     it('was captured from React Native before the screen changed', () => {
@@ -205,7 +207,7 @@ describe('calendar view model', () => {
         expect(getCalendarMovedStart(dayStart.getTime(), 8 * 60).getHours()).toBe(8);
     });
     it('keeps the second 1:30 AM instant when dropped in place on the fall DST day', () => {
-        // Pinned: CI runs in UTC, which has no DST day.
+
         const previous = process.env.TZ;
         process.env.TZ = 'America/New_York';
         try {
@@ -248,7 +250,7 @@ describe('calendar view model', () => {
             expect(next.selectedDate?.getHours()).toBe(0);
             const start = getCalendarWeekStart(next.selectedDate!, 0);
             const range = getCalendarVisibleRange({ calendarSystem: 'gregorian', currentMonthDate: new Date(2026, 10, 1), selectedDate: next.selectedDate, viewMode: 'week', weekStartTime: start.getTime() });
-            // Nov 1 starts in daylight time (UTC-4) and the week ends in standard time (UTC-5).
+
             expect([range.rangeStart.toISOString(), range.rangeEnd.toISOString()]).toEqual(['2026-11-01T04:00:00.000Z', '2026-11-08T04:59:59.999Z']);
             const day = moveCalendarPeriod({ viewMode: 'day', selectedDate: new Date(2026, 11, 31), visibleMonthDate: new Date(2026, 11, 31) }, 'next', { calendarSystem: 'gregorian' });
             expect([day.selectedDate?.getFullYear(), day.visibleMonthDate.getMonth()]).toEqual([2027, 0]);
@@ -268,6 +270,32 @@ describe('calendar view model', () => {
         expect(cell).toMatchObject({ showCounts: true, taskCount: 6, eventCount: 0, accessibilityLabel: 'Friday, October 30. 6 tasks' });
         const two = getCalendarMonthCell(new Date(2026, 9, 30), { ...lists, deadlines: tasks.slice(0, 2) }, { dates: createCalendarLocaleDates('en-US'), t: (key) => key });
         expect([two.previewItems.length, two.showCounts]).toEqual([2, false]);
+    });
+
+    it('draws a completed all-day item crossed out and muted in the day and week lanes (#1462)', () => {
+        const open = task({ id: 'open', title: 'Open', dueDate: '2026-10-30' });
+        const done = task({ id: 'done', title: 'Done', status: 'done', completedAt: '2026-10-30T15:00:00.000Z' });
+        const items = getCalendarDayItems({ scheduled: [], deadlines: [open], completed: [done], events: [] });
+        const completed = items.find((item) => item.kind === 'completed')!;
+        const deadline = items.find((item) => item.kind === 'deadline')!;
+        for (const tones of [getCalendarWeekAllDayTones(completed), getCalendarDayAllDayTones(completed)]) {
+            expect(tones).toMatchObject({ struck: true, text: 'secondary', fill: 'secondary', accent: 'secondary', disabled: true });
+        }
+        for (const tones of [getCalendarWeekAllDayTones(deadline), getCalendarDayAllDayTones(deadline)]) {
+            expect(tones).toMatchObject({ struck: false, text: 'text', fill: 'input', accent: 'danger', disabled: false });
+        }
+    });
+
+    it('caps an all-day lane and counts the rest for "+N more" (#1462)', () => {
+        const deadlines = Array.from({ length: 6 }, (_, index) => task({ id: `t${index}`, title: `T${index}`, dueDate: '2026-10-30' }));
+        const items = getCalendarDayItems({ scheduled: [], deadlines, completed: [], events: [] });
+        const lane = getCalendarAllDayLane(items, CALENDAR_DAY_ALL_DAY_ITEMS);
+        expect(lane.items.map((item) => item.title)).toEqual(['T0', 'T1', 'T2', 'T3']);
+        expect(lane.hiddenCount).toBe(2);
+        expect(formatCalendarAllDayMore(lane.hiddenCount, (key) => (key === 'calendar.more' ? 'more' : key))).toBe('+2 more');
+        const expanded = getCalendarAllDayLane(items, CALENDAR_DAY_ALL_DAY_ITEMS, true);
+        expect([expanded.items.length, expanded.hiddenCount]).toEqual([6, 2]);
+        expect(getCalendarAllDayLane(items.slice(0, 4), CALENDAR_DAY_ALL_DAY_ITEMS).hiddenCount).toBe(0);
     });
 
     it('starts the weekday labels on Sunday after the time zone changes', () => {
@@ -310,7 +338,7 @@ describe('calendar view model', () => {
         const date = new Date(2026, 9, 28);
         const english = (dateFormat: string) => createCalendarPatternDates(createDateFormatter({ language: 'en', dateFormat, systemLocale: 'en-US' }));
         const styles = ['monthYear', 'monthDay', 'dayTitle', 'longDate', 'shortDate', 'cellDate'] as const;
-        // What toLocaleDateString gives for en-US and en-GB (the fixture's ICU).
+
         expect(styles.map((style) => english('mdy')[style](date))).toEqual([
             'October 2026', 'Oct 28', 'Wed, October 28', 'Wednesday, October 28, 2026', 'Wed, Oct 28', 'Wednesday, October 28',
         ]);

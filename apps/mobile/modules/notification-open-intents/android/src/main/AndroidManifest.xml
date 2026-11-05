@@ -1,9 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <!-- Re-posts the persistent quick-capture notification when the user
-             swipes it away (Android 14+ makes ongoing notifications dismissible).
-             App-initiated cancel() does not fire the delete intent, so the
-             settings toggle still turns it off. -->
+
+
         <receiver
             android:name="tech.dongdongbh.mindwtr.notificationopenintents.PersistentCaptureDismissReceiver"
             android:exported="false" />

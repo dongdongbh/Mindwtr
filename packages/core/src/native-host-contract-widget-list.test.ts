@@ -4,7 +4,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppData, Project, Task } from './types';
 import { resolveWidgetListDestination } from './widget-list-destination';
 
-// RN's widget list screen (app/(drawer)/widget-list/[id].tsx and widget-list-screen.test.tsx), through the native host contract.
+
 const now = new Date().toISOString();
 const task = (id: string, fields: Partial<Task> = {}): Task => ({
     id, title: id, status: 'next', tags: [], contexts: [], createdAt: now, updatedAt: now, ...fields,
@@ -38,6 +38,23 @@ afterEach(async () => {
 });
 
 describe('native host contract: widget list screen', () => {
+
+
+    it('names the next instant to read again: the next local midnight, or a row that changes first (#1360)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 9, 17, 12));
+        const host = await open({ tasks: [task('later', { dueDate: '2026-11-30' })] });
+        expect(value(host.getWidgetListView({ id: 'next' })).validUntil).toBe(new Date(2026, 9, 18).getTime());
+
+        const dueSoon = new Date(2026, 9, 20, 13);
+        const created = new Date(2026, 9, 1).toISOString();
+        const soon = await open({ tasks: [task('soon', { dueDate: dueSoon.toISOString(), createdAt: created, updatedAt: created })] });
+        const view = value(soon.getWidgetListView({ id: 'next' }));
+        const turns = dueSoon.getTime() - 72 * 60 * 60 * 1000 + 1;
+        expect(view.rows[0].meta.validUntil).toBe(turns);
+        expect(view.validUntil).toBe(turns);
+    });
+
     it('opens the full Upcoming list through the header route and re-evaluates the local day', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 9, 17, 12));
@@ -101,7 +118,7 @@ describe('native host contract: widget list screen', () => {
 
     it('retains canonical parent tombstones so the list matches widget visibility', async () => {
         const host = await open({});
-        // As RN's screen test: the canonical pools hold the deleted parent; the visible pools do not.
+
         const deleted: Project = { id: 'deleted-project', title: 'Deleted', status: 'active', color: '#000000', order: 0, tagIds: [],
             createdAt: now, updatedAt: now, deletedAt: now };
         const tasks = [task('visible'), task('hidden-child', { projectId: 'deleted-project' })];

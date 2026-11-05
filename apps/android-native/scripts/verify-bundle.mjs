@@ -1,8 +1,6 @@
-// node verify-bundle.mjs <core-host.js> [--allow-module-trace]: exits 1 unless the bundle's first line is the SHA-256 of the
-// rest of the file (build-bundle.mjs writes both in one file), and unless it has no module hooks (the __mwTraceModule step
-// function of build-bundle.mjs --trace-modules) or --allow-module-trace says it is benchmarkTrace's. Gradle runs it on every
-// variant's merged assets, so a bundle whose hash line came from another build, or a traced bundle, fails the build instead
-// of shipping.
+
+
+
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 

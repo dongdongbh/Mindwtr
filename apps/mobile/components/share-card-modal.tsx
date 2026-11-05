@@ -201,10 +201,10 @@ function ShareCardModalContent({ onClose }: Pick<ShareCardModalProps, 'onClose'>
         </View>
 
         <KeyboardAvoidingView
-          // Keep the measured outer frame stable when the native share sheet
-          // hides the keyboard; height avoidance can feed back into its own layout.
+
+
           behavior="padding"
-          // Android hide events can retain coordinates from the sharing activity.
+
           enabled={Platform.OS !== 'android' || keyboardVisible}
           style={styles.body}
         >

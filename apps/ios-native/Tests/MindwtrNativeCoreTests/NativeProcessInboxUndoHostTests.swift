@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Production JSC/SQLite Process Inbox Undo commands in the physical XCTest target.
+
 final class NativeProcessInboxUndoHostTests: XCTestCase {
     private var directory: URL!, bundle: URL!, service: String!, namespace: String!
     private var database: URL { directory.appendingPathComponent("core.sqlite") }
@@ -17,7 +17,7 @@ final class NativeProcessInboxUndoHostTests: XCTestCase {
         }
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let identity = UUID().uuidString.lowercased()
-        // Keep the existing runner-private capture root; own only this fresh UUID child.
+
         directory = support.appendingPathComponent("NativeBoardMoveTests/" + identity)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard let physical = Darwin.realpath(directory.path, nil) else { throw HostFailure("Process Inbox Undo fixture root unavailable") }
@@ -30,7 +30,7 @@ final class NativeProcessInboxUndoHostTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        // XCTest runs the registered async host-close blocks before this owned directory cleanup.
+
         if let directory { try FileManager.default.removeItem(at: directory) }
     }
 
@@ -52,8 +52,8 @@ final class NativeProcessInboxUndoHostTests: XCTestCase {
     private func assertJournalContentUnchanged(_ saved: Data) throws {
         let before = try object(String(decoding: saved, as: UTF8.self))
         let after = try object(String(contentsOf: journal))
-        // Recovery can re-encode the outer envelope; JSON object order is not
-        // part of the contract. The embedded request must remain byte-exact.
+
+
         XCTAssertEqual(try json(after), try json(before))
         XCTAssertEqual(Data(try XCTUnwrap(after["argumentsJSON"] as? String).utf8),
                        Data(try XCTUnwrap(before["argumentsJSON"] as? String).utf8))
@@ -146,7 +146,7 @@ final class NativeProcessInboxUndoHostTests: XCTestCase {
             lastRequest = request; lastResult = result
         }
         XCTAssertEqual(diagnostics, 3)
-        // Own exact receipt precedes mutable task/default guards and never writes again.
+
         _ = try await core.call("inboxStart", argumentsJSON: json(["quick"]))
         let outside = try SQLiteBridge(url: database)
         _ = try outside.execute("UPDATE tasks SET title = ?, rev = rev + 1 WHERE id = ?", parametersJSON: json(["Later edit stays", task]))
@@ -291,7 +291,7 @@ final class NativeProcessInboxUndoHostTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: journal), data, corruption)
             await blocked.close()
         }
-        // Even a structurally valid terminal and matching result need the Undo's own receipt.
+
         let terminal = try Data(json(["version": 2, "method": "inboxUndoCommit", "argumentsJSON": json([json(envelope)]),
                                      "terminal": ["success": ["_0": json(result)]]]).utf8)
         try terminal.write(to: journal)

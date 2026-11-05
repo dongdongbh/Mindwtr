@@ -31,8 +31,8 @@ concurrency:
 jobs:
   open-flathub-pr:
     name: Open Flathub PR
-    # Pinned on purpose: this job installs system packages, and `ubuntu-latest`
-    # moves to Ubuntu 26 on 2026-10-19. Bump it in a commit so CI shows the result first.
+
+
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout Mindwtr
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -97,7 +97,7 @@ jobs:
 
       - name: Checkout Flathub repo
         if: steps.stability.outputs.skip != 'true'
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: flathub/tech.dongdongbh.mindwtr
           ref: ${{ steps.stability.outputs.flathub_branch }}
@@ -141,7 +141,7 @@ jobs:
 
       - name: Checkout flatpak-builder-tools
         if: steps.stability.outputs.skip != 'true'
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           repository: flatpak/flatpak-builder-tools
           ref: 37eb3e5bdc5a14d13ee27b85265aae2c5e9a60c2
@@ -150,7 +150,7 @@ jobs:
 
       - name: Set up Python for Flathub generators
         if: steps.stability.outputs.skip != 'true'
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12.14'
 

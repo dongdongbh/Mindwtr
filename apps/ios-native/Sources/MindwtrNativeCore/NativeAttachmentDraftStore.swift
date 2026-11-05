@@ -2,8 +2,7 @@ import Foundation
 import Darwin
 import CryptoKit
 
-/// Fixed, private structural evidence only. Shared metadata and descriptor
-/// ownership must be revalidated by the future host before any attachment IO.
+
 enum NativeAttachmentDraftStoreError: LocalizedError, Equatable {
     case corrupt, io
     var errorDescription: String? {
@@ -14,8 +13,7 @@ enum NativeAttachmentDraftStoreError: LocalizedError, Equatable {
     }
 }
 
-/// Called only under the existing serialized library lock. Retained evidence
-/// cannot be reset or salvaged; exact saved/discarded release needs terminal authority.
+
 struct NativeAttachmentDraftStore {
     static let maximumBytes = 8 * 1024 * 1024
     let url: URL
@@ -79,7 +77,7 @@ struct NativeAttachmentDraftStore {
         }
     }
 
-    /// Separate V3 grammar on the same private sidecar; never upgrades Record.
+
     struct MixedRecord: Codable, Sendable, Equatable {
         let version: Int
         let session: Session
@@ -183,8 +181,7 @@ struct NativeAttachmentDraftStore {
         }
     }
 
-    /// Retains the exact old/new editor evidence until the separate editor CAS
-    /// and its durability are acknowledged. Projection continuity is not owned here.
+
     struct CheckpointAdvance: Codable, Sendable, Equatable {
         let before: EditorDraftSnapshot
         let after: EditorDraftSnapshot
@@ -478,8 +475,8 @@ struct NativeAttachmentDraftStore {
                     && equal(session.checkpoint.taskID, session.taskID) && record.operations.count <= 128)
         var ids = Set<String>()
         var prior: EditorDraftSnapshot?
-        // Raw UTF-8 is a lower bound on encoded size. Refuse excessive models
-        // before encoding, then enforce the actual complete JSON byte bound.
+
+
         var rawBytes = 0
         func account(_ strings: [String]) throws {
             for text in strings {
@@ -710,8 +707,8 @@ struct NativeAttachmentDraftStore {
             && equal(frozen.attachmentId, request.attachmentId)
             && equal(frozen.beforePayloadJSON, op.before.payloadJSON) && equal(frozen.afterPayloadJSON, op.after.payloadJSON)
             && !frozen.removedAt.isEmpty && frozen.removedAt.utf8.count <= 100)
-        // Timestamp canonicality and the full RN soft-delete projection belong
-        // to the shared V3 authority. This structural store preserves the bytes.
+
+
         if let replyJSON = op.replyJSON {
             try require(object(replyJSON, limit: 64 * 1024))
             let reply: RemoveReply
@@ -734,8 +731,8 @@ struct NativeAttachmentDraftStore {
     private static func validate(_ record: MixedRecord) throws {
         let session = record.session
         try require((record.version == 3 || record.version == 4) && record.operations.count <= 128)
-        // Reuse the existing V2 session/Discard/advance grammar, without
-        // widening its decoder or persisting a synthetic legacy record.
+
+
         try validate(Record(version: 2, session: session, operations: [], discard: record.discard,
                             checkpointAdvance: record.checkpointAdvance))
         var ids = Set<String>(), prior: EditorDraftSnapshot?
@@ -778,8 +775,8 @@ struct NativeAttachmentDraftStore {
                         && (completed?["fileHash"] as? String).map { equal($0, op.source.sha256) } == true)
                 }
                 try account(rawStrings(op))
-                // Private structural view only: the original mixed owner and
-                // all tagged continuity checks above remain authoritative here.
+
+
                 let checkpoint = op.phase == .checkpointed ? op.after : op.before
                 try validate(Record(version: 2, session: Session(sessionID: session.sessionID, taskID: session.taskID,
                     state: .active, checkpoint: checkpoint), operations: [op]))
@@ -871,7 +868,6 @@ struct NativeAttachmentDraftStore {
     }
 
 
-    /// Selected history5 structural evidence; deliberately excluded from VersionedRecord/ordinary boot.
     struct AvailabilityRecord: Codable, Sendable, Equatable {
         let version: Int
         let session: Session
@@ -903,7 +899,7 @@ struct NativeAttachmentDraftStore {
     }
     enum AvailabilityResource: Codable, Sendable, Equatable {
         case none
-        // Published is a generation descriptor here, never creation/deletion authority.
+
         case borrowed(proof: Published)
         case owned(source: Source, stage: Stage?, filled: Filled?, published: Published?)
         private enum CodingKeys: String, CodingKey { case kind, proof, source, stage, filled, published }
@@ -1117,7 +1113,7 @@ struct NativeAttachmentDraftStore {
     }
     private static func validateAvailable(_ frozen: AvailabilityFrozen, resolved: [String: Any], targetURI: String?, sha256: String) throws {
         guard let targetURI, let hash = resolved["fileHash"] as? String else { throw NativeAttachmentDraftStoreError.corrupt }
-        // Only validated ASCII SHA256 may ignore case; retained metadata text stays exact.
+
         try require(frozen.status == "available" && uri(targetURI) && (resolved["uri"] as? String).map { equal($0, targetURI) } == true
             && hash.utf8.count == 64 && hash.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }
             && hash.lowercased() == sha256)
@@ -1249,8 +1245,8 @@ struct NativeAttachmentDraftStore {
     }
 
     private struct VersionHeader: Decodable { let version: Int }
-    /// One bounded descriptor read and one strict version-specific decoder.
-    /// Existing readers intentionally retain their original behavior.
+
+
     func readVersioned() throws -> VersionedSnapshot? {
         guard let read = try readBytes(bound: true) else { return nil }
         let record: VersionedRecord
@@ -1291,13 +1287,11 @@ struct NativeAttachmentDraftStore {
         } catch { throw NativeAttachmentDraftStoreError.corrupt }
     }
 
-    /// Same complete encoded/retained-record admission as write, without mutation.
-    /// A future owner must separately prove shared v2 attachment continuity and
-    /// the exact editor file under the library lock before beginning an advance.
+
     func preflight(_ record: Record) throws { _ = try encodedForWrite(record) }
 
     private func encodedForWrite(_ record: Record) throws -> Data {
-        let previous = try read() // Corrupt evidence must never be replaced.
+        let previous = try read()
         try Self.validate(record)
         if let previous { try Self.retained(previous, in: record) }
         let data: Data
@@ -1313,12 +1307,11 @@ struct NativeAttachmentDraftStore {
         catch { throw NativeAttachmentDraftStoreError.io }
     }
 
-    /// V3 structural admission only; shared mixed projection authority remains
-    /// required at the future coordinator before any editor or attachment IO.
+
     func preflightMixed(_ record: MixedRecord) throws { _ = try encodedForWrite(record) }
 
     private func encodedForWrite(_ record: MixedRecord) throws -> Data {
-        let previous = try readMixed() // Never replace corrupt or opposite-version evidence.
+        let previous = try readMixed()
         try Self.validate(record)
         if let previous { try Self.retained(previous, in: record) }
         let data: Data
@@ -1334,8 +1327,7 @@ struct NativeAttachmentDraftStore {
         catch { throw NativeAttachmentDraftStoreError.io }
     }
 
-    /// The mixed Discard owner refreshes its binding only after confirming the
-    /// exact bytes from this acknowledged write, never a replacement decode.
+
     func writeMixedAcknowledged(_ record: MixedRecord) throws -> VersionedSnapshot {
         let data = try encodedForWrite(record)
         do { try DurableFile.write(data, to: url, privateDraft: true) }
@@ -1345,14 +1337,13 @@ struct NativeAttachmentDraftStore {
         return binding
     }
 
-    /// Complete private evidence binding, not Save, release or file authority.
+
     static func mixedFingerprint(_ record: MixedRecord) throws -> String {
         try validate(record)
         return try canonicalFingerprint(record)
     }
 
-    /// Full private snapshot binding, not filesystem ownership or Save success.
-    /// All exact opaque strings and native proofs participate in the digest.
+
     static func ownedSaveFingerprint(_ record: Record) throws -> String {
         try validate(record)
         try require(record.version == 2 && record.session.state == .active && !record.operations.isEmpty
@@ -1374,8 +1365,7 @@ struct NativeAttachmentDraftStore {
         let sessionID: String
     }
 
-    /// Exact detached private decision binding, not file cleanup or Discard
-    /// success. Interrupted/unfinished Add evidence remains in the full hash.
+
     static func ownedDiscardFingerprint(_ record: Record) throws -> String {
         try validate(record)
         guard record.session.state == .cleanupPending, record.checkpointAdvance == nil,
@@ -1402,8 +1392,8 @@ struct NativeAttachmentDraftStore {
               let discard = record.discard, discard.phase == .detached, let reply = discard.replyJSON else {
             throw NativeAttachmentDraftStoreError.corrupt
         }
-        // Reuse the sealed identity/reply validation without adapting any
-        // mixed operation to a legacy history or granting resource authority.
+
+
         _ = try ownedDiscardFingerprint(Record(version: 2, session: record.session, operations: [],
             discard: .init(requestId: discard.requestId, requestJSON: discard.requestJSON,
                 expected: discard.expected, phase: .detached, replyJSON: reply)))
@@ -1420,21 +1410,19 @@ struct NativeAttachmentDraftStore {
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Caller owns the serialized library and the validated terminal cleanup
-    /// decision. This exact private-record match grants no file-job authority.
+
     func releaseDiscardedAddsMatching(fingerprint: String) throws {
         try Self.require(Self.digest(fingerprint))
         if let record = try read() {
             try Self.require(Self.equal(try Self.ownedDiscardFingerprint(record), fingerprint))
         }
-        // Missing confirms parent durability only under the retained caller
-        // decision. Never recreate a missing parent or adopt a different record.
+
+
         do { try DurableFile.remove(url) }
         catch { throw NativeAttachmentDraftStoreError.io }
     }
 
-    /// CoreHost supplies the exact durable version5 success terminal. Missing
-    /// confirms parent durability and never authorizes another cleanup job.
+
     func releaseDiscardedMixedMatching(fingerprint: String) throws {
         try Self.require(Self.digest(fingerprint))
         if let binding = try readVersioned() {
@@ -1445,21 +1433,19 @@ struct NativeAttachmentDraftStore {
         catch { throw NativeAttachmentDraftStoreError.io }
     }
 
-    /// Caller owns the Engine/library lock and a validated durable success
-    /// terminal. This structural match alone grants no cleanup authority.
+
     func releaseSavedAddsMatching(fingerprint: String) throws {
         try Self.require(Self.digest(fingerprint))
         if let record = try read() {
             try Self.require(Self.equal(try Self.ownedSaveFingerprint(record), fingerprint))
         }
-        // Missing is a durable retry only under the caller's retained terminal.
-        // DurableFile.remove syncs the parent even after ENOENT.
+
+
         do { try DurableFile.remove(url) }
         catch { throw NativeAttachmentDraftStoreError.io }
     }
 
-    /// CoreHost alone supplies the fully validated, durable settled journal.
-    /// Missing confirms parent durability; it never permits another file job.
+
     func releaseSavedMixedMatching(fingerprint: String, allowsEmptyHistory: Bool = false) throws {
         try Self.require(Self.digest(fingerprint))
         if let binding = try readVersioned() {

@@ -1,14 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
-//
-// 日本語訳の方針 (Japanese translation policy)
-// - GTD 用語は『ストレスフリーの整理術』系の定訳に合わせる:
-//   Next Actions=次のアクション / Waiting For=連絡待ち / Someday-Maybe=いつか・たぶん /
-//   Reference=資料 / Weekly Review=週次レビュー / Mind Sweep=マインドスイープ
-// - 設定・チュートリアルの説明文は、動作の結果が分かるまで丁寧に書く。
-// - ラベル・ボタン・トーストは簡潔に。体言止め or 「〜する」。説明文は「です・ます」。
-// - 固有名詞・プロトコル・ファイル形式 (WebDAV, Dropbox, iCloud, ICS, CSV, Obsidian…) と
-//   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
-// - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
+
+
+
 export const jaOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "開始前",
     "taskEdit.advanceReminderLabel": "事前リマインダー",
@@ -19,8 +11,6 @@ export const jaOverrides: Record<string, string> = {
     "taskEdit.advanceReminderWeek": "1 週間前",
     "taskEdit.advanceReminderNeedsDueTime": "事前リマインダーを設定するには、期限の日付と時刻を追加してください。",
     "taskEdit.advanceReminderSkipped": "事前リマインダーを使うには、このタスクの開始・期限リマインダーを有効にしてください。",
-        'savedFilters.saveTitle': "フィルターを保存",
-        'savedFilters.namePlaceholder': "フィルター名",
     "settings.speechUseGemini": "Gemini を使用",
     "settings.speechNativeUnsupported": "この音声プロバイダーはまだサポートされていません。音声入力を使うには Gemini、OpenAI、Whisper のいずれかを選択してください。",
     "settings.speechGeminiDisclosure": "録音は文字起こしのために Gemini に直接送信されます。Mindwtr が録音を収集することはありません。",
@@ -189,6 +179,28 @@ export const jaOverrides: Record<string, string> = {
     'sandbox.confirmTitle': "サンドボックスを開きますか？",
     'sandbox.confirmDescription': "架空のタスクやプロジェクトを使って、不具合の録画やデモを行えます。個人データは別に保管されます。サンドボックスでの変更は終了時に破棄されます。",
     'sandbox.enter': "サンドボックスを開く",
+    'workspaces.title': "ワークスペース",
+    'workspaces.description': "このコンピューター上で、タスク、添付ファイル、同期サーバー、設定を分けて保持します。一度に開けるワークスペースは1つで、同期とリマインダー送信を行うのも開いているものだけです。",
+    'workspaces.defaultName': "デフォルト",
+    'workspaces.open': "使用中",
+    'workspaces.add': "ワークスペースを追加",
+    'workspaces.namePlaceholder': "ワークスペース名",
+    'workspaces.switch': "切り替え",
+    'workspaces.switchTitle': "ワークスペースを切り替えますか？",
+    'workspaces.switchDesc': "{{name}} を開くために Mindwtr が再起動します。",
+    'workspaces.switchNow': "今すぐ切り替え",
+    'workspaces.createdTitle': "ワークスペースを追加しました",
+    'workspaces.later': "後で",
+    'workspaces.saveFailed': "変更を保存できなかったため、ワークスペースは切り替わりませんでした。もう一度お試しください。",
+    'workspaces.failed': "ワークスペースを変更できませんでした。",
+    'workspaces.deleteTitle': "{{name}} を削除しますか？",
+    'workspaces.deleteDesc': "このワークスペースのローカルのタスク、添付ファイル、設定をこのコンピューターから削除します。同期サーバー上のデータは変わりません。",
+    'workspaces.dataFolder': "データフォルダー",
+    'workspaces.cliHint': "MCP サーバーとコマンドラインはデフォルトのワークスペースを開きます。別のワークスペースを使うには、その mindwtr.db ファイルを --db で指定してください。",
+    'workspaces.unavailable': "Mindwtr がプロファイルフォルダーの移動を終えるまで、ワークスペースは使えません。Mindwtr を再起動してもう一度お試しください。",
+    'workspaces.unreadable': "ワークスペースの一覧を読み込めなかったため、デフォルトのワークスペースを開きました。Mindwtr の設定フォルダーにある workspaces.toml を確認してください。",
+    'workspaces.iCloudDefaultOnly': "iCloud 同期はデフォルトのワークスペースでのみ使えます。",
+    'workspaces.switcherLabel': "ワークスペース",
     'sandbox.title': "サンドボックス · サンプルデータ",
     'sandbox.exit': "サンドボックスを終了",
     'sandbox.reset': "サンプルデータをリセット",
@@ -209,7 +221,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.automationCaptureCopyFailed': "キャプチャトークンをコピーできませんでした。",
         'settings.automationCaptureLoadFailed': '自動化キャプチャの設定を読み込めませんでした。',
         'settings.automationCaptureUpdateFailed': '自動化キャプチャの設定を更新できませんでした。',
-        // App
+
         'app.name': 'Mindwtr',
         'app.closeStillSavingTitle': 'Mindwtr は保存中です',
         'app.closeStillSavingBody': '直前の変更がまだ保存し終わっていません。このまま終了しますか？保存されていない変更は失われます。',
@@ -217,6 +229,12 @@ export const jaOverrides: Record<string, string> = {
         'donationPrompt.body': 'Mindwtr には広告もトラッキングも有料プランもありません。1人の開発者がつくり、役に立つと感じた方の支援だけで続いています。頭の中を整理する助けになっているなら、少額の寄付が改善を続ける力になります。',
         'donationPrompt.dismiss': 'あとで',
         'donationPrompt.action': 'Mindwtr を支援する',
+        'updateReminder.title': 'アップデートがあります',
+        'updateReminder.body': 'Mindwtr {{latestVersion}} が利用できます。現在のバージョンは {{currentVersion}} です。時間のあるときにアップデートして、最新の修正と改善を取り込んでください。',
+        'updateReminder.updateNow': '今すぐアップデート',
+        'updateReminder.viewRelease': 'リリースを見る',
+        'common.notNow': '今はしない',
+        'announcement.dismiss': 'お知らせを閉じる',
         'settings.donateLinkValue': '寄付する',
         'settings.documentationLinkValue': 'ドキュメント',
         'markdown.copyCode': 'コードをコピー',
@@ -224,7 +242,7 @@ export const jaOverrides: Record<string, string> = {
         'markdown.openLinkFailed': "このリンクを開けませんでした。対応するアプリがインストールされているか確認してください。リンクをコピーして、そのアプリで開くこともできます。",
         'markdown.copyLinkFailed': "このリンクをコピーできませんでした。",
 
-        // Navigation
+
         'nav.main': 'メイン',
         'nav.inbox': 'インボックス',
         'nav.board': 'ボードビュー',
@@ -253,11 +271,11 @@ export const jaOverrides: Record<string, string> = {
         'nav.sectionOrganize': '整理',
         'nav.sectionArchive': 'アーカイブ',
 
-        // Accessibility
+
         'accessibility.skipToContent': 'コンテンツへスキップ',
         'accessibility.mainContent': 'メインコンテンツ',
 
-        // Quick Add
+
         'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>、 /estimate:45m、/note:<メモ>、/link:<URL>、/energy:<レベル>、/priority:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
         'quickAdd.example': '例：母に電話する /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'スクリーンショット',
@@ -297,10 +315,10 @@ export const jaOverrides: Record<string, string> = {
         'quickAdd.bulkCreateError': 'すべてのタスクを作成できませんでした。',
         'quickAdd.saveAndEdit': '保存して編集',
 
-        // Checklist
+
         'checklist.progress': 'チェックリストの進捗',
 
-        // Keybindings (Desktop)
+
         'keybindings.helpTitle': 'キーボードショートカット',
         'keybindings.helpSubtitle': 'Esc キーで閉じます',
         'keybindings.styleLabel': 'キーバインドのスタイル',
@@ -355,7 +373,7 @@ export const jaOverrides: Record<string, string> = {
         'keybindings.list.toggleDetails': 'リストの詳細表示を切り替え',
         'keybindings.list.toggleDensity': '表示密度を切り替え',
 
-        // Tabs (Mobile)
+
         'tab.inbox': 'インボックス',
         'tab.next': 'フォーカス',
         'tab.board': 'ボード',
@@ -364,7 +382,7 @@ export const jaOverrides: Record<string, string> = {
         'tab.calendar': 'カレンダー',
         'tab.review': 'レビュー',
 
-        // List Views
+
         'list.inbox': 'インボックス',
         'list.todo': '未着手',
         'list.inProgress': '進行中',
@@ -382,7 +400,7 @@ export const jaOverrides: Record<string, string> = {
         'list.taskDeleted': 'タスクを削除しました',
         'list.taskCopied': 'タスクをクリップボードにコピーしました',
         'task.copyTitle': 'タイトルをコピー',
-        "task.copyTaskLink": "タスクのリンクをコピー",
+        "task.copyTaskLink": "Mindwtrリンクをコピー",
         "task.copyTaskId": "タスク ID をコピー",
         "task.linkNotFound": "このライブラリにタスクがありません。削除されたか、この端末にまだ同期されていない可能性があります。",
         'task.titleCopied': 'タイトルをコピーしました',
@@ -419,7 +437,7 @@ export const jaOverrides: Record<string, string> = {
         'reference.empty': '資料はまだありません',
         'reference.emptyHint': '「資料」は、行動は不要でも後から見返すかもしれない情報の置き場です。',
 
-        // Status Labels
+
         'status.inbox': 'インボックス',
         'status.todo': '未着手',
         'status.next': '次のアクション',
@@ -431,7 +449,7 @@ export const jaOverrides: Record<string, string> = {
         'status.archived': 'アーカイブ',
         'status.active': '進行中',
 
-        // Priority Labels
+
         'priority.low': '低',
         'priority.medium': '中',
         'priority.high': '高',
@@ -440,11 +458,16 @@ export const jaOverrides: Record<string, string> = {
         'energyLevel.medium': 'エネルギー中',
         'energyLevel.high': 'エネルギー高',
 
-        // Task Edit
+
         'taskEdit.editTask': 'タスクを編集',
         'taskEdit.aiAssistant': 'AI アシスタント',
         'task.dateIssue.startAfterDue': '開始日が期限より後になっています',
         'taskEdit.checklist': 'チェックリスト',
+        'taskEdit.dragChecklistItem': "ドラッグして並べ替え",
+        'taskEdit.checklistItemActions': "チェックリスト項目の操作",
+        'taskEdit.moveChecklistTop': "先頭に移動",
+        'taskEdit.moveChecklistBottom': "末尾に移動",
+        'taskEdit.addChecklistBelow': "下に項目を追加",
         'taskEdit.tab.task': 'タスク',
         'taskEdit.tab.list': 'リスト',
         'taskEdit.tab.view': '表示',
@@ -544,6 +567,9 @@ export const jaOverrides: Record<string, string> = {
         'markdown.toolbar.italic': '斜体',
         'markdown.toolbar.strikethrough': '取り消し線',
         'markdown.toolbar.bulletList': '箇条書き',
+        'markdown.toolbar.quote': '引用',
+        'markdown.toolbar.orderedList': '番号付きリスト',
+        'markdown.toolbar.taskList': 'タスクリスト',
         'markdown.toolbar.horizontalRule': '水平線',
         'markdown.toolbar.link': 'リンクを挿入',
         'markdown.toolbar.code': 'インラインコード',
@@ -667,13 +693,13 @@ export const jaOverrides: Record<string, string> = {
         'task.aria.dueTime': '期限時刻',
         'task.aria.location': '場所',
 
-        // Compact unit labels (time-estimate chips, calendar duration labels)
+
         'units.minutesShort': '{{minutes}}分',
         'units.hoursShort': '{{hours}}時間',
         'units.hoursMinutesShort': '{{hours}}時間{{minutes}}分',
         'units.hoursPlusShort': '{{hours}}時間以上',
 
-        // Recurrence Labels
+
         'recurrence.none': 'なし',
         'recurrence.daily': '毎日',
         'recurrence.weekly': '毎週',
@@ -719,7 +745,7 @@ export const jaOverrides: Record<string, string> = {
         'recurrence.showFutureInCalendar': '今後の予定をカレンダーに表示',
         'recurrence.showFutureInCalendarHint': '計画を立てるための予測表示です。実際の次のタスクは、今回のタスクを完了した時点で作成されます。',
         'recurrence.nextCalendarPreview': '次回のカレンダー表示',
-        // Inbox (Mobile)
+
         'inbox.title': 'インボックス',
         'inbox.processButton': 'インボックスを処理',
         'inbox.projectHint': '複数の行動が必要そうなものですか？処理の途中で「はい、プロジェクトにする」を選ぶと、目指す結果と最初の次のアクションに名前を付けられます。',
@@ -770,7 +796,7 @@ export const jaOverrides: Record<string, string> = {
         'inbox.movedToTrash': '{{title}} をゴミ箱に移動しました',
         'inbox.fileIt': '整理する',
 
-        // Next Actions (Mobile)
+
         'next.title': '次のアクション',
         'next.ready': '件がすぐ着手できます',
         'next.current': '着手中のアクション',
@@ -781,10 +807,12 @@ export const jaOverrides: Record<string, string> = {
         'next.warningCount': '件が「次のアクション」にあります',
         'next.warningHint': 'プロジェクトを絞ることを検討しましょう。GTD では、見通しを保つために次のアクションを10〜15件ほどに抑えることを勧めています。',
 
-        // Contact / Contexts (Mobile updates)
+
     'contexts.new': '新しいコンテキスト',
     'tags.new': '新しいタグ',
         'contexts.title': 'コンテキスト',
+        "contexts.collapseSidebar": "コンテキストパネルを折りたたむ",
+        "contexts.expandSidebar": "コンテキストパネルを展開",
         'contexts.filter': 'コンテキストでタスクを絞り込む',
         'contexts.dropAdd': '{context} を追加',
         'contexts.dropAdded': '{context} を追加しました',
@@ -813,6 +841,7 @@ export const jaOverrides: Record<string, string> = {
         "filters.taskDates": "タスクの日付",
         "filters.anyTime": "指定なし",
         "filters.datePreset.next_7_days": "今後7日間",
+        "filters.datePreset.overdue_next_7_days": "期限切れ + 今後7日間",
         "filters.datePreset.next_14_days": "今後14日間",
         "filters.datePreset.next_30_days": "今後30日間",
         "filters.datePreset.upcoming": "今後すべて",
@@ -836,7 +865,7 @@ export const jaOverrides: Record<string, string> = {
         'contexts.noContexts': 'コンテキストがありません。@home、@work、@computer のようなコンテキストをタスクに付けてみましょう',
         'contexts.noTasks': 'このコンテキストに進行中のタスクはありません',
 
-        // Board
+
         'board.title': 'ボードビュー',
         'board.next': '次のアクション',
         'board.todo': '未着手',
@@ -847,7 +876,7 @@ export const jaOverrides: Record<string, string> = {
         'board.dragTask': 'タスクをドラッグ',
         'board.delete': '削除',
 
-        // Calendar
+
         'calendar.title': 'カレンダー',
         'calendar.tasksAndEvents': '日付ごとのタスクと外部カレンダーの予定',
         'calendar.today': '今日',
@@ -931,7 +960,7 @@ export const jaOverrides: Record<string, string> = {
         'shortcuts.captureUnavailable': 'キャプチャのショートカットを利用できません',
         'shortcuts.missingTitle': 'そのショートカットのリンクから、タスク名を読み取れませんでした。',
 
-        // Projects
+
         'projects.title': 'プロジェクト',
         'projects.statusLabel': 'ステータス',
         'projects.activeSection': '進行中のプロジェクト',
@@ -1113,7 +1142,7 @@ export const jaOverrides: Record<string, string> = {
         'projects.createAreaFailed': 'エリアを作成できませんでした',
         'projects.collapseSidebar': 'プロジェクトパネルを折りたたむ',
         'projects.resizeSidebar': 'プロジェクトパネルの幅を変更',
-        // Review Steps
+
         'review.title': 'レビュー',
         'review.openTasks': '未完了のタスク',
         'review.intro': '頭をすっきりさせ、リストを最新にして、新しい発想を生むための時間です。',
@@ -1184,7 +1213,7 @@ export const jaOverrides: Record<string, string> = {
         'review.projectsStepDesc': '進行中のすべてのプロジェクトに次のアクションがあるか確認します。',
         'review.projectsHint': 'プロジェクトを1つずつ確認します。具体的な次のアクションが少なくとも1つありますか？なければ今のうちに追加しましょう。終わったプロジェクトは完了にします。',
         'review.hasNextAction': '次のアクションあり',
-        'review.projectDeferred': '予定済み',
+    'review.projectDeferred': '予定済み',
         'review.needsAction': '次のアクションが必要',
         'review.noActiveTasks': '進行中のタスクなし',
         'review.somedayStep': 'いつか・たぶん',
@@ -1214,7 +1243,7 @@ export const jaOverrides: Record<string, string> = {
         'review.nextStepBtn': '次のステップ',
         'review.stuckQuestion': 'この項目は止まっていますか？',
         'review.stuckPrompt': 'より行動に移しやすい言い方に書き換えるか、もう関係がないなら削除するか「いつか・たぶん」に送りましょう。',
-        // Mobile Review keys
+
         'review.notSet': '未設定',
         'review.description': 'メモ',
         'review.startTime': '開始日',
@@ -1243,7 +1272,7 @@ export const jaOverrides: Record<string, string> = {
         'review.expandEverything': 'プロジェクトを展開',
         'review.collapseEverything': 'すべて折りたたむ',
 
-        // Processing
+
         'process.title': '項目を処理する',
         'process.refineTitle': 'タスクを整える',
         'process.refineDesc': 'どう扱うか決める前に、これが何なのかをはっきりさせましょう。',
@@ -1316,7 +1345,7 @@ export const jaOverrides: Record<string, string> = {
         'process.followUpLabel': 'フォロー',
         'process.delegateSendError': '依頼メッセージを送信できませんでした。',
         'process.delegateRequestCopied': '依頼文をコピーしました。メールやチャットに貼り付けてください。',
-        // Settings
+
         'settings.title': '設定',
         'settings.subtitle': 'Mindwtr を自分の使い方に合わせて調整できます',
         'settings.appearance': '外観',
@@ -1386,7 +1415,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.logCleared': 'ログファイルを消去しました。',
         'settings.logClearFailed': 'ログファイルを消去できませんでした。',
         'settings.shareUnavailable': 'この端末では共有機能を利用できません。',
-        // Mobile Settings
+
         'settings.useSystem': 'システムのテーマを使う',
         'settings.followDevice': '端末の外観設定に合わせます',
         'settings.darkMode': 'ダークモード',
@@ -1416,6 +1445,14 @@ export const jaOverrides: Record<string, string> = {
         'appLock.unavailable': 'アプリロックを使うには、端末のパスコードか生体認証を設定してください。',
         'appLock.cancelled': 'Mindwtr はロックされたままです。',
         'appLock.failed': '認証に失敗しました。もう一度お試しください。',
+        "settings.desktopAppLockDesc": "Mindwtr を開いたときと、離席から戻ったときに Windows Hello または Touch ID（または Mac のパスワード）を求めます。隠すのはアプリのウィンドウだけです。macOS ウィジェット、ローカル API、MCP サーバーは引き続きデータを読み取れます。",
+        "settings.desktopAppLockUnavailable": "アプリロックを使うには、Windows Hello または Mac のログインパスワードを設定してください。",
+        "appLock.lockNow": "Mindwtr をロック",
+        "appLock.lockedReminder": "Mindwtr のリマインダー",
+        "appLock.turnOff": "アプリロックをオフにする",
+        "appLock.osCheckUnavailable": "このデバイスでは現在 Windows Hello または Touch ID を利用できません。",
+        "appLock.macUnlockReason": "ロックを解除してタスクを表示",
+        "appLock.macEnableReason": "アプリロックをオンにする",
         'settings.data': 'データ',
         'settings.menuDesc.general': '外観・言語・表示',
         'settings.menuDesc.gtd': 'キャプチャ・レビュー・タスクエディタ',
@@ -1555,6 +1592,10 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncServerUnreachable': '同期サーバーに接続できませんでした。Mindwtr がネットワークを使えるか（モバイル通信、VPN、ファイアウォール）を確認してください。',
         'settings.syncQueuedBody': '同期中に新しい変更がありました。再試行を自動で予約しました。',
         'settings.syncActivationRequeuedBody': 'この同期設定のテスト中に新しい変更が見つかりました。もう一度「今すぐ同期」を実行してください。',
+        'settings.syncMissingFilesTitle': '一部の添付ファイルが見つかりません',
+        'settings.syncMissingFilesBody': '次の添付ファイルは、このデバイスにも新しい同期先にもありません:\n\n{files}\n\nこれらのファイルなしで続行できます。添付はタスクとプロジェクトに残り、ファイルなしとして表示されます。ファイルは元の場所に残り、削除されません。',
+        'settings.syncMissingFilesMore': 'ほか {count} 件',
+        'settings.syncMissingFilesContinue': 'これらのファイルなしで続行',
         'settings.syncCompleted': '同期が完了しました。',
         'settings.syncCompletedWithConflicts': '同期が完了しました（{count}件の競合を自動で解決）。',
         'settings.syncClockSkewWarning': '端末間の時計のずれが大きいようです（{skew}）。それぞれの端末の時刻設定を確認してください。',
@@ -1839,7 +1880,7 @@ export const jaOverrides: Record<string, string> = {
         'digest.reviewDue': 'レビュー予定',
         'digest.noItems': '今日、急ぎのものはありません。',
 
-        // Common
+
         'common.tasks': 'タスク',
         'common.day': '日',
         'common.days': '日',
@@ -1909,7 +1950,7 @@ export const jaOverrides: Record<string, string> = {
         'attachments.transcriptionUnavailable': '文字起こしの準備ができていません。AI の設定を確認してから、もう一度お試しください。',
         'attachments.transcriptionFailed': '文字起こしに失敗しました。もう一度お試しください。',
 
-        // Bulk Actions
+
         'bulk.select': '選択',
         'bulk.exitSelect': '完了',
         'bulk.selected': '件を選択中',
@@ -1942,7 +1983,7 @@ export const jaOverrides: Record<string, string> = {
         'bulk.moveFailed': '選択したタスクを移動できませんでした。',
         'bulk.updateFailed': '選択したタスクを更新できませんでした。',
 
-        // Sorting
+
         'sort.label': '並び順',
         'sort.default': '既定',
         'sort.due': '期限',
@@ -1954,7 +1995,7 @@ export const jaOverrides: Record<string, string> = {
         'sort.created-desc': '新しい順',
         'sort.completed': '完了日',
 
-        // Agenda
+
         'agenda.title': 'フォーカス',
         'agenda.active': '件が進行中',
         'agenda.collapseOtherSections': 'フォーカスのみ',
@@ -1984,6 +2025,9 @@ export const jaOverrides: Record<string, string> = {
         'agenda.upcoming': 'これから',
         'widget.upcomingStarts': '開始',
         'widget.upcomingReturns': '再表示',
+        'widget.background': '背景',
+        'widget.backgroundLightText': '透明・明るい文字',
+        'widget.backgroundDarkText': '透明・暗い文字',
         'widget.availableActions': '着手可能なアクション',
         'widget.includeAvailableActions': '開始日が来た次のアクションを追加',
         'agenda.laterToday': '今日このあと',
@@ -2001,7 +2045,7 @@ export const jaOverrides: Record<string, string> = {
         'focus.group.none': 'なし',
         'focus.group.noEnergy': 'エネルギー未設定',
         'focus.group.noPriority': '優先度なし',
-        // Task Age
+
         'taskAge.day': '日前',
         'taskAge.days': '日前',
         'taskAge.week': '週間前',
@@ -2009,13 +2053,13 @@ export const jaOverrides: Record<string, string> = {
         'taskAge.month': 'か月前',
         'taskAge.months': 'か月前',
 
-        // Energy Contexts
+
         'context.energy.focused': '集中が必要',
         'context.energy.lowenergy': '疲れているとき向け',
         'context.energy.creative': '発想が要るもの',
         'context.energy.routine': 'ルーティン',
 
-        // Waiting (Mobile)
+
         'waiting.title': '連絡待ち',
         'waiting.subtitle': '他の人や外部の出来事を待っているタスク',
         'waiting.count': '連絡待ち',
@@ -2025,7 +2069,7 @@ export const jaOverrides: Record<string, string> = {
         'waiting.empty': '待っているものはありません',
         'waiting.emptyHint': '次の一手が自分ではなく相手にあるタスクは、ここに預けておきます。片付くまで見え続けます。',
 
-        // Someday (Mobile)
+
         'someday.title': 'いつか・たぶん',
         'someday.subtitle': '将来やってみたいアイデアや目標',
         'someday.ideas': 'アイデア',
@@ -2045,7 +2089,7 @@ export const jaOverrides: Record<string, string> = {
         'viewSections.updateFailed': 'いつか・たぶんのセクションを更新できませんでした。',
         'done.emptyHint': '完了したタスクがここに溜まります。やり遂げたことの記録になります。',
 
-        // Search
+
         'search.title': '検索',
         'search.placeholder': 'タスクとプロジェクトを検索…',
         'search.scopeHint': 'タスク・プロジェクト・担当者',
@@ -2062,6 +2106,7 @@ export const jaOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'この検索に名前を付ける',
         'search.savedSearches': '保存した検索',
         'search.noSavedSearches': '保存した検索はまだありません。',
+        'search.sortUseGlobal': 'グローバル設定を使用（{sort}）',
         'search.deleteConfirm': 'この保存した検索を削除しますか？',
         'search.helpOperators': 'status:、context:、tag:、project:、due:<=7d などの条件が使えます。',
         'search.hiddenCompletedMatches': '「完了」「アーカイブ」に他{{count}}件',
@@ -2084,7 +2129,7 @@ export const jaOverrides: Record<string, string> = {
         'search.due.nextWeek': '来週',
         'search.due.none': '期限なし',
 
-        // Archived
+
         'archived.tasksSegment': 'タスク',
         'archived.title': 'アーカイブ',
         'archived.searchPlaceholder': 'アーカイブ済みのタスクを検索…',
@@ -2322,7 +2367,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.sync.incompleteAfterSwitch': '新しい同期設定は有効になりましたが、今回の同期は完了しませんでした。Mindwtr が自動的に再試行します。',
         'settings.sync.remoteWriteDeferred': '変更内容はこの端末に保存されています。別の端末が今、同期先に書き込み中のため、Mindwtr がまもなく自動的にアップロードします。',
         'settings.selectSyncFolderTitle': '同期フォルダを選択',
-        // Mobile-only copy migrated from keyed helpers.
+
         'calendar.mobile.1Day': '1日',
         'calendar.mobile.day': '日',
         'calendar.mobile.dayDetailsPanelHandle': '日別パネルのハンドル',
@@ -2626,7 +2671,7 @@ export const jaOverrides: Record<string, string> = {
         'captureNotification.text': 'タップしてインボックスに書き留める',
         'captureNotification.channelName': 'クイックキャプチャ',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'マインドスイープ',
         'mindSweep.title': 'マインドスイープ',
         'mindSweep.intro': 'いくつかの問いかけを順に見ながら、頭に浮かんだことをそのまま書き出します。取捨選択も整理も不要です。書いたものはすべてインボックスに入るので、仕分けはあとで行えます。',
@@ -2710,7 +2755,7 @@ export const jaOverrides: Record<string, string> = {
         'obsidian.filesUpdated': 'Obsidian のファイル{{count}}件を更新しました。',
         'obsidian.sourceAttachmentTitle': 'Obsidian の元ノート',
 
-        // First-run onboarding modal (both platforms).
+
         'onboarding.title': 'Mindwtr へようこそ',
         'onboarding.subtitle': '気になっていることをまず書き留め、仕分けはあとで。そして一度に少しのことだけに集中する——それが Mindwtr の使い方です。今あるデータを取り込むこともできますし、ガイド付きの小さなプロジェクトから始めることもできます。',
         'onboarding.skip': '初期設定をスキップ',
@@ -2738,7 +2783,7 @@ export const jaOverrides: Record<string, string> = {
         'onboarding.toastReady': '「はじめかた」をプロジェクトに用意しました。',
         'onboarding.toastFailed': '「はじめかた」の作成に失敗しました。',
 
-        // Seeded Getting Started content (first-run tutorial data).
+
         'starter.projectTitle': 'はじめかた',
         'starter.projectNotes': 'ここにあるタスクは、やってもやらなくても構いません。Mindwtr の使い方に慣れたら、このプロジェクトごと削除して大丈夫です。',
         'starter.processInbox.title': 'まずここから：インボックスの1件目を処理する',
@@ -2779,7 +2824,7 @@ export const jaOverrides: Record<string, string> = {
         'starter.sampleBuyMilk': '牛乳を買う',
         'starter.sampleReplySam': '佐藤さんに返信する',
 
-        // Settings — moved from apps/desktop settings/labels.ts (settings-i18n-20260724-01)
+
         'settings.integrations': '連携',
         'settings.searchPlaceholder': '設定を検索…',
         'settings.lookAndFeel': '見た目',
@@ -2891,6 +2936,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.networkProxyInvalid': '正しい HTTP または HTTPS のプロキシ URL を入力してください。',
         'settings.networkProxySave': 'プロキシを保存',
         'settings.syncPreferenceSavedFilters': '保存した絞り込み条件',
+        'savedFilters.saveTitle': "フィルターを保存",
+        'savedFilters.namePlaceholder': "フィルター名",
         'settings.backgroundSync': 'バックグラウンド同期',
         'settings.backgroundSyncDesc': 'デスクトップ版では、起動時、アプリが前面に戻ったとき、起動中は15分ごと、そしてタスクやプロジェクトを変更した少しあとに同期します。トレイに常駐させておけば同期は続き、ログイン時に起動する設定にすればサインイン後から動きます。アプリを終了すると、バックグラウンド同期は止まります。',
         'settings.attachmentsCleanupPendingDeletes': '保留中のリモート削除',

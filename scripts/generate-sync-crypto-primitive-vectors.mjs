@@ -1,11 +1,6 @@
 #!/usr/bin/env node
-// Writes packages/core/src/__fixtures__/sync-crypto/primitive-vectors.json: the raw outputs of core's SyncCryptoPrimitives
-// (Argon2id, AES-256-GCM with AAD, SHA-256) that every implementation must match byte for byte: core's @noble/hashes and
-// WebCrypto, RN's react-native-quick-crypto (OpenSSL), and the Android host's HostCrypto.kt (BouncyCastle, javax.crypto).
-// Each Argon2id key is computed twice, by @noble/hashes and by the OpenSSL command line (3.2 or later, the KDF quick-crypto
-// calls), and the script stops if they differ. AES-GCM and SHA-256 come from node:crypto (OpenSSL).
-//
-// Usage: node scripts/generate-sync-crypto-primitive-vectors.mjs
+
+
 import { argon2id } from '@noble/hashes/argon2.js';
 import { createCipheriv, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -22,7 +17,7 @@ const opensslArgon2id = (pass, salt, { m, t, p, dkLen }) => execFileSync('openss
     '-kdfopt', `lanes:${p}`, 'ARGON2ID']);
 
 const argon2Cases = [
-    // The passphrases and costs of vectors.json, then the edges: empty and non-Latin passphrases, more lanes, the writer default.
+
     ['correct horse battery staple', 1, 64, 1],
     ['hunter2', 2, 19456, 1],
     ['s3cr3t-passphrase', 1, 64, 1],

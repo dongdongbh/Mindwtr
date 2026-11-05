@@ -29,9 +29,7 @@ const createDeferred = <T,>() => {
     return { promise, resolve };
 };
 
-// The completion dialog now uses the shared date control (#944): a locale-formatted
-// date field plus a separate time input, rather than one datetime-local box. jsdom
-// reports en-US, so the display order is month/day/year.
+
 const setCompletionDateTime = (dialog: HTMLElement, localIso: string) => {
     const [date, time] = localIso.split('T');
     const [year, month, day] = date.split('-');
@@ -62,6 +60,27 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
         expect(getByText('Test Task')).toBeInTheDocument();
+    });
+
+    it('copies a task link by pointer or keyboard without selecting or opening the row', async () => {
+        const user = userEvent.setup();
+        const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+        const onSelect = vi.fn();
+        const onToggleSelect = vi.fn();
+        const { getByRole } = render(<LanguageProvider>
+            <TaskItem task={mockTask} onSelect={onSelect} onToggleSelect={onToggleSelect} />
+        </LanguageProvider>);
+        const copy = getByRole('button', { name: 'Copy Mindwtr link' });
+        await user.click(copy);
+        copy.focus();
+        await user.keyboard('{Enter}');
+        await user.keyboard(' ');
+        expect(write).toHaveBeenCalledTimes(3);
+        expect(write).toHaveBeenLastCalledWith('mindwtr://open?task=1');
+        expect(onSelect).not.toHaveBeenCalled();
+        expect(onToggleSelect).not.toHaveBeenCalled();
+        expect(useUiStore.getState().editingTaskId).toBeNull();
+        expect(useUiStore.getState().expandedTaskIds[mockTask.id]).not.toBe(true);
     });
 
     it('shows the task section alongside its project metadata', () => {
@@ -280,6 +299,29 @@ describe('TaskItem', () => {
         expect(view.getByDisplayValue('Unsaved promotion title')).toBeInTheDocument();
     });
 
+    it('keeps Reference status bidirectional and allows its first checklist item (#1416)', async () => {
+        const referenceTask: Task = { ...mockTask, id: 'reference-empty-list', status: 'reference' };
+        act(() => useTaskStore.setState({
+            tasks: [referenceTask], _allTasks: [referenceTask],
+            _tasksById: new Map([[referenceTask.id, referenceTask]]),
+        }));
+        const view = render(<LanguageProvider><TaskItem task={referenceTask} /></LanguageProvider>);
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        expect(view.queryByRole('button', { name: /add to.*focus/i })).toBeNull();
+        fireEvent.click(view.getByRole('button', { name: 'Details' }));
+        fireEvent.click(view.getByRole('button', { name: /add item/i }));
+        fireEvent.change(view.getByPlaceholderText(/item name/i), { target: { value: 'Reusable step' } });
+        fireEvent.click(view.getByRole('button', { name: 'Next' }));
+        expect(view.getByDisplayValue('Reusable step')).toBeInTheDocument();
+        expect(view.getByRole('button', { name: /add to.*focus/i })).toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: 'Reference' }));
+        expect(view.queryByRole('button', { name: /add to.*focus/i })).toBeNull();
+        expect(view.getByDisplayValue('Reusable step')).toBeInTheDocument();
+        fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(useTaskStore.getState()._allTasks.find((task) => task.id === referenceTask.id))
+            .toMatchObject({ status: 'reference', checklist: [{ title: 'Reusable step', isCompleted: false }] }));
+    });
+
     it('saves an edited Reference without erasing fields hidden by its editor', async () => {
         const referenceTask: Task = {
             ...mockTask,
@@ -405,15 +447,14 @@ describe('TaskItem', () => {
             fireEvent.click(deleteButton);
         });
 
-        // Deleting is immediate (soft delete to Trash with an undo toast);
-        // no confirmation dialog appears.
+
         expect(queryByRole('dialog', { name: /^delete$/i })).not.toBeInTheDocument();
         await waitFor(() => {
             const stored = useTaskStore.getState()._allTasks.find((candidate) => candidate.id === mockTask.id);
             expect(stored?.deletedAt).toBeTruthy();
         });
-        // The edit session must close with the task, or the stale
-        // editingTaskId keeps global keyboard shortcuts suppressed (#870).
+
+
         expect(useUiStore.getState().editingTaskId).toBeNull();
     });
 
@@ -566,7 +607,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        fireEvent.contextMenu(getAllByRole('button', { name: 'Done' })[0]);
+        fireEvent.contextMenu(getAllByRole('button', { name: 'Mark Done' })[0]);
         const dialog = getByRole('dialog', { name: 'Completion time' });
         setCompletionDateTime(dialog, '2026-07-20T09:30');
         fireEvent.change(within(dialog).getByLabelText('Time Spent'), { target: { value: '45' } });
@@ -612,7 +653,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        fireEvent.contextMenu(getAllByRole('button', { name: 'Done' })[0]);
+        fireEvent.contextMenu(getAllByRole('button', { name: 'Mark Done' })[0]);
         const dialog = getByRole('dialog', { name: 'Completion time' });
         expect(within(dialog).queryByLabelText('Time Spent')).toBeNull();
         setCompletionDateTime(dialog, '2026-07-20T09:30');
@@ -661,7 +702,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        fireEvent.contextMenu(getAllByRole('button', { name: 'Done' })[0]);
+        fireEvent.contextMenu(getAllByRole('button', { name: 'Mark Done' })[0]);
         const dialog = getByRole('dialog', { name: 'Completion time' });
         const timeSpentInput = within(dialog).getByLabelText('Time Spent') as HTMLInputElement;
         expect(timeSpentInput.value).toBe('30');
@@ -801,8 +842,7 @@ describe('TaskItem', () => {
             fireEvent.click(getByRole('button', { name: "Add to today's focus" }));
         });
 
-        // The star is a draft field: nothing is committed until Save, so the
-        // row cannot vanish from the list mid-edit.
+
         expect(useTaskStore.getState()._tasksById.get('editor-star-task')?.isFocusedToday).not.toBe(true);
 
         await act(async () => {
@@ -882,8 +922,7 @@ describe('TaskItem', () => {
         });
     });
 
-    // #1255: %Person was the one title token nothing claimed, so an accepted suggestion was typed
-    // into the title as "%Stefan" and Assigned To stayed empty.
+
     it('applies an accepted %person suggestion to Assigned To without keeping the token in the title', async () => {
         const editableTask: Task = {
             ...mockTask,
@@ -1004,6 +1043,57 @@ describe('TaskItem', () => {
             const updatedTask = useTaskStore.getState()._allTasks.find((task) => task.id === 'editor-title-slash-date-task');
             expect(updatedTask?.title).toBe('Email today');
             expect(updatedTask?.dueDate).toBe('2026-05-01');
+        });
+    });
+
+    it.each([
+        { command: 'estimate', value: '45m', enabled: true, expected: 'custom:45' },
+        { command: 'duration', value: '1h30m', enabled: true, expected: 'custom:90' },
+        { command: 'estimate', value: 'invalid', enabled: true, expected: '15min' },
+        { command: 'duration', value: 'invalid', enabled: true, expected: '15min' },
+        { command: 'estimate', value: '45m', enabled: false, expected: '15min' },
+        { command: 'duration', value: '1h30m', enabled: false, expected: '15min' },
+    ])('handles editor /$command:$value with time estimates enabled=$enabled', async ({ command, value, enabled, expected }) => {
+        const editableTask: Task = { ...mockTask, title: 'Email', status: 'next', timeEstimate: '15min' };
+        act(() => {
+            useTaskStore.setState({
+                tasks: [editableTask],
+                _allTasks: [editableTask],
+                _tasksById: new Map([[editableTask.id, editableTask]]),
+                settings: { features: { timeEstimates: enabled } },
+            });
+        });
+        const view = render(<LanguageProvider><TaskItem task={editableTask} /></LanguageProvider>);
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        const titleInput = view.getByDisplayValue('Email');
+        if (!(titleInput instanceof HTMLInputElement)) throw new Error('Expected title input');
+        const commandText = `/${command}:${value}`;
+        const typedTitle = `Email ${commandText} today`;
+        fireEvent.change(titleInput, { target: { value: typedTitle } });
+        const caret = `Email ${commandText}`.length;
+        titleInput.setSelectionRange(caret, caret);
+        fireEvent.click(titleInput);
+
+        if (enabled) {
+            expect(await view.findByRole('option', { name: commandText })).toBeInTheDocument();
+            await act(async () => {
+                fireEvent.keyDown(titleInput, { key: 'Enter' });
+            });
+        } else {
+            expect(view.queryByRole('option', { name: commandText })).not.toBeInTheDocument();
+        }
+        const expectedTitle = expected === '15min' ? typedTitle : 'Email today';
+        await waitFor(() => expect(titleInput.value).toBe(expectedTitle));
+        expect(useTaskStore.getState()._tasksById.get(editableTask.id)?.timeEstimate).toBe('15min');
+
+        await act(async () => {
+            fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        });
+        await waitFor(() => {
+            expect(useTaskStore.getState()._tasksById.get(editableTask.id)).toMatchObject({
+                title: expectedTitle,
+                timeEstimate: expected,
+            });
         });
     });
 
@@ -1286,9 +1376,7 @@ describe('TaskItem', () => {
             fireEvent.doubleClick(toggles[0]);
         });
 
-        // Only the double-clicked row may run the editor; a second instance
-        // would treat clicks inside the first editor as outside clicks and
-        // close the whole session.
+
         expect(getAllByDisplayValue('Test Task')).toHaveLength(1);
 
         const titleInput = getAllByDisplayValue('Test Task')[0];
@@ -1364,10 +1452,8 @@ describe('TaskItem', () => {
         expect(getByText('Delete')).toBeInTheDocument();
 
         act(() => {
-            // A real press always ends: the menu now swallows the click that
-            // dismisses it (so the control underneath is not activated), and it
-            // releases that swallower when the gesture completes. A lone
-            // mouseDown is not a gesture a browser can produce.
+
+
             fireEvent.mouseDown(document.body);
             fireEvent.mouseUp(document.body);
         });
@@ -1486,8 +1572,8 @@ describe('TaskItem', () => {
                     _tasksById: new Map([[task.id, task]]),
                 });
             });
-            // Scoped to this render's own container: every render in this test shares
-            // document.body, so a screen-level query would find the previous row.
+
+
             const { container } = render(
                 <LanguageProvider>
                     <TaskItem task={task} />
@@ -1496,8 +1582,7 @@ describe('TaskItem', () => {
             return container.textContent ?? '';
         };
 
-        // Age is expanded-only metadata; the collapsed summary stays limited
-        // to actionable routing and date information.
+
         expect(renderWithStatus('next', 'age-next-task')).not.toContain('5 days old');
         expect(renderWithStatus('done', 'age-done-task')).not.toContain('5 days old');
         expect(renderWithStatus('archived', 'age-archived-task')).not.toContain('5 days old');
@@ -1524,9 +1609,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        // A completed row carries Duplicate, Restore and Delete as buttons, so it drops
-        // the "More options" trigger that would only repeat them; right-click still
-        // reaches the menu (#968).
+
         expect(queryByRole('button', { name: /more options/i })).toBeNull();
         fireEvent.contextMenu(container.querySelector('[data-task-id="done-menu-duplicate-task"]')!);
         const duplicateItem = await findByRole('menuitem', { name: /duplicate/i });
@@ -1563,8 +1646,8 @@ describe('TaskItem', () => {
 
         const row = container.querySelector('[data-task-id="context-menu-ring-task"]');
         expect(row).toBeTruthy();
-        // Token check on purpose: the base class list carries focus-within:ring-*
-        // variants whose substrings would satisfy a plain toContain.
+
+
         const rowClassTokens = () => (row as HTMLElement).className.split(/\s+/);
         expect(rowClassTokens()).not.toContain('ring-primary/40');
 
@@ -2179,7 +2262,7 @@ describe('TaskItem', () => {
                 <TaskItem task={guardedTask} project={activeProject} />
             </LanguageProvider>
         );
-        fireEvent.contextMenu(view.getAllByRole('button', { name: 'Done' })[0]);
+        fireEvent.contextMenu(view.getAllByRole('button', { name: 'Mark Done' })[0]);
         const dialog = view.getByRole('dialog', { name: 'Completion time' });
         setCompletionDateTime(dialog, '2026-08-31T09:30');
         const staleSave = within(dialog).getByRole('button', { name: 'Save' });
@@ -2245,7 +2328,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        fireEvent.click(getByRole('button', { name: 'Done' }));
+        fireEvent.click(getByRole('button', { name: 'Mark Done' }));
 
         await waitFor(() => {
             expect(getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
@@ -2324,7 +2407,7 @@ describe('TaskItem', () => {
                 <TaskItem task={projectTask} project={project} />
             </LanguageProvider>
         );
-        fireEvent.click(view.getByRole('button', { name: 'Done' }));
+        fireEvent.click(view.getByRole('button', { name: 'Mark Done' }));
         await waitFor(() => {
             expect(view.getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
         });
@@ -2399,7 +2482,7 @@ describe('TaskItem', () => {
                 <TaskItem task={projectTask} project={project} />
             </LanguageProvider>
         );
-        fireEvent.click(view.getByRole('button', { name: 'Done' }));
+        fireEvent.click(view.getByRole('button', { name: 'Mark Done' }));
         await waitFor(() => {
             expect(view.getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
         });
@@ -2454,7 +2537,7 @@ describe('TaskItem', () => {
                 <TaskItem task={projectTask} project={project} />
             </LanguageProvider>
         );
-        fireEvent.click(view.getByRole('button', { name: 'Done' }));
+        fireEvent.click(view.getByRole('button', { name: 'Mark Done' }));
         await waitFor(() => {
             expect(view.getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
         });
@@ -2515,7 +2598,7 @@ describe('TaskItem', () => {
                 <TaskItem task={projectTask} project={project} />
             </LanguageProvider>
         );
-        fireEvent.click(view.getByRole('button', { name: 'Done' }));
+        fireEvent.click(view.getByRole('button', { name: 'Mark Done' }));
         await waitFor(() => {
             expect(view.getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
         });
@@ -2585,7 +2668,7 @@ describe('TaskItem', () => {
                 <TaskItem task={projectTask} project={activeProject} />
             </LanguageProvider>
         );
-        fireEvent.click(view.getByRole('button', { name: 'Done' }));
+        fireEvent.click(view.getByRole('button', { name: 'Mark Done' }));
         await waitFor(() => {
             expect(view.getByRole('dialog', { name: /what's the next action/i })).toBeInTheDocument();
         });
@@ -2657,7 +2740,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        fireEvent.click(getByRole('button', { name: 'Done' }));
+        fireEvent.click(getByRole('button', { name: 'Mark Done' }));
 
         await waitFor(() => {
             expect(getByRole('button', { name: /draft follow-up/i })).toBeInTheDocument();
@@ -2698,7 +2781,7 @@ describe('TaskItem', () => {
         );
 
         const promoteButton = getByRole('button', { name: 'Next' });
-        // #1053: the arrow needs a hover tooltip naming the action.
+
         expect(promoteButton).toHaveAttribute('title', 'Move to Next');
 
         fireEvent.click(promoteButton);

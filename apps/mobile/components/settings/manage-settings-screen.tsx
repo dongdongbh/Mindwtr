@@ -37,6 +37,7 @@ import {
 import { useRouter } from 'expo-router';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { CompactText } from '@/components/compact-text';
 
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
@@ -90,6 +91,7 @@ function CollapsibleSection({
 export function ManageSettingsScreen() {
     const router = useRouter();
     const tc = useThemeColors();
+    const einkSafe = useEinkSafeColor();
     const { t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const areas = useTaskStore((state) => state.areas);
@@ -115,8 +117,8 @@ export function ManageSettingsScreen() {
         const value = t(key);
         return value && value !== key ? value : fallback;
     };
-    // Keys not in en.ts yet: resolved here, with their English fallbacks, so the
-    // mobile missing-key check keeps seeing them (the native host resolves the same).
+
+
     const untranslated: ManageUntranslatedText = {
         newAreaHint: resolveText('areas.newHint', 'Create an area for related projects and tasks.'),
         peopleEmpty: resolveText('people.empty', 'No people yet'),
@@ -128,8 +130,8 @@ export function ManageSettingsScreen() {
         openReference: resolveText('people.openReference', 'Open reference link'),
         openReferenceFailed: resolveText('people.openReferenceFailed', 'Could not open this reference link.'),
     };
-    // Texts, rows, confirmations and the editor's writes come from core's Manage
-    // model, shared with the native host.
+
+
     const text = getManageSettingsText(t, untranslated);
     const sortedAreas = sortManageAreas(areas);
     const sortedPeople = useMemo(() => sortManagePeople(people), [people]);
@@ -179,7 +181,7 @@ export function ManageSettingsScreen() {
     }, [openSections]);
 
     const unassignedAreaColor = settings.appearance?.unassignedAreaColor || DEFAULT_AREA_COLOR;
-    // A closed editor keeps the rename texts, as before a target is chosen.
+
     const editorText = getManageEditorText(t, editorTarget?.type ?? 'context', untranslated);
     const saveDisabled = isManageEditorSaveDisabled(editorTarget?.type ?? 'context', editorName, areas);
     const nameTaken = isManageAreaNameTaken(editorTarget?.type ?? 'context', editorName, areas);
@@ -206,11 +208,11 @@ export function ManageSettingsScreen() {
                 .find((candidate) => candidate.id === id);
             if (!currentSection) return;
             if (JSON.stringify(currentSection) !== confirmedRow) {
-                // The alert described an older row; ask again for the current one.
+
                 confirmSomedaySectionDelete(id);
                 return;
             }
-            // Built from the settings as stored when the write is admitted, so a sync save's newer keys stay.
+
             void updateSettingsFromLatest((latest) => buildSomedaySectionsSettingsUpdate(
                 latest,
                 removeSomedaySection(latest.gtd?.viewSections?.someday, id),
@@ -218,7 +220,7 @@ export function ManageSettingsScreen() {
         });
     };
 
-    // The manager edits the shown list; only the sections it changed (by id) go onto the latest stored list.
+
     const saveSomedaySections = (definitions: ViewSectionDefinition[]) => {
         const shown = new Map((settings.gtd?.viewSections?.someday ?? []).map((section) => [section.id, JSON.stringify(section)]));
         const edited = definitions.filter((section) => shown.get(section.id) !== JSON.stringify(section));
@@ -338,7 +340,7 @@ export function ManageSettingsScreen() {
         }
     };
 
-    // Icon buttons name the item they act on, as the Someday section rows do.
+
     const editLabel = (name: string) => `${t('common.edit')}: ${name}`;
     const deleteLabel = (name: string) => `${t('common.delete')}: ${name}`;
 
@@ -465,7 +467,7 @@ export function ManageSettingsScreen() {
 
     const AreaRow = ({ area }: { area: typeof sortedAreas[number] }) => (
         <View style={[styles.settingRow, { borderBottomWidth: 1, borderBottomColor: tc.border }]}>
-            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: area.color || DEFAULT_AREA_COLOR, marginRight: 12 }} />
+            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: einkSafe(area.color || DEFAULT_AREA_COLOR), marginRight: 12 }} />
             <Text style={[styles.settingLabel, { color: tc.text, flex: 1 }]} numberOfLines={1}>{area.name}</Text>
             <TouchableOpacity
                 accessibilityLabel={editLabel(area.name)}
@@ -557,8 +559,8 @@ export function ManageSettingsScreen() {
                         </View>
                     ) : (
                         <SomedaySectionManager
-                            // The stored list: an edit changes only its section and keeps
-                            // every other entry, including ones this build cannot show.
+
+
                             definitions={settings.gtd?.viewSections?.someday ?? []}
                             onDelete={confirmSomedaySectionDelete}
                             onChange={saveSomedaySections}

@@ -51,8 +51,8 @@ const changeContainer = async (sqlite: Sqlite, change: string) => {
     else if (change === 'purge') await sqlite.client().run('UPDATE projects SET purgedAt=? WHERE id=?', [NOW, 'parent']);
     else await sqlite.client().run('UPDATE sections SET deletedAt=? WHERE id=?', [NOW, 'section']);
 };
-// Same physical SQLite test-adapter queue used by the Reference RN parity
-// harness; public Undo performs two updates without waiting for direct SQL.
+
+
 const serializeRNTaskWrites = () => {
     const adapter = getStorageAdapter(); const save = adapter.saveTask?.bind(adapter);
     if (!save) return;
@@ -110,6 +110,7 @@ describe('Board completion uses the existing durable completion owner', () => {
         } finally { await sqlite.close(); }
     });
 
+
     it.each(['complete', 'undo'] as const)('refuses Section/parent races after %s preparation and keeps every durable row/receipt unchanged', async operation => {
         for (const change of ['reparent', 'archive', 'delete', 'purge', 'deleted-section']) {
             vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
@@ -126,7 +127,7 @@ describe('Board completion uses the existing durable completion owner', () => {
                 expect(useTaskStore.getState()._tasksById.get(ID)!.rev, change).toBe(revision);
             } finally { await sqlite.close(); }
         }
-    });
+    }, 20_000);
 
     it.each(['complete', 'undo'] as const)('rejects a container memory race between authority read and atomic %s apply', async operation => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));

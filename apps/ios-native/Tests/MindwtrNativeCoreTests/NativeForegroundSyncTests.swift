@@ -125,7 +125,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("core.sqlite.pending.json").path))
         await host.close()
 
-        // Recreate against the existing bytes, without reseeding the manifest.
+
         let (cold, coldState) = makeHost()
         _ = try await cold.start()
         let coldReply = try object(await cold.foregroundSync(command: command, requestJSON: "{}"))

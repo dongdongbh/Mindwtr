@@ -4,7 +4,7 @@ export { formatProjectDate } from '@mindwtr/core';
 
 export type ProjectStatusPalette = Record<Project['status'], { text: string; bg: string; border: string }>;
 
-// Shared by the project rows and the detail modal so both read the same swatches.
+
 export function buildProjectStatusPalette(tc: {
     border: string;
     filterBg: string;
@@ -25,5 +25,5 @@ export function buildProjectQuickCaptureReturnTo(projectId: string) {
     return `/projects-screen?projectId=${encodeURIComponent(projectId)}`;
 }
 
-/** Inverse of buildProjectQuickCaptureReturnTo: the project the capture route was opened from. */
+
 export { getProjectQuickCaptureReturnToProjectId } from '@mindwtr/core/capture-modal-model';

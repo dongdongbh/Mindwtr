@@ -8,8 +8,8 @@ import { createNativeRequestReceipts, revisionOf, revisionsToken } from './nativ
 import { ensureDeviceId } from './store-helpers';
 import { logInfo } from './logger';
 import { useTaskStore } from './store';
-import { isTaskFinished } from './task-status';
 import { projectLifecycleEffect } from './store-projects/project-actions';
+import { weeklyReviewProjectHasUnfinishedTasks } from './review-views-model';
 import type { PreparedProjectLifecycle } from './store-types';
 import type { Project, Task } from './types';
 
@@ -138,8 +138,7 @@ export function createProjectLifecycleMethods(deps: {
                 return fail('STALE_REVISION', 'Project changed since the review was read');
             const scope = projectScope(project);
             return { ok: true, value: { projectId: project.id, title: project.title, projectRevision: revisionOf(project),
-                scopeRevision: scopeRevision(scope), requiresConfirmation: scope.tasks.some((task) => !task.deletedAt
-                    && !isTaskFinished(task) && task.status !== 'reference') } };
+                scopeRevision: scopeRevision(scope), requiresConfirmation: weeklyReviewProjectHasUnfinishedTasks(useTaskStore.getState(), project.id) } };
         },
         prepareReviewProjectCompletion(input: { request: NativeProjectLifecycleRequest; scopeRevision: string }): NativeHostResult<NativeProjectLifecyclePreparation> {
             const ready = deps.readiness();
@@ -205,7 +204,7 @@ export function createProjectLifecycleMethods(deps: {
             if (confirmed.ok && envelope.request.action === 'reactivate') {
                 try { logInfo('Native archived Project restore confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-project-restore', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

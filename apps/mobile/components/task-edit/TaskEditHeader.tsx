@@ -56,8 +56,8 @@ export function TaskEditHeader({
   const skipOccurrenceLabel = tFallback(t, 'task.skipOccurrence', 'Skip this occurrence');
   const moreLabel = t('common.more');
   const closeLabel = t('common.close');
-  // "Save", not "Done": the button commits the draft, and "Done" reads as the
-  // task status one line below it.
+
+
   const doneLabel = readOnly ? closeLabel : t('common.save');
 
   return (
@@ -119,7 +119,7 @@ export function TaskEditHeader({
               <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
                 {taskId ? (['link', 'id'] as const).map((kind) => {
                   const label = kind === 'link'
-                    ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                    ? tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')
                     : tFallback(t, 'task.copyTaskId', 'Copy task ID');
                   return (
                     <AppPressable

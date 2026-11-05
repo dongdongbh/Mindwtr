@@ -64,7 +64,7 @@ const storeState: MockStoreState = {
   updateSettings,
 };
 
-// Core's GTD model runs for real; only the store is the test's.
+
 vi.mock('@mindwtr/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindwtr/core')>()),
   shallow: Object.is,
@@ -384,7 +384,7 @@ describe('GtdSettingsScreen task editor layout', () => {
     }));
   });
 
-  // The page still shows the settings it rendered; the write rebuilds the group from the latest stored ones.
+
   it('keeps a GTD key another device changed after the page rendered', () => {
     storeState.settings = { gtd: { focusTaskLimit: 3, autoArchiveDays: 7 } };
     let tree!: renderer.ReactTestRenderer;
@@ -456,7 +456,7 @@ describe('GtdSettingsScreen task editor layout', () => {
     expect(presets.map(textOf)).toEqual(['Simple', 'Standard', 'Full']);
     for (const option of presets) {
       expect(option.props.accessibilityRole).toBe('radio');
-      // Chosen is what the eye sees: the tinted label.
+
       const tinted = flattenStyle(option.findAllByType(Text)[0].props.style).color === '#3b82f6';
       expect(option.props.accessibilityState).toEqual({ selected: tinted });
     }

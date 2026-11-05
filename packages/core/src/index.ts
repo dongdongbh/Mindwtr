@@ -1,17 +1,5 @@
-// packages/core barrel: every module in this package is re-exported here with `export *`,
-// uniformly, so that anything published from a `.ts` file under src/ is reachable both as a
-// named import from '@mindwtr/core' and as '@mindwtr/core/<module>'.
-//
-// Mobile's Metro resolver collapses EVERY '@mindwtr/core/<module>' subpath onto this file and
-// ignores package.json "exports" entirely (see apps/mobile/metro.config.js). A module that
-// isn't re-exported here is `undefined` at runtime on a real device even though vitest (Node
-// resolution, which does honour package.json exports) resolves it fine and every test passes.
-// The uniform `export *` convention below exists specifically to make that bug class impossible:
-// a module reachable from src/ is barrel-reachable by construction. Guarded by
-// index-exports.test.ts.
-//
-// One deliberate exception: toStableSyncJson is also exported under its old alias
-// toStableJson. This preserves the public name without duplicating its implementation.
+
+
 
 export * from './types';
 export * from './task-icon-badge';
@@ -83,7 +71,7 @@ export * from './timeline-date-edit';
 export * from './sync-normalization';
 export * from './sync-document';
 export * from './sync-helpers';
-export { toStableSyncJson as toStableJson } from './sync-helpers'; // preserved alias; the plain name is also re-exported via `export *` above
+export { toStableSyncJson as toStableJson } from './sync-helpers';
 export * from './sync-log-utils';
 export * from './sync-client-helpers';
 export * from './sync-runtime-utils';
@@ -93,6 +81,7 @@ export * from './sync-configuration-transaction';
 export * from './sync-service-utils';
 export * from './sync-run';
 export * from './sync-run-ports';
+export * from './unreachable-attachments';
 export * from './sync-payload-trace';
 export * from './sync-backend-io';
 export * from './sync-fast-sync';
@@ -110,6 +99,7 @@ export * from './sync-encryption-local-state';
 export * from './sync-encryption-service';
 export * from './mobile-sync-utils';
 export * from './mobile-sync-service';
+export * from './manual-pull-sync';
 export * from './mobile-background-sync';
 export * from './mobile-sync-triggers';
 export * from './mobile-reminder-alarms';
@@ -172,6 +162,7 @@ export * from './project-row-meta';
 export * from './project-task-list-model';
 export * from './project-task-reorder';
 export * from './task-row-meta';
+export * from './task-row-swipe-actions';
 export * from './list-filter-state';
 export * from './list-count';
 export * from './menu-views-model';
@@ -208,7 +199,7 @@ export * from './gmail-receipt-store';
 export * from './quick-add';
 export * from './area-filter';
 export * from './area-utils';
-export { areaOrderIdsForIntent, type AreaOrderIntent } from './area-ordering';
+export { areaOrderIdsForIntent, sortAreasForOrderDisplay, type AreaOrderIntent } from './area-ordering';
 export { countLiveProjectsByArea } from './area-project-usage';
 export * from './calendar-scheduling';
 export * from './calendar-push-run';
@@ -222,6 +213,7 @@ export * from './digest-utils';
 export * from './search';
 export * from './search-highlight';
 export * from './saved-filters';
+export * from './sqlite-copy-repair';
 export * from './saved-filter-labels';
 export * from './hierarchy-utils';
 export * from './markdown';
@@ -298,6 +290,7 @@ export * from './focus-widget-selection';
 export * from './context-color';
 export * from './capture';
 export * from './capture-session';
+export * from './quick-capture-audio';
 export * from './quick-capture-model';
 export * from './apple-reminders-import-model';
 export * from './capture-deeplink';
@@ -335,6 +328,7 @@ export * from './widget-lists';
 export * from './widget-payload';
 export * from './widget-list-destination';
 export * from './startup-prompts';
+export * from './startup-prompt-run';
 export * from './area-sync-schema';
 export * from './person-sync-schema';
 export * from './import-source-reader';
@@ -343,11 +337,14 @@ export * from './task-recurrence-fields';
 export * from './task-editor-layout';
 export * from './task-editor-model';
 export * from './task-checklist-model';
+export * from './task-checklist-move';
 export * from './task-view-model';
 export * from './task-editor-schedule';
 export * from './shared-api-write-limits';
 export * from './task-query';
 export * from './onboarding-guidance';
+export * from './first-run-onboarding';
+export * from './mobile-startup-prompts';
 export * from './docs-guidance';
 export { afterPaint } from './after-paint';
 export { isGettingStartedProject } from './getting-started-seed';
@@ -434,6 +431,7 @@ export type { NativeInboxOrganizeDestinationCreateRequest, NativeInboxOrganizeDe
     NativeInboxOrganizeDestinationCreatePreparation } from './native-host-contract-inbox-organize-create';
 
 export { getSavedTaxonomyTokens, normalizeTaxonomyToken, isTaxonomyCatalog, mergeTaxonomyCatalog } from './taxonomy-catalog';
+export { CONTEXTS_FILTER_STATUSES, buildContextsFilterModel, getContextsSaveCriteria, selectContextsFilterTasks } from './contexts-filter';
 
 export { createNativeAITextConfigurationMethods, nativeAITextConfigurationWitness, readNativeAITextConfigurationRequest,
     buildNativeAITextConfigurationOptions, planNativeAITextConfigurationChange } from './native-ai-text-configuration';
@@ -446,7 +444,6 @@ export { nativeAITextConfigurationWitnessV2, readNativeAITextConfigurationReques
 export type { AITextConfigurationChangeV2, AITextConfigurationWitnessV2, AITextConfigurationRequestV2, AITextConfigurationResultV2,
     AITextConfigurationOptionsV2, PreparedAITextConfigurationV2 } from './native-ai-text-configuration';
 
-export * from './quick-capture-audio';
 export * from './native-voice';
 
 export * from './native-widget-completion';
@@ -467,11 +464,9 @@ export type { NativeRowTaskDatesRequest, NativePreparedRowTaskDates, NativeRowTa
 export type { NativeRowTaskDestinationRequest, NativePreparedRowTaskDestination, NativeRowTaskDestinationEnvelope, NativeRowTaskDestinationOptionsInput, NativeRowTaskDestinationOptions } from './native-host-contract-task-checklist';
 export type { NativeRowTaskBackdateRequest, NativePreparedRowTaskBackdate, NativeRowTaskBackdateEnvelope } from './native-host-contract-task-checklist';
 
-export { canMoveTaskToChecklist, isChecklistMoveTarget, getChecklistMoveTargets, checklistItemIdForMovedTask } from './task-checklist-move';
 export type { NativeTaskChecklistMoveRequest, NativeTaskChecklistMoveUndoRequest, NativePreparedTaskChecklistMove,
     NativeTaskChecklistMoveEnvelope, NativePreparedTaskChecklistMoveUndo, NativeTaskChecklistMoveUndoEnvelope,
     NativeTaskChecklistMoveOptionsInput, NativeTaskChecklistMoveOptions } from './native-host-contract-task-checklist-move';
 
-export * from './task-row-swipe-actions';
 export type { NativeTaskRowSwipeActionsInput } from './native-host-contract-row-swipe';
 export type { NativeRowTaskFocusRequest, NativeRowTaskFocusResult, NativePreparedRowTaskFocus, NativeRowTaskFocusEnvelope, NativeRowTaskFocusPreparation } from './native-host-contract-task-checklist';

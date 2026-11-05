@@ -1,17 +1,11 @@
-/**
- * Test support only (imported by the selection-mode tests; not exported).
- * Replays the frozen React Native selection-mode scenarios
- * (task-list-bulk-actions-parity.fixtures.json, captured by
- * apps/mobile/components/task-list/bulk-actions-parity.test.tsx) through core:
- * either core's functions directly, or the native host contract. A replay keeps
- * what React state keeps on mobile (the selection, the open dialog, the draft) and
- * records the same observation the mobile harness records.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { collectBulkTaskTokens } from './bulk-task-tokens';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import type { NativeBulkList } from './native-host-contract-bulk-actions';
-import { compareProjectsByPickerOrder } from './project-utils';
+import { sortProjectsForPicker } from './project-utils';
 import { updateRangeSelection } from './range-selection';
 import { getSomedaySectionMoveSelection } from './someday-sections-model';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -72,10 +66,7 @@ type StoreState = ReturnType<typeof useTaskStore.getState>;
 type RealActions = Pick<StoreState, 'batchMoveTasks' | 'batchDeleteTasks' | 'batchUpdateTasks' | 'restoreTask' | 'updateTask' | 'deleteTask'>;
 let realActions: RealActions | null = null;
 
-/**
- * Seeds the store as the mobile harness does, with its store calls recorded in
- * `log`. `saveData` can fail a save.
- */
+
 export async function seedBulkActionsStore(fixture: BulkActionsFixture, log: unknown[], saveData?: (data: unknown) => Promise<void>) {
     await flushPendingSave();
     resetForTests();
@@ -133,13 +124,13 @@ export async function openBulkActionsHost() {
 export type BulkActionsHost = Awaited<ReturnType<typeof openBulkActionsHost>>;
 
 let requestCount = 0;
-/** A fresh request UUID. */
+
 export const requestId = () => `00000000-0000-4000-8000-${String(++requestCount).padStart(12, '0')}`;
 
 type Row = { id: string; readOnly: boolean };
 const DATE_FIELDS: Record<FixtureDateField, BulkOrganizeDateField> = { start: 'startDate', due: 'dueDate', review: 'reviewDate' };
 
-/** The list's rows as its view returns them (the list views have their own parity fixtures). */
+
 function readRows(host: BulkActionsHost, list: TaskListBulkScreen, params: Record<string, unknown>): Row[] {
     const window = { offset: 0, limit: 100 };
     const task = (items: { type: string; row?: { id: string; readOnly?: boolean } }[]) => items
@@ -158,12 +149,12 @@ function readRows(host: BulkActionsHost, list: TaskListBulkScreen, params: Recor
     }
 }
 
-/** What React state holds on mobile while a list is in selection mode. */
+
 type HostState = {
     list: TaskListBulkScreen;
     params: Record<string, unknown>;
     selectionMode: boolean;
-    /** Tap order. */
+
     selected: string[];
     anchorId: string | null;
     rangeSelectMode: boolean;
@@ -182,20 +173,20 @@ type OrganizeShown = {
     picker: { projects: string[]; leading: [string, boolean][]; selectedId: string | null | undefined } | null;
 };
 
-/** How a replay reads the bar and dialogs and makes each write: core's functions, or the contract. */
+
 export type BulkDriver = {
     bar(state: HostState, rows: Row[]): TaskListBulkBarModel;
     removeTokens(state: HostState): string[];
     deleteConfirmation(state: HostState): ReturnType<typeof getBulkTrashConfirmation>;
     organize(state: HostState): OrganizeShown;
-    /** A row tap: the new selection and anchor. */
+
     toggle(state: HostState, rows: Row[], taskId: string): { selected: string[]; anchorId: string | null };
-    /** A draft edit, as the dialog's control sends it. */
+
     edit(state: HostState, edit: BulkOrganizeDraftEdit): BulkOrganizeDraft;
-    /** A quick date chip's edit. */
+
     quickDate(state: HostState, field: BulkOrganizeDateField, preset: 'today' | 'tomorrow'): BulkOrganizeDraftEdit;
     sectionMove(state: HostState): { selectedId: string | null; selectionMixed: boolean };
-    /** A bulk action; `changed` leaves selection mode. */
+
     run(state: HostState, action: DriverAction): Promise<{ changed: boolean; toast: unknown[] | null; undo: (() => Promise<void>) | null }>;
 };
 type DriverAction =
@@ -258,7 +249,7 @@ export function createCoreDriver(t: (key: string) => string): BulkDriver {
                 dates: dialog.dates.map(({ field, label }) => ({ field, model: buildBulkOrganizeDateFieldModel({ label, value: draft[field], now, t }) })),
                 picker: picker === 'project'
                     ? {
-                        projects: [...projects].sort(compareProjectsByPickerOrder).map((project) => project.id),
+                        projects: sortProjectsForPicker(projects, store().areas).map((project) => project.id),
                         leading: [[dialog.project.keepLabel, draft.projectChoice === BULK_ORGANIZE_KEEP]],
                         selectedId: draft.projectChoice === BULK_ORGANIZE_NONE ? null : dialog.project.selectedId,
                     }
@@ -357,7 +348,7 @@ export function createContractDriver(host: BulkActionsHost): BulkDriver {
             return { selectedId: chosen?.sectionId ?? null, selectionMixed: !chosen };
         },
         run: async (state, action) => {
-            // The selection with each row's revision, as the view shows them.
+
             const target = { taskIds: state.selected, taskRevisions: view(state).taskRevisions };
             switch (action.type) {
                 case 'move': return run(state, { type: 'moveTasks', status: action.status, ...target });
@@ -369,7 +360,7 @@ export function createContractDriver(host: BulkActionsHost): BulkDriver {
     };
 }
 
-/** Every task the store changed since the last call: [id, { field: [before, after] }], as the mobile harness records it. */
+
 function createChangeTracker() {
     const snapshot = () => new Map(useTaskStore.getState()._allTasks.map((entry) => [entry.id, JSON.stringify(normalize(entry))]));
     let last = snapshot();
@@ -392,7 +383,7 @@ function createChangeTracker() {
     };
 }
 
-/** Replays one scenario and returns the observations the mobile harness records. */
+
 export async function replayBulkScenario(
     fixture: BulkActionsFixture,
     scenario: BulkScenario,
@@ -410,7 +401,7 @@ export async function replayBulkScenario(
         tagInput: null, removePickerOpen: false, sectionPickerOpen: false, organize: null, alerts: [], toasts: [], undo: null,
     };
     const rows = () => readRows(host, state.list, state.params);
-    // Mobile drops selected rows that leave the screen.
+
     const prune = () => {
         const onScreen = new Set(rows().map((row) => row.id));
         state.selected = state.selected.filter((id) => onScreen.has(id));
@@ -467,7 +458,7 @@ export async function replayBulkScenario(
                 errors: showValidation ? [dialog.validationMessage] : [],
                 cancel: [dialog.cancelLabel, false],
                 apply: [dialog.applyLabel, state.selected.length === 0],
-                // allProjects and allowCreate are the mobile picker's own props: the store's projects, and creation on.
+
                 projectPicker: projectPicker ? {
                     projects: projectPicker.projects,
                     allProjects: useTaskStore.getState().projects.map((project) => project.id),
@@ -636,7 +627,7 @@ export async function replayBulkScenario(
                         state.organize!.datePicker = DATE_FIELDS[extra as FixtureDateField];
                         break;
                     case 'pickDate':
-                        // The picked local day; the Android picker closes once a day is picked.
+
                         editDraft({ type: 'setText', field: DATE_FIELDS[extra as FixtureDateField], value: (action as unknown[])[3] as string });
                         state.organize!.datePicker = null;
                         break;

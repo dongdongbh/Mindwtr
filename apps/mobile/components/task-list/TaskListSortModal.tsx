@@ -12,6 +12,8 @@ type ThemeColors = {
 };
 
 type TaskListSortModalProps = {
+
+  inheritOption?: { label: string; selected: boolean; onSelect: () => void };
   onClose: () => void;
   onSelect: (option: TaskSortBy) => void;
   sortBy: TaskSortBy;
@@ -22,6 +24,7 @@ type TaskListSortModalProps = {
 };
 
 export function TaskListSortModal({
+  inheritOption,
   onClose,
   onSelect,
   sortBy,
@@ -30,10 +33,8 @@ export function TaskListSortModal({
   themeColors,
   visible,
 }: TaskListSortModalProps) {
-  // Gated here rather than at each caller (task lists, Contexts, project detail) so
-  // a new caller cannot leak a disabled feature's sort. Callers pass the resolved
-  // sort ('timeEstimate' and 'priority' read as 'default' while their feature is
-  // off), so dropping the option can never hide the row that is selected (#1107).
+
+
   const features = useTaskStore((state) => state.settings?.features);
   const visibleSortOptions = getVisibleTaskSortOptions(sortOptions, { features });
   return (
@@ -47,6 +48,20 @@ export function TaskListSortModal({
         <View style={[styles.modalCard, { backgroundColor: themeColors.cardBg }]}>
           <Text style={[styles.modalTitle, { color: themeColors.text }]}>{t('sort.label')}</Text>
           <View style={styles.sortList}>
+            {inheritOption ? (
+              <Pressable
+                onPress={inheritOption.onSelect}
+                testID="sort-option-inherit"
+                style={[
+                  styles.sortItem,
+                  inheritOption.selected && { backgroundColor: themeColors.filterBg },
+                ]}
+              >
+                <Text style={[styles.sortItemText, { color: themeColors.text }]}>
+                  {inheritOption.label}
+                </Text>
+              </Pressable>
+            ) : null}
             {visibleSortOptions.map((option) => (
               <Pressable
                 key={option}
@@ -54,7 +69,7 @@ export function TaskListSortModal({
                 testID={`sort-option-${option}`}
                 style={[
                   styles.sortItem,
-                  option === sortBy && { backgroundColor: themeColors.filterBg },
+                  !inheritOption?.selected && option === sortBy && { backgroundColor: themeColors.filterBg },
                 ]}
               >
                 <Text style={[styles.sortItemText, { color: themeColors.text }]}>

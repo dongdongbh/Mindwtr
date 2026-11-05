@@ -76,7 +76,7 @@
     },
     "result": {
       "title": "Import complete",
-      "message": "Imported 12 tasks into 3 project(s).\n4 subtask(s) became checklist items.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json.\n\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes."
+      "message": "Imported 12 tasks into 3 project(s).\n4 subtask(s) became checklist items.\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json."
     }
   },
   "handleImportTickTick:rich": {
@@ -86,7 +86,7 @@
     },
     "result": {
       "title": "Import complete",
-      "message": "Imported 12 task(s), 3 project(s), and 1 area(s).\n4 checklist item(s) were preserved.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json.\n\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes."
+      "message": "Imported 12 task(s), 3 project(s), and 1 area(s).\n4 checklist item(s) were preserved.\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json."
     }
   },
   "handleImportDgt:rich": {
@@ -96,7 +96,7 @@
     },
     "result": {
       "title": "Import complete",
-      "message": "Imported 12 task(s), 3 project(s), and 1 area(s).\n4 checklist item(s) were preserved.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json.\n\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes."
+      "message": "Imported 12 task(s), 3 project(s), and 1 area(s).\n4 checklist item(s) were preserved.\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json."
     }
   },
   "handleImportOmniFocus:rich": {
@@ -106,7 +106,7 @@
     },
     "result": {
       "title": "Import complete",
-      "message": "Imported 12 task(s) and 3 project(s).\n1 area(s) were created from OmniFocus folders.\n4 nested task(s) became checklist items.\n5 task(s) stayed outside projects.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json.\n\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes."
+      "message": "Imported 12 task(s) and 3 project(s).\n1 area(s) were created from OmniFocus folders.\n4 nested task(s) became checklist items.\n5 task(s) stayed outside projects.\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json."
     }
   },
   "handleImportMindwtrCsv:rich": {
@@ -116,7 +116,7 @@
     },
     "result": {
       "title": "Import complete",
-      "message": "Imported 12 task(s), 3 project(s), 2 section(s), and 1 area(s).\n4 checklist item(s) were preserved.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json.\n\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes."
+      "message": "Imported 12 task(s), 3 project(s), 2 section(s), and 1 area(s).\n4 checklist item(s) were preserved.\n1 imported record(s) needed an adjustment. Review the imported data.\n1 unsupported repeat rule(s) were kept as notes.\nRecovery snapshot saved as data.2026-08-13T10-00-00.000.snapshot.json."
     }
   },
   "restore:rich": {

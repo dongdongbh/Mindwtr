@@ -51,8 +51,7 @@
 }
 @end
 
-// Called on Rust's blocking pool, never the UI/runtime thread. NULL means the native add
-// completed successfully; an allocated error string belongs to the Rust caller.
+
 char *mindwtr_macos_send_replacing_notification(const char *title, const char *body, const char *identifier) {
     if (title == NULL || identifier == NULL || [NSThread isMainThread]) {
         return strdup("Invalid notification call");
@@ -72,7 +71,7 @@ char *mindwtr_macos_send_replacing_notification(const char *title, const char *b
         @try {
             center = [UNUserNotificationCenter currentNotificationCenter];
         } @catch (NSException *exception) {
-            // An unbundled `tauri dev` executable has no notification-center identity.
+
             return strdup("The notification center needs an app bundle");
         }
         if (center == nil) {
@@ -85,7 +84,7 @@ char *mindwtr_macos_send_replacing_notification(const char *title, const char *b
             delegate = [[MindwtrReplacingNotificationDelegate alloc] init];
             sendLock = [[NSLock alloc] init];
         });
-        // ponytail: serialize sends globally; per-tag locks only if reminder throughput matters.
+
         [sendLock lock];
         dispatch_sync(dispatch_get_main_queue(), ^{
             if (center.delegate != delegate) {
@@ -94,7 +93,7 @@ char *mindwtr_macos_send_replacing_notification(const char *title, const char *b
             }
         });
 
-        // The desktop plugin reports Granted without checking macOS authorization.
+
         dispatch_semaphore_t finished = dispatch_semaphore_create(0);
         __block BOOL granted = NO;
         __block NSError *nativeError = nil;
@@ -118,7 +117,7 @@ char *mindwtr_macos_send_replacing_notification(const char *title, const char *b
         content.sound = [UNNotificationSound defaultSound];
         content.userInfo = @{@"mindwtrReplacingReminder": @YES};
         UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:tag content:content trigger:nil];
-        // Remove only this task's delivered reminder so the replacement alerts again.
+
         [center removeDeliveredNotificationsWithIdentifiers:@[tag]];
         [center addNotificationRequest:request withCompletionHandler:^(NSError *error) {
             nativeError = error;
@@ -127,7 +126,7 @@ char *mindwtr_macos_send_replacing_notification(const char *title, const char *b
         dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
         [sendLock unlock];
         if (nativeError != nil) {
-            // Include the native code, never payload text or localized descriptions.
+
             return strdup([[NSString stringWithFormat:@"Notification delivery failed (code %ld)",
                             (long)nativeError.code] UTF8String]);
         }

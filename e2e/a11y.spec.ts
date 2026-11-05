@@ -5,14 +5,10 @@ import { dismissOnboarding, localDateKey, seedAppData, seedTheme } from './seed'
 
 const axeSource = readFileSync('node_modules/axe-core/axe.min.js', 'utf8');
 
-// Read off core's registry rather than hand-listed, so an eleventh AppTheme is
-// gated the day it is added. `system` is excluded because it renders as one of
-// these; `material3-*` ship no desktop CSS and collapse to plain light/dark
-// (apps/desktop/src/lib/theme.ts), which is itself worth measuring.
+
 const THEMES = Object.keys(THEME_DESCRIPTORS);
 
-// Enough content for the status, project and focus colors to render on all
-// three screens, and small enough to keep each theme's walk short.
+
 const FIXTURE = {
     projects: [{ id: 'a11y-project', title: 'Contrast Fixture' }],
     tasks: [
@@ -28,19 +24,9 @@ type ContrastViolation = {
     detail: string;
 };
 
-/**
- * Contrast failures that already existed when this gate was widened over every
- * theme and onto Settings and the Daily Review (2026-09-04).
- *
- * The key is `theme | rule | foreground on background`, NOT the DOM selector
- * axe reports: the debt is a color token, one token shows up under a dozen
- * class-chain selectors that change with any unrelated markup edit, and one
- * token fix clears every node at once. The list may only shrink — fix the
- * token, delete the line. The stale-entry test below fails on an entry that no
- * longer fires, so a fix cannot quietly leave the door open again.
- */
+
 const KNOWN_CONTRAST_VIOLATIONS = new Set<string>([
-    // Status chips: the status hue on its own 14% tint, just under 4.5:1.
+
     'light | color-contrast | #228145 on #e0ede5',
     'material3-light | color-contrast | #228145 on #e0ede5',
     'nord | color-contrast | #77c591 on #3f4f55',
@@ -52,10 +38,10 @@ const KNOWN_CONTRAST_VIOLATIONS = new Set<string>([
     'sepia | color-contrast | #886134 on #e9dec8',
     'catppuccin-macchiato | color-contrast | #a5adcb on #494d64',
     'dracula | color-contrast | #bd93f9 on #3b3c4f',
-    // Metadata info badge: the amber status hue on the plain muted surface.
+
     'light | color-contrast | #9d6607 on #f1f5f9',
     'material3-light | color-contrast | #9d6607 on #f1f5f9',
-    // Settings onboarding hint: primary text on the primary 10% tint.
+
     'light | color-contrast | #0b64f4 on #e7f0fe',
     'material3-light | color-contrast | #0b64f4 on #e7f0fe',
 ]);
@@ -116,10 +102,10 @@ const openDailyReview = async (page: Page) => {
 
 for (const theme of THEMES) {
     test(`no color contrast violations in the ${theme} theme`, async ({ page }) => {
-        // Three screens and three axe passes in one browser context: past the
-        // default per-test budget, well inside the job's.
+
+
         test.slow();
-        // This adaptive mode uses the light palette here; OLED is checked separately.
+
         if (theme === 'system-oled') await page.emulateMedia({ colorScheme: 'light' });
         const contrastTheme = theme === 'system-oled' ? 'light' : theme;
         await dismissOnboarding(page);
@@ -129,12 +115,12 @@ for (const theme of THEMES) {
         const found: ContrastViolation[] = [];
 
         await page.goto('/');
-        // CI can still be loading the app's modules after the document load.
+
         await page.locator('#main-content').waitFor({ state: 'visible', timeout: 15_000 });
         await expect(page.locator('[data-sidebar-item][data-view="agenda"]')).toBeVisible();
         found.push(...await runAxeContrast(page, contrastTheme, 'focus'));
 
-        // Settings is code-split, so wait for its own heading, not the shell.
+
         await page.goto('/?view=settings');
         await page.locator('#main-content').waitFor({ state: 'visible', timeout: 15_000 });
         await expect(page.getByRole('heading', { name: 'General', level: 2 })).toBeVisible();
@@ -152,11 +138,7 @@ for (const theme of THEMES) {
     });
 }
 
-// Without this the allowlist rots: an entry left behind after its token is fixed
-// quietly re-opens the door for that contrast failure to come back. It reads what
-// the theme tests above recorded, which needs them in this worker — the default
-// (`fullyParallel` off) keeps one file on one worker; turning that on would make
-// this fail loudly rather than pass on nothing.
+
 test('keeps no stale entries in the known contrast violations', () => {
     expect([...KNOWN_CONTRAST_VIOLATIONS].filter((key) => !seenViolationKeys.has(key))).toEqual([]);
 });

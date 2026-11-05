@@ -152,7 +152,7 @@ final class NativeAttachmentFileJobsTests: XCTestCase {
         _ = try submit(request); _ = try submit(request); jobs.drain()
         XCTAssertThrowsError(try submit(request))
         XCTAssertEqual(try object(jobs.next())["body"] as? Bool, true)
-        XCTAssertEqual(jobs.next(), "") // pending body cannot be silently discarded
+        XCTAssertEqual(jobs.next(), "")
         XCTAssertThrowsError(try submit(request))
         XCTAssertEqual(Data(base64Encoded: jobs.body()), Data([7]))
         _ = try submit(request)

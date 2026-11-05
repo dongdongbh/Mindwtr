@@ -209,7 +209,7 @@ describe('selected metadata-only Task availability proof', () => {
         before.raw.note = '"'.repeat(490_000);
         const escaped = JSON.stringify(before);
         expect(Buffer.byteLength(escaped)).toBeLessThan(1_000_000);
-        // Each embedded payload is escaped again in the frozen operation.
+
         expect(Buffer.byteLength(JSON.stringify({ beforePayloadJSON: escaped, afterPayloadJSON: escaped }))).toBeGreaterThan(2 * 1024 * 1024);
         expect(() => prepareNativeAttachmentDraftAvailability({ ...captured, beforePayloadJSON: escaped })).toThrow('INVALID_INPUT');
     });

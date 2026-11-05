@@ -1,15 +1,6 @@
 import { Dimensions } from 'react-native';
 
-/**
- * Resolve the on-screen keyboard frame from an Android keyboard event.
- *
- * Transparent React Native modals run in their own Android window that does not
- * resize for the soft keyboard, so screens that float content above the keyboard
- * have to measure the inset themselves. Custom keyboard heights (one-handed,
- * floating, third-party keyboards) report inconsistent `screenY`/`height`
- * values, so we derive the inset from whichever measure is largest and fall back
- * gracefully when a field is missing.
- */
+
 export function getAndroidKeyboardFrame(event: {
   endCoordinates?: { screenY?: number; height?: number };
 }) {

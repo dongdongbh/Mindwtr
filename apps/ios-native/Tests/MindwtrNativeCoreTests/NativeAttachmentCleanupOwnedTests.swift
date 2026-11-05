@@ -163,8 +163,8 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             await assertFailure { try await value.retireAttachmentCleanup(input) }; await value.close()
             let frozen = try Data(contentsOf: journal), counter = CleanupOwnedJobs(), hooks = NativeAttachmentHostHooks()
             hooks.configureJobs = { jobs in counter.set(jobs); jobs.beforeWork = { _, _ in counter.record() } }
-            // A recreated generation appearing after a terminal must never be
-            // captured or unlinked by terminal recovery.
+
+
             let terminal = ["afterTerminal", "beforeClear"].contains(boundary)
             if terminal { try bytes.write(to: target) }
             let cold = core(); try await cold.configureAttachmentHost(hooks); _ = try await cold.start()
@@ -226,9 +226,8 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             XCTAssertNil(try object(String(decoding: Data(contentsOf: parked), as: UTF8.self))["terminal"])
             XCTAssertEqual(try markers().count, 0)
             await assertFailure { try await value.retireAttachmentCleanup(input) }
-            // Teardown releases the uncertain transaction. Restore the parked
-            // fixture before cold load, which validates its current journal
-            // binding; inode identity is captured per runtime, not persisted.
+
+
             await value.close()
             try FileManager.default.removeItem(at: journal)
             try FileManager.default.moveItem(at: parked, to: journal)
@@ -297,8 +296,8 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
                 else if target.path.hasPrefix("/var/") { aliasPath = "/private" + target.path }
                 else { aliasPath = target.path }
                 let alias = URL(fileURLWithPath: aliasPath)
-                // An actual iPhone has distinct /var and /private/var spellings;
-                // the Mac fixture can use its one ordinary spelling.
+
+
                 XCTAssertEqual(try Data(contentsOf: alias), bytes)
                 var a = stat(), b = stat()
                 XCTAssertEqual(Darwin.lstat(target.path, &a), 0); XCTAssertEqual(Darwin.lstat(alias.path, &b), 0)
@@ -380,9 +379,8 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             outer["argumentsJSON"] = innerJSON
             var changed = try json(outer)
             if invalid == "duplicateField" || invalid == "escapedOuterField" {
-                // Foundation intentionally tolerates duplicates. The fixture
-                // adds the same decoded key/value; only cleanup's raw checker
-                // must reject it, not an unknown-field or semantic mismatch.
+
+
                 let key = invalid == "duplicateField" ? "version" : "\\u0076ersion"
                 changed = "{\"" + key + "\":2," + String(changed.dropFirst())
                 XCTAssertEqual(try object(changed)["version"] as? Int, 2)
@@ -415,8 +413,8 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             if invalid == "blob" { _ = try sql.execute("UPDATE tasks SET attachments=x'5B5D' WHERE id=?", parametersJSON: json([taskID])) }
             else {
                 var large = attachment(); large["padding"] = String(repeating: "x", count: 8 * 1024 * 1024 + 1)
-                // Valid JSON passes the real schema trigger, then the native
-                // aggregate byte prepass must refuse before materialization.
+
+
                 _ = try sql.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json([try json([large]), taskID]))
             }
             sql.close(); let before = try rows(), input = try request()
@@ -472,8 +470,8 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
             let closeStarted = expectation(description: "Close entered")
             let closing = Task { closeStarted.fulfill(); await value.close() }
             await fulfillment(of: [closeStarted], timeout: 2)
-            // close cancels the registry before enqueueing shutdown. Give the
-            // already-running close task its synchronous entry before releasing IO.
+
+
             try await Task.sleep(nanoseconds: 100_000_000)
             release.signal(); await assertFailure { try await operation.value }; await closing.value
             XCTAssertEqual(capture.jobs?.counters.jobs, 0)
@@ -564,7 +562,7 @@ final class NativeAttachmentCleanupOwnedTests: XCTestCase {
         let sql = try SQLiteBridge(url: database)
         _ = try sql.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json(["[" + selected + "]", taskID])); sql.close()
         let before = try rows(), input = try request()
-        // Public request duplicate refusal also grants no original proof.
+
         await assertFailure { try await value.retireAttachmentCleanup("{\"version\":1," + String(input.dropFirst())) }
         XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         try assertReply(await value.retireAttachmentCleanup(input), request: input, outcome: "removed")

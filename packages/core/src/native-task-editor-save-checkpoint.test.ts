@@ -78,7 +78,7 @@ describe('real native ordinary Save checkpoint correspondence (pure, unbound)', 
         const { input } = fixture(); const original = JSON.stringify(input);
         ready(input); expect(JSON.stringify(input)).toBe(original);
         changePayload(input, (payload) => { payload.tab = 'view'; }); ready(input);
-        // Correspondence is deliberately not a URI/library/workspace ownership check.
+
         changePayload(input, (payload) => { payload.attachments[0].uri = 'file:///elsewhere/file.pdf'; });
         (input.saveRequest as { attachments: { value: Attachment[] } }).attachments.value[0].uri = 'file:///elsewhere/file.pdf'; ready(input);
     });

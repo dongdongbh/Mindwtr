@@ -1,4 +1,4 @@
-import * as chrono from 'chrono-node';
+import type * as chrono from 'chrono-node';
 import { format, isValid, set } from 'date-fns';
 import type { Area, AppSettings, Attachment, Person, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } from './types';
 import { resolveFeatureFlags } from './resolve-feature-flags';
@@ -6,17 +6,14 @@ import { generateUUID } from './uuid';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeLinkAttachmentInput } from './attachment-link-utils';
 import { getActiveLanguage, getMonthNamesForLanguage, isActiveDateFormatDayFirst, normalizeClockTimeInput } from './date';
+import { chronoLocale } from './quick-add-chrono';
 import type { Language } from './i18n/i18n-types';
 import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
 import { getPersonOptionNames } from './people';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { minutesToTimeEstimate, parseTimeEstimateInput } from './calendar-scheduling';
 
-// The live capture preview rides this module's barrel line
-// (`export * from './quick-add'`) rather than its own: Metro collapses subpath
-// imports, so anything the mobile app imports has to reach it through the core
-// index, and index.ts is not this feature's to edit. The logic itself stays in
-// its own file — nothing here parses or formats for display.
+
 export {
     buildQuickAddPreviewEntries,
     type QuickAddPreviewEntry,
@@ -44,35 +41,28 @@ export interface QuickAddParseOptions {
     knownTags?: readonly string[];
     knownPeople?: readonly string[];
     defaultScheduleTime?: string | null;
-    // When true, keep the user's text exactly as entered: recognized metadata
-    // (dates, tags, contexts, ...) is still detected and applied, but never
-    // stripped out of the title. Default strips recognized tokens. See #742.
+
+
     preserveText?: boolean;
-    // When false, skip detection of BARE natural-language dates ("next week")
-    // in the title entirely — the phrase stays as literal title text, never
-    // applied as a date. Explicit syntax (/due:, /start:, /review:, including
-    // natural-language values like "/due:next week") always keeps parsing
-    // regardless of this option. Default true = current detection behavior.
-    // See #742 (2026-07-16 comment).
+
+
     naturalLanguageDates?: boolean;
-    // When false, `/priority:` is not parsed at all: the token stays in the
-    // title exactly like an unknown level does, and no priority is applied.
-    // Follows the Priorities feature toggle. Default true. See #1107.
+
+
     parsePriority?: boolean;
-    // When false, `/estimate:` and `/duration:` are not parsed: the token stays
-    // in the title. Follows the Time estimates feature toggle. Default true (#1358).
+
+
     parseTimeEstimate?: boolean;
 }
 
-// Single source of truth for the default-on semantics: only an explicit
-// `false` disables bare natural-language date detection; unset keeps it on.
+
 export function isNaturalLanguageDatesEnabled(
     settings?: { gtd?: { naturalLanguageDates?: boolean } } | null,
 ): boolean {
     return settings?.gtd?.naturalLanguageDates !== false;
 }
 
-/** The settings a capture surface reads to configure quick-add parsing. */
+
 export interface QuickAddParseSettings {
     taxonomy?: AppSettings['taxonomy'];
     quickAddAutoClean?: boolean;
@@ -83,19 +73,14 @@ export interface QuickAddParseSettings {
     features?: AppSettings['features'];
 }
 
-/** Everything the bag is derived from; `useTaskStore.getState()` satisfies it. */
+
 export interface QuickAddParseSource {
     tasks?: Task[];
     _allTasks?: Task[];
     people?: readonly Person[];
 }
 
-/**
- * Assemble the quick-add parse options — the one place capture surfaces get
- * them from. Hand-rolled bags drifted: every field is optional, so a surface
- * that forgot `knownPeople` still compiled and silently captured `%John Smith`
- * as `%John` while the surface next door resolved it to the known person.
- */
+
 export function buildQuickAddParseOptions(
     settings?: QuickAddParseSettings | null,
     source: QuickAddParseSource = {},
@@ -134,16 +119,7 @@ export interface ProjectNextActionParseContext {
     parseOptions?: QuickAddParseOptions;
 }
 
-/**
- * Parse the "What's the next action?" prompt input with the quick-add
- * grammar, so tokens like `/waiting`, `@context`, or `/due:` work there the
- * same way they do in the quick-add box (#859).
- *
- * The prompt is scoped to one project: parsed tokens win over the prompt's
- * defaults, an existing `+project` token may retarget (dropping the prompt's
- * section), but unknown project names never create projects from here — the
- * token is kept as title text instead.
- */
+
 export function parseProjectNextActionInput(
     input: string,
     context: ProjectNextActionParseContext,
@@ -152,8 +128,8 @@ export function parseProjectNextActionInput(
     const parsed = parseQuickAdd(input, projects, now, areas, parseOptions);
     const props: Partial<Task> = { ...parsed.props };
     let title = parsed.title;
-    // Not applied — the prompt never creates projects — so the token goes back
-    // into the title as the text it now is.
+
+
     if (parsed.projectTitle) {
         const token = /\s/.test(parsed.projectTitle) ? `+"${parsed.projectTitle}"` : `+${parsed.projectTitle}`;
         title = `${title} ${token}`.trim();
@@ -177,22 +153,7 @@ export interface ProcessInboxTitleParseContext {
     parseOptions?: QuickAddParseOptions;
 }
 
-/**
- * Parse an Inbox-processing title with the quick-add grammar, so `@context`,
- * `#tag`, `!Area`, `+Project`, `%Person`, `/energy:` and the date commands work
- * while clarifying exactly as they do at capture (#1088). Processing used to
- * run `parseQuickAddDateCommands` alone, which made it the one editable task
- * title in the app with its own smaller grammar.
- *
- * Two rules keep the clarify workflow in charge of the decision it exists to
- * make:
- * - A status token (`/waiting`, `/done`, ...) is consumed and dropped. The
- *   destination the user picks owns the status, so a stale token typed at
- *   capture cannot silently overrule the button they just pressed.
- * - An unknown `+Name` never creates a project. Processing has its own picker
- *   and a "turn this into a project" step, so the token goes back into the
- *   title as the text it now is — same rule as the next-action prompt.
- */
+
 export function parseProcessInboxTitleInput(
     input: string,
     context: ProcessInboxTitleParseContext = {},
@@ -215,8 +176,7 @@ export interface QuickAddDateCommandsResult {
     invalidDateCommands?: string[];
 }
 
-// By design (maintainer, 2026-09-24): a blank line anywhere, a trailing one
-// included, joins the lines into one task (a pasted paragraph).
+
 export function splitQuickAddBulkLines(input: string): string[] {
     const normalized = String(input || '').replace(/\r\n?/g, '\n');
     const lines = normalized
@@ -251,17 +211,14 @@ const PRIORITY_TOKENS: Record<string, TaskPriority> = {
 const ESCAPE_SENTINEL = '__MW_ESC__';
 const QUICK_ADD_ESCAPE_CHARS = new Set(['@', '#', '+', '/', '!', '%']);
 const QUICK_ADD_FOCUS_COMMAND_PATTERN = String.raw`\*(?:\s+focus\b)?`;
-// A command only counts at the start of a word. Applied tokens are now cut
-// from the title whatever `quickAddAutoClean` says, so a substring match
-// would corrupt real text — `https://example.com/next-steps` is a link, not
-// a status.
+
+
 const QUICK_ADD_COMMAND_START = String.raw`(?:^|\s)`;
 const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|priority:|estimate:|duration:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b)|$)`;
 const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|priority:|estimate:|duration:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b))|$)`;
 const SIMPLE_TASK_TOKEN_RE = /[@#][\p{L}\p{N}_-]+/gu;
-// `@person/todd`: simple segments joined by single slashes, read as one token
-// even when no task uses it yet (#1428). A malformed path (`@a/`, `@a//b`)
-// does not match, so it keeps its old reading (`@a` plus title text).
+
+
 const HIERARCHICAL_TASK_TOKEN_RE = /[@#][\p{L}\p{N}_-]+(?:\/[\p{L}\p{N}_-]+)+(?![\p{L}\p{N}_/-])/gu;
 const RICH_TASK_TOKEN_RE = new RegExp(
     String.raw`(?:^|\s)([@#](?![\s\p{L}\p{N}_-])[^@#+/!%]+?)${QUICK_ADD_INLINE_CONTROL_BOUNDARY}`,
@@ -271,11 +228,8 @@ const NATURAL_TIME_HINT_RE = /\b(?:\d{1,2}:\d{2}(?:\s*[ap]m)?|\d{1,2}\s*[ap]m|no
 const PURE_TIME_ONLY_RE = /^(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)$/i;
 const BARE_MONTH_RE = /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)$/i;
 const TRAILING_DATE_SUFFIX_RE = /^[\s).,!?:;'"\]]*$/u;
-// The hyphen is written as \x2D on purpose. `\-` inside a Unicode-mode class is
-// valid ECMAScript, but the QuickJS build embedded by the native Android pilot
-// (wang.harlon.quickjs:wrapper-android 3.2.x) refuses it while reading the file,
-// so the whole core failed to load there. A bare `-` would be wrong here too:
-// `}-–` would then read as a character range.
+
+
 const TRAILING_DATE_SEPARATOR_RE = /[\s,;:()[\]{}\x2D–—]+$/u;
 
 function protectEscapes(input: string): string {
@@ -303,12 +257,7 @@ function restoreEscapes(input: string): string {
 
 type DateDefaultTimeMode = 'now' | 'startOfDay';
 
-// European dot dates are inherently day-first, so they carry none of the
-// mm/dd vs dd/mm ambiguity of slash dates. Requiring the convention's trailing
-// dot ("26.06.") or a four-digit year ("26.06.2026") keeps version strings
-// like "python 3.12" from parsing as dates; a bare "26.06" stays literal text.
-// (No lookbehind — the boundary check runs in extract() — because older
-// WKWebView builds lack lookbehind support.)
+
 const dotDateParser: chrono.Parser = {
     pattern: () => /(\d{1,2})\.(\d{1,2})\.(\d{4})?(?=[\s,;:!?)\]]|$)/,
     extract: (context, match) => {
@@ -324,46 +273,42 @@ const dotDateParser: chrono.Parser = {
     },
 };
 
-const quickAddChrono = chrono.casual.clone();
-quickAddChrono.parsers.push(dotDateParser);
 
-// chrono.en.GB is the casual configuration in little-endian mode, so ambiguous
-// slash dates ("10/8") read day-first. Selected per parse from the active date
-// format so `/due:10/8` means August 10 under a d/m/y setting (#1006).
-const quickAddChronoDayFirst = chrono.en.GB.clone();
-quickAddChronoDayFirst.parsers.push(dotDateParser);
+let quickAddChrono: chrono.Chrono | null = null;
+let quickAddChronoDayFirst: chrono.Chrono | null = null;
+const withDotDates = (instance: chrono.Chrono): chrono.Chrono => {
+    instance.parsers.push(dotDateParser);
+    return instance;
+};
 
-const getQuickAddChrono = (): chrono.Chrono => (
-    isActiveDateFormatDayFirst() ? quickAddChronoDayFirst : quickAddChrono
-);
+const getQuickAddChrono = (): chrono.Chrono => (isActiveDateFormatDayFirst()
+    ? quickAddChronoDayFirst ??= withDotDates(chronoLocale.en().GB.clone())
+    : quickAddChrono ??= withDotDates(chronoLocale.en().casual.clone()));
 
-// chrono-node locale parsers for the app languages it natively supports
-// (#1059). Every other app language (en, and any without a chrono locale)
-// keeps today's English-only behavior via the fallback in parseNaturalDate /
-// detectTrailingDate below.
+
 type LocaleChronoLanguage = 'de' | 'es' | 'fr' | 'it' | 'ja' | 'nl' | 'pt' | 'ru' | 'sv' | 'zh' | 'zh-Hant';
 const LOCALE_CHRONO_FACTORY: Record<LocaleChronoLanguage, () => chrono.Chrono> = {
-    de: () => chrono.de.casual.clone(),
-    es: () => chrono.es.casual.clone(),
-    fr: () => chrono.fr.casual.clone(),
-    it: () => chrono.it.casual.clone(),
-    ja: () => chrono.ja.casual.clone(),
-    nl: () => chrono.nl.casual.clone(),
-    pt: () => chrono.pt.casual.clone(),
-    ru: () => chrono.ru.casual.clone(),
-    sv: () => chrono.sv.casual.clone(),
-    zh: () => chrono.zh.hans.casual.clone(),
-    'zh-Hant': () => chrono.zh.hant.casual.clone(),
+    de: () => chronoLocale.de().casual.clone(),
+    es: () => chronoLocale.es().casual.clone(),
+    fr: () => chronoLocale.fr().casual.clone(),
+    it: () => chronoLocale.it().casual.clone(),
+    ja: () => chronoLocale.ja().casual.clone(),
+    nl: () => chronoLocale.nl().casual.clone(),
+    pt: () => chronoLocale.pt().casual.clone(),
+    ru: () => chronoLocale.ru().casual.clone(),
+    sv: () => chronoLocale.sv().casual.clone(),
+    zh: () => chronoLocale.zh().hans.casual.clone(),
+    'zh-Hant': () => chronoLocale.zh().hant.casual.clone(),
 };
 const localeChronoCache = new Map<LocaleChronoLanguage, chrono.Chrono>();
 
 function isLocaleChronoLanguage(language: Language): language is LocaleChronoLanguage {
-    // Own-property check: `in` would also admit prototype keys like
-    // 'constructor' if a corrupted settings value slipped through upstream.
+
+
     return Object.prototype.hasOwnProperty.call(LOCALE_CHRONO_FACTORY, language);
 }
 
-/** The active language's chrono instance, or null when it has no locale parser (falls back to English). */
+
 function getLocaleQuickAddChrono(): chrono.Chrono | null {
     const language = getActiveLanguage();
     if (!isLocaleChronoLanguage(language)) return null;
@@ -376,10 +321,7 @@ function getLocaleQuickAddChrono(): chrono.Chrono | null {
     return instance;
 }
 
-// The es/fr/pt/it chrono parsers leave the words that introduce a date out of
-// the match ("el próximo viernes" matches "próximo viernes"), so a cleaned
-// title would keep a dangling "el". Only these four need the list: de/nl/ru/sv
-// take the preposition into the match themselves.
+
 const TRAILING_DATE_INTRO_WORDS: Partial<Record<Language, ReadonlySet<string>>> = {
     es: new Set(['el', 'la', 'los', 'las', 'al', 'del', 'de', 'para', 'próximo', 'próxima']),
     fr: new Set(['le', 'la', 'les', 'du', 'au', 'aux', 'pour', 'prochain', 'prochaine']),
@@ -387,12 +329,7 @@ const TRAILING_DATE_INTRO_WORDS: Partial<Record<Language, ReadonlySet<string>>> 
     it: new Set(['il', 'lo', 'la', 'al', 'per', 'di', 'prossimo', 'prossima']),
 };
 
-/**
- * Drop the date-introducing words the locale parser excluded from its match.
- * Only words standing directly ahead of the matched date go — a title that
- * merely contains one keeps it ("Comprar leche del super mañana") — and the
- * first word never goes, so the title can't be emptied out from here.
- */
+
 function stripTrailingDateIntroWords(title: string, language: Language): string {
     const words = TRAILING_DATE_INTRO_WORDS[language];
     if (!words) return title;
@@ -410,7 +347,7 @@ function normalizeMonthToken(value: string): string {
     return value.trim().toLowerCase().replace(/\.$/, '');
 }
 
-/** Whether matchedText is a bare month name in the given language — English uses the static regex, others the date-fns locale table. */
+
 function isBareMonthName(matchedText: string, language: Language): boolean {
     if (language === 'en') return BARE_MONTH_RE.test(matchedText);
     let names = localizedMonthNamesCache.get(language);
@@ -452,8 +389,8 @@ function applyDefaultScheduleTime(
     const clock = parseDefaultScheduleTime(defaultScheduleTime);
     if (!clock) return parsed;
     return {
-        // The applied default is a real clock time; without this the value
-        // below would store date-only and drop the configured time.
+
+
         hasExplicitTime: true,
         date: set(parsed.date, { hours: clock.hours, minutes: clock.minutes, seconds: 0, milliseconds: 0 }),
     };
@@ -483,11 +420,7 @@ function resolveChronoDate(
     return isValid(parsed) ? { date: parsed, hasExplicitTime } : null;
 }
 
-// chrono's locale bundles ship a single numeric order each (day-first for
-// de/es/fr/pt, month-first for it/ja) and no way to flip it, while the English
-// instances already follow the date-format setting (#1006). A letter-free
-// value like "10/8" carries no locale signal, so those decide it; anything
-// with words stays the locale parser's call.
+
 const CONTAINS_LETTER_RE = /\p{L}/u;
 
 function orderedChronoInstances(text: string): chrono.Chrono[] {
@@ -498,8 +431,7 @@ function orderedChronoInstances(text: string): chrono.Chrono[] {
         : [getQuickAddChrono(), localeChrono];
 }
 
-// A result only counts if it spans the whole input — used for both the
-// locale attempt and the English fallback so the acceptance rule lives once.
+
 function parseWholeTextResult(chronoInstance: chrono.Chrono, text: string, now: Date): chrono.ParsedResult | null {
     const results = chronoInstance.parse(text, { instant: now }, { forwardDate: true });
     const result = results[0];
@@ -525,9 +457,7 @@ function formatDueDateValue(parsed: ParsedNaturalDate): string {
     return parsed.hasExplicitTime ? parsed.date.toISOString() : format(parsed.date, 'yyyy-MM-dd');
 }
 
-// Reverse-scan acceptance loop shared by the locale pass and the English
-// fallback pass; `language` picks which bare-month check the results were
-// produced under (the active language for a locale pass, English otherwise).
+
 function findTrailingDateInResults(
     results: chrono.ParsedResult[],
     trimmed: string,
@@ -542,8 +472,8 @@ function findTrailingDateInResults(
         if (PURE_TIME_ONLY_RE.test(matchedText) || isBareMonthName(matchedText, language)) continue;
 
         const beforeDate = trimmed.slice(0, result.index).replace(TRAILING_DATE_SEPARATOR_RE, '').trim();
-        // Always the active language, never the pass's: an English-instance
-        // match ("10/8") still sits in a Spanish title that ends in "el".
+
+
         const titleWithoutDate = stripTrailingDateIntroWords(beforeDate, getActiveLanguage());
         if (!titleWithoutDate) continue;
 
@@ -569,8 +499,8 @@ function detectTrailingDate(title: string, now: Date): QuickAddDetectedDate | un
     if (localeChrono) {
         const localeResults = localeChrono.parse(trimmed, { instant: now }, { forwardDate: true });
         localeDetected = findTrailingDateInResults(localeResults, trimmed, now, getActiveLanguage());
-        // Same rule as parseNaturalDate: a letter-free match is the English
-        // instances' call because only they follow the date-format setting.
+
+
         if (localeDetected && CONTAINS_LETTER_RE.test(localeDetected.matchedText)) return localeDetected;
     }
 
@@ -606,10 +536,8 @@ function isQuickAddTokenEndBoundary(working: string, index: number): boolean {
 }
 
 function pushQuickAddQuotedTokenMatches(working: string, prefix: '@' | '#', matches: QuickAddTokenMatch[]) {
-    // Same typographic-quote tolerance as matchQuickAddQuotedName (#849, #1094):
-    // smart punctuation substitutes curly quotes as the user types — macOS even
-    // picks the CLOSING glyph (”) right after @/#, since a symbol precedes it —
-    // so any curly double works as the opener.
+
+
     const quotedRe = /(?:^|\s)([@#])(?:"((?:\\.|[^"\\])*)"|[“”„]([^"“”]*)["“”])/gu;
     for (const match of working.matchAll(quotedRe)) {
         if (match[1] !== prefix) continue;
@@ -669,8 +597,8 @@ function getQuickAddTokenMatches(
     const matches: QuickAddTokenMatch[] = [];
 
     pushQuickAddQuotedTokenMatches(working, prefix, matches);
-    // The rich matcher also starts at `@"`, runs past the closing quote and,
-    // being longer, would win; an explicit quote ends the token.
+
+
     const quotedStarts = new Set(matches.map((match) => match.index));
     pushQuickAddKnownTokenMatches(working, prefix, knownTokens, matches);
 
@@ -678,11 +606,8 @@ function getQuickAddTokenMatches(
         const token = match[0];
         if (token.startsWith(prefix)) {
             const index = match.index ?? 0;
-            // A marker only opens a token at a word start (#1087). Without this
-            // the `@` inside `bob@example.com` became the context `@example` and
-            // tore the address out of the title — and a `#fragment` in a pasted
-            // URL became a tag. Every other matcher here (quoted, known, rich)
-            // already requires this boundary; this one was the outlier.
+
+
             if (!isQuickAddTokenStartBoundary(working, index)) continue;
             matches.push({
                 token: restoreEscapes(token),
@@ -727,9 +652,7 @@ function normalizeQuickAddName(name: string): string {
     return name.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-// Given the raw text captured after a `+`/`!` marker (which greedily spans
-// following words), find the longest known entity name that matches a
-// whole-word prefix, so trailing title words are not swallowed into the token.
+
 function matchKnownQuickAddNamePrefix(
     rawToken: string,
     knownNames: readonly string[],
@@ -751,18 +674,8 @@ function matchKnownQuickAddNamePrefix(
 
 function matchQuickAddQuotedName(working: string, marker: '+' | '!' | '%'): { raw: string; value: string } | null {
     const escapedMarker = marker === '+' ? String.raw`\+` : marker;
-    // Mobile and desktop keyboards substitute typographic quotes as you type
-    // (iOS smart punctuation, German layouts, autocorrect fixing only one of
-    // the pair), so accept the common quote styles and mixed pairs — a name
-    // that parses when pasted must also parse as typed (#849):
-    //   "..."  straight doubles, with backslash escapes (canonical form)
-    //   “...”, “...“, or mixed “..." curly/straight doubles — macOS also produces a
-    //          CLOSING glyph as the opener (”...”), since the marker character
-    //          before the quote reads as "not a word start" to smart
-    //          punctuation (#1094)
-    //   „..."  German low-9 opening with any double-quote close
-    //   '...'  straight singles
-    //   ‘...’  or ’...’  smart singles
+
+
     const match = working.match(new RegExp(
         String.raw`(?:^|\s)${escapedMarker}(?:"((?:\\.|[^"\\])*)"|[“”]([^"“”]*)["“”]|„([^"“”]*)["“”]|'([^']*)'|[‘’]([^’]*)’)`,
         'u',
@@ -791,8 +704,8 @@ function parseDateCommand(
     let parsedNaturalDate = parseNaturalDate(dateText, now, defaultTimeMode);
     let commandText = match[0];
     if (!parsedNaturalDate) {
-        // Keep complete dates (including spaced UTC offsets such as +0200)
-        // ahead of inline controls, then try the longest valid date prefix.
+
+
         const boundaries = [...match[1].matchAll(new RegExp(QUICK_ADD_INLINE_CONTROL_BOUNDARY, 'gi'))];
         for (const boundary of boundaries.reverse()) {
             if (boundary.index === match[1].length) continue;
@@ -800,8 +713,8 @@ function parseDateCommand(
             if (!candidate) continue;
             parsedNaturalDate = parseNaturalDate(candidate, now, defaultTimeMode);
             if (parsedNaturalDate) {
-                // A failed numeric offset after an explicit time must not
-                // become a project; numeric project names can be quoted.
+
+
                 if (parsedNaturalDate.hasExplicitTime && /^\s+\+\d[\d:]*(?=\s|$)/.test(match[1].slice(boundary.index))) {
                     parsedNaturalDate = null;
                     break;
@@ -822,9 +735,8 @@ function parseDateCommand(
     }
     const nextWorking = stripToken(working, commandText);
     return {
-        // Timeless values stay date-only for every command — a blank default
-        // schedule time must not stamp midnight on /start: or /review: (#797),
-        // matching the GUI pickers (joinDateTime in date-draft.ts).
+
+
         value: formatDueDateValue(parsed),
         working: nextWorking,
     };
@@ -923,8 +835,8 @@ export function parseQuickAddDateCommands(
     } = parseDateCommandsFromWorking(protectedInput, now, options);
 
     return {
-        // /due:, /start: and /review: are explicit commands, so they leave the
-        // title even with cleanup off (#feedback 884b0fe0).
+
+
         title: restoreEscapes(working.replace(/\s{2,}/g, ' ').trim()),
         props: {
             ...(startTime ? { startTime } : {}),
@@ -961,7 +873,7 @@ export function parseQuickAdd(
     tagMatches.forEach((tag) => tags.add(tag.token));
     tagMatches.forEach((tag) => (working = stripToken(working, tag.raw)));
 
-    // Person: %Name or %"Full Name" → assignedTo
+
     let assignedTo: string | undefined;
     const knownPeople = options.knownPeople ?? [];
     const canonicalPersonName = (value: string) =>
@@ -979,8 +891,8 @@ export function parseQuickAdd(
                 assignedTo = canonicalPersonName(prefixMatch.value);
                 working = stripToken(working, `%${prefixMatch.consumedRaw}`);
             } else {
-                // Unknown name: take only the first word so trailing title
-                // words are not swallowed; multi-word new names use %"...".
+
+
                 const firstWord = rawFull.match(/\S+/u)?.[0] ?? '';
                 const restoredFirst = restoreEscapes(firstWord).trim();
                 if (restoredFirst) {
@@ -993,7 +905,7 @@ export function parseQuickAdd(
 
     let timeEstimate: Task['timeEstimate'];
     let hasInvalidEstimateCommand = false;
-    // Feature off: no parse, no strip, as with `/priority:`.
+
     if (options.parseTimeEstimate !== false) working = working.replace(/(?:^|\s)\/(?:estimate|duration):([^\s]*)/gi, (raw, value: string) => {
         const minutes = parseTimeEstimateInput(restoreEscapes(value));
         if (minutes === null) {
@@ -1015,8 +927,8 @@ export function parseQuickAdd(
     }
 
     let priority: TaskPriority | undefined;
-    // Feature off: no parse, no strip — the token reads as plain title text,
-    // the same as `/priority:bogus` does today (#1107).
+
+
     const priorityMatch = options.parsePriority === false
         ? null
         : working.match(/(?:^|\s)\/priority:([^\s/]+)/i);
@@ -1028,7 +940,7 @@ export function parseQuickAdd(
         }
     }
 
-    // Area: /area:<id|name> or !Area Name
+
     let areaId: string | undefined;
     const areaIdMatch = working.match(/(?:^|\s)\/area:([^\s/]+)/i);
     if (areaIdMatch) {
@@ -1069,8 +981,8 @@ export function parseQuickAdd(
                             working = stripToken(working, `!${prefixMatch.consumedRaw}`);
                         }
                     }
-                    // No known area matches: leave the text untouched instead of
-                    // silently swallowing the token and any words after it.
+
+
                 } else {
                     const firstWord = rawFull.match(/\S+/u)?.[0] ?? '';
                     const restoredFirst = restoreEscapes(firstWord);
@@ -1083,7 +995,7 @@ export function parseQuickAdd(
         }
     }
 
-    // Note: /note:...
+
     let description: string | undefined;
     const noteMatch = working.match(new RegExp(`${QUICK_ADD_COMMAND_START}\\/note:([\\s\\S]+?)${QUICK_ADD_COMMAND_BOUNDARY}`, 'i'));
     if (noteMatch) {
@@ -1091,7 +1003,7 @@ export function parseQuickAdd(
         working = stripToken(working, noteMatch[0]);
     }
 
-    // Date commands: /start:..., /due:..., /review:...
+
     const {
         working: workingWithoutDates,
         startTime,
@@ -1101,11 +1013,10 @@ export function parseQuickAdd(
     } = parseDateCommandsFromWorking(working, now, options);
     working = workingWithoutDates;
 
-    // Status tokens like /next, /waiting, etc.
+
     let status: TaskStatus | undefined;
-    // `\b` would also match inside `/someday-maybe`, which used to be harmless
-    // when preserve mode handed the title back verbatim and is not now: the
-    // token has to be the whole word.
+
+
     const statusMatch = working.match(/(?:^|\s)\/(inbox|next|in-progress|waiting|someday|reference|done|archived)(?=\s|$)/i);
     if (statusMatch) {
         const token = statusMatch[1].toLowerCase();
@@ -1113,7 +1024,7 @@ export function parseQuickAdd(
         working = stripToken(working, statusMatch[0]);
     }
 
-    // Focus token: /* or /* focus. Bare focus implies Next; explicit status tokens still win.
+
     const focusMatch = working.match(/(?:^|\s)\/\*(?:\s+focus\b)?(?=\s|$)/i);
     const focusToday = Boolean(focusMatch);
     if (focusMatch) {
@@ -1121,7 +1032,7 @@ export function parseQuickAdd(
         if (!status) status = 'next';
     }
 
-    // Project: +ProjectName or /project:<id>
+
     let projectId: string | undefined;
     let projectTitle: string | undefined;
     const projectIdMatch = working.match(/(?:^|\s)\/project:([^\s/]+)/i);
@@ -1174,14 +1085,9 @@ export function parseQuickAdd(
         }
     }
 
-    // A token the parser recognised and applied has already left `working`, and
-    // it stays gone: nobody wants a task called "Call mum /next" when the status
-    // is on the task. `quickAddAutoClean` decides only the ambiguous half —
-    // whether a date read out of ordinary prose is also cut from the title —
-    // which is why preserve mode still hands back a titleWithoutDate that keeps
-    // the prose intact.
+
     const title = restoreEscapes(working.replace(/\s{2,}/g, ' ').trim());
-    // Invalid estimate text stays literal, including words such as "tomorrow".
+
     const rawDetectedDate = dueDate || hadExplicitDueCommand || hasInvalidEstimateCommand || options.naturalLanguageDates === false
         ? undefined
         : detectTrailingDate(title, now);
@@ -1215,15 +1121,7 @@ export function parseQuickAdd(
     };
 }
 
-/**
- * `quickAdd.help` is one frozen sentence per locale listing every token, so
- * the `/priority:<level>` fragment cannot be hidden by picking a different
- * key. Strip it at render time instead: the `/priority:` prefix is identical
- * in all 18 locales (only the `<level>` placeholder and the separator are
- * translated), so one pattern covers every language, and a locale that ever
- * reworded the prefix simply keeps its full sentence rather than breaking.
- * `/estimate:45m` goes the same way while Time estimates is off (#1358).
- */
+
 const QUICK_ADD_PRIORITY_HELP_TOKEN = /\/priority:<[^>]*>(?:\s*[,،、]\s*|\s+)?/u;
 const QUICK_ADD_ESTIMATE_HELP_TOKEN = /\/estimate:45m(?:\s*[,،、]\s*|\s+)?/u;
 

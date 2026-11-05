@@ -24,13 +24,13 @@ type CalendarDeadlineLaneProps = {
     onContextMenu: (event: MouseEvent<HTMLElement>, task: Task, kind: 'deadline') => void;
 };
 
-/** A separate label rail: its geometry never becomes a task's work interval. */
+
 export function CalendarDeadlineLane({
     day, markers, t, resolveText, getTaskAccentColor, taskMenuRingClass, openTaskFromCalendar, onContextMenu,
 }: CalendarDeadlineLaneProps) {
     const groups = getCalendarDeadlineMarkerGroups(markers, {
         dayStart: day,
-        // Leave space for borders as well as the two-line label.
+
         minGapMinutes: (MARKER_ROW_HEIGHT + 4) / DESKTOP_HOUR_HEIGHT * 60,
         maxVisibleRows: MAX_VISIBLE_ROWS,
     });

@@ -40,6 +40,7 @@ body:
         - "Flathub"
         - "APT"
         - "AUR"
+        - "Nix (community flake)"
         - "Distro package"
         - "Release file (.deb / .rpm / AppImage / .dmg / .exe / .msi / APK)"
         - "Source / dev build"

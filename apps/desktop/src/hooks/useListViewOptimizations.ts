@@ -38,7 +38,7 @@ export function useListViewOptimizations(
     const sequentialProjectIds = derived.sequentialProjectIds;
     const sequentialWithinSectionProjectIds = derived.sequentialWithinSectionProjectIds;
     const sequentialSectionKeys = derived.sequentialSectionKeys;
-    // Per section projects (#1429) add their Sequential sections; callers test with isTaskSequenceBlocked.
+
     const sequencing = useMemo<TaskSequencing>(() => ({
         sequentialProjectIds,
         sectionScopedProjectIds: sequentialWithinSectionProjectIds,
@@ -54,8 +54,8 @@ export function useListViewOptimizations(
             perfApi?.trackUseMemo?.();
             const compute = () => {
                 if (!hasTaskSequences(sequencing)) return new Set<string>();
-                // Waiting tasks hold their chain slot too: a waiting first
-                // step keeps later next tasks out of the Next list.
+
+
                 return getSequentialFirstTaskIds(
                     baseTasks.filter((task) => !task.deletedAt && isSequentialChainStatus(task.status)),
                     sequentialProjectIds,

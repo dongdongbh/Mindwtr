@@ -1,10 +1,10 @@
-// Pass D1c step 0 (design §8, code review P2): the transfer limit check-data-device.mjs proposes from its measured rows.
+
 import { describe, expect, it } from 'bun:test';
 import { atBoundary, boundaryVerdict, MEASURE_SHAPES, MEASURE_WORKLOADS, proposeTransferLimit, rowBound, rowPasses, rowPassesFor } from './data-transfer-limit.mjs';
 import { IMPORT_TEXT_CAP_BYTES, importTasksFor, importTexts } from './data-measure-fixtures.mjs';
 
 const row = (shape, workload, fields) => ({ shape, workload, sourceMiB: 0, libraryBeforeMiB: 0, libraryAfterMiB: 0, pass: true, ...fields });
-/** Every workload and shape, each passing at [mib] (a file over nothing; an import leaving that library). */
+
 const everyWorkload = (mib) => MEASURE_SHAPES.flatMap((shape) => MEASURE_WORKLOADS.map((workload) => row(shape, workload,
     workload.startsWith('import-') ? { libraryAfterMiB: mib } : { sourceMiB: mib })));
 
@@ -37,12 +37,12 @@ describe('the step 0 transfer limit', () => {
         expect(rowBound(row('rows', 'restore-over', { sourceMiB: 30, libraryBeforeMiB: 40, libraryAfterMiB: 35 }))).toBe(70);
     });
 
-    // Code review 2 #5: an import counts the library it left alone; a duplicate import that adds nothing counts that library.
+
     it('counts an 8 MiB duplicate import over 40 MiB that leaves 40 MiB as 40', () => {
         expect(rowBound(row('rows', 'import-mindwtr-csv', { sourceMiB: 8, libraryBeforeMiB: 40, libraryAfterMiB: 40 }))).toBe(40);
     });
 
-    // Step 0 run 6: an import starts on a fresh install, so its rows (measured once) count for every shape.
+
     it('counts one shape\'s import rows for every shape', () => {
         const rows = everyWorkload(64).filter((item) => !(item.shape === 'notes' && item.workload.startsWith('import-')));
         expect(proposeTransferLimit(rows)).toMatchObject({ limitMiB: 32, missing: [] });
@@ -59,16 +59,15 @@ describe('the step 0 transfer limit', () => {
         expect(boundaryVerdict(boundary.filter((item) => item.workload !== 'cold-start'), 20)).toMatchObject({ established: false, missing: ['rows/cold-start', 'notes/cold-start'] });
     });
 
-    // Code review 2 #4: a boundary row proves the limit only by its bytes: at the limit (within 15 %), or with a refused attempt
-    // just above it (the app's own admission says nothing larger runs). Every workload at 2 MiB does not establish 32.
+
     it('checks each boundary row\'s bytes, not its label', () => {
         const small = everyWorkload(2).map((item) => ({ ...item, boundary: true }));
         const verdict = boundaryVerdict(small, 32);
         expect(verdict.established).toBe(false);
         const imports = MEASURE_WORKLOADS.filter((workload) => workload.startsWith('import-')).length;
         expect(verdict.belowBoundary).toHaveLength(MEASURE_SHAPES.length * (MEASURE_WORKLOADS.length - imports) + imports);
-        // Each admitted row right after the attempt the app refused ([grow] times larger): the refusal is its evidence, never a
-        // failed cell. An import's refused file is compared by its expanded bytes.
+
+
         const imported = (item) => item.workload.startsWith('import-');
         const withAbove = (grow) => small.flatMap((item) => [
             { ...item, sourceMiB: item.sourceMiB * grow, expandedMiB: imported(item) ? grow : null, pass: false, refused: true },
@@ -80,8 +79,7 @@ describe('the step 0 transfer limit', () => {
     });
 });
 
-// The coordinator's ruling (10-19): native at most 512 MiB; Java at most 128 MiB by the app's own sampler where the row has
-// it, else by dumpsys; a row whose Java crosses fails only when 2 of its 3 runs cross.
+
 describe('the step 0 pass rule', () => {
     const done = { outcome: 'done', nativeMiB: 300, javaMiB: 90 };
     it('reads Java from the app\'s sampler before dumpsys, and native from the larger of the two', () => {
@@ -103,12 +101,10 @@ describe('the step 0 pass rule', () => {
     });
 });
 
-// Step 0 run 6's boundary: a refused restore or merge leaves no library, so it is compared by S + L, not by the admitted
-// row's library after; an Undo follows the restore it undoes.
+
 describe('a boundary row over a library', () => {
-    // Step 0 run 6's log: the admitted merge left 10.8 MiB; the refused one above it was 5.6 over 4.5 = 10.1. Compared with
-    // the admitted row's own file and library (9.5), the refusal is just above it; compared with its library after, it read
-    // as smaller and the check printed "T not established".
+
+
     const refused = { workload: 'merge-over', shape: 'rows', boundary: true, refused: true, pass: false, sourceMiB: 5.6, libraryBeforeMiB: 4.5, libraryAfterMiB: 4.5 };
     const merge = { workload: 'merge-over', shape: 'rows', boundary: true, pass: true, sourceMiB: 5, libraryBeforeMiB: 4.5, libraryAfterMiB: 10.8 };
     it('is compared with its own file and library, not with the library it left', () => {
@@ -127,9 +123,8 @@ describe('a boundary row over a library', () => {
 });
 
 
-// Code review 2 (new P2): each importer's step 0 file is built to core's caps by its encoded bytes.
 describe('the step 0 import fixtures', () => {
-    // Step 0 run 6: an import sized to the limit's range, not to core's caps (run 5's 100 000 Todoist tasks grew the library 101 MiB).
+
     it('stop at the task count asked for', () => {
         const tasks = importTasksFor(24);
         expect(tasks).toBe(24_576);

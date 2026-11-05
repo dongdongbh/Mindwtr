@@ -21,8 +21,7 @@ import { markNextLoadAsDocumentReplacement } from '../packages/core/src/store-se
 
 import { createMindwtrAutomationStorage } from './mindwtr-automation-storage';
 
-// ponytail: one queue owns every profile because core's store and adapter are process
-// singletons; per-profile parallelism requires isolated stores, not another lock.
+
 const singletonStoreQueue = createSerializedAsyncQueue();
 let activeStorageIdentity: string | null = null;
 const AUTOMATION_CONCURRENT_WRITE_PREFIX = 'SQLITE_BUSY: database changed after the automation snapshot was loaded';
@@ -117,9 +116,8 @@ type CreateTaskInput = {
 
 const refreshState = async () => {
     await useTaskStore.getState().fetchData({ silent: true, throwOnError: true });
-    // A read can run a core load migration. Settle that queued snapshot before
-    // another service operation is allowed to point the singleton store at a
-    // different profile.
+
+
     await flushPendingSave();
     return useTaskStore.getState();
 };
@@ -197,9 +195,8 @@ export async function createMindwtrAutomationService(options: AutomationServiceO
                     await flushPendingSave();
                     settled = true;
                 } catch {
-                    // A terminal flush failure dequeues its payload. Keep the
-                    // operation error, but never let this profile's work cross
-                    // the adapter handoff below.
+
+
                 }
                 activeStorageIdentity = null;
                 if (settled) logAutomationFailedOperationSettledDiagnostic();
@@ -305,16 +302,14 @@ export async function createMindwtrAutomationService(options: AutomationServiceO
             if (status) {
                 tasks = tasks.filter((task) => task.status === status);
             }
-            // Unlike the cloud and MCP read paths, this one goes through the store, so core
-            // has already run the flag through normalizeSyncedBoolean and it is a real
-            // boolean here. Coerce anyway to stay identical to the other two filters — the
-            // cost is nil and it does not depend on that normalization staying in place.
+
+
             if (isFocusedToday !== undefined) {
                 tasks = tasks.filter((task) => Boolean(task.isFocusedToday) === isFocusedToday);
             }
             if (typeof query === 'string' && query.trim().length > 0) {
-                // filterTasksBySearch, not searchAll: searchAll caps at SEARCH_RESULT_LIMIT
-                // (200) for the UI palette, which silently truncated list results here.
+
+
                 tasks = filterTasksBySearch(tasks, filterProjectsForSearch(state._allProjects, includeDeleted), query);
             }
             return tasks;

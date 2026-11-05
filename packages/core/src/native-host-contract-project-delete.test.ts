@@ -80,20 +80,20 @@ const insertOwnedRow = (id: string, order: number) => {
 };
 
 describe('prepared Project Delete and Undo', () => {
-    it('matches RN Undo taxonomy retention from the same legacy deleted document without a catalog', async () => {
+    it('matches RN Undo from the same legacy deleted document without a catalog', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(AT));
         const original = await open();
         const links = collectProjectTaskLinks(ID);
         const deletion = original.prepareDelete();
         value(await original.host.commitPreparedProjectDelete(deletion));
-        // A document saved by the earlier native Delete has no taxonomy catalog.
+
         const legacyDeleted = copy(original.data()); delete legacyDeleted.settings.taxonomy;
         const rn = await open(legacyDeleted);
         const before = copy(rn.data());
         await undoProjectDelete(ID, links); await flushPendingSave();
         const expected = copy(rn.data());
-        expect(expected.settings.taxonomy?.tags?.map(row => row.token)).toContain('#kept');
-        expect(expected.settings.taxonomy?.contexts?.map(row => row.token)).toContain('@home');
+
+        expect(expected.settings.taxonomy).toBeUndefined();
         const native = await open(legacyDeleted);
         expect(native.data()).toEqual(before);
         value(await native.host.commitPreparedProjectDeleteUndo(native.prepareUndo(deletion)));
@@ -123,7 +123,7 @@ describe('prepared Project Delete and Undo', () => {
     it('deletes an archived Project, sections and linked live Tasks, preserving content and prior tombstones', async () => {
         const env = await open(initial({ projects: [project({ status: 'archived', archivedAt: AT })] }));
         const envelope = env.prepareDelete();
-        // Load repair clears an orphan section-only link under an archived Project.
+
         expect(envelope.prepared.scope.tasks.map((row) => row.id)).not.toContain('task-section-only');
         expect(envelope.prepared.effect.tasks.map((row) => row.before.id)).not.toContain('task-prior');
         expect(value(env.host.validatePreparedProjectDelete(envelope))).toEqual(envelope.prepared.result);

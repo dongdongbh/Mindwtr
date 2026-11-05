@@ -1,6 +1,5 @@
-/**
- * Utility functions for task operations
- */
+
+
 
 import { Task, TaskStatus, TaskSortBy, TaskPriority, Project, ProjectFlowMode, Section, AppData, AppSettings, SortField, Area } from './types';
 import { resolveFeatureFlags } from './resolve-feature-flags';
@@ -12,27 +11,10 @@ import { isTaskActionable, isTaskFinished, TASK_STATUS_ORDER } from './task-stat
 import { isTaskInActiveProject } from './project-utils';
 import type { Language } from './i18n/i18n-types';
 
-/**
- * Shared collator for the tie-break comparisons below. `localeCompare` resolves
- * its locale and collation options on every call, and these run on a large
- * fraction of the comparisons in an n-log-n sort over the whole task list. One
- * instance with default options sorts identically and is reused everywhere.
- * Deliberately no `numeric`/`sensitivity` options — those change user-visible
- * ordering and are a separate decision.
- */
+
 const textCollator = new Intl.Collator();
 
-/**
- * Shared collators for the comparator sites that pass an options bag. V8 caches only the
- * argless `localeCompare()`, so `localeCompare(b, undefined, opts)` builds a fresh collator
- * per comparison — measurable in the per-mutation derived-state pass.
- *
- * `new Intl.Collator(undefined, opts).compare(a, b)` is equivalent to
- * `a.localeCompare(b, undefined, opts)`, so swapping a site preserves its order exactly.
- *
- * The two are NOT interchangeable: `numeric` makes "item 10" sort after "item 9". Sites that
- * asked for it are user-visible orderings and must keep it.
- */
+
 export const baseTextCollator = new Intl.Collator(undefined, { sensitivity: 'base' });
 export const numericTextCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -53,15 +35,7 @@ export function buildTasksByProjectId(tasks: readonly Task[]): Map<string, Task[
     return tasksByProjectId;
 }
 
-/**
- * Status sorting order for task list display
- */
-/**
- * Standard task colors for each status.
- * Used for badges, borders, and highlights across the app.
- * Owned by theme-scheme.ts (the single "what colors does this theme use" module);
- * re-exported here for compatibility with existing callers.
- */
+
 export { STATUS_COLORS, getStatusColor } from './theme-scheme';
 
 const TASK_PRIORITY_SORT_RANK: Record<TaskPriority, number> = {
@@ -71,13 +45,7 @@ const TASK_PRIORITY_SORT_RANK: Record<TaskPriority, number> = {
     urgent: 4,
 };
 
-/**
- * Canonical priority ordering (higher = more urgent). `priority` is a TEXT column/field
- * everywhere it's persisted, so anything that needs to rank it — SQL `ORDER BY`, JS
- * `.sort()` — must go through this map rather than comparing the string directly
- * (lexicographic order puts 'high' after 'medium' and 'urgent', which is wrong).
- * Shared by the MCP server's local SQLite and cloud REST adapters so they can't drift.
- */
+
 export const PRIORITY_RANK: Record<TaskPriority, number> = TASK_PRIORITY_SORT_RANK;
 
 const TASK_ENERGY_SORT_RANK: Record<NonNullable<Task['energyLevel']>, number> = {
@@ -96,16 +64,11 @@ export const FOCUS_NEXT_DUE_SOON_WINDOW_DAYS = 30;
 
 type TaskStartVisibilityOptions = {
     now?: Date;
-    /** Frozen local-day boundary for a prepared native write; normal callers omit it. */
+
     endOfTodayIso?: string;
     showFutureStarts?: boolean;
-    /**
-     * 'day' (default): a start today is visible all day — right for planning
-     * surfaces like Daily Review, which must offer tonight's tasks in the
-     * morning (#867). 'time': a start with an explicit clock time later today
-     * stays hidden until that moment — the actionable-now list surfaces
-     * (Focus, Next) opt in (#995).
-     */
+
+
     granularity?: 'day' | 'time';
 };
 
@@ -117,7 +80,7 @@ type FocusSequentialOptions = {
     frozenLocalDay?: { endOfTodayIso: string; dates: FocusDateLookup };
 };
 
-/** A native journal freezes each parsed value, including its own DST offset. */
+
 export type FocusDateProjection = { value: string; parsedAt: number | null; parsedOffsetMinutes: number | null;
     sourceOffsetMinutes: number | null;
     dueAt: number | null; dueOffsetMinutes: number | null };
@@ -128,8 +91,8 @@ export const projectFocusDateValues = (values: readonly string[]): FocusDateProj
         const parsed = safeParseDate(value);
         const due = safeParseDueDate(value);
         const parts = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2})?/.exec(value);
-        // The preceding local minute retains the pre-transition offset when
-        // the supplied date begins in a midnight DST gap.
+
+
         const midnight = parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]) - 1, 23, 59) : null;
         return { value, parsedAt: parsed?.getTime() ?? null,
             parsedOffsetMinutes: parsed?.getTimezoneOffset() ?? null,
@@ -151,16 +114,16 @@ export type TaskFocusEligibilityOptions = {
     projects: readonly Project[] | Map<string, Project>;
     now?: Date;
     endOfTodayIso?: string;
-    /** Prepared native writes use each value's frozen date parse, including DST. */
+
     frozenDates?: FocusDateLookup;
     sequentialProjectIds?: ReadonlySet<string>;
     sectionScopedProjectIds?: ReadonlySet<string>;
-    /** See TaskSequencing; derived from projects + sections when absent. */
+
     sequentialSectionKeys?: ReadonlySet<string>;
     sections?: readonly SequentialSection[];
-    /** Precomputed by buildTaskFocusEligibilityContext; derived per call when absent. */
+
     sequentialFirstTaskIds?: ReadonlySet<string>;
-    /** A future-start Next action may be starred now for Focus on its start day. */
+
     allowFutureStart?: boolean;
 };
 
@@ -174,31 +137,18 @@ type SequentialFirstTaskOptions = {
     sections?: readonly SequentialSection[];
 };
 
-/**
- * The project's Flow mode (#1429). Project-wide Sequential wins, so an older client
- * that turns Sequential on still gets Sequential. perSectionFlow counts only while
- * isSequential is off; an older client reads such a project as Parallel and hides
- * no work.
- */
+
 export const getProjectFlowMode = (project: Pick<Project, 'isSequential' | 'perSectionFlow'>): ProjectFlowMode => (
     project.isSequential ? 'sequential' : project.perSectionFlow === true ? 'perSection' : 'parallel'
 );
 
-/**
- * Every sequence in the library, built once from projects and sections (#1429).
- * A task takes part in at most one sequence (see getTaskSequenceKey):
- * - its whole project, when the project is Sequential across sections;
- * - its section, when the project is Sequential within sections;
- * - its section, when the project is Per section and that section is Sequential.
- * Tasks with no section, or in a Parallel section, of a Per section project take
- * part in none. Section order never links two sections.
- */
+
 export type TaskSequencing = {
-    /** Projects whose Flow mode is Sequential. */
+
     sequentialProjectIds: ReadonlySet<string>;
-    /** Sequential projects that run one sequence per section. */
+
     sectionScopedProjectIds: ReadonlySet<string>;
-    /** `${projectId}:${sectionId}` for each live Sequential section of a Per section project. */
+
     sequentialSectionKeys: ReadonlySet<string>;
 };
 
@@ -229,15 +179,12 @@ export function getTaskSequencing(
     return { sequentialProjectIds, sectionScopedProjectIds, sequentialSectionKeys };
 }
 
-/** True when no task can be held back by a sequence; lets callers skip the scan. */
+
 export const hasTaskSequences = (sequencing: Partial<TaskSequencing>): boolean => (
     (sequencing.sequentialProjectIds?.size ?? 0) > 0 || (sequencing.sequentialSectionKeys?.size ?? 0) > 0
 );
 
-/**
- * The one answer to "which sequence does this task take part in?" (#1429): a key
- * shared by every task of the same sequence, or null when the task is in none.
- */
+
 export function getTaskSequenceKey<T extends SequentialGroupingFields>(
     task: T,
     sequencing: Partial<TaskSequencing>,
@@ -254,7 +201,7 @@ export function getTaskSequenceKey<T extends SequentialGroupingFields>(
     return sequencing.sequentialSectionKeys.has(sectionKey) ? sectionKey : null;
 }
 
-/** A task in a sequence that is not that sequence's current step. */
+
 export const isTaskSequenceBlocked = (
     task: SequentialGroupingFields & Pick<Task, 'id'>,
     sequencing: Partial<TaskSequencing>,
@@ -374,6 +321,7 @@ const compareProjectDeadlineBoosts = (
     return compareProjectDeadlineBoostTasks(taskA, taskB);
 };
 
+
 export function getProjectDeadlineBoosts(
     tasks: readonly Task[],
     projects: readonly Project[],
@@ -426,15 +374,7 @@ export function getProjectDeadlineBoosts(
     return boosts;
 }
 
-// Orders tasks the way a project lists them: manual order first (tasks without
-// one sort last), creation time as the tie-break, task id as the final one.
-// This is the order project views render, so anything surfacing "the project's
-// next action" must use it too or it will contradict what the user arranged
-// (#873). The id tie-break is load-bearing (#784): imported duplicates can
-// carry the SAME order and createdAt, and a comparator that returns 0 leaves
-// stable sort at the mercy of array order — which every sync merge rebuild
-// reshuffles, so tied rows visibly swapped positions after each sync and made
-// drags around them look like they reverted.
+
 export function compareTasksByProjectOrder<T extends SequentialTaskOrderFields & Pick<Task, 'id'>>(a: T, b: T): number {
     const aOrder = Number.isFinite(a.order) ? (a.order as number) : Number.isFinite(a.orderNum) ? (a.orderNum as number) : Number.POSITIVE_INFINITY;
     const bOrder = Number.isFinite(b.order) ? (b.order as number) : Number.isFinite(b.orderNum) ? (b.orderNum as number) : Number.POSITIVE_INFINITY;
@@ -445,11 +385,10 @@ export function compareTasksByProjectOrder<T extends SequentialTaskOrderFields &
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-// Ranks projects the way the sidebar and project-grouped views arrange them:
-// manual order first (projects without one sort last), title as the tie-break.
+
 export function compareProjectsByOrder(
-    a: Pick<Project, 'order' | 'title'>,
-    b: Pick<Project, 'order' | 'title'>,
+    a: Pick<Project, 'title'> & Partial<Pick<Project, 'order'>>,
+    b: Pick<Project, 'title'> & Partial<Pick<Project, 'order'>>,
 ): number {
     const aOrder = Number.isFinite(a.order) ? (a.order as number) : Number.POSITIVE_INFINITY;
     const bOrder = Number.isFinite(b.order) ? (b.order as number) : Number.POSITIVE_INFINITY;
@@ -457,8 +396,7 @@ export function compareProjectsByOrder(
     return textCollator.compare(a.title, b.title);
 }
 
-// Ranks areas by their custom order, with the task editor's numeric,
-// case-insensitive name ordering as the tie-break. Areas without an order sort last.
+
 export function compareAreasByOrder(
     a: Pick<Area, 'order' | 'name'>,
     b: Pick<Area, 'order' | 'name'>,
@@ -469,8 +407,7 @@ export function compareAreasByOrder(
     return numericTextCollator.compare(a.name, b.name);
 }
 
-// Builds the projectId -> rank map that project-grouped views sort tasks by.
-// Deleted projects are dropped; the survivors are ranked by compareProjectsByOrder.
+
 export function buildProjectOrderMap(
     projects: readonly (Pick<Project, 'id' | 'order' | 'title'> & Partial<Pick<Project, 'deletedAt'>>)[],
 ): Map<string, number> {
@@ -482,10 +419,7 @@ export function buildProjectOrderMap(
     return map;
 }
 
-// Orders tasks first by their project's rank in the given order map (tasks with
-// no project, or in a project missing from the map, sort last), then by
-// compareTasksByProjectOrder within a project. This is the combined default
-// order the Next and Board views render.
+
 export function compareTasksByProjectThenOrder(
     orderMap: ReadonlyMap<string, number>,
 ): <T extends SequentialTaskOrderFields & Pick<Task, 'id' | 'projectId'>>(a: T, b: T) => number {
@@ -628,16 +562,14 @@ export function getTaskDeferUntil(
     const parse = (value?: string) => frozenDates === undefined
         ? safeParseDate(value) : parseFrozenFocusDate(value, frozenDates);
     const start = parse(task.startTime);
-    // A recurring task without a start date defers on its next remaining
-    // schedule field (the earlier of due/review); otherwise the next instance
-    // spawned on completion reappears in Next/Focus immediately,
-    // indistinguishable from the instance just completed (#843).
+
+
     return start ?? (hasRecurrenceRule(task.recurrence)
         ? earliestDate(parse(task.dueDate), parse(task.reviewAt))
         : null);
 }
 
-/** Original date-only or datetime value, without adding a time or changing its timezone. */
+
 export function getTaskDeferUntilSource(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
 ): string | null {
@@ -646,6 +578,7 @@ export function getTaskDeferUntilSource(
     return [task.startTime, task.dueDate, task.reviewAt]
         .find((value) => safeParseDate(value)?.getTime() === date.getTime()) ?? null;
 }
+
 
 export function isTaskFutureStart(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
@@ -666,7 +599,7 @@ export function isTaskFutureStart(
     return deferUntil > endOfToday;
 }
 
-/** The same future-start check with a frozen local-day boundary for prepared native replay. */
+
 export function isTaskFutureStartBeforeBoundary(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
     endOfTodayIso: string,
@@ -681,7 +614,7 @@ export function isTaskFutureFocusCandidateBeforeBoundary(task: Task, endOfTodayI
     return task.status === 'next' && Boolean(task.startTime) && isTaskFutureStartBeforeBoundary(task, endOfTodayIso, frozenDates);
 }
 
-/** The store's visible Focus cap evaluated at a frozen local-day boundary for a prepared native write. */
+
 export function countFocusedTasksBeforeBoundary(tasks: readonly Task[], endOfTodayIso: string, frozenDates?: FocusDateLookup): number {
     let count = 0;
     for (const task of tasks) {
@@ -696,26 +629,20 @@ export function isTaskFutureFocusCandidate(task: Task, now: Date = new Date()): 
     return task.status === 'next' && Boolean(task.startTime) && isTaskFutureStart(task, now);
 }
 
+
 export function isTaskFocusedNow(task: Task, now: Date = new Date()): boolean {
     return task.isFocusedToday === true && !isTaskFutureStart(task, now);
 }
 
 export type UpcomingDeferredTask = {
     task: Task;
-    /** The defer-until date the task will surface on. */
+
     appearsAt: Date;
 };
 
 export const UPCOMING_DEFERRED_WINDOW_DAYS = 7;
 
-/**
- * The Focus "Upcoming" preview (#1061): next-status tasks deferred to another
- * day, sorted by the date they will appear. Derives the date via
- * getTaskDeferUntil — the same derivation isTaskFutureStart uses — so the
- * preview cannot disagree with the actual reveal. A start later *today*
- * belongs to the Today section instead (it is today's business, just later),
- * so it is excluded here even though Next Actions hides it until its time.
- */
+
 export function getUpcomingDeferredTasks(
     tasks: readonly Task[],
     options: { now?: Date; windowDays?: number } = {},
@@ -736,10 +663,8 @@ export function getUpcomingDeferredTasks(
         if (task.status !== 'next') continue;
         const deferUntil = getTaskDeferUntil(task);
         if (!deferUntil || deferUntil > windowEnd) continue;
-        // Membership is "deferred to another day" — the same end-of-today
-        // bound isTaskFutureStart uses. This also keeps a recurring task due
-        // later today out: that one has no start, so isTaskFutureStart is
-        // false for it and it stays visible in Next Actions, not listed here.
+
+
         if (!isTaskFutureStart(task, now)) continue;
         upcoming.push({ task, appearsAt: deferUntil });
     }
@@ -749,6 +674,7 @@ export function getUpcomingDeferredTasks(
     ));
 }
 
+
 export function shouldShowTaskForStart(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
     options: TaskStartVisibilityOptions = {},
@@ -757,24 +683,19 @@ export function shouldShowTaskForStart(
     const now = options.now ?? new Date();
     if (options.endOfTodayIso ? isTaskFutureStartBeforeBoundary(task, options.endOfTodayIso) : isTaskFutureStart(task, now)) return false;
     if (options.granularity !== 'time') return true;
-    // A date-only start stays visible all day. The unstar-on-defer rule
-    // (store-helpers) deliberately keeps day granularity via
-    // isTaskFutureStart, so a Today star set on a task that starts later
-    // today survives to resurface when the task does.
+
+
     const start = safeParseDate(task.startTime);
     return !(start && start > now && hasTimeComponent(task.startTime));
 }
 
-/**
- * Split already-selected Today rows for display without changing eligibility.
- * Date-only starts remain in the main list; later timed starts get a subgroup.
- */
+
 export function splitTodayTasksByStartTime<T extends Pick<Task, 'startTime'>>(
     tasks: readonly T[],
     now: Date = new Date(),
 ): { ready: T[]; laterToday: T[] } {
-    // Presentation only: callers supply eligible Today rows. Preserve their
-    // membership, order and identity; never reinterpret a date-only start.
+
+
     const ready: T[] = [];
     const laterToday: T[] = [];
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -786,12 +707,7 @@ export function splitTodayTasksByStartTime<T extends Pick<Task, 'startTime'>>(
     return { ready, laterToday };
 }
 
-/**
- * The earliest upcoming timed start today among the given tasks, as an epoch
- * timestamp — the moment a view filtering with shouldShowTaskForStart next
- * needs to re-render to reveal a task (#995). Starts beyond today are the
- * day-key tick's job.
- */
+
 export function getNextFutureStartRevealAt(
     tasks: ReadonlyArray<Pick<Task, 'startTime'>>,
     now: Date = new Date(),
@@ -808,14 +724,7 @@ export function getNextFutureStartRevealAt(
     return next;
 }
 
-/**
- * Statuses that occupy a slot in a sequential project's chain. `next` is the
- * actionable step; `waiting` is a committed step blocked on someone else, so
- * it holds its place and keeps later steps out of Focus/Next until it clears
- * — deferring by person blocks the chain exactly like deferring by date
- * already does. Inbox (unclarified) and someday (uncommitted) deliberately do
- * NOT hold a slot: they are not steps of the sequence yet.
- */
+
 export function isSequentialChainStatus(status: TaskStatus | undefined): boolean {
     return status === 'next' || status === 'waiting';
 }
@@ -861,6 +770,7 @@ export function isFocusSequentialCandidate(
         : isDueForReview(task.reviewAt, options.now);
 }
 
+
 function getFocusSequentialScheduleKey(
     task: Pick<Task, 'dueDate' | 'isFocusedToday' | 'reviewAt' | 'status'>,
     now: Date,
@@ -880,15 +790,7 @@ function getFocusSequentialScheduleKey(
         : safeParseDate(task.reviewAt)?.getTime() ?? Number.NaN;
     let scheduledTime = Number.POSITIVE_INFINITY;
 
-    // A due date or due review earns the project's one Focus slot; a start
-    // date deliberately does not — a later task becoming available today only
-    // gates that task, it must not displace an earlier task in the sequence
-    // (#1015: the displaced winner can even be hidden by its own start time,
-    // leaving the whole project missing from Focus). A waiting task's due
-    // date earns nothing either: it is not actionable, and letting it outrank
-    // an earlier actionable step would hide real work. Waiting tasks hold
-    // their slot by order alone (review-due keeps its rank — those surface in
-    // Focus's review section regardless of status).
+
     if (Number.isFinite(dueMs) && dueMs <= endOfTodayMs && task.status !== 'waiting') {
         scheduledTime = Math.min(scheduledTime, dueMs);
     }
@@ -970,10 +872,7 @@ const getFocusEligibilityProjectMap = (
     return projects as Map<string, Project>;
 };
 
-/**
- * Focus eligibility's sequencing. Unlike getTaskSequencing, a deleted project's
- * id stays in the sets (its tasks are filtered as inactive anyway), as before.
- */
+
 export const getFocusEligibilitySequentialProjectIds = (
     projectMap: ReadonlyMap<string, Project>,
     sections?: readonly SequentialSection[],
@@ -982,10 +881,7 @@ export const getFocusEligibilitySequentialProjectIds = (
     sections,
 );
 
-/**
- * Everything getTaskFocusEligibility derives from the whole task set, computed once. Pass the
- * result as options when classifying more than one task against the same library.
- */
+
 export function buildTaskFocusEligibilityContext(options: {
     tasks: readonly Task[];
     projects: readonly Project[] | Map<string, Project>;
@@ -1033,9 +929,8 @@ export function getTaskFocusEligibility(
         ?? derivedSequential?.sequentialSectionKeys
         ?? new Set<string>();
     const sequencing = { sequentialProjectIds, sectionScopedProjectIds, sequentialSectionKeys };
-    // Scanning every task to find each sequential chain's head is O(all) — fine for one call,
-    // quadratic when a caller filters a whole library. Callers that ask repeatedly should pass
-    // buildTaskFocusEligibilityContext's result instead.
+
+
     const sequentialFirstTaskIds = options.sequentialFirstTaskIds
         ?? getFocusSequentialFirstTaskIds(
             options.tasks.filter((candidate) => (
@@ -1074,12 +969,7 @@ export function getTaskFocusEligibility(
     return { eligible: false, reason: 'clarify' };
 }
 
-/**
- * Sorts on keys read once per task instead of once per comparison. These
- * comparators parse date strings, and at a few thousand tasks the O(n log n)
- * parses — not the sort — were the cost (#766). The comparison itself is
- * unchanged, and `sort` stays stable, so the resulting order is identical.
- */
+
 export function sortByPrecomputedKey<T, K>(
     tasks: readonly T[],
     toKey: (task: T) => K,
@@ -1090,11 +980,7 @@ export function sortByPrecomputedKey<T, K>(
     return decorated.map((entry) => entry.task);
 }
 
-/**
- * Sort tasks by status, due date, and creation time.
- * Order: inbox → next → waiting → someday → reference → done → archived
- * Within same status: tasks with due dates first (sorted by date), then by creation time (FIFO)
- */
+
 export function sortTasks(tasks: Task[]): Task[] {
     return sortByPrecomputedKey(
         tasks,
@@ -1104,19 +990,19 @@ export function sortTasks(tasks: Task[]): Task[] {
             created: safeTime(task.createdAt, 0),
         }),
         (a, b) => {
-            // 1. Sort by Status
+
             if (a.status !== b.status) {
                 return a.status - b.status;
             }
 
-            // 2. Sort by Due Date (tasks with valid due dates first)
+
             const hasDueA = Number.isFinite(a.due);
             const hasDueB = Number.isFinite(b.due);
             if (hasDueA && !hasDueB) return -1;
             if (!hasDueA && hasDueB) return 1;
             if (hasDueA && hasDueB && a.due !== b.due) return a.due - b.due;
 
-            // 3. Created At (oldest first for FIFO)
+
             return a.created - b.created;
         }
     );
@@ -1160,11 +1046,7 @@ export function buildTrashTimeline(
     ));
 }
 
-/**
- * What "Clear Trash" may purge: exactly the shown items. `narrowed` is true when
- * a filter hides at least one trashed item, so the caller must purge by id and
- * say how many items it will delete instead of claiming "all".
- */
+
 export function resolveTrashClearScope(
     shownTasks: readonly Task[],
     shownProjects: readonly Project[],
@@ -1180,17 +1062,7 @@ export function resolveTrashClearScope(
     };
 }
 
-/**
- * Sort tasks by a user-selected sort option.
- * Falls back to default sortTasks when sortBy is 'default' or undefined.
- */
-/**
- * A stored 'timeEstimate' sort must stop ordering lists the moment the Time
- * estimates feature is switched off: the field is hidden everywhere else, so
- * an order derived from it reads as random. The preference itself is kept
- * (it comes back when the feature is re-enabled) — only the effective sort
- * falls back. Every list, widget and picker resolves through here (#1107).
- */
+
 export function resolveTaskSortByForFeatures<Sort extends SortField>(
     sortBy: Sort,
     settings: { features?: AppSettings['features'] } | null | undefined,
@@ -1201,13 +1073,7 @@ export function resolveTaskSortByForFeatures<Sort extends SortField>(
     return sortBy;
 }
 
-/**
- * The grouping twin of `resolveTaskSortByForFeatures`: a saved or stored
- * 'priority' group-by stops bucketing the moment Priorities is switched off,
- * falling back to the ungrouped list. The stored preference survives and
- * returns when the feature is re-enabled. Energy has no feature flag, so it
- * is deliberately not handled here.
- */
+
 export function resolveTaskGroupByForFeatures<Axis extends string>(
     groupBy: Axis,
     settings: { features?: AppSettings['features'] } | null | undefined,
@@ -1223,11 +1089,7 @@ export type TaskPerspectiveFeatureState<Sort extends SortField, Group extends st
     canSavePerspective: boolean;
 };
 
-/**
- * Derives Focus-style perspective controls from the axes that are actually visible.
- * Raw stored choices deliberately survive feature-off periods, but they must not make
- * Default look inactive, enable Save, or leak back into a newly saved perspective.
- */
+
 export function resolveTaskPerspectiveForFeatures<Sort extends SortField, Group extends string>({
     sortBy,
     groupBy,
@@ -1292,15 +1154,12 @@ export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task
         case 'review':
             return byDateThenCreated((task) => timeOrInfinity(task.reviewAt));
         case 'timeEstimate':
-            // timeEstimateSortRank maps a missing estimate to +Infinity, and the
-            // comparator's equality guard sends those to the createdAt tie-break
-            // instead of Infinity - Infinity = NaN, so unestimated tasks land last
-            // in a stable order (#1107).
+
+
             return byDateThenCreated((task) => timeEstimateSortRank(task.timeEstimate));
         case 'priority':
-            // Focus's priority order (sortTasksBySavedPreference): rank high to low, no
-            // priority last, then due, start and created. Equality guards keep two
-            // missing dates (Infinity) from comparing as NaN.
+
+
             return sortByPrecomputedKey(
                 tasks,
                 (task) => ({
@@ -1321,11 +1180,8 @@ export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task
         case 'created-desc':
             return sortByPrecomputedKey(tasks, (task) => timeOrZero(task.createdAt), (a, b) => b - a);
         case 'completed':
-            // Deliberately keyed on completedAt alone, unlike the Done list's
-            // default order (sortDoneTasksForListView), which falls back to
-            // updatedAt/createdAt so every done task gets a position. Archive
-            // holds archived-but-never-completed tasks, and those belong at the
-            // end rather than sorted in by when they were last touched (#945).
+
+
             return sortByPrecomputedKey(
                 tasks,
                 (task) => ({ completed: safeTime(task.completedAt, -Infinity), title: task.title }),
@@ -1339,10 +1195,7 @@ export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task
     }
 }
 
-/**
- * Stable sort for Board columns: tasks with a manual boardOrder come first
- * in ascending order; tasks without one keep their incoming relative order.
- */
+
 export function sortTasksByBoardOrder<T extends Pick<Task, 'boardOrder'>>(tasks: T[]): T[] {
     return [...tasks].sort((a, b) => {
         const aOrder = Number.isFinite(a.boardOrder) ? (a.boardOrder as number) : Number.POSITIVE_INFINITY;
@@ -1352,7 +1205,7 @@ export function sortTasksByBoardOrder<T extends Pick<Task, 'boardOrder'>>(tasks:
     });
 }
 
-/** A duplicate takes a free integer slot without changing existing cards. */
+
 export function boardOrderForDuplicate(sourceOrder: number | undefined, column: readonly Pick<Task, 'boardOrder'>[]): number | undefined {
     if (!Number.isSafeInteger(sourceOrder)) return undefined;
     const current = sourceOrder as number;
@@ -1365,10 +1218,7 @@ export function boardOrderForDuplicate(sourceOrder: number | undefined, column: 
     return Number.isSafeInteger(candidate) && candidate > current && candidate < next ? candidate : undefined;
 }
 
-/**
- * Stable sort for Today's Focus: tasks with a manual focusOrder come first
- * in ascending order; tasks without one keep their incoming relative order.
- */
+
 export function sortTasksByFocusOrder<T extends Pick<Task, 'focusOrder'>>(tasks: T[]): T[] {
     return [...tasks].sort((a, b) => {
         const aOrder = Number.isFinite(a.focusOrder) ? (a.focusOrder as number) : Number.POSITIVE_INFINITY;
@@ -1451,8 +1301,8 @@ export function sortTasksBySavedPreference<T extends Task>(
         const byCreatedDesc = () => safeTime(b.createdAt, 0) - safeTime(a.createdAt, 0);
         const byTitle = () => textCollator.compare(a.title, b.title);
         const byId = () => textCollator.compare(a.id, b.id);
-        // Two missing values are both +Infinity: compare them as equal, never as
-        // Infinity - Infinity = NaN, which would skip every fallback below.
+
+
         const byNumber = (x: number, y: number) => (x === y ? 0 : x - y);
         const byDue = () => byNumber(safeDueTime(a.dueDate, Number.POSITIVE_INFINITY), safeDueTime(b.dueDate, Number.POSITIVE_INFINITY));
         const byStart = () => byNumber(safeTime(a.startTime, Number.POSITIVE_INFINITY), safeTime(b.startTime, Number.POSITIVE_INFINITY));
@@ -1495,10 +1345,8 @@ export function sortTasksBySavedPreference<T extends Task>(
             case 'created-desc':
                 return withFallbacks(byCreatedDesc);
             case 'priority':
-                // A stored 'priority' sort must stop ordering the list once the
-                // Priorities feature is off — the field is hidden everywhere
-                // else, so a priority order reads as random. Same contract as
-                // 'start' above: the preference is kept, only the effect drops.
+
+
                 return options.prioritizeByPriority
                     ? withFallbacks(byPriority, byDue, byStart, byCreatedAsc)
                     : withFallbacks(byDue, byStart, byCreatedAsc);
@@ -1518,6 +1366,7 @@ export function sortTasksBySavedPreference<T extends Task>(
     return [...tasks].sort((a, b) => direction * compare(a, b));
 }
 
+
 export function sortFocusNextActions(tasks: Task[], options: SortFocusNextActionsOptions = {}): Task[] {
     const nowMs = (options.now ?? new Date()).getTime();
     const dueSoonWindowDays = Number.isFinite(options.dueSoonWindowDays)
@@ -1528,12 +1377,7 @@ export function sortFocusNextActions(tasks: Task[], options: SortFocusNextAction
     const projectDeadlineBoosts = options.projectDeadlineBoosts
         ?? (options.projects ? getProjectDeadlineBoosts(tasks, options.projects, { now: options.now }) : new Map());
 
-    // Date parsing belongs to the O(n) preparation, not the O(n log n)
-    // comparator. Keep keys local so edits and the moving due-soon window
-    // always take effect, and return the original task references.
-    // Every value the comparator reads more than once — the boost lookup and the
-    // priority rank included — is read once per task here. Same reason as the
-    // date parses above (#766): the comparator runs O(n log n) times.
+
     return sortByPrecomputedKey(tasks, (task) => {
         const due = safeDueTime(task.dueDate, Number.POSITIVE_INFINITY);
         return {
@@ -1639,19 +1483,14 @@ export function getCalendarPlanningCandidates<T extends Task>(
     return sorted.slice(0, limit);
 }
 
-/**
- * Calculate the age of a task in days
- */
+
 export function getTaskAgeDays(createdAt: string, now: Date = new Date()): number {
     const created = new Date(createdAt);
     const diffMs = now.getTime() - created.getTime();
     return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
-/**
- * Get a human-readable age string for a task
- * Returns null for tasks < 1 day old (to avoid clutter)
- */
+
 export function getTaskAgeLabel(createdAt: string, lang: Language = 'en', now: Date = new Date()): string | null {
     const days = getTaskAgeDays(createdAt, now);
     const isChinese = lang === 'zh' || lang === 'zh-Hant';
@@ -1674,10 +1513,7 @@ export function getTaskAgeLabel(createdAt: string, lang: Language = 'en', now: D
     return `${Math.floor(days / 30)} months old`;
 }
 
-/**
- * Get the staleness level of a task (for color coding)
- * Returns: 'fresh' | 'aging' | 'stale' | 'very-stale'
- */
+
 export function getTaskStaleness(createdAt: string): 'fresh' | 'aging' | 'stale' | 'very-stale' {
     const days = getTaskAgeDays(createdAt);
 
@@ -1687,10 +1523,7 @@ export function getTaskStaleness(createdAt: string): 'fresh' | 'aging' | 'stale'
     return 'very-stale';
 }
 
-/**
- * Get the urgency level of a task based on due date
- * Returns: 'overdue' | 'urgent' (24h) | 'upcoming' (72h) | 'normal' | 'done'
- */
+
 export function getTaskUrgency(task: Partial<Task>, now: Date = new Date()): 'overdue' | 'urgent' | 'upcoming' | 'normal' | 'done' {
     if (!isTaskActionable(task)) return 'done';
     if (!task.dueDate) return 'normal';
@@ -1716,10 +1549,7 @@ export function getTaskAreaId(
     return task.areaId;
 }
 
-/**
- * Get checklist progress for display.
- * Returns null if no checklist or checklist is empty.
- */
+
 export function getChecklistProgress(task: Pick<Task, 'checklist'>): { completed: number; total: number; percent: number } | null {
     const list = task.checklist || [];
     if (list.length === 0) return null;
@@ -1737,12 +1567,7 @@ export interface TaskLifecycleCounts {
     createdLast7d: number;
 }
 
-/**
- * Content-free composition of a stored task array for diagnostic logs (#766):
- * how many tasks are live, sitting in Trash, or retained purely as sync
- * tombstones, plus recent creation volume so unexplained growth between two
- * shared logs can be attributed without another instrumentation round.
- */
+
 export function summarizeTaskLifecycleCounts(
     tasks: readonly Pick<Task, 'deletedAt' | 'purgedAt' | 'createdAt'>[],
     nowMs: number = Date.now(),
@@ -1777,15 +1602,7 @@ export const getAutoArchiveDays = (settings: AppData['settings']): number => {
         : DEFAULT_AUTO_ARCHIVE_DAYS;
 };
 
-/**
- * Whether one finished task is old enough to file itself away.
- *
- * Shared by the load-time sweep and the update path, because those run on
- * different clocks: the sweep is throttled to twice a day, so a completion time
- * edited to last year sat in Done until the next window and read as a bug
- * (#959). Keyed on completedAt, falling back to updatedAt for rows that predate
- * the field.
- */
+
 export function shouldAutoArchiveCompletedTask(
     task: Pick<Task, 'status' | 'completedAt' | 'updatedAt' | 'deletedAt'>,
     settings: AppData['settings'],
@@ -1802,23 +1619,11 @@ export function shouldAutoArchiveCompletedTask(
     return resolvedMs < nowMs - archiveDays * 24 * 60 * 60 * 1000;
 }
 
-/**
- * Buckets for grouping a completed list by when the work was finished (#945).
- * Ordered oldest-last, which is the order the groups are shown in.
- */
+
 export const COMPLETION_DATE_GROUPS = ['today', 'yesterday', 'previous7Days', 'earlier', 'notCompleted'] as const;
 export type CompletionDateGroup = typeof COMPLETION_DATE_GROUPS[number];
 
-/**
- * Which bucket a task falls in, on local calendar-day boundaries rather than
- * rolling 24-hour windows — "yesterday" has to mean the previous calendar day
- * however close to midnight the task was finished.
- *
- * Keyed on completedAt alone, matching the 'completed' sort: a task with no
- * completion time is 'notCompleted' rather than being placed by when it last
- * changed. Archive holds archived-but-never-completed tasks; a done task can
- * also predate completedAt being recorded.
- */
+
 export function getCompletionDateGroup(
     task: Pick<Task, 'completedAt'>,
     now: Date = new Date(),
@@ -1826,8 +1631,8 @@ export function getCompletionDateGroup(
     const completedAt = safeParseDate(task.completedAt);
     if (!completedAt) return 'notCompleted';
     const daysAgo = differenceInCalendarDays(startOfDay(now), startOfDay(completedAt));
-    // A completion stamped later today than `now` (clock skew, or a sync from a
-    // device running ahead) is still today's work, not the future.
+
+
     if (daysAgo <= 0) return 'today';
     if (daysAgo === 1) return 'yesterday';
     if (daysAgo <= 7) return 'previous7Days';

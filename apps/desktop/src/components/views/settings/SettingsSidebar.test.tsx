@@ -17,6 +17,18 @@ function setup() {
 }
 
 describe('SettingsSidebar responsive search', () => {
+    it('marks only the active settings section as the current page', () => {
+        const items = [{ id: 'main', label: 'General', icon: Icon }, { id: 'sync', label: 'Sync', icon: Icon }];
+        const props = { title: 'Settings', subtitle: 'Preferences', items, onSelect: vi.fn() };
+        const { rerender } = render(<SettingsSidebar {...props} activeId="main" />);
+        expect(screen.getByRole('button', { name: 'General', current: 'page' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Sync' })).not.toHaveAttribute('aria-current');
+
+        rerender(<SettingsSidebar {...props} activeId="sync" />);
+        expect(screen.getByRole('button', { name: 'Sync', current: 'page' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'General' })).not.toHaveAttribute('aria-current');
+    });
+
     it('keeps search and results in the narrow layout instead of hiding them behind lg', () => {
         const { input, pick } = setup();
         expect(input.parentElement!.className).not.toMatch(/\bhidden\b/);

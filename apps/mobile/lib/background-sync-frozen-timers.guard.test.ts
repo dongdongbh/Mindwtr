@@ -1,12 +1,6 @@
-/**
- * Guard for #1001. React Native on Android pauses every JavaScript timer while
- * the app is off screen; anything on the background sync path that waits on a
- * timer freezes there and holds the WorkManager job until Android kills it.
- * This test freezes timers the same way and drives the real WebDAV client,
- * retry helper, and mobile fetch through a fake native XMLHttpRequest. If a
- * timer creeps back into that path, the promises below never settle and the
- * test times out.
- */
+
+
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reactNativeMock = vi.hoisted(() => ({
@@ -49,7 +43,7 @@ class FakeNativeXhr {
   send() {
     FakeNativeXhr.requests.push({ method: this.method, url: this.url });
     const answer = FakeNativeXhr.answer(this.method, this.url);
-    // Native completion arrives as an event on a later tick, never via a timer.
+
     queueMicrotask(() => {
       this.status = answer.status;
       this.statusText = answer.status === 200 ? 'OK' : 'Not Found';
@@ -67,7 +61,7 @@ describe('background sync path with JavaScript timers frozen', () => {
   beforeEach(() => {
     FakeNativeXhr.requests = [];
     vi.stubGlobal('XMLHttpRequest', FakeNativeXhr);
-    // Not fake timers: frozen ones. Nothing scheduled here ever runs.
+
     vi.stubGlobal('setTimeout', inertTimer);
     vi.stubGlobal('setInterval', inertTimer);
     reactNativeMock.AppState.currentState = 'background';

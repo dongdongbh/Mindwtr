@@ -21,6 +21,7 @@ import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } f
 import { AttachmentProgressIndicator } from '../../AttachmentProgressIndicator';
 import { isFolderLinkAttachment, useBareFileReferenceCheck } from '../../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../../lib/attachment-utils';
+import { isImeComposing } from '../../../lib/ime';
 
 type ProjectNotesSectionProps = {
     project: Project;
@@ -28,7 +29,7 @@ type ProjectNotesSectionProps = {
     onTogglePreview: () => void;
     onAddFile: () => void;
     onAddLink: () => void;
-    // Desktop shell only: the folder picker is a native dialog.
+
     onLinkFolder?: () => void;
     attachmentsBusy?: boolean;
     visibleAttachments: Attachment[];
@@ -179,6 +180,7 @@ export function ProjectNotesSection({
     });
 
     const handleNotesKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (isImeComposing(event)) return;
         if (notesAutocomplete.handleKeyDown(event)) {
             return;
         }
@@ -198,8 +200,8 @@ export function ProjectNotesSection({
             start: textarea.selectionStart ?? currentValue.length,
             end: textarea.selectionEnd ?? currentValue.length,
         };
-        // Tab indents (Shift+Tab outdents) list items through the same core helper the
-        // task description editor uses; a no-op result keeps the browser focus move.
+
+
         const next = isTab
             ? applyMarkdownKeyboardShortcut(currentValue, selection, { key: 'Tab', shiftKey: event.shiftKey })
             : continueMarkdownOnEnter(currentValue, selection, { assist: markdownEditorAssist });

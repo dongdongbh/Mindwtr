@@ -118,7 +118,7 @@ async function fixture(provider: 'openai' | 'gemini' | 'anthropic' = 'openai', p
 }
 
 describe('private iOS Weekly Review AI', () => {
-    it('uses section sequence candidates for iOS analysis while omitted Review reads remain legacy', async () => {
+    it('uses section sequence candidates for iOS analysis and the Weekly Review stale step without a flag', async () => {
         const f = await fixture(), data = seed('openai');
         data.projects[0] = { ...data.projects[0], perSectionFlow: true };
         data.sections = [{ id: 'sequence', projectId: 'p1', title: 'Steps', order: 0, isSequential: true, createdAt: AT, updatedAt: AT }];
@@ -132,8 +132,8 @@ describe('private iOS Weekly Review AI', () => {
         expect(f.logs.filter(row => row.op === 'append').map(row => row.text).join('')).toContain('v1.3.8/ios-review-sequence');
         expect(f.logs.filter(row => row.op === 'append').map(row => row.text).join('')).toContain('prepared');
         expect(f.writes).toEqual([]);
-        const legacy = await f.poll(f.host.menuRead('weeklyReview', JSON.stringify({ checkpoint: JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }), offset: 0, limit: 100 })));
-        expect(legacy.value.items.some((item: { row?: { id: string } }) => item.row?.id === ID)).toBe(true);
+        const plain = await f.poll(f.host.menuRead('weeklyReview', JSON.stringify({ checkpoint: JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }), offset: 0, limit: 100 })));
+        expect(plain.value.items.some((item: { row?: { id: string } }) => item.row?.id === ID)).toBe(false);
     });
 
     it('invalidates held analysis when section flow makes an offered tail blocked', async () => {

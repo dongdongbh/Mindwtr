@@ -23,7 +23,7 @@ const task: Task = {
 };
 
 const initialTaskState = useTaskStore.getState();
-/** The editor saves through the store: [stored] is the row it finds, [updateTask] the store write it reaches. */
+
 const seedStore = (stored: Task, updateTask = vi.fn().mockResolvedValue({ success: true })) => {
     useTaskStore.setState({ _allTasks: [stored], updateTask });
     return updateTask;
@@ -230,7 +230,7 @@ describe('useTaskItemSubmit attachment durability', () => {
         useTaskStore.setState({ _allTasks: [opened] });
         const { result } = renderHook(() => useTaskItemSubmit({
             baselineTask: opened,
-            // The editor moves the start with the due date, as its relative start says.
+
             draft: createTaskDraft({ ...opened, dueDate: '2026-10-25', startTime: '2026-10-22' }),
             editAttachments: undefined,
             editingTaskId: task.id,
@@ -357,4 +357,15 @@ describe('useTaskItemSubmit attachment durability', () => {
             expect(useTaskStore.getState()._tasksById.get(task.id)?.title).toBe('Second');
         });
     });
+});
+
+
+it('blocks every save path while file import is pending', async () => {
+    const updateTask = vi.fn(async () => ({ success: true }));
+    const setIsEditing = vi.fn();
+    const params = { baselineTask: task, task, draft: { ...createTaskDraft(task), title: 'Edited' }, editAttachments: [], isImportingFiles: true, editingTaskId: task.id, setEditingTaskId: vi.fn(), setIsEditing, showToast: vi.fn(), t: (key: string) => key, updateTask, beginAttachmentSave: vi.fn(), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(), settlePersistedAttachmentSave: vi.fn() };
+    const { result } = renderHook(() => useTaskItemSubmit(params));
+    await expect(result.current(undefined, { keepEditing: true })).resolves.toBeUndefined();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(setIsEditing).not.toHaveBeenCalled();
 });

@@ -34,7 +34,7 @@ void write_exact(int fd, const void *bytes, size_t size) {
 void read_exact(int fd, void *bytes, size_t size) {
   require(read(fd, bytes, size) == static_cast<ssize_t>(size), "read pipe");
 }
-}  // namespace
+}
 
 int main() {
   char path[] = "/tmp/mindwtr-ofd-lock.XXXXXX";
@@ -66,9 +66,8 @@ int main() {
 
   close(commands[0]);
   close(results[1]);
-  // SAF identity revalidation opens and closes another descriptor for the same
-  // document. A process-owned F_SETLK lock would be released here; the retained
-  // OFD lock must continue excluding a legacy FileChannel/fcntl owner.
+
+
   for (int attempt = 0; attempt < 3; ++attempt) {
     const int validation_fd = open(path, O_RDONLY | O_CLOEXEC);
     require(validation_fd >= 0, "validation open");

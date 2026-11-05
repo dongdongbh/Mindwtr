@@ -7,9 +7,7 @@ import {
   type Attachment,
 } from '@mindwtr/core';
 
-/** Real digests, not fixtures: core's `validateAttachmentHash` now fails closed, and the
- *  node test env has `crypto.subtle`, so the values the code computes must be the values
- *  the tests expect. */
+
 const sha256Hex = (bytes: Uint8Array): string => nodeCrypto.createHash('sha256').update(bytes).digest('hex');
 const base64Of = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 const deferred = <T = void>() => {
@@ -48,7 +46,7 @@ const fileSystemMock = vi.hoisted(() => ({
   moveAsync: vi.fn().mockResolvedValue(undefined),
   uploadAsync: vi.fn(),
   createUploadTask: vi.fn(),
-  // Mirrors expo-file-system/legacy: the enum is exported here and nowhere else (#1136).
+
   FileSystemUploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
 }));
 
@@ -95,8 +93,8 @@ vi.mock('expo-file-system', () => ({
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
 
 vi.mock('./attachment-file-installer', () => attachmentFileInstallerMock);
-// SafDocumentsCore's listing and lookup through the expo SAF mock above (a path-like provider:
-// the display name is the decoded tail of the document ID).
+
+
 vi.mock('./saf-documents', () => {
   const nameOf = (uri: string) => {
     const decoded = decodeURIComponent(uri).replace(/\/+$/, '');
@@ -108,7 +106,7 @@ vi.mock('./saf-documents', () => {
       return uris.map((child) => ({ uri: child, name: nameOf(child), mime: null, size: null, lastModified: null }));
     }),
     statSafDocument: vi.fn(async (uri: string) => ({ uri, name: nameOf(uri), mime: null, size: null, lastModified: null })),
-    // Lands where the legacy write landed, so the folder fakes below see the bytes.
+
     writeSafDocument: vi.fn(async (uri: string, bytes: Uint8Array) => (
       fileSystemMock.writeAsStringAsync(uri, Buffer.from(bytes).toString('base64'), { encoding: 'base64' })
     )),
@@ -125,13 +123,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-// Only the network transports are stubbed. Everything else — the shared transfer
-// lifecycle (packages/core/src/attachment-transfer.ts), SHA-256 hashing and
-// fail-closed hash validation, cloud-key/path derivation, upload validation, the
-// WebDAV download backoff — is the REAL core code, so what this file asserts is
-// what actually ships. (It used to be a vi.hoisted hand-copy of the lifecycle
-// with `computeSha256Hex` pinned to null, which proved nothing about core and
-// covered none of #1057's check-on-touch behaviour.)
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {
@@ -147,8 +139,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     webdavMakeDirectory: vi.fn(),
     webdavPutFile: vi.fn(),
     webdavPutFileVersioned: vi.fn(),
-    // Retry/backoff is transport timing, not behaviour under test: the real
-    // helper sleeps up to a minute between attempts.
+
+
     withRetry: vi.fn(async (fn: () => Promise<unknown>) => await fn()),
     sleep: vi.fn().mockResolvedValue(undefined),
   };
@@ -165,8 +157,7 @@ vi.mock('./dropbox-sync', () => ({
   uploadDropboxFileVersioned: vi.fn(),
 }));
 
-// Only the three functions the CloudKit attachment backend uses; nothing else in this
-// test's module graph imports ./cloudkit-sync.
+
 vi.mock('./cloudkit-sync', () => {
   class CloudKitAttachmentNotFoundError extends Error {}
   return {
@@ -189,23 +180,16 @@ vi.mock('./app-log', () => ({
   sanitizeLogMessage: (value: string) => value,
 }));
 
-// BUG-R1: `common.ts` imports this (as `../js-timers`) to skip arming timers that would
-// never fire while Android has the app backgrounded. Default false (not paused) matches
-// the real predicate's behaviour under the test shim's default `Platform.OS`.
+
 const jsTimersMock = vi.hoisted(() => ({
   areJsTimersPaused: vi.fn(() => false),
 }));
 vi.mock('./js-timers', () => jsTimersMock);
 
-// Loaded once, in a hook: the first import pulls the real @mindwtr/core barrel through
-// `importOriginal` and costs seconds. Inside a test body that cost lands on whichever test
-// runs first and can blow the 5s test timeout under parallel load.
+
 let attachmentSync: typeof import('./attachment-sync');
 
-/**
- * The backends never write to the document they are given: they return the folded copy, or
- * `false` when nothing changed. `data` is where a test reads the post-sync values.
- */
+
 const syncResult = (result: AppData | boolean | null | undefined, input: AppData) => {
   const folded = typeof result === 'object' && result !== null;
   return { didMutate: folded, data: (folded ? result : input) as AppData };
@@ -267,9 +251,8 @@ describe('attachment sync', () => {
     modernFileSystemMock.create.mockReturnValue(undefined);
     modernFileSystemMock.move.mockReset();
     modernFileSystemMock.move.mockReturnValue(undefined);
-    // The real lifecycle keeps a module-scoped "stat we already failed to hash" map
-    // (BUG-16); leaking it between tests would silently skip a re-read a later test
-    // is asserting on.
+
+
     const core = await import('@mindwtr/core');
     core.resetUnhashableAttachmentStatsForTests();
     vi.mocked(core.webdavHeadFile).mockResolvedValue({
@@ -279,9 +262,8 @@ describe('attachment sync', () => {
       lastModified: null,
       contentLength: null,
     });
-    // #1119 follow-up: the presence pre-pass may only ever clear on a DEFINITIVE not-found,
-    // so the unconfigured defaults are "the blob is there" and "no listing was obtained" —
-    // both of which change nothing. A test that wants a repair says so explicitly.
+
+
     vi.mocked(core.cloudAttachmentExists).mockResolvedValue(true);
     const dropbox = await import('./dropbox-sync');
     vi.mocked(dropbox.getDropboxFileMetadata).mockResolvedValue({ rev: null });
@@ -300,9 +282,8 @@ describe('attachment sync', () => {
     fileSystemMock.StorageAccessFramework.createFileAsync.mockImplementation(
       async (parentUri: string, name: string) => `${parentUri.replace(/\/$/, '')}/${encodeURIComponent(name)}`,
     );
-    // file-system.ts routes a SAF (`content://`) write to the legacy module's own
-    // SAF writer; the generic legacy writer cannot take those URIs. Both stand in
-    // for the same simulated filesystem here, so tests keep asserting one mock.
+
+
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockImplementation(
       async (uri: string, contents: string, options?: unknown) => (
         fileSystemMock.writeAsStringAsync(uri, contents, options)
@@ -425,8 +406,7 @@ describe('attachment sync', () => {
       updatedAt: '2026-03-06T05:14:32.399Z',
     });
 
-    // Native copyAsync streams the content:// bytes straight into a temp file
-    // beside the target; no JS-side base64 read happens on the happy path.
+
     expect(fileSystemMock.copyAsync).toHaveBeenCalledTimes(1);
     expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -687,8 +667,8 @@ describe('attachment sync', () => {
     );
 
     const appLog = await import('./app-log');
-    // The key is the only thing that lets core keep the record for a later
-    // download; clearing it produced "the file could not be fetched" forever.
+
+
     expect(data.projects[0]?.attachments?.[0]).toMatchObject({
       cloudKey: 'attachments/absent-blob.pdf',
       localStatus: 'missing',
@@ -826,7 +806,7 @@ describe('attachment sync', () => {
     expect(didMutate).toBe(true);
     expect(attachment?.uri).toBe(managedUri);
     expect(attachment?.localStatus).toBe('available');
-    // The document handed in is never written to.
+
     expect(appData.tasks[0].attachments?.[0]?.uri).toBe(legacyContentUri);
     expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -943,10 +923,7 @@ describe('attachment sync', () => {
     expect(fileSystemMock.readDirectoryAsync).not.toHaveBeenCalled();
     expect(fileSystemMock.StorageAccessFramework.readDirectoryAsync).not.toHaveBeenCalled();
 
-    // #1057 (review B3): the exact same steady-state attachment (cloudKey + managed
-    // local file + localStatus 'available') must count as pending work once a backend
-    // wires check-on-touch content detection — otherwise both attachment phases never
-    // run on mobile and content edits/cross-device updates are never detected.
+
     await expect(
       hasPendingAttachmentSyncWork(makeData(baseAttachment), { contentCheckEnabled: true }),
     ).resolves.toBe(true);
@@ -993,20 +970,17 @@ describe('attachment sync', () => {
     }))).resolves.toBe(true);
   });
 
-  // Audit F3 / #1119 follow-up: a settled attachment used to make EVERY sync cycle run the
-  // whole attachment phase — a MKCOL, one HEAD per attachment, and (because the phase runs
-  // at all) a remote mutation fence PUT and DELETE. The presence proof is now periodic.
+
   describe('idle-cycle attachment traffic', () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
     const WEBDAV_CONFIG = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
     const WEBDAV_BASE = 'https://example.com';
-    // Mirrors core's `buildSyncLocationScope` (shared with sync-encryption discovery scoping
-    // since #1138): only the dimensions the ACTIVE backend addresses, URLs normalized.
+
+
     const scopeFor = (webdavUrl: string): string => JSON.stringify(['webdav', webdavUrl, 'u']);
     const STEADY_BYTES = new Uint8Array([1, 2, 3]);
 
-    /** cloudKey set, a managed local file, `available`, and a recorded content stat that
-     *  matches what `getInfoAsync` reports below. Nothing here needs doing. */
+
     const steadyAttachment = (): Attachment => ({
       id: 'settled',
       kind: 'file',
@@ -1081,7 +1055,7 @@ describe('attachment sync', () => {
       await expect(hasPendingAttachmentSyncWork(appData, { contentCheckEnabled: true }))
         .resolves.toBe(false);
 
-      // Even if something else made the phase run, the settled attachment costs nothing.
+
       await syncWebdavAttachments(appData, WEBDAV_CONFIG, WEBDAV_BASE);
       await expect(countWebdavRequests()).resolves.toBe(0);
     });
@@ -1352,7 +1326,7 @@ describe('attachment sync', () => {
     it('(d) forces reconciliation when the backend configuration changed under the stamp', async () => {
       const core = await import('@mindwtr/core');
       const { hasPendingAttachmentSyncWork, syncWebdavAttachments } = attachmentSync;
-      // Fresh in time, but written against a different server.
+
       await stubDeviceConfig({ scope: scopeFor('https://old.example/data.json'), at: Date.now() });
       const appData = dataWith(steadyAttachment());
 
@@ -1363,13 +1337,7 @@ describe('attachment sync', () => {
       expect(vi.mocked(core.webdavFileExists)).toHaveBeenCalledTimes(1);
     });
 
-    // fresh-join-attachment-posture packet -10 (correction pass, fixed in the final fix pass —
-    // review finding B2): the durable "seen this location" fact the sync-encryption posture
-    // gate uses for backends (the file backend above all) with no FastSyncState record.
-    // Scope-exact by design. Takes NO scope argument: it derives its own comparison scope via
-    // `readActiveSyncLocationScope`, the same derivation `markAttachmentPresenceReconciled`
-    // writes with — `stubDeviceConfig`'s `CONFIG` map IS that stored device config, so it
-    // always resolves to `scopeFor(WEBDAV_CONFIG.url)` here.
+
     describe('hasCompletedAttachmentPresenceReconciliation', () => {
       it('is false for a genuinely fresh device with no stamp at all', async () => {
         await stubDeviceConfig(null);
@@ -1396,7 +1364,7 @@ describe('attachment sync', () => {
     it('(e) does not MKCOL the attachments directory for a pass that uploads nothing', async () => {
       const core = await import('@mindwtr/core');
       const { syncWebdavAttachments } = attachmentSync;
-      // Reconciliation due, so the pass genuinely runs and still uploads nothing.
+
       await stubDeviceConfig(null);
 
       await syncWebdavAttachments(dataWith(steadyAttachment()), WEBDAV_CONFIG, WEBDAV_BASE);
@@ -1406,9 +1374,7 @@ describe('attachment sync', () => {
       expect(vi.mocked(core.webdavPutFileVersioned)).not.toHaveBeenCalled();
     });
 
-    // The File Sync backend's pre-pass is local, so it costs no radio — but it is two
-    // native stats per attachment on every idle cycle, and it is what keeps
-    // `hasPendingAttachmentSyncWork` from ever going quiet for that backend.
+
     it('(f) skips the File Sync remote-presence pre-pass inside the interval and runs it outside', async () => {
       const { syncFileAttachments } = attachmentSync;
       const syncFileUri = 'file://sync/data.json';
@@ -1433,8 +1399,8 @@ describe('attachment sync', () => {
       const { data } = syncResult(await syncFileAttachments(appData, syncFileUri), appData);
 
       expect(sawRemoteStat()).toBe(true);
-      // The remote copy is gone, so the pass clears cloudKey and the lifecycle republishes
-      // it under a fresh generation name.
+
+
       expect(data.tasks[0].attachments?.[0]?.cloudKey).not.toBe('attachments/settled.txt');
     });
 
@@ -1532,8 +1498,7 @@ describe('attachment sync', () => {
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(createdRemoteFileUri, expect.anything());
   });
 
-  // RSAF (rclone) never sets FLAG_SUPPORTS_WRITE, so expo's legacy SAF write refuses every
-  // attempt (#1001); attachments must write through SafDocumentsCore, which has no pre-check (B1).
+
   it('uploads a SAF attachment to a provider whose metadata denies writes, through the unchecked write', async () => {
     const syncFileUri = 'content://com.chiller3.rsaf.documents/tree/remote%3AMindwtr/document/remote%3AMindwtr%2Fdata.json';
     const attachmentsDirUri = 'content://com.chiller3.rsaf.documents/tree/remote%3AMindwtr/document/remote%3AMindwtr%2Fattachments';
@@ -1553,7 +1518,7 @@ describe('attachment sync', () => {
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockRejectedValue(notWritable);
     fileSystemMock.writeAsStringAsync.mockRejectedValue(notWritable);
     const safDocuments = await import('./saf-documents');
-    // SafDocumentsCore writes through the output stream, which this provider accepts.
+
     vi.mocked(safDocuments.writeSafDocument).mockResolvedValueOnce(undefined);
     const appData = singleAttachmentData({
       id: 'upload-me',
@@ -1719,8 +1684,8 @@ describe('attachment sync', () => {
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
       expect(candidate.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
-      // Model data.json CAS loss by discarding `candidate`: the already-published
-      // winning H2 generation is byte-identical and was never a mutation target.
+
+
       expect(remoteFiles.get(h2Uri)).toBe(base64Of(H2_BYTES));
       expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalledWith(
         h2Uri,
@@ -2186,13 +2151,12 @@ describe('attachment sync', () => {
       id: 'backoff-download', uri: '', cloudKey: 'attachments/backoff-download.txt',
     });
 
-    // A normal cycle fails the download and arms the per-attachment backoff.
+
     vi.mocked(core.webdavGetFile).mockRejectedValueOnce(new Error('connection reset'));
     await attachmentSync.syncWebdavAttachments(data, config, 'https://example.com');
     expect(core.webdavGetFile).toHaveBeenCalledTimes(1);
 
-    // The backoff is keyed by attachment id, so it is stale for the candidate
-    // destination an activation probe must prove right now.
+
     vi.mocked(core.webdavGetFile).mockResolvedValue(bytes.slice().buffer as ArrayBuffer);
     const probed = syncResult(await attachmentSync.syncWebdavAttachments(
       data, config, 'https://example.com', undefined, { activationProbe: true },
@@ -2326,8 +2290,8 @@ describe('attachment sync', () => {
         uri === localUri ? { exists: true, size: 3 } : { exists: false }
       ));
       fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
-      // The buffered PUT must revalidate the fence right before it is sent, instead
-      // of inheriting the check made before the file was read.
+
+
       const core = await import('@mindwtr/core');
       const lost = new SyncRemoteMutationFenceLostError();
       const assertRemoteMutationFenceHeld = vi.fn()
@@ -2430,10 +2394,7 @@ describe('attachment sync', () => {
     },
   );
 
-  // SEC-07: `uri` travels inside the synced document, so an attachment that still points
-  // outside the managed attachments directory after the migration pre-pass is refused as
-  // an upload source — its bytes are never read for upload and never leave the device —
-  // while its localStatus is still reconciled like any other attachment.
+
   it('never uploads a cloud attachment whose uri stayed outside the managed attachments directory', async () => {
     const originalUri = 'file://document/audio-captures/audio.m4a';
     const managedUri = 'file://document/attachments/audio.m4a';
@@ -2442,7 +2403,7 @@ describe('attachment sync', () => {
       if (uri === originalUri) return { exists: true, size: 3 };
       return { exists: false };
     });
-    // Migration into the managed dir fails, so the uri stays where the document put it.
+
     fileSystemMock.copyAsync.mockRejectedValueOnce(new Error('copy failed'));
     fileSystemMock.writeAsStringAsync.mockRejectedValueOnce(new Error('write failed'));
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
@@ -2490,8 +2451,8 @@ describe('attachment sync', () => {
     );
 
     expect(core.cloudPutFile).not.toHaveBeenCalled();
-    // The single read is the migration pre-pass's byte fallback; the refused upload
-    // adds none of its own (without the guard it reads the file a second time).
+
+
     expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledTimes(1);
     expect(didMutate).toBe(true);
     expect(data.tasks[0].attachments?.[0]).toMatchObject({
@@ -2856,9 +2817,7 @@ describe('attachment sync', () => {
     });
   });
 
-  // The self-hosted server refuses some uploads for good: 400 for blocked content, 413
-  // over its size limit. Retrying them every cycle also keeps every task edit on this
-  // device from reaching the other devices, so the third refusal is the last one.
+
   describe('self-hosted uploads the server refuses for good', () => {
     const REFUSED_URI = 'file://document/attachments/refused.txt';
 
@@ -2889,7 +2848,7 @@ describe('attachment sync', () => {
 
     const BLOCKED_SIGNATURE = 'Blocked executable attachment signature: elf';
 
-    /** `refusalText` is the raw response body both upload transports put on the error. */
+
     const rejectUploadsWith = async (status: number, serverMessage?: string): Promise<void> => {
       const core = await import('@mindwtr/core');
       vi.mocked(core.cloudPutFile).mockRejectedValue(
@@ -2920,7 +2879,7 @@ describe('attachment sync', () => {
     });
 
     afterEach(async () => {
-      // mockRejectedValue survives vi.clearAllMocks(), and later tests upload successfully.
+
       const core = await import('@mindwtr/core');
       vi.mocked(core.cloudPutFile).mockReset();
     });
@@ -2949,9 +2908,7 @@ describe('attachment sync', () => {
       },
     );
 
-    // A 400 the server did not say about the bytes is about the server: a storage folder
-    // that became a symbolic link or moved answers `Invalid attachment path` to EVERY
-    // upload, and giving up on those would soft-delete every waiting attachment at once.
+
     it.each([
       ['400 Invalid attachment path', 400, 'Invalid attachment path'],
       ['400 with no readable body', 400, undefined],
@@ -3875,6 +3832,7 @@ describe('attachment sync', () => {
       { phase: 'post-merge' },
     );
 
+
     const { data } = syncResult(result, appData);
     expect(data.tasks[0].attachments?.[0]).toMatchObject({
       cloudKey: 'cloudkit:cloudkit-terminal-missing',
@@ -3887,6 +3845,10 @@ describe('attachment sync', () => {
       { idempotent: true },
     );
     expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+
+    const asked = vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mock.calls.length;
+    await attachmentSync.syncCloudKitAttachments(appData, undefined, { phase: 'post-merge' });
+    expect(vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mock.calls.length).toBe(asked);
   });
 
   it('preserves CloudKit scratch and metadata when native install reports a conflict', async () => {
@@ -4482,10 +4444,7 @@ describe('attachment sync', () => {
     expect(core.cloudDeleteFile).not.toHaveBeenCalled();
   });
 
-  // #1057 check-on-touch content detection, running through the REAL core lifecycle.
-  // The same stat+hash mismatch means opposite things in the two halves of a sync
-  // cycle, and getting the direction backwards would ping-pong two devices' uploads
-  // against each other forever — so each direction is pinned per backend.
+
   describe('check-on-touch content changes', () => {
     const OLD_BYTES = new Uint8Array([1, 2, 3]);
     const NEW_BYTES = new Uint8Array([1, 2, 3, 4]);
@@ -5219,9 +5178,8 @@ describe('attachment sync', () => {
     });
 
     it('refuses a public http WebDAV target before making any request (SEC-10a)', async () => {
-      // The expo-file-system uploader talks to the server directly, so core's cleartext
-      // guard never sees it; without the mobile guard this streamed Basic credentials
-      // and the file's bytes in the clear.
+
+
       const core = await import('@mindwtr/core');
       const { syncWebdavAttachments } = attachmentSync;
       const config = { url: 'http://public.example/data.json', username: 'u', password: 'p' };
@@ -5268,9 +5226,8 @@ describe('attachment sync', () => {
     });
 
     it('sends a defined uploadType to the native uploader (#1136)', async () => {
-      // Android's FileSystemUploadOptions.uploadType has no native default and expo's
-      // UploadTask spreads our options over its own, so an undefined value here reached
-      // Kotlin as null and killed uploadTaskStartAsync with an Enum.ordinal() NPE.
+
+
       fileSystemMock.createUploadTask.mockReturnValue({
         uploadAsync: vi.fn().mockResolvedValue({ status: 200, body: '{"ok":true}' }),
         cancelAsync: vi.fn(),
@@ -5418,8 +5375,7 @@ describe('attachment sync', () => {
       fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync: () => upload.promise, cancelAsync });
       const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
 
-      // timeoutMs=1: if the timeout were still armed, it would have fired well before the
-      // 20ms wait below and started cancellation.
+
       const pending = uploadWebdavFileWithFileSystem(
         'https://example.com/attachments/a.bin',
         'file://document/attachments/a.bin',
@@ -5487,7 +5443,7 @@ describe('attachment sync', () => {
         ));
         vi.mocked(core.webdavFileExists).mockResolvedValue(true);
         vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
-        // Remote still holds the bytes the recorded fileHash describes.
+
         vi.mocked(core.webdavGetFile).mockResolvedValue(
           OLD_BYTES.slice().buffer as ArrayBuffer
         );
@@ -5522,8 +5478,8 @@ describe('attachment sync', () => {
         'https://example.com/attachments/edited-webdav.txt',
         expect.anything()
       );
-      // Remote bytes are staged and the exact old local generation is supplied
-      // to the native generation-bound installer.
+
+
       expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
         expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
         base64Of(OLD_BYTES),
@@ -5539,10 +5495,7 @@ describe('attachment sync', () => {
       expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(installedStage, { idempotent: true });
     });
 
-    // BUG-16: an attachment predating `fileHash` cannot have had newer remote content
-    // adopted by the merge (fileHash is synced), so post-merge records what is on disk
-    // as the baseline instead of downloading over it. Prepare still treats the same
-    // state as this device's edit candidate, but defers the remote write until merge.
+
     it('adopts a missing hash post-merge and defers the prepare-side candidate', async () => {
       const localUri = 'file://document/attachments/nohash.txt';
       const config = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
@@ -5583,8 +5536,7 @@ describe('attachment sync', () => {
       expect(preparedResult.data.tasks[0].attachments?.[0]?.pendingContentUpload).toBe(true);
     });
 
-    // BUG-16: an unhashable file used to be re-read (up to the 50 MB cap) every single
-    // cycle with nothing to show for it. The retry now waits for the stat to move again.
+
     it('re-reads an unhashable changed file only once per observed stat', async () => {
       const syncPath = 'file://sync/data.json';
       const localUri = 'file://document/attachments/unhashable.txt';
@@ -5599,8 +5551,8 @@ describe('attachment sync', () => {
       );
 
       const { syncFileAttachments } = attachmentSync;
-      // Each cycle carries the previous cycle's folded document forward, exactly as the
-      // sync run does after persisting it.
+
+
       let current = makeEditedAppData('unhashable');
 
       current = syncResult(
@@ -5617,7 +5569,7 @@ describe('attachment sync', () => {
       expect(attachmentFileInstallerMock.hashAttachmentFileGeneration).toHaveBeenCalledTimes(1);
       expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
 
-      // Nothing is published on an unconfirmed guess.
+
       const attachment = current.tasks[0].attachments?.[0];
       expect(attachment?.fileHash).toBe(sha256Hex(OLD_BYTES));
       expect(attachment?.contentMtimeMs).toBe(1000);
@@ -5625,13 +5577,12 @@ describe('attachment sync', () => {
     });
   });
 
-  // The teeth of the purity contract: a deep-frozen document makes any in-place write throw
-  // (strict mode), so a backend that still mutates its input fails loudly here.
+
   describe('backend purity (frozen input document)', () => {
     const BYTES = new Uint8Array([1, 2, 3]);
     const localUri = 'file://document/attachments/pure.txt';
 
-    /** A locally-available attachment with no cloud key: every backend has real work to do. */
+
     const frozenData = (): AppData => deepFreeze({
       tasks: [{
         id: 'task-1',
@@ -5745,15 +5696,12 @@ describe('attachment sync', () => {
     });
   });
 
-  // #1119 follow-up: a blob deleted on the server can only be restored by a device that
-  // still holds the bytes. WebDAV has repaired that since #1119; these are the same repair
-  // for Dropbox (one folder listing) and the self-hosted cloud (one probe per blob), mirroring
-  // apps/desktop/src/lib/sync-attachment-backends.test.ts.
+
   describe('remote attachment presence repair (#1119 follow-up)', () => {
     const BYTES = new Uint8Array([1, 2, 3]);
     const localUri = 'file://document/attachments/settled.txt';
 
-    /** cloudKey set, readable managed bytes, nothing pending: the one shape the repair may act on. */
+
     const uploadedData = (): AppData => singleAttachmentData({
       id: 'settled',
       title: 'settled.txt',
@@ -5802,8 +5750,8 @@ describe('attachment sync', () => {
 
       expect(core.cloudAttachmentExists).toHaveBeenCalledWith(
         'https://cloud.example/v1/attachments/settled.txt',
-        // React Native buffers whole response bodies, so the probe must never be allowed
-        // to fall back to a GET: that would download every attachment once a day.
+
+
         expect.objectContaining({ partialBodyReads: false }),
       );
       expect(core.cloudPutFile).toHaveBeenCalledTimes(1);
@@ -5812,7 +5760,7 @@ describe('attachment sync', () => {
 
     it('cloud: a probe that cannot tell changes nothing and uploads nothing', async () => {
       const core = await import('@mindwtr/core');
-      // Stands in for a server with no HEAD route, which on this transport is unknowable.
+
       vi.mocked(core.cloudAttachmentExists).mockImplementation(async (_url, options) => {
         options?.onHeadUnsupported?.();
         return null;
@@ -5916,10 +5864,10 @@ describe('attachment sync', () => {
       const cloudResult = syncResult(await runCloud(forCloud), forCloud);
       const dropboxResult = syncResult(await runDropbox(forDropbox), forDropbox);
 
-      // Clearing here would drop the only pointer to bytes this device cannot re-upload.
+
       expect(cloudKeyOf(cloudResult.data)).toBe('attachments/settled.txt');
       expect(cloudKeyOf(dropboxResult.data)).toBe('attachments/settled.txt');
-      // Nothing was even asked: the candidate walk found no attachment it could repair.
+
       expect(core.cloudAttachmentExists).not.toHaveBeenCalled();
       expect(dropbox.listDropboxFolderFiles).not.toHaveBeenCalled();
     });

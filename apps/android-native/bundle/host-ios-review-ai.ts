@@ -59,7 +59,7 @@ export function createIOSReviewAI(deps: { contract: Contract; adapter: () => Sql
     };
     const snapshot = () => {
         const state = useTaskStore.getState(), { weekStart } = getWeeklyReviewSettings(state.settings);
-        const items = getWeeklyReviewBuckets(state.tasks, state.projects, { weekStart, sections: state.sections, sequenceAware: true }).staleItems;
+        const items = getWeeklyReviewBuckets(state.tasks, state.projects, { weekStart, sections: state.sections }).staleItems;
         return { items, taskRevisions: Object.fromEntries(items.filter(item => item.status !== 'project').map(item => [item.id, revisionOf(state._tasksById.get(item.id)!)])),
             language: unwrap(deps.contract.getStrings({ keys: [] })).language, weekStart: weekStart ?? null };
     };
@@ -86,7 +86,7 @@ export function createIOSReviewAI(deps: { contract: Contract; adapter: () => Sql
                 logInfo('Native iOS review sequence candidates prepared', { scope: 'ai', force: true,
                     context: { releaseCheck: 'v1.3.8/ios-review-sequence', outcome: 'prepared', candidateCount: frozen.items.length } });
                 selectedHost = host;
-                let pending; try { pending = deps.contract.requestWeeklyReviewAnalysis({ signal }, true).then(unwrap); }
+                let pending; try { pending = deps.contract.requestWeeklyReviewAnalysis({ signal }).then(unwrap); }
                 finally { selectedHost = null; }
                 const answer = await pending; current(); return answer;
             } finally { selectedHost = null; active = false; }

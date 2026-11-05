@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     CLOUD_SYNC_TOKEN_PATTERN,
     CloudHttpError,
@@ -56,6 +56,10 @@ const hangingBodyResponse = () => {
         response: new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 }),
     };
 };
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe('cloud sync http helpers', () => {
     it('times out and cancels a JSON body that stalls after response headers', async () => {
@@ -371,13 +375,16 @@ describe('cloud sync http helpers', () => {
             'https://example.com/v1/file', { fetcher, timeoutMs: 1 },
         )],
     ])('times out and cancels a stalled successful %s response body', async (kind, request) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const status = kind === 'DELETE 404' ? 404 : 200;
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
 
-        await expect(request(async () => response)).rejects.toThrow('Cloud request timed out');
+        const outcome = expect(request(async () => response)).rejects.toThrow('Cloud request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('exposes status on file get failures', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
@@ -389,9 +396,7 @@ describe('cloud sync http helpers', () => {
         });
     });
 
-    // Only the server's own "these bytes are not allowed" answers may ever be treated as
-    // final. A `400 Invalid attachment path` is about the server's storage folder and hits
-    // every upload at once, so counting it would soft-delete every waiting attachment.
+
     describe('upload refusals', () => {
         const refusalResponse = (status: number, body: string) =>
             ({
@@ -418,7 +423,7 @@ describe('cloud sync http helpers', () => {
             const error = await putRejection(400, JSON.stringify({ error: serverMessage }));
 
             expect(isBlockedAttachmentContentRefusal(error)).toBe(true);
-            // The server's words stay off the message, which is what reaches the logs.
+
             expect((error as Error).message).not.toContain('Blocked');
         });
 
@@ -544,14 +549,17 @@ describe('cloudGetFile download cap', () => {
     });
 
     it('times out and cancels a file body that stalls after response headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const { cancel, response } = hangingBodyResponse();
 
-        await expect(cloudGetFile('https://example.com/v1/files/a', {
+        const outcome = expect(cloudGetFile('https://example.com/v1/files/a', {
             fetcher: async () => response,
             timeoutMs: 1,
         })).rejects.toThrow('Cloud request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 });
 
 describe('cloudAttachmentExists (#1119 follow-up)', () => {
@@ -566,7 +574,7 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
         text: async () => '',
     } as unknown as Response);
 
-    /** A GET whose body would have to be streamed to be read. */
+
     const streamingFileResponse = (read: ReturnType<typeof vi.fn>) => ({
         ok: true,
         status: 200,
@@ -639,7 +647,7 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
                 .resolves.toBe(true);
             expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method))
                 .toEqual(['HEAD', 'GET']);
-            // The one-byte ceiling rejects on the declared length, so no chunk is ever read.
+
             expect(read).not.toHaveBeenCalled();
         });
 
@@ -658,7 +666,7 @@ describe('cloudAttachmentExists (#1119 follow-up)', () => {
 
             await expect(cloudAttachmentExists(url, { fetcher, partialBodyReads: false, onHeadUnsupported }))
                 .resolves.toBeNull();
-            // The GET would be a full download on this transport, not a probe.
+
             expect(fetcher.mock.calls.map(([, init]) => (init as RequestInit).method)).toEqual(['HEAD']);
             expect(onHeadUnsupported).toHaveBeenCalledTimes(1);
         });

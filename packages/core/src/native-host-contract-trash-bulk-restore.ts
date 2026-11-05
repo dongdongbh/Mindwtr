@@ -35,7 +35,7 @@ const logTrashRestoreConfirmed = (count: number): void => {
     try {
         logInfo('Native Trash bulk Restore confirmed', { scope: 'native-host', category: 'storage',
             context: { releaseCheck: 'v1.3.5/ios-trash-bulk-restore', outcome: 'confirmed', count } });
-    } catch { /* Diagnostics cannot change a durable result. */ }
+    } catch {                                                   }
 };
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -47,7 +47,7 @@ const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).si
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 
-// Archive's bounded closed JSON grammar, with both exact revision dictionaries.
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number, path: string): boolean => {
         if (depth > 24) return false;
@@ -64,7 +64,7 @@ const detach = <T>(value: unknown): T | null => {
     return JSON.parse(JSON.stringify(value)) as T;
 };
 const jsonSafe = <T>(value: unknown): T | null => {
-    // Scope rows come from saved storage; check size before allocating the journal copy.
+
     if (!isNativeJsonWithinBytes(value)) return null;
     try { return detach<T>(JSON.parse(JSON.stringify(value))); } catch { return null; }
 };
@@ -83,7 +83,7 @@ const readRequest = (input: unknown): NativeTrashItemsRestoreRequest | null => {
     return row as NativeTrashItemsRestoreRequest;
 };
 
-/** Original project membership plus every selected task's sanitation witness, in saved row order. */
+
 export const trashItemsRestoreScope = (request: NativeTrashItemsRestoreRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas'>): NativeTrashItemsRestoreScope => {
     const selectedTasks = new Set(request.taskIds), selectedProjects = new Set(request.projectIds);
@@ -112,7 +112,7 @@ const sourcesMatch = (request: NativeTrashItemsRestoreRequest, scope: NativeTras
     });
 };
 
-/** Actual RN task-first policy, collapsed from pure intermediate rows to unique original/final pairs. */
+
 export const trashItemsRestoreEffect = (prepared: Pick<NativePreparedTrashItemsRestore,
     'version' | 'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt'>): NativePreparedTrashItemsRestore['effect'] | null => {
     const { request, scope } = prepared;

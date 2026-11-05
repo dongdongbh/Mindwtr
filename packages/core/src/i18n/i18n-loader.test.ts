@@ -99,9 +99,8 @@ describe('i18n-loader sync fallback', () => {
     });
 
     it('registers task.updateFailed with a real translation instead of leaking English', async () => {
-        // getTranslationsSync would silently pass this assertion against English
-        // (see i18n-loader.ts), so this must go through loadTranslations and
-        // compare against the English string, not just check truthiness.
+
+
         const en = await loadTranslations('en');
         const cs = await loadTranslations('cs');
 

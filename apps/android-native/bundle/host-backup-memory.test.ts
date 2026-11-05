@@ -1,6 +1,6 @@
-// Pass D1c, cut i: the host's storage adapter caches no document, so a boot's reads and a backup commit's reads are free
-// once they are used. A cached read (the old `latestData`) kept a whole library alive past the store's own reload.
-// The shipped host-entry runs in a VM over bun:sqlite; each getData result is watched through a WeakRef.
+
+
+
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import vm from 'node:vm';
@@ -34,7 +34,7 @@ const fixture = (rnStateCommit: () => unknown = () => null) => {
     const database = new Database(':memory:'); databases.push(database);
     const state: Record<string, any> = {
         AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout, WeakRef,
-        // Shared host-entry code; the iOS table needs the fewest bridge functions.
+
         __mindwtrHostPlatform: 'ios', console: { info() {}, warn() {}, error() {}, log() {} },
         __mindwtrNative: {
             sqlExec: (sql: string) => { database.exec(sql); return null; },
@@ -55,7 +55,7 @@ const fixture = (rnStateCommit: () => unknown = () => null) => {
         }
         throw new Error('Host operation did not settle');
     };
-    /** How many of the boot's and operations' reads are still reachable after a full collection. */
+
     const reachable = async () => {
         await settle(); Bun.gc(true); await settle(); Bun.gc(true);
         return (state.fixture.reads as WeakRef<object>[]).filter((ref) => ref.deref() !== undefined).length;

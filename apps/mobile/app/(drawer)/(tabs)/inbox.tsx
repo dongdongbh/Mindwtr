@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
+import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Brain, ListChecks } from 'lucide-react-native';
@@ -27,11 +28,7 @@ export default function InboxScreen() {
   const tokens = useThemeTokens();
   const filledButton = useFilledButtonColors();
 
-  // Mid-emphasis, not filled: the capture FAB owns this screen's single
-  // high-emphasis fill, so the process row sits one step below — tint wash +
-  // tint border on classic themes, primaryContainer on M3. The label stays
-  // `text` because tint-on-wash fails 4.5:1 contrast on the light and sepia
-  // presets; the tint border and icon carry the call-to-action identity.
+
   const processButtonBg = tokens.isMaterial ? filledButton.backgroundColor : `${tc.tint}29`;
   const processButtonBorder = tokens.isMaterial ? 'transparent' : tc.tint;
   const processLabelColor = tokens.isMaterial ? (filledButton.textColor ?? tc.onTint) : tc.text;
@@ -42,17 +39,15 @@ export default function InboxScreen() {
   const [groupBy, setGroupBy] = useState<TaskListGroupBy>('none');
   const { projectById } = useVisibleTaskContext();
 
-  // The same base set TaskList narrows below, so the Process count and the list
-  // can only ever differ by the user's own filter chips.
+
   const inboxTasks = useMemo(
     () => tasks.filter((task) => (
       task.status === 'inbox' && isTaskVisibleInInbox(task, { projectById })
     )),
     [projectById, tasks],
   );
-  // The Process label, the Mind Sweep placement and the capture method's empty
-  // action are core's, shared with the native host. The list's empty text is
-  // core's too (TaskList reads it for the Inbox).
+
+
   const screen = buildInboxScreenModel({ count: inboxTasks.length, settings, t });
   const inboxScopeHint = (
     <View style={styles.scopeHint}>
@@ -62,10 +57,7 @@ export default function InboxScreen() {
     </View>
   );
 
-  // Mind Sweep (secondary, labeled) rides on the sort/filter row's empty right
-  // side when there are tasks to process; deliberately neutral like the
-  // sort/filter controls so the Process row below is the only accented action.
-  // When the inbox is empty it is promoted to the full-width primary slot.
+
   const mindSweepPill = (
     <TouchableOpacity
       style={[styles.mindSweepPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
@@ -83,8 +75,7 @@ export default function InboxScreen() {
     </TouchableOpacity>
   );
 
-  // Full-width primary action below the controls: Process Inbox when there is
-  // something to clarify, otherwise the promoted Mind Sweep entry point.
+
   const primaryActionRow = (
     <>
     <View style={styles.actionRow}>
@@ -128,6 +119,7 @@ export default function InboxScreen() {
 
   return (
     <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
+      <WidgetLaunchDestination path="/inbox" />
       <TaskList
         statusFilter="inbox"
         title={screen.title}
@@ -161,17 +153,17 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: 8,
     paddingHorizontal: 16,
-    // The toolbar row above ends at 6dp of padding; 6 more here separates the
-    // process action from the list controls without orphaning it (#grouping).
+
+
     paddingTop: 6,
-    // The shared list content already adds the full 12dp gutter below this row.
+
     paddingBottom: 0,
   },
   scopeHint: {
     alignItems: 'flex-start',
     paddingHorizontal: 16,
-    // Keep the action-to-summary gap at the shared 12dp list inset rather than
-    // stacking another local inset on top of it.
+
+
     paddingTop: 0,
     paddingBottom: 8,
   },

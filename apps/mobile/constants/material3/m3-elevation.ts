@@ -8,7 +8,7 @@ export interface ElevationStyle {
   shadowOffset?: { width: number; height: number };
   shadowOpacity?: number;
   shadowRadius?: number;
-  elevation?: number; // Android
+  elevation?: number;
 }
 
 const SURFACE_BY_LEVEL = (roles: M3ColorRoles): Record<M3ElevationLevel, string> => ({
@@ -20,7 +20,7 @@ const SURFACE_BY_LEVEL = (roles: M3ColorRoles): Record<M3ElevationLevel, string>
   5: roles.surfaceContainerHighest,
 });
 
-// Android dp + iOS shadow tuned subtle (M3 leans on tonal elevation, not heavy shadows).
+
 const SHADOW_BY_LEVEL: Record<M3ElevationLevel, { dp: number; opacity: number; radius: number; height: number }> = {
   0: { dp: 0, opacity: 0, radius: 0, height: 0 },
   1: { dp: 1, opacity: 0.10, radius: 1.5, height: 1 },

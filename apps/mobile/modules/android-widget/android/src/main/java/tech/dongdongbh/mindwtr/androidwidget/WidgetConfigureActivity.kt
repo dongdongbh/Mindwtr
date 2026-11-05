@@ -10,68 +10,125 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.widget.EditText
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.RadioButton
 import android.content.Context
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.ListView
 import android.widget.TextView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import androidx.appcompat.app.AppCompatActivity
 
-/**
- * Picks which list a Tasks widget shows (#1173): the fixed GTD lists, then
- * saved filters, contexts and tags. Runs on placement (`android:configure`), from the launcher's
- * edit action (`reconfigurable`), and as a dropdown sheet when the widget's
- * own header chevron is tapped. OK stores the choice for this widget id and
- * redraws it; Cancel on first placement cancels the placement.
- */
+
 class WidgetConfigureActivity : AppCompatActivity() {
   private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
-  // Opened from the widget's header chevron: a top-anchored sheet, tap = pick.
+
   private var dropdown = false
   private var pendingSelection = WidgetListStore.DEFAULT_LIST
+  private var groupingOptions = WidgetListStore.GROUPINGS
+  private var kind = WidgetKind.TASKS
+  private var pendingBackground = WidgetBackground.DEFAULT
+  private var pendingFocusAvailable = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setResult(Activity.RESULT_CANCELED)
     appWidgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
       ?: AppWidgetManager.INVALID_APPWIDGET_ID
-    // Exported for the launcher's configure flow, so trust nothing in the
-    // intent: the id must name a widget already bound to one of this app's
-    // providers (the launcher binds before it starts the configure activity).
+
+
     val info = AppWidgetManager.getInstance(this)?.getAppWidgetInfo(appWidgetId)
     if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID || info?.provider?.packageName != packageName) {
       finish()
       return
     }
-    dropdown = intent?.getBooleanExtra(EXTRA_DROPDOWN, false) == true
+    kind = kindFor(packageName, info.provider.className)
+    if (kind == WidgetKind.QUICK_CAPTURE) {
+      finish()
+      return
+    }
+    dropdown = kind == WidgetKind.TASKS && intent?.getBooleanExtra(EXTRA_DROPDOWN, false) == true
     setContentView(R.layout.mindwtr_widget_configure)
+    if (kind == WidgetKind.COMPACT) {
+      findViewById<View>(R.id.mindwtr_widget_configure_lists).visibility = View.GONE
+    }
     if (dropdown) {
       window.setGravity(android.view.Gravity.TOP)
       window.attributes = window.attributes.apply { y = dp(56) }
       findViewById<View>(R.id.mindwtr_widget_configure_buttons).visibility = View.GONE
       findViewById<View>(R.id.mindwtr_widget_configure_title).visibility = View.GONE
+      findViewById<View>(R.id.mindwtr_widget_configure_background_row).visibility = View.GONE
     }
     val payload = WidgetPayloadStore.read(this)
+    groupingOptions = WidgetListStore.GROUPINGS.filter { it != "priority" || payload.prioritiesEnabled }
     val palette = payload.resolvedPalette(this)
     val current = WidgetListStore.read(this, appWidgetId)
     pendingSelection = savedInstanceState?.getString("listSelection") ?: current
+    pendingBackground = savedInstanceState?.getString("background")?.let { name -> WidgetBackground.entries.firstOrNull { it.name == name } }
+      ?: WidgetListStore.background(this, appWidgetId)
+    pendingFocusAvailable = savedInstanceState?.getBoolean("focusAvailable") ?: WidgetListStore.focusAvailable(this, appWidgetId)
 
     val list = findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val textColor = palette?.text ?: getColor(R.color.mindwtr_widget_text)
     val mutedColor = palette?.mutedText ?: getColor(R.color.mindwtr_widget_muted_text)
     val options = chooserGroups(payload)
     val adapter = ChooserAdapter(this, options, textColor, mutedColor, if (dropdown) 40 else 44,
-      selected = { pendingSelection },
-      pick = { id -> pendingSelection = id; if (dropdown) save() },
+      selected = { WidgetListStore.baseListId(pendingSelection) },
+      pick = { id ->
+        pendingSelection = WidgetListStore.withGrouping(id, WidgetListStore.grouping(pendingSelection)?.first)
+        updateGroupingVisibility()
+        if (dropdown) save()
+      },
     )
     list.adapter = adapter
     list.setOnItemClickListener { _, _, position, _ -> adapter.pick(position) }
+    findViewById<TextView>(R.id.mindwtr_widget_configure_grouping_label).apply {
+      text = payload.listTitles["groupBy"] ?: "Group by"
+      setTextColor(textColor)
+    }
+    findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).apply {
+      val labels = listOf("groupDefault" to "Default", "groupNone" to "None", "groupContext" to "Context", "groupProject" to "Project") +
+        if (payload.prioritiesEnabled) listOf("groupPriority" to "Priority") else emptyList()
+      this.adapter = spinnerAdapter(labels.map { (key, fallback) -> payload.listTitles[key] ?: fallback }, textColor, palette)
+      setSelection((groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0))
+      onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+          val currentPosition = (groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0)
+          if (position != currentPosition) pendingSelection = WidgetListStore.withGrouping(pendingSelection, groupingOptions.getOrNull(position - 1))
+        }
+        override fun onNothingSelected(parent: AdapterView<*>?) {}
+      }
+    }
+    findViewById<CheckBox>(R.id.mindwtr_widget_configure_available).apply {
+      text = payload.listTitles["focusAvailable"] ?: "Add Next Actions whose start date has arrived"
+      setTextColor(textColor)
+      isChecked = pendingFocusAvailable
+      setOnCheckedChangeListener { _, checked -> pendingFocusAvailable = checked }
+    }
+    updateGroupingVisibility()
+    findViewById<TextView>(R.id.mindwtr_widget_configure_background_label).apply {
+      text = payload.listTitles["background"] ?: "Background"
+      setTextColor(textColor)
+    }
+    findViewById<Spinner>(R.id.mindwtr_widget_configure_background).apply {
+
+      this.adapter = spinnerAdapter(listOf(payload.listTitles["groupDefault"] ?: "Default",
+        payload.listTitles["backgroundLightText"] ?: "Transparent, light text",
+        payload.listTitles["backgroundDarkText"] ?: "Transparent, dark text"), textColor, palette)
+      setSelection(pendingBackground.ordinal)
+      onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { pendingBackground = WidgetBackground.entries[position] }
+        override fun onNothingSelected(parent: AdapterView<*>?) {}
+      }
+    }
     findViewById<EditText>(R.id.mindwtr_widget_configure_search).apply {
       hint = payload.listTitles["search"] ?: "Search"
       setTextColor(textColor)
       setHintTextColor(mutedColor)
-      visibility = if (options.sumOf { it.second.size } > 12) View.VISIBLE else View.GONE
+      visibility = if (kind == WidgetKind.TASKS && options.sumOf { it.second.size } > 12) View.VISIBLE else View.GONE
       addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { adapter.search(s?.toString() ?: "") }
@@ -92,16 +149,33 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putString("listSelection", pendingSelection)
+    outState.putString("background", pendingBackground.name)
+    outState.putBoolean("focusAvailable", pendingFocusAvailable)
     super.onSaveInstanceState(outState)
   }
 
   private fun save() {
-    val listId = pendingSelection
-    WidgetListStore.write(this, appWidgetId, listId)
+    if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
+
+    if (kind == WidgetKind.TASKS && !dropdown) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
+    WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
     val manager = AppWidgetManager.getInstance(this)
-    WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), WidgetKind.TASKS)
+    WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), kind)
+    CaptureSyncHeadlessService.startWidgetRefresh(this)
     setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId))
     finish()
+  }
+
+  private fun updateGroupingVisibility() {
+    val focus = WidgetListStore.baseListId(pendingSelection) == WidgetListStore.DEFAULT_LIST
+    findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility =
+      if (dropdown || focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
+
+    findViewById<View>(R.id.mindwtr_widget_configure_available).visibility =
+      if (!dropdown && focus && kind == WidgetKind.TASKS) View.VISIBLE else View.INVISIBLE
+    findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).setSelection(
+      (groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0),
+    )
   }
 
   private fun applyPalette(palette: WidgetPayload.Palette, textColor: Int) {
@@ -114,9 +188,18 @@ class WidgetConfigureActivity : AppCompatActivity() {
     }
   }
 
+  private fun spinnerAdapter(labels: List<String>, textColor: Int, palette: WidgetPayload.Palette?) =
+    object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
+      override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = super.getView(position, convertView, parent).apply {
+        (this as TextView).setTextColor(textColor)
+        palette?.let { setBackgroundColor(it.background) }
+      }
+      override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = getView(position, convertView, parent)
+    }
+
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-  /** Only visible rows are inflated; filtering never discards the pending widget selection. */
+
   internal class ChooserAdapter(
     private val context: Context,
     private val groups: List<Pair<String?, List<Pair<String, String>>>>,
@@ -173,6 +256,10 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   companion object {
     const val EXTRA_DROPDOWN = "tech.dongdongbh.mindwtr.androidwidget.dropdown"
+
+
+    internal fun kindFor(applicationPackage: String, providerClassName: String): WidgetKind =
+      WidgetProviderRegistry.identities(applicationPackage).firstOrNull { it.className == providerClassName }?.kind ?: WidgetKind.TASKS
 
     internal fun chooserGroups(payload: WidgetPayload): List<Pair<String?, List<Pair<String, String>>>> = listOf(
       null to fixedOptions(payload.listTitles),

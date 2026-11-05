@@ -64,6 +64,7 @@ import {
     injectExternalCalendars as injectExternalCalendarsForSync,
     persistExternalCalendars as persistExternalCalendarsForSync,
     summarizeMergeStats,
+    UNREACHABLE_ATTACHMENTS_KEY,
     withTimeout,
     withRetry,
     isRetryableError,
@@ -115,6 +116,7 @@ import {
 } from './sync-attachment-cleanup';
 import {
     clearAttachmentSyncState,
+    isAttachmentDownloadBackedOff,
     type AttachmentBackendDeps,
     type CloudConfig,
     syncCloudAttachments,
@@ -366,12 +368,7 @@ const resolveSyncText = (key: string, fallback: string): string => resolveI18nTe
     { fallback },
 );
 
-/** A failed decrypt is never a permission problem and never "corrupt data we repaired" — it
- *  always means this device needs the sync passphrase again (#1056 decision #4). Mapping it
- *  here keeps it out of the generic failure toast. The message is built into a variable
- *  because desktop's toast-i18n test scans showToast's FIRST argument for prose literals.
- *  Phase 3 owns the settings surface that turns this into a re-entry prompt; the fallbacks
- *  carry the wording until its locale keys land. */
+
 const resolveSyncFailureMessage = (rawError: string | undefined): string => {
     switch (classifySyncEncryptionFailure(rawError)) {
         case 'local-state-unavailable':
@@ -418,14 +415,6 @@ const logSyncInfo = (message: string, extra?: Record<string, string>) => {
     void syncServiceDependencies.logInfo(message, { scope: 'sync', extra });
 };
 
-// ---------------------------------------------------------------------------
-// Sync-encryption diagnostics trail (#1056 follow-up)
-//
-// `state` and `remote-read` are per-cycle detail and ride the existing Debug logging switch
-// (Settings → Data → Diagnostics), which `logInfo` already gates on. `error` and `activation`
-// pass `force`: those are the lines a shared log is useless without, and a user usually turns
-// detailed logging on only AFTER the failure they are reporting.
-// ---------------------------------------------------------------------------
 
 const logSyncEncryptionState = (
     input: Parameters<typeof buildSyncEncryptionStateExtra>[0],
@@ -446,8 +435,7 @@ const logSyncEncryptionRemoteRead = (
     );
 };
 
-/** The line that ties a user's toast to the trail: the classification `resolveSyncFailureMessage`
- *  is about to render, next to the error name and the sentinel that produced it. */
+
 const logSyncEncryptionError = (error: unknown, backend: string, step: string): void => {
     if (!isSyncEncryptionFailure(error)) return;
     const message = error instanceof Error ? error.message : String(error ?? '');
@@ -471,29 +459,7 @@ const isLegacyWebdavPlaintextPostureAllowed = (
     status: Pick<SyncEncryptionStatus, 'state' | 'incompleteTransition'>,
 ): boolean => status.state === 'off' && !status.incompleteTransition;
 
-/** fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. Desktop has no
- *  pre-read no-key gate at all (unlike mobile — see `setupDesktopCycle`'s comment on
- *  `logCycleState`), so this is the ONLY gate standing between an unresolved encryption
- *  posture and the attachment prepare phase's `sealAttachmentBytes`, which falls back to
- *  plaintext when `getSyncEncryptionMaterial()` resolves null
- *  (apps/desktop/src/lib/sync-encryption-service.ts). Pure so it can be unit tested without a
- *  full Tauri sync cycle — `setupDesktopCycle` supplies the already-resolved facts.
- *
- *  "Posture established" mirrors mobile's `isSyncEncryptionPostureUnestablished`: a keyed
- *  state (enabled/remote-plaintext) is ALWAYS established, with no scope comparison — material
- *  is present, so anything this device writes is encrypted from the first byte regardless of
- *  `discoveredScopeLabel`. Review packet -10 finding B1: `discoveredScopeLabel` is `undefined`
- *  for every production `enabled` state (the Rust and core writers both clear it on purpose —
- *  a key proves this device owns the generation, the discovery scope described the lock it
- *  just left) — comparing it against `activeScopeLabel` deferred an enabled device on every
- *  cycle, forever. A `remote-encrypted-no-key` discovery is established only when
- *  `discoveredScopeLabel` matches this location's reduced scope (a mismatched or missing scope
- *  there is NOT established — that state is blocked from syncing anyway once the scope matches).
- *  No persisted state at all (the only shape 'off' ever takes) is established only when
- *  `hasCompletedCycleAgainstLocation` is true — a per-location fast-sync fact the file backend
- *  has no way to record (`buildFastSyncScope` returns null there), so a plaintext file-backend
- *  cycle always defers here; see the packet's blocked note. Never gates a backend encryption
- *  cannot apply to. */
+
 const shouldDeferAttachmentPrepareUntilRead = (input: {
     backend: SyncBackend;
     cloudProvider: CloudProvider;
@@ -513,18 +479,7 @@ const shouldDeferAttachmentPrepareUntilRead = (input: {
     return input.discoveredScopeLabel !== input.activeScopeLabel;
 };
 
-/** The durable "this device has already completed a cycle against THIS location" fact that
- *  `shouldDeferAttachmentPrepareUntilRead` needs for the `off`/`unknown` posture.
- *
- *  Two sources, ORed. The fast-sync record is the original one, but `buildFastSyncScope`
- *  returns `null` for the file backend and always will, which is why the packet had to ship
- *  an unconditional `file -> established` and establish a genuinely fresh file-backend device
- *  on its very first cycle. The attachment presence stamp (#1119 follow-up) closes that: it is
- *  only ever written at the END of a completed attachment pass, keyed by
- *  `desktopSyncLocationScope` — the same derivation this function is handed — so its presence
- *  for this location proves a full cycle already ran here. Checked for webdav/dropbox too, so
- *  a device that completed a presence pass without yet writing a fast-sync record (or the
- *  reverse) is recognized either way. */
+
 const hasCompletedCycleAgainstLocation = (input: {
     backend: SyncBackend;
     locationScope: string;
@@ -572,7 +527,7 @@ const mergeLocalSyncStatus = (data: AppData): AppData => {
     });
 };
 
-// Sync should start from persisted data so startup sync cannot overwrite settings with an unhydrated store snapshot.
+
 let lastObservedPersistedDataForSync: AppData | null = null;
 
 const readLocalDataForSync = async (): Promise<AppData> => {
@@ -602,7 +557,7 @@ const readLocalDataForSync = async (): Promise<AppData> => {
     });
 };
 
-/** Native command call routed through the sync service's injectable transport. */
+
 async function invokeSyncNative<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     return syncServiceDependencies.invoke<T>(command, args);
 }
@@ -623,8 +578,7 @@ const releaseFileSyncLease = async (token: string): Promise<void> => {
     }
 };
 
-// An exact save replaces every local row, so it must name the data it
-// replaces; native refuses it otherwise.
+
 type LocalDataSaveOptions =
     | { baseline?: AppData; mode?: undefined; expectedData?: undefined }
     | { baseline?: undefined; mode: 'exact'; expectedData: AppData };
@@ -646,8 +600,8 @@ async function persistLocalDataForSync(
     if (options.mode) args.mode = options.mode;
     if (options.expectedData) args.expectedData = options.expectedData;
     const canonical = await invokeSyncNative<AppData>('save_data', args);
-    // The sync store receives this target. Do not make canonical-only,
-    // concurrently added rows eligible for omission before a persisted read.
+
+
     lastObservedPersistedDataForSync = data;
     syncServiceDependencies.markLocalSqliteWrite();
     return canonical;
@@ -674,7 +628,7 @@ async function getTauriFetch(): Promise<typeof fetch | undefined> {
     return syncServiceDependencies.getTauriFetch();
 }
 
-/** Tauri's HTTP client when the runtime has one, else the webview's fetch. */
+
 const tauriOrWebviewFetch: typeof fetch = async (input, init) => ((await getTauriFetch()) ?? fetch)(input, init);
 
 let desktopEncryptionService: SyncEncryptionService | null = null;
@@ -684,9 +638,7 @@ type DropboxCredentialHandleOptions = {
     credentialHandle?: string;
 };
 
-// Native token/status commands run crash-journal recovery. Public entry points
-// serialize them with configuration commits; sync/test code already holding
-// that queue must use these direct primitives to avoid nesting the queue.
+
 async function getDropboxAccessTokenDirect(
     clientId: string,
     options?: DropboxCredentialHandleOptions,
@@ -705,10 +657,7 @@ async function getDropboxAccessTokenDirect(
     });
 }
 
-// The connection-status probe reruns on every settings visit and auto-sync
-// tick, so a persistently broken keyring would re-toast the same error
-// forever (#1060). Each distinct failure is reported once; a successful
-// probe re-arms reporting so a new breakage is loud again.
+
 let lastReportedDropboxStatusFailure: string | null = null;
 
 async function isDropboxConnectedDirect(clientId: string): Promise<boolean> {
@@ -766,8 +715,8 @@ function resolveRequestedDropboxCredentialHandleAtExecution(
     if (!normalizedRequestedHandle) return undefined;
     const pendingHandle = SyncService.getPendingDropboxCredentialHandleForSession();
     if (!pendingHandle) {
-        // A commit queued ahead of this request finalized the candidate. The
-        // durable credential is now authoritative, so do not send a stale handle.
+
+
         return undefined;
     }
     if (pendingHandle !== normalizedRequestedHandle) {
@@ -814,38 +763,7 @@ const getAttachmentCleanupDeps = (
     resolveWebdavPassword,
 });
 
-/**
- * Gate for the attachment phases, mirroring mobile's `hasPendingAttachmentSyncWork`.
- * `preSyncAttachmentsBeforeFastCheck` makes the prepare phase run on every tick (#1057), and
- * every desktop backend opens with directory-ensure / rate-limit-probe IO before it looks at
- * a single attachment — so a store with no file attachments paid a network round trip per
- * cycle for loops it was always going to run zero times.
- *
- * #1119 follow-up (audit F3): returning `true` for ANY live file attachment made every cycle
- * run the whole phase for anyone owning one synced attachment — a MKCOL plus one HEAD per
- * attachment against the server, forever. Three things genuinely need the phase, and each now
- * has its own signal rather than "always":
- *
- *  - an attachment that still has to move: no `cloudKey` (never uploaded, or the presence
- *    self-heal cleared it), no local copy, `missing`/`downloading`/unknown `localStatus`, or
- *    `pendingContentUpload`.
- *  - another device's newer content. `resolveContentIdentity` in core's merge
- *    (packages/core/src/sync.ts) lands an incoming content winner with NO recorded
- *    `contentMtimeMs`/`contentSize`, precisely so the receiving device re-checks and
- *    re-downloads. An absent recorded stat is therefore the download signal, and it is
- *    already in the document — no stat, no request.
- *  - the remote copy deleted on the server behind the app's back. Nothing local can show
- *    that, so it stays a real pass — just a periodic one, see `attachment-presence-scope.ts`.
- *
- * Desktop diverges from mobile in ONE place, deliberately: an EXTERNAL file reference (a
- * `uri` outside the managed attachments dir, the shape "Add link" produces) never enters the
- * steady state. Mobile's managed files live in app-private storage and are only ever created
- * by capture or replaced by a download that re-records the stat in the same breath, so mobile
- * can defer check-on-touch to the daily pass. A desktop user can and does edit a linked file
- * in an external editor, which is the exact case #1057's check-on-touch exists for. Keeping
- * those eager costs a local stat per cycle and no requests at all — the MKCOL is now lazy and
- * the HEAD pass is gated inside the backends independently of this predicate.
- */
+
 const hasAttachmentSyncWork = async (data: AppData, presenceScope: string | null): Promise<boolean> => {
     if ((data.settings.attachments?.pendingRemoteDeletes?.length ?? 0) > 0) return true;
 
@@ -856,12 +774,16 @@ const hasAttachmentSyncWork = async (data: AppData, presenceScope: string | null
         const uri = attachment.uri || '';
         const hasLocalUri = Boolean(uri) && !/^https?:\/\//i.test(uri);
         if (!attachment.cloudKey) {
-            // Nothing uploaded yet. A local copy the app can still read is an upload waiting
-            // to happen; anything else (a bare http link, a file already known missing) is not.
+
+
             if (hasLocalUri && attachment.localStatus !== 'missing') return true;
             continue;
         }
-        if (!hasLocalUri || attachment.localStatus !== 'available') return true;
+        if (!hasLocalUri || attachment.localStatus !== 'available') {
+
+            if (isAttachmentDownloadBackedOff(attachment.id)) continue;
+            return true;
+        }
         if (attachment.pendingContentUpload === true) return true;
         if (
             !Number.isFinite(attachment.contentMtimeMs ?? NaN)
@@ -872,13 +794,12 @@ const hasAttachmentSyncWork = async (data: AppData, presenceScope: string | null
 
     if (settled.length === 0) return false;
     const managedDirPrefix = await loadManagedAttachmentsDirPrefix();
-    // Unresolved prefix (not desktop, or the managed dir could not be resolved) is doubt, and
-    // doubt runs the phase.
+
+
     if (!managedDirPrefix) return true;
     if (settled.some((attachment) => isExternalFileReference(attachment, managedDirPrefix))) return true;
 
-    // Nothing in the document says there is work to do. The one remaining reason to run the
-    // phase is the periodic presence proof.
+
     const presenceDue = isAttachmentPresenceReconciliationDue(presenceScope);
     void logInfo('Attachment presence re-verification checked', {
         scope: 'sync',
@@ -899,10 +820,7 @@ const getSyncConfigDeps = () => ({
     invokeNative: invokeSyncNative,
 });
 
-// NOTE: also the config transaction's `writeBackend` dependency, which writes an
-// intermediate 'off' on every commit — user-visible backend-change notifications
-// live in the explicit entry points (setSyncBackend, disconnectDropbox,
-// commitProvenSyncConfiguration), never here.
+
 const writeSyncBackendDirect = (backend: SyncBackend): Promise<void> => (
     writeSyncBackend(backend, getSyncConfigDeps())
 );
@@ -924,25 +842,25 @@ export type { DesktopSyncConfigOverride };
 
 type SyncRunOptions = {
     backendOverride?: SyncBackend;
-    /** Session-only transport values used to prove a new configuration before
-     *  the settings UI commits it to durable storage. */
+
+
     configOverride?: DesktopSyncConfigOverride;
-    /** User-initiated sync: always run the full read/merge cycle, never the
-     *  fast-check skip, so a stale cached fingerprint can't hide remote data. */
+
+
     manual?: boolean;
-    /** Isolated candidate transport proof. The shared machine keeps merged
-     *  local writes in memory and suppresses durable/finalization side effects. */
+
+
     activationProbe?: boolean;
-    /** Internal marker for the single automatic File Sync contention retry. */
+
+    acceptMissingAttachmentIds?: readonly string[];
+
     fileSyncLockBusyRetryAttempt?: number;
-    /** The candidate was just activated; do not inherit the previous
-     *  transport's retry deadline on this first durable cycle. */
+
+
     ignorePendingRemoteWriteBackoff?: boolean;
 };
 
-/** Desktop transport state for one sync cycle. Cycle sequencing/state lives in
- *  the core machine (`runSharedSyncCycle`, ADR 0014); this carries only what
- *  the desktop backend adapters need. */
+
 type DesktopSyncCycleContext = {
     backend: SyncBackend;
     usesConfigOverride: boolean;
@@ -959,33 +877,21 @@ type DesktopSyncCycleContext = {
     fileBaseDir: string;
     fileSyncLeaseToken: string | null;
     allowLegacyWebdavPlaintext: boolean;
-    /** Sync encryption is exactly off for this cycle (state 'off', no incomplete
-     *  transition). Gates every "no safe backend version" refusal — those protect
-     *  encrypted CAS, and a plaintext cycle degrades instead of failing. */
+
+
     syncEncryptionOff: boolean;
-    /** fresh-join-attachment-posture packet -10: this cycle does not yet know the active
-     *  location's encryption posture (mismatched/no discovery, or no persisted state at all —
-     *  desktop has no pre-read no-key gate, so unlike mobile this also covers every ordinary
-     *  re-check). The attachment prepare phase runs BEFORE the document read
-     *  (`preSyncAttachmentsBeforeFastCheck`); `sealAttachmentBytes` falls back to plaintext when
-     *  `getSyncEncryptionMaterial()` resolves null, so uploading before the read settles the
-     *  posture is the plaintext-beside-ciphertext outcome decision #5 forbids. See
-     *  `shouldRunAttachmentPhase` below. */
+
+
     deferAttachmentPrepareUntilRead: boolean;
 };
 
-/**
- * The Diagnostics "Encryption" block, as `label: value` lines, plus a forced copy of the same
- * posture into the log file. Lives here rather than in sync-encryption-service.ts because the
- * active location scope needs the backend config getters, and that module must not import this
- * one. Read-only.
- */
+
 export async function getDesktopSyncEncryptionDiagnosticsLines(): Promise<string[]> {
     const posture = await getSyncEncryptionPosture().catch(() => null);
     const backend = await SyncService.getSyncBackend().catch(() => 'off' as SyncBackend);
     const activeScope = await readPersistedSyncLocationScope(backend);
-    // Stamp the posture into the log too: a user who shares the log without opening this block
-    // still needs it, and `force` puts it there even with Debug logging off.
+
+
     logSyncEncryptionState({
         backend,
         trigger: 'manual',
@@ -1008,7 +914,7 @@ export async function getDesktopSyncEncryptionDiagnosticsLines(): Promise<string
     });
 }
 
-/** The scope of the configuration persisted on this device. */
+
 const readPersistedSyncLocationScope = async (backend: SyncBackend): Promise<string> => buildSyncLocationScope({
     backend,
     syncPath: backend === 'file' ? await SyncService.getSyncPath().catch(() => '') : '',
@@ -1018,9 +924,7 @@ const readPersistedSyncLocationScope = async (backend: SyncBackend): Promise<str
     cloudUrl: backend === 'cloud' ? (await SyncService.getCloudConfig().catch(() => null))?.url : undefined,
 });
 
-/** #1138: the location identity a discovery persisted during this cycle is bound to. Only the
- *  TS backends (WebDAV, Dropbox) need it here — the file backend's discoveries are persisted
- *  by Rust, which derives the same `['file', <syncPath>]` shape itself. */
+
 const desktopSyncLocationScope = (context: DesktopSyncCycleContext): string => buildSyncLocationScope({
     backend: context.backend,
     syncPath: context.syncPath,
@@ -1071,11 +975,7 @@ const resolveDropboxAccessTokenForContext = async (
     return context.cachedDropboxAccessToken;
 };
 
-// Synchronous mirror of the last observed sync backend, so the footer's sync
-// affordances render correctly on the first frame instead of blinking while the
-// async config read resolves (#1001). The persisted config stays the authority;
-// this is display seed data only.
-// How long an activation probe waits for a running cycle before reporting a requeue.
+
 const ACTIVATION_PROBE_IDLE_WAIT_MS = 90_000;
 const SYNC_BACKEND_HINT_KEY = 'mindwtr-last-known-sync-backend';
 const SYNC_BACKEND_VALUES: readonly SyncBackend[] = ['off', 'file', 'webdav', 'cloud', 'cloudkit'];
@@ -1093,14 +993,11 @@ const writeSyncBackendHint = (backend: SyncBackend): void => {
     try {
         window.localStorage.setItem(SYNC_BACKEND_HINT_KEY, backend);
     } catch {
-        // Display seed only; losing it costs one blink, nothing else.
+
     }
 };
-// The Sync settings page reads its configuration through the serialized
-// restore queue, which can take seconds after launch; without a synchronous
-// seed the backend control showed "Off" and then jumped to the real backend.
-// The backend hint above covers the backend; Dropbox is backend 'cloud' plus
-// this provider, so it needs a seed of its own.
+
+
 const CLOUD_PROVIDER_HINT_KEY = 'mindwtr-last-known-cloud-provider';
 const CLOUD_PROVIDER_VALUES: readonly CloudProvider[] = ['selfhosted', 'dropbox'];
 const readCloudProviderHint = (): CloudProvider | null => {
@@ -1117,7 +1014,7 @@ const writeCloudProviderHint = (provider: CloudProvider): void => {
     try {
         window.localStorage.setItem(CLOUD_PROVIDER_HINT_KEY, provider);
     } catch {
-        // Display seed only.
+
     }
 };
 
@@ -1125,9 +1022,8 @@ export class SyncService {
     private static didMigrate = false;
     private static legacyMigrationPromise: Promise<void> | null = null;
     private static queuedSyncOptions: SyncRunOptions | null = null;
-    // OAuth token bytes stay in native/keyring storage. The renderer keeps only
-    // the opaque native handle, at session scope, so a settings unmount cannot
-    // orphan a candidate that still needs discard/rollback recovery.
+
+
     private static pendingDropboxCredentialHandle: string | null = null;
     private static pendingDropboxFinalizeHandles = new Set<string>();
     private static pendingDropboxCredentialHandleListeners = new Set<(handle: string | null) => void>();
@@ -1137,8 +1033,8 @@ export class SyncService {
         step: string | null;
         lastResult: 'success' | 'error' | null;
         lastResultAt: string | null;
-        /** Persisted sync backend; `null` until first read. Lets the UI hide
-         *  sync affordances when sync is off (#1001). */
+
+
         backend: SyncBackend | null;
     } = {
         inFlight: false,
@@ -1163,7 +1059,7 @@ export class SyncService {
                     const message = resolveSyncFailureMessage(queuedResult.error);
                     showSyncErrorToast(message, 6000);
                 } catch {
-                    // UI store may be unavailable during shutdown/tests.
+
                 }
             }
         },
@@ -1223,15 +1119,13 @@ export class SyncService {
         return (left?.backendOverride ?? undefined) === (right?.backendOverride ?? undefined)
             && (left?.configOverride ?? undefined) === (right?.configOverride ?? undefined)
             && (left?.activationProbe ?? false) === (right?.activationProbe ?? false)
+            && (left?.acceptMissingAttachmentIds ?? undefined) === (right?.acceptMissingAttachmentIds ?? undefined)
             && (left?.fileSyncLockBusyRetryAttempt ?? 0) === (right?.fileSyncLockBusyRetryAttempt ?? 0)
             && (left?.ignorePendingRemoteWriteBackoff ?? false)
                 === (right?.ignorePendingRemoteWriteBackoff ?? false);
     }
 
-    /** Covered-snapshot check for the core machine's acceptCoveredSnapshot
-     *  hook: a mid-cycle store change is benign when the in-memory payload
-     *  already matches what this cycle synced. The machine owns the snapshot
-     *  stamp bookkeeping. */
+
     private static isCoveredLocalSnapshot(expectedData: AppData): boolean {
         const currentChangeAt = getStoreState().lastDataChangeAt;
         const currentData = normalizeAppData(syncServiceDependencies.getInMemoryAppDataSnapshot());
@@ -1250,11 +1144,7 @@ export class SyncService {
             return false;
         }
 
-        // The payload fingerprint is blind to device-local settings (the
-        // sanitizer strips them), but finalize applies expectedData.settings to
-        // the store wholesale — accepting coverage while e.g. the sidebar area
-        // filter changed mid-cycle would revert that change (#316). A mismatch
-        // here falls back to the normal requeue path.
+
         const currentSettingsFingerprint = computeCoveredSettingsFingerprint(currentData.settings);
         const syncedSettingsFingerprint = computeCoveredSettingsFingerprint(syncedData.settings);
         if (currentSettingsFingerprint !== syncedSettingsFingerprint) {
@@ -1287,9 +1177,7 @@ export class SyncService {
         return SyncService.syncStatus;
     }
 
-    /** Seed `syncStatus.backend` from the persisted configuration. Later changes
-     *  flow through `writeSyncBackendDirect`, the single home for durable
-     *  backend writes. */
+
     static async refreshSyncBackendStatus(): Promise<void> {
         try {
             const backend = await SyncService.getSyncBackend();
@@ -1299,19 +1187,16 @@ export class SyncService {
         }
     }
 
-    /** Call only for a user-visible backend change (turn off, disconnect,
-     *  committed configuration) — never for the config transaction's
-     *  intermediate 'off' write, which would blink the footer and wipe the
-     *  error text a failed save just produced. */
+
     static async noteSyncBackendPersisted(backend: SyncBackend): Promise<void> {
         if (SyncService.lastConfigurationSnapshot) {
             SyncService.lastConfigurationSnapshot = { ...SyncService.lastConfigurationSnapshot, backend };
         }
-        // Status subscribers synchronously derive UI from the cached selection.
+
         SyncService.updateSyncStatus({ backend });
         if (backend !== 'off') return;
-        // Sync reporting ends with sync: once no future sync can clear it, a
-        // stale conflict/error status would re-toast at every launch (#1001).
+
+
         try {
             await persistSyncSettings({
                 lastSyncStatus: 'idle',
@@ -1365,8 +1250,8 @@ export class SyncService {
     private static moveDropboxCredentialToFinalizeRetry(credentialHandle: string): void {
         const normalizedHandle = credentialHandle.trim();
         if (!normalizedHandle) return;
-        // Record the committed phase before withdrawing the Candidate from UI
-        // so every synchronous subscriber sees a lifecycle with an owner.
+
+
         SyncService.pendingDropboxFinalizeHandles.add(normalizedHandle);
         SyncService.forgetPendingDropboxCredentialHandleForSession(normalizedHandle);
     }
@@ -1402,10 +1287,8 @@ export class SyncService {
 
     private static async recoverDropboxCredentialsBeforeConfigurationMutation(): Promise<void> {
         await recoverDropboxCredentialsBeforeConfigurationDirect();
-        // The native recovery barrier removes committed orphan promotion
-        // entries only after exact marker recovery succeeds. Any renderer
-        // finalize handles are therefore stale, while Candidate ownership is
-        // intentionally unchanged.
+
+
         SyncService.pendingDropboxFinalizeHandles.clear();
     }
 
@@ -1435,9 +1318,8 @@ export class SyncService {
     }
 
     static async resetForTests(): Promise<void> {
-        // A requeued sync may already have entered the serialized restore queue.
-        // Detach it from the orchestrator, then wait for it to finish before a
-        // following test replaces the service dependencies underneath it.
+
+
         SyncService.syncOrchestrator.reset();
         await runSyncDocumentExclusive(async () => undefined);
         await SyncService.legacyMigrationPromise?.catch(() => undefined);
@@ -1498,7 +1380,7 @@ export class SyncService {
                     6000,
                 );
             } catch {
-                // UI store may be unavailable during shutdown/tests.
+
             }
             return;
         }
@@ -1520,10 +1402,8 @@ export class SyncService {
         }
 
         const migrationPromise = (async () => {
-            // Snapshot renderer-owned state without invoking the browser getters:
-            // getCloudConfigLocal intentionally relocates a non-remembered legacy
-            // token into sessionStorage, which would destroy the retry source if
-            // native migration failed and the app then closed.
+
+
             const capturedLocalEntries = new Map<string, string | null>([
                 [SYNC_BACKEND_KEY, localStorage.getItem(SYNC_BACKEND_KEY)],
                 [WEBDAV_URL_KEY, localStorage.getItem(WEBDAV_URL_KEY)],
@@ -1580,15 +1460,10 @@ export class SyncService {
                 return;
             }
 
-            // Migration can run either inside the lifecycle queue (atomic
-            // snapshot/commit) or from a legacy individual getter. Use the
-            // direct native barrier here to avoid queue reentrancy while still
-            // settling any crash-left Dropbox journal before config writes.
+
             await recoverDropboxCredentialsBeforeConfigurationDirect();
 
-            // Read one tolerant native snapshot instead of consulting each
-            // secret authority. A dormant WebDAV or Cloud credential can be
-            // opaque in a sandboxed package without blocking File sync.
+
             const current = await invokeSyncNative<
                 PersistedDesktopSyncConfiguration & { cloudProviderAuthority: string }
             >('get_sync_configuration_snapshot', {
@@ -1643,8 +1518,7 @@ export class SyncService {
                 }
             }
 
-            // The provider selects the cloud transport, so make it durable and
-            // verify it before a legacy cloud backend can be activated.
+
             if (rawLegacyCloudProvider !== null) {
                 if (
                     (current.cloudProvider !== 'selfhosted'
@@ -1678,9 +1552,7 @@ export class SyncService {
                 }
             }
 
-            // Every native read/write above completed successfully. Retire only
-            // the exact values inspected by this migration so a concurrent
-            // renderer update is never mistaken for legacy state.
+
             capturedLocalEntries.forEach((value, key) => {
                 if (value !== null && localStorage.getItem(key) === value) {
                     localStorage.removeItem(key);
@@ -1755,9 +1627,7 @@ export class SyncService {
         };
     }
 
-    /** Last durable configuration this session read or committed. The Sync
-     *  settings page seeds every field from it on open, because the serialized
-     *  read below waits behind whole sync cycles (tens of seconds on WebDAV). */
+
     private static lastConfigurationSnapshot: PersistedDesktopSyncConfiguration | null = null;
 
     private static rememberConfigurationSnapshot(configuration: PersistedDesktopSyncConfiguration): void {
@@ -1771,9 +1641,7 @@ export class SyncService {
         return configuration;
     }
 
-    /** Synchronous first-frame seed for the Sync settings page: the last
-     *  backend and cloud provider this device durably read, plus the full
-     *  configuration when this session has read or committed one. */
+
     static getLastKnownSyncSelection(): {
         backend: SyncBackend | null;
         cloudProvider: CloudProvider | null;
@@ -1799,35 +1667,22 @@ export class SyncService {
         return readWebDavConfig(getSyncConfigDeps(), options);
     }
 
-    // -----------------------------------------------------------------
-    // Sync encryption (#1056). The surface phase 3's settings UI calls.
-    //
-    // A transition is an explicit maintenance pass over the whole remote artifact set, so it
-    // runs wherever that set can be enumerated:
-    //   * File Sync -> Rust, which owns the folder's IO and can walk it directly.
-    //   * WebDAV, Dropbox, and no backend yet -> core's sync encryption service, the same code
-    //     the mobile apps run. Rust still owns the per-CYCLE WebDAV crypto seam; it picks up
-    //     the key this transition cached.
-    // Either way the key lives only in Rust's keyring — TS keeps no cache of its own. Every
-    // call below runs inside `runSyncRestoreExclusive`, so a transition never interleaves with
-    // a sync cycle, and the core service adds its own document queue inside that one.
-    // -----------------------------------------------------------------
 
     private static encryptionService(): SyncEncryptionService {
         desktopEncryptionService ??= createDesktopSyncEncryptionService({
             location: {
                 readTarget: async () => {
                     const backend = await SyncService.getSyncBackend();
-                    // No durable backend yet (a typed-but-unproven WebDAV config is still 'off'
-                    // until its activation probe passes): enable/disable run local-only (#1001).
+
+
                     if (backend === 'off') return { backend: 'off' };
                     if (backend === 'webdav') return { backend: 'webdav' };
-                    // `cloud` covers two very different providers; only Dropbox is a blob store.
+
                     if (backend === 'cloud' && (await SyncService.getCloudProvider()) === 'dropbox') {
                         return { backend: 'dropbox' };
                     }
-                    // File Sync is routed to Rust before the service. CloudKit and the
-                    // self-hosted cloud are not blob stores this app writes whole documents to.
+
+
                     return { backend: 'unsupported' };
                 },
                 readLocationScope: async () => readPersistedSyncLocationScope(await SyncService.getSyncBackend()),
@@ -1853,7 +1708,7 @@ export class SyncService {
         return desktopEncryptionService;
     }
 
-    /** A File Sync transition in Rust, with the same transition trail core writes. */
+
     private static runNativeEncryptionTransition<T>(
         kind: 'enable' | 'disable' | 'change-passphrase' | 'unlock',
         onProgress: ((progress: SyncEncryptionTransitionProgress) => void) | undefined,
@@ -1871,8 +1726,8 @@ export class SyncService {
         passphrase: string,
         onProgress?: (progress: SyncEncryptionTransitionProgress) => void,
     ): Promise<void> {
-        // Serialized against sync runs and restores by the same exclusive gate every other
-        // configuration mutation uses; the Rust side additionally holds the sync-folder lock.
+
+
         return runSyncRestoreExclusive(async () => {
             if (await SyncService.getSyncBackend() === 'file') {
                 await SyncService.runNativeEncryptionTransition('enable', onProgress, () =>
@@ -1902,11 +1757,8 @@ export class SyncService {
         onProgress?: (progress: SyncEncryptionTransitionProgress) => void,
     ): Promise<void> {
         return runSyncRestoreExclusive(async () => {
-            // Confirm the current passphrase before rewrapping anything: the cached key is
-            // what actually decrypts, so an unverified "current" would let a typo rotate the
-            // folder to a passphrase the user did not intend. With no backend this rejects
-            // SYNC_ENCRYPTION_BACKEND_REQUIRED: a local-only "rotation" while an old sync
-            // location still holds ciphertext would silently strand it under the previous key.
+
+
             if ((await SyncService.provideSyncEncryptionPassphraseUnlocked(currentPassphrase)) !== 'ok') {
                 throw new Error('SYNC_ENCRYPTION_WRONG_PASSPHRASE');
             }
@@ -1927,8 +1779,8 @@ export class SyncService {
         passphrase: string,
     ): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
         if (await SyncService.getSyncBackend() === 'file') {
-            // Unlock reports its answer rather than throwing it, so the end line takes the
-            // returned outcome verbatim — it is already the fixed outcome vocabulary.
+
+
             return SyncService.runNativeEncryptionTransition(
                 'unlock',
                 undefined,
@@ -1942,11 +1794,7 @@ export class SyncService {
         return SyncService.encryptionService().provideSyncEncryptionPassphrase(passphrase);
     }
 
-    /** Validates against the remote's own header and caches the key on success. Never mutates
-     *  the remote, whichever way it answers.
-     *
-     *  `'no-encrypted-remote'` (#1138): nothing encrypted is at this location, so the no-key
-     *  state described somewhere this device has left behind. It is cleared back to off. */
+
     static async provideSyncEncryptionPassphrase(
         passphrase: string,
     ): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'> {
@@ -1955,9 +1803,7 @@ export class SyncService {
         );
     }
 
-    /** "Not now". The no-key state was already persisted at discovery, so this only re-affirms
-     *  it — a dismissal must never re-arm automatic sync against ciphertext this device cannot
-     *  read. Kept as a stable call for phase 3 rather than letting the UI infer a no-op. */
+
     static async declineSyncEncryptionPassphrase(): Promise<void> {
         const status = await readSyncEncryptionStatus();
         if (status.state !== 'remote-encrypted-no-key') return;
@@ -1974,7 +1820,7 @@ export class SyncService {
             const previousBackend = isTauriRuntimeEnv()
                 ? normalizeSyncBackend(await invokeSyncNative<string>('get_sync_backend'))
                 : getSyncBackendLocal();
-            // A lost write response can still commit; never seed the page with the old credential.
+
             SyncService.lastConfigurationSnapshot = null;
             try {
                 await SyncService.setWebDavConfig({ url: '', username: '', password: '', replacePassword: true });
@@ -1996,7 +1842,7 @@ export class SyncService {
                 });
                 return configuration;
             } catch (error) {
-                // Disabling WebDAV can commit before credential removal fails.
+
                 try {
                     const configuration = isTauriRuntimeEnv()
                         ? await invokeSyncNative<PersistedDesktopSyncConfiguration>('get_sync_configuration_snapshot', {
@@ -2022,10 +1868,8 @@ export class SyncService {
             throw new Error('WebDAV URL not configured');
         }
         const fetcher = await getTauriFetch();
-        // The settings form leaves the password field empty after a restart
-        // (the secret stays in the keyring, only hasPassword survives). An
-        // empty string must mean "unchanged", not "no password", or the test
-        // 401s on saved credentials that sync itself uses fine (#899).
+
+
         const password = await resolveWebdavPassword({
             url: config.url,
             username: config.username || '',
@@ -2060,9 +1904,7 @@ export class SyncService {
         if (compatibility === 'strong-etag') rememberWebdavCapabilityProof(config);
     }
 
-    /** Reachability + credential check for the self-hosted server, the same read
-     *  the mobile panel's Test connection makes. A wrong URL or token surfaces
-     *  here instead of only in the verification sync that Save runs. */
+
     static async testCloudConnection(config: { url: string; token?: string; allowInsecureHttp?: boolean }): Promise<void> {
         const normalizedUrl = normalizeCloudUrl(config.url.trim());
         if (!normalizedUrl) throw new Error('Self-hosted server URL is not configured.');
@@ -2072,6 +1914,18 @@ export class SyncService {
                 token: config.token,
                 fetcher: (await getTauriFetch()) ?? fetch,
             });
+            if (!isTauriRuntimeEnv() && typeof window !== 'undefined' && window.location.protocol === 'http:') {
+                const cloudUrl = new URL(normalizedUrl);
+                if (cloudUrl.protocol === 'http:'
+                    && cloudUrl.hostname === window.location.hostname
+                    && cloudUrl.port !== window.location.port) {
+                    void syncServiceDependencies.logInfo('Browser same-host HTTP cloud connection test succeeded', {
+                        scope: 'sync',
+                        force: true,
+                        extra: { releaseCheck: 'v1.3.8/docker-lan-cloud-test' },
+                    });
+                }
+            }
         } catch (error) {
             logSyncWarning('Self-hosted connection test failed', error);
             throw error;
@@ -2086,9 +1940,7 @@ export class SyncService {
         return writeCloudConfig(config, getSyncConfigDeps());
     }
 
-    /** Read, rotate or revoke the self-hosted server's iCalendar feed token (#952).
-     *  `null` means no feed is published; the subscription URL is derived from the
-     *  configured sync URL, not from whatever the server reports. */
+
     static async requestCalendarFeed(action: 'read' | 'rotate' | 'revoke'): Promise<{ feed: CloudCalendarFeed | null; url: string | null }> {
         const config = await SyncService.getCloudConfig();
         const url = config.url?.trim();
@@ -2163,13 +2015,12 @@ export class SyncService {
                     ),
                 });
                 if (committed.cleanupPending && credentialHandle) {
-                    // Phase ownership changes before releasing the lifecycle queue;
-                    // a queued Off/disconnect barrier must see and settle this slot.
+
+
                     SyncService.moveDropboxCredentialToFinalizeRetry(credentialHandle);
                 }
-                // Refresh the page seed inside the queue slot, ahead of any sync
-                // cycle already waiting; a reopened Sync page otherwise shows the
-                // previous backend until that cycle finishes.
+
+
                 try {
                     SyncService.rememberConfigurationSnapshot(await SyncService.readPersistedSyncConfiguration());
                 } catch (error) {
@@ -2178,25 +2029,19 @@ export class SyncService {
                 return committed;
             });
         } catch (error) {
-            // A SyncConfigurationDisabledError is the transaction's own assertion
-            // that it left sync durably off (rollback could not restore). Reflect
-            // that without any config IO — after a failed native recovery, no
-            // further configuration read may run (fail-closed).
+
+
             if (error instanceof SyncConfigurationDisabledError) {
                 SyncService.updateSyncStatus({ backend: 'off' });
             }
             throw error;
         }
-        // The transaction's internal intermediate 'off' write is deliberately not
-        // observed; only the committed configuration is (#1001). On any other
-        // throw/rollback the persisted backend is unchanged, so the status needs
-        // no correction.
+
+
         await SyncService.refreshSyncBackendStatus();
         if (result.cleanupPending && credentialHandle) {
-            // Schedule the post-commit notice/retry behind anything that was
-            // already queued during commit. A newer Off/disconnect barrier may
-            // settle and clear this handle first, in which case no stale notice
-            // or finalize attempt is emitted.
+
+
             void runSyncRestoreExclusive(async () => {
                 if (!SyncService.pendingDropboxFinalizeHandles.has(credentialHandle)) return;
                 logSyncWarning('Dropbox setup committed; credential cleanup will retry');
@@ -2207,11 +2052,11 @@ export class SyncService {
                         6000,
                     );
                 } catch {
-                    // The UI store can be unavailable during shutdown/tests.
+
                 }
                 try {
-                    // Native finalize is idempotent at the committed marker,
-                    // including a lost response after cleanup.
+
+
                     await SyncService.retryDropboxCredentialFinalizations(credentialHandle);
                 } catch {
                     logSyncWarning('Dropbox credential cleanup retry is still pending');
@@ -2254,9 +2099,8 @@ export class SyncService {
             if (SyncService.pendingDropboxCredentialHandle) {
                 throw new Error('A pending Dropbox authorization must be resolved before connecting another account');
             }
-            // Renderer finalize ownership is session-only and may be empty
-            // after reload. Native recovery must settle any prior promotion
-            // journal before a new OAuth candidate is allowed to mutate it.
+
+
             await SyncService.recoverDropboxCredentialsBeforeConfigurationMutation();
             const credentialHandle = await invokeSyncNative<string>('connect_dropbox', { clientId: normalized });
             SyncService.rememberPendingDropboxCredentialHandleForSession(credentialHandle);
@@ -2329,22 +2173,21 @@ export class SyncService {
         }
         await runSyncRestoreExclusive(async () => {
             if (SyncService.pendingDropboxFinalizeHandles.has(normalizedHandle)) {
-                // This handle is past the exact active-backend commit point.
-                // Its only legal transition is idempotent finalize.
+
+
                 await SyncService.retryDropboxCredentialFinalizations(normalizedHandle);
                 return;
             }
             const pendingHandle = SyncService.pendingDropboxCredentialHandle;
-            // A transaction or disconnect that ran first already resolved this
-            // handle. A different handle must never be touched by stale cleanup.
+
+
             if (!pendingHandle) return;
             if (pendingHandle !== normalizedHandle) {
                 throw new Error('A different Dropbox authorization is pending recovery');
             }
             try {
-                // Native discard is idempotent for a missing/expired Candidate.
-                // Promoted entries are never TTL-pruned and deliberately reject
-                // discard, so rollback remains the safe second phase.
+
+
                 await SyncService.discardDropboxCredentials(normalizedHandle);
             } catch (discardError) {
                 try {
@@ -2419,21 +2262,17 @@ export class SyncService {
         }));
     }
 
-    /**
-     * Get the currently configured sync path from the backend
-     */
+
     static async getSyncPath(): Promise<string> {
         return readSyncPath(getSyncConfigDeps());
     }
 
-    /**
-     * Set the sync path in the backend
-     */
+
     static async setSyncPath(path: string): Promise<{ success: boolean; path: string; error?: string }> {
         return writeSyncPath(path, getSyncConfigDeps());
     }
 
-    /** Exercise the native file-sync write contract without saving the path. */
+
     static async testSyncPath(path: string): Promise<void> {
         return runSyncRestoreExclusive(() => testSyncPath(path, getSyncConfigDeps()));
     }
@@ -2451,12 +2290,7 @@ export class SyncService {
         SyncService.ignoreFileEventsUntil = SyncService.getMonotonicNow() + 2000;
     }
 
-    /** Desktop's own transient-retry policy for one Dropbox transport call
-     *  (network/5xx failures, per `DROPBOX_TRANSIENT_RETRY_OPTIONS`). The
-     *  401-triggered token-refresh-and-retry-once policy is shared and lives
-     *  in `createSyncBackendIO` (`packages/core/src/sync-backend-io.ts`);
-     *  `isRetryableError` already excludes 401s, so this wrap never competes
-     *  with that policy — it only covers the same operation's transient failures. */
+
     private static async runDropboxTransientRetry<T>(operation: () => Promise<T>): Promise<T> {
         return withRetry(operation, DROPBOX_TRANSIENT_RETRY_OPTIONS);
     }
@@ -2481,8 +2315,7 @@ export class SyncService {
         }
     }
 
-    /** Resolve backend config and construct the cycle's transport adapter —
-     *  the core machine's setupCycle hook. */
+
     private static async setupDesktopCycle(
         context: DesktopSyncCycleContext,
         options: SyncRunOptions,
@@ -2499,15 +2332,14 @@ export class SyncService {
         setBackend(context.backend);
 
         const encryptionStatus = await readSyncEncryptionStatus();
-        // The sidecar's salt prefix and discovery scope are not on the core status shape;
-        // the trail needs both to explain a refusal (#1056 diagnostics).
+
+
         const encryptionPosture = await getSyncEncryptionPosture().catch(() => null);
         const legacyWebdavPostureAllowed = isLegacyWebdavPlaintextPostureAllowed(encryptionStatus);
         context.allowLegacyWebdavPlaintext = false;
         context.syncEncryptionOff = legacyWebdavPostureAllowed;
-        // One `state` line per cycle, emitted immediately before the return/throw it explains
-        // so a shared log never shows a refusal with no posture behind it. The scope is built
-        // from whatever config has been resolved by that point.
+
+
         const logCycleState = (decision: SyncEncryptionStateDecision) => {
             logSyncEncryptionState({
                 backend: context.backend,
@@ -2566,8 +2398,8 @@ export class SyncService {
             : null;
         if (context.webdavConfig) {
             setStep('webdav_probe');
-            // Retried like the cycle's own read: a single timeout on the cold first
-            // request must not fail a cycle whose reads would then succeed.
+
+
             const compatibility = await ensureWebdavCapabilityProof(
                 context.webdavConfig,
                 () => withRetry(
@@ -2603,23 +2435,19 @@ export class SyncService {
             ? getFileSyncDir(context.syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME)
             : '';
         if (context.backend === 'file') {
-            // This is the same persistent `.mindwtr.lock` OS lease used by
-            // native enable/change/disable transitions. It covers attachment
-            // mutations, document CAS, and final local persistence as one unit.
+
+
             context.fileSyncLeaseToken = await acquireFileSyncLease(context.syncPath);
         }
 
-        // CloudKit setup: ensure zone and subscription exist before syncing.
+
         if (context.backend === 'cloudkit') {
             setStep('cloudkit_setup');
             await yieldToRenderer();
             await syncServiceDependencies.ensureCloudKitReady();
         }
 
-        // Desktop has NO pre-read no-key gate: `is_encryption_enabled` is false for
-        // `remote-encrypted-no-key`, so the cycle re-discovers at the read seam every time
-        // (#1138). The decision here is therefore always "run"; the refusal, when it comes,
-        // arrives as a `remote-read` line.
+
         logCycleState(
             options.activationProbe
                 ? 'probe'
@@ -2627,7 +2455,7 @@ export class SyncService {
                     ? 'legacy-plaintext'
                     : 'proceed',
         );
-        // Computed once and reused for `fastSyncScope` below: same config, same pure builder.
+
         const fastSyncScope = buildFastSyncScope(context);
         context.deferAttachmentPrepareUntilRead = shouldDeferAttachmentPrepareUntilRead({
             backend: context.backend,
@@ -2647,14 +2475,11 @@ export class SyncService {
             cloudProvider: context.cloudProvider,
             io: await SyncService.createBackendIO(context),
             fastSyncScope,
+            locationScope: desktopSyncLocationScope(context),
         };
     }
 
-    /** Ladder-visible config for `createSyncBackendIO` (ADR 0014's shared
-     *  `SyncBackendIO` implementation, `packages/core/src/sync-backend-io.ts`).
-     *  A separate, minimal object from `DesktopSyncCycleContext` — the ladder
-     *  only needs enough to pick a branch and normalize a url; the transport
-     *  closures below keep reading the rich `context` for everything else. */
+
     private static createBackendContext(context: DesktopSyncCycleContext): SyncBackendContext {
         return {
             backend: context.backend,
@@ -2669,16 +2494,11 @@ export class SyncService {
         };
     }
 
-    /** Backend transport adapter for the core machine (ADR 0014). The ladder
-     *  (which backend, url normalization, the Dropbox rev fingerprint format,
-     *  the conflict mapping, and the auth-retry-once policy) lives in
-     *  `createSyncBackendIO`; this only supplies desktop's transport truths. */
+
     private static async createBackendIO(context: DesktopSyncCycleContext): Promise<SyncBackendIO> {
         const ctx = SyncService.createBackendContext(context);
-        // Resolved once per cycle and handed to the shared machine: the WebDAV read
-        // posture decision lives there now, not in the two transport paths below.
-        // Only the WebDAV backend consults it, and the key stays in Rust for every
-        // other backend's cycle.
+
+
         const encryptionMaterial = context.backend === 'webdav'
             ? await getSyncEncryptionMaterial()
             : null;
@@ -2699,9 +2519,8 @@ export class SyncService {
                 discovered,
                 desktopSyncLocationScope(context),
             ),
-            // Carries the Rust-mirrored sentinel so string-form classification
-            // (classifySyncEncryptionFailure on a probe result's error text)
-            // recognizes this as no-key, same as the native path.
+
+
             noKeyError: () => new SyncEncryptionTerminalError(
                 new SyncCryptoUnsupportedError(`${SYNC_ENCRYPTION_REMOTE_ENCRYPTED}: the WebDAV remote is encrypted and this device has no key`),
             ),
@@ -2710,22 +2529,16 @@ export class SyncService {
                 { url: ctx.syncUrl!, etag: String(etag ?? 'none') },
             ),
         };
-        // #1119 follow-up: the presence-reconciliation stamp's scope, computed ONCE per cycle
-        // from the fully-resolved context (every field it reads is assigned in
-        // setupDesktopCycle, before this runs) and shared with the gate that reads the stamp
-        // in `shouldRunAttachmentPhase`. One derivation, one value — mobile had to derive it
-        // twice and a reader/writer mismatch was a blocking review finding there.
+
+
         const cycleAttachmentDeps: AttachmentBackendDeps = {
             ...attachmentBackendDeps,
             presenceScope: desktopSyncLocationScope(context),
         };
 
         const transport: SyncTransport = {
-            // Fence ports deliberately skip the cycle's abort signal: an abort
-            // mid-cycle used to cancel the release requests in `run()`'s finally,
-            // leaving a lease that blocked every device for up to the 5-minute TTL.
-            // Fence requests are tiny and timeout-bounded, so letting them finish
-            // is cheaper than a stale lock.
+
+
             acquireWebdavRemoteMutationFence: async () => {
                 const webdavConfig = context.webdavConfig;
                 if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
@@ -2752,23 +2565,19 @@ export class SyncService {
                 );
             },
             webdavGet: async () => {
-                // Error context must carry the file URL the request targets,
-                // not the configured base folder — a folder-only url field
-                // made #898 (and #758) logs unreadable for pinpointing the
-                // failing request.
+
+
                 const normalizedUrl = ctx.syncUrl!;
-                // A "missing" remote on a folder that other devices populate
-                // means the app is reading the wrong URL or the server hid
-                // the file; make it visible in shared logs (#898).
+
+
                 const logMissingRemote = (remote: WebdavSyncReadResult): WebdavSyncReadResult => {
                     if ('data' in remote && remote.data == null) {
                         logSyncInfo('WebDAV remote read returned no data', { url: normalizedUrl });
                     }
                     return remote;
                 };
-                // Raw read only. What an encrypted/plaintext/no-ETag outcome MEANS is
-                // decided once by `createSyncBackendIO` through `encryptionPosture`
-                // below — the native path decrypts in Rust and so never reports a state.
+
+
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
                     return logMissingRemote(await withRetry(
                         () => invokeSyncNative<WebdavSyncReadResult>('webdav_get_json'),
@@ -2817,8 +2626,8 @@ export class SyncService {
                 });
             },
             webdavPutLegacyPlaintext: async (sanitized, assertRemoteMutationFenceHeld) => {
-                // `ctx`, not `context`: the ladder may have degraded this cycle to the
-                // plaintext write after a read arrived without a strong ETag.
+
+
                 if (!ctx.allowLegacyWebdavPlaintext) {
                     throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
                 }
@@ -2849,9 +2658,8 @@ export class SyncService {
                 const webdavConfig = context.webdavConfig!;
                 const password = await resolveWebdavPassword(webdavConfig);
                 const fetcher = await createFetchWithAbortForContext(context);
-                // The HEAD has to target the artifact that actually exists, or the change
-                // probe 404s every cycle on an encrypted remote. The fingerprint it builds
-                // stays a change-detection heuristic either way.
+
+
                 const material = await getSyncEncryptionMaterial();
                 const headUrl = material ? syncEncryptedArtifactName(ctx.syncUrl!) : ctx.syncUrl!;
                 return webdavHeadFile(headUrl, {
@@ -2996,25 +2804,19 @@ export class SyncService {
         return createSyncBackendIO(ctx, transport, encryptionPosture);
     }
 
-    /** Dropbox remote read: try the native (Tauri) fetcher first, fall back to
-     *  the browser fetcher when it comes back empty. Desktop-only truth — the
-     *  Tauri http client and the browser fetch client can see different
-     *  network paths (e.g. proxy configuration), so a native miss is worth a
-     *  second try before treating the remote as empty. */
+
     private static async downloadDropboxWithFallback(
         context: DesktopSyncCycleContext,
         token: string
     ): Promise<{ data: AppData | null; rev: string | null }> {
         const nativeFetch = await getTauriFetch();
         const browserFetcher = createAbortableFetch(fetch, { baseSignal: context.requestAbortController.signal });
-        // `undefined` material is the encryption-off path and produces byte-for-byte the same
-        // request Dropbox saw before this feature existed.
+
+
         const material = (await getSyncEncryptionMaterial()) ?? undefined;
         const crypto = { material, cryptoPrims: desktopSyncCryptoPrimitives };
 
-        // A discovery means the remote is encrypted and this device has no key: persist the
-        // state and stop the run. Never "no data" — that would let the merge treat an encrypted
-        // remote as empty and push a full plaintext document over it.
+
         const settle = async (result: DropboxDownloadResult): Promise<DropboxDownloadResult> => {
             if (result.encryptedNoKey) {
                 logSyncEncryptionRemoteRead({
@@ -3028,16 +2830,14 @@ export class SyncService {
                     decision: 'no-key',
                 });
                 await markRemoteSyncEncryptionDiscovered(result.encryptedNoKey, desktopSyncLocationScope(context));
-                // Sentinel-prefixed for the same string-form classification as the
-                // WebDAV path above.
+
+
                 throw new SyncEncryptionTerminalError(
                     new SyncCryptoUnsupportedError(`${SYNC_ENCRYPTION_REMOTE_ENCRYPTED}: the Dropbox remote is encrypted and this device has no key`),
                 );
             }
-            // The mirror case: this device has a key and the remote is back in plaintext, so a
-            // peer disabled encryption there. Also never "no data" — merging would fork the
-            // account into two generations, and writing plaintext would follow whoever removed
-            // the ciphertext down to it.
+
+
             if (result.remotePlaintext) {
                 logSyncEncryptionRemoteRead({
                     artifact: SYNC_FILE_NAME,
@@ -3106,9 +2906,8 @@ export class SyncService {
             }
             return nativeRemote;
         } catch (error) {
-            // A lifecycle abort is terminal for this cycle. Treating it like a browser-only
-            // fallback failure would turn a cancelled read into an empty remote and let the
-            // sync machine continue until a later operation happened to notice cancellation.
+
+
             if (context.requestAbortController.signal.aborted || isSyncEncryptionFailure(error)) {
                 throw error;
             }
@@ -3170,9 +2969,8 @@ export class SyncService {
                 await syncServiceDependencies.flushPendingSave();
                 const leaseToken = await acquireFileSyncLease();
                 try {
-                    // Read local data first: native replaces it only if it is
-                    // unchanged, so a capture (MCP, Local API) that lands
-                    // while the external file is read survives.
+
+
                     const expectedData = await invokeSyncNative<AppData>('get_data');
                     const externalData = normalizeAppData(await invokeSyncNative<AppData>(
                         'read_sync_file',
@@ -3273,7 +3071,7 @@ export class SyncService {
                             try {
                                 useUiStore.getState().showToast(message, 'info', 5000);
                             } catch {
-                                // UI store may be unavailable during bootstrap/tests.
+
                             }
                         }
                     })
@@ -3356,9 +3154,8 @@ export class SyncService {
         const backend = await SyncService.getSyncBackend();
         const cloudProvider = backend === 'cloud' ? await SyncService.getCloudProvider() : null;
         if (backend === 'webdav' || (backend === 'cloud' && cloudProvider === 'dropbox')) {
-            // These providers share the compatible-client mutation fence. Route
-            // the manual button through the ordinary sync machine so cleanup
-            // cannot become an unfenced writer outside the normal lease/CAS path.
+
+
             const result = await SyncService.performSync({
                 manual: true,
                 ignorePendingRemoteWriteBackoff: true,
@@ -3386,9 +3183,8 @@ export class SyncService {
                     getAttachmentCleanupDeps(),
                     { ensureLocalSnapshotFresh },
                 );
-                // The last freshness check, the save and its publication hold the store write gate alone, so no
-                // command reads the pre-cleanup store after the commit. The load runs after the gate is released:
-                // it is a store command and would wait on this save.
+
+
                 await runSyncStoreSave(async () => {
                     ensureLocalSnapshotFresh();
                     const canonical = await persistLocalDataForSync(cleaned, { baseline: data });
@@ -3462,18 +3258,7 @@ export class SyncService {
         }
     }
 
-    /**
-     * Perform a full sync cycle:
-     * 1. Read Local & Remote Data
-     * 2. Merge (Last-Write-Wins)
-     * 3. Write merged data back to both Local & Remote
-     * 4. Refresh Core Store
-     */
-    /** Resolve once no sync cycle is in flight or queued, or after `timeoutMs`
-     *  (false). Activation probes wait on this instead of bouncing: a focus- or
-     *  data-change-triggered auto sync is usually running when the user presses
-     *  Save, and an immediate "requeued" answer dropped the backend switch behind
-     *  an info toast every single time. */
+
     static isSyncIdle(): boolean {
         const state = SyncService.syncOrchestrator.getState();
         return !state.inFlight && !state.queued && pendingSyncServiceOperations === 0;
@@ -3492,9 +3277,8 @@ export class SyncService {
                 resolve(idle);
             };
             const timer = setTimeout(() => finish(false), timeoutMs);
-            // The status listener fires from inside the cycle, before the
-            // orchestrator clears its own in-flight slot in a later microtask;
-            // re-check after yielding so the orchestrator's view is settled.
+
+
             const checkAfterYield = () => {
                 if (settled) return;
                 setTimeout(() => {
@@ -3512,9 +3296,8 @@ export class SyncService {
         }
         let wasInFlight = SyncService.syncOrchestrator.getState().inFlight;
         if (wasInFlight && options.activationProbe) {
-            // A candidate must be proven by the call that will commit it, so it
-            // cannot ride the active cycle. Wait for that cycle (and any queued
-            // follow-up) to finish, then prove the candidate on a clean run.
+
+
             const idle = await SyncService.waitForSyncIdle(ACTIVATION_PROBE_IDLE_WAIT_MS);
             if (isWorkspaceTransitionActive()) {
                 return { success: true, skipped: 'disabled' };
@@ -3532,9 +3315,8 @@ export class SyncService {
         }
         const result = SyncService.syncOrchestrator.run(options);
         if (wasInFlight && options.configOverride) {
-            // The orchestrator returns the active cycle's promise when it queues
-            // another request. That active result did not use this transient
-            // config and must never authorize the settings UI to persist it.
+
+
             void result.catch((error) => logSyncWarning('Active sync failed while a settings proof was queued', error));
             return { success: true, skipped: 'requeued' };
         }
@@ -3542,17 +3324,13 @@ export class SyncService {
     }
 
     private static runSyncCycle(options: SyncRunOptions): Promise<SyncRunResult> {
-        // The orchestrator drops `queued` and starts the follow-up cycle in the same tick,
-        // but the cycle body only reaches its own busy publish after the document lock and
-        // a handful of awaits. Publishing busy here instead means no tick in between reads
-        // as idle, which is what made the footer flicker on every hand-off (#913): the Sync
-        // now button re-enabled under the pointer and animate-spin restarted from 0deg.
+
+
         SyncService.updateSyncStatus({ inFlight: true, step: 'init' });
         return runSyncDocumentExclusive(() => SyncService.runSyncCycleExclusive(options))
             .catch((error) => {
-                // The cycle publishes the final idle status itself; it only misses it when
-                // it throws before getting there. `lastResult` is left alone — the caller,
-                // not this guard, decides what a crashed cycle proved.
+
+
                 SyncService.updateSyncStatus({ inFlight: false, step: null });
                 throw error;
             });
@@ -3563,14 +3341,13 @@ export class SyncService {
         try {
             await SyncService.retryDropboxCredentialFinalizations();
         } catch (error) {
-            // The active configuration is already committed and durable. A
-            // cleanup retry must not block sync through those credentials.
+
+
             logSyncWarning('Dropbox credential cleanup remains pending', error);
         }
         const context = createDesktopSyncCycleContext();
-        // Activation probes exist to answer a question about the remote's encryption posture
-        // rather than to sync (57f8e2420); one forced line per probe records what the settings
-        // UI then acted on.
+
+
         const encryptionStateBeforeProbe = options.activationProbe
             ? (await readSyncEncryptionStatus().catch(() => null))?.state ?? 'unknown'
             : 'unknown';
@@ -3599,8 +3376,7 @@ export class SyncService {
             }
         };
 
-        // `runSyncCycle` already published the busy status; yield so the footer paints it
-        // before the cycle's first blocking work.
+
         if (await yieldToRenderer() === 'timer') {
             void syncServiceDependencies.logInfo('Sync continued without a renderer frame', {
                 scope: 'sync', force: true,
@@ -3615,6 +3391,7 @@ export class SyncService {
                 options: {
                     manual: options.manual,
                     activationProbe: options.activationProbe,
+                    acceptMissingAttachmentIds: options.acceptMissingAttachmentIds,
                     fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
                     ignorePendingRemoteWriteBackoff: options.ignorePendingRemoteWriteBackoff,
                 },
@@ -3625,6 +3402,8 @@ export class SyncService {
                     persistSyncStatus: (updates) => persistSyncSettings(updates),
                     readFastSyncState: async (scope) => readFastSyncState(scope),
                     writeFastSyncState: async (state) => writeFastSyncState(state, logSyncWarning),
+                    readUnreachableAttachments: async () => localStorage.getItem(UNREACHABLE_ATTACHMENTS_KEY),
+                    writeUnreachableAttachments: async (raw) => localStorage.setItem(UNREACHABLE_ATTACHMENTS_KEY, raw),
                     injectExternalCalendars: (data) => injectExternalCalendars(data),
                     persistExternalCalendars: (data) => persistExternalCalendars(data),
                 },
@@ -3651,9 +3430,8 @@ export class SyncService {
                             {
                                 scope: 'sync',
                                 extra: mergeLog.extra,
-                                // Resolved conflicts must stay auditable in mindwtr.log even when
-                                // diagnostics logging is off; the extra carries ids and field names
-                                // only, never task content (#854).
+
+
                                 force: mergeLog.summary.conflicts > 0,
                             }
                         );
@@ -3697,10 +3475,8 @@ export class SyncService {
                     acceptCoveredSnapshot: (expectedData) => SyncService.isCoveredLocalSnapshot(expectedData),
                     cleanupAttachmentTempFiles: () => cleanupAttachmentTempFiles(getAttachmentCleanupDeps()),
                     shouldRunAttachmentPhase: async (data, phase) => {
-                        // fresh-join-attachment-posture packet -10: see the comment on
-                        // `deferAttachmentPrepareUntilRead` in setupDesktopCycle. The post-merge
-                        // phase (`phase !== 'prepare'`) is never gated — by then the document
-                        // read has settled the posture.
+
+
                         if (phase === 'prepare' && context.deferAttachmentPrepareUntilRead) {
                             logSyncInfo('Attachment pre-sync skipped', {
                                 backend: context.backend,
@@ -3763,11 +3539,8 @@ export class SyncService {
                     },
                 },
                 policy: {
-                    // #1057 (review S1): must run before the fast unchanged-check, or an
-                    // attachment-only edit (which changes no document field) has its
-                    // fingerprint compared as "unchanged" and the pre-pass never runs at
-                    // all — content propagation would only ever happen on a manual sync
-                    // (which bypasses the fast check) or piggyback on an unrelated edit.
+
+
                     preSyncAttachmentsBeforeFastCheck: true,
                     enableReadCheckSkip: false,
                     postMergeAttachmentErrorPolicy: 'warn',
@@ -3784,9 +3557,8 @@ export class SyncService {
                     await releaseFileSyncLease(token);
                 } catch (error) {
                     fileSyncLockCleanupDeferred = true;
-                    // The native process still owns the handle if release
-                    // failed; surface this loudly rather than pretending the
-                    // folder is available for another mutation cycle.
+
+
                     logSyncWarning('Failed to release File Sync lease', error);
                 }
             }
@@ -3804,8 +3576,8 @@ export class SyncService {
         if (result.success && fileSyncLockCleanupDeferred) {
             result = { ...result, fileSyncLockDeferred: 'cleanup' };
         }
-        // The proof the settings UI reads is the probe's own error text, classified. Log the
-        // same discriminant so a report shows what the candidate configuration actually proved.
+
+
         await logActivationOutcome(
             result.success ? 'ok' : classifySyncEncryptionFailure(result.error) ?? null,
         );

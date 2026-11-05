@@ -1,20 +1,6 @@
-// Settings › About, feedback, the update check and the heartbeat on the isolated native Android development app (pass O1).
-//
-//   ADB=/opt/android-sdk/platform-tools/adb node apps/android-native/scripts/check-about-device.mjs <adb-serial> [apk]
-//
-// Nothing reaches a real endpoint: a local stub on 127.0.0.1 (adb reverse) answers GitHub's latest release, the feedback endpoint
-// and the heartbeat, and the debug build points all three at it (`debug.mindwtr.native.about_stub=<port>`, CoreHost's
-// aboutAppInfo); `about_reset` clears the day's heartbeat and update-check keys before the boot. The check installs the debug
-// APK with `install -r` (existing development data stays) and:
-// (a) the boot sends one heartbeat with RN's payload (core's sendMobileDailyHeartbeat: RN's keys in RN's order, this build's
-//     version, Android's major, the device's locale, the synced profile id);
-// (b) Settings › About shows RN's header and rows in core's English, and its silent check asks the stub's GitHub (or Play) once;
-// (c) Check for updates finds the stub's newer release: RN's alert (Update Available, the versions), then Later; the Settings
-//     menu's About row then carries RN's update dot;
-// (d) the feedback modal sends a bug report with a place, a reply email and diagnostics: the stub gets RN's body (the place
-//     leading the message, RN's metadata, the diagnostics ending with RN's snapshot), and the modal thanks.
-// It saves screenshots of About, the alert and the modal under android/build/about-check. It puts back the properties, the
-// adb reverse, the rotation and the Inbox tab. Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -47,7 +33,10 @@ const rnApp = JSON.parse(readFileSync(resolve(app, '../mobile/app.json'), 'utf8'
 const VERSION = rnApp.version;
 const NEWER = '9.9.9';
 
-// ---- The stub: GitHub's latest release, the feedback endpoint and the heartbeat, each request kept ----
+
+let latest = VERSION;
+
+
 const requests = [];
 const stub = createServer((request, response) => {
     let body = '';
@@ -56,7 +45,7 @@ const stub = createServer((request, response) => {
         requests.push({ method: request.method, url: request.url, headers: request.headers, body });
         if (request.url === '/github/releases/latest') {
             response.writeHead(200, { 'content-type': 'application/json' });
-            response.end(JSON.stringify({ tag_name: `v${NEWER}`, html_url: `https://github.com/dongdongbh/Mindwtr/releases/tag/v${NEWER}`, body: 'Stub notes' }));
+            response.end(JSON.stringify({ tag_name: `v${latest}`, html_url: `https://github.com/dongdongbh/Mindwtr/releases/tag/v${latest}`, body: 'Stub notes' }));
             return;
         }
         response.writeHead(request.url === '/feedback' || request.url === '/heartbeat' ? 200 : 404, { 'content-type': 'application/json' });
@@ -99,7 +88,7 @@ const openSettings = async () => {
     for (let step = 0; step < 6 && !aboutRow(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
     return nodes;
 };
-/** Types [text] into the field tagged [tag] (no spaces: adb's input text). */
+
 const typeInto = async (tag, text) => {
     await tap(tagged(await screen(), tag) ?? fail(`no ${tag} field`));
     await sleep(400);
@@ -111,19 +100,19 @@ const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const originalLanguage = sh('getprop debug.mindwtr.native.language');
 const restore = async () => {
-    for (const name of ['about_stub', 'about_reset']) { try { setProp(name, ''); } catch { /* device gone */ } }
-    try { setProp('language', originalLanguage); } catch { /* device gone */ }
-    try { adbRaw('reverse', '--remove', `tcp:${PORT}`); } catch { /* already gone */ }
+    for (const name of ['about_stub', 'about_reset']) { try { setProp(name, ''); } catch {                   } }
+    try { setProp('language', originalLanguage); } catch {                   }
+    try { adbRaw('reverse', '--remove', `tcp:${PORT}`); } catch {                    }
     try {
         if (front().includes(`${PKG}/`)) {
             const nodes = await backToTabs();
             if (tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
         }
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
     stub.close();
 };
 
@@ -145,10 +134,10 @@ try {
     sh('settings put system accelerometer_rotation 0');
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
-    // Later boots keep the day's keys.
+
     setProp('about_reset', '');
 
-    // (a) The boot's heartbeat: one POST, RN's payload.
+
     const heartbeatDeadline = Date.now() + 40_000;
     while (Date.now() < heartbeatDeadline && seen('/heartbeat').length === 0) await sleep(500);
     const beats = seen('/heartbeat');
@@ -164,13 +153,18 @@ try {
         `(a) RN's values: ${JSON.stringify({ ...beat, distinct_id: '…', profile_id: '…' })}`);
     check(beats[0].headers['content-type'] === 'application/json', '(a) sent as JSON');
 
-    // (b) Settings › About: RN's header and rows; the silent check asks once.
+
+    await sleep(5000);
+    const launchCard = texts(await screen()).includes(en['updateReminder.title']);
+    check(!launchCard, `(a) no launch update reminder while GitHub reports this version (startup asked GitHub ${seen('/github/releases/latest', 'GET').length} time(s))`);
+
+
     let nodes = await openSettings();
     nodes = await tapExpecting(aboutRow(nodes) ?? fail('no About row'), (current) => Boolean(tagged(current, 'settings-about')), 'Settings › About');
     await sleep(2500);
     nodes = await screen();
-    // Each link row is one button reading "label, value" (its texts merged, as RN's TouchableOpacity reads them); the license row's
-    // texts are its own.
+
+
     const shown = [...texts(nodes), ...nodes.map((node) => node['content-desc']).filter(Boolean)];
     check(shown.includes(rnApp.name) && shown.includes(`v${VERSION}`), `(b) the header: ${rnApp.name}, v${VERSION}`);
     for (let step = 0; step < 3 && !shown.includes(en['settings.license']); step += 1) {
@@ -188,7 +182,8 @@ try {
     const silentGithub = seen('/github/releases/latest', 'GET').length;
     console.log(`info - the silent check asked GitHub ${silentGithub} time(s) (a sideloaded install asks GitHub; a Play install asks Play first)`);
 
-    // (c) Check for updates: the stub's newer release, RN's alert; Later; the menu's dot.
+
+    latest = NEWER;
     nodes = await screen();
     nodes = await tapExpecting(tagged(nodes, 'about-checkForUpdates') ?? fail('no Check for updates row'),
         (current) => texts(current).includes(words.update), 'the update alert', 20_000);
@@ -199,7 +194,7 @@ try {
     const asked = seen('/github/releases/latest', 'GET').at(-1);
     check(asked.headers.accept === 'application/vnd.github.v3+json' && asked.headers['user-agent'] === 'Mindwtr-App', '(c) with RN\'s Accept and User-Agent');
     shot('about-alert');
-    // The alert is its own window (Compose's AlertDialog), so its buttons are found by their text.
+
     const later = tagged(nodes, 'about-alert-cancel') ?? nodes.find((node) => node.text?.toLowerCase() === words.later.toLowerCase());
     nodes = await tapExpecting(later ?? fail('no Later button'), (current) => !texts(current).includes(words.update), 'the alert to close');
     nodes = await backToTabs();
@@ -208,12 +203,12 @@ try {
     check(row?.['content-desc'].includes(words.update), `(c) the Settings menu's About row has RN's update dot: ${row?.['content-desc']}`);
     shot('settings-dot');
 
-    // (d) Feedback: a bug in Sync with a reply email and diagnostics.
+
     nodes = await tapExpecting(row, (current) => Boolean(tagged(current, 'settings-about')), 'Settings › About');
     nodes = await tapExpecting(tagged(nodes, 'about-feedback') ?? fail('no Send feedback row'), (current) => Boolean(tagged(current, 'feedback-modal')), 'the feedback modal');
     shot('feedback-modal');
     await tap(tagged(nodes, 'feedback-place-sync') ?? fail('no Sync place'));
-    // The keyboard shrinks the card (RN's KeyboardAvoidingView 'height'): Back closes the keyboard after each field.
+
     const hideKeyboard = async () => {
         sh('input keyevent KEYCODE_BACK');
         await sleep(800);
@@ -251,7 +246,7 @@ try {
         `(d) the diagnostics end with RN's snapshot (${logs.split('\n').length} lines, ${logs.length} characters)`);
     check(!logs.includes('Stub-only-report') && !logs.includes('tester@example.com'), '(d) the diagnostics hold neither the message nor the email');
     nodes = await screen();
-    // The thanks' Close (a button node read as its words; the header's X reads the same).
+
     await tap(nodes.filter((node) => node['content-desc'] === words.close || node.text === words.close).at(-1) ?? fail('no Close'));
     await waitFor('the modal to close', (current) => !tagged(current, 'feedback-modal'), 10_000);
     check(seen('/heartbeat').length === 1, 'no second heartbeat the same day');

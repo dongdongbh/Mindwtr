@@ -12,9 +12,8 @@ let reportedStructuralComparison = false;
 const sameEntitySnapshot = (left: unknown, right: unknown): boolean => {
     if (left === right) return true;
     if (left === undefined || right === undefined) return false;
-    // Positive-only shortcut: cloned unchanged rows need no sorted serialization
-    // or hashing. A structural mismatch is NOT proof of a snapshot difference:
-    // stable fingerprints also normalize ID-array order and JSON-only values.
+
+
     if (isDeepJsonEqual(left, right)) {
         if (!reportedStructuralComparison) {
             reportedStructuralComparison = true;
@@ -53,7 +52,7 @@ const samePersistedEntitySnapshot = (
     normalizePersistedEntityDefaults(key, right),
 );
 
-/** Originals for only the entities changed or omitted by the target snapshot. */
+
 export const buildChangedEntityBaseline = (
     baseline: AppData,
     target: AppData,
@@ -81,16 +80,11 @@ export const buildChangedEntityBaseline = (
         changed.settings = baseline.settings;
     }
 
-    // Observed ids also keep an otherwise unchanged snapshot guarded, so stale
-    // settings are preserved instead of replacing a concurrent update.
+
     return changed;
 };
 
-/**
- * Advance only the rows whose preceding queued write demonstrably persisted.
- * Canonical-only rows and conflicting canonical versions stay outside this
- * provenance, so a follower cannot turn discovering them into CAS authority.
- */
+
 export const advanceSaveProvenance = (
     provenance: AppData,
     attempted: AppData,
@@ -119,9 +113,7 @@ export const advanceSaveProvenance = (
             }
         }
 
-        // Absence is trusted only when this operation intentionally omitted
-        // the row and canonical confirms that omission. If the target retained
-        // it, canonical absence came from elsewhere and must stay observed.
+
         for (const id of [...trustedById.keys()]) {
             if (!attemptedById.has(id) && !canonicalById.has(id)) {
                 trustedById.delete(id);
@@ -177,13 +169,13 @@ const mergeStableIdArray = (
         const baselineItem = baselineById.get(canonicalItem.id);
         const targetItem = targetById.get(canonicalItem.id);
         if (!baselineItem) {
-            // A canonical addition is unseen. A colliding local addition cannot
-            // safely replace it; distinct local additions are appended below.
+
+
             merged.push(canonicalItem);
             continue;
         }
         if (!targetItem) {
-            // Delete only the exact root item. Preserve a concurrently edited one.
+
             if (!sameEntitySnapshot(baselineItem, canonicalItem)) merged.push(canonicalItem);
             continue;
         }
@@ -192,14 +184,14 @@ const mergeStableIdArray = (
 
     for (const targetItem of target) {
         if (canonicalIds.has(targetItem.id)) continue;
-        // A missing root item is a genuine local addition. A root item absent
-        // canonically was deleted elsewhere and must not be resurrected.
+
+
         if (!baselineById.has(targetItem.id)) merged.push(targetItem);
     }
     return merged;
 };
 
-/** Three-way replay of queued changes, preserving canonical conflicts. */
+
 const applyJsonDelta = (baseline: unknown, target: unknown, canonical: unknown): unknown => {
     if (sameEntitySnapshot(baseline, target)) return canonical;
     if (sameEntitySnapshot(baseline, canonical)) return target;

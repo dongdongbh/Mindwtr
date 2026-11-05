@@ -61,7 +61,7 @@ const saveDateEdit = <T extends Task | Project>(
         const planned = plan(live, edit);
         if (!planned) return { status: 'invalid' };
         const write = update(planned.updates);
-        // Normal store methods apply scheduling and push-count changes before yielding.
+
         const applied = current();
         const result = await write;
         if (!result.success) throw new Error(result.error || 'Could not save timeline dates');
@@ -121,7 +121,7 @@ const saveDateEdit = <T extends Task | Project>(
                 logSaved(kind, 'undo');
                 return true;
             } catch (error) {
-                // Requeue persistence after an exhausted save; never replay the mutation.
+
                 retryPersistence = true;
                 throw error;
             }
@@ -154,7 +154,7 @@ export const commitTimelineDateEdit = (target: TimelineDateEditTarget, edit: Tim
         (updates, undo) => useTaskStore.getState().updateTask(id, {
             ...updates,
             ...(undo && Object.prototype.hasOwnProperty.call(updates, 'dueDate') ? { pushCount: target.task.pushCount } : {}),
-            // Restoring start and due together must retain an unchanged relative link.
+
             ...(undo && Object.prototype.hasOwnProperty.call(updates, 'startTime') && !Object.prototype.hasOwnProperty.call(updates, 'relativeStartOffset')
                 && target.task.relativeStartOffset ? { relativeStartOffset: target.task.relativeStartOffset } : {}),
         }));

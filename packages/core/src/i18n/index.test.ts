@@ -28,26 +28,26 @@ describe('getI18nKeyForEnglishText', () => {
 
 describe('getLocaleCoverageTier', () => {
     it('calls a locale held to every English key full', () => {
-        // 'all' commitment, both load modes.
+
         expect(getLocaleCoverageTier('zh')).toBe('full');
         expect(getLocaleCoverageTier('sv')).toBe('full');
         expect(getLocaleCoverageTier('uk')).toBe('full');
     });
 
     it('calls a locale with a low key floor partial', () => {
-        // nl is the worst of them (~26% of en at time of writing).
+
         expect(getLocaleCoverageTier('nl')).toBe('partial');
     });
 
     it('treats English and unknown codes as full', () => {
-        // en is not in LOCALES — it is the base dictionary, never a partial one.
+
         expect(getLocaleCoverageTier('en')).toBe('full');
         expect(getLocaleCoverageTier('kl')).toBe('full');
     });
 
     it('tracks a numeric floor across the coverage threshold', () => {
-        // Real locales can cross the threshold when the English dictionary grows.
-        // Exercise both sides with a fixture instead of pinning a locale's label.
+
+
         const locales = LOCALES as Record<string, LocaleDescriptor>;
         const code = 'test-coverage';
         const minimumFullFloor = Math.ceil(Object.keys(en).length * MIXED_ENGLISH_COVERAGE_CEILING / 100);
@@ -70,7 +70,7 @@ describe('getEnglishI18nValue', () => {
 });
 
 describe('resolveI18nText', () => {
-    // Both platforms' `t` returns the key itself when the locale has no entry.
+
     const miss = (key: string) => key;
 
     it('returns the translation when the locale has one', () => {
@@ -103,15 +103,13 @@ describe('resolveI18nText', () => {
 });
 
 describe('getTranslator', () => {
-    // getTranslationsSync serves from the loader cache and falls back to English until the
-    // locale is loaded, so warm it the way every real caller does.
+
+
     beforeAll(async () => {
         await loadTranslations('nl');
     });
 
-    // digest.focus is deliberately absent from nl and it — its translation equals English, and
-    // copying it in trips the mirrored-English gate. A raw dict[key] read renders that as
-    // "undefined" in a notification title; through the seam it must be the English string.
+
     it('falls back to English for a key an override locale omits', () => {
         expect(getTranslator('nl')('digest.focus')).toBe('Focus');
         expect(resolveI18nText(getTranslator('nl'), 'digest.focus', { fallback: 'Focus' })).toBe('Focus');

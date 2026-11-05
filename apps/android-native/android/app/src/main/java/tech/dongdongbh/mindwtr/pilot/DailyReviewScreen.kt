@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,12 +42,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's Daily Review (components/daily-review-modal.tsx) on core's getDailyReview and runReviewAction: the header (Close, core's
- * title, the step's title and "Step n of m"), core's step (Today with its count and the calendar's two days, Focus with RN's
- * stars, Inbox with Process Inbox, Waiting with Follow up today), RN's toast, and Back and Next (or Finish) at core's
- * checkpoints. The step is core's checkpoint, kept on the device under core's key.
- */
+
 @Composable
 fun DailyReview(model: InboxViewModel) = with(model.menu) {
     val theme = LocalTheme.current
@@ -74,7 +68,7 @@ fun DailyReview(model: InboxViewModel) = with(model.menu) {
         Rule()
         model.error?.let { message ->
             FailureBanner(message) {
-                if (model.failedAction == null) TextButton(onClick = { retryRead() }, enabled = !model.busy, modifier = Modifier.testTag("read-retry")) { Text(t("common.retry")) }
+                if (model.failedAction == null) RetryButton({ retryRead() }, !model.busy, "read-retry")
                 else OwedRetry(model)
             }
         }
@@ -99,7 +93,7 @@ fun DailyReview(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's Daily Review footer button: filled (Next, Finish) or the filter background (Back), dimmed while unavailable. */
+
 @Composable
 private fun FooterButton(label: String, filled: Boolean, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
     val theme = LocalTheme.current
@@ -110,18 +104,18 @@ private fun FooterButton(label: String, filled: Boolean, modifier: Modifier, ena
     }
 }
 
-/** RN's info box: core's count in bold with its noun, then the step's description. */
+
 private fun LazyListScope.infoBox(count: Int, unit: String, description: String) = item(key = "info") {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(14.dp)
-    Column(Modifier.padding(bottom = 14.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(14.dp),
+    Column(Modifier.padding(bottom = 14.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("$count") }; append(" $unit") }, style = rnText(14, 700), color = c.text)
         Text(description, style = rnText(13, 400, 18), color = c.secondaryText)
     }
 }
 
-/** A step's empty state: RN's 48 glyph at stroke 1.5 over core's line. */
+
 private fun LazyListScope.dailyEmpty(icon: ImageVector, text: String) = item(key = "empty") {
     val c = LocalTheme.current.colors
     Column(Modifier.fillMaxWidth().padding(vertical = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -130,7 +124,7 @@ private fun LazyListScope.dailyEmpty(icon: ImageVector, text: String) = item(key
     }
 }
 
-/** Core's step content, as RN's renderStep draws it. */
+
 private fun LazyListScope.dailyContent(model: InboxViewModel, shown: MenuPage) {
     val menu = model.menu
     val view = shown.view
@@ -176,7 +170,7 @@ private fun LazyListScope.dailyContent(model: InboxViewModel, shown: MenuPage) {
     }
 }
 
-/** RN's Follow up today on a waiting row: core's label; disabled (and dimmed) once the task is due for review, as core says. */
+
 @Composable
 private fun FollowUpButton(menu: MenuModel, row: TaskRow, followUp: JSONObject) {
     val c = LocalTheme.current.colors
@@ -191,7 +185,7 @@ private fun FollowUpButton(menu: MenuModel, row: TaskRow, followUp: JSONObject) 
     }
 }
 
-/** RN's Today calendar: the Events toggle with core's count, then today's and tomorrow's cards with core's notice or events. */
+
 @Composable
 private fun TodayCalendar(menu: MenuModel, calendar: JSONObject) {
     val c = LocalTheme.current.colors
@@ -200,7 +194,7 @@ private fun TodayCalendar(menu: MenuModel, calendar: JSONObject) {
     val count = calendar.getInt("count")
     Column(Modifier.padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val shape = RoundedCornerShape(12.dp)
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clickable(role = Role.Button) { menu.editOwn("daily") { if (open) put("calendarClosed", true) else remove("calendarClosed") } }
             .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -214,7 +208,7 @@ private fun TodayCalendar(menu: MenuModel, calendar: JSONObject) {
             Icon(if (open) Lucide.ChevronUp else Lucide.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
         if (open) for (day in calendar.menuObjects("days")) {
-            Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(day.getString("title").uppercase(), style = rnText(11, 700, letterSpacing = 0.4f), color = c.secondaryText)
                 day.menuText("notice")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText) }
                 for (event in day.menuObjects("events")) {

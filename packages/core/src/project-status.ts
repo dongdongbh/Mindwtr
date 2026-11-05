@@ -13,10 +13,7 @@ export function isProjectCancelled(
         && normalizeCancellationTimestamp(project.cancelledAt) !== undefined;
 }
 
-/**
- * Canonical project cancellation shape. A cancellation marker is meaningful
- * only on an archived project; active/waiting/someday projects cannot retain it.
- */
+
 export function normalizeProjectLifecycleFields(project: Project): Project {
     const cancelledAt = project.status === 'archived'
         ? normalizeCancellationTimestamp(project.cancelledAt)
@@ -32,16 +29,12 @@ export function normalizeProjectLifecycleFields(project: Project): Project {
     return sameShallowRecord(project, next) ? project : next;
 }
 
-/**
- * Applies project cancellation precedence to a raw patch. A valid timestamp by
- * itself is the explicit cancel signal; an explicit non-archived status is a
- * reactivation and therefore clears cancellation.
- */
+
 export function normalizeProjectUpdate(
     project: Project,
     updates: Partial<Project>,
 ): Partial<Project> {
-    // The archive entry clock is stamped by the lifecycle writer.
+
     let adjustedUpdates = { ...updates };
     delete adjustedUpdates.archivedAt;
     if (hasOwnField(updates, 'cancelledAt')) {

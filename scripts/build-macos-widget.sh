@@ -1,42 +1,6 @@
 #!/usr/bin/env bash
-# Builds the macOS WidgetKit "Tasks" widget, embeds it into the already-built
-# Mindwtr.app bundle, and re-signs the outer bundle (#1054).
-#
-# Run on the macOS release runner, AFTER `tauri build --bundles app` produces
-# Mindwtr.app and BEFORE the installer (DMG or App Store .pkg) is built from it
-# -- see .github/workflows/release-macos.yml and release-macos-appstore.yml.
-# The installer must be built from the app this script modifies, never by
-# re-running `tauri build`/`tauri bundle`, or the widget silently never ships.
-#
-# Two distributions, selected by MINDWTR_WIDGET_DISTRIBUTION (default
-# "developer-id"):
-#
-#   developer-id  The notarized DMG. Host entitlements come from
-#                 Entitlements.mac.plist, widget entitlements from
-#                 Entitlements.widget.plist (sandbox + App Group only). The
-#                 App Group is unrestricted on macOS, so no provisioning
-#                 profile is involved anywhere.
-#
-#   appstore      The Mac App Store .pkg. Host entitlements come from
-#                 Entitlements.mas.plist, widget entitlements from
-#                 Entitlements.widget.mas.plist, which additionally carries the
-#                 application-identifier and team-identifier the App Store
-#                 requires for every signed bundle. App Store bundles also need
-#                 their own provisioning profile, so the widget's profile
-#                 (MINDWTR_WIDGET_PROVISIONING_PROFILE, a .provisionprofile for
-#                 bundle id tech.dongdongbh.mindwtr.MindwtrWidgets) is copied
-#                 to <appex>/Contents/embedded.provisionprofile before the
-#                 appex is signed. The host keeps the embedded.provisionprofile
-#                 `tauri build` already placed there.
-#
-# Requires a signing identity and team ID; skips (exit 0) when neither is
-# configured, e.g. an unsigned PR/fork build of the workflow. Having only one
-# of the two configured is treated as a broken environment (exit 1), not a
-# reason to silently skip.
-#
-# Usage: scripts/build-macos-widget.sh <path-to-Mindwtr.app> <apple-team-id> <signing-identity> <rust-target-triple>
-#   <rust-target-triple> is aarch64-apple-darwin, x86_64-apple-darwin, or
-#   universal-apple-darwin (each slice compiled separately, joined with lipo).
+
+
 set -euo pipefail
 
 APP_PATH="${1:-}"
@@ -179,8 +143,7 @@ echo "Assembling ${WIDGET_EXECUTABLE_NAME}.appex..."
 cp "$WIDGET_SRC_DIR/Info.plist" "$APPEX_DIR/Contents/Info.plist"
 cp "$WIDGET_ENTITLEMENTS" "$WORKDIR/Entitlements.widget.plist"
 
-# A backup suffix works with both BSD and GNU sed, which keeps the packaging
-# path hermetically testable on non-macOS CI hosts too.
+
 sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$APPEX_DIR/Contents/Info.plist"
 sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g; s/${TEAM_ID_PLACEHOLDER}/${TEAM_ID}/g" "$WORKDIR/Entitlements.widget.plist"
 rm -f "$APPEX_DIR/Contents/Info.plist.bak" "$WORKDIR/Entitlements.widget.plist.bak"
@@ -191,10 +154,7 @@ $PLIST_BUDDY -c "Set :CFBundleShortVersionString ${APP_VERSION}" "$APPEX_DIR/Con
 $PLIST_BUDDY -c "Set :CFBundleVersion ${APP_BUILD}" "$APPEX_DIR/Contents/Info.plist"
 $PLIST_BUDDY -c "Set :CFBundleIdentifier ${WIDGET_BUNDLE_ID}" "$APPEX_DIR/Contents/Info.plist"
 
-# A hand-built Swift appex does not get Xcode's Extract App Intents Metadata
-# phase automatically. WidgetKit can still link Button(intent:) without that
-# phase, but macOS cannot register or execute the action. Reproduce the public
-# toolchain phase explicitly and fail closed if it produces no metadata.
+
 APP_INTENTS_PROCESSOR="$(xcrun --find appintentsmetadataprocessor)"
 SWIFTC_PATH="$(xcrun --find swiftc)"
 TOOLCHAIN_DIR="$(dirname "$(dirname "$(dirname "$SWIFTC_PATH")")")"
@@ -241,8 +201,8 @@ if [ "$METADATA_ONLY" = "1" ]; then
 fi
 
 if [ "$DISTRIBUTION" = "appstore" ]; then
-    # Must land before signing: the profile is part of the sealed bundle, and
-    # App Store validation rejects a nested bundle without its own profile.
+
+
     echo "Embedding the widget's App Store provisioning profile..."
     cp "$WIDGET_PROVISIONING_PROFILE" "$APPEX_DIR/Contents/embedded.provisionprofile"
 fi
@@ -264,25 +224,12 @@ echo "Re-signing outer app bundle with the resolved App Group entitlement..."
 RESOLVED_HOST_ENTITLEMENTS="$WORKDIR/Entitlements.host.resolved.plist"
 sed "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$HOST_ENTITLEMENTS" > "$RESOLVED_HOST_ENTITLEMENTS"
 
-# Deliberately NOT `--deep`: the appex above already carries its own,
-# distinct (sandboxed) entitlements signature. A `--deep` re-sign here would
-# blow that away and re-sign it with the host's entitlements instead. Signing
-# nested-first, container-last (and non-deep for the container) is the
-# standard app-extension signing order (#1054 decision 8).
+
 codesign --force --options runtime --timestamp \
     --sign "$SIGNING_IDENTITY" \
     --entitlements "$RESOLVED_HOST_ENTITLEMENTS" \
     "$APP_PATH"
 
-# --- Post-sign assertions -----------------------------------------------
-# The App Group entitlement is unrestricted on macOS (no provisioning-profile
-# grant needed), so there is nothing to validate against a profile. What DOES
-# need checking is that this script's own work actually landed: the appex is
-# really there, and neither the host app nor the appex still carries the
-# unresolved placeholder or a group that doesn't match what the other side
-# has. This runs against the exact app the installer step packages next, so
-# a failure here is a failure before the DMG/.pkg (and notarization or App
-# Store upload) ever sees a broken build.
 
 assert_entitlement_group() {
     local target="$1"
@@ -332,12 +279,7 @@ if [ "$DISTRIBUTION" = "appstore" ]; then
     fi
 fi
 
-# Cheap regression guard for the host/appex-mismatch failure mode (#1054): if
-# APPLE_TEAM_ID is ever dropped from the Build App step's env again, the
-# entitlement checks above would still pass (this script computes APP_GROUP
-# independently), but the *compiled binary* would still have baked in the
-# DEVTEAM placeholder from build.rs, and the widget would silently never see
-# real data. Checking the binary's own strings catches that class of drift.
+
 if ! strings "$APP_PATH/Contents/MacOS/${HOST_EXECUTABLE_NAME}" 2>/dev/null | grep -F "$APP_GROUP" >/dev/null; then
     echo "::error::Host binary does not appear to have ${APP_GROUP} baked in -- APPLE_TEAM_ID may be missing from the Build App step's env."
     exit 1

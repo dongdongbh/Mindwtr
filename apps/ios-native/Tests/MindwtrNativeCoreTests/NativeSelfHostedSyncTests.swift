@@ -5,8 +5,7 @@ import Security
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Only the maintained Cloud document route, not a DAV endpoint or a real server.
-/// Unknown destinations are intercepted too; this fixture never opens a socket.
+
 private final class SelfHostedDocumentProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var stores: [String: SelfHostedDocumentStore] = [:]
@@ -55,7 +54,7 @@ private final class SelfHostedDocumentStore: @unchecked Sendable {
     private var unexpected = 0
     private let getStatus: Int?
     private let declaredGetLength: Int?
-    /// Runs before publishing the first accepted PUT or giving its acknowledgement.
+
     private var beforeFirstPut: (() -> Void)?
     init(token: String, document: Data, getStatus: Int? = nil, declaredGetLength: Int? = nil, beforeFirstPut: (() -> Void)? = nil) {
         authorization = "Bearer " + token; self.document = document
@@ -75,7 +74,7 @@ private final class SelfHostedDocumentStore: @unchecked Sendable {
         func reply(_ status: Int, _ bytes: Data = Data(), headers extra: [String: String] = [:]) -> Reply {
             var headers = ["Content-Type": "application/json", "Content-Length": String(bytes.count)]
             headers.merge(extra) { _, new in new }
-            // A boolean records exact Bearer comparison; a received token is never retained.
+
             requests.append(Request(method: method, status: status, authorized: authorized, body: method == "PUT" ? body : Data()))
             return Reply(status: status, headers: headers, body: method == "HEAD" ? Data() : bytes)
         }
@@ -105,9 +104,8 @@ private final class SelfHostedDocumentStore: @unchecked Sendable {
               prior.allSatisfy({ old in tasks.contains { encoded($0) == encoded(old) } }) else {
             unexpected += 1; return reply(400)
         }
-        // This bounded route has no concurrent server edit: incoming already contains
-        // every exact stored task. Actual server.ts merges under its namespace lock;
-        // this fixture cannot establish that server merge or its conflict accounting.
+
+
         beforeFirstPut?(); beforeFirstPut = nil
         let oldCount = prior.count
         document = body
@@ -158,7 +156,7 @@ final class NativeSelfHostedSyncTests: XCTestCase {
         guard let physical = Darwin.realpath(directory.path, nil) else { throw HostFailure("Self-hosted fixture root is unavailable") }
         defer { free(physical) }; root = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
         #if os(macOS)
-        // Shared test-only file-backed secrets; Mac acceptance is not Keychain proof.
+
         bundle = try NativeSyntheticSecretFixture.makeBundle(source: bundle, directory: root)
         #endif
         namespace = "tech.dongdongbh.mindwtr.selfhosted400." + UUID().uuidString.lowercased()
@@ -402,7 +400,7 @@ final class NativeSelfHostedSyncTests: XCTestCase {
         await host.close()
         let cold = core(); try await open(cold, select: false); try await assertMasked(cold, expectedLength: token.count)
         XCTAssertEqual(try rows(), domain); XCTAssertEqual(remote.bytes, persisted); XCTAssertEqual(remote.recorded.count, count)
-        // An external task makes cold Sync now exercise an actual read/apply rather than an idle return.
+
         remote.seedAsPeer(try document([task("local400"), task("remote400"), task("cold400")]))
         let synced = try await command(cold, "syncNow", ["requestId": UUID().uuidString.lowercased(), "revision": try await revision(cold), "selfHosted": fields(credential: NSNull())])
         try assertSuccess(synced); try assertProvenConfiguration(); try assertTasks(["local400", "remote400", "cold400"], template: template)

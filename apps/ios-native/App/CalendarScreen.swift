@@ -7,6 +7,7 @@ struct CalendarScreen: View {
     @State private var allDayExpanded = false
     @State private var weekOffset: CGFloat = 0
     @State private var measuredWeekdays = CalendarWeekdayMeasurements()
+
     @FocusState private var queryFocused: Bool
     @ScaledMetric(relativeTo: .body) private var monthCellHeight: CGFloat = 86
     @ScaledMetric(relativeTo: .body) private var weekHeaderHeight: CGFloat = 56
@@ -16,7 +17,7 @@ struct CalendarScreen: View {
     private var text: CoreObject { view.object("text") }
     private var entries: [CoreObject] { view.objects("items") }
     private var days: [CoreObject] { entries.filter { $0.text("type") == "day" } }
-    // RN geometry constants only; all time coordinates and overlap percentages come from core.
+
     private let pixelsPerMinute: CGFloat = 1.4
     private let gutter: CGFloat = 56
     private var hours: [String] { content["hourLabels"] as? [String] ?? [] }
@@ -27,7 +28,7 @@ struct CalendarScreen: View {
             state.text("selectedDate") + ":" + state.text("visibleMonth")
     }
     private var initialTimelineOffset: CGFloat {
-        // Core wall-clock minutes select the first-entry default, never a saved viewport.
+
         let minute = (content["nowMinutes"] as? NSNumber)?.doubleValue ?? 0
         return CGFloat(max(0, Int(minute / 60) - 1)) * 60 * pixelsPerMinute
     }
@@ -573,8 +574,7 @@ struct CalendarScreen: View {
     }
 }
 
-// iOS 16 ScrollViewReader restores a measured content anchor. The saved value uses
-// timeline minutes or day-column units so a size change never reuses stale pixels.
+
 private struct CalendarAnchoredScroll<Content: View>: View {
     let axis: Axis.Set
     @Binding var anchor: Double?
@@ -611,7 +611,7 @@ private struct CalendarAnchoredScroll<Content: View>: View {
                     let geometryChanged = restoredGeometry?.contentLength != position.contentLength
                         || restoredGeometry?.viewportLength != position.viewportLength
                         || restoredGeometry?.pointsPerUnit != position.pointsPerUnit
-                    // Keep the logical minute/day even when a rotation temporarily fits all content.
+
                     if anchor == nil { anchor = Double(initialOffset / position.pointsPerUnit) }
                     if geometryChanged {
                         restoredGeometry = position
@@ -624,8 +624,8 @@ private struct CalendarAnchoredScroll<Content: View>: View {
                             if start < target { target = start }
                             else if end > target + position.viewportLength { target = end - position.viewportLength }
                             target = min(maximum, max(0, target))
-                            // Preserve the manual logical offset unless the new geometry would
-                            // hide the current selection. A necessary reveal becomes its new anchor.
+
+
                             if target != restored { anchor = Double(target / position.pointsPerUnit) }
                         }
                         onOffset(target)
@@ -644,8 +644,8 @@ private struct CalendarAnchoredScroll<Content: View>: View {
                         lastOffset = offset
                         return
                     }
-                    // Geometry/restoration callbacks never replace the logical anchor. Once the
-                    // extent settles, ordinary touch, VoiceOver and programmatic scrolling all do.
+
+
                     if maximum > 0, abs(position.offset - offset) <= 1,
                        let previous = lastOffset, previous != offset {
                         anchor = Double(offset / position.pointsPerUnit)

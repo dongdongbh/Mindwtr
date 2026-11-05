@@ -182,18 +182,13 @@ export const STT_MODE_VALUE_SET = new Set<SpeechToTextModeValue>(STT_MODE_VALUES
 export const STT_FIELD_STRATEGY_VALUES = Object.keys(STT_FIELD_STRATEGY_VALUE_FLAGS) as SpeechToTextFieldStrategyValue[];
 export const STT_FIELD_STRATEGY_VALUE_SET = new Set<SpeechToTextFieldStrategyValue>(STT_FIELD_STRATEGY_VALUES);
 
-// GTD settings sync by default. An explicit false remains authoritative so a
-// device can keep these preferences local without a migration writing default
-// values into the document and winning over an existing choice.
+
 export const isSettingsSyncGroupEnabled = (
     preferences: SettingsSyncPreferences | undefined,
     group: SettingsSyncGroup,
 ): boolean => preferences?.[group] ?? (group === 'gtd');
 
-// Single source of truth for which `settings.gtd` fields sync. Nested Inbox
-// processing fields are handled separately below because defaultMode is a
-// device-local presentation choice. Upload, merge, and timestamp stamping all
-// derive from these lists to prevent allowlist drift.
+
 export const GTD_SYNCED_FIELD_KEYS = [
     'timeEstimatePresets',
     'taskEditor',

@@ -6,9 +6,9 @@ import Darwin
 import MindwtrWatchPayloadValidation
 
 #if DEBUG
-// Private fixture primitives only. Production cannot construct or invoke this evidence seam.
+
 enum NativeAISummaryEvidence {
-    // Darwin exposes the descriptor operations but omits the class-C constant from its public headers.
+
     static let protectionClassC: Int32 = 3
     static let processSession = UUID().uuidString.lowercased()
     struct File: Equatable, Sendable {
@@ -45,8 +45,8 @@ enum NativeAISummaryEvidence {
               descriptor.st_dev == named.st_dev, descriptor.st_ino == named.st_ino else { throw unavailable }
         return .init(device: UInt64(descriptor.st_dev), inode: UInt64(descriptor.st_ino))
     }
-    // Called synchronously on MainActor by the facade after native capture and its await.
-    // The private artifact binds acceptance to that exact capture; capture.json alone is provisional.
+
+
     static func accept(_ publication: Publication, readmission: () throws -> Bool) throws {
         guard try readmission() else { throw unavailable }
         for (path, identity) in publication.directories {
@@ -111,7 +111,7 @@ enum NativeAISummaryEvidence {
         guard result == observation(after), result == observation(named) else { throw unavailable }
         return result
     }
-    // Matching uses exact scalar types and bytes; NSObject bool/number equality is insufficient.
+
     static func typedDomain(_ domain: [String: Any]?) throws -> Data {
         var budget = 1024 * 1024
         func value(_ input: Any, depth: Int) throws -> Any {
@@ -188,21 +188,19 @@ enum NativeAISummaryEvidence {
 public enum NativeAISummaryCheckpointPhase: String, Sendable, Hashable { case baseline, final }
 #endif
 
-/// Core refused a command before writing, and its pending journal is now clear.
-/// Other errors, even with the same core code, may still require exact retry.
+
 public struct CoreHostRejection: LocalizedError, Sendable {
     public let message: String
     public var errorDescription: String? { message }
 }
 
-/// A validated Save succeeded and its terminal was durably journaled. Retry
-/// owns only cleanup, never another task commit.
+
 public struct CoreHostAttachmentCleanupPending: LocalizedError, Sendable {
     public let resultJSON: String
     public var errorDescription: String? { "Task saved. Attachment cleanup needs Retry." }
 }
 
-/// A retained Project Add requires its typed recovery/Stop owner before activation.
+
 public struct CoreHostProjectFileAddRecovery: LocalizedError, Sendable {
     public var errorDescription: String? { "A pending Project file operation needs Retry or Stop." }
 }
@@ -224,7 +222,7 @@ final class ProjectFileAddHostHooks: @unchecked Sendable {
 }
 #endif
 
-/// Recovery could not prove this authenticated request landed; no replay write was attempted.
+
 public struct CoreHostAppLockRecovery: LocalizedError, Sendable {
     public var errorDescription: String? { "App lock outcome is unknown. Cancel the pending change to use the saved setting." }
 }
@@ -260,7 +258,7 @@ public struct NativeCalendarFileAddResult: Sendable {
 }
 public enum NativeCalendarPushOperation: String, Sendable { case start, stop, run, setting }
 public struct NativeCalendarFileAddFailure: LocalizedError, Sendable {
-    /// Private accepted input for typed App recovery only; never log it.
+
     public let requestJSON: String?
     private let freshRuntimeRequired: Bool
     init(requestJSON: String?, freshRuntimeRequired: Bool = false) {
@@ -276,7 +274,7 @@ private struct NativeCalendarFileCaptureAdmission: Sendable {
     let jobs: NativeAttachmentFileJobs
 }
 
-/// Private prerequisite only; these saved switches do not promise native AI capability.
+
 public struct NativeAISettingsProjection: Decodable, Sendable, Equatable {
     public enum Provider: String, Decodable, Sendable { case openai, gemini, anthropic }
     typealias Effort = NativeAIReasoningEffortSavedValue
@@ -310,7 +308,7 @@ public struct NativeAISettingsProjection: Decodable, Sendable, Equatable {
               let result = try? JSONDecoder().decode(Self.self, from: Data(raw.utf8)), result.version == 1,
               (0...32768).contains(result.aiThinkingBudget), [30, 60, 120, 300].contains(result.aiRequestTimeoutSeconds),
               result.anthropicThinkingEnabled == (result.aiProvider == .anthropic && result.aiThinkingBudget > 0) else { throw failure }
-        // The shared helper owns static catalog provenance; Swift checks transport shape only.
+
         guard [result.staticAiModelOptions, result.staticAiCopilotOptions, result.staticSpeechModelOptions].allSatisfy({ values in
             !values.isEmpty && values.count <= 16 && Set(values).count == values.count && values.allSatisfy {
                 $0.utf8.count <= 64 && $0.range(of: "^[a-z0-9][a-z0-9.-]*$", options: .regularExpression) != nil
@@ -874,7 +872,7 @@ public struct NativeAIRequestTimeoutResult: Decodable, Sendable, Equatable {
 public struct NativeAIRequestTimeoutFixtureState: Sendable {
     public let failureInjected: Bool
     public let exactRequestRetried: Bool
-    /// Matching SQL COMMIT attempts, including the shared save's internal retries.
+
     public let commitAttempts: Int
     public let journalRetired: Bool
 }
@@ -883,7 +881,7 @@ public struct NativeAIRequestTimeoutFixtureState: Sendable {
 public struct NativeAIReasoningEffortFixtureState: Sendable {
     public let failureInjected: Bool
     public let exactRequestRetried: Bool
-    /// Matching SQL COMMIT attempts, including the shared save's internal retries.
+
     public let commitAttempts: Int
     public let journalRetired: Bool
 }
@@ -892,13 +890,13 @@ public struct NativeAIReasoningEffortFixtureState: Sendable {
 public struct NativeAIGeminiThinkingBudgetFixtureState: Sendable {
     public let failureInjected: Bool
     public let exactRequestRetried: Bool
-    /// Matching SQL COMMIT attempts, including the shared save's internal retries.
+
     public let commitAttempts: Int
     public let journalRetired: Bool
 }
 #endif
 
-/// Private display-only selected-provider metadata, never credential usability or request authority.
+
 struct NativeAIProviderDeviceState: Decodable, Sendable, Equatable {
     enum SecureItem: String, Decodable, Sendable { case present, absent, unavailable }
     let version: Int
@@ -938,7 +936,7 @@ public enum CoreHostRetirementError: Error, Sendable, Equatable {
 
 public final class CoreHost: @unchecked Sendable {
     #if DEBUG
-    /// Pure journal-witness check, exposed for package tests only.
+
     static func validReferenceProjectNextActionWitness(_ prepared: [String: Any], request: [String: Any]) -> Bool {
         Engine.validReferenceProjectNextActionWitness(prepared, request: request)
     }
@@ -1040,7 +1038,7 @@ public final class CoreHost: @unchecked Sendable {
     private let reminderEffects = NativeReminderEffects()
     private let notificationAuthorization = NativeNotificationAuthorization()
     private let calendarAuthorization = NativeCalendarAuthorization()
-    private let appleRemindersAuthorization = NativeCalendarAuthorization() // Reuse the callback-drain/readmission gate, not its event requester.
+    private let appleRemindersAuthorization = NativeCalendarAuthorization()
 
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
@@ -2035,7 +2033,7 @@ public final class CoreHost: @unchecked Sendable {
         return try await perform { try $0.setSearchObservationHandler(handler) }
     }
 
-    /// One physical cleanup decision; grants no attachment metadata authority.
+
     public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2048,7 +2046,7 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// One unjournaled foreground Sync invocation with a scoped cleanup owner.
+
     public func foregroundSync(command: String, requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2372,7 +2370,7 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// One cancellable, unjournaled read through the shared calendar contract.
+
     public func calendarRead(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2453,7 +2451,7 @@ public final class CoreHost: @unchecked Sendable {
                 let selection = try await admitted.jobs.copyCalendarProviderSource(selectedURL, cancellation: cancellation)
                 return try await perform { try $0.finishCalendarFileCapture(admitted.id, selection: selection, cancellation: cancellation) }
             } catch {
-                // Exact capture retirement must drain and release its owner even after Task cancellation.
+
                 if let capture { _ = try? await perform(reminderOwned: true) { $0.abortCalendarFileCapture(capture.id) } }
                 if let failure = error as? NativeCalendarFileAddFailure { throw failure }
                 throw NativeCalendarFileAddFailure(requestJSON: nil)
@@ -2509,13 +2507,13 @@ public final class CoreHost: @unchecked Sendable {
                 result = .failure(cancellation.isCancelled
                     ? CoreHostRejection(message: "STALE_REVISION: Calendar access is no longer current") : error)
             }
-            // Accepted OS callbacks drain before this cancellation-independent owner retirement.
+
             _ = try? await perform(reminderOwned: true) { $0.retireCalendarAccess(owner) }
             try result.get()
         } onCancel: { cancellation.cancel(); self.calendarAuthorization.cancelReadmission(owner) }
     }
 
-    /// Passive permission observation followed by a fresh, read-only shared plan.
+
     public func readReminderPlan() async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2546,7 +2544,7 @@ public final class CoreHost: @unchecked Sendable {
         return try await perform { try $0.feedbackConfiguration(endpointURL: endpointURL) }
     }
 
-    /// One explicit, unjournaled submission. Cancellation cannot unsend a POST.
+
     public func submitFeedback(requestJSON: String, endpointURL: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2657,7 +2655,7 @@ public final class CoreHost: @unchecked Sendable {
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
-    /// Task-local byte operations only; no project/store command or picker UI.
+
     public func localAttachmentRequest(name: String, requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2670,7 +2668,7 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// Validates a read-only local file plan before the App presents system UI.
+
     public func prepareTaskFileOpen(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2683,7 +2681,7 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// Prepares already-present Project bytes without availability or metadata writes.
+
     public func prepareProjectFileOpen(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2696,7 +2694,7 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// Copies one provider file under a real Project journal owner, never a Task draft.
+
     public func addProviderProjectAttachment(selectedURL: URL, requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2774,7 +2772,7 @@ public final class CoreHost: @unchecked Sendable {
         defer { finishOuterAdmission() }
         _ = try? await perform { $0.projectFileDownloadHooks = hooks }
     }
-    /// Existing DEBUG isolated-library fixture only, one known durable boundary.
+
     public func configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: Bool = false) async throws {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2861,8 +2859,8 @@ public final class CoreHost: @unchecked Sendable {
         defer { finishOuterAdmission() }
         return try await perform { try $0.beginAttachmentDraftV2(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
     }
-    /// Begins or validates the V3 attachment owner for the exact unfrozen editor checkpoint.
-    /// Selected history5 availability; no saved Task mutation or automatic sync.
+
+
     public func downloadTaskAttachmentV5(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2899,7 +2897,7 @@ public final class CoreHost: @unchecked Sendable {
                 expectedGeneration: expectedGeneration, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    /// Records a V3 metadata removal; retained interrupted work requires exact recovery.
+
     public func removeAttachmentDraftV3(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2922,7 +2920,7 @@ public final class CoreHost: @unchecked Sendable {
             try await perform { try $0.addAttachmentDraftV3(requestJSON: requestJSON, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    /// Copies one provider selection and runs the existing V3 Add owner with the supplied exact request UUID.
+
     public func addProviderAttachmentV3(selectedURL: URL, expectedSession: String, expectedGeneration: Int,
                                  requestId: String) async throws -> String {
         try beginOuterAdmission()
@@ -2948,7 +2946,7 @@ public final class CoreHost: @unchecked Sendable {
                 expectedGeneration: expectedGeneration, requestId: requestId, cancellation: token, historyVersion: historyVersion) }
         }, onCancel: { token.cancel() })
     }
-    /// Captures and processes one selected photo before its provider callback lease ends.
+
     public func addPhotoProviderAttachmentV3(itemProvider: NSItemProvider, expectedSession: String,
                                              expectedGeneration: Int, requestId: String) async throws -> String {
         try beginOuterAdmission()
@@ -2974,8 +2972,8 @@ public final class CoreHost: @unchecked Sendable {
             let capture = try await perform { try $0.beginPhotoProviderAttachmentV3(selection: selection,
                 expectedSession: expectedSession, expectedGeneration: expectedGeneration, requestId: requestId, cancellation: token, historyVersion: historyVersion) }
             do {
-                // No JS binding crosses this await. The callback retains its temporary URL
-                // until capture finishes, including a cancellation that arrives during copy.
+
+
                 let receipt = try await capture.load(itemProvider)
                 return try await perform { try $0.finishPhotoProviderAttachmentV3(captureID: capture.id,
                     receipt: receipt, expectedGeneration: expectedGeneration, cancellation: token) }
@@ -2985,7 +2983,7 @@ public final class CoreHost: @unchecked Sendable {
             }
         }, onCancel: { token.cancel() })
     }
-    /// Finishes only the retained V3 Add, Remove or checkpoint advance for this session.
+
     public func recoverAttachmentDraftV3(expectedSession: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3003,7 +3001,7 @@ public final class CoreHost: @unchecked Sendable {
         return try await perform { try $0.saveAttachmentDraftAdds(saveRequestJSON: saveRequestJSON,
             expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
     }
-    // Internal until the real mixed Add producer and editor UI are admitted.
+
     func saveAttachmentDraftMixed(saveRequestJSON: String, expectedSession: String, expectedGeneration: Int) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3016,7 +3014,7 @@ public final class CoreHost: @unchecked Sendable {
                 expectedSession: expectedSession, expectedGeneration: expectedGeneration, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    /// Saves the full editor request and settles attachments through the existing durable V3 owner.
+
     public func saveAttachmentDraftComplete(saveRequestJSON: String, expectedSession: String, expectedGeneration: Int) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3029,7 +3027,7 @@ public final class CoreHost: @unchecked Sendable {
                 expectedSession: expectedSession, expectedGeneration: expectedGeneration, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    /// Checks the exact V3 editor owner and fresh opening fields without rewriting buffers or proving file existence.
+
     public func checkAttachmentDraftResumeV3(expectedSession: String, expectedGeneration: Int) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3052,7 +3050,7 @@ public final class CoreHost: @unchecked Sendable {
         defer { finishOuterAdmission() }
         return try await perform { try $0.discardAttachmentDraft(requestJSON: requestJSON) }
     }
-    /// Records and finishes the exact V3 Discard decision under the existing native owner.
+
     public func discardAttachmentDraftV3(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3064,7 +3062,7 @@ public final class CoreHost: @unchecked Sendable {
             try await perform { try $0.discardAttachmentDraftV3(requestJSON: requestJSON, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    /// Retries the retained V3 Discard decision identified by its original session and request UUID.
+
     public func finishAttachmentDraftDiscardV3(expectedSession: String, requestId: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3132,21 +3130,21 @@ public final class CoreHost: @unchecked Sendable {
     }
     #endif
 
-    /// Initialized file actions cannot activate, replay or acknowledge domain work.
+
     public func diagnosticsFileAction(_ method: String) async throws -> String {
         try beginOuterAdmission(restrictedAllowed: true)
         defer { finishOuterAdmission() }
         return try await perform { try $0.diagnosticsFileAction(method) }
     }
 
-    /// Best-effort proof that the app accepted a matching editor attachment result.
+
     public func recordEditorAttachmentAcknowledgment(operation: String) async {
         guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
         defer { finishOuterAdmission() }
         _ = try? await perform { try $0.recordEditorAttachmentAcknowledgment(operation: operation) }
     }
 
-    /// Fixed, best-effort proof that the foreground Task player accepted playback.
+
     public func recordTaskAudioPlaybackStarted() async {
         guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
         defer { finishOuterAdmission() }
@@ -3271,8 +3269,7 @@ public final class CoreHost: @unchecked Sendable {
         return try await perform { try $0.probeNotificationSettingOutcome(requestJSON: requestJSON) }
     }
 
-    /// The trusted App closure waits for the same active page/host intent and observes cancellation.
-    /// A temporary permission-sheet inactivity is not cancellation; real background/navigation is.
+
     public func setNotificationSetting(requestJSON: String,
         readmission: @escaping @Sendable () async -> Bool) async throws -> String {
         try beginOuterAdmission()
@@ -3324,7 +3321,7 @@ public final class CoreHost: @unchecked Sendable {
                 if retryPending { result = .failure(HostFailure("Notification save still requires exact retry")) }
                 else { result = .failure(CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")) }
             } catch { result = .failure(error) }
-            // Exact owner retirement must run even after caller cancellation; no mutation is admitted here.
+
             _ = try? await perform(reminderOwned: true) { $0.finishNotificationSetting(owner) }
             return try result.get()
         } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(owner) }
@@ -3402,7 +3399,7 @@ public final class CoreHost: @unchecked Sendable {
             }
             return targets
         }
-        // Withdrawal removes the tray entry first; expiry deliberately preserves it.
+
         if plan.clearDelivered || !withdrawn.isEmpty {
             try await beforeEffect()
             let observed = try await port.delivered(namespace: namespace); try await current()
@@ -3443,10 +3440,10 @@ public final class CoreHost: @unchecked Sendable {
             if let expiry = alarm.unarmedSnoozeExpiry {
                 guard Date().timeIntervalSince1970 * 1000 <= expiry else { throw NativeReminderEffects.unavailable }
             }
-            // No await separates the final deadline check from accepting the OS add callback.
+
             try await port.add(alarm, namespace: namespace); try await current()
         }
-        // Pending requests stay distinct. Collapse only actual, freshly observed delivered owners.
+
         try await beforeEffect()
         let observed = try await port.delivered(namespace: namespace); try await current()
         let superseded = try NativeReminderEffects.supersededDelivered(observed)
@@ -3615,10 +3612,10 @@ public final class CoreHost: @unchecked Sendable {
             try NativePomodoroAlarmEffects.checkCapacity(schedulingInventory, schedule: schedule)
             guard acceptedPermission else { throw NativePomodoroAlarmEffects.unavailable }
             let ahead = plan.writeAhead
-            // The durable attempt is the last publication before accepting the SDK add callback.
+
             _ = try await perform(reminderOwned: true) { try $0.publishPomodoroAlarmState(owner, next: ahead) }
             let dispatch = try await perform(reminderOwned: true) { try $0.refreshPomodoroAlarmDispatch(owner, schedule: schedule) }
-            // No awaited baseline follows the final shared clock; a changed immediate fence is already durable.
+
             try cancellation.check()
             do { try await port.add(dispatch.schedule.json, namespace: namespace, libraryID: admission.libraryID) }
             catch {
@@ -3641,7 +3638,7 @@ public final class CoreHost: @unchecked Sendable {
             let delivered = try await port.delivered(namespace: namespace); try await current()
             _ = try NativePomodoroAlarmEffects.targets(pending, expected: knownTargets)
             _ = try NativePomodoroAlarmEffects.targets(delivered, expected: knownTargets)
-            // Permission is the last awaited SDK observation; shared policy then evaluates the fresh clock.
+
             try await beforeEffect()
             let refreshed = try await perform(reminderOwned: true) {
                 try $0.preparePomodoroAlarmReconciliation(owner, granted: acceptedPermission, pending: pending, delivered: delivered)
@@ -3651,7 +3648,7 @@ public final class CoreHost: @unchecked Sendable {
                 uniquingKeysWith: { first, _ in first }).values)
             return (refreshed, pending, delivered)
         }
-        // Replanning follows channel movement and preserves a phase that became due during a callback.
+
         let (freshPlan, _, _) = try await cancellationSnapshot()
         let freshAhead = freshPlan.writeAhead, freshPublished = freshPlan.published
         _ = try await perform(reminderOwned: true) { try $0.publishPomodoroAlarmState(owner, next: freshAhead) }
@@ -3665,7 +3662,7 @@ public final class CoreHost: @unchecked Sendable {
             let (pendingPlan, pending, deliveredAfterTray) = try await cancellationSnapshot()
             let pendingUnion = Array(Dictionary((pendingPlan.cancelPending + pendingPlan.cancelDelivered).map { ($0.identifier, $0) },
                 uniquingKeysWith: { first, _ in first }).values)
-            // A second channel transition owes a successor turn, never a false cleanup acknowledgment.
+
             guard try NativePomodoroAlarmEffects.targets(deliveredAfterTray, expected: pendingUnion).isEmpty else {
                 throw NativePomodoroAlarmEffects.unavailable
             }
@@ -3736,7 +3733,7 @@ public final class CoreHost: @unchecked Sendable {
             if let cancellation, !(await reminderEffects.reserveOrdinary(cancellation: cancellation)) { throw CancellationError() }
             return try await withCheckedThrowingContinuation { continuation in
                 queue.async { [engine, reminderEffects] in
-                    // Once Engine work starts, its existing durable/cancellation contract owns the outcome.
+
                     let result: Result<T, Error>
                     do {
                         if cancellation?.isCancelled == true { throw CancellationError() }
@@ -3782,9 +3779,7 @@ private enum TerminalResult: Codable {
     }
 }
 
-// DispatchQueue may move between threads; every entry point enforces queue
-// ownership. The public facade holds only immutable references and schedules all
-// access here. No JSValue, JSContext or SQLite handle crosses this boundary.
+
 private final class Engine: @unchecked Sendable {
     private static let cleanupMethod = "attachmentCleanupRetireOwned"
     private static let cleanupFailure = HostFailure("Attachment cleanup could not be confirmed; retry the retained request")
@@ -3877,8 +3872,8 @@ private final class Engine: @unchecked Sendable {
     private var projectFileAddTurn: ProjectAddTurn?
     private static let projectDownloadMethod = "projectFileAvailabilityOwned"
     private static let projectDownloadFailure = HostFailure("Project download could not be confirmed; retry the retained download")
-    /// Core's PROJECT_SQLITE_COLUMNS: 26 cells through v1.3.6, then colorOverride and perSectionFlow (#1422, #1429).
-    /// Same range as core's padProjectSqliteCells; core sends its current list, so a newer core never fails this check.
+
+
     private static let projectColumnCounts = 26...28
     private enum ProjectDownloadPhase: String, Codable, CaseIterable { case intent, stagePrepared, stageFilled, published, domainSaved, settled }
     private struct ProjectDownloadState: Codable {
@@ -3950,7 +3945,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var projectDownloadTurn: ProjectDownloadTurn?
-    // Terminal delivery receipt only, never file or metadata authority and never an ordinary-command gate.
+
     private var projectDownloadAcknowledgedTurn: ProjectDownloadTurn?
     #if DEBUG
     var projectFileDownloadHooks: ProjectFileDownloadHostHooks?
@@ -4103,9 +4098,8 @@ private final class Engine: @unchecked Sendable {
             self.jobs = jobs; self.mixedBinding = mixedBinding
         }
     }
-    /// A leaked JS callback holds only a weak reference to this ephemeral slot.
-    /// Consume before any authority check/IO; even failed or duplicate entries
-    /// cannot acquire a second retirement. Invalidation drops captured proofs.
+
+
     private final class OwnedDiscardCallbackLease {
         var active = true
         var consumed = false
@@ -4723,9 +4717,8 @@ private final class Engine: @unchecked Sendable {
         let beforeRecord: NativeAttachmentDraftStore.VersionedSnapshot
         let beforeEditor: EditorDraftStore.OwnedCheckpoint
     }
-    // ponytail: only warm creation provenance authorizes scratch retirement.
-    // A crash may leave an unproven copy <=50 MiB; total accumulation is not
-    // bounded, and this library-backed cache has no guaranteed OS reclamation.
+
+
     private var providerCopy: ProviderCopyTurn?
     private final class TaskDownloadTurn {
         let generation: UInt64
@@ -4817,8 +4810,8 @@ private final class Engine: @unchecked Sendable {
     private var unresolvedAppLockRecovery = false
     private var closed = false
     private var pending: PendingCommand?
-    // One Engine turn binds the retained owner, exact editor and normal journal.
-    // Already-owed active replay grants no new work or editor/file cleanup.
+
+
     private enum RetainedOrdinaryOwnerMode: Equatable {
         case detached(fingerprint: String)
         case alreadyOwedActive
@@ -4846,12 +4839,12 @@ private final class Engine: @unchecked Sendable {
     }
     private var retainedOrdinaryTurn: RetainedOrdinaryTurn?
     private var ordinaryMutationDepth = 0
-    // Authorizes one interactive Commit; after journaling, the journal owns exact replay.
+
     private var preparedSomedaySectionTaskEnvelope: Data?
     private var confirmedTaskCancellationEnvelope: String?
     private var confirmedTaskCompletionEnvelope: String?
-    // Only a warm, durably acknowledged decision can authorize a fresh public Undo.
-    // The UI owns the offer deadline; a journal or settled Undo owns exact retry.
+
+
     private var confirmedInboxDecisionEnvelope: String?
     private var confirmedInboxUndoEnvelope: String?
     private var confirmedRowQuickStatusEnvelope: String?
@@ -4869,7 +4862,7 @@ private final class Engine: @unchecked Sendable {
     private var confirmedRowTaskDestinationEnvelope: String?
     private var confirmedRowTaskBackdateEnvelope: String?
     private var confirmedReferenceTaskDestinationEnvelope: String?
-    // Independent of the mutable completion/Undo notice cache.
+
     private var referenceProjectNextActionOrigin: [String: Any]?
     private var confirmedReferenceProjectNextActionEnvelope: String?
     private var startupReferenceProjectNextActionResult: String?
@@ -4917,8 +4910,8 @@ private final class Engine: @unchecked Sendable {
     private var boardMoveFixtureOriginal: String?
     private var boardMoveFixtureRetry = false
     #endif
-    // Only an unpresented validated acknowledgment survives automatic runtime
-    // teardown; this CoreHost's databaseURL is immutable. Shutdown clears it.
+
+
     private var startupAttachmentSaveResult: (method: String, resultJSON: String, requestId: String?)?
     private var startupBoardResult: String?
     private var startupTaskDeleteResult: String?
@@ -5201,9 +5194,8 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func loadPendingJournal(checkingEditorSnapshot: Bool = true) throws -> PendingCommand? {
-        // Preserve legacy grammar/size limits, but read the same validated
-        // no-follow descriptor so corrupt FIFO/symlink entries cannot hang boot
-        // or redirect the read after a separate path check.
+
+
         guard let journalData = try readJournalBytes(maximumBytes: nil,
             failure: HostFailure("Invalid pending command journal"), singleLink: false) else { return nil }
         guard let raw = try NativeJSON.jsonObject(with: journalData) as? [String: Any],
@@ -5746,7 +5738,7 @@ private final class Engine: @unchecked Sendable {
                 }
             }
             if pending == nil { pending = try loadPendingJournal() }
-            // Cleanup recovery is decided before unrelated cache or legacy work.
+
             let cleanupRecovery = pending?.method == Self.cleanupMethod
             let recoveringCaptureLines = pending?.method == "captureLinesCommit"
             let recoveringTrashItemsPurge = pending?.method == "trashItemsPurgeCommit"
@@ -5756,10 +5748,10 @@ private final class Engine: @unchecked Sendable {
                 var original = stat()
                 guard lstat(databaseURL.path, &original) == 0, original.st_mode & S_IFMT == S_IFREG else { throw Self.cleanupFailure }
             }
-            // Optional cache cleanup cannot block startup or change an owed command.
+
             if !cleanupRecovery && !recoveringCaptureLines && !recoveringTrashItemsPurge && !recoveringPomodoro && !recoveringAppleReminder { try? backupExportFile.discardInterruptedExports() }
-            // An uncertain journal never authorizes garbage collection. Validate
-            // every owned backup byte before boot can activate domain work.
+
+
             if let command = pending, command.method == "backupDocumentCommit" {
                 _ = try backupDocumentArguments(command)
             }
@@ -5769,10 +5761,10 @@ private final class Engine: @unchecked Sendable {
                 if command.method == Self.appleReminderMethod { return try appleReminderItem(command).reference.id }
                 return nil
             }
-            // Lines plans require the shared pure validator as well as file hashes.
-            // Delay their GC until that validator exists, still before SQLite boot.
+
+
             if !cleanupRecovery && !recoveringCaptureLines && !recoveringTrashItemsPurge && !recoveringPomodoro && !recoveringAppleReminder { try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? [])) }
-            // Accepted operations own their frozen plan, never the picker copy.
+
             if !cleanupRecovery && !recoveringCaptureLines && !recoveringTrashItemsPurge && !recoveringPomodoro && !recoveringAppleReminder { try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id })) }
             guard let runtime = JSContext() else { throw HostFailure("Cannot create JavaScriptCore runtime") }
             context = runtime
@@ -5798,8 +5790,8 @@ private final class Engine: @unchecked Sendable {
                     let state = try NativeJSON.jsonObject(with: Data(legacy.stateJSON.utf8)) as? [String: Any]
                     let hadSQLite = state?["jsonAhead"] as? Bool == true || state?["reconciled"] as? Bool == true
                         || state?["backupVersion"] as? String != nil
-                    // A SQLite-era backup may predate later local writes. Only a
-                    // genuinely JSON-only legacy installation can create this DB.
+
+
                     guard !hadSQLite, !legacy.backupJSON.isEmpty else {
                         throw HostFailure("Legacy library database is missing; recovery is required")
                     }
@@ -5881,8 +5873,8 @@ private final class Engine: @unchecked Sendable {
             emitCleanupAcknowledgement()
             projectFileAddTurn?.expectedStarted = true
             projectDownloadTurn?.expectedStarted = true
-            // A durable no-write rejection needs only cleanup, not another failed
-            // startup. The interactive retry still returns its original error.
+
+
             return try startupWindow(retentionJSON: retentionJSON)
         } catch {
             if !(error is CoreHostAppLockRecovery) && !(error is CoreHostProjectFileAddRecovery) && !(error is CoreHostProjectFileAvailabilityRecovery) { releaseRuntime() }
@@ -5894,7 +5886,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard started, !closed, unresolvedAppLockRecovery, let command = pending,
               command.method == "appLockCommit" else { throw HostFailure("No unresolved App lock recovery") }
-        // An explicit cancellation abandons this UUID; it does not claim the old write failed or succeeded.
+
         _ = try finish(command, with: .rejected("STALE_REVISION: App lock outcome unknown; pending change cancelled"))
         unresolvedAppLockRecovery = false
         NSLog("Native iOS App lock recovery cancelled releaseCheck=v1.3.4/ios-app-lock outcome=cancelled")
@@ -6435,8 +6427,8 @@ private final class Engine: @unchecked Sendable {
         }
         if recoveringPomodoroCommand != nil, let terminal, case .success(let value) = terminal { startupPomodoroResult = value }
         if let method = recoveringAttachmentSaveMethod, let terminal, case .success(let result) = terminal {
-            // Both existing owners return only their validated domain result,
-            // after durable recovery/cleanup; never expose a settlement journal.
+
+
             let actual = try NativeJSON.jsonObject(with: Data(result.utf8)) as? [String: Any]
             startupAttachmentSaveResult = (method, result,
                 actual?["cancellation"] is [String: Any] ? recoveringAttachmentCancelRequestId : nil)
@@ -6455,7 +6447,7 @@ private final class Engine: @unchecked Sendable {
         }
         if let recoveringCompletionCommand, let terminal, case .success = terminal {
             rememberConfirmedTaskCompletion(recoveringCompletionCommand)
-            // Only the validated captured command and its exact proven receipt supply this route.
+
             startupTaskCompletionSource = taskCompletionSource(recoveringCompletionCommand)
             startupTaskCompletionRequestID = taskCompletionRequestID(recoveringCompletionCommand)
         }
@@ -6490,7 +6482,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringInlineChecklist, let terminal, case .success(let value) = terminal { startupInlineChecklistResult = value }
         if recoveringDoneTaskStatus, let terminal, case .success(let value) = terminal {
             startupDoneTaskStatusResult = value
-            // resolvePending has validated this captured command and proven its exact receipt.
+
             startupDoneTaskStatusSource = recoveringDoneTaskStatusCommand.flatMap(historyTaskStatusSource)
         }
         if let recoveringBackdateMethod, let terminal, case .success(let value) = terminal {
@@ -6803,7 +6795,7 @@ private final class Engine: @unchecked Sendable {
         }
         if startupReferenceTaskDestinationResult != nil,
            var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "referenceTaskDestinationCommit" {
-            // Captured request/source and exact saved receipt were validated before this marker.
+
             recovery["source"] = "reference"
             window["recovery"] = recovery
         }
@@ -7200,7 +7192,7 @@ private final class Engine: @unchecked Sendable {
 
     private func recoverCalendarPush(_ turn: CalendarPushTurn) throws {
         try turn.effects.retryPublication()
-        // Each iteration advances one durable phase; no recovery path issues a provider mutation.
+
         for _ in 0..<4 {
             try requireCalendarPushTurn()
             guard let effect = try turn.effects.current() else { return }
@@ -7414,8 +7406,8 @@ private final class Engine: @unchecked Sendable {
               delay.doubleValue.rounded() == delay.doubleValue, (0...86_400_000).contains(delay.doubleValue) else {
             throw NativeReminderEffects.unavailable
         }
-        // This read-only snapshot shares the reminder owner's admission without granting effect access.
-        // Otherwise requireNoAttachmentDraft would manufacture an own-cycle blocked→ready retry.
+
+
         let priorAccess = reminderOwnerAccess
         reminderOwnerAccess = true
         defer { reminderOwnerAccess = priorAccess }
@@ -7444,7 +7436,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         if let observer = reminderObserver, context === observer.runtime, attachmentGeneration == observer.generation,
            let snapshot = try? reminderObservation("iosReminderObservation") {
-            // Consume the one-shot debt even when a source change already supplies this wake.
+
             let ordinaryReady = reminderAdmissions.takeOrdinaryReadyWake(ready: snapshot.ready)
             if snapshot.revision != observer.revision {
                 observer.pending = .sourceChanged(revision: snapshot.revision)
@@ -7462,7 +7454,7 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        // Only real existing JS timers are re-armed; dirty reminders never create polling work.
+
         scheduleAttachmentIdle()
     }
     private func reminderInvoke(_ method: String, _ arguments: [Any], cancellation: NativeAttachmentCancellation? = nil) throws -> String {
@@ -7515,7 +7507,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         try cancellation.check()
         if let retained = reminderEffectsTurn {
-            // Settle only the exact already accepted mutation. It never resumes the old effects plan.
+
             guard let mutation = retained.mutation, retained.storage.hasPendingReminderMutation,
                   started, !closed, context === retained.runtime, deviceStorage === retained.storage,
                   attachmentGeneration == retained.generation, lockFD >= 0 else { throw NativeReminderEffects.unavailable }
@@ -7653,7 +7645,7 @@ private final class Engine: @unchecked Sendable {
         }
         turn.expected = before; turn.final = [alarms, state]; turn.plan = plan
         try checkReminderReconciliation(id)
-        // Unarmed Snooze state stays unarmed until final acknowledgment. Ordinary pending flags come from core.
+
         let ahead = try optional(value["writeAhead"]) ?? before[0]
         try writeReminderMaps(turn, next: [ahead, before[1]])
         try checkReminderReconciliation(id)
@@ -7724,7 +7716,7 @@ private final class Engine: @unchecked Sendable {
             try retained.storage.compareAndSetPomodoroAlarmState(expected: mutation.before, next: mutation.after)
             retained.expected = mutation.after; retained.mutation = nil
             if try reminderDataVersion() != retained.dataVersion { reminderSourceStale = true }
-            // A successor settles only the accepted CAS, then discards the old OS plan.
+
             throw NativePomodoroAlarmEffects.unavailable
         }
         let storage = try requireDeviceStorageAdmission()
@@ -8388,7 +8380,7 @@ private final class Engine: @unchecked Sendable {
                   let after = prepared["storedAfter"] as? String, let marker = prepared["markerAfter"] as? String else {
                 throw Self.deviceStorageInvalid
             }
-            // Pure validation above must precede settling an ambiguously acknowledged native mutation.
+
             try owned.storage.compareAndSetCalendarSetting(expected: [prepared["storedBefore"] as? String, prepared["markerBefore"] as? String],
                 next: [after, marker])
         }
@@ -8518,7 +8510,7 @@ private final class Engine: @unchecked Sendable {
         } catch {
             calendarSubscriptionSettingTurn = nil
             if turn.freshRuntimeRequired || (error as? HostFailure)?.message == Self.calendarSubscriptionFreshRuntime.message {
-                // The failed queued snapshot must never re-enter ordinary work. App owns full lifecycle re-admission.
+
                 releaseRuntime()
                 throw Self.calendarSubscriptionFreshRuntime
             }
@@ -8556,7 +8548,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func calendarSubscriptionSQLPublication(_ sql: String) -> Bool {
         let statement = sql.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        // Receipt/source reads precede material guards; only this exact owner's rollback may settle a stale transaction.
+
         return statement != "ROLLBACK" && !statement.hasPrefix("SELECT") && !statement.hasPrefix("PRAGMA")
     }
     private func calendarSubscriptionRead() throws -> String {
@@ -8669,8 +8661,8 @@ private final class Engine: @unchecked Sendable {
             return jobs
         }
         guard let captured else { throw Self.deviceStorageUnavailable }
-        // The synchronous owner helper has completed; restore only this exact
-        // admission before yielding Engine to the off-queue provider copy.
+
+
         calendarSubscriptionSettingTurn = captured
         let id = UUID()
         calendarFileCaptureTurn = .init(id: id, owner: captured, jobs: jobs, requestJSON: requestJSON, cancellation: cancellation)
@@ -8699,8 +8691,8 @@ private final class Engine: @unchecked Sendable {
                   Self.ownedEqual(complete["url"] as? String ?? "", selection.uri) else { throw Self.deviceStorageInvalid }
             frozen = derived
             try requireCalendarSubscriptionSettingTurn(); try cancellation.check()
-            // No queue yield between releasing capture authority and admitting
-            // the unchanged durable Add under its normal selected owner.
+
+
             calendarFileCaptureTurn = nil; calendarSubscriptionSettingTurn = nil
             let value = try addCalendarSubscription(requestJSON: derived)
             return .init(requestJSON: derived, resultJSON: value)
@@ -9489,11 +9481,11 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("NOT_READY: AI timeout owner callback is unavailable")
             }
             let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiRequestTimeoutTurn?.cancellation)
-            // A published commit's validated terminal result wins caller cancellation.
+
             try requireAIRequestTimeoutTurn(checkCancellation: method != "iosAIRequestTimeoutCommit")
             return value
         } catch {
-            // JS may have advanced the adapter epoch before refusal; do not reuse this native admission.
+
             let message = (error as? HostFailure)?.message
             let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
                 || message?.hasPrefix("CANCELLED:") == true
@@ -9634,11 +9626,11 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("NOT_READY: AI reasoning effort owner callback is unavailable")
             }
             let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiReasoningEffortTurn?.cancellation)
-            // A published commit's validated terminal result wins caller cancellation.
+
             try requireAIReasoningEffortTurn(checkCancellation: method != "iosAIReasoningEffortCommit")
             return value
         } catch {
-            // JS may have advanced the adapter epoch before refusal; do not reuse this native admission.
+
             let message = (error as? HostFailure)?.message
             let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
                 || message?.hasPrefix("CANCELLED:") == true
@@ -9779,11 +9771,11 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("NOT_READY: AI Gemini thinking budget owner callback is unavailable")
             }
             let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiGeminiThinkingBudgetTurn?.cancellation)
-            // A published commit's validated terminal result wins caller cancellation.
+
             try requireAIGeminiThinkingBudgetTurn(checkCancellation: method != "iosAIGeminiThinkingBudgetCommit")
             return value
         } catch {
-            // JS may have advanced the adapter epoch before refusal; do not reuse this native admission.
+
             let message = (error as? HostFailure)?.message
             let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
                 || message?.hasPrefix("CANCELLED:") == true
@@ -11601,9 +11593,8 @@ private final class Engine: @unchecked Sendable {
         if command.method == "projectLifecycleCommit" { return try projectLifecycleJournalArguments(command) }
         return try journalArguments(command, retainedOrdinary: true)
     }
-    // Cold structural parsing happens after library lock/jobs acquisition and
-    // before a runtime exists. It validates current evidence, not a historical
-    // sidecar hash which the unchanged ordinary journal never recorded.
+
+
     private func validateRetainedOrdinaryCommand(_ command: PendingCommand) throws {
         guard !closed, lockFD >= 0, let jobs = attachmentJobs else { throw Self.retainedOrdinaryFailure }
         jobs.drain()
@@ -11755,8 +11746,8 @@ private final class Engine: @unchecked Sendable {
               let raw = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any], let operation = raw["op"] as? String,
               installer ? operation == "hash" : ["barrier", "sha256", "getInfo", "readDirectory", "readBytes",
                 "readBytesRange", "sha256File"].contains(operation) else { throw Self.retainedOrdinaryFailure }
-        // The existing adapter still owns full arity/URI/range grammar. Unknown
-        // operations and all raw mutations fail before queue admission.
+
+
     }
 
     private func attachmentDraftCoordinator() throws -> NativeAttachmentDraftCoordinator {
@@ -12024,7 +12015,7 @@ private final class Engine: @unchecked Sendable {
               base64.utf8.allSatisfy({ $0 < 128 }), let bytes = Data(base64Encoded: base64), bytes.count <= 8_388_608,
               Self.ownedEqual(bytes.base64EncodedString(), base64), bytes.count == size.intValue else { throw Self.taskDownloadFailure }
         let captured = try turn.jobs.createPlaintextDownloadSource(bytes: bytes, cancellation: cancellation)
-        // Capture creation authority before any late cancellation or owner check.
+
         turn.receipt = captured.receipt; turn.source = captured.source; turn.sourceToken = UUID().uuidString.lowercased()
         try requireTaskDownloadTurn(before: true); try cancellation.check()
         guard captured.source.sha256 == hash, captured.source.size == size.int64Value else { throw Self.taskDownloadFailure }
@@ -12034,10 +12025,8 @@ private final class Engine: @unchecked Sendable {
         guard let receipt = turn.receipt, let source = turn.source else { return }
         turn.jobs.drain()
         guard taskDownloadTurn === turn, receipt.matches(source) else { throw Self.taskDownloadFailure }
-        // Only an exact unadopted source can retire after material revocation.
-        // Config/KV namespace, credentials, editor and record checks still apply.
-        // A settled cancellation still permits fresh secure observations for this
-        // exact retirement; it never waives credential equality or admits work.
+
+
         let readCancellation = completed ? turn.cancellation : NativeAttachmentCancellation()
         try requireTaskDownloadTurn(checkMaterial: completed, secureReadCancellation: readCancellation)
         let store = NativeAttachmentDraftStore(databaseURL: databaseURL), binding = try store.readVersioned()
@@ -12052,7 +12041,7 @@ private final class Engine: @unchecked Sendable {
                   receipt.matches(.init(sourceURI: retained.sourceURI, sha256: retained.sha256, size: retained.size,
                     identity: retained.identity, cacheRootIdentity: retained.cacheRootIdentity, parentIdentity: retained.parentIdentity)) else { throw Self.taskDownloadFailure }
         } else {
-            // Lost write acknowledgements never establish absence of intent.
+
             try requireTaskDownloadTurn(before: true, checkMaterial: false, secureReadCancellation: readCancellation)
             if let binding {
                 guard case .availability(let record) = binding.record,
@@ -12166,9 +12155,8 @@ private final class Engine: @unchecked Sendable {
                       let original = selected["uri"] as? String else { throw Self.taskDownloadFailure }
                 var relocatedProof: NativeAttachmentFiles.BaselineAttachmentProof?
                 if !original.isEmpty && !taskDownloadManagedPath(original, root: managed) {
-                    // Only an existing hash-proven current target can repair a
-                    // relocated selection. The old path never gains read or
-                    // retirement authority, and a refusal never falls into GET.
+
+
                     guard let mapped = try? relocatedFileOpenURI(selected), Self.ownedEqual(mapped, target),
                           let proof = try coordinator.snapshotFileOpen(attachmentID: request.attachmentID,
                             targetURI: target, cancellation: cancellation) else { return try taskDownloadKnown("unavailable", request) }
@@ -12282,8 +12270,8 @@ private final class Engine: @unchecked Sendable {
                 // Optional scratch cleanup cannot revoke the durable checkpoint ACK.
                 try? finishTaskDownloadSource(turn, completed: true)
                 if cloud && status != "unrecoverable" {
-                    // A diagnostic cannot revoke a durable checkpoint or grant
-                    // availability when captured authority is no longer current.
+
+
                     do { try requireTaskDownloadTurn()
                         _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-task-availability", "confirmed"])
                     } catch { }
@@ -12360,8 +12348,8 @@ private final class Engine: @unchecked Sendable {
                         size: op.source.size, identity: op.source.identity, cacheRootIdentity: op.source.cacheRootIdentity,
                         parentIdentity: op.source.parentIdentity)) else { throw HostFailure("Attachment provider cleanup is unavailable") }
             } else {
-                // A confirmed ordinary recovery may settle a warm pre-intent
-                // refusal. It still cannot grant authority over borrowed bytes.
+
+
                 guard recovered else { throw HostFailure("Attachment provider cleanup is unavailable") }
             }
         } else {
@@ -12438,7 +12426,7 @@ private final class Engine: @unchecked Sendable {
     }
     func abortPhotoProviderAttachmentV3(captureID: UUID) {
         dispatchPrecondition(condition: .onQueue(queue))
-        // A finished no-receipt load created no native scratch authority.
+
         if let turn = providerCopy, turn.photoCaptureID == captureID, turn.receipt == nil { providerCopy = nil }
     }
     func finishPhotoProviderAttachmentV3(captureID: UUID, receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt,
@@ -12447,8 +12435,8 @@ private final class Engine: @unchecked Sendable {
             guard var turn = providerCopy, turn.photoCaptureID == captureID, turn.receipt == nil else {
                 throw HostFailure("Attachment provider owner is unavailable")
             }
-            // Bind successful creation before checking cancellation, so its exact
-            // receipt remains available for conservative pre-intent cleanup.
+
+
             turn.receipt = receipt; providerCopy = turn
             return try addCapturedProviderAttachmentV3(turn, expectedGeneration: expectedGeneration,
                 cancellation: cancellation, acknowledgment: "photo-add")
@@ -12468,7 +12456,7 @@ private final class Engine: @unchecked Sendable {
             guard case .mixed(let original) = turn.beforeRecord.record else { throw Self.ownedSaveFailure }
             let reply = try original.version == 4 ? ownedAdd.addV4(request, cancellation: cancellation)
                 : ownedAdd.addV3(request, cancellation: cancellation)
-            // The durable Add reply survives optional scratch cleanup failure.
+
             let cleaned = (try? finishProviderCopy(turn, completed: true)) != nil
             providerCopy = nil
             if acknowledgment == "provider-add" || cleaned {
@@ -12490,8 +12478,8 @@ private final class Engine: @unchecked Sendable {
             else { reply = try coordinator.recoverV3(session: expectedSession, cancellation: cancellation) }
             if let turn = providerCopy, Self.ownedEqual(turn.session, expectedSession) {
                 try? finishProviderCopy(turn, completed: true, recovered: true)
-                // Recovery's accepted outcome is also independent of best-effort
-                // scratch cleanup. No receipt is reconstructed after restart.
+
+
                 providerCopy = nil
             }
             return reply
@@ -12545,8 +12533,8 @@ private final class Engine: @unchecked Sendable {
               args[0].utf8.count <= 2_000_000 else { throw ownedSaveFailure }
         return try completeSaveRequest(NativeJSON.jsonObject(with: Data(args[0].utf8)), taskID: attempt.taskID)
     }
-    /// Structural selected-proof grammar before runtime/storage activation.
-    /// Shared validation subsequently proves every witness and affected row.
+
+
     private static func completeSaveEnvelope(_ value: Any?, version: Int = 2) throws -> [String: Any] {
         guard let envelope = value as? [String: Any], Set(envelope.keys) == Set(["request", "prepared"]),
               let request = envelope["request"] as? [String: Any],
@@ -12579,8 +12567,8 @@ private final class Engine: @unchecked Sendable {
         if isInteger(version, equalTo: 5) { return .completeAvailability }
         return nil
     }
-    /// Does not read files or assert a Save outcome. Startup separately binds
-    /// the native files, then pure shared validation proves the complete effect.
+
+
     private func ownedSaveJournal(_ command: PendingCommand, checkingNative: Bool = true) throws -> OwnedSaveJournal {
         guard command.version == 2, command.method == Self.ownedSaveMethod,
               try JSONEncoder().encode(command).count <= Self.ownedSaveMaximumBytes,
@@ -12633,7 +12621,7 @@ private final class Engine: @unchecked Sendable {
                 if let frozen = current.attempt {
                     guard Self.ownedEqual(frozen, attempt) else { throw Self.ownedSaveFailure }
                 } else if case .rejected = command.terminal {
-                    // A prior exact thaw may precede a failed journal clear.
+
                 } else { throw Self.ownedSaveFailure }
             } else if !success { throw Self.ownedSaveFailure }
         }
@@ -12662,8 +12650,7 @@ private final class Engine: @unchecked Sendable {
         return command
     }
 
-    /// Only used by the new owned command's mutation guards. The legacy
-    /// journal loader and its historical transport limits remain unchanged.
+
     private func ownedJournalBytes() throws -> Data? {
         try readJournalBytes(maximumBytes: Self.ownedSaveMaximumBytes, failure: Self.ownedSaveFailure, singleLink: true)
     }
@@ -12784,8 +12771,8 @@ private final class Engine: @unchecked Sendable {
               let document = directories["document"] as? String, let root = URL(string: document) else { throw Self.ownedSaveFailure }
         return root.appendingPathComponent("attachments", isDirectory: true).absoluteString
     }
-    /// Only the canonical native spelling and Apple's actual fixed system alias
-    /// can participate in a bounded terminal mapping. No arbitrary URL rebasing.
+
+
     private static func mixedSaveCanonicalPath(_ uri: String, directory: Bool) throws -> String {
         guard !uri.isEmpty, uri.utf8.count <= 16 * 1024 else { throw ownedSaveFailure }
         let path = try NativeAttachmentFiles.filePath(uri)
@@ -12835,7 +12822,7 @@ private final class Engine: @unchecked Sendable {
         guard let relocation = captured.relocation else { return nil }
         try requireMixedSaveRelocation(relocation)
         guard case .baseline(let observation) = candidate.authority else { throw Self.ownedSaveFailure }
-        // A non-present opening observation never gains a new generation.
+
         guard observation.proof != nil else { return nil }
         let original = try Self.mixedSaveCanonicalPath(relocation.originalManagedURI, directory: true)
         let current = try Self.mixedSaveCanonicalPath(relocation.currentManagedURI, directory: true)
@@ -13161,8 +13148,8 @@ private final class Engine: @unchecked Sendable {
         guard try JSONEncoder().encode(command).count <= Self.ownedSaveMaximumBytes else { throw Self.ownedSaveFailure }
         try reserve(state)
         for candidate in candidates {
-            // The actual Foundation encoder includes both nested escaping
-            // layers; the longest permitted ASCII outcome bounds every prefix.
+
+
             state.targets[candidate.index] = candidate.outcomes.max(by: { $0.utf8.count < $1.utf8.count })!
             try reserve(state)
             let frame = try Self.ownedJSON(["version": 1, "envelopeJSON": captured.envelopeJSON, "candidateIndex": candidate.index])
@@ -13275,15 +13262,15 @@ private final class Engine: @unchecked Sendable {
         _ = try requireMixedSaveAuthority(command, turn: turn, cancellation: cancellation, promotion: true, proposedState: state)
         try DurableFile.write(data, to: journalURL, privateDraft: true)
         guard let written = try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes), written.bytes == data else { throw Self.ownedSaveFailure }
-        // Only a confirmed write advances the acknowledged progress and inode.
+
         turn.journal = written; turn.acknowledged = command; turn.acknowledgedState = state
         #if DEBUG
         try attachmentDraftHooks?.boundary?(after)
         #endif
         _ = try requireMixedSaveAuthority(command, turn: turn, cancellation: cancellation)
     }
-    /// Exactly one native-held branch completes synchronously. No JSC work,
-    /// pump or logging occurs between shared policy selection and typed IO.
+
+
     private func mixedSaveTargetHandoff(_ command: PendingCommand, turn: MixedSaveTurn,
                                         candidate: NativeAttachmentDraftCoordinator.MixedSaveCandidate,
                                         cancellation: NativeAttachmentCancellation) throws -> String {
@@ -13403,10 +13390,10 @@ private final class Engine: @unchecked Sendable {
         do {
             let turn = try supplied ?? mixedSaveTurn(command)
             if supplied == nil {
-                // A warm uncertain progress write is owed before another action.
+
                 if turn.journal == nil {
-                    // A lost clear acknowledgment has only a warm retained
-                    // settled owner. Recreate its exact journal before release.
+
+
                     try requireMixedSaveOwner(turn, cancellation: cancellation)
                     let captured = try mixedSaveJournal(command)
                     let settled = captured.settlement?.phase == "settled" && captured.binding == nil && turn.editor == nil
@@ -13466,8 +13453,8 @@ private final class Engine: @unchecked Sendable {
             if case .rejected = command.terminal { return try finishMixedSaveRejection(command, turn: turn, cancellation: cancellation) }
             guard var state = try mixedSaveJournal(command).settlement else { throw Self.ownedSaveFailure }
             let captured = try requireMixedSaveAuthority(command, turn: turn, cancellation: cancellation)
-            // Retained terminal replay validates and re-ACKs the exact complete
-            // cancellation before cleanup; preparation/unknown SQL grants none.
+
+
             if captured.selection.isComplete { rememberConfirmedTaskCancellation(command) }
             if state.phase == "domainSaved", try hasSavedTaskFileHash(captured) {
                 _ = try? invoke("attachmentDraftAcknowledged", arguments: ["task-file-hash", "saved"])
@@ -13526,7 +13513,7 @@ private final class Engine: @unchecked Sendable {
                 command.terminal = .success(try mixedSaveStateJSON(state, stages: captured.stages))
                 try persistMixedSaveProgress(command, turn: turn, cancellation: cancellation, before: .beforeSaveSettled, after: .afterSaveSettled)
             }
-            // A settled replay performs no file jobs, including private stages.
+
             _ = try requireMixedSaveAuthority(command, turn: turn, cancellation: cancellation, editorAbsent: true)
             if let relocation = captured.relocation, relocation.containerComponentIndex != nil {
                 try requireMixedSaveRelocation(relocation)
@@ -13610,8 +13597,8 @@ private final class Engine: @unchecked Sendable {
         _ = try ownedSaveJournal(command, checkingNative: false)
         var success = command; success.terminal = .success(result)
         var rejected = command
-        // Each ASCII control byte has the maximum six-byte JSON escaping cost.
-        // Reserve a full bounded rejection rather than truncating future evidence.
+
+
         rejected.terminal = .rejected(String(repeating: "\u{0000}", count: Self.ownedSaveRejectionBytes))
         for candidate in [command, success, rejected] {
             guard try JSONEncoder().encode(candidate).count <= Self.ownedSaveMaximumBytes else { throw Self.ownedSaveFailure }
@@ -13847,9 +13834,8 @@ private final class Engine: @unchecked Sendable {
                 }
                 turn.mixedAcknowledged = actual
             } else if case .success = command.terminal {
-                // A lost journal-clear acknowledgment may leave only the exact
-                // warm validated terminal. Re-persist it before release/clear;
-                // this grants no nonterminal or attachment-job permission.
+
+
                 guard let current = pending, try ownedEncoded(current) == ownedEncoded(command) else { throw Self.ownedDiscardFailure }
                 turn.mixedAcknowledged = command
             }
@@ -14023,8 +14009,8 @@ private final class Engine: @unchecked Sendable {
             } else { guard record.discard != nil else { throw Self.ownedDiscardFailure } }
             _ = try coordinator.prepareMixedDiscardCandidates(record, binding: binding, cancellation: cancellation)
             try requireDecisionOwner()
-            // Fresh capacity is reserved before either private intent or editor
-            // detachment. Retained decisions reserve only their actual owed form.
+
+
             if record.discard == nil { try store.preflightMixed(decision.decided) }
             try store.preflightMixed(decision.detached)
             try preflightOwnedDiscard(ownedMixedDiscardCommand(decision.detached))
@@ -14045,8 +14031,8 @@ private final class Engine: @unchecked Sendable {
                 #endif
                 try requireDecisionOwner()
                 if editorBinding == nil {
-                    // Only a retained decision permits missing; acknowledge its
-                    // parent durability again before promoting to detached.
+
+
                     try DurableFile.remove(editorDrafts.url)
                 } else { try editorDrafts.discardMatching(expected: decision.decided.session.checkpoint) }
                 guard try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil else { throw Self.ownedDiscardFailure }
@@ -14157,8 +14143,8 @@ private final class Engine: @unchecked Sendable {
                   binding.record.discard.map({ Self.ownedEqual($0.requestId, requestId) }) == true,
                   let runtime = context, let jobs = attachmentJobs else { throw Self.ownedDiscardFailure }
             let record = binding.record
-            // Construct the journal only after the selected pure planner has
-            // bound exact candidate membership; no physical work precedes it.
+
+
             let generation = attachmentGeneration
             func requireInitial() throws {
                 try cancellation.check()
@@ -14384,9 +14370,8 @@ private final class Engine: @unchecked Sendable {
             var turn = try ownedDiscardTurn(command)
             let coordinator = try ownedSaveCoordinatorForWork()
             if version == 3 || version == 4 {
-                // Both historical formats must drain before intent abandonment
-                // or fresh filled-stage classification.
-                // The fresh strict record and inode must still be this decision.
+
+
                 coordinator.drainOwnedSaveJobs()
                 try requireUnjournaledDiscard(command, turn: turn, cancellation: cancellation)
             }
@@ -14401,8 +14386,8 @@ private final class Engine: @unchecked Sendable {
                 let observed: Bool
                 do { try coordinator.observeOwnedDiscardFilledStage(op, cancellation: cancellation); observed = true }
                 catch {
-                    // An observer error grants no permission. Only a separate
-                    // positive publication proof can select the other branch.
+
+
                     try requireUnjournaledDiscard(command, turn: turn, cancellation: cancellation)
                     observed = false
                 }
@@ -14447,9 +14432,8 @@ private final class Engine: @unchecked Sendable {
             #endif
             try requireUnjournaledDiscard(command, turn: turn, cancellation: cancellation)
             pending = command
-            // A visible earlier promotion is not an acknowledgment by itself.
-            // This sibling journal's successful parent fsync orders that rename
-            // before cleanup; an uncertain journal write starts no retirement.
+
+
             try persist(command)
             turn.journalIdentity = try ownedDiscardIdentity(journalURL)
             #if DEBUG
@@ -14460,8 +14444,7 @@ private final class Engine: @unchecked Sendable {
         } catch { throw Self.ownedDiscardFailure }
     }
 
-    /// The native callbacks complete before JSC returns and drains microtasks.
-    /// No invoke, timer pumping, diagnostic or JSC value enters the file queue.
+
     private func ownedDiscardTargetHandoff(_ command: PendingCommand, turn: OwnedDiscardTurn,
                                            op: NativeAttachmentDraftStore.Operation,
                                            coordinator: NativeAttachmentDraftCoordinator,
@@ -14490,8 +14473,8 @@ private final class Engine: @unchecked Sendable {
               let retireValue = JSValue(object: retire, in: turn.runtime),
               turn.runtime.exception == nil else { throw Self.ownedDiscardFailure }
         let returned = host.invokeMethod("attachmentDraftDiscardRetire", withArguments: [input, keepValue, retireValue])
-        // Never expose arbitrary JS exception content. A callback/outer failure
-        // keeps the journal even if an unlink already completed.
+
+
         let threw = turn.runtime.exception != nil
         turn.runtime.exception = nil
         guard !threw, lease.consumed, !lease.failed, let outcome = lease.outcome,
@@ -14514,8 +14497,8 @@ private final class Engine: @unchecked Sendable {
         }
         do {
             let turn = try supplied ?? ownedDiscardTurn(command)
-            // Warm unknown writes are owed; identity guards forbid overwriting
-            // foreign evidence. Historical terminals never start file jobs.
+
+
             if supplied == nil {
                 try persist(command)
                 turn.journalIdentity = try ownedDiscardIdentity(journalURL)
@@ -14531,9 +14514,8 @@ private final class Engine: @unchecked Sendable {
                 _ = try requireOwnedDiscardAuthority(command, turn: turn, cancellation: cancellation)
                 let target: String
                 if captured.version >= 2 && index == operations.count - 1 {
-                    // No public content/proof/reference query or mutation. A
-                    // recorded stage job retains confined path validation;
-                    // the unclaimed intent below does not submit that job.
+
+
                     target = "untouched"
                 } else {
                     #if DEBUG
@@ -14548,8 +14530,8 @@ private final class Engine: @unchecked Sendable {
                 }
                 let stage: String
                 if captured.version == 3 && index == operations.count - 1 {
-                    // No recorded ownership: do not inspect, adopt or sweep even
-                    // an apparently empty same-named private namespace.
+
+
                     stage = "unclaimed"
                 } else {
                     #if DEBUG
@@ -14840,8 +14822,7 @@ private final class Engine: @unchecked Sendable {
         catch { throw Self.ownedSaveFailure }
     }
 
-    /// A crash after freeze and before journal creation proves no invocation
-    /// only through demonstrable journal absence, never through a read error.
+
     private func reconcileUnjournaledOwnedSave(snapshot: EditorDraftSnapshot, attempt: EditorDraftAttempt) throws {
         guard pending == nil, try ownedJournalIsAbsent(),
               let binding = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned() else { throw Self.ownedSaveFailure }
@@ -14944,7 +14925,7 @@ private final class Engine: @unchecked Sendable {
         #if DEBUG
         try attachmentDraftHooks?.boundary?(.beforeSaveTerminal)
         #endif
-        // No cleanup authority exists until this exact terminal reaches disk.
+
         try persist(finished)
         do {
             #if DEBUG
@@ -14965,7 +14946,7 @@ private final class Engine: @unchecked Sendable {
                 if let record = captured.record {
                     let coordinator = try ownedSaveCoordinatorForWork()
                     for (index, op) in record.operations.enumerated() {
-                        // An already absent sidecar authorizes no further file job.
+
                         guard try requireOwnedCleanup(finished, editorAbsent: true).record != nil else { break }
                         #if DEBUG
                         try attachmentDraftHooks?.boundary?(.beforeSaveStage(index))
@@ -15011,7 +14992,7 @@ private final class Engine: @unchecked Sendable {
     func readAttachmentDraft() throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         guard started, !closed else { throw HostFailure("Attachment draft recovery is not ready") }
-        // Reading private evidence does not activate or replay pending domain work.
+
         do { return try NativeAttachmentDraftCoordinator.readSummary(databaseURL: databaseURL) }
         catch { throw HostFailure("Attachment draft capability is unavailable") }
     }
@@ -15042,9 +15023,8 @@ private final class Engine: @unchecked Sendable {
             return current.snapshot
         }
         if attachmentDraftEvidence {
-            // Preserve the historical owned-editor read/reconcile path, but a
-            // foreign independent editor cannot borrow a corrupt, decided or
-            // otherwise nonqualified owner's presence to reopen ordinary work.
+
+
             guard let owner = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned() else {
                 throw Self.retainedOrdinaryFailure
             }
@@ -15063,7 +15043,7 @@ private final class Engine: @unchecked Sendable {
                 return current.snapshot
             }
             try requireNoAttachmentDraft()
-            // No journal means the invocation never began, or a definite refusal settled.
+
             try editorDrafts.thaw(attempt)
         }
         return current.snapshot
@@ -15127,8 +15107,8 @@ private final class Engine: @unchecked Sendable {
     func discardCorruptEditorDraft() throws {
         dispatchPrecondition(condition: .onQueue(queue))
         try requireNoAttachmentDraft()
-        // A failed start may not yet have assigned `pending`. Inspect the durable
-        // journal itself before removing the only frozen proof of an editor Save.
+
+
         let saved = try loadPendingJournal(checkingEditorSnapshot: false)
         let editorMethods: Set<String> = ["draftCommit", "checklistPreparedCommit", "taskPromoteCommit"]
         if let pending, pending.editorDraft != nil || editorMethods.contains(pending.method) {
@@ -15184,8 +15164,8 @@ private final class Engine: @unchecked Sendable {
         do {
             value = try call(method, argumentsJSON: argumentsJSON, editorAttempt: attempt)
         } catch {
-            // A command that never entered the journal, or a definite refusal,
-            // cannot have written. Keep uncertain attempts frozen for exact replay.
+
+
             if pending == nil {
                 try requireOrdinaryEditorMutation()
                 guard try ownedJournalIsAbsent() else { throw Self.retainedOrdinaryFailure }
@@ -15194,8 +15174,8 @@ private final class Engine: @unchecked Sendable {
             }
             throw error
         }
-        // A prepared draft no-op returns before a journal exists. Cleanup errors
-        // leave the frozen file for explicit read/retry, without another writer.
+
+
         if pending == nil, let current = try editorDrafts.read() {
             guard current.attempt == attempt else { throw HostFailure("Editor draft Save attempt changed") }
             #if DEBUG
@@ -15215,8 +15195,8 @@ private final class Engine: @unchecked Sendable {
               ["logShare", "logClearChecked"].contains(method) else {
             throw HostFailure("Diagnostics file action unavailable")
         }
-        // No pending check or mutation here: the file queue is independent from
-        // an already initialized host's exact owed domain command.
+
+
         return try invoke(method, arguments: [])
     }
 
@@ -15240,7 +15220,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     func prepareDataBackup(format: NativeBackupFormat = .json) throws -> NativeBackupExport {
-        // Use the normal read gate. Unlike Diagnostics, export cannot bypass pending work.
+
         let method: String
         switch format {
         case .json: method = "dataBackup"
@@ -15326,8 +15306,8 @@ private final class Engine: @unchecked Sendable {
     }
 
     func mergeBackupImport(_ id: UUID) throws -> String {
-        // Any pre-journal failure is definitely unwritten. Once pending is set,
-        // only finish may release it, even if durable journal promotion failed.
+
+
         let operation: NativeBackupOperationReference
         do {
             try backupAdmission()
@@ -15341,7 +15321,7 @@ private final class Engine: @unchecked Sendable {
                 metadata: backupMetadata(fileName: selection.fileName, modifiedAt: selection.modifiedAtMilliseconds),
                 snapshotName: name, existingSnapshot: nil)
         } catch {
-            // Never claim an unrelated owed command was rejected.
+
             guard pending == nil else { throw error }
             if let capacity = error as? NativeBackupOperationFilesError, capacity != .unavailable {
                 throw CoreHostRejection(message: "INVALID_INPUT: " + capacity.localizedDescription)
@@ -15357,7 +15337,7 @@ private final class Engine: @unchecked Sendable {
             ].contains(failure.message) { throw CoreHostRejection(message: failure.message) }
             throw CoreHostRejection(message: "INVALID_INPUT: Backup merge could not be prepared")
         }
-        // The complete immutable plan now owns all accepted input bytes.
+
         discardBackupImport(id)
         return try commitBackupOperation(operation)
     }
@@ -15375,7 +15355,7 @@ private final class Engine: @unchecked Sendable {
               let reference = try? JSONDecoder().decode(NativeBackupSnapshotReference.self, from: Data(encoded.utf8)) else {
             throw HostFailure("INVALID_INPUT: Recovery snapshot reference is invalid")
         }
-        // The storage owner proves canonical identity, completion and exact bytes.
+
         guard try backupOperationFiles.listSnapshots().contains(reference) else {
             throw HostFailure("INVALID_INPUT: Recovery snapshot is no longer available")
         }
@@ -15561,7 +15541,7 @@ private final class Engine: @unchecked Sendable {
             reference = try backupOperationFiles.prepare(id: id, planJSON: planJSON,
                 newSnapshot: (name: name, content: recoveryJSON), existingSnapshot: nil)
         } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        // No journal or invocation exists yet: only this preparation may be rejected.
+
         do {
             command = PendingCommand(version: 2, method: "captureLinesCommit", argumentsJSON: try backupJSON([backupEncoded(reference)]))
             replay = try captureLinesArguments(command)
@@ -15589,7 +15569,7 @@ private final class Engine: @unchecked Sendable {
     private func commitBackupOperation(_ reference: NativeBackupOperationReference) throws -> String {
         let command = PendingCommand(version: 2, method: "backupDocumentCommit",
                                      argumentsJSON: try backupJSON([backupEncoded(reference)]))
-        // Full byte ownership is verified before the journal can permit a write.
+
         let arguments: [Any]
         do { arguments = try backupDocumentArguments(command) }
         catch {
@@ -15603,8 +15583,8 @@ private final class Engine: @unchecked Sendable {
         }
         pending = command
         try persist(command)
-        // Document reload intentionally suppresses maintenance until this exact
-        // journal is complete. Normal activation resumes after durable cleanup.
+
+
         recoveryActivationPending = true
         let terminal: TerminalResult
         do { terminal = .success(try invoke(command.method, arguments: arguments)) }
@@ -15642,8 +15622,8 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func calendarPushEffectConstrainsBackup() -> Bool {
-        // Hosts without this capability cannot own a Calendar effect. A configured
-        // namespace that cannot prove absence must retain the same safety fence.
+
+
         guard deviceStorageLocation != nil else { return false }
         guard let deviceStorage, let cells = try? deviceStorage.readCalendarPushState(), cells.count == 6 else { return true }
         return cells[5] != nil
@@ -15676,8 +15656,8 @@ private final class Engine: @unchecked Sendable {
         defer { backupReplayReadOnly = previous }
         if calendarPushEffectConstrainsBackup() {
             backupReplayReadOnly = true
-            // Keep the existing exact receipt proof and normal reload/finish path.
-            // A vanished receipt cannot fall through to document writes afterward.
+
+
             guard try invoke("backupDocumentOutcome", arguments: arguments) != "null" else {
                 throw HostFailure("SAVE_FAILED: Pending Calendar effects require an exact saved backup receipt")
             }
@@ -15762,9 +15742,8 @@ private final class Engine: @unchecked Sendable {
         if ["pomodoroTransitionWrite", "watchPomodoroSubmit"].contains(method), pending == nil, try editorDrafts.read() != nil {
             throw CoreHostRejection(message: "NOT_READY: Pomodoro cannot replace a saved editor draft")
         }
-        // Fresh source capture must precede the ordinary mutation turn: the
-        // unchanged generic KV admission correctly refuses a retained owner.
-        // A retry keeps its already frozen plan and never recaptures source.
+
+
         let freshPomodoroRequest: [String: Any]?
         if pomodoroOwned, method == "pomodoroTransitionWrite", pending == nil {
             do {
@@ -16051,8 +16030,8 @@ private final class Engine: @unchecked Sendable {
                 return try inboxUndoReceiptOutcome(arguments: args)
             }
             if method == "trashTaskRestoreRetryOutcome" {
-                // The journal is the only replay authority. A visible target or an
-                // absent journal cannot prove that this request committed.
+
+
                 throw CoreHostRejection(message: "STALE_REVISION: Trash Task restore has no pending journal")
             }
             if method == "trashProjectRestoreRetryOutcome" {
@@ -16720,8 +16699,8 @@ private final class Engine: @unchecked Sendable {
             preparedSomedaySectionTaskEnvelope = nil
         }
         if method == "captureLinesSubmit" {
-            // Lines prepare, commit and finish in one call. Inside prepareCallCommand's frame, finish's plan check
-            // entered JavaScriptCore with too little of the 512 KiB queue stack left and overflowed.
+
+
             let result = try submitCaptureLines(args)
             NSLog("Native iOS capture lines ran outside command preparation releaseCheck=v1.3.7/ios-capture-lines-stack outcome=returned")
             return result
@@ -16797,8 +16776,8 @@ private final class Engine: @unchecked Sendable {
             else { terminal = .success(try command.method == "deviceCalendarSettingCommit"
                 ? invokeDeviceCalendarSettingCommit(command) : invoke(command.method, arguments: replay)) }
         } catch {
-            // These codes prove the first attempt stopped before its write. A
-            // replay rejection cannot prove an earlier uncertain attempt did not.
+
+
             if let failure = error as? HostFailure,
                isDefiniteRejection(failure.message, method: command.method) { terminal = .rejected(failure.message) }
             else { throw error }
@@ -16831,7 +16810,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    // Keep preparation locals off the stack while commit acknowledgment enters JavaScriptCore.
+
     private enum CallPreparationResult {
         case result(String)
         case command(PendingCommand)
@@ -18997,7 +18976,7 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == Self.ownedSaveMethod {
             if let terminal = command.terminal { return try finishOwnedSave(command, with: terminal) }
-            // A failed warm write remains owed. Replay rejection is uncertain.
+
             try persist(command)
             #if DEBUG
             try attachmentDraftHooks?.boundary?(.beforeSaveCommit)
@@ -19038,11 +19017,11 @@ private final class Engine: @unchecked Sendable {
         ordinaryMutationDepth += 1
         defer {
             ordinaryMutationDepth -= 1
-            // Active replay retains its exact binding through owed activation,
-            // or until runtime teardown; detached settlement keeps its old lifetime.
+
+
             if pending == nil {
                 if let turn = retainedOrdinaryTurn, case .alreadyOwedActive = turn.mode,
-                   recoveryActivationPending { /* Activation still owns this turn. */ }
+                   recoveryActivationPending {                                        }
                 else { retainedOrdinaryTurn = nil }
             }
         }
@@ -19087,11 +19066,11 @@ private final class Engine: @unchecked Sendable {
             }
             if let terminal = command.terminal { return try finish(command, with: terminal) }
             try persist(command)
-            // Unknown warm work must refuse: only the original running/owed/saved receipt may advance.
+
             let value: String
             do { value = try invoke("reminderCompletionRetry", arguments: args) }
             catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-                // Retire definite no-write refusal only after its terminal journal and clear succeed.
+
                 return try finish(command, with: .rejected(failure.message))
             }
             try validateReminderCompletionResult(value)
@@ -19104,7 +19083,7 @@ private final class Engine: @unchecked Sendable {
                 try validateNotificationSettingAcknowledgment(command, value: value)
                 terminal = .success(value)
             } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-                // A cold intent without a receipt has no surviving permission or write authority.
+
                 terminal = .rejected(failure.message)
             }
             return try finish(command, with: terminal)
@@ -19128,7 +19107,7 @@ private final class Engine: @unchecked Sendable {
                 try validateAIRequestTimeoutAcknowledgment(command, value: value)
                 terminal = .success(value)
             } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-                // A cold intent without a receipt has no surviving permission or write authority.
+
                 terminal = .rejected(failure.message)
             }
             return try finish(command, with: terminal)
@@ -19140,7 +19119,7 @@ private final class Engine: @unchecked Sendable {
                 try validateAIReasoningEffortAcknowledgment(command, value: value)
                 terminal = .success(value)
             } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-                // A cold intent without a receipt has no surviving permission or write authority.
+
                 terminal = .rejected(failure.message)
             }
             return try finish(command, with: terminal)
@@ -19152,7 +19131,7 @@ private final class Engine: @unchecked Sendable {
                 try validateAIGeminiThinkingBudgetAcknowledgment(command, value: value)
                 terminal = .success(value)
             } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-                // A cold intent without a receipt has no surviving permission or write authority.
+
                 terminal = .rejected(failure.message)
             }
             return try finish(command, with: terminal)
@@ -19264,11 +19243,11 @@ private final class Engine: @unchecked Sendable {
             }
             return try finish(command, with: terminal)
         }
-        // Also repairs a failed journal promotion before any execution can occur.
+
         try persist(command)
         if command.method == "backupDocumentCommit" { recoveryActivationPending = true }
-        // A rejection here remains ambiguous: an earlier execution may have
-        // succeeded. Only a successful exact replay establishes its terminal value.
+
+
         let value: String
         do {
             let replay: [Any]
@@ -19345,13 +19324,13 @@ private final class Engine: @unchecked Sendable {
         if command.method == Self.pomodoroMethod, case .success(let value) = terminal { try validatePomodoroResult(command, value: value) }
         if command.method == Self.ownedSaveMethod { return try finishOwnedSave(command, with: terminal) }
         if command.method == "captureLinesCommit", case .success(let value) = terminal {
-            // A proven capture result authorizes only pure validation and cleanup.
-            // Never reapply domain writes when a terminal journal already exists.
+
+
             try validateCaptureLinesSuccess(command, value: value)
         }
         if command.method == "backupDocumentCommit", case .success(let value) = terminal {
-            // A terminal journal is not permission to apply a missing receipt.
-            // This probe is SQL read-only, including after a cold restart.
+
+
             let proven = try invoke("backupDocumentOutcome", arguments: backupDocumentArguments(command))
             guard proven != "null",
                   Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
@@ -19910,7 +19889,7 @@ private final class Engine: @unchecked Sendable {
             rememberConfirmedProjectLifecycle(command)
         }
         if ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(command.method), case .success = terminal {
-            // Retain the exact validated envelope even if terminal persistence or cleanup fails.
+
             rememberConfirmedTaskCompletion(command)
         }
         if ["inboxPreparedCommit", "inboxUndoCommit"].contains(command.method), case .success = terminal {
@@ -19918,8 +19897,8 @@ private final class Engine: @unchecked Sendable {
         }
         var finished = command
         finished.terminal = terminal
-        // Keep the known answer in memory even if this phase cannot reach disk.
-        // Once persisted, restart can clean up without entering core again.
+
+
         pending = finished
         try persist(finished)
         if command.method == Self.pomodoroMethod, case .success = terminal, !lastPomodoroProjectionReloaded { return terminal }
@@ -19939,8 +19918,8 @@ private final class Engine: @unchecked Sendable {
             }
             try requireRetainedOrdinaryTurn()
         }
-        // Both removal after success and thaw after definite refusal belong to
-        // this exact editor proof. Retain the terminal journal on a conflict.
+
+
         if command.editorDraft != nil { try requireOrdinaryEditorMutation() }
         if command.method == "backupDocumentCommit", case .success = terminal {
             try backupOperationFiles.complete(backupOperationReference(command))
@@ -19975,8 +19954,8 @@ private final class Engine: @unchecked Sendable {
             if case .success(let value) = terminal { backupUnreturnedReply = value }
             let rejected: Bool
             if case .rejected = terminal { rejected = true } else { rejected = false }
-            // Cleanup failure cannot turn a proven completed write into a retry.
-            // Startup can remove the now unreferenced immutable operation later.
+
+
             try? backupOperationFiles.discard(backupOperationReference(command), provenRejected: rejected)
         }
         if let attempt = command.editorDraft, case .rejected = terminal {
@@ -20102,7 +20081,7 @@ private final class Engine: @unchecked Sendable {
             faults?.commandDiagnostic?(source == "archive" ? prefix : source + (prefix == "archivedTasksDelete" ? "TasksDelete" : "TasksDeleteUndo"))
             #endif
             let outcome = prefix == "archivedTasksDelete" ? "deleted" : "restored"
-            // Reference and Inbox shared core emit their ACK diagnostic; preserve old native logs.
+
             if done { NSLog("Native iOS Done bulk Trash confirmed releaseCheck=v1.3.4/ios-done-bulk-trash outcome=\(outcome)") }
             else if !reference && !inbox { NSLog("Native iOS Archive bulk Trash confirmed releaseCheck=v1.3.4/ios-archive-bulk-trash outcome=\(outcome)") }
         }
@@ -20733,7 +20712,7 @@ private final class Engine: @unchecked Sendable {
             || (["somedaySectionOrderWrite", "backupDocumentCommit", "captureLinesCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
     }
 
-    // Classification only; callers validate the separate branch before it grants authority.
+
     private func boardOrderEnvelope(_ command: PendingCommand) -> [String: Any]? {
         guard command.method == "boardCommit",
               let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
@@ -20748,7 +20727,7 @@ private final class Engine: @unchecked Sendable {
               let result = prepared["result"] as? [String: Any] else { return }
         let bytes = try JSONEncoder().encode(command)
         var acknowledged = command
-        // The known exact success DTO must also fit BEFORE accepting the first journal.
+
         if acknowledged.terminal == nil {
             acknowledged.terminal = .success(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
         }
@@ -20797,7 +20776,7 @@ private final class Engine: @unchecked Sendable {
         let json = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
         _ = try arguments("boardAction", String(decoding: try JSONSerialization.data(withJSONObject: [json]), as: UTF8.self))
         try requireBoardOrderEncodedSize(command)
-        // Shared boardValidate verifies full record grammar, snapshot hash and every RN effect BEFORE SQL.
+
         return args
     }
 
@@ -22526,7 +22505,7 @@ private final class Engine: @unchecked Sendable {
             confirmedInboxDecisionEnvelope = nil
             confirmedInboxUndoEnvelope = encoded
         } else if command.method == "inboxPreparedCommit" {
-            // A recovered forward write settles debt but must not create a fresh Undo offer.
+
             guard !recoveryActivationPending,
                   let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
                   let prepared = envelope["prepared"] as? [String: Any],
@@ -23062,9 +23041,7 @@ private final class Engine: @unchecked Sendable {
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
 
-    // Foundation can preserve canonically equivalent NSString keys while a
-    // Swift Dictionary collapses them. Opaque JSON must fail closed before
-    // crossing that bridge; otherwise replay would silently change the payload.
+
     private static func referenceTasksMoveJSONIsLossless(_ value: Any) -> Bool {
         if let object = value as? NSDictionary {
             guard let swift = object as? [String: Any], swift.count == object.count else { return false }
@@ -23295,7 +23272,7 @@ private final class Engine: @unchecked Sendable {
     private static func validTaskListAddTagRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "tag", "params", "source"]),
               let tag = request["tag"] as? String, tag.utf16.count <= 2_000 else { return false }
-        // Reuse the exact-byte selection transport; core owns tag semantics.
+
         var selection = request
         selection.removeValue(forKey: "tag")
         selection["status"] = "next"
@@ -23377,7 +23354,7 @@ private final class Engine: @unchecked Sendable {
               let tags = request["tags"] as? [String], (1...10_000).contains(tags.count),
               tags.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 2_000_000 }),
               Set(tags.map { Data($0.utf8) }).count == tags.count else { return false }
-        // Reuse the exact-byte selection transport; core owns tag semantics.
+
         var selection = request
         selection.removeValue(forKey: "tags")
         selection["status"] = "next"
@@ -23615,7 +23592,7 @@ private final class Engine: @unchecked Sendable {
     private static func validReferenceTasksAddTagRequest(_ request: [String: Any]) -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "tag", "params"]),
               let tag = request["tag"] as? String, tag.utf16.count <= 2_000 else { return false }
-        // Reuse the exact-byte selection transport; core owns tag semantics.
+
         var selection = request
         selection.removeValue(forKey: "tag")
         selection["status"] = "inbox"
@@ -23695,7 +23672,7 @@ private final class Engine: @unchecked Sendable {
               let tags = request["tags"] as? [String], (1...10_000).contains(tags.count),
               tags.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 2_000_000 }),
               Set(tags.map { Data($0.utf8) }).count == tags.count else { return false }
-        // Preserve raw picks: core owns JavaScript trim/prefix semantics.
+
         var selection = request
         selection.removeValue(forKey: "tags")
         selection["status"] = "inbox"
@@ -23958,7 +23935,7 @@ private final class Engine: @unchecked Sendable {
             }
         }
         try current()
-        // The fixed-cell store retains an uncertain CAS; only its exact pair can retry it.
+
         try storage.compareAndSetAppleRemindersImportState(expected: expectedRaw, next: next)
         try current()
         guard Self.taskDownloadOptionalEqual(try storage.readAppleRemindersImportState(), next) else { throw Self.appleReminderFailure }
@@ -24059,7 +24036,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func appleReminderSavedTaskIsLive(_ id: String, connection: SQLiteBridge) throws -> Bool {
-        // A pre-existing transaction cannot prove the saved task; leave it untouched.
+
         _ = try connection.execute("BEGIN DEFERRED")
         do {
             let rows = try NativeJSON.jsonObject(with: Data(connection.execute("SELECT id,deletedAt,purgedAt FROM tasks WHERE id=?",
@@ -24282,7 +24259,7 @@ private final class Engine: @unchecked Sendable {
             item = try validateAppleReminderItem(updated)
             try current()
         }
-        // The receipt is authoritative even when source metadata or task defaults changed.
+
         try current()
         var proof = try invoke("appleReminderItemOutcome", arguments: [item.planJSON])
         try current()
@@ -24402,8 +24379,8 @@ private final class Engine: @unchecked Sendable {
                 _ = try NativeWatchPomodoro(name: id + ".json", body: source)
             case "adoptLegacy":
                 guard Set(request.keys) == common else { throw pomodoroFailure }
-                // Refuse a malformed observation day before any legacy read.
-                // Shared535 remains the full preparation/plan authority.
+
+
                 let parts = day.split(separator: "-").compactMap { Int($0) }
                 guard day.utf8.count == 10, day.utf8.allSatisfy({ $0 == 45 || (48...57).contains($0) }),
                       parts.count == 3, (1...12).contains(parts[1]) else { throw pomodoroFailure }
@@ -24433,8 +24410,8 @@ private final class Engine: @unchecked Sendable {
         _ = try pomodoroPlanRequest(ownedJSON(request))
     }
     private static let pomodoroLegacyNames = ["@mindwtr_pomodoro_state", "@mindwtr_pomodoro_collapsed"]
-    /// Only a plan owned by Engine may contain the two exact source strings.
-    /// Validating this grammar grants no source-read or writer-stop authority.
+
+
     private static func pomodoroPlanRequest(_ json: String) throws -> [String: Any] {
         let request = try pomodoroObject(json, maximum: 2_000_000)
         guard request["action"] as? String == "adoptLegacy" else { return try pomodoroRequest(json) }
@@ -24465,8 +24442,8 @@ private final class Engine: @unchecked Sendable {
         guard let namespace = deviceStorageLocation?.bundleIdentifier, NativeReminderRequest.validNamespace(namespace) else {
             throw Self.pomodoroFailure
         }
-        // This historically named field already binds every startup SQLite
-        // connection. Reuse it; a newly replaced path cannot grant authority.
+
+
         guard let library = calendarPushDatabaseBinding, context != nil, database != nil,
               try Self.bindingIdentity(databaseURL) == library else { throw Self.pomodoroFailure }
         let values = try readPomodoroLegacy(storage)
@@ -24524,7 +24501,8 @@ private final class Engine: @unchecked Sendable {
               try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
               let arguments = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], arguments.count == 1 else { throw Self.pomodoroFailure }
         let plan = try Self.pomodoroObject(arguments[0], maximum: 2_000_000)
-        guard Set(plan.keys) == Set(["version", "request", "sessionBefore", "sessionAfter", "target", "taskPatch", "deviceId", "result"]),
+
+        guard Set(plan.keys).subtracting(["owed"]) == Set(["version", "request", "sessionBefore", "sessionAfter", "target", "taskPatch", "deviceId", "result"]),
               Self.isInteger(plan["version"], equalTo: 1), let request = plan["request"] as? [String: Any],
               let after = plan["sessionAfter"] as? String,
               plan["sessionBefore"] is NSNull || plan["sessionBefore"] is String,
@@ -24533,8 +24511,9 @@ private final class Engine: @unchecked Sendable {
         _ = try Self.pomodoroPlanRequest(Self.ownedJSON(request))
         _ = try Self.pomodoroObject(after, maximum: 1_000_000)
         if let before = plan["sessionBefore"] as? String { _ = try Self.pomodoroObject(before, maximum: 1_000_000) }
-        if !(plan["target"] is NSNull) {
-            guard let target = plan["target"] as? [String: Any], Set(target.keys) == Set(["id", "row"]),
+        func checkTask(_ value: Any?, nullable: Bool) throws {
+            if nullable, value is NSNull { return }
+            guard let target = value as? [String: Any], Set(target.keys) == Set(["id", "row"]),
                   let id = target["id"] as? String, !id.isEmpty, id.utf16.count <= 500,
                   target["row"] is NSNull || (target["row"] as? [Any]).map({ row in
                     row.count <= 128 && row.first as? String == id && row.allSatisfy { cell in
@@ -24543,16 +24522,27 @@ private final class Engine: @unchecked Sendable {
                     }
                   }) == true else { throw Self.pomodoroFailure }
         }
-        if !(plan["taskPatch"] is NSNull) {
-            guard let patch = plan["taskPatch"] as? [String: Any], Set(patch.keys) == Set(["timeSpentMinutes", "rev", "revBy", "updatedAt"]),
+        func checkPatch(_ value: Any?) throws {
+            if value is NSNull { return }
+            guard let patch = value as? [String: Any], Set(patch.keys) == Set(["timeSpentMinutes", "rev", "revBy", "updatedAt"]),
                   Self.pomodoroCount(patch["timeSpentMinutes"]), Self.pomodoroCount(patch["rev"]),
                   let device = patch["revBy"] as? String, !device.isEmpty, device.utf16.count <= 200,
                   let updated = patch["updatedAt"] as? String, updated.utf8.count <= 32 else { throw Self.pomodoroFailure }
         }
+        try checkTask(plan["target"], nullable: true)
+        try checkPatch(plan["taskPatch"])
+        if plan.keys.contains("owed") {
+            guard let owed = plan["owed"] as? [Any], !owed.isEmpty else { throw Self.pomodoroFailure }
+            for entry in owed {
+                guard let entry = entry as? [String: Any], Set(entry.keys) == Set(["target", "taskPatch"]) else { throw Self.pomodoroFailure }
+                try checkTask(entry["target"], nullable: false)
+                try checkPatch(entry["taskPatch"])
+            }
+        }
         let resultJSON = try Self.ownedJSON(result)
         _ = try Self.pomodoroResult(resultJSON)
-        // Reserve every later encoded phase before publishing an intent. The
-        // rejection's escaped control bytes are the worst valid bounded payload.
+
+
         let prefix = "NOT_READY:"
         var success = command; success.terminal = .success(resultJSON)
         var rejected = command; rejected.terminal = .rejected(prefix + String(repeating: "\0", count: 4096 - prefix.utf8.count))
@@ -24605,8 +24595,8 @@ private final class Engine: @unchecked Sendable {
                 try validatePomodoroResult(command, value: outcome)
                 receiptOnly = true
             } else {
-                // A successful absence probe alone permits source recheck;
-                // arbitrary SQL errors or formerly proven missing receipts retain.
+
+
                 try recheckPomodoroLegacy(command, request: request)
             }
         }
@@ -24632,8 +24622,8 @@ private final class Engine: @unchecked Sendable {
         try validatePomodoroResult(command, value: value)
         let proof = try invoke("pomodoroTransitionOutcome", arguments: arguments)
         guard proof != "null", Self.equalJSON(try Self.pomodoroResult(proof), result) else { throw Self.pomodoroFailure }
-        // Only an exact SQL receipt proves a control ran, including replay.
-        // The literal allowlist excludes caller content and older action markers.
+
+
         if let planJSON = arguments.first as? String,
            let request = (try? Self.pomodoroObject(planJSON, maximum: 2_000_000))?["request"] as? [String: Any],
            let action = request["action"] as? String,
@@ -24719,8 +24709,7 @@ private final class Engine: @unchecked Sendable {
         return args
     }
 
-    // Native validates lossless closed transport only. Shared506 owns all
-    // compaction, reference authority, pending-delete policy and saved effects.
+
     private static func validTrashPurgePendingQueue(_ value: Any?) -> Bool {
         if value is NSNull { return true }
         guard let rows = value as? [[String: Any]] else { return false }
@@ -24779,7 +24768,7 @@ private final class Engine: @unchecked Sendable {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "source", "action", "tag"]),
               request["source"] as? String == "done", request["action"] as? String == "addTag",
               let tag = request["tag"] as? String, !tag.isEmpty, tag.utf16.count <= 2_000 else { return false }
-        return true // Shared canSaveTaskListTag owns whitespace and token semantics.
+        return true
     }
 
     private static func isDoneBulkRemoveTagRequest(_ request: [String: Any]) -> Bool {
@@ -24788,7 +24777,7 @@ private final class Engine: @unchecked Sendable {
               let tags = request["tags"] as? [String], !tags.isEmpty, tags.count <= 10_000,
               Set(tags.map { Data($0.utf8) }).count == tags.count,
               tags.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 2_000_000 }) else { return false }
-        return true // Shared request decoder and token builder own trim/normalization.
+        return true
     }
 
     private static func validArchivedTasksRestoreResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
@@ -25190,7 +25179,7 @@ private final class Engine: @unchecked Sendable {
         return true
     }
 
-    // Origin is read after validation; successful Board delivery also requires its exact receipt.
+
     private func taskCompletionSource(_ command: PendingCommand) -> String? {
         guard ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(command.method),
               let args = try? taskCompletionJournalArguments(command), let encoded = args.first as? String,
@@ -25214,8 +25203,7 @@ private final class Engine: @unchecked Sendable {
         return requestID
     }
 
-    // Explicit History/Reference row actions share the guarded journal/receipt path. Public
-    // endpoints and each durable namespace remain explicit and independent.
+
     private static func historyTaskWritePrefix(_ method: String) -> String? {
         switch method {
         case "rowQuickStatusOptions", "rowQuickStatusWrite", "rowQuickStatusRetryOutcome", "rowQuickStatusCommit": return "rowQuickStatus"
@@ -25438,7 +25426,7 @@ private final class Engine: @unchecked Sendable {
             && ["inbox", "next", "waiting", "someday", "reference"].contains(request["status"] as? String ?? "")
     }
 
-    // Callers use this only for commands whose core validation has already succeeded.
+
     private func historyTaskStatusSource(_ command: PendingCommand) -> String? {
         guard command.method == "doneTaskStatusCommit", let args = try? journalArguments(command),
               let text = args.first as? String,
@@ -26117,11 +26105,11 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    /// Core `isTimeEstimate`: a picker preset, or `custom:` plus a finite JS Number of at least 1.
+
     private static func isTimeEstimate(_ value: Any) -> Bool {
         guard let text = value as? String else { return false }
         if ["5min", "10min", "15min", "30min", "1hr", "2hr", "3hr", "4hr", "4hr+"].contains(text) { return true }
-        // JS Number trims whitespace; its rare 0b/0o spellings are refused here (fail closed).
+
         guard text.hasPrefix("custom:"),
               let minutes = Double(text.dropFirst("custom:".count).trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
         return minutes.isFinite && minutes >= 1
@@ -26271,8 +26259,8 @@ private final class Engine: @unchecked Sendable {
                   let result = prepared["result"] as? [String: Any], Self.validReferenceProjectNextActionResult(result, request: request) else {
                 throw HostFailure("Malformed Reference project next action journal")
             }
-            // Pure core validation binds the deep context/operation, resolved creation
-            // intent and original proof before any journal replay SQL.
+
+
             return args
         }
 
@@ -26478,15 +26466,15 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("Malformed editor draft journal identity")
             }
             if !checkingEditorSnapshot {
-                // Corrupt-file discard validates durable journal authority first;
-                // the snapshot itself cannot be decoded until explicitly discarded.
+
+
             } else if let frozen = try editorDrafts.read() {
                 guard frozen.attempt == attempt else {
                     throw HostFailure("Editor draft journal identity does not match snapshot")
                 }
             } else if let terminal = command.terminal, case .success = terminal {
-                // A terminal result may have removed this exact snapshot before
-                // journal cleanup failed; replaying no writer is now required.
+
+
             } else {
                 throw HostFailure("Editor draft journal is missing its frozen snapshot")
             }
@@ -27413,22 +27401,22 @@ private final class Engine: @unchecked Sendable {
         var initial = command; initial.terminal = nil
         var success = initial; success.terminal = .success(try Self.ownedJSON(result))
         var rejection = initial; rejection.terminal = .rejected(String(repeating: "\u{0000}", count: Self.ownedSaveRejectionBytes))
-        // Reserve the actual Foundation escaping layers before any selected
-        // Undo commit; legacy Undo keeps its historical journal budget.
+
+
         for representation in [command, initial, success, rejection] {
             guard try JSONEncoder().encode(representation).count <= Self.ownedSaveMaximumBytes else { throw Self.ownedSaveFailure }
         }
     }
 
     private func journalLegacyAndCaptureArguments(_ command: PendingCommand, retainedOrdinary: Bool = false) throws -> [Any] {
-        // These commands store a final state. Text drafts also carry the exact
-        // base values; core accepts an applied edit or refuses an intervening one.
+
+
         if ["complete", "setAreaFilter", "saveDraft", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit"].contains(command.method) {
-            // Only these existing final-state task routes are ordinary. The
-            // remaining branch members write preferences/global section settings.
+
+
             guard !retainedOrdinary || ["complete", "saveDraft"].contains(command.method) else { throw Self.retainedOrdinaryFailure }
-            // A raw schedule intent was never a supported legacy journal. It
-            // must not be reparsed/reprepared under a different clock or zone.
+
+
             return try arguments(command.method, command.argumentsJSON, allowPreparedDates: false)
         }
         if Self.somedayMoveCommits.contains(command.method) {
@@ -27481,7 +27469,7 @@ private final class Engine: @unchecked Sendable {
                       move["clock"] is [String: Any], move["scope"] is [String: Any] else {
                     throw HostFailure("Malformed prepared Board Move journal")
                 }
-                // Shared boardValidate recomputes this opaque frozen one-row effect.
+
             }
             let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
             let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self)
@@ -27601,8 +27589,8 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("saveDraft", encoded)
             return args
         }
-        // This method is deliberately absent from the public whitelist. Native
-        // checks the transport envelope; core validates every prepared row field.
+
+
         guard command.method == "captureCommit",
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
               let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
@@ -27769,7 +27757,7 @@ private final class Engine: @unchecked Sendable {
               let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [Any], args.count == count else {
             throw HostFailure("Invalid or unavailable core method arguments")
         }
-        // Native validates its transport; the shared contract validates meaning.
+
         for (index, argument) in args.enumerated() {
             if (method == "window" && index < 2) || method == "focus"
                 || (["focusWindow", "projectDetail", "projectNotes"].contains(method) && (index == 1 || index == 2))
@@ -27845,7 +27833,7 @@ private final class Engine: @unchecked Sendable {
               let raw = args[1] as? String, raw.utf8.count <= 1_024,
               let context = try? NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               (try? NativeJSON.hasUniqueObjectKeys(raw)) == true else { throw invalid }
-        // Client diagnostics carry only audited marker enums and aggregate counts.
+
         let valid: Bool
         switch message {
         #if DEBUG && os(iOS) && targetEnvironment(simulator)
@@ -28058,9 +28046,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    /// Syntax/placement is checked by NativeJSON and the fixed schemas above.
-    /// These schemas have no valid repeated key at any level; Foundation alone
-    /// would silently collapse duplicates, including escaped equivalent names.
+
     private func dataSettingHasExactKeyTokens(_ raw: String, expected: Set<String>) throws -> Bool {
         let bytes = Array(raw.utf8)
         var index = 0, keys: [String] = []
@@ -30324,7 +30310,7 @@ private final class Engine: @unchecked Sendable {
                     throw HostFailure("INVALID_INPUT: Inbox tokens require a bounded revision window")
                 }
                 if let params = input["params"] {
-                    // Core validates optional filter fields and selection limits; no edit can be replayed by paging.
+
                     guard let params = params as? [String: Any],
                           Set(params.keys).isSubset(of: ["groupBy", "collapsedGroupIds", "filters"]) else {
                         throw HostFailure("INVALID_INPUT: Inbox tokens require canonical view params")
@@ -30692,8 +30678,8 @@ private final class Engine: @unchecked Sendable {
             }
         }
         if method == "calendarPreference" {
-            // Types and the static request envelope are checked before journaling
-            // and again before startup replay. Core owns option/range/conflict policy.
+
+
             guard let json = args.first as? String,
                   let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
                   Set(input.keys) == Set(["requestId", "field", "before", "value"]),
@@ -30711,9 +30697,8 @@ private final class Engine: @unchecked Sendable {
             guard valid else { throw HostFailure("INVALID_INPUT: Unsupported native Calendar preference field or value type") }
         }
         if method == "saveDraft" {
-            // Deliberate draft-field subset. Validate again on journal replay;
-            // dates/recurrence additionally require their original raw tuples and
-            // enter only the prepared commit journal path.
+
+
             guard let json = args.first as? String,
                   let input = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
                   input["attachments"] == nil || json.utf8.count <= 2_000_000,
@@ -30758,8 +30743,8 @@ private final class Engine: @unchecked Sendable {
                     throw HostFailure("INVALID_INPUT: Native recurrence save requires its complete draft tuple and raw baseline")
                 }
             }
-            // A move can clear its section/area. Guard unchanged companions too,
-            // so an intervening writer's assignment cannot be silently cleared.
+
+
             let associations: Set<String> = ["projectId", "areaId", "sectionId"]
             if !associations.isDisjoint(with: patch.keys) {
                 let complete = associations.isSubset(of: Set(patch.keys))
@@ -30772,17 +30757,14 @@ private final class Engine: @unchecked Sendable {
     }
 
 
-    // Cleanup uses the existing slot but never generic command replay, store
-    // hydration, editor lineage, or a captured whole-document metadata write.
     private static func cleanupObject(_ text: String, maximum: Int) throws -> [String: Any] {
         guard text.utf8.count <= maximum,
               let value = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
               try cleanupUniqueKeys(text) else { throw cleanupFailure }
         return value
     }
-    /// NativeJSON checks syntax and preserves decoded string bytes. Foundation
-    /// collapses duplicate members, so cleanup authority checks every object
-    /// separately using the existing fixed-schema key-token reader pattern.
+
+
     private static func cleanupUniqueKeys(_ text: String) throws -> Bool {
         try NativeJSON.hasUniqueObjectKeys(text)
     }
@@ -30954,8 +30936,8 @@ private final class Engine: @unchecked Sendable {
             let journalURL = self.journalURL, editorURL = editorDrafts.url,
                 sidecarURL = NativeAttachmentDraftStore(databaseURL: databaseURL).url
             let attachmentID = try Self.cleanupRequest(turn.requestJSON).attachmentID
-            // Immutable bytes/inode and URLs only. No Engine, JSC, database or
-            // mutable turn escapes to the file worker; close uses its token.
+
+
             id = try turn.jobs.submitBaselineRetirement(attachmentID: attachmentID, proof: proof, ownershipBytes: journal.bytes.count) {
                 guard try Self.boundFile(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == journal,
                       try Self.boundFile(editorURL, maximumBytes: 3_000_000) == nil,
@@ -30983,7 +30965,7 @@ private final class Engine: @unchecked Sendable {
         try requireCleanupTurn(); _ = try cleanupJournal(command)
         let bytes = try ownedEncoded(command)
         guard bytes.count <= Self.ownedSaveMaximumBytes else { throw Self.cleanupFailure }
-        // Retain this exact attempted transition even if promotion loses its ACK.
+
         pending = command; turn.command = command; turn.unacknowledged = true
         #if DEBUG
         try faults?.journalWrite?()
@@ -31099,8 +31081,8 @@ private final class Engine: @unchecked Sendable {
                 do { _ = try turn.database.execute("ROLLBACK"); turn.transaction = false }
                 catch { throw Self.cleanupFailure }
             }
-            // No proof/intent ever escaped: a later fresh selection may retry.
-            // Once an immutable command exists the exact owner remains owed.
+
+
             if turn.command == nil && turn.terminal == nil { cleanupTurn = nil }
             throw Self.cleanupFailure
         }
@@ -31355,7 +31337,7 @@ private final class Engine: @unchecked Sendable {
                    let project = shape["projectId"] as? String, !project.isEmpty, project.utf16.count <= 500,
                    Self.ownedDiscardUUID(shape["attachmentId"]) != nil,
                    let revision = shape["revision"] as? String, !revision.isEmpty, revision.utf16.count <= 200 {
-                    // A new initial attempt cannot adopt an older terminal receipt for this selection.
+
                     projectDownloadAcknowledgedTurn = nil
                 }
             }
@@ -31498,8 +31480,8 @@ private final class Engine: @unchecked Sendable {
               let settings = try NativeJSON.jsonObject(with: Data(data.utf8)) as? [String: Any] else { throw Self.foregroundSyncFailure }
         return settings["deviceId"] ?? NSNull()
     }
-    /// Default relocation keeps its selector. Cached mode returns nil only for
-    /// a proved absent target; a present invalid generation never falls through.
+
+
     private func relocatedProjectAvailability(requestJSON: String, callback: JSValue,
                                                cancellation: NativeAttachmentCancellation, cached: Bool = false) throws -> String? {
         guard let request = try NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
@@ -31508,8 +31490,8 @@ private final class Engine: @unchecked Sendable {
               let attachmentID = request["attachmentId"] as? String, !attachmentID.isEmpty, attachmentID.utf16.count <= 500,
               let revision = request["revision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
               let runtime = context, let jobs = attachmentJobs else { throw Self.foregroundSyncFailure }
-        // Capture all actual cells, including row identity, before any shared
-        // durable read. The display token is never substituted for these bytes.
+
+
         guard let before = try projectAvailabilityOptionalRow(projectID) else { return nil }
         if before["attachments"] is NSNull { return nil }
         guard let encoded = before["attachments"] as? String,
@@ -31653,8 +31635,7 @@ private final class Engine: @unchecked Sendable {
         return result
     }
 
-    // Project Add is one concrete owner in the existing command journal. The
-    // immutable core envelope is never reconstructed from current row metadata.
+
     private static func projectObject(_ text: String, maximum: Int = 8 * 1024 * 1024) throws -> [String: Any] {
         guard text.utf8.count <= maximum,
               let value = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw projectFileAddFailure }
@@ -31854,8 +31835,8 @@ private final class Engine: @unchecked Sendable {
         let defaults = try aiSummaryDefaults(domain: domain), storage = try requireDeviceStorageAdmission()
         let kv = try storage.captureAISummaryEvidence(), owned = try aiSummaryOwnedFiles()
         guard kv.count + owned.count + 8 <= 4096 else { throw NativeAISummaryEvidence.unavailable }
-        // JSON escaping costs at most six bytes per UTF-8 input byte. Reserve fixed metadata,
-        // per-entry artifact/hash objects, and reject before constructing or serializing them.
+
+
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         var manifestBudget = 1024 * 1024 - 8192
         for name in Array(kv.keys) + Array(owned.keys) + [build] {
@@ -32160,7 +32141,7 @@ private final class Engine: @unchecked Sendable {
             guard let turn = self.aiRequestTimeoutTurn, let request = turn.requestJSON else {
                 throw HostFailure("Isolated AI timeout COMMIT interrupted")
             }
-            // The published save retains its cancellation contract and exact owner fences.
+
             try self.requireAIRequestTimeoutTurn(checkCancellation: false)
             guard let command = self.pending, let envelopeRaw = try self.journalArguments(command).first as? String,
                   let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else {
@@ -32176,7 +32157,7 @@ private final class Engine: @unchecked Sendable {
                 guard !turn.retry else { throw HostFailure("Isolated AI timeout COMMIT interrupted") }
                 self.aiRequestTimeoutFixtureOriginal = request
             }
-            // "Once" is the initial typed save: every shared SQL retry must still fail.
+
             guard turn.retry else { throw HostFailure("Isolated AI timeout COMMIT interrupted") }
             self.aiRequestTimeoutFixtureExactRetry = true
         }
@@ -32227,7 +32208,7 @@ private final class Engine: @unchecked Sendable {
             guard let turn = self.aiReasoningEffortTurn, let request = turn.requestJSON else {
                 throw HostFailure("Isolated AI reasoning effort COMMIT interrupted")
             }
-            // The published save retains its cancellation contract and exact owner fences.
+
             try self.requireAIReasoningEffortTurn(checkCancellation: false)
             guard let command = self.pending, let envelopeRaw = try self.journalArguments(command).first as? String,
                   let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else {
@@ -32243,7 +32224,7 @@ private final class Engine: @unchecked Sendable {
                 guard !turn.retry else { throw HostFailure("Isolated AI reasoning effort COMMIT interrupted") }
                 self.aiReasoningEffortFixtureOriginal = request
             }
-            // "Once" is the initial typed save: every shared SQL retry must still fail.
+
             guard turn.retry else { throw HostFailure("Isolated AI reasoning effort COMMIT interrupted") }
             self.aiReasoningEffortFixtureExactRetry = true
         }
@@ -32294,7 +32275,7 @@ private final class Engine: @unchecked Sendable {
             guard let turn = self.aiGeminiThinkingBudgetTurn, let request = turn.requestJSON else {
                 throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted")
             }
-            // The published save retains its cancellation contract and exact owner fences.
+
             try self.requireAIGeminiThinkingBudgetTurn(checkCancellation: false)
             guard let command = self.pending, let envelopeRaw = try self.journalArguments(command).first as? String,
                   let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else {
@@ -32310,7 +32291,7 @@ private final class Engine: @unchecked Sendable {
                 guard !turn.retry else { throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted") }
                 self.aiGeminiThinkingBudgetFixtureOriginal = request
             }
-            // "Once" is the initial typed save: every shared SQL retry must still fail.
+
             guard turn.retry else { throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted") }
             self.aiGeminiThinkingBudgetFixtureExactRetry = true
         }
@@ -32633,8 +32614,8 @@ private final class Engine: @unchecked Sendable {
         turn.encryptionObserved = true
         try requireProjectDownloadTurn(strict: true)
     }
-    /// Match core's base64ToBytes key-cache decoding, including tolerated legacy
-    /// formatting. Observation equality stays exact; only AES byte binding decodes.
+
+
     private static func attachmentDownloadKeyBytes(_ value: String?) -> Data? {
         guard let value else { return nil }
         let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".utf8)
@@ -32698,7 +32679,7 @@ private final class Engine: @unchecked Sendable {
         #endif
         try requireProjectDownloadTurn(strict: checkFreshness ? nil : false)
     }
-    /// Acquired evidence is returned under cleanup ownership before freshness/cancellation.
+
     private func projectDownloadFile(_ request: NativeAttachmentDraftFileRequest, turn: ProjectDownloadTurn,
                                      cancellation: NativeAttachmentCancellation) throws -> [String: Any] {
         try requireProjectDownloadTurn(strict: false)
@@ -32910,8 +32891,8 @@ private final class Engine: @unchecked Sendable {
                       Self.ownedEqual(try Self.ownedJSON([projectAvailabilityDevice()]), turn.deviceAfterJSON) else { throw Self.projectDownloadFailure }
             }
             _ = try invoke("projectFileAvailabilityEncryptionAdmission", arguments: [state.config[4] as Any? ?? NSNull()])
-            // Retained sources are already authenticated plaintext. Observe fresh
-            // current material (including nil), never a pre-crash secret identity.
+
+
             try observeProjectDownloadEncryption(turn)
         }
         defer { turn.strict = false; turn.preparing = false }
@@ -32934,7 +32915,7 @@ private final class Engine: @unchecked Sendable {
                 try projectDownloadBoundary(.afterSettled)
                 return try finishProjectDownload(state, turn: turn, cancellation: cancellation)
             }
-            // An exact after row is a lost commit acknowledgment, never rollback authority.
+
             try projectDownloadBoundary(.beforeCommit)
             let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, Self.projectDownloadBackend(state.config)], localCancellation: cancellation)
             try projectDownloadBoundary(.afterCommit)
@@ -32964,7 +32945,7 @@ private final class Engine: @unchecked Sendable {
             try requireProjectDownloadTurn(strict: true)
             state.reservationStarted = true; try writeProjectDownloadState(state, turn: turn)
             let value = try projectDownloadFile(.prepareStage(targetURI: target, operationID: state.requestId.replacingOccurrences(of: "-", with: "")), turn: turn, cancellation: cancellation)
-            // Deliberate unproven-reservation crash control, before ownership is durable.
+
             try projectDownloadBoundary(.afterReservation, checkFreshness: false)
             guard let uri = value["stageURI"] as? String, let identity = value["stagedIdentity"] as? String,
                   let parent = value["directoryIdentity"] as? String, let privateParent = value["privateDirectoryIdentity"] as? String else { throw Self.projectDownloadFailure }
@@ -32986,7 +32967,7 @@ private final class Engine: @unchecked Sendable {
                 _ = try projectDownloadFile(.observeFilledStage(stage: projectStage(state.stage!), sha256: source.sha256, size: source.size), turn: turn, cancellation: cancellation)
                 try projectDownloadBoundary(.beforePublication); try requireProjectDownloadTurn(strict: true)
                 _ = try? projectDownloadFile(.publishStage(stage: projectStage(state.stage!), targetURI: target, sha256: source.sha256), turn: turn, cancellation: cancellation)
-                // Reprove and durably capture the owned publication before a late owner fence.
+
                 publication = try projectDownloadFile(.verifyPublication(targetURI: target, stage: projectStage(state.stage!), sha256: source.sha256, size: source.size), turn: turn, cancellation: NativeAttachmentCancellation())
                 state.published = try JSONDecoder().decode(ProjectPublished.self, from: Data(Self.ownedJSON(publication!).utf8))
                 state.phase = .published; try writeProjectDownloadState(state, turn: turn)
@@ -33314,7 +33295,7 @@ private final class Engine: @unchecked Sendable {
         #endif
         try requireProjectFileAddTurn()
         try requireProjectDownloadTurn()
-        // A failed durable ACK retains exactly this attempted immutable intent.
+
         pending = command; turn.command = command; turn.unacknowledged = true
         do { try DurableFile.write(data, to: journalURL, privateDraft: true) }
         catch {
@@ -33415,7 +33396,7 @@ private final class Engine: @unchecked Sendable {
             return try executeProjectFileAdd(&state, turn: turn, cancellation: cancellation)
         } catch {
             if turn.command == nil && turn.acknowledged == nil {
-                // Only a receipt made by this live call grants cache retirement.
+
                 if let receipt = turn.receipt { try? turn.jobs.retireProviderSource(receipt, requireOwner: { try self.requireProjectFileAddTurn() }) }
                 projectFileAddTurn = nil
             }
@@ -33451,7 +33432,7 @@ private final class Engine: @unchecked Sendable {
         let target = prepared["targetURI"] as! String
         if state.abandoned { return try executeProjectFileAbandon(&state, turn: turn, cancellation: cancellation) }
         if state.phase == .intent {
-            // A crash after reservation cannot turn an existing pathname into proof.
+
             guard !state.reservationStarted else { throw Self.projectFileAddFailure }
             _ = try projectFile(.ensureManagedDirectoryProof, turn: turn, cancellation: cancellation)
             state.managedDirectoryIdentity = turn.managedDirectoryIdentity
@@ -33516,7 +33497,7 @@ private final class Engine: @unchecked Sendable {
             guard try ownedDiscardIdentity(candidate) == nil else { throw Self.projectFileAddFailure }
         }
         if state.published == nil, let stage = state.stage {
-            // Reprove only the reserved inode. Equal bytes in a foreign target never qualify.
+
             if let value = try? projectFile(.verifyPublication(targetURI: target, stage: projectStage(stage), sha256: state.source.sha256, size: state.source.size), turn: turn, cancellation: cancellation) {
                 guard state.filled != nil else { throw Self.projectFileAddFailure }
                 state.published = try JSONDecoder().decode(ProjectPublished.self, from: Data(Self.ownedJSON(value).utf8))
@@ -33580,9 +33561,8 @@ private final class Engine: @unchecked Sendable {
         try requireProjectDownloadTurn()
         return outcome
     }
-    /// The shared same-turn check remains mandatory. This additional native
-    /// check only keeps/refuses bytes; its SQLite writer lock closes the interval
-    /// between the durable reference scan and unlink without entering JSC.
+
+
     private func projectDurableReferenceRetirement(targetURI: String, proof: ProjectPublished,
                                                    turn: ProjectAddTurn, cancellation: NativeAttachmentCancellation) throws -> String {
         do {
@@ -33594,9 +33574,8 @@ private final class Engine: @unchecked Sendable {
                 })
         } catch { throw Self.projectFileAddFailure }
     }
-    /// Keep-only reference identity, as core `normalizeAttachmentCleanupUri`: one file's
-    /// percent-encoded and plain spellings, and `/private/var` vs `/var`, compare equal.
-    /// Never use it as a file-operation path.
+
+
     static func attachmentReferenceIdentity(_ uri: String) -> String? {
         let lower = uri.lowercased()
         if lower.hasPrefix("http://") || lower.hasPrefix("https://") || uri.hasPrefix("content://") { return nil }
@@ -33631,7 +33610,7 @@ private final class Engine: @unchecked Sendable {
                     guard let kind = attachment["kind"] as? String, ["file", "link"].contains(kind) else { throw Self.ownedDiscardFailure }
                     if kind == "file" {
                         guard let uri = attachment["uri"] as? String, uri.utf8.count <= 16 * 1024 else { throw Self.ownedDiscardFailure }
-                        // Deleted parents/tombstones also keep conservatively.
+
                         if Self.attachmentReferenceIdentity(uri).map({ Self.ownedEqual($0, targetIdentity) }) == true {
                             referenced = true; respelled = respelled || !Self.ownedEqual(uri, targetURI)
                         }
@@ -33726,8 +33705,8 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == "deviceCalendarSettingCommit" { _ = try journalArguments(command) }
         if command.method == "taskCancellationUndoCommit", try cancellationUndoIsComplete(command) {
-            // The same selected reader reserves future terminal capacity and
-            // bounds an actual terminal before generic persistence can write it.
+
+
             _ = try journalArguments(command)
         }
         if command.method == Self.mixedSaveMethod {
@@ -33794,9 +33773,8 @@ private final class Engine: @unchecked Sendable {
         }
         do { try DurableFile.write(bytes, to: journalURL) }
         catch {
-            // Only this exact attempted write may have become visible before a
-            // directory-sync ACK was lost. Preserve the same warm owner/editor;
-            // retry must re-ACK these bytes, never adopt another ordinary plan.
+
+
             if let turn = retainedOrdinaryTurn {
                 try requireRetainedOrdinaryTurn(checkingJournal: false)
                 let actual = try retainedOrdinaryJournalBinding()
@@ -33852,8 +33830,7 @@ private final class Engine: @unchecked Sendable {
         try requireRetainedOrdinaryTurn()
     }
 
-    /// A settled read may resolve one container UUID, but never gains ownership
-    /// of old paths or rewrites the attachment/journal which names them.
+
     private func relocatedFileOpenURI(_ selected: [String: Any]) throws -> String? {
         guard let uri = selected["uri"] as? String else { throw Self.ownedSaveFailure }
         let managed = try mixedSaveManagedURI(), prefix = Data(managed.utf8), target = Data(uri.utf8)
@@ -33900,8 +33877,8 @@ private final class Engine: @unchecked Sendable {
                   number.int64Value == proof.size else { throw Self.ownedSaveFailure }
         }
     }
-    /// Capture actual persisted attachment cells, not an editor or cached store
-    /// projection. The same raw row is checked after every asynchronous boundary.
+
+
     private func relocatedFileOpenRow(table: String, id: String, selected: [String: Any]) throws -> [String: Any] {
         guard ["tasks", "projects"].contains(table), let selectedID = selected["id"] as? String else { throw Self.ownedSaveFailure }
         let raw = try requireDatabase().execute("SELECT attachments,deletedAt,purgedAt,rev,updatedAt FROM \(table) WHERE id=? AND length(CAST(attachments AS BLOB))<=6400000",
@@ -34211,8 +34188,8 @@ private final class Engine: @unchecked Sendable {
 
     private func settleSelectedTicket(_ id: String, terminalConsumed: Bool, turn: TaskDownloadTurn?,
                                           runtime: JSContext, host: JSValue) {
-        // Failure retires only this submission. Ports stay revoked while the
-        // accepted workers and the exact shared ticket reach terminal state.
+
+
         turn?.preparing = false
         runtime.exception = nil
         _ = host.invokeMethod("cancel", withArguments: [id])
@@ -34238,7 +34215,7 @@ private final class Engine: @unchecked Sendable {
         _ = runtime.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
         runtime.exception = nil
         _ = runtime.objectForKeyedSubscript("__resumeHostCalls")?.call(withArguments: [])
-        // Settlement must not replace the original owner/parse/cancel failure.
+
         runtime.exception = nil
     }
 
@@ -34298,8 +34275,8 @@ private final class Engine: @unchecked Sendable {
         guard let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true else {
             throw HostFailure("Malformed core request ticket")
         }
-        // No timeout abandons a command while its durable result is unknown.
-        // Promise jobs drain whenever JSC returns from a call; timers share this queue.
+
+
         var cancelled = false
         var fileSyncInvocationDisposed = false
         defer {
@@ -34317,8 +34294,8 @@ private final class Engine: @unchecked Sendable {
         while true {
             var reply: JSValue?
             if !cancelled, localCancellation?.isCancelled == true {
-                // An already acknowledged terminal result wins the cancellation
-                // race; do not report failure after its completion diagnostic.
+
+
                 reply = host.invokeMethod("poll", withArguments: [id])
                 try checkException()
                 if reply == nil || reply!.isNull || reply!.isUndefined {
@@ -34359,8 +34336,8 @@ private final class Engine: @unchecked Sendable {
                 try checkException()
             }
             if let reply, !reply.isNull, !reply.isUndefined {
-                // poll has already removed this ticket, even if parsing or the
-                // post-terminal owner fence refuses its returned value.
+
+
                 terminalConsumed = true
                 guard reply.isString, let json = reply.toString(),
                       let envelope = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
@@ -34401,8 +34378,8 @@ private final class Engine: @unchecked Sendable {
               attachmentJobs != nil || httpJobs != nil || secretJobs != nil || cryptoJobs != nil || calendarJobs != nil, let context else { return }
         let delay = immediate ? 0 : context.objectForKeyedSubscript("__nextTimerDelay")?.call(withArguments: [])?.toDouble() ?? -1
         guard delay.isFinite, delay >= 0 else { return }
-        // One scheduled idle turn per generation; completions can move a timer
-        // earlier but never capture a JSContext/JSValue on the worker queue.
+
+
         if attachmentIdlePump != nil && !immediate { return }
         attachmentIdlePump?.cancel()
         let generation = attachmentGeneration
@@ -34417,7 +34394,7 @@ private final class Engine: @unchecked Sendable {
         attachmentIdlePump = nil
         guard started, !closed, !localRequests.isClosing, !invoking, !recoveryActivationPending, pending == nil, !cleanupOwed, reminderEffectsTurn == nil, pomodoroAlarmTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil, encryptionUnlockTurn == nil, let context else { return }
         _ = context.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
-        // No arbitrary JS exception content enters diagnostics.
+
         if context.exception != nil { context.exception = nil }
         reminderPostOperation()
         searchPostOperation()
@@ -34585,7 +34562,7 @@ private final class Engine: @unchecked Sendable {
             }
             return result
         } catch {
-            // No filesystem exception, setting name or stored value crosses JSC.
+
             let failure = (error as? HostFailure)?.message == Self.deviceStorageInvalid.message
                 ? Self.deviceStorageInvalid : Self.deviceStorageUnavailable
             return "!MindwtrNativeError:" + failure.message
@@ -34875,8 +34852,8 @@ private final class Engine: @unchecked Sendable {
             guard let jobs = httpJobs else { throw HostFailure("I/O response body is unavailable") }
             let result = try jobs.body()
             if result.completed {
-                // Defer logging until after this JSC turn; never invoke or pump
-                // a host method recursively from a native ioBody callback.
+
+
                 let generation = attachmentGeneration
                 queue.async { [weak self] in
                     guard let self, self.attachmentGeneration == generation, self.started, !self.closed,
@@ -34929,8 +34906,8 @@ private final class Engine: @unchecked Sendable {
         }
         let now: @convention(block) () -> Double = { ProcessInfo.processInfo.systemUptime * 1_000 }
         let random: @convention(block) (Int) -> String = { length in
-            // Bundle evaluation needs entropy for in-memory identifiers before
-            // cold cleanup settles. This bounded helper has no durable I/O authority.
+
+
             guard (0...65_536).contains(length) else { return "!MindwtrNativeError:Invalid random byte count" }
             if length == 0 { return "[]" }
             var bytes = [UInt8](repeating: 0, count: length)
@@ -34949,8 +34926,8 @@ private final class Engine: @unchecked Sendable {
             }
         }
         let log: @convention(block) (String) -> Void = { [weak self] line in
-            // Accept only the fixed, field-allowlisted release check. Generic JS
-            // console output can contain task content and must not leave the host.
+
+
             guard let at = line.firstIndex(of: "{"),
                   let payload = try? NativeJSON.jsonObject(with: Data(line[at...].utf8)) as? [String: Any] else { return }
             if payload["scope"] as? String == "storage" {
@@ -35000,7 +34977,7 @@ private final class Engine: @unchecked Sendable {
                           context["outcome"] as? String == "added",
                           Self.isInteger(context["count"]), let count = context["count"] as? NSNumber,
                           (1.0...10_000.0).contains(count.doubleValue) {
-                    // Forward only the shared core's bounded aggregate receipt acknowledgment.
+
                     #if DEBUG
                     self?.faults?.commandDiagnostic?("inboxTasksAddTagCoreAck:" + String(count.intValue))
                     #endif
@@ -35009,7 +34986,7 @@ private final class Engine: @unchecked Sendable {
                           context["outcome"] as? String == "removed",
                           Self.isInteger(context["count"]), let count = context["count"] as? NSNumber,
                           (1.0...10_000.0).contains(count.doubleValue) {
-                    // Forward only the shared core's bounded aggregate receipt acknowledgment.
+
                     #if DEBUG
                     self?.faults?.commandDiagnostic?("inboxTasksRemoveTagCoreAck:" + String(count.intValue))
                     #endif
@@ -35018,7 +34995,7 @@ private final class Engine: @unchecked Sendable {
                           context["outcome"] as? String == "organized",
                           Self.isInteger(context["count"]), let count = context["count"] as? NSNumber,
                           (1.0...10_000.0).contains(count.doubleValue) {
-                    // Forward only the shared core's bounded aggregate receipt acknowledgment.
+
                     #if DEBUG
                     self?.faults?.commandDiagnostic?("inboxTasksOrganizeCoreAck:" + String(count.intValue))
                     #endif
@@ -35034,7 +35011,7 @@ private final class Engine: @unchecked Sendable {
                           context["outcome"] as? String == "added",
                           Self.isInteger(context["count"]), let count = context["count"] as? NSNumber,
                           (1.0...10_000.0).contains(count.doubleValue) {
-                    // Forward only the shared core's bounded aggregate receipt acknowledgment.
+
                     #if DEBUG
                     self?.faults?.commandDiagnostic?("referenceTasksAddTagCoreAck:" + String(count.intValue))
                     #endif
@@ -35043,7 +35020,7 @@ private final class Engine: @unchecked Sendable {
                           context["outcome"] as? String == "removed",
                           Self.isInteger(context["count"]), let count = context["count"] as? NSNumber,
                           (1.0...10_000.0).contains(count.doubleValue) {
-                    // Forward only the shared core's bounded aggregate receipt acknowledgment.
+
                     #if DEBUG
                     self?.faults?.commandDiagnostic?("referenceTasksRemoveTagCoreAck:" + String(count.intValue))
                     #endif
@@ -35051,7 +35028,7 @@ private final class Engine: @unchecked Sendable {
                 }
                 return
             }
-            // The shared host puts its fields in core's `context` (the part the Android log file keeps); older bundles used `extra`.
+
             guard payload["scope"] as? String == "native-ios",
                   let encodedExtra = (payload["context"] ?? payload["extra"]) as? String,
                   let extra = try? NativeJSON.jsonObject(with: Data(encodedExtra.utf8)) as? [String: Any] else { return }
@@ -35202,7 +35179,7 @@ private final class Engine: @unchecked Sendable {
                       let observer = self.calendarPushObserver, observer.generation == self.attachmentGeneration else {
                     throw NativeCalendarWriteError.unavailable
                 }
-                // A large dirty batch invalidates the full projection; dropping it would strand saved changes.
+
                 if json.utf8.count > NativeCalendarJobs.maximumRequestBytes { observer.callback(nil); return nil }
                 let value = try NativeJSON.jsonObject(with: Data(json.utf8))
                 if let ids = value as? [Any], ids.count > 10_000 { observer.callback(nil); return nil }
@@ -35659,7 +35636,7 @@ private final class Engine: @unchecked Sendable {
     }
 }
 
-/// Exact data bounds used by the order-only coordinator, including its truthful success variant.
+
 enum NativeBoardOrderJournalBudget {
     static let maximumBytes = 2_000_000
     static func require(_ initial: Data, acknowledged: Data) throws {

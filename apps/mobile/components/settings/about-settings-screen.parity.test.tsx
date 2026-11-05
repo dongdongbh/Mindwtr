@@ -1,17 +1,6 @@
-/**
- * React Native's Settings › About (its update checks and its feedback modal), the analytics heartbeat and the store review
- * prompt, replayed against the frozen parity fixture (packages/core/src/about-settings-parity.fixtures.json) that core's About
- * model and the native host contract are tested against.
- *
- * To recapture, keep every file under apps/ at HEAD except this one, then run
- *   MINDWTR_CAPTURE_ABOUT_SETTINGS=1 TZ=UTC bunx vitest run components/settings/about-settings-screen.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD, so the provenance names the RN code that ran.
- *
- * Each scenario renders the real screen with the real core, on a stubbed device: Android, a pinned clock, AsyncStorage in
- * memory, the install referrer, the Play update answer, GitHub's answer and the feedback endpoint from the scenario. It
- * records what a user sees (the screen's texts, its alerts and toasts), what the screen stores, every request it sends, every
- * link it opens and the update dot it reports.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -26,7 +15,7 @@ const NOW = Date.parse('2026-10-07T10:00:00.000Z');
 const FEEDBACK_URL = 'https://feedback.example.test/submit';
 const HEARTBEAT_URL = 'https://analytics.example.test/';
 
-// The screen requires its icon PNG; Node would parse the image as JavaScript.
+
 vi.hoisted(() => {
   const nodeModule = process.getBuiltinModule('module') as unknown as { _extensions: Record<string, (module: { exports: unknown }) => void> };
   nodeModule._extensions['.png'] = (module) => { module.exports = 1; };
@@ -148,13 +137,13 @@ type Scenario = {
   releaseVersion?: string;
   feedbackEndpointUrl?: string;
   referrer?: { value?: string; error?: string };
-  /** PackageManager's installing package (not in the frozen scenarios: RN read only the referrer then). */
+
   installer?: string;
   storage?: Record<string, string>;
   play?: ({ value: unknown } | { error: string })[];
   github?: { status: number; body?: unknown }[];
   feedbackStatus?: number;
-  /** What the user does after the screen opens, in order. */
+
   steps?: (
     | { tap: string; last?: true }
     | { pressAlert: string }
@@ -234,7 +223,7 @@ const SCENARIOS: Scenario[] = [
     steps: [{ tap: 'settings.feedback' }, { type: { field: 'message', text: 'Broken' } }, { tap: 'settings.feedbackSubmit', last: true }, { pressAlert: 'settings.feedbackSendWithoutEmail' }] },
 ];
 
-/** A node's strings in drawing order, nested texts (a link inside a sentence) included. */
+
 const textOf = (node: ReactTestInstance | string): string => (typeof node === 'string' ? node : node.children.map(textOf).join(''));
 
 const insideText = (node: ReactTestInstance): boolean => {
@@ -242,7 +231,7 @@ const insideText = (node: ReactTestInstance): boolean => {
   return false;
 };
 
-/** What a user sees: every outermost text, in order. */
+
 const visibleTexts = (tree: ReactTestRenderer): string[] => tree.root.findAllByType(Text)
   .filter((node) => !insideText(node)).map(textOf).filter(Boolean);
 
@@ -281,7 +270,7 @@ async function run(scenario: Scenario) {
       record('tap', step.tap, target.props.disabled === true ? 'disabled' : 'enabled');
       if (target.props.disabled !== true) await act(async () => { target.props.onPress(); });
     } else if ('pressAlert' in step) {
-      // The alert's own buttons, opened by the step before (TypeScript narrowed the field to null at the reset above).
+
       const opened = harness.openAlert as { buttons: { text?: string; onPress?: () => void }[] } | null;
       const button = opened?.buttons.find((entry) => entry.text === label(step.pressAlert));
       if (!button) throw new Error(`${scenario.name}: no alert button ${step.pressAlert}`);
@@ -301,7 +290,7 @@ async function run(scenario: Scenario) {
   return { name: scenario.name, screens, events: harness.events, storage: Object.fromEntries([...harness.storage.entries()].sort()) };
 }
 
-/** The heartbeat and its opt-out as RN sends them, with core's request on the stubbed fetch. */
+
 async function heartbeats() {
   const out: unknown[] = [];
   const config = { analyticsHeartbeatUrl: HEARTBEAT_URL, appVersion: '1.3.4-rc.2', analyticsHeartbeatChannel: '', isExpoGo: false, isFossBuild: false };
@@ -328,7 +317,7 @@ async function heartbeats() {
     const sent = entry.optOut ? await sendMobileAnalyticsOptOut(merged) : await sendMobileDailyHeartbeat(merged, entry.settings as never);
     (globalThis as { __DEV__?: boolean }).__DEV__ = false;
     const storage = Object.fromEntries([...harness.storage.entries()].sort());
-    // A made distinct id is random: the fixture keeps whether one was made.
+
     const madeId = !entry.storage?.['mindwtr-analytics-distinct-id'] && storage['mindwtr-analytics-distinct-id'];
     if (madeId) storage['mindwtr-analytics-distinct-id'] = '<uuid>';
     const events = JSON.parse(JSON.stringify(harness.events).split(String(madeId || '\u0000')).join('<uuid>'));
@@ -337,7 +326,7 @@ async function heartbeats() {
   return out;
 }
 
-/** The store review prompt after a Weekly Review, for prompt states around each gate. */
+
 async function storeReviews() {
   const day = 24 * 60 * 60 * 1000;
   const days = (count: number) => Array.from({ length: count }, (_, index) => new Date(NOW - index * day).toISOString().slice(0, 10));

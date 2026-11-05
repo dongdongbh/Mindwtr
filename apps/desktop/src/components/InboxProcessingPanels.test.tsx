@@ -57,6 +57,7 @@ const visibility: InboxProcessingVisibility = {
 
 const options: InboxProcessingOptionLists = {
     projects: [],
+    sections: [],
     areas: [],
     allContexts: [],
     allTags: [],
@@ -85,12 +86,7 @@ const scheduleFields = {
     review: scheduleField(),
 };
 
-/**
- * Both panels take the task fields as one draft, so a render fixture is the
- * draft plus the surface's own state — not a 90-key object of value/setter
- * pairs. setField writes through the core reducer, exactly as the controller
- * does, so a field cascade lands in the test the same way it lands in the app.
- */
+
 const useLiveDraft = (initial: Partial<TaskDraft> = {}) => {
     const [draft, setDraft] = useState<TaskDraft>(() => ({ ...createTaskDraft(processingTask), ...initial }));
     return {
@@ -101,8 +97,10 @@ const useLiveDraft = (initial: Partial<TaskDraft> = {}) => {
     };
 };
 
-function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = {}) {
-    const { draft, setField } = useLiveDraft();
+type HarnessDraft = { initialDraft?: Partial<TaskDraft> };
+
+function QuickPanelHarness({ initialDraft, ...overrides }: Partial<InboxProcessingQuickPanelProps> & HarnessDraft = {}) {
+    const { draft, setField } = useLiveDraft(initialDraft);
 
     return (
         <LanguageProvider>
@@ -113,6 +111,8 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             draft={draft}
             setField={setField}
             similarTasks={[]}
+            linkAttachments={[]}
+            onAddLinks={() => true}
             visibility={visibility}
             options={options}
             processingMode="quick"
@@ -135,6 +135,7 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             onSendDelegateRequest={noop}
             onCreatePerson={noop}
             onCreateSomedaySection={noop as InboxProcessingQuickPanelProps['onCreateSomedaySection']}
+            onCreateSection={noop as InboxProcessingQuickPanelProps['onCreateSection']}
             toggleContext={noop}
             toggleTag={noop}
             convertToProject={false}
@@ -151,8 +152,8 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
     );
 }
 
-function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrides }: Partial<InboxProcessingWizardProps> = {}) {
-    const { draft, setField } = useLiveDraft();
+function WizardHarness({ processingStep = 'refine' as ProcessingStep, initialDraft, ...overrides }: Partial<InboxProcessingWizardProps> & HarnessDraft = {}) {
+    const { draft, setField } = useLiveDraft(initialDraft);
 
     return (
         <LanguageProvider>
@@ -166,6 +167,8 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             draft={draft}
             setField={setField}
             similarTasks={[]}
+            linkAttachments={[]}
+            onAddLinks={() => true}
             visibility={visibility}
             options={options}
             setIsProcessing={noop}
@@ -196,6 +199,7 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             handleConfirmSomeday={noop}
             onCreatePerson={noop}
             onCreateSomedaySection={noop as InboxProcessingWizardProps['onCreateSomedaySection']}
+            onCreateSection={noop as InboxProcessingWizardProps['onCreateSection']}
             customContext=""
             setCustomContext={noop}
             addCustomContext={noop}
@@ -298,8 +302,7 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         expect(queryByLabelText('projects.title')).toBeNull();
     });
 
-    // The draft stores the raw token text; the selected chips are derived from
-    // it, so typing and clicking a suggestion cannot disagree.
+
     it('derives the selected contexts from the typed token text', () => {
         const { getByLabelText, getByRole } = render(<QuickPanelHarness />);
 
@@ -332,8 +335,7 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         expect(getByText('+ New section…')).toBeInTheDocument();
     });
 
-    // #1155: filing a note as Reference has to offer the same containers the
-    // Someday path does, so it lands in its project in one step.
+
     it('offers Area and Project controls before filing a Reference item', () => {
         const { getByText } = render(
             <QuickPanelHarness actionabilityChoice="reference" />,
@@ -492,8 +494,76 @@ describe('Incubate requires a review date (#1338)', () => {
         expect(view.getByRole('dialog')).toBeInTheDocument();
         expect(view.queryByRole('button', { name: 'No date' })).toBeNull();
     });
+    it.each(['guided', 'quick'] as const)('offers only dates for Start later in %s mode (#768)', (mode) => {
+        const view = mode === 'quick'
+            ? render(<QuickPanelHarness actionabilityChoice="later" />)
+            : render(<WizardHarness processingStep="actionable" />);
+        if (mode === 'guided') fireEvent.click(view.getByRole('button', { name: 'Start later' }));
+        expect(view.getByRole('button', { name: 'Tomorrow' })).toBeInTheDocument();
+        expect(view.queryByRole('button', { name: 'No date' })).toBeNull();
+    });
     it('retains No date for optional scheduling fields', () => {
-        const view = render(<QuickPanelHarness actionabilityChoice="later" />);
+        const view = render(<QuickPanelHarness visibility={{ ...visibility, showScheduleFields: true }} visibleScheduleFieldKeys={['start']} />);
         expect(view.getByRole('button', { name: 'No date' })).toBeInTheDocument();
     });
 });
+
+
+describe('Inbox processing project section picker', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    const workProject: Project = { ...similarProject, id: 'p-work', title: 'Work' };
+    const homeProject: Project = { ...similarProject, id: 'p-home', title: 'Home' };
+    const sectionOptions: InboxProcessingOptionLists = {
+        ...options,
+        projects: [workProject, homeProject],
+        sections: [
+            { id: 's-design', projectId: 'p-work', title: 'Design', order: 0, createdAt: '', updatedAt: '' },
+            { id: 's-review', projectId: 'p-work', title: 'Review', order: 1, createdAt: '', updatedAt: '' },
+        ],
+    };
+
+    it('shows no Section picker without a project or for a project with no sections', () => {
+        const none = render(<WizardHarness processingStep="someday" options={sectionOptions} />);
+        expect(none.queryByText('taskEdit.sectionLabel')).toBeNull();
+        none.unmount();
+        const home = render(<WizardHarness processingStep="someday" options={sectionOptions} initialDraft={{ projectId: 'p-home' }} />);
+        expect(home.queryByText('taskEdit.sectionLabel')).toBeNull();
+    });
+
+    it.each([
+        ['guided', () => render(<WizardHarness processingStep="someday" options={sectionOptions} initialDraft={{ projectId: 'p-work' }} />)],
+        ['quick', () => render(<QuickPanelHarness actionabilityChoice="someday" options={sectionOptions} initialDraft={{ projectId: 'p-work' }} />)],
+    ] as const)('offers the chosen project\'s sections in %s mode and writes the pick to the draft', (_mode, renderPanel) => {
+        const { getByRole, getByText } = renderPanel();
+
+        expect(getByText('taskEdit.sectionLabel')).toBeInTheDocument();
+        const trigger = getByRole('button', { name: 'taskEdit.sectionLabel' });
+        expect(trigger).toHaveTextContent('taskEdit.noSectionOption');
+        fireEvent.click(trigger);
+        fireEvent.click(getByRole('option', { name: 'Review' }));
+        expect(getByRole('button', { name: 'taskEdit.sectionLabel' })).toHaveTextContent('Review');
+    });
+
+    it('selects a project with sections in the project step instead of filing at once', () => {
+        const handleSetProject = vi.fn();
+        const { getByRole, getByText } = render(
+            <WizardHarness
+                processingStep="project"
+                options={sectionOptions}
+                filteredProjects={[workProject, homeProject]}
+                handleSetProject={handleSetProject}
+            />,
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Work' }));
+        expect(handleSetProject).not.toHaveBeenCalled();
+        expect(getByText('taskEdit.sectionLabel')).toBeInTheDocument();
+
+        fireEvent.click(getByRole('button', { name: 'Home' }));
+        expect(handleSetProject).toHaveBeenCalledExactlyOnceWith('p-home');
+    });
+});
+

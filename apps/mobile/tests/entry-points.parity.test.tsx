@@ -1,18 +1,6 @@
-/**
- * React Native's system entry points on Android, replayed against the frozen parity
- * fixture (packages/core/src/entry-points-parity.fixtures.json) that core's
- * capture-deeplink.ts, entry-points.ts and the native host contract's
- * resolveNativeEntryPoint are tested against: the deep link parsers, Expo Router's
- * redirectSystemPath, what the root layout's external-capture hook opens for each
- * link and each Android text share, and expo-share-intent's reading of a share.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_ENTRY_POINTS=1 MINDWTR_CAPTURE_ENTRY_POINTS_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run tests/entry-points.parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code and this harness and its fixture, so the provenance
- * always names the code that ran.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -43,7 +31,7 @@ vi.mock('@/lib/app-log', () => ({ logError: vi.fn(), logWarn: vi.fn(), logInfo: 
 vi.mock('@/lib/app-search-service', () => ({ syncAppSearchIndexingWithPreference: vi.fn(async () => undefined) }));
 vi.mock('@/lib/attachment-sync', () => ({ persistAttachmentLocallyDetailed: vi.fn() }));
 vi.mock('expo-file-system', () => ({ deleteAsync: vi.fn().mockResolvedValue(undefined) }));
-// expo-share-intent's parser module imports these for its iOS scheme lookup, which an Android text share never reaches.
+
 vi.mock('expo-linking', () => ({ createURL: () => 'mindwtr://dataUrl=', useLinkingURL: () => null }));
 vi.mock('expo-constants', () => ({ default: { expoConfig: { scheme: 'mindwtr' } } }));
 
@@ -65,14 +53,14 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   }));
 });
 
-/** The store the entity links resolve against: live and deleted tasks, projects and an area. */
+
 export const STORE = {
   tasks: [{ id: 't-live' }, { id: 't-deleted', deletedAt: '2026-09-01T00:00:00.000Z' }],
   projects: [{ id: 'p-live' }, { id: 'p-deleted', deletedAt: '2026-09-01T00:00:00.000Z' }],
   areas: [{ id: 'a-live' }, { id: 'a-deleted', deletedAt: '2026-09-01T00:00:00.000Z' }],
 };
 
-/** Links a shortcut, assistant, search result, widget, tile or Dropbox callback sends, and lookalikes. */
+
 export const URLS = [
   'mindwtr://capture?title=Buy%20groceries&note=From%20store&project=Shopping&tags=errands,%20home',
   'mindwtr:///capture?text=Pay%20bill&description=Utility',
@@ -140,10 +128,7 @@ export const TAG_LISTS: string[][] = [
   [], ['a'], ['a', '#a', 'A'], ['  x  ', '', '#y', 'Y'], ['#', 'two words'],
 ];
 
-/**
- * Android text shares as ACTION_SEND delivers them (EXTRA_TEXT, EXTRA_TITLE, EXTRA_SUBJECT). expo-share-intent's Kotlin
- * sends `{ text: EXTRA_TEXT, type: 'text', meta: { title: EXTRA_TITLE ?? EXTRA_SUBJECT } }`.
- */
+
 export const SHARES: { text: string | null; title: string | null; subject: string | null }[] = [
   { text: 'The paragraph I selected in another app', title: null, subject: null },
   { text: 'https://example.com/article', title: null, subject: null },

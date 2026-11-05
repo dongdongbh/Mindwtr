@@ -41,7 +41,7 @@ vi.mock('../../hooks/use-theme-tokens', () => ({
 describe('TaskEditHeader', () => {
   beforeEach(() => { vi.clearAllMocks(); clipboard.write.mockResolvedValue(undefined); });
   it.each([
-    ['Copy task link', 'mindwtr://open?task=task%20%2F%3F%26%23'],
+    ['Copy Mindwtr link', 'mindwtr://open?task=task%20%2F%3F%26%23'],
     ['Copy task ID', 'task /?&#'],
   ])('copies %s and dismisses only More', async (label, expected) => {
     const onDone = vi.fn();
@@ -82,7 +82,7 @@ describe('TaskEditHeader', () => {
         onShare={vi.fn()} onDuplicate={vi.fn()} onDelete={vi.fn()} />);
     });
     act(() => tree.root.findByProps({ accessibilityLabel: 'More' }).props.onPress());
-    await act(async () => tree.root.findByProps({ accessibilityLabel: 'Copy task link' }).props.onPress());
+    await act(async () => tree.root.findByProps({ accessibilityLabel: 'Copy Mindwtr link' }).props.onPress());
     expect(clipboard.toast).toHaveBeenCalledExactlyOnceWith({ message: 'Could not copy task', tone: 'error' });
     expect(onDone).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -103,7 +103,7 @@ describe('TaskEditHeader', () => {
       'Cancel task', 'Skip this occurrence', 'Convert to action', 'task.convertToSection']) {
       expect(tree.root.findAllByProps({ accessibilityLabel: label })).toHaveLength(0);
     }
-    expect(tree.root.findByProps({ accessibilityLabel: 'Copy task link' })).toBeTruthy();
+    expect(tree.root.findByProps({ accessibilityLabel: 'Copy Mindwtr link' })).toBeTruthy();
     await act(async () => tree.root.findByProps({ accessibilityLabel: 'Copy task ID' }).props.onPress());
     expect(clipboard.write).toHaveBeenCalledExactlyOnceWith('saved-task');
     act(() => tree.unmount());
@@ -117,7 +117,7 @@ describe('TaskEditHeader', () => {
     });
     if (!readOnly) act(() => tree.root.findByProps({ accessibilityLabel: 'More' }).props.onPress());
     else expect(tree.root.findAllByProps({ accessibilityLabel: 'More' })).toHaveLength(0);
-    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task link' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy Mindwtr link' })).toHaveLength(0);
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Copy task ID' })).toHaveLength(0);
     act(() => tree.unmount());
   });
@@ -142,8 +142,7 @@ describe('TaskEditHeader', () => {
     const saveButton = tree.root.findByProps({ accessibilityLabel: 'Save' });
     const closeButton = tree.root.findByProps({ accessibilityLabel: 'Close' });
 
-    // Save keeps its word: a first-time user must be able to tell which
-    // control commits the draft. Close is the X icon on the left.
+
     expect(saveButton.findAllByType(Text).map((node) => node.props.children)).toEqual(['Save']);
     expect(closeButton.findAllByType(Text)).toHaveLength(0);
     act(() => saveButton.props.onPress());

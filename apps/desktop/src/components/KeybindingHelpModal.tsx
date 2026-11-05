@@ -2,6 +2,7 @@ import { useId } from 'react';
 import { resolveFeatureFlags, useTaskStore } from '@mindwtr/core';
 import { KeybindingStyle } from '../contexts/keybinding-context';
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from './ui/Dialog';
+import { useAppLockStore } from '../lib/app-lock';
 import {
     type GlobalQuickAddShortcutSetting,
     formatGlobalQuickAddShortcutForDisplay,
@@ -31,6 +32,7 @@ export function KeybindingHelpModal({
     const titleId = useId();
     const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
     const timelineEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeline);
+    const appLockEnabled = useAppLockStore((state) => state.enabled);
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
     const primary = isMac ? 'Cmd' : 'Ctrl';
     const quickAddShortcutDisplay = formatGlobalQuickAddShortcutForDisplay(quickAddShortcut, isMac, t);
@@ -45,6 +47,7 @@ export function KeybindingHelpModal({
         { keys: `${primary}+Shift+C`, labelKey: 'keybindings.list.toggleDensity' },
         { keys: `${primary}+Z`, labelKey: 'keybindings.undo', fallbackLabel: 'Undo last complete/delete' },
         { keys: 'F11', labelKey: 'keybindings.toggleFullscreen' },
+        ...(appLockEnabled ? [{ keys: `${primary}+Shift+L`, labelKey: 'appLock.lockNow' }] : []),
     ];
     const vimGlobal: HelpItem[] = [
         ...sharedGlobal,
@@ -141,8 +144,7 @@ export function KeybindingHelpModal({
         { keys: 'Insert', labelKey: 'keybindings.list.newTask', fallbackLabel: 'Focus add-task input' },
     ];
 
-    // Keep this table in sync with the parser inventory mirrored by
-    // SLASH_COMMANDS in TaskInput.tsx (#869) and the quickAdd.help string.
+
     const quickAddSyntax: HelpItem[] = [
         { keys: '/start:<when>', labelKey: 'taskEdit.startDateLabel' },
         { keys: '/due:<when>', labelKey: 'taskEdit.dueDateLabel' },
@@ -150,8 +152,8 @@ export function KeybindingHelpModal({
         { keys: '/note:<text>', labelKey: 'taskEdit.descriptionLabel' },
         { keys: '/link:<url>', labelKey: 'attachments.addLink' },
         { keys: '/energy:<level>', labelKey: 'taskEdit.energyLevel' },
-        // The parser drops /priority: while the Priorities feature is off, so the
-        // help table must not advertise it (#1107).
+
+
         ...(prioritiesEnabled
             ? [{ keys: '/priority:<level>', labelKey: 'taskEdit.priorityLabel' }]
             : []),

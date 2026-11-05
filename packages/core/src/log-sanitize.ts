@@ -32,14 +32,7 @@ const PRIVATE_CONTENT_KEYS = [
     'notes',
 ];
 
-// One home for provider key shapes (sync error text reuses it through sanitizeLogMessage).
-// The character class allows the `-` and `_` that current keys contain (sk-proj-…,
-// sk-ant-api03-…, sk-or-v1-…). Each pattern captures the character BEFORE the
-// prefix and the replacement puts it back, so a key is redacted everywhere except
-// after a letter — which is all that words such as "task-management" and
-// "risk-assessment" need. `\b` cannot express this: it counts `_` and digits as
-// word characters, so `OPENAI_sk-…` and `%20sk-…` went through unredacted. A
-// look-behind would read better, but Hermes (the mobile engine) does not run one.
+
 const AI_KEY_PATTERNS = [
     /(^|[^A-Za-z])sk-[A-Za-z0-9_-]{10,}/g,
     /(^|[^A-Za-z])xai-[A-Za-z0-9]{20,}/g,
@@ -49,12 +42,8 @@ const AI_KEY_PATTERNS = [
 ];
 
 const ICS_URL_PATTERN = /\b(?:https?|webcal|webcals):\/\/[^\s'")]+/gi;
-// A local file or a document provider's URI (file:/, file://, content://, any letter case), or a plain path under a phone's
-// storage roots, names the user's folders and files: a log never keeps one. Provider and file-system errors quote them in their
-// text and stacks (File Sync, S5), and a folder name can hold spaces, quotes and parentheses, so no character marks where one
-// ends: everything from its start to the end of its line goes. One greedy `[^\n]*` keeps this linear on any input; the text
-// lost after a path ("is not writable") is what the File Sync lines' fileSyncErrorCode carries. Desktop OS paths outside these
-// roots stay (desktop logs them on purpose). A plain path starts after a character that cannot end a word or a path.
+
+
 const LOCAL_URI_PATTERN = /(file:\/|content:\/\/)[^\n]*/gi;
 const LOCAL_PATH_PATTERN = /(^|[^\w/.~-])\/(?:private\/var\/mobile|var\/mobile|storage|sdcard|data\/user|data\/data)\/[^\n]*/gi;
 const redactLocal = (text: string): string => text
@@ -78,7 +67,7 @@ const looksLikeUrlKey = (key?: string): boolean => {
     return normalized === 'url' || normalized.endsWith('url');
 };
 
-/** [raw] parsed and stripped of its credentials, or null when the platform's URL cannot parse it. */
+
 const sanitizeParsedUrl = (raw: string): string | null => {
     try {
         const parsed = new URL(raw);
@@ -101,11 +90,7 @@ const sanitizeParsedUrl = (raw: string): string | null => {
     }
 };
 
-/**
- * A URL the platform cannot parse (a port out of range, a broken host), redacted as text: a calendar feed whole, anything
- * else without its user and password (up to the last "@", where a URL splits them). Never through sanitizeUrl again, which
- * would call this text's redaction forever.
- */
+
 const redactUnparsedUrl = (raw: string): string => (
     /^webcals?:/i.test(raw) || /\.ics\b/i.test(raw) ? '[redacted-ics-url]' : raw.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]*@/i, '$1')
 );

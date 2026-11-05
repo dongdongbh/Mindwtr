@@ -1,23 +1,6 @@
-// Review's Mark reviewed and Organize, and the token and Board picker search check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-review-organize-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays). Tasks due for review cannot be made in the app, so
-// the script stops the app once and, through core's own store on a host copy of the database, adds this run's two areas (76 + run
-// id + 0 and + 7), a project in the second (76 + run id + 9) and six Next tasks in the first (76 + run id + 1 to 6), each due for
-// review, each with the contexts @76 + run id + 8 and @ + run id + 9. The app runs in English (the debug language override, put back
-// on exit). Then it checks against core's own views on copies: (a) on Review's Due scope, one row's Review in 1 week and another's
-// Mark reviewed are one write each of core's review date; (b) the bar's Mark reviewed clears two rows in one write; (c) folding a
-// selected row's area ends the selection, as core says; (d) Review's Organize sheet: the area and project pickers' search shows
-// core's match, Today on Due, rotation and process death keep the open sheet, an Apply under an injected failed commit stores
-// nothing, and its exact retry stores the project and the date on both selected tasks in one write; (e) the Contexts token picker's
-// search shows core's matching tokens only; (f) the Board filter picker's search shows core's match only. On exit, an injected
-// failure left owed is settled through the app's Try again, then this run's tasks, project and areas are removed through core's
-// store (tasks and the project deleted forever), and a cleanup that cannot finish says so. It changes no setting; it touches only
-// the development package (it refuses any other APK), never launches over another app, leaves the app on its Inbox tab, restores
-// rotation and its debug properties on exit. Leave the device on its home screen. It needs host `bun`. check-projects-device.mjs
-// --prune-old removes what an interrupted run left.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -44,13 +27,13 @@ const ACTIVITY = `${PKG}/${PKG}.MainActivity`;
 const TAG = 'MindwtrNativeDev';
 const UI_FILE = '/data/local/tmp/mindwtr-native-dev-ui.xml';
 const STAGED = '/data/local/tmp/mindwtr-native-dev-review-organize.db';
-// The fault properties are cleared; the language property is set to English for the run and put back after.
+
 const FAULTS = ['fail_commit', 'delay_before_ms', 'delay_after_ms'];
 const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/review-organize-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits only: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const names = {
     areaX: `76${run}0`, tasks: [1, 2, 3, 4, 5, 6].map((index) => `76${run}${index}`), areaY: `76${run}7`, project: `76${run}9`,
@@ -65,7 +48,7 @@ const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).repla
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 const timeZone = sh('getprop persist.sys.timezone') || undefined;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = (name = 'db') => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -75,13 +58,8 @@ const pullDatabase = (name = 'db') => {
     return resolve(dir, DB);
 };
 let injected = null;
-/**
- * Core on a copy, in the phone's time zone: `inject` adds this run's areas, project and tasks through core's store (each task's
- * review date three days back); `remove` deletes them (the tasks and the project forever); both checkpoint the WAL. `views` prints
- * what the check compares with: this run's tasks as stored, core's
- * Review overview for this run's area (its labels, rows, links, the selection's bar and Organize dialog, and whether a fold ends a
- * selection), core's Contexts token picker for the run's query, core's Board tokens for it, and the More sheet's tiles.
- */
+
+
 const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, getAdvancedReviewDate, isTaskDueForReview, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -208,16 +186,16 @@ const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e'
     env: { ...process.env, TZ: timeZone, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify(names), CHECK_IDS: JSON.stringify(injected ?? {}), CHECK_REVIEW_AT: injected?.reviewAt ?? '' },
 }).trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const onInbox = (nodes) => !tagged(nodes, 'menu-screen') && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onReview = (nodes) => Boolean(tagged(nodes, 'review-list'));
-// A clickable row's label can sit on a child node with the row's own bounds (dd's phone): read it there.
+
 const rowLabel = (nodes, row) => row.text || row['content-desc']
     || nodes.find((node) => node !== row && node.bounds === row.bounds && (node.text || node['content-desc']))?.['content-desc'] || '';
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => rowLabel(nodes, node));
 const texts = (nodes) => new Set(nodes.map((node) => node.text).filter(Boolean));
-/** The smallest focusable or clickable node around [label]'s center (a selectable's state sits there, not on its text). */
+
 const around = (nodes, label) => {
     if (!label) return undefined;
     const [x1, y1, x2, y2] = box(label);
@@ -228,32 +206,32 @@ const around = (nodes, label) => {
         return l <= cx && cx <= r && t <= cy && cy <= b;
     }).sort((a, b) => area(a) - area(b))[0];
 };
-/** The choice reading [text] is on (Review's scope buttons carry their state around their text). */
+
 const textOn = (nodes, text) => { const label = nodes.find((node) => node.text === text); return isOn(label) || isOn(around(nodes, label)); };
-/** A node reading or named [text] on the same line as [anchor] (the Contexts bar's X exit beside its count, not the Done status). */
+
 const onLineOf = (nodes, anchor, text) => {
     if (!anchor) return undefined;
     const [, t, , b] = box(anchor);
     const middle = (t + b) / 2;
     return nodes.find((node) => (node.text === text || node['content-desc'] === text) && box(node)[1] <= middle && box(node)[3] >= middle);
 };
-/** The nodes inside [outer]'s bounds. */
+
 const inside = (nodes, outer) => {
     if (!outer) return [];
     const [l, t, r, b] = box(outer);
     return nodes.filter((node) => { const [x1, y1, x2, y2] = box(node); return x1 >= l && y1 >= t && x2 <= r && y2 <= b && x2 > x1 && y2 > y1; });
 };
-/** A node wholly inside the main list (not under the tab bar or a header). */
+
 const shownInList = (nodes, node) => {
     const list = mainList(nodes);
     if (!node) return false;
-    // A list short enough to fit the screen reports no scrollable node (run 60): then a drawn node is shown.
+
     if (!list) return box(node)[3] > box(node)[1];
     const [, top, , bottom] = box(list);
     const [, y1, , y2] = box(node);
     return y2 > y1 && y1 >= top && y2 <= bottom;
 };
-/** Scrolls the main list until [find] gives a node wholly inside it (back to the top first, then forward). */
+
 const revealNode = async (find, description) => {
     let nodes = await device.toTop();
     for (let step = 0; step < 30 && !shownInList(nodes, find(nodes)); step += 1) {
@@ -276,14 +254,14 @@ const back = async (done) => {
     sh('input keyevent KEYCODE_BACK');
     return waitFor('Back', done, 15_000);
 };
-/** Types [text] into [node] (its end focused first). */
+
 const typeInto = async (node, text, description) => {
     await device.focusAtEnd(node ?? fail(`no field for ${description}`));
     requireAppFront();
     sh(`input text '${text}'`);
     await sleep(600);
 };
-/** The row titled [title], scrolled wholly into the list. */
+
 const revealRow = async (title) => {
     const find = (current) => taskRows(current).find((node) => rowLabel(current, node) === title);
     return find(await revealNode(find, title)) ?? fail(`no row ${title}`);
@@ -297,14 +275,14 @@ const longPress = async (title) => {
     sh(`input swipe ${x} ${Math.round((y1 + y2) / 2)} ${x} ${Math.round((y1 + y2) / 2)} 900`);
     await sleep(600);
 };
-/** The More sheet from the Menu tab, then the tile labelled [label], until [done]. */
+
 const openTile = async (label, done, description) => {
     let nodes = await screen();
     if (!sheetOpen(nodes)) nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     return tapExpecting(withDescription(nodes, label) ?? fail(`no ${label} tile`), done, description);
 };
-/** HOME, the process killed, and the app launched again until [done]: the check's process death. */
+
 const killAndRelaunch = async (done, description) => {
     const processId = pid();
     requireAppFront();
@@ -317,16 +295,13 @@ const killAndRelaunch = async (done, description) => {
     return waitFor(description, done, 60_000);
 };
 
-/** An injected failure whose exact retry is still owed: named while it is, so cleanup can settle it. */
+
 let owed = null;
-/**
- * Cleanup for a check that stopped between a failure's injection and its retry: the fault cleared, the dialog over the failure
- * message closed (its Cancel), and that exact request sent again through the app's Try again until no retry is owed. A cleanup
- * that cannot settle it says so loudly and fails the run.
- */
+
+
 const settleOwed = async () => {
     if (!owed) return;
-    for (const name of FAULTS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of FAULTS) { try { setProp(name, ''); } catch {                   } }
     try {
         if (front().includes(`${home}/`)) device.launch(ACTIVITY);
         for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -351,10 +326,8 @@ const settleOwed = async () => {
 
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
-/**
- * This run's tasks, project and areas removed through core's store on a host copy (the app stopped, as for the injection), then the
- * app launched again on its Inbox. Only after any owed write is settled; a removal that cannot finish says so.
- */
+
+
 const removeFixtures = async () => {
     if (!injected) return;
     if (owed) {
@@ -383,9 +356,9 @@ const removeFixtures = async () => {
 
 const originalLanguage = sh('getprop debug.mindwtr.native.language');
 const restore = async () => {
-    for (const name of FAULTS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of FAULTS) { try { setProp(name, ''); } catch {                   } }
     await settleOwed();
-    // Leave the app on its Inbox tab: the other checks start there.
+
     try {
         for (let step = 0; step < 6 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -395,13 +368,13 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     await removeFixtures();
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { setProp('language', originalLanguage); } catch { /* device gone */ }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { setProp('language', originalLanguage); } catch {                   }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 try {
@@ -409,12 +382,12 @@ try {
     console.log(`device: ${sh('getprop ro.product.model')} / Android ${sh('getprop ro.build.version.release')} (API ${sh('getprop ro.build.version.sdk')}) / ${timeZone ?? 'no time zone'}`);
     console.log(`apk: ${apk}\napk sha256: ${createHash('sha256').update(readFileSync(apk)).digest('hex')}`);
     for (const name of FAULTS) setProp(name, '');
-    // The selectors read core's English: the app boots in English whatever language it keeps (restored on exit).
+
     setProp('language', 'en');
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
-    // Boot once (this build's schema), stop, add this run's areas and tasks through core's store, and put the database back.
+
     device.launch(ACTIVITY);
     requireAppFront();
     sh('settings put system accelerometer_rotation 0');
@@ -434,17 +407,17 @@ try {
     check(names.tasks.every((title) => seen.tasks[title].length === 1 && seen.tasks[title][0].due) && review.rows.length === 6 && names.tasks.every((title) => review.rows.includes(title)),
         `core stores the six tasks, due for review, and Review's Due scope lists them under ${names.areaX}`);
 
-    // Review (the quick-access tab or the More sheet's tile), on its Due scope, with this run's area and its tasks unfolded.
+
     if (seen.quickAccess === 'review') await tapExpecting(tab(await screen(), en['tab.review']) ?? fail('no Review tab'), onReview, 'the Review tab');
     else await openTile(seen.tiles.review, onReview, 'Review');
     let nodes = await device.settle(await device.toTop());
-    // RN's Review opens on its Due scope; a scope the app kept from before is put back to Due.
+
     if (!textOn(nodes, seen.scope.due)) {
         const due = nodes.find((node) => node.text === seen.scope.due) ?? fail('no Due scope');
         nodes = await tapExpecting(due, (current) => textOn(current, seen.scope.due), 'the Due scope');
     }
     const ours = (current) => rowTitles(current).some((title) => names.tasks.includes(title));
-    /** Taps the fold header described [label] (scrolled into the list first) until [shows]. */
+
     const unfold = async (label, shows, description) => {
         const found = await revealNode((current) => withDescription(current, label), description);
         return tapExpecting(withDescription(found, label), shows, description);
@@ -454,7 +427,7 @@ try {
     const shownOrder = rowTitles(nodes).filter((title) => names.tasks.includes(title));
     check(review.rows.join('|').includes(shownOrder.join('|')), `Review draws this run's rows in core's order (${shownOrder.length} on screen)`);
 
-    // (a) A row's Review in 1 week and another's Mark reviewed: core's action on the row, one write each.
+
     const rowLink = async (title, kind) => {
         const label = seen.review.links[title]?.[kind] ?? fail(`core offers no ${kind} under ${title}`);
         const shown = await revealNode((current) => withDescription(current, label), `${kind} under ${title}`);
@@ -471,10 +444,10 @@ try {
         `(a) Review in 1 week stored core's date ${seen.advanced} in one write`);
     check(marked.reviewAt === null && !marked.due && marked.rev === before[names.tasks[1]][0].rev + 1, '(a) Mark reviewed cleared the review date in one write');
 
-    // (b) The bar's Mark reviewed on two selected rows: one write, both cleared.
+
     const selectedLine = (current) => current.find((node) => /^\d+ /.test(node.text ?? '') && node.text.endsWith(` ${en['bulk.selected']}`))?.text;
     const rowSelected = (title) => (current) => current.some((node) => node.text === title && node.checked === 'true');
-    // The bar is the list's first item and scrolls with it (RN's too), so a row far down leaves it off screen: read it from the top.
+
     const barShows = (want, description) => revealNode((current) => current.find((node) => want(selectedLine([node]) ?? '')), description);
     await revealRow(names.tasks[2]);
     await longPress(names.tasks[2]);
@@ -491,7 +464,7 @@ try {
     check([2, 3].every((index) => { const task = seen.tasks[names.tasks[index]][0]; return task.reviewAt === null && task.rev === before[names.tasks[index]][0].rev + 1; }),
         '(b) the bar\'s Mark reviewed cleared both rows\' review dates in one write');
 
-    // (c) Folding a selected row's area ends the selection, as core's view says.
+
     check(seen.review?.foldEnds === true, 'core ends a selection whose row a fold hides');
     await revealRow(names.tasks[4]);
     await longPress(names.tasks[4]);
@@ -502,9 +475,7 @@ try {
     check(!selectedLine(nodes), `(c) folding ${names.areaX} ended the selection, as core does`);
     nodes = await unfold(seen.review.area, (current) => rowTitles(current).includes(names.tasks[4]) && !selectedLine(current), `${names.areaX} unfolded again, not selecting`);
 
-    // (d) Review's Organize sheet on two selected rows: the area and project pickers' search, Today on Due, rotation and process
-    // death, then an Apply under a failed commit (nothing stored) and its exact retry (one write for both tasks). A chosen project
-    // resets the area to Keep (RN's rule), so the tasks take the project (in the second area) and the date.
+
     const organize = seen.review.organize ?? fail('core offers no Organize for the two rows');
     await revealRow(names.tasks[4]);
     await longPress(names.tasks[4]);
@@ -513,7 +484,7 @@ try {
     await barShows((line) => line === seen.review.bar.count, 'two rows selected');
     nodes = await device.toTop();
     const dialogOpen = (current) => Boolean(withDescription(current, organize.apply));
-    /** The Organize sheet's control described [label], its fields scrolled up (from just above Apply) until it shows. */
+
     const sheetShows = async (label) => {
         let shown = await screen();
         for (let step = 0; step < 4; step += 1) {
@@ -546,7 +517,7 @@ try {
     nodes = await sheetShows(today.accessibilityLabel);
     nodes = await tapExpecting(withDescription(nodes, today.accessibilityLabel), (current) => chipOn(current, today.accessibilityLabel), 'Today on Due');
     const sheetKept = (current) => dialogOpen(current) && Boolean(withDescription(current, organize.chosenProject)) && chipOn(current, today.accessibilityLabel);
-    // Landscape shows the sheet's top only (its fields scroll); portrait and a relaunch show the area and the date again.
+
     sh('settings put system user_rotation 1');
     await waitFor('the sheet in landscape', dialogOpen, 20_000);
     sh('settings put system user_rotation 0');
@@ -558,15 +529,15 @@ try {
     const failedBefore = commands('reviewAction', 'failed');
     setProp('fail_commit', '1');
     owed = 'the injected failed Organize Apply';
-    // The sheet is its own window over the failure message (run 60): the failed Apply shows as Apply locked, and the
-    // app's command log records the failed write; Cancel below shows the message's Try again.
+
+
     nodes = await tapExpecting(withDescription(nodes, organize.apply), (current) => withDescription(current, organize.apply)?.enabled === 'false', 'Apply locked by the failure');
     await waitFor('the injected failure', () => commands('reviewAction', 'failed') === failedBefore + 1, 15_000);
     seen = core('views');
     check([4, 5].every((index) => seen.tasks[names.tasks[index]][0].rev === before[names.tasks[index]][0].rev) && commands('reviewAction', 'failed') === failedBefore + 1,
         '(d) the failed Apply stored nothing; its exact retry is owed');
     setProp('fail_commit', '');
-    // The sheet stays over the failure message (its Apply waits); Cancel shows the message's Try again.
+
     nodes = await tapExpecting(withDescription(await screen(), organize.cancel) ?? fail('no Cancel'), (current) => !dialogOpen(current) && Boolean(owedRetry(current)), 'the sheet to close');
     await tapExpecting(owedRetry(nodes), (current) => !owedRetry(current) && !selectedLine(current), 'Try again');
     await waitFor('the retried write', () => commands('reviewAction') === writes + 1, 10_000);
@@ -579,7 +550,7 @@ try {
     if (seen.quickAccess === 'review') await tapExpecting(tab(await screen(), en['tab.inbox']), onInbox, 'the Inbox');
     else await back(onInbox);
 
-    // (e) The Contexts token picker: its search shows core's matching tokens only.
+
     check(seen.contexts.all.includes(names.context) && seen.contexts.all.includes(names.other) && JSON.stringify(seen.contexts.found) === JSON.stringify([names.context]),
         `core's Add context tokens hold ${names.context} and ${names.other}; its search for ${names.query} finds ${names.context} only`);
     const onContexts = (current) => Boolean(tagged(current, 'contexts-list'));
@@ -605,7 +576,7 @@ try {
     if (seen.quickAccess === 'contexts') await tapExpecting(tab(await screen(), en['tab.inbox']), onInbox, 'the Inbox');
     else await back(onInbox);
 
-    // (f) The Board's filter picker: its search shows core's match only.
+
     const board = seen.board ?? fail('core\'s Board could not be read');
     check(board.all.includes(names.context) && board.all.includes(names.other) && JSON.stringify(board.found) === JSON.stringify([names.context]),
         `core's Board tokens hold ${names.context} and ${names.other}; its search for ${names.query} finds ${names.context} only`);
@@ -621,7 +592,7 @@ try {
     nodes = await waitFor('core\'s Board match', (current) => JSON.stringify(options(current)) === JSON.stringify(board.found), 15_000);
     check(true, `(f) the Board picker's search shows core's match ${names.context}, not ${names.other}`);
     await hideKeyboard();
-    // The sheet's own Back and Done (the header has a Back, and a column reads Done).
+
     const inSheet = (current, text) => inside(current, tagged(current, 'board-filters')).find((node) => node.text === text);
     nodes = await tapExpecting(inSheet(await screen(), en['common.back']) ?? fail('no Back in the sheet'), (current) => Boolean(withDescription(current, tokensRow)), 'the sheet');
     await tapExpecting(inSheet(nodes, en['common.done']) ?? fail('no Done in the sheet'), (current) => !filters(current), 'the sheet to close');

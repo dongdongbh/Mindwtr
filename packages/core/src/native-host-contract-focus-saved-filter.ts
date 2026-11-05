@@ -9,6 +9,7 @@ import { hasActiveFilterCriteria, normalizeSavedFilter, isSavedFilterSortField }
 import { buildAdvancedFilterCriteriaChips } from './saved-filter-labels';
 import { resolveTaskPerspectiveForFeatures } from './task-utils';
 import { useTaskStore } from './store';
+import { logInfo } from './logger';
 import { focusSavedFilterCreation, focusSavedFilterToken, prepareLocalSavedFilterUpdates } from './store-settings';
 import type { FocusSavedFilterOperation, FocusSavedFilterRequest, FocusSavedFilterResult,
     PreparedFocusSavedFilter } from './store-types';
@@ -134,7 +135,7 @@ const plannedResult = (request: FocusSavedFilterRequest, after: SavedFilter): Fo
             ? { ...request.controls, savedFilterId: null } : request.controls,
 });
 
-/** Pure validation of a cold journal, before opening native SQLite. */
+
 const readPrepared = (value: unknown): PreparedFocusSavedFilter | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -261,6 +262,12 @@ export function createFocusSavedFilterMethods(deps: {
                 if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
             } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
             const saved = await deps.save();
+            if (saved.ok && prepared.result.view === 'contexts') {
+                try { logInfo('Native Context filter saved', {
+                    scope: 'native-host', category: 'storage', force: true,
+                    context: { releaseCheck: 'v1.3.8/context-filter-save', outcome: 'confirmed' },
+                }); } catch {                                                         }
+            }
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
     };

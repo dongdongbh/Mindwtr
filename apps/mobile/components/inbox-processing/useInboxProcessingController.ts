@@ -26,11 +26,13 @@ import {
   getProcessInboxDefaultScheduleTime,
   getProcessInboxPersonSuggestions,
   getProcessInboxProjectChoices,
+  getProjectSectionsForView,
   getProcessInboxRemainingCandidates,
   getProcessInboxSections,
   getProcessInboxSimilarTasks,
   getProcessInboxSuggestionTerms,
   getProcessInboxTaskDefaults,
+  resolveDefaultNewTaskAreaId,
   getProcessInboxTokenPools,
   getProcessInboxTokenSuggestions,
   INITIAL_PROCESS_INBOX_ANSWERS,
@@ -42,7 +44,6 @@ import {
   rankProcessInboxTokenSuggestions,
   resolveProcessInboxPlan,
   resolveProcessInboxProjectSearchSubmit,
-  resolveProcessInboxStep,
   restoreTaskSnapshot,
   safeFormatDate,
   safeParseDate,
@@ -62,6 +63,7 @@ import {
   type ProcessInboxAnswers,
   type ProcessInboxChoiceOutcome,
   type ProcessInboxCommitKind,
+  type ProcessInboxDateField,
   type ProcessInboxDraft,
   type ProcessInboxMode,
   type ProcessInboxSession,
@@ -78,7 +80,7 @@ import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
-import { logWarn } from '../../lib/app-log';
+import { logInfo, logWarn } from '../../lib/app-log';
 import { readAppleClarificationBackend } from '../../lib/apple-clarification-preference';
 import {
   APPLE_CLARIFICATION_RELEASE_CHECK,
@@ -118,6 +120,10 @@ type InboxProcessingControllerParams = {
   onClose: () => void;
 };
 
+const withoutPendingTime = (field: ProcessInboxDateField) => (
+  (prev: Partial<Record<ProcessInboxDateField, string>>) => (prev[field] ? { ...prev, [field]: undefined } : prev)
+);
+
 export function useInboxProcessingController({
   visible,
   onClose,
@@ -126,6 +132,7 @@ export function useInboxProcessingController({
     tasks,
     _allTasks: allTasks,
     projects,
+    sections,
     areas,
     people,
     settings,
@@ -145,7 +152,7 @@ export function useInboxProcessingController({
   const [processingSession, setProcessingSession] = useState<ProcessInboxSession>(
     () => createProcessInboxSession(),
   );
-  // The answers so far; core derives the step, its choices and the write from them.
+
   const [answers, setAnswers] = useState<ProcessInboxAnswers>(INITIAL_PROCESS_INBOX_ANSWERS);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [newContext, setNewContext] = useState('');
@@ -162,6 +169,7 @@ export function useInboxProcessingController({
   const [processingDescription, setProcessingDescription] = useState('');
   const [processingTitleFocused, setProcessingTitleFocused] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   const [selectedEnergyLevel, setSelectedEnergyLevel] = useState<Task['energyLevel']>(undefined);
   const [selectedAssignedTo, setSelectedAssignedTo] = useState('');
@@ -175,6 +183,9 @@ export function useInboxProcessingController({
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [showReviewDatePicker, setShowReviewDatePicker] = useState(false);
+
+  const [pendingTimes, setPendingTimes] = useState<Partial<Record<ProcessInboxDateField, string>>>({});
+  const [timePickerField, setTimePickerField] = useState<ProcessInboxDateField | null>(null);
   const [isAIWorking, setIsAIWorking] = useState(false);
   const [appleClarificationBackend, setAppleClarificationBackend] = useState<'configured' | 'on-device'>('configured');
   const [aiModal, setAiModal] = useState<{ title: string; message?: string; actions: AIResponseAction[] } | null>(null);
@@ -191,6 +202,9 @@ export function useInboxProcessingController({
   const processingScrollRef = useRef<any>(null);
   const hasInitialized = useRef(false);
   const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
+
+  const defaultAreaIdRef = useRef<string | null>(null);
+  defaultAreaIdRef.current = resolveDefaultNewTaskAreaId(settings, areas) ?? null;
   const { projectFirst, referenceEnabled } = processInboxPlan;
   const {
     project: showProjectField,
@@ -240,8 +254,8 @@ export function useInboxProcessingController({
 
   const { areaById } = useVisibleTaskContext();
   const inboxTasks = useMemo(
-    // Not `visibleTasks`: the queue is the process-inbox candidate set, which
-    // has its own status rule on top of the shared visibility predicate.
+
+
     () => selectProcessInboxQueue(tasks, projects),
     [projects, tasks],
   );
@@ -376,21 +390,27 @@ export function useInboxProcessingController({
     () => (selectedProjectId ? projects.find((project) => project.id === selectedProjectId) ?? null : null),
     [projects, selectedProjectId],
   );
+
+
+  const projectSections = useMemo(
+    () => getProjectSectionsForView(currentProject, sections),
+    [currentProject, sections],
+  );
+  const effectiveSectionId = selectedSectionId && projectSections.some((section) => section.id === selectedSectionId)
+    ? selectedSectionId
+    : null;
   const currentArea = useMemo(
     () => (selectedAreaId ? areas.find((area) => area.id === selectedAreaId) ?? null : null),
     [areas, selectedAreaId],
   );
 
-  // Answering a question appends the next one below the fold, so on a phone the tap looks like it
-  // did nothing until you scroll. Follow the reveal down instead.
+
   const scrollProcessingToRevealedStep = useCallback(() => {
     requestAnimationFrame(() => {
       processingScrollRef.current?.scrollToEnd?.({ animated: true });
     });
   }, []);
 
-  // "More options" reveals below the fold exactly like answering a question
-  // does, so expanding follows the reveal down too; collapsing stays put.
   const toggleAdvancedOptions = useCallback(() => {
     setShowAdvancedOptions((previous) => {
       if (!previous) scrollProcessingToRevealedStep();
@@ -405,15 +425,22 @@ export function useInboxProcessingController({
 
   const scrollProcessingToTop = useCallback((animated: boolean = false) => {
     requestAnimationFrame(() => {
-      processingScrollRef.current?.scrollTo?.({ y: 0, animated });
+      const scroll = processingScrollRef.current;
+      if (!scroll?.scrollTo) return;
+      scroll.scrollTo({ y: 0, animated });
+      if (animated) {
+        void logInfo('Inbox processing step scroll reset', {
+          scope: 'inbox', force: true, extra: { releaseCheck: 'v1.3.8/inbox-processing-step-scroll' },
+        });
+      }
     });
   }, []);
 
   const primeTaskState = useCallback((task: Task | null | undefined) => {
-    // The task the draft is filled from: the base its save merges against. currentTask follows the live store, so a
-    // sync that lands before the decision would read as the draft's own change.
+
+
     processingBaseRef.current = task ?? null;
-    const defaults = getProcessInboxTaskDefaults(task);
+    const defaults = getProcessInboxTaskDefaults(task, defaultAreaIdRef.current);
     const { startTime, dueDate, reviewAt } = defaults.dates;
     dirtyScheduleFieldsRef.current.clear();
     useDefaultStartTimeRef.current = false;
@@ -428,6 +455,8 @@ export function useInboxProcessingController({
     setShowStartDatePicker(false);
     setShowDueDatePicker(false);
     setShowReviewDatePicker(false);
+    setPendingTimes({});
+    setTimePickerField(null);
     setDelegateWho('');
     setDelegateFollowUpDate(null);
     setDelegateFollowUpDateOnly(false);
@@ -445,42 +474,69 @@ export function useInboxProcessingController({
     setNewContext('');
     setProjectSearch('');
     setSelectedProjectId(defaults.projectId);
+    setSelectedSectionId(defaults.sectionId);
     setSelectedAreaId(defaults.areaId);
     resetTitleFocus();
     setProcessingTitle(defaults.title);
     setProcessingDescription(defaults.description);
   }, [resetTitleFocus]);
 
+
   const setPendingStartDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = false;
     setPendingStartDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('startTime'));
   }, []);
   const setPendingStartDateOnlyFromControl = useCallback((value: boolean) => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = false;
     setPendingStartDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('startTime'));
   }, []);
   const useDefaultStartTimeFromControl = useCallback(() => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = true;
     setPendingStartDateOnly(false);
+    setPendingTimes(withoutPendingTime('startTime'));
   }, []);
   const setPendingDueDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('dueDate');
     setPendingDueDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('dueDate'));
   }, []);
   const setPendingDueDateOnlyFromControl = useCallback((value: boolean) => {
     dirtyScheduleFieldsRef.current.add('dueDate');
     setPendingDueDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('dueDate'));
   }, []);
   const setPendingReviewDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('reviewAt');
     setPendingReviewDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('reviewAt'));
   }, []);
   const setPendingReviewDateOnlyFromControl = useCallback((value: boolean) => {
     dirtyScheduleFieldsRef.current.add('reviewAt');
     setPendingReviewDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('reviewAt'));
+  }, []);
+  const setDelegateFollowUpDateFromControl = useCallback((value: Date | null) => {
+    setDelegateFollowUpDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('followUp'));
+  }, []);
+  const setDelegateFollowUpDateOnlyFromControl = useCallback((value: boolean) => {
+    setDelegateFollowUpDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('followUp'));
+  }, []);
+
+  const setPendingTimeFromControl = useCallback((field: ProcessInboxDateField, picked: Date) => {
+    if (field !== 'followUp') dirtyScheduleFieldsRef.current.add(field);
+    if (field === 'startTime') useDefaultStartTimeRef.current = false;
+    if (field === 'startTime') setPendingStartDateOnly(false);
+    if (field === 'dueDate') setPendingDueDateOnly(false);
+    if (field === 'reviewAt') setPendingReviewDateOnly(false);
+    if (field === 'followUp') setDelegateFollowUpDateOnly(false);
+    setPendingTimes((prev) => ({ ...prev, [field]: safeFormatDate(picked, 'HH:mm') }));
   }, []);
 
   const activateProcessingSession = useCallback((
@@ -591,16 +647,18 @@ export function useInboxProcessingController({
     [areas, people, projects, settings, tasks],
   );
 
-  /** The draft as plain values, the shape core commits. */
+
   const buildDraft = useCallback((): ProcessInboxDraft => {
-    const dateValue = (date: Date | null, dateOnly: boolean, useDefaultTime = false) => (
+    const dateValue = (date: Date | null, dateOnly: boolean, useDefaultTime = false, time?: string) => (
       date ? { date: safeFormatDate(date, 'yyyy-MM-dd'), dateOnly,
-        ...(useDefaultTime ? { useDefaultTime: true } : {}) } : null
+        ...(useDefaultTime ? { useDefaultTime: true } : {}),
+        ...(time && !dateOnly ? { time } : {}) } : null
     );
     return {
       title: processingTitle,
       description: processingDescription,
       projectId: selectedProjectId,
+      ...(effectiveSectionId ? { sectionId: effectiveSectionId } : {}),
       areaId: selectedAreaId,
       projectSearch,
       contexts: selectedContexts,
@@ -610,11 +668,11 @@ export function useInboxProcessingController({
       energyLevel: selectedEnergyLevel ?? null,
       assignedTo: selectedAssignedTo,
       timeEstimate: selectedTimeEstimate ?? null,
-      startTime: dateValue(pendingStartDate, pendingStartDateOnly, useDefaultStartTimeRef.current),
-      dueDate: dateValue(pendingDueDate, pendingDueDateOnly),
-      reviewAt: dateValue(pendingReviewDate, pendingReviewDateOnly),
+      startTime: dateValue(pendingStartDate, pendingStartDateOnly, useDefaultStartTimeRef.current, pendingTimes.startTime),
+      dueDate: dateValue(pendingDueDate, pendingDueDateOnly, false, pendingTimes.dueDate),
+      reviewAt: dateValue(pendingReviewDate, pendingReviewDateOnly, false, pendingTimes.reviewAt),
       delegateWho,
-      followUp: dateValue(delegateFollowUpDate, delegateFollowUpDateOnly),
+      followUp: dateValue(delegateFollowUpDate, delegateFollowUpDateOnly, false, pendingTimes.followUp),
       convertToProject,
       nextAction: nextActionDraft,
       extraActions: extraActionDrafts,
@@ -627,6 +685,7 @@ export function useInboxProcessingController({
     delegateFollowUpDate,
     delegateFollowUpDateOnly,
     delegateWho,
+    effectiveSectionId,
     extraActionDrafts,
     newContext,
     nextActionDraft,
@@ -636,6 +695,7 @@ export function useInboxProcessingController({
     pendingReviewDateOnly,
     pendingStartDate,
     pendingStartDateOnly,
+    pendingTimes,
     processingDescription,
     processingTitle,
     projectSearch,
@@ -651,10 +711,7 @@ export function useInboxProcessingController({
     showAdvancedOptions,
   ]);
 
-  /**
-   * A step button. Moves between questions here; a destination comes back as a
-   * `commit` outcome for the step flow to run through `runCommit`.
-   */
+
   const answerStep = useCallback((choice: string, mode: ProcessInboxMode): ProcessInboxChoiceOutcome => {
     if (!currentTask) return { type: 'invalid' };
     const outcome = answerProcessInboxStep({
@@ -667,28 +724,26 @@ export function useInboxProcessingController({
       parseTitle: parseProcessingTitle,
     });
     if (outcome.type !== 'flow') return outcome;
-    const step = resolveProcessInboxStep(answers, mode, processInboxPlan);
     setAnswers(outcome.answers);
     setConvertToProject(outcome.draft.convertToProject);
     setNextActionDraft(outcome.draft.nextAction);
     setExtraActionDrafts(outcome.draft.extraActions);
     setSelectedProjectId(outcome.draft.projectId);
+    setSelectedSectionId(outcome.draft.sectionId ?? null);
     setProjectSearch(outcome.draft.projectSearch);
-    if (choice !== 'back' && step !== 'oneAction') scrollProcessingToRevealedStep();
+    scrollProcessingToTop(true);
     return outcome;
-  }, [answers, buildDraft, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToRevealedStep]);
+  }, [answers, buildDraft, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop]);
 
-  // Returns whether the decision was committed, so the presentation can hold
-  // its completion feedback (haptic, Undo toast) until it lands.
+
   const runCommit = useCallback(async (kind: ProcessInboxCommitKind | 'convert'): Promise<boolean> => {
     if (!currentTask) return false;
     if (kind === 'convert') {
       if (projectConversionInFlightRef.current) return false;
       projectConversionInFlightRef.current = true;
     }
-    // The draft is saved field by field onto the row as stored when the write is admitted (base: the task the draft
-    // was filled from), so a field, tag or context another device synced since stays. Attachments merge the same way,
-    // which appends the title's /link: attachments to the latest list. Fields nobody changed are written as before.
+
+
     const base = processingBaseRef.current?.id === currentTask.id ? processingBaseRef.current : currentTask;
     const updateTaskKeepingAttachments: typeof updateTask = (id, updates) => saveTaskDraftOntoLatest(id, base, updates, {
       write: updateTask,
@@ -709,7 +764,7 @@ export function useInboxProcessingController({
         t,
       });
       if (!result.ok) {
-        // Extra actions already added are dropped, so a retry cannot repeat them.
+
         setExtraActionDrafts(result.draft.extraActions);
         if (result.error !== undefined) {
           void logWarn('Failed to create project from mobile inbox processing', {
@@ -727,9 +782,8 @@ export function useInboxProcessingController({
         }
         return false;
       }
-      // Opening the next item primes all of its state. Nothing may reset state
-      // after this: it would clear the next item's dates, and filing that item
-      // would then erase them.
+
+
       if (!activateProcessingSession(result.session)) {
         handleClose();
       }
@@ -756,8 +810,7 @@ export function useInboxProcessingController({
     updateTask,
   ]);
 
-  // Capture the task generation before a decision runs. Toasts keep this exact
-  // receipt, so a later decision cannot redirect an older queued Undo action.
+
   const createDecisionUndoReceipt = useCallback((kind: InboxDecisionUndoKind): InboxDecisionUndoReceipt | null => {
     if (!currentTask) return null;
     return {
@@ -780,7 +833,7 @@ export function useInboxProcessingController({
         );
         return;
       }
-      // Refused (STALE_REVISION) when another device changed the task since; the toast says so.
+
       const result = receipt.kind === 'discarded'
         ? await restoreTask(receipt.taskId)
         : await restoreTaskSnapshot(receipt.taskId, receipt.restoreUpdates);
@@ -788,7 +841,7 @@ export function useInboxProcessingController({
         showProcessingError(getActionFailureMessage(result));
       }
     } catch (error) {
-      // undoTaskCompletion throws its STALE_REVISION refusal.
+
       showProcessingError(getUnknownErrorMessage(error));
     }
   }, [restoreTask, showProcessingError]);
@@ -826,8 +879,7 @@ export function useInboxProcessingController({
     setNewContext('');
   }, [selectedContexts, selectedTags]);
 
-  // `kind` is how a surface that shows contexts and tags separately says which
-  // one an unprefixed entry belongs to; without it the prefix decides.
+
   const addCustomContextMobile = useCallback((kind?: 'context' | 'tag') => {
     applyTokenLists(addProcessInboxToken({
       tokenInput: newContext,
@@ -851,9 +903,10 @@ export function useInboxProcessingController({
     const next = selectProcessInboxProject(projectId);
     setConvertToProject(next.convertToProject);
     setSelectedProjectId(next.projectId);
+    if (next.projectId !== selectedProjectId) setSelectedSectionId(null);
     if (next.areaId === null) setSelectedAreaId(null);
     setProjectSearch(next.projectSearch);
-  }, []);
+  }, [selectedProjectId]);
 
   const handleCreateProjectEarly = useCallback(async () => {
     const submit = resolveProcessInboxProjectSearchSubmit(projectSearch, exactProjectMatch, selectedAreaId);
@@ -872,6 +925,27 @@ export function useInboxProcessingController({
   const handleSkipTask = useCallback(async () => {
     await runCommit('skip');
   }, [runCommit]);
+
+
+  const reloadEditedTask = useCallback(() => {
+    const base = processingBaseRef.current;
+    const latest = base ? useTaskStore.getState()._tasksById?.get(base.id) : undefined;
+    if (!base || !latest || (latest.updatedAt === base.updatedAt && latest.rev === base.rev)) return;
+    primeTaskState(latest);
+    setAnswers(answers);
+    setDelegateWho(delegateWho);
+    setDelegateFollowUpDate(delegateFollowUpDate);
+    setDelegateFollowUpDateOnly(delegateFollowUpDateOnly);
+    setConvertToProject(convertToProject);
+    setNextActionDraft(nextActionDraft);
+    setExtraActionDrafts(extraActionDrafts);
+    void logInfo('Inbox processing reloaded the edited task', {
+      scope: 'inbox', force: true, extra: { releaseCheck: 'v1.3.8/inbox-processing-editor-reload' },
+    });
+  }, [
+    answers, convertToProject, delegateFollowUpDate, delegateFollowUpDateOnly, delegateWho, extraActionDrafts,
+    nextActionDraft, primeTaskState,
+  ]);
 
   const applyAppleClarificationStatus = useCallback((status: AppleClarificationSuggestion['status']) => {
     if (!status) return;
@@ -1103,7 +1177,7 @@ export function useInboxProcessingController({
     try {
       apiKey = await loadAIKey(aiProvider);
     } catch (error) {
-      // An unreadable keystore fails like a request, never as an unhandled rejection.
+
       void logWarn('Inbox processing failed', {
         scope: 'inbox',
         extra: { error: redactAIError(error, '', settings).message },
@@ -1235,6 +1309,10 @@ export function useInboxProcessingController({
     pendingReviewDateOnly,
     pendingStartDate,
     pendingStartDateOnly,
+    pendingTimes,
+    setPendingTime: setPendingTimeFromControl,
+    timePickerField,
+    setTimePickerField,
     processInboxPlan,
     processingDescription,
     processingScrollRef,
@@ -1243,6 +1321,7 @@ export function useInboxProcessingController({
     projectFirst,
     projectSearch,
     referenceEnabled,
+    reloadEditedTask,
     runCommit,
     selectedAreaId,
     selectedAssignedTo,
@@ -1250,13 +1329,16 @@ export function useInboxProcessingController({
     selectedEnergyLevel,
     selectedPriority,
     selectedProjectId,
+    selectedSectionId: effectiveSectionId,
+    setSelectedSectionId,
+    projectSections,
     selectedSomedaySectionId,
     selectedTags,
     selectedTimeEstimate,
     setSelectedAreaId,
     setSelectedAssignedTo,
-    setDelegateFollowUpDate,
-    setDelegateFollowUpDateOnly,
+    setDelegateFollowUpDate: setDelegateFollowUpDateFromControl,
+    setDelegateFollowUpDateOnly: setDelegateFollowUpDateOnlyFromControl,
     setDelegateWho,
     setNewContext,
     setPendingDueDate: setPendingDueDateFromControl,

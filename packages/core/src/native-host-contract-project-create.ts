@@ -30,7 +30,7 @@ const exact = (value: Record<string, unknown>, keys: readonly string[]) => Objec
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 
-/** Journal inputs are strict JSON; count encoded bytes as the Swift transport does. */
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -72,7 +72,7 @@ const expectedProject = (prepared: NativePreparedProjectCreate): Project => {
     });
 };
 
-/** Pure, including on a cold boot before storage is opened. */
+
 const readPrepared = (value: unknown): NativePreparedProjectCreate | null => {
     const input = detach<Record<string, unknown>>(value);
     if (!input || !exact(input, ['request', 'prepared']) || !record(input.prepared)) return null;

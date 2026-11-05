@@ -185,7 +185,7 @@ describe('legacy Cloud attachment URL recovery (#1205)', () => {
         expect(repaired.projects[0].attachments?.[0].title).toBe(LINK);
         expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(repaired);
 
-        // The repair is published once; a second GET must not rewrite the file.
+
         const before = statSync(filePath);
         const reread = await fetch(`${baseUrl}/v1/data`, { headers });
         expect(await reread.text()).toBe(body);

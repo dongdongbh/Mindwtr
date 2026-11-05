@@ -65,11 +65,11 @@ const SORT_FIELD_VALUES = new Set<SortField>([
     'updated',
 ]);
 
-/** Sort values retained by saved filters, including values outside a screen's sort menu. */
+
 export const isSavedFilterSortField = (value: unknown): value is SortField =>
     typeof value === 'string' && SORT_FIELD_VALUES.has(value as SortField);
 
-const DATE_PRESET_VALUES = new Set(['today', 'this_week', 'this_month', 'overdue', 'no_date', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
+const DATE_PRESET_VALUES = new Set(['today', 'this_week', 'this_month', 'overdue', 'no_date', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -95,8 +95,7 @@ const normalizeStringArray = (value: unknown, options?: { lowercase?: boolean; p
     return next.length > 0 ? next : undefined;
 };
 
-// Drop from `tokens` any entry that also appears (case-insensitively) in
-// `remove`. Used so an exclude token never coexists with the same include.
+
 const subtractTokens = (tokens: string[] | undefined, remove: string[] | undefined): string[] | undefined => {
     if (!tokens) return undefined;
     if (!remove || remove.length === 0) return tokens;
@@ -145,9 +144,8 @@ export function normalizeFilterCriteria(value: unknown): FilterCriteria {
     const projects = normalizeStringArray(value.projects);
     const excludedProjects = normalizeStringArray(value.excludedProjects);
     const tags = normalizeStringArray(value.tags, { prefix: '#' });
-    // Exclude lists never override an include of the same token: a token on
-    // both sides would filter every task out, so include wins and the token
-    // drops from the exclude side.
+
+
     const excludedContexts = subtractTokens(normalizeStringArray(value.excludedContexts, { prefix: '@' }), contexts);
     const excludedTags = subtractTokens(normalizeStringArray(value.excludedTags, { prefix: '#' }), tags);
     const energy = normalizeEnumArray(value.energy, TASK_ENERGY_VALUES);
@@ -226,11 +224,7 @@ export function hasActiveFilterCriteria(criteria: FilterCriteria | undefined): b
     );
 }
 
-// `selected` (the filter criteria) is already prefix-normalized by
-// normalizeFilterCriteria. A task's own contexts/tags can still hold a bare
-// token saved before #1013's draft-save fix, so `actual` gets the same
-// normalization here — otherwise a selected "@home" chip never matches a
-// stored bare "home", even though both mean the same context.
+
 const matchesAnyToken = (
     selected: readonly string[] | undefined,
     actual: readonly string[] | undefined,
@@ -266,11 +260,12 @@ const matchesTokens = (
         : matchesAnyToken(selected, actual, field)
 );
 
+
 const matchesDateRange = (
     value: string | undefined,
     range: DateRange | undefined,
     parser: (input: string | undefined) => Date | null,
-    options: Required<Pick<ApplyFilterOptions, 'now' | 'weekStartsOn'>>
+    options: Required<Pick<ApplyFilterOptions, 'now' | 'weekStartsOn'>> & { includeOverdueDue?: boolean }
 ): boolean => {
     if (!range) return true;
     if ('preset' in range && range.preset === 'no_date') {
@@ -287,6 +282,10 @@ const matchesDateRange = (
                 const todayEnd = endOfDay(options.now);
                 return (isAfter(date, todayStart) || isEqual(date, todayStart))
                     && (isBefore(date, todayEnd) || isEqual(date, todayEnd));
+            }
+            case 'overdue_next_7_days': {
+                const end = endOfDay(addDays(options.now, 6));
+                return date <= end && (date >= todayStart || (options.includeOverdueDue === true && date < options.now));
             }
             case 'next_7_days':
             case 'next_14_days':
@@ -399,8 +398,8 @@ const taskMatchesPreparedFilterCriteria = (
     if (normalized.statuses?.length && !normalized.statuses.includes(task.status)) return false;
     if (!matchesTokens(normalized.contexts, task.contexts, 'contexts', contextMatchMode)) return false;
     if (!matchesTokens(normalized.tags, task.tags, 'tags', tagMatchMode)) return false;
-    // Excluded tokens always subtract: a task carrying ANY excluded context/tag
-    // (hierarchical) is filtered out, independent of the include match modes.
+
+
     if (normalized.excludedContexts?.length && matchesAnyToken(normalized.excludedContexts, task.contexts, 'contexts')) return false;
     if (normalized.excludedTags?.length && matchesAnyToken(normalized.excludedTags, task.tags, 'tags')) return false;
 
@@ -422,16 +421,16 @@ const taskMatchesPreparedFilterCriteria = (
 
     if (normalized.energy?.length && (!task.energyLevel || !normalized.energy.includes(task.energyLevel))) return false;
     if (!matchesPriority(normalized.priority, task.priority)) return false;
-    if (!matchesDateRange(task.dueDate, normalized.dueDateRange, safeParseDueDate, { now, weekStartsOn })) return false;
+    if (!matchesDateRange(task.dueDate, normalized.dueDateRange, safeParseDueDate, { now, weekStartsOn, includeOverdueDue: true })) return false;
     if (!matchesDateRange(task.startTime, normalized.startDateRange, safeParseDate, { now, weekStartsOn })) return false;
     if (normalized.anyDateRange) {
         const options = { now, weekStartsOn };
         const range = normalized.anyDateRange;
-        // No date means none of the task's date fields are set.
+
         const matches = 'preset' in range && range.preset === 'no_date'
             ? !task.startTime && !task.dueDate && !task.reviewAt
             : matchesDateRange(task.startTime, range, safeParseDate, options)
-                || matchesDateRange(task.dueDate, range, safeParseDueDate, options)
+                || matchesDateRange(task.dueDate, range, safeParseDueDate, { ...options, includeOverdueDue: true })
                 || matchesDateRange(task.reviewAt, range, safeParseDate, options);
         if (!matches) return false;
     }
@@ -467,13 +466,7 @@ export function createTaskFilterPredicate(
     return (task: Task) => taskMatchesPreparedFilterCriteria(task, context);
 }
 
-/**
- * True when the normalized criteria ask for nothing. `normalizeFilterCriteria`
- * only ever writes a key it means — no key is set to `undefined` or to an empty
- * array, and the two match-mode keys ride along with the tokens they belong to
- * — so an empty object is exactly "no criterion". A criterion added there later
- * shows up here as a key and takes the full path, which is the safe direction.
- */
+
 const hasNoCriteria = (context: PreparedFilterContext): boolean => (
     Object.keys(context.normalized).length === 0
 );
@@ -484,25 +477,13 @@ export function applyFilter<T extends Task>(
     options: ApplyFilterOptions = {}
 ): T[] {
     const context = prepareFilterContext(criteria, options);
-    // With no criteria, every one of the ~20 checks below passes and only the
-    // deleted-task rule is left, so run that rule alone. This is the common
-    // case, not a corner: Focus narrows four pools through here on every
-    // derivation and the screen has no saved filter until the user picks one.
-    // On an engine without a JIT those four passes were the single largest
-    // cost in the whole derivation.
+
+
     if (hasNoCriteria(context)) return tasks.filter((task) => !task.deletedAt);
     return tasks.filter((task) => taskMatchesPreparedFilterCriteria(task, context));
 }
 
-/**
- * The storage and sync form of the saved filters: every entry exactly as
- * written — views, fields and values this build does not know included — in
- * stored order. Only an entry with no id is dropped; a repeated id keeps its
- * last copy at the first copy's place. Nothing is interpreted or invented
- * here (a missing createdAt stays missing), so load, save and merge never
- * rewrite a filter. Entries may hold values the SavedFilter type does not
- * list: screens read them through normalizeSavedFilter(s).
- */
+
 export function keepSavedFilters(value: unknown): SavedFilter[] {
     if (!Array.isArray(value)) return [];
     const byId = new Map<string, SavedFilter>();
@@ -513,20 +494,14 @@ export function keepSavedFilters(value: unknown): SavedFilter[] {
     return Array.from(byId.values());
 }
 
-/**
- * One stored saved filter as this build reads it: the fields it knows, with
- * values it does not know dropped. Null when the filter cannot be shown here —
- * no id, no name, or a view this build does not know (a newer app's view is
- * hidden, never shown as a Focus filter). The id is kept as stored so writes
- * find the stored entry. For reading only: writes change the stored entry.
- */
+
 export function normalizeSavedFilter(value: unknown): SavedFilter | null {
     if (!isRecord(value)) return null;
     if (typeof value.id !== 'string' || !value.id.trim()) return null;
     if (typeof value.name !== 'string' || !value.name.trim()) return null;
     if (typeof value.view !== 'string' || !SAVED_FILTER_VIEW_VALUES.has(value.view as SavedFilterView)) return null;
     const view = value.view as SavedFilterView;
-    // A missing timestamp reads as empty here and is never written back.
+
     const createdAt = typeof value.createdAt === 'string' ? value.createdAt : '';
     const updatedAt = typeof value.updatedAt === 'string' && value.updatedAt.trim() ? value.updatedAt : createdAt;
     const sortBy = isSavedFilterSortField(value.sortBy)
@@ -554,7 +529,7 @@ export function normalizeSavedFilter(value: unknown): SavedFilter | null {
     };
 }
 
-/** The stored saved filters this build can show, read through normalizeSavedFilter, in stored order. */
+
 export function normalizeSavedFilters(value: unknown): SavedFilter[] {
     return keepSavedFilters(value).flatMap((filter) => {
         const normalized = normalizeSavedFilter(filter);
@@ -562,10 +537,7 @@ export function normalizeSavedFilters(value: unknown): SavedFilter[] {
     });
 }
 
-/**
- * Tombstone one saved filter. Only that entry changes: the others stay as
- * stored, in stored order, including a newer app's views and fields.
- */
+
 export function markSavedFilterDeleted(
     filters: readonly SavedFilter[] | undefined,
     filterId: string,

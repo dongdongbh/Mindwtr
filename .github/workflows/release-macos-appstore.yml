@@ -98,7 +98,7 @@ jobs:
       VITE_DONATION_PROMPT_ENABLED: "true"
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
@@ -114,7 +114,7 @@ jobs:
           bundle install --jobs 4 --retry 3
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
         with:
           targets: aarch64-apple-darwin
 
@@ -122,17 +122,17 @@ jobs:
         run: rustup target add x86_64-apple-darwin
 
       - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           workspaces: apps/desktop/src-tauri
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
@@ -153,12 +153,8 @@ jobs:
           MAS_INSTALLER_CERT_PASSWORD: ${{ secrets.MAS_INSTALLER_CERT_PASSWORD }}
           MAS_PROVISIONING_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE }}
           MAS_SIGNING_IDENTITY: ${{ secrets.MAS_SIGNING_IDENTITY }}
-          # Optional (#1054): base64 of a Mac App Store provisioning profile for
-          # the widget extension's App ID tech.dongdongbh.mindwtr.MindwtrWidgets
-          # (developer portal: register that App ID, create a "Mac App Store
-          # Connect" profile for it, `base64 -i <file>.provisionprofile`). When
-          # set, the .pkg ships Contents/PlugIns/MindwtrWidgets.appex; when
-          # unset, the build is exactly the widget-less one it always was.
+
+
           MAS_WIDGET_PROVISIONING_PROFILE: ${{ secrets.MAS_WIDGET_PROVISIONING_PROFILE }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
@@ -435,12 +431,12 @@ jobs:
       - name: Drop the widget App Group from App Store entitlements
         if: env.HAS_MAS_WIDGET_PROFILE != '1'
         run: |
-          # Entitlements.mas.plist carries the __MINDWTR_MACOS_APP_GROUP__
-          # placeholder for the widget (#1054); only the widget embed step
-          # resolves it. Without the widget the placeholder would be signed
-          # into the host as-is and App Store Connect rejects app-group values
-          # that are not team-ID-prefixed, so remove the key to keep this
-          # build identical to the widget-less one.
+
+
+
+
+
+
           python3 - <<'PY'
           import plistlib
           from pathlib import Path
@@ -487,25 +483,23 @@ jobs:
           VITE_ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.ref_name }}
           TAURI_LOG_LEVEL: debug
           SOURCE_DATE_EPOCH: "1"
-          # Bundled whisper bindings are only needed on this macOS build path.
-          # Linux/AUR source builds must generate native bindings instead.
+
+
           WHISPER_DONT_GENERATE_BINDINGS: "1"
-          # build.rs bakes this into the binary as the widget's App Group ID
-          # (team-ID-prefixed). Only set when the widget actually ships so a
-          # build without the widget profile keeps the DEVTEAM placeholder and
-          # is byte-for-byte the build it always was (#1054).
+
+
           APPLE_TEAM_ID: ${{ env.HAS_MAS_WIDGET_PROFILE == '1' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           set -euo pipefail
-          # rust-cache can restore stale CMake cache where GGML_NATIVE stayed ON.
-          # Clear whisper-rs-sys build dirs so GGML_NATIVE_DEFAULT=OFF is applied.
+
+
           if [ -d apps/desktop/src-tauri/target ]; then
             find apps/desktop/src-tauri/target -type d -path '*/build/whisper-rs-sys-*' -prune -exec rm -rf {} +
           fi
           cd apps/desktop
-          # Pin the scoped CLI package: bare `bunx tauri` on a checkout whose lockfile
-          # lacks @tauri-apps/cli falls back to the npm `tauri` v1 package, which
-          # compiles sharp/libvips from source and fails on macOS runners.
+
+
+
           bunx @tauri-apps/cli@2.11.3 build \
             --target universal-apple-darwin \
             --bundles app \
@@ -530,10 +524,10 @@ jobs:
             echo "::error::Built .app bundle not found"
             exit 1
           fi
-          # Modifies the .app in place. Nothing after this step may run
-          # `tauri build`/`tauri bundle` again: productbuild below packages
-          # this exact app, and a Tauri re-bundle would regenerate the .app
-          # from the binary and drop the widget (#1054).
+
+
+
+
           MINDWTR_WIDGET_DISTRIBUTION=appstore \
           MINDWTR_WIDGET_PROVISIONING_PROFILE="$WIDGET_PROFILE_PATH" \
           bash scripts/build-macos-widget.sh "$APP_PATH" "$APPLE_TEAM_ID" "$MAS_SIGNING_IDENTITY" universal-apple-darwin
@@ -669,7 +663,7 @@ jobs:
           ls -la "$PKG_DIR"
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: mindwtr-macos-appstore-pkg
           path: ${{ env.PKG_PATH }}
@@ -928,6 +922,13 @@ jobs:
                 in_house: false
               )
 
+              unless ENV.fetch("SKIP_METADATA", "false") == "true"
+                update_app_age_rating(
+                  api_key: api_key,
+                  app_identifier: ENV.fetch("EXPECTED_BUNDLE_ID"),
+                  age_rating_config_path: File.join(ENV.fetch("GITHUB_WORKSPACE"), "metadata/apple-age-rating.json")
+                )
+              end
               deliver(deliver_options.merge(api_key: api_key))
             end
           end

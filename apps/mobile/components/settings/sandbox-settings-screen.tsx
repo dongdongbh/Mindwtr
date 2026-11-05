@@ -80,7 +80,7 @@ export function SandboxSettingsScreen() {
     const [failed, setFailed] = React.useState(false);
     const [settingsFailed, setSettingsFailed] = React.useState(false);
 
-    // A built update reads the settings as stored when its write is admitted, so a newer key stays.
+
     const save = async (updates: Partial<AppSettings> | ((latest: AppSettings) => Partial<AppSettings>), setting: string) => {
         if (!isSandboxMode()) return;
         setSettingsFailed(false);

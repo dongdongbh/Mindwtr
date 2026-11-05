@@ -55,9 +55,8 @@ struct ContextsScreen: View {
                             .rnFont(14, .semibold).frame(minHeight: 44).disabled(model.busy || model.retryNeeded)
                             .accessibilityIdentifier("contexts-retry")
                     }
-                    // Keep the published rows mounted while the next bounded read
-                    // is staged, so paging/refresh/chip search preserve scroll position.
-                    // Row and More actions stay disabled until this response is current.
+
+
                     if !model.contexts.isEmpty {
                         let rows = model.contexts.objects("rows")
                         ForEach(rows.map(ContextsTaskRow.init)) { entry in
@@ -229,8 +228,7 @@ struct ContextsScreen: View {
         .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
     }
 
-    // RN's chip (#1427): a tap switches to core's `next`; a token chip's long-press, also VoiceOver's
-    // named action, applies core's `additive` selection. All and No context have no long-press.
+
     @ViewBuilder private func chip(_ chip: CoreObject) -> some View {
         let selected = chip.flag("selected")
         let additive = chip.object("additive")
@@ -258,7 +256,7 @@ struct ContextsScreen: View {
         } else {
             let add = { endInput(); model.selectContextsChip(chip.text("id"), additive: true) }
             button
-                // High priority, as RN's Pressable: a recognized long-press cancels the button's tap.
+
                 .highPriorityGesture(LongPressGesture().onEnded { _ in add() })
                 .accessibilityAction(named: additive.text("label"), add)
         }
@@ -292,7 +290,7 @@ struct ContextsScreen: View {
     }
 
     private func emptyIcon(check: Bool) -> some View {
-        // The same Lucide CheckCircle2 / Tag paths used by RN.
+
         Path { path in
             if check {
                 path.addEllipse(in: CGRect(x: 2, y: 2, width: 20, height: 20))

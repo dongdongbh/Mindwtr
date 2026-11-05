@@ -1,18 +1,13 @@
-/**
- * Calendar push sync service.
- *
- * One-way push of scheduled tasks and tasks with due dates into a device
- * calendar (iOS EventKit via expo-calendar). Creates, updates, or removes
- * calendar events as task dates change. Mapping between task IDs and
- * calendar event IDs is persisted in the SQLite calendar_sync table.
- *
- * The rules are core's (calendar-push-service.ts); this binds the device.
- */
+
+
+
 import * as Calendar from 'expo-calendar';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+    calendarPushTaskMarkerLine,
     createCalendarPushService,
+    notesCarryCalendarPushTaskMarker,
     useTaskStore,
     type CalendarPushService,
 } from '@mindwtr/core';
@@ -29,6 +24,42 @@ import {
 export { CALENDAR_PUSH_COLOR_OPTIONS, type CalendarPushTargetCalendar } from '@mindwtr/core';
 
 const PLATFORM = Platform.OS;
+
+type EventPlace = 'gone' | 'elsewhere' | 'unmarked' | 'here';
+
+const eventPlace = (eventId: string, owner?: { taskId: string; calendarId: string }): Promise<EventPlace> => Calendar.getEventAsync(eventId).then(
+    (event): EventPlace => {
+        if (owner && event?.calendarId != null && String(event.calendarId) !== owner.calendarId) return 'elsewhere';
+        const markerLine = owner ? calendarPushTaskMarkerLine(owner.taskId) : null;
+        return markerLine && !notesCarryCalendarPushTaskMarker(event?.notes, markerLine) ? 'unmarked' : 'here';
+    },
+    (error: unknown): EventPlace => {
+        if ((error as { code?: unknown } | null)?.code === 'E_EVENT_NOT_FOUND') return 'gone';
+        throw error;
+    },
+);
+
+const unmarkedEvent = (outcome: 'recreated' | 'cleared'): Error => {
+    void logWarn('Calendar push left an event it did not make', {
+        scope: 'calendar-push',
+        force: true,
+        extra: { releaseCheck: 'v1.3.8/calendar-push-unmarked-event', outcome },
+    });
+    return new Error('Calendar event not found');
+};
+
+const notOwnEvent = (place: EventPlace, outcome: 'recreated' | 'cleared'): Error => (
+    place === 'unmarked' ? unmarkedEvent(outcome) : missingEvent(outcome)
+);
+
+const missingEvent = (outcome: 'recreated' | 'cleared'): Error => {
+    void logInfo('Calendar push found a missing event', {
+        scope: 'calendar-push',
+        force: true,
+        extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome },
+    });
+    return new Error('Calendar event not found');
+};
 
 let service: CalendarPushService | null = null;
 const getService = (): CalendarPushService => {
@@ -47,7 +78,7 @@ const getService = (): CalendarPushService => {
             getEvents: (calendarIds, start, end) => Calendar.getEventsAsync(calendarIds, start, end),
             getSources: () => Calendar.getSourcesAsync(),
             createCalendar: (details) => Calendar.createCalendarAsync(details as Parameters<typeof Calendar.createCalendarAsync>[0]),
-            // Read on each use, as the platform may not offer it.
+
             get updateCalendar() {
                 return typeof Calendar.updateCalendarAsync === 'function'
                     ? (calendarId: string, details: { color: string; title?: string }) => Calendar.updateCalendarAsync(calendarId, details)
@@ -55,8 +86,21 @@ const getService = (): CalendarPushService => {
             },
             deleteCalendar: (calendarId) => Calendar.deleteCalendarAsync(calendarId),
             createEvent: (calendarId, details) => Calendar.createEventAsync(calendarId, details),
-            updateEvent: (eventId, details) => Calendar.updateEventAsync(eventId, details),
-            deleteEvent: (eventId) => Calendar.deleteEventAsync(eventId),
+            updateEvent: async (eventId, details, context) => {
+                const place = Platform.OS === 'android' ? await eventPlace(eventId, context) : 'here';
+                if (place !== 'here') throw notOwnEvent(place, 'recreated');
+                return Calendar.updateEventAsync(eventId, details);
+            },
+            deleteEvent: async (eventId, context) => {
+                const place = Platform.OS === 'android' && context ? await eventPlace(eventId, context) : 'here';
+                if (place === 'elsewhere' || place === 'unmarked') throw notOwnEvent(place, 'cleared');
+                try {
+                    return await Calendar.deleteEventAsync(eventId);
+                } catch (error) {
+                    if (Platform.OS === 'android' && await eventPlace(eventId) === 'gone') throw missingEvent('cleared');
+                    throw error;
+                }
+            },
         },
         syncEntries: {
             ensureReady: () => ensureCalendarSyncStorageReady(),
@@ -75,7 +119,6 @@ const getService = (): CalendarPushService => {
     return service;
 };
 
-// MARK: - Settings
 
 export const getCalendarPushEnabled = (): Promise<boolean> => getService().getCalendarPushEnabled();
 
@@ -91,7 +134,6 @@ export const getCalendarPushColor = (): Promise<string> => getService().getCalen
 
 export const setCalendarPushColor = (color: string): Promise<string> => getService().setCalendarPushColor(color);
 
-// MARK: - Permission
 
 export const requestCalendarWritePermission = (): Promise<boolean> => getService().requestCalendarWritePermission();
 
@@ -99,34 +141,23 @@ export const getCalendarWritePermissionStatus = (): Promise<'granted' | 'denied'
     getService().getCalendarWritePermissionStatus()
 );
 
-// MARK: - Managed Calendar
 
 export const getCalendarPushTargetCalendars = () => getService().getCalendarPushTargetCalendars();
 
-/**
- * Returns the ID of the managed "Mindwtr" calendar, creating it if needed.
- * Returns null if the calendar cannot be created (e.g. no permission, no source).
- */
+
 export const ensureMindwtrCalendar = (): Promise<string | null> => getService().ensureMindwtrCalendar();
 
 export const updateMindwtrCalendarColor = (color: string): Promise<boolean> => getService().updateMindwtrCalendarColor(color);
 
-/**
- * Deletes the managed Mindwtr calendar and removes the stored ID.
- * Called when the user disables calendar push sync and chooses to clean up.
- */
+
 export const deleteMindwtrCalendar = (): Promise<void> => getService().deleteMindwtrCalendar();
 
-// MARK: - Sync
 
 export const runFullCalendarSync = (): Promise<void> => getService().runFullCalendarSync();
 
 export const scheduleSyncDebounced = (taskIds: string[]): void => getService().scheduleSyncDebounced(taskIds);
 
-/**
- * Starts watching the task store for changes and syncing due-date tasks to
- * the device calendar. Returns an unsubscribe function.
- */
+
 export const startCalendarPushSync = (): (() => void) => getService().startCalendarPushSync();
 
 export const stopCalendarPushSync = (): void => getService().stopCalendarPushSync();

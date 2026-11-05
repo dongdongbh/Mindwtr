@@ -27,10 +27,10 @@ export default defineConfig({
         environment: 'jsdom',
         setupFiles: './src/test/setup.ts',
         css: true,
-        // Harness timeout, not a performance budget: full-screen jsdom mounts cross
-        // Vitest's 5 s default when the machine is busy. Budgets live in the perf suite.
+
+
         testTimeout: 30_000,
-        // Vitest 4 narrowed discovery defaults; retain the Vitest 3 boundary.
+
         exclude: [
             ...configDefaults.exclude,
             '**/dist/**',
@@ -40,12 +40,12 @@ export default defineConfig({
         ],
         coverage: {
             provider: 'v8',
-            // Keep Vitest 3's unloaded-source denominator and exclusions.
+
             include: ['**/*.{js,cjs,mjs,ts,mts,tsx,jsx,vue,svelte,marko,astro}'],
             exclude: [
                 'coverage/**',
                 'dist/**',
-                // Native build output contains compressed JS and CMake .ts files, not source.
+
                 'src-tauri/target/**',
                 '**/node_modules/**',
                 '**/[.]**',
@@ -53,7 +53,7 @@ export default defineConfig({
                 '**/*.d.ts',
                 '**/virtual:*',
                 '**/__x00__*',
-                // Do not retain the old raw-NUL glob: picomatch strips NUL and excludes every file.
+
                 'cypress/**',
                 'test?(s)/**',
                 'test?(-*).?(c|m)[jt]s?(x)',

@@ -2,9 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// Internal device settings only. Calls (including close) must be serialized by
-/// the owner. RN writers must be stopped; this namespace lease is advisory.
-/// No CoreHost/JS binding or Sync capability is granted by constructing a store.
+
 final class NativeDeviceKV {
     private static let manifestLimit = 64 * 1024 * 1024
     private static let snapshotLimit = 256 * 1024 * 1024
@@ -103,8 +101,8 @@ final class NativeDeviceKV {
               !bundleIdentifier.isEmpty, bundleIdentifier.utf8.count <= Self.keyLimit,
               bundleIdentifier != ".", bundleIdentifier != "..", !bundleIdentifier.contains("/"),
               !bundleIdentifier.utf8.contains(0) else { throw Self.invalid }
-        // Reuse only the existing fixed Apple system-alias rule, never arbitrary
-        // symlink resolution as authority for the caller's supplied container.
+
+
         let path: String
         do { path = try NativeAttachmentFiles.filePath(containerURL.absoluteString) }
         catch { throw Self.invalid }
@@ -148,7 +146,7 @@ final class NativeDeviceKV {
     deinit { close() }
 
     #if DEBUG
-    /// Artifact-only fixture inventory; the CoreHost fixture validates launch authority.
+
     func captureAISummaryEvidence() throws -> [String: Data] {
         try requireUsable(); try verifyNamespace()
         guard pending == nil else { throw Self.failure }
@@ -257,7 +255,7 @@ final class NativeDeviceKV {
     }
 
     private static let searchConsentName = "mindwtr:iosSearchIndexingEnabled"
-    /// Foundation accepts BOM and trailing commas that the shared JSON.parse reader refuses.
+
     private static func strictAIConsentJSON(_ raw: String) -> Bool {
         guard !raw.utf8.starts(with: [0xEF, 0xBB, 0xBF]) else { return false }
         var quoted = false, escaped = false
@@ -277,7 +275,7 @@ final class NativeDeviceKV {
         return !quoted
     }
 
-    /// Fixed selected-provider metadata only; the legacy credential value never leaves this snapshot.
+
     func readAIProviderDeviceMetadata(provider: NativeAISettingsProjection.Provider) throws -> (consentRecorded: Bool, legacyItemPresent: Bool) {
         try requireUsable()
         guard pending == nil else { throw Self.failure }
@@ -287,11 +285,11 @@ final class NativeDeviceKV {
         guard let raw, raw.utf8.count <= Self.valueLimit, Self.strictAIConsentJSON(raw),
               let consent = try? NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let value = consent[provider.rawValue] as? NSNumber else { return (false, legacyItemPresent) }
-        // NSNumber also bridges numeric 1; consent follows the shared strict `=== true` reader.
+
         return (CFGetTypeID(value) == CFBooleanGetTypeID() && value.boolValue, legacyItemPresent)
     }
 
-    /// Revalidate namespace/snapshot even before the selected provider is known.
+
     func validateAIProviderDeviceMetadataRead() throws {
         try requireUsable()
         guard pending == nil else { throw Self.failure }
@@ -347,7 +345,7 @@ final class NativeDeviceKV {
         default: throw Self.failure
         }
     }
-    // Private typed authority; the cell stays outside the generic JS writable allowlist.
+
     func setSearchConsent(_ enabled: Bool) throws {
         try mutate([Change(key: Self.searchConsentName, bytes: Data(Self.searchConsentName.utf8),
                            value: enabled ? "true" : "false")], skipUnchanged: true)
@@ -357,7 +355,7 @@ final class NativeDeviceKV {
     var hasPendingReminderMutation: Bool {
         pending.map { $0.changes.map(\.key) == Self.reminderNames } ?? false
     }
-    /// Fixed private two-cell CAS; reminder keys remain absent from the generic writable allowlist.
+
     func compareAndSetReminderMaps(expected: [String?], next: [String?], confirmUnchanged: Bool = false) throws {
         guard expected.count == 2, next.count == 2,
               (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
@@ -381,7 +379,7 @@ final class NativeDeviceKV {
     var hasPendingCalendarSettingMutation: Bool {
         pending.map { $0.changes.map(\.key) == Self.calendarSettingNames } ?? false
     }
-    /// Only the prepared calendar owner may atomically publish its private mutation proof.
+
     func compareAndSetCalendarSetting(expected: [String?], next: [String]) throws {
         guard expected.count == 2, next.count == 2,
               expected.allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }),
@@ -408,7 +406,7 @@ final class NativeDeviceKV {
     var hasPendingAppleRemindersImportMutation: Bool {
         pending.map { $0.changes.map(\.key) == [Self.appleRemindersImportName] } ?? false
     }
-    /// Fixed raw cell only; importer policy and saved-task proof belong to its owner.
+
     func compareAndSetAppleRemindersImportState(expected: String?, next: String) throws {
         guard (expected?.utf8.count ?? 0) <= Self.valueLimit,
               next.utf8.count <= Self.valueLimit else { throw Self.invalid }
@@ -447,7 +445,7 @@ final class NativeDeviceKV {
     var hasPendingPomodoroAlarmMutation: Bool {
         pending.map { $0.changes.map(\.key) == [Self.pomodoroAlarmName] } ?? false
     }
-    /// Fixed raw cell only; alarm policy and transition proof belong to its owner.
+
     func compareAndSetPomodoroAlarmState(expected: String?, next: String) throws {
         guard (expected?.utf8.count ?? 0) <= Self.valueLimit,
               next.utf8.count <= Self.valueLimit else { throw Self.invalid }
@@ -476,7 +474,7 @@ final class NativeDeviceKV {
     var hasPendingCalendarPushMutation: Bool {
         pending.map { $0.changes.map(\.key) == Self.calendarPushNames } ?? false
     }
-    /// Private raw six-cell authority; the effect owner validates transitions before using it.
+
     func compareAndSetCalendarPushState(expected: [String?], next: [String?]) throws {
         guard expected.count == 6, next.count == 6,
               (expected + next).allSatisfy({ ($0?.utf8.count ?? 0) <= Self.valueLimit }) else { throw Self.invalid }
@@ -523,8 +521,8 @@ final class NativeDeviceKV {
             if retiringAILegacy != nil || Self.isLegacySecretRemoval(changes.map(\.key)) {
                 let selected = changes[0]
                 let name = Self.externalName(selected.key)
-                // A different live manifest reference never grants permission
-                // to retire its backing path, even if its MD5 filename collides.
+
+
                 for (key, value) in object where value is NSNull {
                     guard let key = key as? String else { throw Self.failure }
                     guard Data(key.utf8) == selected.bytes || Self.externalName(key) != name else { throw Self.failure }
@@ -536,8 +534,8 @@ final class NativeDeviceKV {
                 #if DEBUG
                 if let limit = faults.snapshotByteLimit { inputLimit = min(inputLimit, max(0, limit)) }
                 #endif
-                // An unreferenced file is additional to the legacy reader's
-                // full input (including old manifests/repeated references).
+
+
                 remaining = min(remaining, max(0, inputLimit - before.consumedBytes))
                 let file = try before.external[name] ?? Self.readFile(try storeFD(), name: name,
                     limit: Self.snapshotLimit, remaining: &remaining, optional: true)
@@ -551,8 +549,8 @@ final class NativeDeviceKV {
                     var external = before.external; external[name] = file
                     before = Snapshot(manifest: before.manifest, values: before.values,
                                       external: external, consumedBytes: before.consumedBytes)
-                    // Bind a captured orphan only after validating the original
-                    // namespace and snapshot; constructor/read never retire it.
+
+
                     snapshot = before; retainedExternal = external
                 }
             }
@@ -568,9 +566,8 @@ final class NativeDeviceKV {
             }
             let after = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
             guard after.count <= Self.manifestLimit else { throw Self.invalid }
-            // Keep the reader's full contribution from old empty manifests and
-            // repeated external references. Inline/remove can only reduce that
-            // contribution, so retaining it is a conservative future ceiling.
+
+
             let otherInput = before.consumedBytes - (before.manifest?.bytes.count ?? 0)
             let withOrphan = otherInput.addingReportingOverflow(orphanInputBytes)
             let futureInput = withOrphan.partialValue.addingReportingOverflow(after.count)
@@ -627,8 +624,8 @@ final class NativeDeviceKV {
             retainedExternal = final.external
             pending = nil
         } catch {
-            // A fault or write error retains this operation. Namespace/file
-            // uncertainty is poisoned by the verification paths, never adopted.
+
+
             if !poisoned {
                 do { try verifyNamespace() }
                 catch { _ = poison() }
@@ -647,9 +644,8 @@ final class NativeDeviceKV {
         if let file = retirement.file, !retirement.removed {
             try verifyFile(file, name: retirement.name)
             guard unlinkat(try storeFD(), retirement.name, 0) == 0 else { throw Self.failure }
-            // This state must survive a lost acknowledgment after our unlink.
-            // The held FD stays alive, but its unlinked generation is no longer
-            // required to equal the previously named single-link file.
+
+
             retirement.removed = true
             retainedExternal.removeValue(forKey: retirement.name)
             #if DEBUG
@@ -713,17 +709,16 @@ final class NativeDeviceKV {
                                                           remaining: &remaining, optional: false) else { throw Self.failure }
                         external[name] = file
                     }
-                    // RN's UTF-8 file reader consumes one encoding marker.
-                    // Bind that decoded value separately
-                    // while retaining the original raw bytes and generation.
+
+
                     guard let file = external[name], let decoded = LegacyRNStorage.decodeExternalUTF8(file.bytes),
                           let value = parsed.values[Data(key.utf8)], Data(decoded.utf8) == Data(value.utf8) else {
                         throw Self.failure
                     }
                 }
             }
-            // Inline replacement/removal changes only the manifest reference.
-            // Every previously referenced external file remains bound and kept.
+
+
             for (name, original) in retainedExternal {
                 if external[name] == nil {
                     guard let current = try Self.readFile(try storeFD(), name: name, limit: Self.snapshotLimit,
@@ -881,14 +876,14 @@ final class NativeDeviceKV {
 }
 
 #if DEBUG
-// IO boundaries only, never release-build knobs or domain fixtures.
+
 final class NativeDeviceKVFaults {
     var beforePromotion: (() throws -> Void)?
     var afterPromotion: (() throws -> Void)?
     var beforeReadback: (() throws -> Void)?
     var beforeSecretUnlink: (() throws -> Void)?
     var afterSecretUnlink: (() throws -> Void)?
-    // A smaller IO read ceiling for bounded tests; release limits are unchanged.
+
     var snapshotByteLimit: Int?
 }
 #endif

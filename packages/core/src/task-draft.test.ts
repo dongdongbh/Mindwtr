@@ -137,7 +137,7 @@ describe('task-draft', () => {
         expect(backToInbox.status).toBe('inbox');
         expect(backToInbox.focusedToday).toBe(false);
 
-        // An active Waiting follow-up keeps the star.
+
         const toWaiting = setTaskDraftField(draft, 'status', 'waiting');
         expect(toWaiting.focusedToday).toBe(true);
     });
@@ -447,7 +447,7 @@ describe('task-draft', () => {
         expect(noOption && 'attachments' in noOption).toBe(false);
         const emptyBuffer = taskDraftToUpdatePatch(draft, withAttachment, { attachments: [] });
         expect(emptyBuffer && 'attachments' in emptyBuffer).toBe(false);
-        // A populated buffer (including soft-deleted records) passes through.
+
         const removedAll = taskDraftToUpdatePatch(draft, withAttachment, {
             attachments: [{ ...withAttachment.attachments![0], deletedAt: '2026-01-02T00:00:00.000Z' }],
         });

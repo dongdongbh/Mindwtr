@@ -1,29 +1,6 @@
-// AI check for the isolated native Android development app: Settings › AI and the AI actions, against a local stub only.
-//
-//   node apps/android-native/scripts/check-ai-device.mjs <adb-serial> [apk]
-//
-// Starts an OpenAI-compatible stub on this computer (127.0.0.1:<port>, MINDWTR_AI_STUB_PORT or 18781) and maps the phone's
-// port to it (`adb reverse`); no real provider and no real key is ever used. Then, through the app's own screens:
-//   (1) Settings › Advanced › AI opens; with the consent record removed at boot (the debug-only `ai_consent_reset`), turning
-//       the assistant on asks RN's question in RN's words and writes nothing until Agree; Agree records the consent under
-//       RN's key in RKStorage and turns AI on (synced settings); a provider chosen while on asks again, and Cancel keeps OpenAI;
-//   (2) the base URL typed (the stub's), the model list loaded from the stub (Suggestions lists its models), a model picked;
-//   (3) a key typed: sealed in RN's SecureStore format under `key_v1-mindwtr-ai-key_openai`, and in no other app file, log line
-//       or journal entry; the stub sees it as the bearer of the next request;
-//   (4) the editor (a capture link's Save & edit): the copilot's chips from the stub, a chip applied to the draft only; an edit
-//       while Clarify waits stops its provider call and no answer shows; Clarify shows core's dialog and changes nothing until a button; Use suggestion changes the draft; Break down's Add steps adds
-//       the checklist; nothing is stored until Save, and Save stores core's edits;
-//   (5) a stub error that echoes the key: the alert shows the error with the key redacted;
-//   (6) Process Inbox's Clarify: core's dialog, and its button edits the step's draft only;
-//   (7) the Weekly Review's Run analysis on the stale step: closing the review while it waits stops the provider call and the
-//       reopened review shows no old answer; then core's suggestions (or its empty line), and nothing written;
-//   (8) the capture screen's copilot: its chips from the stub; Cancel writes nothing;
-//   (9) a kill during a key save: the stub sees a key the field held while typing (each keystroke is one write, in order; at a
-//       kill at once, also the key before), never another; a key the field showed as saved survives a kill at once
-//       after; the journal holds no key and no setAIKey entry.
-// It installs with `install -r` (development data stays), touches only the development package, never launches over another
-// app, and on exit removes the port mapping and debug properties, stops the stub and puts the keyboard back. Leave the device on
-// its home screen. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
@@ -57,7 +34,7 @@ const SCHEME = 'mindwtr-native-dev';
 const work = resolve(app, 'android/build/ai-check');
 const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'));
 
-// This run's names: letters and digits only for what the phone types.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const PORT = Number(process.env.MINDWTR_AI_STUB_PORT ?? 18781);
 const BASE_URL = `http://127.0.0.1:${PORT}/v1`;
@@ -70,12 +47,7 @@ const ANSWERS = {
     breakdown: { steps: [`Find the card ${run}`, `Dial the number ${run}`] },
 };
 
-/**
- * The OpenAI-compatible stub: GET /v1/models lists MODELS; POST /v1/chat/completions answers by the prompt's shape (Clarify,
- * Break down, the review analysis, the copilot). Mode "echo" answers 400 with the bearer echoed back (core shows a 400's message; a 401's it words itself). Mode "hold" never answers: it reports the request "held", then "aborted" when the app closes it. It runs on a worker
- * thread: the check's own adb calls are synchronous and would hold a request on this thread's event loop until the phone gave
- * up on it. Every request's method, path, bearer and answer kind comes back as a message into `seen`.
- */
+
 const STUB_SOURCE = `
     const { createServer } = require('node:http');
     const { parentPort, workerData: { port, models, answers, run } } = require('node:worker_threads');
@@ -131,7 +103,7 @@ const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const logs = () => device.logs(pid(), TAG);
 
-// ---- The phone's storage (run-as copies, read on this computer) ----
+
 const pullFile = (remote, name) => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -148,16 +120,13 @@ const sqlite = (file, sql) => {
 };
 const database = () => pullFile(`files/${DB}`, 'db');
 const aiSettings = () => JSON.parse(sqlite(database(), 'SELECT data FROM settings WHERE id = 1')[0]?.data ?? '{}').ai ?? {};
-/** The live tasks titled [title] (this run's titles hold only letters, digits and spaces). */
+
 const taskByTitle = (title) => sqlite(database(), `SELECT title, status, tags, contexts, checklist, timeEstimate, rev FROM tasks WHERE deletedAt IS NULL AND title = '${title}'`);
 const rkStorage = () => Object.fromEntries(sqlite(pullFile('databases/RKStorage', 'rk'), 'SELECT key, value FROM catalystLocalStorage').map((row) => [row.key, row.value]));
 const grepApp = (text) => sh(`run-as ${PKG} sh -c "grep -rl '${text}' files databases shared_prefs 2>/dev/null || true"`).split(/\s+/).filter(Boolean);
 const STAGED = '/data/local/tmp/mindwtr-native-dev-ai-check.db';
-/**
- * Core's store on a copy of the app's database (the app stopped), as check-review-organize-device.mjs does: `inject` adds this
- * run's two stale tasks (next, untouched for 40 days: core's Weekly Review lists them), `remove` deletes them forever. The copy
- * goes back whole (its WAL checkpointed into the main file), and the app starts again.
- */
+
+
 const editDatabase = async (mode) => {
     await device.stopApp();
     const db = database();
@@ -205,7 +174,7 @@ const editDatabase = async (mode) => {
 let staleInjected = false;
 const journalEntries = () => sh(`run-as ${PKG} sh -c 'ls files/journal 2>/dev/null; cat files/journal/*.json 2>/dev/null' || true`);
 
-// ---- UI (core's English) ----
+
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onAI = (nodes) => Boolean(tagged(nodes, 'settings-ai'));
 const withPrefix = (nodes, prefix) => nodes.find((node) => (node['content-desc'] ?? '').startsWith(prefix));
@@ -216,7 +185,7 @@ const hideKeyboard = async () => {
     sh('input keyevent KEYCODE_BACK');
     await sleep(600);
 };
-/** Back until the tab bar shows (nothing open over it). */
+
 const toTabs = async () => {
     for (let step = 0; step < 10; step += 1) {
         const nodes = await screen();
@@ -229,16 +198,16 @@ const toTabs = async () => {
     }
     return fail('the tabs did not come back');
 };
-/** The main list scrolled until [find] picks a node fully in view: from the top, then down. */
+
 const reveal = (find, description) => device.revealNode(find, description);
-/** Settings from the More sheet. */
+
 const openSettings = async () => {
     let nodes = await toTabs();
     nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     return tapExpecting(withDescription(await device.settle(nodes), en['nav.settings']) ?? fail('no Settings tile'),
         (next) => Boolean(tagged(next, 'settings-main')), 'Settings');
 };
-/** Settings › Advanced › AI (core's rows read "<title>. <description>"). */
+
 const openAI = async () => {
     const nodes = await screen();
     if (onAI(nodes)) return nodes;
@@ -250,13 +219,13 @@ const tapTag = async (tag, expected, description, timeoutMs = 30_000) => {
     await hideKeyboard();
     return tapExpecting(await reveal((current) => tagged(current, tag), tag), expected, description, timeoutMs);
 };
-/** A folded card or row ([tag]) opened. */
+
 const unfold = async (tag, shows) => {
     const nodes = await screen();
     if (shows(nodes)) return nodes;
     return tapTag(tag, shows, `${tag} open`);
 };
-/** A text field (its test tag) focused and typed after what it shows; [clear] empties it first. */
+
 const typeInto = async (tag, text, clear = true, settleMs = 700) => {
     const node = await reveal((current) => tagged(current, tag), tag);
     await device.focusAtEnd(node);
@@ -268,11 +237,11 @@ const typeInto = async (tag, text, clear = true, settleMs = 700) => {
     sh(`input text '${text}'`);
     await sleep(settleMs);
 };
-/** How many stub requests answered (or held) as [kind]. */
+
 const kinds = (kind) => stub.state.seen.filter((entry) => entry.kind === kind).length;
-/** The consent dialog: its title and message as shown. */
+
 const dialogTexts = (nodes) => nodes.filter((node) => node.class === 'android.widget.TextView').map((node) => node.text).filter(Boolean);
-/** How many times [operation] answered (host-entry.ts taskResult's line). */
+
 const commands = (operation, outcome = 'saved') => logs().replace(/\\/g, '').split('\n')
     .filter((line) => line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 const until = async (description, holds, timeoutMs = 60_000, everyMs = 1_000) => {
@@ -288,7 +257,7 @@ const link = async (query, expected, description) => {
     sh(`am start -W -a android.intent.action.VIEW -d '${SCHEME}://capture?${query}' ${PKG}`);
     return waitFor(description, expected, 30_000);
 };
-/** The app started afresh (a new process), on the Inbox. */
+
 const restart = async (props = {}) => {
     await device.stopApp();
     for (const [name, value] of Object.entries(props)) sh(`setprop debug.mindwtr.native.${name} ${value}`);
@@ -298,7 +267,7 @@ const restart = async (props = {}) => {
     for (const name of Object.keys(props)) sh(`setprop debug.mindwtr.native.${name} ''`);
     return nodes;
 };
-/** Core's consent question for [provider], computed by core itself (bun), in English. */
+
 const consentPrompt = (provider) => JSON.parse(execFileSync('bun', ['-e', `
     const { getAIConsentPrompt, createAISettingsTranslator } = await import(${JSON.stringify(resolve(repo, 'packages/core/src/ai-settings-model.ts'))});
     const { getTranslator } = await import(${JSON.stringify(resolve(repo, 'packages/core/src/i18n/index.ts'))});
@@ -325,7 +294,7 @@ try {
     await restart({ ai_consent_reset: 1 });
     check(!rkStorage()['mindwtr-ai-provider-consent-v1'], '(0) the app booted with no AI consent recorded (debug reset)');
 
-    // (1) Settings › AI; AI off first when an earlier run left it on.
+
     let nodes = await openAI();
     check(onAI(nodes), '(1) Settings › AI opens from Settings › Advanced');
     nodes = await unfold('ai-assistant-card', (current) => Boolean(tagged(current, 'ai-enabled')));
@@ -336,7 +305,7 @@ try {
     }
     const expected = consentPrompt('openai');
     const settingsBefore = aiSettings();
-    // The question is RN's Alert (a dialog window of its own): its buttons are found by their words.
+
     const asked = (prompt) => (current) => dialogTexts(current).includes(prompt.title) && Boolean(button(current, prompt.agree));
     nodes = await tapTag('ai-enabled', asked(expected), 'the consent question');
     const shown = dialogTexts(nodes);
@@ -346,7 +315,7 @@ try {
     nodes = await tapExpecting(button(nodes, expected.agree), (current) => !asked(expected)(current) && switchOn(current, enableLabel), 'AI on after Agree');
     await until('AI on stored', () => aiSettings().enabled === true, 20_000);
     check(JSON.parse(rkStorage()['mindwtr-ai-provider-consent-v1'] ?? '{}').openai === true, '(1) Agree recorded the consent under RN\'s key in RKStorage, then turned AI on');
-    // A provider chosen while on asks for that provider; Cancel keeps OpenAI.
+
     const gemini = consentPrompt('gemini');
     const geminiConsented = JSON.parse(rkStorage()['mindwtr-ai-provider-consent-v1']).gemini === true;
     if (!geminiConsented) {
@@ -357,20 +326,20 @@ try {
         check((aiSettings().provider ?? 'openai') === 'openai' && !JSON.parse(rkStorage()['mindwtr-ai-provider-consent-v1']).gemini, '(1) Cancel keeps OpenAI and records nothing');
     }
 
-    // (2) The stub as the OpenAI-compatible endpoint; its model list; a model picked.
+
     await typeInto('ai-base-url', BASE_URL);
     await hideKeyboard();
     await until('the base URL stored', () => aiSettings().baseUrl === BASE_URL, 20_000);
     check(!logs().includes(BASE_URL), '(2) the base URL is stored and never logged');
     await until('the model list asked from the stub', () => stub.state.seen.some((entry) => entry.path === '/v1/models'), 30_000);
-    // The list shows once the stub's answer is back (the picker follows core's view as it changes).
+
     nodes = await tapTag('ai-model-suggestions', (current) => Boolean(tagged(current, 'ai-picker')) && MODELS.every((model) => current.some((node) => node['content-desc'] === model)), 'the model picker');
     check(MODELS.every((model) => nodes.some((node) => node['content-desc'] === model)), `(2) Suggestions lists the stub's models (${MODELS.join(', ')})`);
     await tapExpecting(withDescription(nodes, MODELS[1]), (current) => !tagged(current, 'ai-picker'), 'the model picked');
     await until('the model stored', () => aiSettings().model === MODELS[1], 20_000);
     check(true, `(2) picking ${MODELS[1]} stored it`);
 
-    // (3) A key: RN's SecureStore format, nowhere else.
+
     await typeInto('ai-assistant-key', KEYS.first);
     await hideKeyboard();
     await tapTag('ai-model', (current) => Boolean(current), 'the key field left');
@@ -385,7 +354,7 @@ try {
     check(!journalEntries().includes(KEYS.first) && !/"setAIKey"/.test(journalEntries()), '(3) the journal holds no key and no setAIKey entry');
     check(!Object.values(rkStorage()).some((value) => value.includes(KEYS.first)), '(3) RKStorage holds no key');
 
-    // (4) The editor: a capture link's Save & edit opens the task.
+
     nodes = await link(`title=${encodeURIComponent(titles.editor)}`, (current) => tagged(current, 'capture-modal-title')?.text === titles.editor, 'the capture screen');
     nodes = await tapExpecting(tagged(nodes, 'capture-modal-save-edit') ?? fail('no Save & edit'), (current) => inEditor(current) && !tagged(current, 'capture-modal'), 'the editor');
     const saved = taskByTitle(titles.editor)[0] ?? fail('the capture was not stored');
@@ -394,7 +363,7 @@ try {
     check(copilotAsk?.bearer === KEYS.first, '(4) the copilot asked the stub with the stored key as its bearer');
     nodes = await tapExpecting(withDescription(nodes, '#finance'), (current) => Boolean(tagged(current, 'ai-applied')), 'the chip applied');
     check(tagged(nodes, 'ai-applied').text.includes('#finance'), `(4) the chip is applied to the draft ("${tagged(nodes, 'ai-applied').text}")`);
-    // An edit while Clarify waits stops its provider call, and its answer never shows (review C1 verification 5).
+
     {
         const [held, aborted] = [kinds('held'), kinds('aborted')];
         stub.state.mode = 'hold';
@@ -432,11 +401,11 @@ try {
     check(JSON.parse(stored.tags ?? '[]').includes('#finance') && JSON.parse(stored.contexts ?? '[]').includes('@phone')
         && ANSWERS.breakdown.steps.every((step) => checklist.includes(step)), '(4) Save stored the suggestion\'s title and context, the chip\'s tag and the steps, in one write');
 
-    // (5) A provider error that echoes the key: redacted.
+
     stub.state.mode = 'echo';
     nodes = await link(`title=${encodeURIComponent(`Echo ${run}`)}`, (current) => Boolean(tagged(current, 'capture-modal-title')), 'the capture screen for the echo');
-    // Samsung's keyboard can open on its Clipboard panel, which took both taps on Save & edit (d1 full4, 10-12): the keyboard
-    // goes first (a Back can only close the panel, so up to three).
+
+
     for (let tries = 0; tries < 3 && keyboardShown(); tries += 1) await hideKeyboard();
     nodes = await screen();
     nodes = await tapExpecting(tagged(nodes, 'capture-modal-save-edit') ?? fail('no Save & edit'), (current) => inEditor(current), 'the echo task\'s editor');
@@ -448,7 +417,7 @@ try {
     stub.state.mode = 'ok';
     await toTabs();
 
-    // (6) Process Inbox's Clarify: core's dialog; its button edits the step's draft only.
+
     await link(`title=${encodeURIComponent(titles.inbox)}`, (current) => tagged(current, 'capture-modal-title')?.text === titles.inbox, 'the capture screen for the Inbox');
     await tapExpecting(tagged(await screen(), 'capture-modal-save') ?? fail('no Save'), (current) => !tagged(current, 'capture-modal'), 'the capture saved');
     nodes = await toTabs();
@@ -466,8 +435,7 @@ try {
     await tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close'), (current) => !tagged(current, 'process-inbox'), 'Process Inbox closed');
     check(JSON.stringify(taskByTitle(stepTitle)) === JSON.stringify(before), '(6) closing Process Inbox wrote nothing');
 
-    // (7) The Weekly Review's analysis on the stale step: this run's two stale tasks (injected through core's store), core's
-    // suggestions from the stub, nothing written by the answer, and Apply selected moving only the chosen one to Someday.
+
     staleInjected = true;
     await editDatabase('inject');
     check(taskByTitle(titles.staleSomeday)[0]?.status === 'next' && taskByTitle(titles.staleKeep)[0]?.status === 'next', '(7) this run\'s two stale tasks are in the app\'s database');
@@ -485,7 +453,7 @@ try {
     };
     nodes = await startWeekly(nodes);
     console.log(`info - the Weekly Review opened on "${tagged(nodes, 'review-step-title').text}" (${tagged(nodes, 'review-step-indicator')?.text})`);
-    // A checkpoint on the last step has no Back: Finish (core's lastReviewAt, as a user finishing it), then the guide starts over.
+
     if (!withDescription(nodes, en['review.back']) && withDescription(nodes, en['review.finish'])) {
         nodes = await tapExpecting(withDescription(nodes, en['review.finish']), (current) => Boolean(button(current, en['review.startReview'])), 'the review finished');
         nodes = await startWeekly(nodes);
@@ -510,8 +478,8 @@ try {
     };
     nodes = await toStale(nodes);
     check(tagged(nodes, 'review-step-title').text === stale, `(7) the Weekly Review reached "${stale}"`);
-    // Closing the review while its analysis waits stops the provider call; the review opened again shows no old answer
-    // (review C1 verification 5 and A).
+
+
     {
         const [held, aborted] = [kinds('held'), kinds('aborted')];
         stub.state.mode = 'hold';
@@ -535,7 +503,7 @@ try {
     check(stub.state.seen.filter((entry) => entry.kind === 'suggestions').length > asksBefore, '(7) Run analysis asked the stub');
     nodes = await device.settle();
     if (tagged(nodes, 'review-ai-error')) fail(`the analysis failed: ${tagged(nodes, 'review-ai-error').text}`);
-    // A suggestion's row (its test tag) holds its title: its checkbox state is the row's `checked`.
+
     const suggestionOf = (title, current = nodes) => {
         const label = current.find((node) => node.text === title && !(node['content-desc'] ?? '').includes('Status'));
         if (!label) return undefined;
@@ -545,8 +513,8 @@ try {
             return l <= x1 && t <= y1 && r >= x2 && b >= y2;
         });
     };
-    // The suggestions sit under Run analysis, below the step's stale list (the phone's other stale tasks make it long): each
-    // is scrolled into view on its own.
+
+
     const revealed = async (find, description) => reveal(find, description).catch(() => undefined);
     const somedaySuggestion = await revealed((current) => suggestionOf(titles.staleSomeday, current), 'the Someday suggestion');
     const keptSuggestion = await revealed((current) => suggestionOf(titles.staleKeep, current), 'the kept suggestion');
@@ -565,7 +533,7 @@ try {
     staleInjected = false;
     check(taskByTitle(titles.staleSomeday).length === 0 && taskByTitle(titles.staleKeep).length === 0, '(7) this run\'s stale tasks are removed again');
 
-    // (8) The capture screen's copilot: its chips from the stub; Cancel writes nothing.
+
     nodes = await link(`title=${encodeURIComponent(titles.capture)}`, (current) => tagged(current, 'capture-modal-title')?.text === titles.capture, 'the capture screen for the copilot');
     await hideKeyboard();
     nodes = await waitFor('the capture screen\'s chips', (current) => current.some((node) => node['content-desc'] === '#finance'), 30_000);
@@ -574,9 +542,9 @@ try {
     await tapExpecting(tagged(nodes, 'capture-modal-cancel'), (current) => !tagged(current, 'capture-modal'), 'the capture cancelled');
     check(taskByTitle(titles.capture).length === 0, '(8) Cancel wrote nothing');
 
-    // (9) Kills during a key save: the key is the one before or one the field held while typing, never another; no journal entry holds it.
+
     let storedKey = KEYS.first;
-    // Each keystroke is one setAIKey, in order (AISettings.kt, review C1 4): the kills fall while the writes run and after.
+
     const modelsAsked = async (seenBefore, description) => {
         await until(description, () => stub.state.seen.slice(seenBefore).some((entry) => entry.path === '/v1/models'), 30_000);
         return stub.state.seen.slice(seenBefore).find((entry) => entry.path === '/v1/models').bearer;
@@ -589,7 +557,7 @@ try {
         const next = `sk${run}kill${index}`;
         await openAI();
         await unfold('ai-assistant-card', (current) => Boolean(tagged(current, 'ai-enabled')));
-        // Typed after the dots (no clear): the field's first edit starts the key over, so each write is a prefix of the new key.
+
         await typeInto('ai-assistant-key', next, false, 0);
         await sleep(waitMs);
         const seenBefore = stub.state.seen.length;
@@ -597,13 +565,13 @@ try {
         await openAI();
         const bearer = await modelsAsked(seenBefore, 'the model list asked with the stored key');
         const typedPart = bearer.length > 0 && next.startsWith(bearer);
-        // At once after typing a write may not have landed yet (the key before); from 300 ms on, the field's text is stored.
+
         const allowed = typedPart || (waitMs === 0 && bearer === storedKey);
         check(allowed, `(9) killed ${waitMs} ms after typing: the stored key is ${typedPart ? `${bearer.length} of the ${next.length} typed characters` : bearer === storedKey ? 'the one before' : `another (${bearer.length} characters, ${[...bearer].filter((c) => c === '•').length} dots; a stub key)`}`);
         storedKey = bearer;
         journalClean(next);
     }
-    // A key the field showed as saved (its writes stored, the model list asked with it) survives a kill at once after.
+
     {
         const saved = `sk${run}saved`;
         await openAI();
@@ -621,7 +589,7 @@ try {
         journalClean(saved);
     }
 
-    // AI off again, so the other device checks see the editor and Process Inbox without it.
+
     nodes = await openAI();
     nodes = await unfold('ai-assistant-card', (current) => Boolean(tagged(current, 'ai-enabled')));
     if (switchOn(nodes, enableLabel)) await tapTag('ai-enabled', (current) => !switchOn(current, enableLabel), 'AI off');
@@ -632,7 +600,7 @@ try {
     try {
         console.log(`evidence - stub saw: ${JSON.stringify(stub?.state.seen.map(({ method, path, kind, at }) => `${at} ${method} ${path} ${kind ?? ''}`))}`);
         console.log(`evidence - app log (ai):\n${logs().split('\n').filter((line) => /AI|ai|Core action|DEBUGAI/.test(line) && !/task command/.test(line)).slice(-40).map((line) => line.slice(0, 300)).join('\n')}`);
-    } catch { /* the app is gone */ }
+    } catch {                       }
     evidenced(error);
     if (staleInjected) {
         try { await editDatabase('remove'); console.log('note - removed this run\'s stale tasks'); } catch (cleanupError) { console.error(`RESTORE FAILED: this run's stale tasks (${run}) stay: ${cleanupError.message}`); }

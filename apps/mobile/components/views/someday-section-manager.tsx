@@ -20,7 +20,7 @@ type SomedaySectionManagerProps = {
 };
 
 export function SomedaySectionManager({ definitions, onChange, onDelete, t, themeColors: tc }: SomedaySectionManagerProps) {
-  // Row order, labels and the rename/reorder results come from core, shared with the native host.
+
   const rows = useMemo(() => buildSomedaySectionManagerRows(definitions, t), [definitions, t]);
   const text = getSomedaySectionManagerText(t);
   const [renamingId, setRenamingId] = useState<string | null>(null);

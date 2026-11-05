@@ -98,8 +98,8 @@ describe('buildMacWidgetPayload', () => {
     });
 
     it('gives the sequential project slot to the later step that is due today', () => {
-        // The widget must name the same next action the Focus screen does
-        // (#1090). Selecting by chain order alone showed 'step-1' here.
+
+
         const project = makeProject({ id: 'seq-project', isSequential: true });
         const dueToday = new Date();
         dueToday.setHours(17, 0, 0, 0);

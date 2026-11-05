@@ -1,75 +1,8 @@
-/**
- * The native host contract for Settings: the menu (settings-menu-model.ts), the
- * General screen (general-settings-model.ts), the Manage screen
- * (manage-settings-model.ts), the GTD screens (gtd-settings-model.ts) and Data's Diagnostics card
- * (data-settings-model.ts). Kept in its own file and spread into
- * createNativeHostContract. Someday sections on Manage use the Someday methods
- * (getSomedaySections, createSomedaySection, renameSomedaySection,
- * reorderSomedaySections, deleteSomedaySection in native-host-contract-menu-views.ts).
- *
- * Where React Native keeps each choice, and how a host keeps it the same way.
- * Synced settings are written by the commands below. Device-local values stay on
- * the device (AsyncStorage on React Native), under these keys:
- *
- * - Theme: `@mindwtr_theme` holds the theme value; `@mindwtr_theme_style` holds
- *   'material3' for the two Material themes, else 'default'. A synced
- *   `settings.theme` wins over the stored one. Send the stored theme as
- *   `deviceTheme` to getGeneralSettings.
- * - Language: `mindwtr-language` holds the language code. After storing it, call
- *   setLanguage({ storedLanguage, systemLocale }) so labels follow.
- * - Android system search (Android 12+ only): `mindwtr:appSearchIndexingEnabled`
- *   is 'true' while on and removed when off. The host also indexes or wipes its
- *   search documents (platform wiring). Send `appSearch` to getGeneralSettings.
- * - App lock: device-local (`settings.security.mobileAppLockEnabled`). Before turning
- *   it on, the host asks the device lock with `appLock.enablePrompt`; only a
- *   success sends the edit, a failure shows `appLock.errors[reason]`.
- * - Regional formats open or closed: screen state only, closed on every visit.
- * - Manage's open sections: `mindwtr:settings:manage:openSections`, JSON
- *   `{"areas":false,"people":false,"somedaySections":false,"contexts":false,"tags":false}`.
- *   Send the stored text as `openSections`; each section's `toggle` is the write
- *   that opens or closes it.
- * - The About row's update dot: `mindwtr-update-available` is 'true' when an
- *   update was found. Send it as `updateAvailable` to getSettingsMenu.
- * - GTD › Task editor layout › Open tasks in: `mindwtr:view:taskOpenMode:v1`
- *   holds 'automatic', 'preview' or 'edit' (anything else reads as automatic;
- *   the sandbox keeps its own in memory). Send the stored text as `taskOpenMode`
- *   to getGtdSettings; setGtdSetting's deviceWrites store a new choice.
- * - GTD › Pomodoro's alert notice: the host checks Android's exact-alarm
- *   permission (Android 12+) and shows `pomodoro.controls.alarmNotice` only
- *   while it is denied; its action opens the system's Alarms & reminders page.
- * - GTD › Capture's automation capture card (Android's capture intent): the
- *   token lives in the app's no-backup files (React Native's
- *   CaptureIntentConfigStore.kt), never in core. Send the stored config's
- *   `enabled` as `captureIntent` to getGtdSettings (null when it cannot be read,
- *   and show `capture.captureIntent.messages.loadFailed`). The switch sets the
- *   stored config itself, a target-state write: on keeps a token already there,
- *   off deletes it. Then read the view again.
- * - Notifications › Quick capture in notification bar (Android): RN's AsyncStorage key
- *   `mindwtr:persistentCaptureNotification` is 'true' while on and removed when off; the host's
- *   persistentCapture port reads and writes it. setNotificationsSetting's reply says what the
- *   notification shows (`persistentCapture`), and the host posts or removes it (RN's
- *   PersistentCaptureNotifier.kt); getPersistentCaptureNotification says what to post again at
- *   start and on every resume while it is on (RN's keepPersistentCaptureNotificationArmed).
- * - Notifications' exact-alarm row: as GTD › Pomodoro's notice, shown only while Android 12+
- *   denies exact alarms; its action opens the system's Alarms & reminders page.
- * - GTD screen state, reset on every visit: the text fields' drafts, the open
- *   task editor groups (see `taskEditor.expandedResetKey`), the field sheet, the
- *   default-area picker, and whether the auto-start notice showed.
- *
- * Every write takes a request UUID: while its save is owed a retry only saves
- * (native-request-receipts.ts). Each write is target-state, so a replay after a
- * restart writes nothing: a setting already holding the value, an area already
- * named and colored, a person already added, a token nobody carries any more,
- * an item already deleted. A new area or person takes the request UUID as its ID,
- * so a replay finds it. An edit or delete of an area, person, context or tag is
- * also compare-and-set on the `revision` its row's target carries (echo `edit.target`
- * and `delete` as the view gives them): a replay after a restart never undoes a later
- * change (STALE_REVISION).
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
+
+
+
 import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR } from './color-constants';
+import { countLiveProjectsByArea } from './area-project-usage';
 import { createBackupFileName, serializeBackupData } from './backup-transfer';
 import { bytesToBase64 } from './base64-bytes';
 import { serializeMindwtrCsv } from './mindwtr-csv-export';
@@ -175,7 +108,7 @@ import { sortViewSectionDefinitions } from './view-sections';
 
 type Translate = (key: string) => string;
 
-/** Build General from one saved Settings snapshot, including its regional defaults. */
+
 export function buildNativeGeneralSettingsModel(settings: import('./types').AppSettings, deps: Pick<SettingsDeps,
     't' | 'language' | 'systemLocale' | 'dateFormatting'>, deviceTheme?: string | null,
 appSearch: { supported: boolean; enabled: boolean } = { supported: false, enabled: false }): GeneralSettingsModel {
@@ -194,21 +127,21 @@ export type SettingsDeps = {
     t: () => Translate;
     language: () => Language;
     systemLocale: () => string | null;
-    /** The user's date formatting (createDateFormatter). */
+
     dateFormatting: () => DateFormattingConfig;
-    /** Tasks, projects, areas, people and settings generations. */
+
     dataRevision: () => string;
     requestIdPattern: RegExp;
-    /** Settings › About's host (native-host-contract-about.ts): the Data screen's analytics switch is there while it sends. */
+
     about?: () => NativeAboutHost | null;
-    /** Android's persistent capture switch, as RN stores it (PERSISTENT_CAPTURE_STORAGE_KEY); null on a host without one. */
+
     persistentCapture?: () => NativePersistentCaptureHost | null;
 };
 
-/** The host's store of the persistent capture switch: on disk when write returns; each throws on a failure. */
+
 export type NativePersistentCaptureHost = { read(): boolean; write(enabled: boolean): void };
 
-/** Settings screens the native host draws so far; draw the other rows disabled. */
+
 export const NATIVE_SETTINGS_SCREENS: readonly string[] = ['general', 'gtd', 'manage', 'notifications', 'sync', 'data', 'advanced', 'ai', 'about', 'calendar'];
 
 type NativeMenuRow<Id extends string = string> = SettingsMenuRow<Id> & { enabled: boolean };
@@ -218,10 +151,10 @@ export type NativeSettingsMenu = {
     revision: string;
     title: string;
     searchPlaceholder: string;
-    /** The cards left after the search; each row opens the screen of its id. */
+
     groups: NativeMenuRow[][];
     noMatches: string | null;
-    /** The Advanced screen (the `advanced` row opens it). */
+
     advanced: { title: string; rows: NativeMenuRow[] };
 };
 
@@ -233,20 +166,15 @@ export type NativeDataSettings = DataSettingsModel & { version: typeof NATIVE_HO
 
 export type NativeNotificationsSettings = NotificationsSettingsModel & { version: typeof NATIVE_HOST_CONTRACT_VERSION; revision: string };
 
-/** What the persistent capture notification shows while it is on; null while it is off. */
+
 export type NativePersistentCaptureNotification = { post: NotificationsSettingsModel['persistentCaptureNotification'] | null };
 
 export type NativeNotificationsWriteResult = NativeSettingsWriteResult & { persistentCapture?: NativePersistentCaptureNotification };
 
-/** A write's answer: whether the store changed, and what the host stores on the device. */
+
 export type NativeSettingsWriteResult = { changed: boolean; deviceWrites: SettingsDeviceWrite[] };
 
-/**
- * What the editor edits, as a host sends it back (a row's `edit.target`); the contract
- * reads the current values. `revision` is the row's as the view showed it: an area's
- * or person's revision, or a context's or tag's carriers (every task and project that
- * carries it, at its revision). A write refuses a target changed since (STALE_REVISION).
- */
+
 export type NativeManageEditorTarget =
     | { type: 'area'; id: string; revision: string }
     | { type: 'newArea' }
@@ -256,13 +184,13 @@ export type NativeManageEditorTarget =
     | { type: 'person'; id: string; revision: string }
     | { type: 'context' | 'tag'; name: string; revision: string };
 
-/** A row's `delete`, with its revision as for NativeManageEditorTarget. */
+
 export type NativeManageDeleteTarget = { type: 'area' | 'person'; id: string; revision: string } | { type: 'context' | 'tag'; name: string; revision: string };
 
-/** A target as read from a host: checkManageEditor takes one without its revision too. */
+
 type ReadTarget = NativeManageEditorTarget | { type: 'area' | 'person'; id: string } | { type: 'context' | 'tag'; name: string };
 
-/** Opens the editor: send `target` to saveManageEditor with the fields, which start at `draft`. */
+
 type NativeManageEdit = { target: NativeManageEditorTarget; draft: ManageEditorDraft };
 
 export type NativeManageAreaRow = { id: string; name: string; color: string; edit: NativeManageEdit; delete: NativeManageDeleteTarget; deleteConfirm: ManageConfirm };
@@ -278,24 +206,22 @@ export type ManageListName = 'areas' | 'people' | 'contexts' | 'tags';
 
 export type NativeManageSettings = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Changes with the data, settings and language; getManageSettingsList pages under it. */
+
     revision: string;
     title: string;
-    /** In screen order. A section's rows show while it is open. */
+
     sections: { key: ManageSectionKey; title: string; count: number; open: boolean; toggle: SettingsDeviceWrite }[];
-    /**
-     * When the screen opens with a stored value, React Native writes it back
-     * normalized (all five keys, booleans); null when nothing is stored.
-     */
+
+
     openSectionsRestore: SettingsDeviceWrite | null;
     areas: {
         unassigned: { label: string; description: string; color: string; edit: NativeManageEdit };
         rows: NativeWindow<NativeManageAreaRow>;
-        /** Shown above the new-area row when there is no area. */
+
         empty: string | null;
         newArea: { label: string; hint: string; addLabel: string; color: string; edit: NativeManageEdit };
     };
-    /** getSomedaySections lists the rows; the hint shows when there is none. */
+
     somedaySections: { emptyHint: string | null };
     people: {
         rows: NativeWindow<NativeManagePersonRow>;
@@ -305,7 +231,7 @@ export type NativeManageSettings = {
     };
     contexts: { rows: NativeWindow<NativeManageValueRow>; empty: string | null; create: { label: string; addLabel: string; edit: NativeManageEdit } };
     tags: { rows: NativeWindow<NativeManageValueRow>; empty: string | null; create: { label: string; addLabel: string; edit: NativeManageEdit } };
-    /** The editor dialog's texts by target type, and the color swatches it offers. */
+
     editor: {
         text: Record<ManageEditorTarget['type'], ReturnType<typeof getManageEditorText>>;
         colors: { color: string; label: string }[];
@@ -320,7 +246,7 @@ const CALENDAR_SYSTEMS = new Set(['gregorian', 'jalali']);
 const LANGUAGES = new Set<string>(SETTINGS_LANGUAGE_OPTIONS.map((lang) => lang.id));
 const SYNC_BADGES = new Set<string>(['hidden', 'syncing', 'healthy', 'attention']);
 
-/** A General edit as a host sends it back; null when it is not one the screen offers. */
+
 function readGeneralEdit(value: unknown, calendarSystemShown: boolean): GeneralSettingsEdit | null {
     if (!isObjectRecord(value) || Object.keys(value).some((key) => key !== 'type' && key !== 'value')) return null;
     const v = value.value;
@@ -333,7 +259,7 @@ function readGeneralEdit(value: unknown, calendarSystemShown: boolean): GeneralS
             case 'weekStart': return WEEK_STARTS.has(v as string);
             case 'dateFormat': return DATE_FORMATS.has(v as string);
             case 'timeFormat': return TIME_FORMATS.has(v as string);
-            // Offered only for a Persian language or device locale.
+
             case 'calendarSystem': return calendarSystemShown && CALENDAR_SYSTEMS.has(v as string);
             case 'showTaskAge':
             case 'appLock':
@@ -354,10 +280,7 @@ const GTD_BOOLEAN_EDITS = new Set<string>([
 const OPENABLE_SECTIONS = new Set<string>(['scheduling', 'organization', 'details']);
 const isTaskEditorField = (value: unknown): value is TaskEditorFieldId => DEFAULT_TASK_EDITOR_ORDER.includes(value as TaskEditorFieldId);
 
-/**
- * A GTD edit as a host sends it back; null when it is not one the screens offer.
- * A schedule time comes back normalized; one that is not blank or a time is refused.
- */
+
 function readGtdEdit(value: unknown, liveAreaIds: Set<string>): GtdSettingsEdit | null {
     if (!isObjectRecord(value)) return null;
     const { type, value: v } = value;
@@ -378,7 +301,7 @@ function readGtdEdit(value: unknown, liveAreaIds: Set<string>): GtdSettingsEdit 
             case 'taskOpenMode': return only('value') && GTD_TASK_OPEN_MODES.includes(v as never);
             case 'taskEditorPreset': return only('value') && (v === 'simple' || v === 'standard' || v === 'full');
             case 'taskEditorFieldVisible': return only('field', 'value') && isTaskEditorField(value.field) && typeof v === 'boolean';
-            // Any order of every field (a move offers one).
+
             case 'taskEditorOrder':
                 return only('value') && Array.isArray(v) && v.length === DEFAULT_TASK_EDITOR_ORDER.length
                     && new Set(v).size === v.length && v.every(isTaskEditorField);
@@ -398,7 +321,7 @@ const isName = (value: unknown): value is string => isText(value, 500) && value.
 const NOTIFICATIONS_BOOLEANS = new Set<string>([...NOTIFICATIONS_BOOLEAN_SETTINGS, 'persistentCapture']);
 const NOTIFICATIONS_TIMES = new Set<string>(NOTIFICATIONS_TIME_SETTINGS);
 
-/** A Notifications edit as a host sends it back; null when it is not one the screen offers (a time is RN's 'HH:MM'). */
+
 const readNotificationsEdit = (value: unknown): NotificationsSettingsEdit | null => {
     if (!isObjectRecord(value) || Object.keys(value).length !== 2 || typeof value.type !== 'string') return null;
     const v = value.value;
@@ -409,7 +332,7 @@ const readNotificationsEdit = (value: unknown): NotificationsSettingsEdit | null
     return ok ? { type: value.type, value: v } as NotificationsSettingsEdit : null;
 };
 
-/** RN's readPersistentCaptureEnabled: a store that cannot be read reads as off. */
+
 const persistentCaptureOn = (capture: NativePersistentCaptureHost): boolean => {
     try {
         return capture.read();
@@ -418,7 +341,7 @@ const persistentCaptureOn = (capture: NativePersistentCaptureHost): boolean => {
     }
 };
 
-/** A Data edit as a host sends it back; the analytics switch only in a build with the heartbeat. */
+
 const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettingsEdit | null => {
     if (!isObjectRecord(value) || Object.keys(value).length !== 2) return null;
     if (value.type === 'archiveRetentionDays') return isArchiveRetentionDays(value.value) ? { type: value.type, value: value.value } : null;
@@ -427,6 +350,7 @@ const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettings
         : null;
 };
 
+
 export type NativeArchiveRetentionRun = {
     outcome: 'purged' | 'unchanged' | 'skipped' | 'failed';
     purged: { tasks: number; projects: number; sections: number };
@@ -434,6 +358,7 @@ export type NativeArchiveRetentionRun = {
 };
 
 export function createSettingsMethods(deps: SettingsDeps) {
+
     let lastRetentionLine = '';
     const durableSave = async (): Promise<NativeHostResult<null>> => {
         try {
@@ -444,7 +369,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         return deps.save();
     };
     const receipts = createNativeRequestReceipts({ save: durableSave });
-    /** The build's heartbeat, while it sends (isMobileAnalyticsHeartbeatConfigured); null without one. */
+
     const heartbeat = () => {
         const host = deps.about?.() ?? null;
         const bound = host ? nativeAboutHeartbeat(host) : null;
@@ -465,7 +390,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         return buildNativeGeneralSettingsModel(state.settings, deps, input.deviceTheme, input.appSearch);
     };
 
-    // Carriers of a context or tag, as the store's rename and delete match them.
+
     const contextCarried = (name: string, except?: string) => {
         const key = normalizeTaxonomyToken('context', name).toLowerCase();
         const state = useTaskStore.getState();
@@ -482,11 +407,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             || getSavedTaxonomyTokens(settings, 'tag').some(match);
     };
 
-    /**
-     * Every context's or tag's carriers revision, by name, in one pass: how many tasks and
-     * projects carry it (as the store's rename and delete match them) and a hash of each
-     * carrier's revision. A new carrier, or a change to one, changes it.
-     */
+
     const carriersRevisions = (type: 'context' | 'tag') => {
         const { _allTasks, _allProjects, settings } = useTaskStore.getState();
         const keyOf = type === 'context' ? (name: string) => normalizeTaxonomyToken('context', name).toLowerCase() : normalizeTagId;
@@ -508,7 +429,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         };
     };
 
-    /** Compare-and-set, right before a write, on the target the row showed. */
+
     const refuseStaleTarget = (target: NativeManageEditorTarget | NativeManageDeleteTarget): NativeHostResult<never> | null => {
         if (!('revision' in target)) return null;
         const state = useTaskStore.getState();
@@ -526,7 +447,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         return [state._allTasks, state._allProjects, state._allAreas, state._allPeople, state.settings];
     };
 
-    /** Drops writes the store would make again for a target it already holds, so a replay writes nothing. */
+
     const pendingWrites = (writes: ManageEditorWrite[]): ManageEditorWrite[] => {
         const state = useTaskStore.getState();
         return writes.filter((write) => {
@@ -535,11 +456,11 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 case 'addTag':
                     return !getSavedTaxonomyTokens(state.settings, write.kind === 'addContext' ? 'context' : 'tag')
                         .some((token) => token.toLowerCase() === write.name.trim().toLowerCase());
-                // The editor's only settings write: the unassigned color.
+
                 case 'updateSettings':
                     return state.settings.appearance?.unassignedAreaColor !== write.updates.appearance?.unassignedAreaColor;
-                // A live area has the name: the store returns it and writes nothing
-                // (the editor's Save is off for it: isManageEditorSaveDisabled).
+
+
                 case 'addArea':
                     return !isManageAreaNameTaken('newArea', write.name, state.areas);
                 case 'renameContext':
@@ -552,11 +473,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         });
     };
 
-    /**
-     * One editor write. A new area or person takes `newId` (the request UUID) as its ID,
-     * except when the store finds one of that name (returned as it is, or restored from
-     * Trash): an ID in the props would rewrite that row's ID.
-     */
+
     const runEditorWrite = async (write: ManageEditorWrite, newId: string) => {
         const state = useTaskStore.getState();
         switch (write.kind) {
@@ -587,7 +504,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         }
     };
 
-    /** The editor target with the values it holds now; null when it no longer exists. */
+
     const resolveTarget = (target: ReadTarget): ManageEditorTarget | null => {
         const state = useTaskStore.getState();
         switch (target.type) {
@@ -609,7 +526,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         }
     };
 
-    /** A target as a host sends it; an area, person, context or tag may carry its row's `revision`. */
+
     const readEditorTarget = (value: unknown): ReadTarget | null => {
         if (!isObjectRecord(value)) return null;
         const revision = 'revision' in value ? value.revision : undefined;
@@ -633,7 +550,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 return null;
         }
     };
-    /** A write's target: an area, person, context or tag carries the revision its row showed. */
+
     const readWriteTarget = (value: unknown): NativeManageEditorTarget | null => {
         const target = readEditorTarget(value);
         return target && (target.type === 'newArea' || target.type === 'newPerson' || target.type === 'newContext' || target.type === 'newTag' || target.type === 'unassignedArea' || 'revision' in target)
@@ -641,7 +558,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             : null;
     };
 
-    // Keys not in en.ts yet; mobile resolves the same fallbacks (manage-settings-screen.tsx).
+
     const manageUntranslated = (t: Translate): ManageUntranslatedText => {
         const tf = (key: string, fallback: string) => tFallback(t, key, fallback);
         return {
@@ -669,7 +586,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
         const { allContexts, allTags } = state.getDerivedState();
         const somedayCount = sortViewSectionDefinitions(state.settings.gtd?.viewSections?.someday).length;
         const unassignedColor = state.settings.appearance?.unassignedAreaColor || DEFAULT_AREA_COLOR;
-        // Each row's target carries its revision; the host echoes it with an edit or delete.
+
         const areaRows: NativeManageAreaRow[] = areas.map((area) => {
             const target = { type: 'area' as const, id: area.id, revision: revisionOf(area) };
             return {
@@ -773,11 +690,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
     const menuRow = <Id extends string>(row: SettingsMenuRow<Id>): NativeMenuRow<Id> => ({ ...row, enabled: NATIVE_SETTINGS_SCREENS.includes(row.id) });
 
     return {
-        /**
-         * The Settings menu for the search text. `syncBadge` is the sync row's badge
-         * as the host's sync status resolves it; `updateAvailable` is the stored
-         * `mindwtr-update-available` flag.
-         */
+
+
         getSettingsMenu(input: { query?: string; syncBadge?: SettingsSyncBadgeState; updateAvailable?: boolean } = {}): NativeHostResult<NativeSettingsMenu> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -809,11 +723,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             };
         },
 
-        /**
-         * Settings › General. `deviceTheme` is the stored `@mindwtr_theme`;
-         * `appSearch` says whether Android system search indexing is supported and on.
-         * Each option's `edit` goes to setGeneralSetting.
-         */
+
         getGeneralSettings(input: { deviceTheme?: string | null; appSearch?: { supported: boolean; enabled: boolean } } = {}): NativeHostResult<NativeGeneralSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -833,11 +743,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             };
         },
 
-        /**
-         * One General control's `edit`: writes only the setting it changes, and returns
-         * the device-local writes the host stores (`deviceWrites`). A setting that
-         * already holds the value is not written again.
-         */
+
         async setGeneralSetting(input: { requestId: string; edit: GeneralSettingsEdit }): Promise<NativeHostResult<NativeSettingsWriteResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -856,13 +762,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             });
         },
 
-        /**
-         * Settings › GTD: the hub and its six sub-screens in one view (draw the one
-         * the host is on; a link's `screen` opens a sub-screen). `taskOpenMode` is
-         * the stored `mindwtr:view:taskOpenMode:v1` text; `captureIntent` is the
-         * stored capture intent config on a device that has one. Each control's
-         * `edit` goes to setGtdSetting.
-         */
+
         getGtdSettings(input: { taskOpenMode?: string | null; captureIntent?: { enabled: boolean | null } } = {}): NativeHostResult<NativeGtdSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -883,14 +783,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
         },
 
-        /**
-         * One GTD control's `edit`: writes only the setting it changes, and returns
-         * the device-local writes the host stores (`deviceWrites`). A setting that
-         * already holds the value is not written again. The two text fields commit
-         * on blur, sending the typed text: a schedule time that is not blank or a
-         * time answers INVALID_INPUT (show `hub.defaultScheduleTime.invalidMessage`),
-         * and after a commit each field shows the view's value again.
-         */
+
         async setGtdSetting(input: { requestId: string; edit: GtdSettingsEdit }): Promise<NativeHostResult<NativeSettingsWriteResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -909,11 +802,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             });
         },
 
-        /**
-         * Settings › Manage. `openSections` is the stored
-         * `mindwtr:settings:manage:openSections` text (null when unset). Lists show
-         * their first window; getManageSettingsList pages the rest.
-         */
+
         getManageSettings(input: { openSections?: string | null } = {}): NativeHostResult<NativeManageSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -923,7 +812,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...view } };
         },
 
-        /** A later window of Manage's areas, people, contexts or tags under the Manage revision. */
+
         getManageSettingsList(input: { list: ManageListName; offset: number; limit: number; revision: string }): NativeHostResult<{
             version: typeof NATIVE_HOST_CONTRACT_VERSION;
             revision: string;
@@ -946,13 +835,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             };
         },
 
-        /**
-         * The editor's name as typed, checked for a `target` (a row's `edit.target`):
-         * `saveDisabled` turns Save off (a blank name, or a new area named like a
-         * live area), and `message` is the line shown under the name while
-         * `nameTaken`, else null. Core's own rule (isManageEditorSaveDisabled), so a
-         * host asks on each keystroke instead of copying it. Nothing is written.
-         */
+
         checkManageEditor(input: { target: NativeManageEditorTarget; name: string }): NativeHostResult<{
             nameTaken: boolean;
             saveDisabled: boolean;
@@ -978,14 +861,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             };
         },
 
-        /**
-         * The editor's Save for a `target` (a row's `edit.target`) with the dialog's
-         * fields. Writes what changed against the values stored now: a new area or
-         * person, a rename, a color, a note or link, the unassigned color. A blank
-         * name is refused; nothing to change answers `changed: false`. A new area
-         * named like a live area writes nothing: the editor keeps Save off for it
-         * and shows `editor.text.newArea.nameTaken` (checkManageEditor).
-         */
+
         async saveManageEditor(input: {
             requestId: string;
             target: NativeManageEditorTarget;
@@ -1010,8 +886,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
             if (tokenKind && !normalizeTaxonomyToken(tokenKind, fields.name)) return fail('INVALID_INPUT', 'A context or tag name is required');
             const { requestId } = input;
             return receipts.run<{ changed: boolean }>(requestId, JSON.stringify(['manageEditor', target, fields]), async () => {
-                // A new area or person takes the request UUID as its ID: a replay after a restart
-                // finds it (renamed or deleted since) and writes nothing.
+
+
                 const newId = requestId.toLowerCase();
                 const { _allAreas, _allPeople } = useTaskStore.getState();
                 if ((target.type === 'newArea' && _allAreas.some((area) => area.id === newId))
@@ -1022,7 +898,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 if (!resolved) return fail('INVALID_INPUT', 'That item is not available');
                 const draft = { ...getManageEditorDraft(resolved), name: fields.name, note: fields.note, referenceLink: fields.referenceLink };
                 if (fields.color !== null) {
-                    // The swatches, or the color the editor opened with.
+
                     if (!(AREA_PRESET_COLORS as readonly string[]).includes(fields.color) && fields.color !== draft.color) {
                         return fail('INVALID_INPUT', 'That color is not offered');
                     }
@@ -1040,25 +916,23 @@ export function createSettingsMethods(deps: SettingsDeps) {
                     for (const write of writes) results.push(await runEditorWrite(write, newId));
                     return results;
                 });
-                // Adding a person who already exists asks the store, which writes nothing.
+
                 return settleWrite(written, { changed: storeData().some((data, index) => data !== before[index]) });
             });
         },
 
-        /**
-         * Delete an area, person, context or tag after the row's `deleteConfirm` (send the row's
-         * `delete`). Target state: one already gone answers `changed: false`. Compare-and-set on
-         * the row's revision: one changed since the view showed it is not deleted (STALE_REVISION).
-         */
-        async deleteManageItem(input: { requestId: string; target: NativeManageDeleteTarget }): Promise<NativeHostResult<{ changed: boolean }>> {
+
+        async deleteManageItem(input: { requestId: string; target: NativeManageDeleteTarget; ifUnused?: true }): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const target = isObjectRecord(input) ? readWriteTarget(input.target) : null;
             if (!target || (target.type !== 'area' && target.type !== 'person' && target.type !== 'context' && target.type !== 'tag')
-                || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)) {
+                || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
+                || (input.ifUnused !== undefined && (input.ifUnused !== true || target.type !== 'area'))) {
                 return fail('INVALID_INPUT', 'A request UUID and an area, person, context or tag, with the revision its row showed, are required');
             }
-            return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(['manageDelete', target]), async () => {
+            const ifUnused = input.ifUnused === true;
+            return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(ifUnused ? ['manageDelete', target, 'ifUnused'] : ['manageDelete', target]), async () => {
                 const state = useTaskStore.getState();
                 const present = target.type === 'area'
                     ? state.areas.some((area) => area.id === target.id)
@@ -1068,6 +942,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 if (!present) return { ok: true, value: { changed: false } };
                 const refused = refuseStaleTarget(target);
                 if (refused) return refused;
+                if (ifUnused && target.type === 'area' && countLiveProjectsByArea(state._allProjects).has(target.id))
+                    return fail('STALE_REVISION', 'A project uses this area now; refresh before deleting it');
                 const written = await runStoreWrite(() => {
                     switch (target.type) {
                         case 'area': return state.deleteArea(target.id);
@@ -1080,12 +956,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             });
         },
 
-        /**
-         * Settings › Notifications (notifications-settings-model.ts). The host shows `exactAlarmNotice` only while Android
-         * denies exact alarms (read again on each resume). A switch whose `askPermission` is true asks for the notification
-         * permission first, and sends its `edit` to setNotificationsSetting only once it is granted; a time row opens the
-         * time picker and sends `{ type, value: 'HH:MM' }`.
-         */
+
         getNotificationsSettings(): NativeHostResult<NativeNotificationsSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1094,11 +965,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
         },
 
-        /**
-         * One Notifications control's edit: a synced setting written only when it does not already hold the value, or the
-         * persistent capture switch stored on the device (a target state). Its reply's `persistentCapture` is what the
-         * notification shows now (null: remove it), for the host to post: a replay after a restart posts it again.
-         */
+
         async setNotificationsSetting(input: { requestId: string; edit: NotificationsSettingsEdit }): Promise<NativeHostResult<NativeNotificationsWriteResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1129,10 +996,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             });
         },
 
-        /**
-         * The persistent capture notification to post again (at start and on every resume, with the permission), or null to
-         * remove it. A switch that cannot be read is ACTION_FAILED, never null: the host keeps what it shows.
-         */
+
         getPersistentCaptureNotification(): NativeHostResult<NativePersistentCaptureNotification> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1147,11 +1011,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: { post: on ? notificationsModel(null).persistentCaptureNotification : null } };
         },
 
-        /**
-         * Settings › Data: RN's Diagnostics card (data-settings-model.ts). The host's own diagnostics log
-         * (diagnostics-log.ts) makes the file for Share log and deletes it for Clear log; the model has
-         * RN's toast words for both.
-         */
+
         getDataSettings(): NativeHostResult<NativeDataSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1166,7 +1026,6 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 card: buildArchiveRetentionCard(useTaskStore.getState().settings, deps.t()) } };
         },
 
-        /** RN reviews enabling retention or shortening it before the existing Data setting write. */
         getArchiveRetentionReview(input: { days: number }): NativeHostResult<{ review: ArchiveRetentionReview | null; edit: DataSettingsEdit }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1179,7 +1038,6 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 input.days, deps.t()), edit: { type: 'archiveRetentionDays', value: input.days } } };
         },
 
-        /** The host schedules this while in front; only explicit off bypasses this session's first-sync gate. */
         async runArchiveRetention(input: { editorOpen: boolean; selectedBackend: string | null }): Promise<NativeHostResult<NativeArchiveRetentionRun>> {
             if (!isObjectRecord(input) || Object.keys(input).length !== 2 || typeof input.editorOpen !== 'boolean'
                 || (input.selectedBackend !== null && typeof input.selectedBackend !== 'string')) {
@@ -1207,7 +1065,6 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: run };
         },
 
-        /** RN's export snapshot and serializers. Never flushes or acknowledges an owed save. */
         getDataBackup(format: 'json' | 'csv' | 'tasknotes' = 'json'): NativeHostResult<{ fileName: string; content: string; encoding: 'utf8' | 'base64' }> {
             if (format !== 'json' && format !== 'csv' && format !== 'tasknotes') return fail('INVALID_INPUT', 'Unsupported export format');
             const ready = deps.readiness();
@@ -1236,7 +1093,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
                     encoding: 'utf8',
                 } };
             } catch {
-                // Serialization errors can contain data; the host receives only a fixed message.
+
                 return fail('ACTION_FAILED', 'Could not prepare the backup');
             }
         },
@@ -1281,18 +1138,14 @@ export function createSettingsMethods(deps: SettingsDeps) {
                     : after._allTasks !== before._allTasks || after._allProjects !== before._allProjects ? 'repaired' : 'unchanged';
                 return settleWrite(written, { projectId });
             });
-            // A receipt's answer ran nothing and logs nothing; the line follows the save that committed the seed.
+
             if (result.ok && outcome) {
                 logInfo('Native Getting Started seeded', { scope: 'onboarding', context: { releaseCheck: 'v1.3.7/native-getting-started', outcome } });
             }
             return result;
         },
 
-        /**
-         * The Debug logging switch's or the analytics switch's `edit`. Turning logging on then writes RN's forced
-         * "Debug logging enabled" line through core's logger, so the log starts with it. Opting out of the heartbeat (after
-         * `analytics.confirm`) sends RN's one opt-out event; opting back in clears its marker.
-         */
+
         async setDataSetting(input: { requestId: string; edit: DataSettingsEdit }): Promise<NativeHostResult<NativeSettingsWriteResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1303,13 +1156,14 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return receipts.run<NativeSettingsWriteResult>(input.requestId, JSON.stringify(['data', edit]), async () => {
                 const settings = useTaskStore.getState().settings;
                 if (isDataSettingStored(settings, edit)) return { ok: true, value: { changed: false, deviceWrites: [] } };
+
                 if (edit.type === 'archiveRetentionDays') {
                     return settleWrite(await runStoreWrite(() => useTaskStore.getState().setArchiveRetentionDays(edit.value)), { changed: true, deviceWrites: [] });
                 }
                 const written = await runStoreWrite(() => useTaskStore.getState().updateSettings(buildDataSettingsUpdate(settings, edit)));
                 if (written.ok && edit.type === 'debugLogging' && edit.value) logInfo('Debug logging enabled', { scope: 'diagnostics', force: true });
-                // RN's analytics switch, after the setting saved: turning the heartbeat on clears the opt-out marker; opting out
-                // sends the one opt-out event. Neither waits for the network, and a replay (no change) sends nothing.
+
+
                 const bound = edit.type === 'analyticsOptOut' && written.ok ? heartbeat() : null;
                 if (bound) {
                     const follow = edit.value ? sendMobileAnalyticsOptOut(bound.config, bound.device) : resetHeartbeatOptOutMarker(bound.device.storage);

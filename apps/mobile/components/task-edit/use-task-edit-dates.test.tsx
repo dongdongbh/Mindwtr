@@ -3,6 +3,7 @@ import { Text } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configureDateFormatting } from '@mindwtr/core';
+import { createTaskDraft } from '@mindwtr/core/task-draft';
 
 import { useTaskEditDates } from './use-task-edit-dates';
 
@@ -45,5 +46,29 @@ describe('useTaskEditDates', () => {
         });
 
         expect(tree.root.findByType(Text).props.children).toBe('2026-06-05 09:30|2026-06-05 17:00');
+    });
+
+    it('writes a picked review time on the review day as local wall time (#1465)', () => {
+        const setDraftField = vi.fn();
+        const setShowDatePicker = vi.fn();
+        let onDateChange!: ReturnType<typeof useTaskEditDates>['onDateChange'];
+        function Probe() {
+            ({ onDateChange } = useTaskEditDates({
+                draft: createTaskDraft({ id: 't', title: 'T', status: 'next', tags: [], contexts: [], reviewAt: '2026-04-28', createdAt: '', updatedAt: '' }),
+                pendingDueDate: null,
+                pendingStartDate: null,
+                setDraftField,
+                setPendingDueDate: vi.fn(),
+                setPendingStartDate: vi.fn(),
+                setShowDatePicker,
+                showDatePicker: 'review-time',
+                t,
+            }));
+            return null;
+        }
+        act(() => { renderer.create(<Probe />); });
+
+        act(() => { onDateChange({ type: 'set' } as never, new Date(2026, 0, 2, 14, 30)); });
+        expect(setDraftField).toHaveBeenCalledWith('reviewAt', '2026-04-28T14:30');
     });
 });

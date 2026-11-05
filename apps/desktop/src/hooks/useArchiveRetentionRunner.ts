@@ -17,9 +17,8 @@ export function useArchiveRetentionRunner(hydrated: boolean, disabled: boolean) 
             if (running || document.visibilityState === 'hidden' || state.isLoading || state.error
                 || state.editLockCount > 0 || useUiStore.getState().editingTaskId !== null) return;
             running = true;
-            // Any selected backend counts, even with missing or disconnected credentials: a purge made
-            // before this device syncs again would beat another device's restore. An unreadable
-            // configuration also counts as configured: waiting is the safe side (R-2).
+
+
             void SyncService.getPersistedSyncConfigurationSnapshot()
                 .then(({ backend }) => backend !== 'off', () => true)
                 .then((syncConfigured) => useTaskStore.getState().runArchiveRetention({ syncConfigured }))

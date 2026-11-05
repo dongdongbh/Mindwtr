@@ -23,7 +23,7 @@ const sandboxStorage: Storage = {
     },
 };
 
-/** UI caches in sandbox live only for the current renderer runtime. */
+
 export function getWorkspaceCache(): Storage | null {
     if (isSandboxMode()) return sandboxStorage;
     if (typeof window === 'undefined') return null;

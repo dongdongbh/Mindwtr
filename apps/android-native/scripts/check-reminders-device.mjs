@@ -1,36 +1,6 @@
-// Reminder alarms check for the isolated native Android development app (pass B3, R1 native).
-//
-//   node apps/android-native/scripts/check-reminders-device.mjs <adb-serial> [apk]
-//   Add --replacement-only for injected native deliveries using core-planned details, immediate replacement plus old-owner cancellation, and latest Snooze/Done,
-//   using existing notification permission and alarm access; phone settings stay unchanged.
-//
-// Installs the debug APK with `install -r` (existing development data stays) and checks, from `dumpsys alarm`, `dumpsys
-// notification`, the shade, and the app's own files (the database, its journal and RN's RKStorage alarm map, pulled through
-// run-as and read with sqlite3):
-// (1) tasks queued while the app is closed (quick-add due times a few minutes ahead, and one with date-only start and due dates)
-//     are planned at the next start: one alarm per timed task, at its due time, held in RN's alarm map under core's id; the
-//     date-only task has none;
-// (2) exact alarms: with Android's exact-alarm access off the alarms are inexact; allowing it (appops, development package only)
-//     sends Android's grant broadcast, and CoreWork remakes every alarm exact, still one per task;
-// (3) a reboot's loss: a force-stop drops every alarm (as a reboot does), and the reschedule receiver's path (its debug action,
-//     the same CoreWork remake a reboot, a clock change or an update starts) arms each again, once; after a second force-stop
-//     (as when the user revokes exact-alarm access: Android stops the app) a plain start remakes each too, once;
-// (4) a process death after the plan's writeAhead is stored and before its alarm map is (debug property `reminder_stop`, both
-//     at the writeAhead and after the alarms were made): the next start makes each pending alarm once, none lost, none twice;
-// (5) a reminder fires once, on RN's channel `mindwtr_reminders_v2`, with core's title and text (core's own plan, run here on
-//     the pulled database) and RN's buttons; the date-only task posts nothing;
-// (6) Snooze (debug property `snooze_minutes` shortens RN's 10 minutes to 15 s): the notification goes, CoreWork makes core's
-//     snooze alarm, and it fires again; then Done on it: CoreWork stores Done once (rev + 1) and the notification goes;
-// (7) Done on a recurring task with the process killed after core's reply (debug property `journal_stop`): after the restart's
-//     journal replay and CoreWork's retry, the task is done once and has exactly one next instance;
-// (8) a delivered reminder whose task is completed before the next plan (a widget check-off while the app is closed) is withdrawn:
-//     its notification goes (core's `withdrawn`), an expired one stays, remembered in the native reminder state; one completed
-//     after that plan (its alarm already expired) is withdrawn too at the plan after the completion;
-// (9) a tap on a task's reminder opens the app on that task's editor (core's routeNotificationOpen).
-// At the end this run's open tasks are checked off through the queue, so no alarm of this run stays, and Android's exact-alarm
-// access goes back to what it was. Titles are 87 + a 12-digit run id + one digit. It grants the development app the notification
-// permission (kept, plan section 5). Visible notifications appear on the phone for a few minutes. It never launches over another
-// app and leaves the device on its home screen. Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -89,7 +59,7 @@ const waitUntil = async (description, predicate, timeoutMs = 60_000, everyMs = 1
     }
 };
 
-// ---- the phone's clock and time zone: quick-add reads a due time in the phone's local time ----
+
 const zone = sh('getprop persist.sys.timezone') || 'UTC';
 const phoneNow = () => Number(sh('date +%s')) * 1000;
 const local = (ms) => {
@@ -99,7 +69,7 @@ const local = (ms) => {
 };
 const clock = (ms) => `${local(ms).date} ${local(ms).time}`;
 
-// ---- the app's files ----
+
 const pull = (names, dir) => {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
@@ -115,18 +85,18 @@ const sql = (file, query) => {
     return out ? JSON.parse(out) : [];
 };
 const pullDb = () => resolve(pull([`files/${DB}`], resolve(work, 'db')), DB);
-/** The live tasks titled [text] as stored, oldest first. */
+
 const stored = (text) => sql(pullDb(), `SELECT id, status, rev, dueDate, recurrence FROM tasks WHERE title = '${text}' AND deletedAt IS NULL ORDER BY createdAt, id`);
-/** RN's alarm map in RN's RKStorage, as core's plan last stored it. */
+
 const storedValue = (key) => {
     const dir = pull(['databases/RKStorage'], resolve(work, 'rkstorage'));
     const [row] = sql(resolve(dir, 'RKStorage'), `SELECT value FROM catalystLocalStorage WHERE key = '${key}'`);
     return row ? JSON.parse(row.value) : {};
 };
 const alarmMap = () => storedValue(MAP_KEY);
-/** The native host's own reminder state (core's): delivered reminders it may still withdraw, and Snoozes. */
+
 const nativeState = () => storedValue(STATE_KEY);
-// The native host marks each signature as its own (native-host-contract-reminders.ts), so an RN recovery build trusts none.
+
 const signedAt = (entry) => Date.parse(JSON.parse(entry?.signature?.replace(/^native:/, '') ?? '{}').fireAt ?? '');
 const journal = () => runAs('ls files/journal 2>/dev/null || true').split(/\s+/).filter((name) => /^\d{16}\.json$/.test(name))
     .map((name) => JSON.parse(runAs(`cat files/journal/${name}`)));
@@ -138,7 +108,7 @@ const enqueue = (item) => {
 const capture = (text, extra = {}) => enqueue({ id: randomUUID(), title: text, createdAt: new Date().toISOString(), source: 'android-capture-intent', ...extra });
 const checkOff = (taskId) => enqueue({ kind: 'complete', id: randomUUID(), taskId, completedAt: new Date().toISOString(), source: 'android-widget' });
 
-/** Core's alarm details for [keys], from core's own plan over the pulled database at [nowMs] (RN replays the same plan, its parity fixture). */
+
 const coreDetails = (keys, nowMs) => {
     const db = pullDb();
     const language = (sh('getprop persist.sys.locale') || 'en').split('-')[0];
@@ -163,11 +133,7 @@ const coreDetails = (keys, nowMs) => {
     `], { encoding: 'utf8', env: { ...process.env, TZ: zone, CHECK_DB: db, CHECK_NOW: String(nowMs), CHECK_LANG: ['en', 'zh', 'de', 'fr', 'es', 'ja'].includes(language) ? language : 'en', CHECK_KEYS: JSON.stringify(keys) } }).trim());
 };
 
-/**
- * With the app stopped: the database pulled, edited through Bun's SQLite (it has FTS5, which the tasks table's triggers need),
- * pushed back over the app's, its WAL removed. [recurringId] repeats daily; task reminders are set to [reminders] (null: the key
- * removed, as an unset setting). Answers the setting as it was.
- */
+
 const editDb = (recurringId, reminders, repeatId) => {
     if (pid()) fail('the app must be stopped to edit its database');
     const db = pullDb();
@@ -196,19 +162,16 @@ const editDb = (recurringId, reminders, repeatId) => {
     }
     return JSON.parse(before);
 };
-/** Task reminders as the development data had them before this run (undefined: not changed yet). */
+
 let reminderSetting;
 
-// ---- the system's view: this app's reminder alarms and notifications ----
-/** This app's pending reminder alarms: when each fires (ms) and whether it is exact (`dumpsys alarm`). */
+
 const alarms = () => sh('dumpsys alarm').split(/\n(?=\s*(?:RTC_WAKEUP|RTC|ELAPSED_WAKEUP|ELAPSED) #\d+: Alarm\{)/)
     .filter((block) => block.includes(`*walarm*:${FIRE}`) && block.includes(PKG))
     .map((block) => ({ at: Number(/origWhen[= ](\d+)/.exec(block)?.[1] ?? NaN), exact: /\bwindow[= ]0\b/.test(block), block }));
 const alarmsAt = (ms) => alarms().filter((alarm) => alarm.at === ms);
-/**
- * This app's notifications (`dumpsys notification --noredact`): id, channel, title, text and button labels. A reminder's id is the
- * alarm it was posted for (CoreNotifications' extra): every reminder of a task shares one slot (tag, id 1), the latest replacing the last.
- */
+
+
 const notifications = () => sh('dumpsys notification --noredact').split(/\n(?=\s*NotificationRecord\()/)
     .filter((block) => block.includes(`pkg=${PKG}`))
     .map((block) => ({
@@ -222,12 +185,10 @@ const notifications = () => sh('dumpsys notification --noredact').split(/\n(?=\s
     }));
 const shown = (text) => notifications().filter((item) => item.title === text);
 
-// ---- the shade ----
+
 const closeShade = () => sh('cmd statusbar collapse');
-/**
- * Taps [label] (a button) on the notification titled [text] in the shade, expanding it first when its buttons are folded; or the
- * notification itself when [label] is null.
- */
+
+
 const tapInShade = async (text, label) => {
     sh('cmd statusbar expand-notifications');
     await sleep(1500);
@@ -248,8 +209,8 @@ const tapInShade = async (text, label) => {
     };
     let button = near(nodes);
     for (let attempt = 0; !button && attempt < 3; attempt += 1) {
-        // Folded: Android's expand button on that notification's row, else a downward drag on its title.
-        // An app group can unfold first, leaving the task's own notification folded.
+
+
         const [x, y] = center(nodes.find((node) => node.text === text) ?? fail(`the notification "${text}" is no longer in the shade`));
         const expand = nodes.filter((node) => /\/expand_button$/.test(node['resource-id'] ?? '') && node.clickable === 'true'
             && node['content-desc'] === 'Expand' && Math.abs(center(node)[1] - y) < 140)
@@ -265,19 +226,18 @@ const tapInShade = async (text, label) => {
     sh(`input tap ${Math.round(x)} ${Math.round(y)}`);
 };
 
-// ---- the process ----
-/** The app's process gone, as after the system reclaimed it: a signal, never a force-stop (that drops every alarm and job). */
+
 const killApp = async () => {
     if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME');
     for (let attempt = 0; attempt < 20 && pid(); attempt += 1) {
-        try { runAs(`kill -9 ${pid()}`); } catch { /* gone meanwhile */ }
+        try { runAs(`kill -9 ${pid()}`); } catch {                      }
         await sleep(500);
     }
     if (pid()) fail('the app process did not end');
 };
 const CYCLE = 'Native Android reminder cycle';
 const cycles = () => count(allLogs(), CYCLE);
-/** Launches the app and waits for its first reminder plan after the boot (the start's cycle). */
+
 const launchAndPlan = async () => {
     const before = cycles();
     device.launch(ACTIVITY);
@@ -296,11 +256,11 @@ const toTabs = async () => {
 
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const exactMode = /SCHEDULE_EXACT_ALARM: (\w+)/.exec(sh(`appops get ${PKG} SCHEDULE_EXACT_ALARM`))?.[1] ?? 'default';
-/** This run's tasks that may still hold an alarm, checked off at the end. */
+
 const openTasks = new Set();
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    try { closeShade(); } catch { /* device gone */ }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+    try { closeShade(); } catch {                   }
     try {
         if (openTasks.size > 0) {
             await killApp();
@@ -320,17 +280,17 @@ const restore = async () => {
             reminderSetting = undefined;
         }
     } catch (error) { console.error(`RESTORE FAILED: task reminders are still on in the development data (${error.message})`); process.exitCode = 1; }
-    try { if (!replacementOnly) sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${exactMode}`); } catch { /* device gone */ }
-    try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch { /* device gone */ }
-    try { if (!replacementOnly) sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch { /* device gone */ }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { if (!replacementOnly) sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${exactMode}`); } catch {                   }
+    try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch {                   }
+    try { if (!replacementOnly) sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch {                   }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
-/** Injected native deliveries from the actual core plan; alarm timing belongs to the full check. Phone settings stay unchanged. */
+
 const replacementCheck = async () => {
     check(/android\.permission\.POST_NOTIFICATIONS: granted=true/.test(sh(`dumpsys package ${PKG}`)), 'native Dev already has notification permission');
     console.log(`info - existing native Dev exact-alarm access: ${exactMode} (left unchanged)`);
-    // Package replacement can start a reschedule worker immediately; stop Dev before seeding its isolated test data.
+
     sh(`am force-stop ${PKG}`);
     await waitUntil('native Dev stopped before seeding', () => !pid());
     const at = Math.ceil((phoneNow() + 90_000) / 60_000) * 60_000;
@@ -365,7 +325,7 @@ const replacementCheck = async () => {
     check(shown(names[1])[0].tag !== first.tag, 'different tasks have different notification slots');
     const marker = 'releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=0';
     const cancellations = count(allLogs(), marker);
-    // No visibility wait between B's notify and A's cancel: Android still may report A while B is queued.
+
     postNative(plannedAlarm(`${key}:r1`, latestId, at + 300_000), oldId);
     await waitUntil('the immediate old alarm cancellation diagnostic', () => count(allLogs(), marker) > cancellations);
     const latest = await waitUntil('the due-repeat replacement after old-owner cancellation', () => shown(names[0]).find((item) => item.id === latestId));
@@ -413,13 +373,13 @@ try {
         await replacementCheck();
     } else {
     sh(`pm grant ${PKG} android.permission.POST_NOTIFICATIONS`);
-    // Exact alarms off for (1) and (2) (Android 14 gives a new install none); this run sets the access back at the end.
+
     sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM deny`);
     await sleep(1500);
     await killApp();
     sh('logcat -c');
 
-    // (1) Tasks queued while the app is closed are planned at the next start.
+
     const t0 = Math.ceil((phoneNow() + 4 * 60_000) / 60_000) * 60_000;
     const due = { A: t0, C: t0 + 60_000, D: t0 + 120_000, G: t0 + 120_000 };
     const names = { A: title(1), B: title(2), C: title(3), D: title(4), G: title(5), E: title(6), F: title(7), H: title(8) };
@@ -436,8 +396,8 @@ try {
         openTasks.add(ids[key]);
     }
     check(['A', 'C', 'D', 'G', 'H'].every((key) => Date.parse(stored(names[key])[0].dueDate) === due[key]), `(1) the timed tasks are due at ${clock(t0)}, +1 and +2 minutes (${zone})`);
-    // C repeats daily, and task reminders are on: both set in the database while the app is closed, as a synced edit would
-    // arrive (Settings › Notifications comes with pass R2). The setting goes back at the end.
+
+
     {
         await killApp();
         reminderSetting = editDb(ids.C, true);
@@ -460,7 +420,7 @@ try {
     };
     onePerTask('(1)', false);
 
-    // (2) Exact alarms allowed: Android's grant broadcast, then CoreWork remakes every alarm exact.
+
     {
         const before = count(allLogs(), 'Native Android core work', '"job":"reminders","outcome":"success"');
         sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM allow`);
@@ -470,7 +430,7 @@ try {
         onePerTask('(2)', true);
     }
 
-    // (3) A reboot drops every alarm; the reschedule receiver's path arms each again, once.
+
     {
         sh(`am force-stop ${PKG}`);
         await sleep(1500);
@@ -482,8 +442,8 @@ try {
         onePerTask('(3)', true);
         map = alarmMap();
         check(['A', 'C', 'D', 'G', 'H'].every((key) => !map[keyOf(key)]?.pending), '(3) the map holds each again, none pending');
-        // Revoking exact-alarm access stops the app and drops its exact alarms, as a force-stop does; no broadcast comes after it.
-        // The process's first plan remakes every alarm.
+
+
         sh(`am force-stop ${PKG}`);
         await sleep(1500);
         check(alarms().length === 0, '(3) a second force-stop dropped every alarm');
@@ -493,7 +453,7 @@ try {
         onePerTask('(3 start)', true);
     }
 
-    // (4) A process death after the writeAhead and before the alarm map: the next start makes each pending alarm once.
+
     for (const [key, at] of [['E', 'write-ahead'], ['F', 'scheduled']]) {
         await killApp();
         const when = t0 + 24 * 3600_000 + (key === 'E' ? 0 : 60_000);
@@ -503,10 +463,10 @@ try {
         const before = count(allLogs(), stopLine);
         let running = '';
         try {
-            // A boot with no screen (the reschedule receiver's job): Android restarts no activity after the process dies, so the
-            // reads below see the state the death left. The boot's own plan stops first.
+
+
             sh(`am broadcast -f 0x20 -n ${RESCHEDULE} -a ${DEBUG_RESCHEDULE}`);
-            // The process that logs the stop is the one seen last before its line; it is gone once pid() names another or none.
+
             await waitUntil(`the stop at ${at}`, () => {
                 if (count(allLogs(), stopLine) === before) {
                     running = pid() || running;
@@ -517,7 +477,7 @@ try {
         } finally {
             setProp('reminder_stop', '');
         }
-        // Read at once: the system may restart the app by itself, and its plan must not have run before these reads.
+
         const cyclesAtStop = cycles();
         const pending = alarmMap();
         const madeAtStop = alarmsAt(when).length;
@@ -542,7 +502,7 @@ try {
     onePerTask('(4)', true);
     await killApp();
 
-    // (5) The first reminder fires once, on RN's channel, with core's title and text and RN's buttons.
+
     const expected = coreDetails(['A', 'C', 'D', 'G', 'H'].map(keyOf), t0 - 60_000);
     check(Object.keys(expected).length === 5, '(5) core\'s plan on the pulled database names the five reminders');
     setProp('snooze_minutes', '0.25');
@@ -561,7 +521,7 @@ try {
         check(shown(names.B).length === 0, '(5) the date-only task posts nothing');
     }
 
-    // (6) Snooze, then Done on the snoozed reminder.
+
     {
         const jobs = () => count(allLogs(), 'Native Android core work', '"job":"reminderSnooze","outcome":"success"');
         const before = jobs();
@@ -585,7 +545,7 @@ try {
         openTasks.delete(ids.A);
     }
 
-    // (7) Done on a recurring reminder, the process killed after core's reply: one next instance after the replay and the retry.
+
     {
         await waitUntil(`the reminder for ${names.C}`, () => shown(names.C).length > 0, 120_000);
         const [beforeDone] = stored(names.C);
@@ -605,7 +565,7 @@ try {
         const atStop = stored(names.C);
         check(atStop.length === 2 && atStop[0].status === 'done' && atStop[0].rev === beforeDone.rev + 1 && atStop[1].status !== 'done',
             '(7) core replied: the task is done once, with one next instance, and the process died before the entry settled');
-        // Android may restart the process at once (CoreWork's job service), and its boot replays the entry: on disk, or replayed.
+
         check(journal().some((entry) => entry.method === 'reminderDone') || replays().length > replaysBefore,
             '(7) the Done request outlived the process: the journal holds it, or the next boot replayed it');
         if (!pid()) {
@@ -625,11 +585,7 @@ try {
         sh('input keyevent KEYCODE_HOME');
     }
 
-    // (8) A delivered reminder whose task is completed before the next plan is withdrawn: the app is closed when D fires (no plan
-    // runs after it), a widget check-off completes D, and the next start drains it before its plan, which withdraws D's alarm and
-    // removes its notification. That plan lets G's and H's alarms expire and remembers them (core's native state); H completed
-    // after it is withdrawn at the plan after its completion (RN keeps such a notification: reported in the pass result).
-    // (9) A tap on a reminder opens its task.
+
     {
         await killApp();
         await waitUntil(`the reminders for ${names.D}, ${names.G} and ${names.H}`,
@@ -673,7 +629,7 @@ try {
     evidenced(error);
     try {
         console.error(`evidence - the app's reminder lines:\n${allLogs().split('\n').filter((line) => /[Rr]eminder|Local Notifications|core work|journal/.test(line)).slice(-25).join('\n')}`);
-    } catch { /* device gone */ }
+    } catch {                   }
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {

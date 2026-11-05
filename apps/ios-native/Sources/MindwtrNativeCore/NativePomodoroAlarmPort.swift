@@ -58,7 +58,7 @@ final class NativeSystemPomodoroAlarmPort: NativePomodoroAlarmPort, @unchecked S
 }
 
 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-/// Isolated lifecycle proof only; this port never obtains a notification center.
+
 actor NativeSimulatorPomodoroAlarmPort: NativePomodoroAlarmPort {
     private let holdFirstAdd: Bool, denied: Bool, seedOwned: Bool
     private var bound = false, adds = 0, permissionReads = 0, pendingReads = 0, deliveredReads = 0

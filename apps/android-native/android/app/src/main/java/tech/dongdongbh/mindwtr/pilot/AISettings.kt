@@ -5,7 +5,6 @@ import android.os.Looper
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -68,72 +67,58 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/*
- * RN's Settings › AI (ai-settings-screen.tsx, its assistant and speech cards and the provider panels) on core's contract
- * (native-host-contract-ai.ts). Kotlin keeps only what RN keeps in React state for one visit, in memory (never in saved state:
- * a base URL may hold a password): which cards and folds are open, the open picker, text fields as typed, a key field while it
- * has focus, and the consent question. Every word, option, value and write is core's.
- */
 
-/**
- * Settings › AI's screen writes AISettings.kt sends itself (host-entry.ts MENU_COMMANDS, never through the Menu tab's send()): the
- * screen's open (journaled), and a key and a base URL (WriteJournal.UNJOURNALED: a key, or a URL that may hold a password). No
- * failure of theirs is kept for a retry.
- */
 val AI_COMMANDS = setOf("openAISettings", "setAIKey", "setAIEndpoint")
 
-/** RN's picker Check (lucide at stroke 2.5). */
+
 private val PickerCheck = lucide("PickerCheck", "M20 6 9 17l-5-5", stroke = 2.5f)
 
-/**
- * The typed text a synced field sends once typing pauses (RN writes each keystroke; one write per pause keeps the journal small).
- * A key and a base URL have no pause (review C1 4): each change is one unjournaled write, in order, so a kill never loses one.
- */
+
 private const val TYPING_PAUSE_MS = 500L
 
 class AISettingsModel(private val menu: MenuModel) {
     private companion object {
-        /** A visit's open and close, and every key and base URL write, in the order sent: a later keystroke never lands first. */
+
         val ordered: ExecutorService = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-ai-settings") }
     }
     private val shell get() = menu.shell
     private val settings get() = menu.settings
     private val main = Handler(Looper.getMainLooper())
 
-    /** openAISettings ran for this visit: RN reads the keys and stores its corrections once, when the screen mounts. */
+
     @Volatile private var opened = false
     var assistantOpen by mutableStateOf(false); private set
     var speechOpen by mutableStateOf(false); private set
     var advancedOpen by mutableStateOf(false); private set
     var extraOpen by mutableStateOf(false); private set
-    /** The open picker: "model", "copilotModel", "speechModel" or "timeout". */
+
     var picker by mutableStateOf<String?>(null); private set
-    /** Text fields as typed, by core's change type ("baseUrl" and "speechBaseUrl" for the base URLs), until core's view shows the text. */
+
     var typed by mutableStateOf(emptyMap<String, String>()); private set
-    /** A key field ("assistant" or "speech") while it shows typed text: the key typed after core's dots ([keyTexts]). Gone once saved. */
+
     var keys by mutableStateOf(emptyMap<String, String>()); private set
     private val keyTexts = KeyTexts()
-    /** The extra request parameters as typed, and the stored text it last took (RN resets it whenever the stored ones change). */
+
     var extraDraft by mutableStateOf<String?>(null); private set
     private var extraFollowed: String? = null
-    /** Core's consent question, and the change that waits for its agree. */
+
     var consent by mutableStateOf<Pair<JSONObject, JSONObject>?>(null); private set
-    /** The model lists asked for, by list, so each request goes once (core's `modelLists`). */
+
     private val asked = HashMap<String, String>()
-    /** Each synced field's pending typed text: its send runs once typing pauses, or at once on blur or leave. */
+
     private val pending = LinkedHashMap<String, Runnable>()
-    /** A key field whose last write failed: it keeps the typed key on blur (it never shows saved). Main thread. */
+
     private val unsaved = HashSet<String>()
-    /** The model lists loading: leaving the screen or a newer request cancels one (its provider call stops). */
+
     private val modelCalls = AIRequestSlots<CoreHost.LongCall> { call -> shell.coreHost()?.cancel(call) }
 
-    /** Settings' read of this screen: it opens once per visit (journaled), then core's view for the visit. */
+
     fun read(runtime: CoreHost): JSONObject {
         open(runtime)
         return try {
             runtime.menuRead("aiSettings", "{}")
         } catch (failure: Exception) {
-            // Core has no open visit (a close that raced this one): open it again, once.
+
             if (failure.message?.contains("Open Settings › AI first") != true) throw failure
             opened = false
             open(runtime)
@@ -148,7 +133,7 @@ class AISettingsModel(private val menu: MenuModel) {
         }
     }.get()
 
-    /** Core's new view: typed text that it now shows follows it again; the extra parameters take new stored ones; model lists load. Main thread. */
+
     fun follow(view: JSONObject) {
         val shown = shownTexts(view)
         typed = typed.filter { (field, text) -> shown[field] != text }
@@ -163,7 +148,7 @@ class AISettingsModel(private val menu: MenuModel) {
         }
     }
 
-    /** The text each typed field shows in core's view. */
+
     private fun shownTexts(view: JSONObject): Map<String, String> {
         val assistant = view.getJSONObject("assistant")
         val speech = view.getJSONObject("speech")
@@ -177,7 +162,7 @@ class AISettingsModel(private val menu: MenuModel) {
         ).toMap()
     }
 
-    /** A model list core asked for, `delayMs` after it last changed: the provider's own list, then core's view again. */
+
     private fun loadModels(list: String, request: String) {
         if (asked[list] != request || !opened) return
         val runtime = shell.coreHost() ?: return
@@ -186,7 +171,7 @@ class AISettingsModel(private val menu: MenuModel) {
         Thread({
             runCatching { runtime.aiRequest("loadAIModels", JSONObject().put("list", list).put("request", request).toString(), handle) }
                 .onFailure { if (it !is CancellationException) Log.w(CoreHost.TAG, "AI model list failed code=${it.message?.substringBefore(':')}") }
-            // Read again once no action runs (a background read skips while one does), so the new list shows.
+
             modelCalls.reply(list, handle, shell::ui) { menu.whenIdle { settings.refresh() } }
         }, "mindwtr-ai-models").start()
     }
@@ -197,7 +182,7 @@ class AISettingsModel(private val menu: MenuModel) {
     fun toggleExtra() { extraOpen = !extraOpen }
     fun openPicker(name: String?) { picker = name }
 
-    /** Leaving the screen (RN unmounts it): typed text still waiting is sent, and core forgets the visit's keys and lists. */
+
     fun leave() {
         if (!opened && typed.isEmpty() && pending.isEmpty()) return
         flushAll()
@@ -210,29 +195,24 @@ class AISettingsModel(private val menu: MenuModel) {
         ordered.execute { runCatching { runtime.menuRead("aiSettingsClose", "{}") }.onFailure { Log.w(CoreHost.TAG, "AI screen close failed ${failureForLog(it)}") } }
     }
 
-    // ---- Writes ----
 
-    /** A control's change (core's setAISetting): a synced setting, so it goes through the Menu tab's journaled command path. */
     fun set(change: JSONObject, agreed: Boolean = false) =
         menu.command("setAISetting", JSONObject().put("change", change).apply { if (agreed) put("consent", true) })
 
-    /** A text field as typed (a model, the audio language): sent once typing pauses; the field shows it until core's view does. */
+
     fun type(field: String, text: String, change: () -> JSONObject) {
         typed = typed + (field to text)
         schedule(field) { menu.whenIdle { set(change()) } }
     }
 
-    /** A base URL as typed ([field] "baseUrl" or "speechBaseUrl"): setAIEndpoint at once, in order. Never journaled. */
+
     fun typeUrl(field: String, text: String) {
         typed = typed + (field to text)
         val target = if (field == "baseUrl") "assistant" else "speech"
         screenWrite("setAIEndpoint", JSONObject().put("field", target).put("value", text))
     }
 
-    /**
-     * A key field's text. RN's secure field starts with the stored key; here it starts with core's dots, and [typedKey] keeps
-     * them out of the key. setAIKey goes at once, in order, naming the provider shown.
-     */
+
     fun typeKey(field: String, provider: String, mask: String, text: String) {
         val next = typedKey(keys[field], mask, text)
         keyTexts.typed(field, next)
@@ -240,20 +220,17 @@ class AISettingsModel(private val menu: MenuModel) {
         screenWrite("setAIKey", JSONObject().put("field", field).put("provider", provider).put("value", next), keyField = field)
     }
 
-    /**
-     * A key field lost focus: once its writes before are stored, the key leaves the screen's state and the field shows core's dots
-     * (saved). A failed write keeps the typed key in the field, and an edit typed after a refocus stays (review C1 verification 4).
-     */
+
     fun blurKey(field: String) {
         val upTo = keyTexts.edit(field)
         ordered.execute { shell.ui { if (field !in unsaved) { keyTexts.saved(field, upTo); keys = keyTexts.shown } } }
     }
 
-    /** The extra request parameters as typed, and their Save (core parses the text and answers the field's text). */
+
     fun typeExtra(text: String) { extraDraft = text }
     fun saveExtra(stored: String) = set(JSONObject().put("type", "extraBodyParams").put("text", extraDraft ?: stored))
 
-    /** The consent question's agree: the same change again, with a new request UUID and the agreement, which core records first. */
+
     fun agree() {
         val (change, _) = consent ?: return
         consent = null
@@ -271,10 +248,7 @@ class AISettingsModel(private val menu: MenuModel) {
     private fun flush(key: String) { pending.remove(key)?.let { main.removeCallbacks(it); it.run() } }
     private fun flushAll() { pending.keys.toList().forEach(::flush) }
 
-    /**
-     * A key or base URL write, in order, off the main thread; core's view is read again after it. Its failure is shown, never
-     * kept for a retry; a key's ([keyField]) marks the field unsaved until a later write of it lands.
-     */
+
     private fun screenWrite(name: String, input: JSONObject, keyField: String? = null) {
         val runtime = shell.coreHost() ?: return
         ordered.execute {
@@ -282,7 +256,7 @@ class AISettingsModel(private val menu: MenuModel) {
             shell.ui {
                 keyField?.let { if (result.isSuccess) unsaved -= it else unsaved += it }
                 result.exceptionOrNull()?.let { error ->
-                    // Core's message names no key: its failures are redacted (redactAIError).
+
                     Log.w(CoreHost.TAG, "AI screen command failed command=$name code=${error.message?.substringBefore(':')}")
                     shell.showToast(null, error.message.orEmpty().substringAfter(": "), "error")
                 }
@@ -291,9 +265,7 @@ class AISettingsModel(private val menu: MenuModel) {
         }
     }
 
-    // ---- Answers (MenuModel's send, for setAISetting) ----
 
-    /** Core's answer: its consent question, its toasts (the newest shows, as RN's toast does), a Save's stored extra parameters. */
     fun done(action: FailedAction, reply: JSONObject) {
         reply.optJSONObject("consent")?.let { prompt -> consent = JSONObject(action.title).getJSONObject("change") to prompt }
         reply.menuText("extraBodyDraft")?.let { extraDraft = it }
@@ -303,16 +275,14 @@ class AISettingsModel(private val menu: MenuModel) {
     private fun uuid() = UUID.randomUUID().toString()
 }
 
-// ---- The screen ----
 
-/** RN's AI screen from core's view: the assistant card and the speech card. */
 @Composable
 internal fun AISettings(model: InboxViewModel, view: JSONObject) {
     AssistantCard(model, view.getJSONObject("assistant"))
     SpeechCard(model, view.getJSONObject("speech"))
 }
 
-/** Over the AI screen (SettingsDialogs, outside its scroll): the model and timeout pickers, and RN's consent question. */
+
 @Composable
 internal fun AISettingsDialogs(model: InboxViewModel, view: JSONObject) {
     val ai = model.menu.settings.ai
@@ -328,12 +298,12 @@ internal fun AISettingsDialogs(model: InboxViewModel, view: JSONObject) {
     }
 }
 
-/** RN's settingRow with its label and description (settingInfo), a hairline above unless first, and a trailing control. */
+
 @Composable
 private fun AIRow(label: String, description: String?, divider: Boolean = true, note: String? = null, modifier: Modifier = Modifier,
                   trailing: @Composable () -> Unit = {}) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).then(modifier).padding(16.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).then(modifier).padding(16.dp),
         verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
             Text(label, style = rnText(16, 500, 21), color = c.text)
@@ -344,7 +314,7 @@ private fun AIRow(label: String, description: String?, divider: Boolean = true, 
     }
 }
 
-/** RN's folding row (the cards' headings, Advanced, Extra request parameters): the label, the description, and ▸ or ▾. */
+
 @Composable
 private fun FoldRow(label: String, description: String?, open: Boolean, divider: Boolean, tag: String, toggle: () -> Unit) {
     val spoken = if (description == null) label else "$label, $description"
@@ -356,7 +326,7 @@ private fun FoldRow(label: String, description: String?, open: Boolean, divider:
     }
 }
 
-/** RN's switch row: the label, the description, and RN's settings switch. */
+
 @Composable
 private fun SwitchRow(model: InboxViewModel, row: JSONObject, tag: String, toggle: (Boolean) -> Unit) {
     val label = row.getString("label")
@@ -366,7 +336,7 @@ private fun SwitchRow(model: InboxViewModel, row: JSONObject, tag: String, toggl
     }
 }
 
-/** RN's backendToggle: core's options as chips, the chosen one washed and in the tint; a tap sends its change. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Chips(model: InboxViewModel, options: List<JSONObject>, tag: String, enabled: Boolean = true, choose: (JSONObject) -> Unit) {
@@ -378,7 +348,7 @@ private fun Chips(model: InboxViewModel, options: List<JSONObject>, tag: String,
             val label = option.getString("label")
             val on = enabled && model.menu.idle
             val shape = RoundedCornerShape(16.dp)
-            Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).border(1.dp, c.border, shape)
+            Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).rnBorder(1.dp, c.border, shape)
                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; testTag = "$tag-${option.get("value")}"
                     if (on) onClick { choose(option); true } else disabled() }
                 .clickable(enabled = on) { choose(option) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -388,7 +358,7 @@ private fun Chips(model: InboxViewModel, options: List<JSONObject>, tag: String,
     }
 }
 
-/** RN's textInput and modelTextInput: a bordered field over the card; a secure one shows dots, a code one is monospace. */
+
 @Composable
 private fun AIInput(value: String, label: String, placeholder: String?, tag: String, modifier: Modifier, radius: Int = 8, secure: Boolean = false,
                     code: Boolean = false, keyboard: KeyboardType = KeyboardType.Text, focus: (Boolean) -> Unit = {}, change: (String) -> Unit) {
@@ -398,7 +368,7 @@ private fun AIInput(value: String, label: String, placeholder: String?, tag: Str
     BasicTextField(value, change, singleLine = !code, minLines = if (code) 5 else 1, cursorBrush = SolidColor(c.tint), textStyle = style,
         visualTransformation = if (secure) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = keyboard),
-        modifier = modifier.clip(shape).border(1.dp, c.border, shape).onFocusChanged { focus(it.isFocused) }.semantics { contentDescription = label }.testTag(tag),
+        modifier = modifier.clip(shape).rnBorder(1.dp, c.border, shape).onFocusChanged { focus(it.isFocused) }.semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 if (value.isEmpty() && placeholder != null) Text(placeholder, style = style.copy(color = c.secondaryText))
@@ -407,7 +377,7 @@ private fun AIInput(value: String, label: String, placeholder: String?, tag: Str
         })
 }
 
-/** RN's modelInputRow: the typed model and its Suggestions button, which opens the picker. */
+
 @Composable
 private fun ModelInput(model: InboxViewModel, field: String, row: JSONObject, tag: String, picker: String) {
     val ai = model.menu.settings.ai
@@ -419,7 +389,7 @@ private fun ModelInput(model: InboxViewModel, field: String, row: JSONObject, ta
         }
         val suggestions = row.getString("suggestions")
         val shape = RoundedCornerShape(10.dp)
-        Box(Modifier.clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Box(Modifier.clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { contentDescription = suggestions; role = Role.Button; testTag = "$tag-suggestions"; onClick { ai.openPicker(picker); true } }
             .clickable { ai.openPicker(picker) }.padding(horizontal = 8.dp, vertical = 10.dp)) {
             Text(suggestions, style = rnText(12, 600, 16), color = c.secondaryText, maxLines = 2, textAlign = TextAlign.Center)
@@ -427,13 +397,13 @@ private fun ModelInput(model: InboxViewModel, field: String, row: JSONObject, ta
     }
 }
 
-/** RN's dropdownButton: the value and ▾; it opens the picker. */
+
 @Composable
 private fun Dropdown(label: String, value: String, tag: String, open: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
     Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
-        Row(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { contentDescription = "$label: $value"; role = Role.Button; testTag = tag; onClick { open(); true } }
             .clickable(onClick = open).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -443,7 +413,7 @@ private fun Dropdown(label: String, value: String, tag: String, open: () -> Unit
     }
 }
 
-/** A key field (RN's secure textInput): core's dots until it is edited; the edit is the new key (AISettingsModel.typeKey). */
+
 @Composable
 private fun KeyField(model: InboxViewModel, field: String, provider: String, key: JSONObject, bottom: Int) {
     val ai = model.menu.settings.ai
@@ -455,7 +425,7 @@ private fun KeyField(model: InboxViewModel, field: String, provider: String, key
     }
 }
 
-/** A base URL field (the assistant's, or the speech card's): as typed until core's view shows it; setAIEndpoint once typing pauses. */
+
 @Composable
 private fun UrlField(model: InboxViewModel, field: String, row: JSONObject, tag: String) {
     val ai = model.menu.settings.ai
@@ -468,7 +438,7 @@ private fun UrlField(model: InboxViewModel, field: String, row: JSONObject, tag:
 
 private fun selectedValue(options: List<JSONObject>): String = options.first { it.getBoolean("selected") }.get("value").toString()
 
-/** RN's AiSettingsAssistantCard: folded; the switch, provider, models, the provider's panel, and Advanced's request timeout. */
+
 @Composable
 private fun AssistantCard(model: InboxViewModel, card: JSONObject) {
     val ai = model.menu.settings.ai
@@ -505,7 +475,7 @@ private fun AssistantCard(model: InboxViewModel, card: JSONObject) {
                         modifier = Modifier.padding(top = 6.dp))
                     val save = extra.getString("save")
                     val shape = RoundedCornerShape(10.dp)
-                    Box(Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape).border(1.dp, c.border, shape)
+                    Box(Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape)
                         .clearAndSetSemantics { contentDescription = save; role = Role.Button; testTag = "ai-extra-body-save"
                             if (model.menu.idle) onClick { ai.saveExtra(extra.getString("value")); true } else disabled() }
                         .clickable(enabled = model.menu.idle) { ai.saveExtra(extra.getString("value")) }.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -540,7 +510,7 @@ private fun AssistantCard(model: InboxViewModel, card: JSONObject) {
     }
 }
 
-/** RN's AiSettingsSpeechCard: folded; the switch, provider, model, the Whisper file or the key and base URL, language, mode and fields. */
+
 @Composable
 private fun SpeechCard(model: InboxViewModel, card: JSONObject) {
     val ai = model.menu.settings.ai
@@ -562,10 +532,10 @@ private fun SpeechCard(model: InboxViewModel, card: JSONObject) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(whisper.getString("status"), style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.weight(1f))
-                // Download and Delete come with the Whisper pass (D4): core offers them off.
+
                 val action = whisper.getJSONObject("action")
                 val shape = RoundedCornerShape(16.dp)
-                Box(Modifier.fade(if (action.getBoolean("enabled")) 1f else 0.5f).clip(shape).border(1.dp, c.border, shape)
+                Box(Modifier.fade(if (action.getBoolean("enabled")) 1f else 0.5f).clip(shape).rnBorder(1.dp, c.border, shape)
                     .clearAndSetSemantics { contentDescription = action.getString("label"); role = Role.Button; disabled() }
                     .padding(horizontal = 10.dp, vertical = 6.dp)) {
                     Text(action.getString("label"), style = rnText(13, 700, 17), color = c.text, maxLines = 2, textAlign = TextAlign.Center)
@@ -589,10 +559,7 @@ private fun SpeechCard(model: InboxViewModel, card: JSONObject) {
     }
 }
 
-/**
- * RN's model and timeout pickers (pickerOverlay, pickerCard): core's title and options, the chosen one washed with lucide's Check;
- * a choice sends its change and closes it.
- */
+
 @Composable
 private fun AIPicker(model: InboxViewModel, view: JSONObject, picker: String) {
     val ai = model.menu.settings.ai
@@ -612,7 +579,7 @@ private fun AIPicker(model: InboxViewModel, view: JSONObject, picker: String) {
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
-            .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("ai-picker")) {
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("ai-picker")) {
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (option in options) {
@@ -620,7 +587,7 @@ private fun AIPicker(model: InboxViewModel, view: JSONObject, picker: String) {
                     val label = option.getString("label")
                     val row = RoundedCornerShape(10.dp)
                     val choose = { close(); ai.set(change(option)) }
-                    Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else Color.Transparent).border(1.dp, c.border, row)
+                    Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else Color.Transparent).rnBorder(1.dp, c.border, row)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (model.menu.idle) onClick { choose(); true } else disabled() }
                         .clickable(enabled = model.menu.idle) { choose() }.padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically) {

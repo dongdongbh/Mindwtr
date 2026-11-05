@@ -265,7 +265,7 @@ struct ReviewGuideScreen: View {
                             ForEach(scheduledItems.indices, id: \.self) { index in guideItem(scheduledItems[index]) }
                         }
                     }
-                    // A folded group should not offer pages containing only its hidden rows.
+
                     let visibleTotal = view.number("total") - (scheduledGroup && !scheduledExpanded ? content.object("scheduled").number("count") : 0)
                     if items.count < visibleTotal {
                         ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-guide-more") {

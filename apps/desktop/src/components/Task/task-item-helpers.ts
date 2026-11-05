@@ -10,10 +10,7 @@ import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 
 export { getRecurrenceRRuleValue };
 
-// Attachments can be reassigned (Settings -> GTD -> Task Editor Layout) to any
-// of the three collapsible sections. A dropped file needs to know which one
-// to expand; null means attachments aren't in a collapsible section (basic,
-// or hidden), so there's nothing to expand.
+
 export function findAttachmentsSection(
     schedulingFields: TaskEditorFieldId[],
     organizationFields: TaskEditorFieldId[],
@@ -25,8 +22,7 @@ export function findAttachmentsSection(
     return null;
 }
 
-// Convert stored ISO or date-only strings into datetime-local input values.
-// A date-only value never gains an implicit time here — see date-draft.ts.
+
 export function toDateTimeLocalValue(dateStr: string | undefined): string {
     const { date, time } = splitDateTime(dateStr);
     return joinDateTime(date, time);

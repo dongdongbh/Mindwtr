@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AppData, Project, Task } from './types';
+import type { AppData, Attachment, Project, Task } from './types';
 import type {
     SyncBackendIO,
     SyncRunNotifier,
@@ -33,7 +33,10 @@ import {
     SyncRemoteMutationFenceLostError,
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
-import { AttachmentUploadTooLargeError } from './attachment-transfer';
+import { AttachmentUploadTooLargeError, applyAttachmentPatches, runAttachmentTransferLifecycle } from './attachment-transfer';
+import { buildCloudKey } from './attachment-paths';
+import { isAttachmentKeptWithoutFile } from './unreachable-attachments';
+import { markAttachmentUnrecoverable } from './attachment-validation';
 import { createMobileAttachmentFiles } from './mobile-attachment-files';
 import { createMobileAttachmentCommon } from './mobile-attachment-common';
 import { createMobileAttachmentBackends } from './mobile-attachment-backends';
@@ -50,9 +53,7 @@ import { join } from 'node:path';
 import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter } from './sqlite-adapter';
 
-// Each harness stands up its own fake store, so the process-wide idle-cycle
-// snapshot (keyed on sync scope + the store's change stamp, unique inside a
-// real app) would otherwise leak one harness's document into the next.
+
 beforeEach(() => {
     clearIdleSyncCycleSnapshot();
 });
@@ -90,6 +91,7 @@ type HarnessConfig = {
     remote?: AppData | null;
     backend?: SyncBackend;
     fastSyncScope?: string | null;
+    locationScope?: string | null;
     manual?: boolean;
     activationProbe?: boolean;
     ignorePendingRemoteWriteBackoff?: boolean;
@@ -140,7 +142,7 @@ const createHarness = (config: HarnessConfig = {}) => {
     const store: SyncRunStoreBridge = {
         getLastDataChangeAt: () => harness.lastDataChangeAt,
         getInMemorySnapshot: () => cloneAppData(harness.inMemory),
-        // A sliced run takes the lists in one turn and copies them in slices (change 3 review P3-2).
+
         captureInMemorySnapshot: () => ({
             tasks: [...harness.inMemory.tasks],
             projects: [...harness.inMemory.projects],
@@ -165,7 +167,7 @@ const createHarness = (config: HarnessConfig = {}) => {
         persistSyncStatus: vi.fn(async (updates) => {
             harness.statusUpdates.push(updates);
         }),
-        // A sliced run (a test that binds sliceYield) saves only with a token; this fake checks none.
+
         readTokenOf: () => ({ epoch: 0, generation: 0 }),
         readFastSyncState: vi.fn(async (scope: string) => harness.fastStates.get(scope) ?? null),
         writeFastSyncState: vi.fn(async (state: FastSyncState) => {
@@ -194,6 +196,7 @@ const createHarness = (config: HarnessConfig = {}) => {
             cloudProvider: 'selfhosted' as const,
             io,
             fastSyncScope: config.fastSyncScope ?? null,
+            locationScope: config.locationScope ?? null,
         })),
         requestFollowUp: vi.fn(),
         requestFollowUpAfter: vi.fn(),
@@ -216,10 +219,12 @@ const createHarness = (config: HarnessConfig = {}) => {
         activationProbe?: boolean;
         fileSyncLockBusyRetryAttempt?: number;
         ignorePendingRemoteWriteBackoff?: boolean;
+        acceptMissingAttachmentIds?: readonly string[];
     } = {}) => runSharedSyncCycle({
         options: {
             manual: config.manual ?? options.manual,
             activationProbe: config.activationProbe ?? options.activationProbe,
+            acceptMissingAttachmentIds: options.acceptMissingAttachmentIds,
             fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
             ignorePendingRemoteWriteBackoff: config.ignorePendingRemoteWriteBackoff
                 ?? options.ignorePendingRemoteWriteBackoff,
@@ -238,20 +243,15 @@ const createHarness = (config: HarnessConfig = {}) => {
 };
 
 describe('runSharedSyncCycle', () => {
-    // The fixtures are stamped 2026-07-01 (STAMP), and tombstones older than 90 days are pruned, so an
-    // unpinned clock turned these tests red on 2026-09-29. Pin the date (timers stay real).
+
+
     beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-07-15T00:00:00.000Z') }); });
     afterEach(() => { vi.useRealTimers(); });
 
     describe('persisted-vs-in-memory reconcile short-circuit (#766)', () => {
         it('uses the persisted side without merging when change fingerprints match', async () => {
-            // Same id/rev/updatedAt metadata, diverged content. The fingerprint
-            // short-circuit trusts the tuple and hands back the persisted side
-            // (the previous cycle's merge output, whose byte shape the fast-sync
-            // state recorded) — the accepted deferral this test documents.
-            // Sides chosen so the assertion DISCRIMINATES: a real merge's
-            // deterministic winner is signature-lexical and would pick the
-            // in-memory 'Zebra title'; only the short-circuit yields 'Apple'.
+
+
             const inMemory = createData([createTask('t-1', 'Zebra title')]);
             const persisted = createData([createTask('t-1', 'Apple title')]);
             let capturedLocal: AppData | null = null;
@@ -271,9 +271,8 @@ describe('runSharedSyncCycle', () => {
         });
 
         it('still merges when the change fingerprints differ', async () => {
-            // The extra task lives on the IN-MEMORY side so the assertion
-            // discriminates: only a real merge unions it in — a broken
-            // short-circuit handing back persisted would drop it.
+
+
             const inMemory = createData([
                 createTask('t-1', 'Shared task'),
                 createTask('t-extra', 'Only in memory'),
@@ -397,10 +396,10 @@ describe('runSharedSyncCycle', () => {
             expect.objectContaining({ tasks: expect.any(Array) }),
             expect.objectContaining({ status: 'success', wroteLocal: true }),
         );
-        // Merged data persists locally without the pending-remote-write flag.
+
         expect(harness.persisted.settings.pendingRemoteWriteAt).toBeUndefined();
         expect(harness.persisted.settings.lastSyncStatus).toBe('success');
-        // Fast-sync state recorded from the remote write fingerprint.
+
         expect(harness.fastStates.get('scope-1')?.remoteFingerprint).toContain('remote-fp-');
         expect(harness.steps).toEqual(expect.arrayContaining(['flush', 'fast-check', 'read-local', 'read-remote', 'merge', 'write-local', 'write-remote', 'refresh']));
         expect(harness.diagnostics).toEqual(expect.arrayContaining(['flush', 'merge-complete']));
@@ -706,9 +705,8 @@ describe('runSharedSyncCycle', () => {
             kind: 'file',
             title: 'Notes',
             uri: '/local/notes.txt',
-            // This key wins the ordinary attachment merge tie-break against
-            // the candidate key below. An activation probe must still keep the
-            // metadata it just proved on the candidate backend authoritative.
+
+
             cloudKey: 'cloudkit:a',
             localStatus: 'available',
             createdAt: STAMP,
@@ -1341,9 +1339,8 @@ describe('runSharedSyncCycle', () => {
         };
         const syncAttachments = vi.fn(async (data: AppData) => {
             const attachment = data.tasks[0]?.attachments?.[0];
-            // The key came from the candidate document just read. Keeping it is
-            // what prevents stale local bytes from replacing that remote winner;
-            // the old-backend key never reaches the candidate adapter.
+
+
             expect(attachment?.cloudKey).toBe('attachments/missing-on-candidate.txt');
             expect(attachment?.pendingContentUpload).toBeUndefined();
             expect(attachment?.uri).toBe('');
@@ -1557,9 +1554,8 @@ describe('runSharedSyncCycle', () => {
 
     it('completes a fresh file sync when the remote payload is missing sections and people (#990)', async () => {
         const local = createData([createTask('t-local', 'Local task')]);
-        // Exact synthetic "no remote yet" payload Rust's read_sync_file returns
-        // for a brand-new sync folder (apps/desktop/src-tauri/src/sync.rs)
-        // before the #990 fix — missing `sections` and `people`.
+
+
         const remote = { tasks: [], projects: [], areas: [], settings: {} } as unknown as AppData;
         const { harness, hooks, run } = createHarness({ local, remote, backend: 'file' });
 
@@ -1583,11 +1579,8 @@ describe('runSharedSyncCycle', () => {
         const result = await run();
 
         expect(result.success).toBe(true);
-        // writeRemoteForCycle computes a throwaway sanitized copy of the raw
-        // remote snapshot to compare against the merged payload before
-        // writing; on the un-normalized partial remote this used to throw
-        // inside sanitizeAppDataForRemote/compactSectionsForPurgedProjects
-        // before ever reaching writeRemote.
+
+
         expect(io.writeRemote).toHaveBeenCalledTimes(1);
     });
 
@@ -1863,9 +1856,8 @@ describe('runSharedSyncCycle', () => {
         const { io, storage, run } = createHarness({
             io: {
                 acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease),
-                // The fence is taken on the first mutation, so a pass that never
-                // reaches for it never meets the lost lease. Every real backend
-                // calls this immediately before it writes.
+
+
                 syncAttachments: vi.fn(async (_data, helpers) => {
                     await helpers.assertRemoteMutationFenceHeld();
                     return false;
@@ -1892,7 +1884,7 @@ describe('runSharedSyncCycle', () => {
                     const fingerprint = remote
                         ? `remote-fp-${JSON.stringify(remote.tasks.map((task) => task.id).sort())}`
                         : null;
-                    // The user edits while the fingerprint round trip is in flight.
+
                     if (editDuringFingerprintRead) bundle.harness.lastDataChangeAt += 1;
                     return fingerprint;
                 }),
@@ -1910,8 +1902,7 @@ describe('runSharedSyncCycle', () => {
         editDuringFingerprintRead = true;
         const second = await run();
 
-        // Option B: the freshness re-check throws LocalSyncAbort, so the cycle
-        // requeues instead of reporting the mid-check edit as already synced.
+
         expect(second).toMatchObject({ success: true, skipped: 'requeued' });
         expect(hooks.requestFollowUp).toHaveBeenCalled();
         expect(storage.writeFastSyncState).not.toHaveBeenCalledWith(
@@ -1926,7 +1917,7 @@ describe('runSharedSyncCycle', () => {
         await run();
         await run({ manual: true });
 
-        // The manual second run performed a full cycle including the remote read.
+
         expect(vi.mocked(io.readRemote).mock.calls.length).toBe(2);
     });
 
@@ -2195,16 +2186,14 @@ describe('runSharedSyncCycle', () => {
 
         expect(result).toMatchObject({ success: true, skipped: 'requeued' });
         expect(hooks.requestFollowUp).toHaveBeenCalled();
-        // A stale exit writes nothing more: the follow-up cycle publishes and clears the marker.
+
         expect(harness.persisted.settings.pendingRemoteWriteAt).toBeTruthy();
         expect(harness.diagnosticEvents).toContainEqual(expect.objectContaining({
             event: 'follow-up-requested', followUpReason: 'remote-conflict',
         }));
         expect(harness.diagnostics).toContain('requeued');
-        // Desktop has no diagnostics sink: the requeue must also reach the plain
-        // log with its reason, or a never-converging activation probe is invisible.
-        // The transport detail (e.g. the rejecting HTTP status) rides along so a
-        // server that breaks its own ETag chain shows up in one log line.
+
+
         expect(harness.infos).toContainEqual(expect.objectContaining({
             message: 'Sync cycle requeued',
             extra: expect.objectContaining({
@@ -2533,7 +2522,7 @@ describe('runSharedSyncCycle', () => {
                 onStaleSnapshot: (details) => staleEvents.push(details),
             },
         });
-        // Simulate a user edit while the remote read is in flight.
+
         vi.mocked(io.readRemote).mockImplementation(async () => {
             harness.lastDataChangeAt += 1;
             return cloneAppData(harness.remote!);
@@ -2550,15 +2539,8 @@ describe('runSharedSyncCycle', () => {
     });
 
     it('does not silently drop a local write that lands during the first local read (#910)', async () => {
-        // Reproduces the recurring-task completion race: the cycle's very
-        // first local read (readPersistedLocal, awaited inside
-        // readLocalDataForSyncCycle) is already in flight when the user
-        // completes a recurring task, which both updates the existing task
-        // and spawns a brand-new next-occurrence task. Before the fix, the
-        // snapshot was stamped as "fresh as of" the change stamp read AFTER
-        // the await, so the race was invisible to every later
-        // ensureLocalSnapshotFresh check and the stale, completion-less data
-        // was persisted and pushed back into the live store unchanged.
+
+
         const local = createData([createTask('t-recurring', 'Recurring task')]);
         let raceMidRead: () => void = () => {
             throw new Error('Harness mutation was not initialized');
@@ -2590,8 +2572,8 @@ describe('runSharedSyncCycle', () => {
         const result = await run();
 
         expect(result.success).toBe(true);
-        // Both the completion and the newly spawned recurring follow-up must
-        // survive the cycle instead of being overwritten by a stale merge.
+
+
         expect(harness.persisted.tasks.find((task) => task.id === 't-recurring')?.status).toBe('done');
         expect(harness.persisted.tasks.some((task) => task.id === 't-recurring-next')).toBe(true);
         expect(hooks.finalizeSuccess).toHaveBeenCalledWith(
@@ -2641,7 +2623,7 @@ describe('runSharedSyncCycle', () => {
         const result = await run();
 
         expect(result).toMatchObject({ success: true, skipped: 'requeued' });
-        // The store shows what the commit wrote: a gated writer cannot land here, and the disk holds this.
+
         expect(applyDataToStore).toHaveBeenCalledWith(harness.persisted);
         expect(harness.inMemory).toEqual(harness.persisted);
         expect(io.writeRemote).not.toHaveBeenCalled();
@@ -2661,11 +2643,11 @@ describe('runSharedSyncCycle', () => {
         const sections: string[] = [];
         const traced = globalThis as { __mindwtrTraceSection?: (name: string) => void };
         traced.__mindwtrTraceSection = (name) => { if (name) sections.push(name); };
-        // A command holds the gate from the remote read on, so the first save waits for it.
+
         let release!: () => void;
         const held = runStoreCommand(() => new Promise<void>((resolve) => { release = resolve; }));
         vi.mocked(io.readRemote).mockImplementationOnce(async () => {
-            // Date is faked in this suite: the command's 40 ms pass on the clock as it ends.
+
             setTimeout(() => { vi.setSystemTime(Date.now() + 40); release(); }, 5);
             return cloneAppData(harness.remote!);
         });
@@ -2696,10 +2678,10 @@ describe('runSharedSyncCycle', () => {
             let yields = 0;
             const sliceYield = vi.fn(async () => { yields += 1; });
             if (bindSlices) bundle.notifier.sliceYield = sliceYield;
-            // Desktop's renderer yield is not a slice port: it must not slice a cycle (D9 O1/C4).
+
             const yieldToUi = vi.fn(async () => undefined);
             if (!bindSlices) bundle.notifier.yieldToUi = yieldToUi;
-            // Every slice is due at once: the most interleaved run there can be.
+
             let clock = 0;
             const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
             try {
@@ -2712,7 +2694,7 @@ describe('runSharedSyncCycle', () => {
         const atOnce = await cycle(false);
         const sliced = await cycle(true);
         expect(atOnce.yields).toBe(0);
-        // The renderer yields once per step, however large the library: never once per slice.
+
         expect(atOnce.uiYields).toBe((await cycle(false, 3)).uiYields);
         expect(sliced.yields).toBeGreaterThan(10);
         expect(sliced.persisted).toEqual(atOnce.persisted);
@@ -2721,7 +2703,7 @@ describe('runSharedSyncCycle', () => {
 
     it('prepares each save\'s rows and store publish in slices before the gate, and never yields from the gate through the publish (D9b W6)', async () => {
         const bundle = createHarness({ remote: createData([createTask('t-local', 'Local task'), createTask('t-remote', 'Remote task')]) });
-        // Is the write gate held? A store command cannot start while a sync save holds it.
+
         const gateHeld = () => Promise.race([
             runStoreCommand(async () => false),
             new Promise<boolean>((resolve) => { setTimeout(() => resolve(true), 0); }),
@@ -2749,7 +2731,7 @@ describe('runSharedSyncCycle', () => {
 
         const saves = vi.mocked(bundle.storage.persistLocal).mock.calls.length;
         expect(saves).toBeGreaterThanOrEqual(1);
-        // Each save: its rows, then its publish, then the gate.
+
         expect(order.filter((step) => ['prepareSave', 'preparePublish', 'persistLocal'].includes(step)))
             .toEqual(Array.from({ length: saves }, () => ['prepareSave', 'preparePublish', 'persistLocal']).flat());
         expect(vi.mocked(bundle.storage.applyDataToStore!).mock.calls.map((call) => call[1])).toEqual(prepared);
@@ -2803,7 +2785,7 @@ describe('runSharedSyncCycle', () => {
         await desktop.run();
         const callsAfterFirstMerge = syncAttachments.mock.calls.length;
         await desktop.run();
-        // Desktop order: the second run fast-skips before the attachment phase.
+
         expect(syncAttachments.mock.calls.length).toBe(callsAfterFirstMerge);
 
         const mobileAttachments = vi.fn(async () => false);
@@ -2816,7 +2798,7 @@ describe('runSharedSyncCycle', () => {
         const mobileCalls = mobileAttachments.mock.calls.length;
         const second = await mobile.run();
         expect(second.skipped).toBe('unchanged');
-        // Mobile order: the pre-sync ran again even though the cycle then skipped.
+
         expect(mobileAttachments.mock.calls.length).toBeGreaterThan(mobileCalls);
     });
 
@@ -2879,7 +2861,7 @@ describe('runSharedSyncCycle', () => {
                     throw new Error('upload failed');
                 }),
             },
-            // Restrict the failure to the pre-sync phase.
+
             hooks: {
                 shouldRunAttachmentPhase: vi.fn(async (_data, phase) => phase === 'prepare'),
             },
@@ -3034,8 +3016,8 @@ describe('runSharedSyncCycle', () => {
         expect(bundle.harness.warnings.some((warning) => (
             warning.message === 'Attachment pre-sync warning' || warning.message === 'Attachment sync warning'
         ))).toBe(false);
-        // The late phase can follow an already published document. Require its
-        // exact prior boundary and no additional publication after refusal.
+
+
         expect(writesAtRefusal).toEqual([lateWinner ? 1 : 0]);
         expect(bundle.io.writeRemote).toHaveBeenCalledTimes(lateWinner ? 1 : 0);
         expect(bundle.hooks.finalizeSuccess).not.toHaveBeenCalled();
@@ -3300,7 +3282,7 @@ describe('runSharedSyncCycle', () => {
                     warning.message === 'Attachment pre-sync warning' || warning.message === 'Attachment sync warning'
                 ))).toBe(false);
                 expect(syncAttachments.mock.calls.some((call) => call[1].phase === phase)).toBe(true);
-                // The actual shared webdavGetFile/fetch timeout path rejected before a Response existed.
+
                 expect(fetcher).toHaveBeenCalledTimes(1);
                 expect(fetcher).toHaveBeenCalledWith('https://dav.example/attachments/bounded.txt',
                     expect.objectContaining({ method: 'GET' }));
@@ -3342,7 +3324,7 @@ describe('runSharedSyncCycle', () => {
         expect(result.success).toBe(true);
         expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
         expect(harness.persisted.settings.attachments?.lastCleanupAt).toBe(NOW.toISOString());
-        // invalidateFastSyncState suppressed the fast-state record.
+
         expect(harness.fastStates.size).toBe(0);
     });
 
@@ -3354,7 +3336,7 @@ describe('runSharedSyncCycle', () => {
         });
         let atCleanup: (() => void) | undefined;
         const runAttachmentCleanup = vi.fn(async () => { atCleanup!(); throw fatal; });
-        // The cycle publishes its saves before the refusal, so it has a published line it must not log after it.
+
         const applyDataToStore = vi.fn((data: AppData) => { bundle.harness.inMemory = cloneAppData(data); });
         const bundle = createHarness({
             local, remote: createData([createTask('t-remote', 'Remote task')]), fastSyncScope: 'fatal-scope',
@@ -3463,8 +3445,8 @@ describe('runSharedSyncCycle', () => {
             updatedAt: STAMP,
             deletedAt: STAMP,
         }];
-        // The throttle only blocks while the interval has not elapsed, and it
-        // compares against the real clock — stamp the last cleanup as "now".
+
+
         const local = createData([task], {
             attachments: { lastCleanupAt: new Date().toISOString() },
         });
@@ -3758,9 +3740,8 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
     });
 
     it('activates when the trial tombstones a candidate blob this device never held bytes for', async () => {
-        // The #1119 shape: a fresh device, one of the candidate's blobs is gone.
-        // No local bytes exist, so the tombstone cannot be a misread local file;
-        // it is the outcome every established device converges to.
+
+
         const remoteTask = createTask('t-two-attachments', 'Two attachments');
         remoteTask.attachments = [fileAttachment('attachment-ok', 'Fine'), fileAttachment('attachment-404', 'Gone')];
         const syncAttachments = vi.fn(async (data: AppData) => {
@@ -3768,7 +3749,7 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
                 if (attachment.id === 'attachment-ok') {
                     attachment.localStatus = 'available';
                 } else {
-                    // What markAttachmentUnrecoverable does on a terminal 404.
+
                     attachment.cloudKey = undefined;
                     attachment.fileHash = undefined;
                     attachment.localStatus = 'missing';
@@ -3795,10 +3776,8 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
     });
 
     it('activates a sync folder whose blob has not arrived yet when this device holds no bytes', async () => {
-        // A fresh desktop joins a Syncthing folder that carries data.json but not
-        // attachments/ yet: the file backend finds no blob, tombstones nothing, and
-        // leaves the record keyed + missing. Refusing here strands the folder
-        // forever; the record stays downloadable for a later cycle instead.
+
+
         const remoteTask = createTask('t-absent-blob', 'Blob not synced yet');
         remoteTask.attachments = [fileAttachment('attachment-absent', 'Arrives later')];
         const syncAttachments = vi.fn(async (data: AppData) => data);
@@ -3814,8 +3793,8 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
 
         expect(result.success).toBe(true);
         expect(io.writeRemote).toHaveBeenCalledTimes(1);
-        // The key survives (localStatus is device-local and never written remotely)
-        // and nothing was tombstoned, so a later cycle can still download it.
+
+
         expect(harness.remote?.tasks[0]?.attachments).toEqual([
             expect.objectContaining({
                 id: 'attachment-absent',
@@ -3927,8 +3906,8 @@ describe('activation proof with unrecoverable attachments (#1119)', () => {
             const attachment = data.tasks[0]?.attachments?.[0];
             expect(attachment?.uri).toBe('/managed/unreadable.txt');
             if (attachment) {
-                // Mobile WebDAV's LocalReadFailure currently reaches core only as
-                // the same untyped tombstone used for a terminal remote 404.
+
+
                 attachment.cloudKey = undefined;
                 attachment.fileHash = undefined;
                 attachment.localStatus = 'missing';
@@ -4003,8 +3982,8 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
 
         expect(result.success).toBe(true);
         expect(io.writeRemote).toHaveBeenCalledTimes(1);
-        // Same outcome an established device converges to: the written document
-        // carries the record as a tombstone, never as a live attachment.
+
+
         expect(harness.remote?.tasks[0]?.attachments).toEqual([
             expect.objectContaining({ id: 'attachment-orphan', deletedAt: STAMP }),
         ]);
@@ -4035,7 +4014,7 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
             success: false,
             error: expect.stringContaining('[cloud] Candidate attachment proof failed for attachment-old-backend'),
         });
-        // The refusal names the file, its owner, and the cross-backend cause (#1151).
+
         expect(result.error).toContain('"Only on the old backend" on task "Old backend attachment"');
         expect(result.error).toContain('uploaded to iCloud');
         expect(io.writeRemote).not.toHaveBeenCalled();
@@ -4060,14 +4039,14 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
         const logged = (warnings: { message: string; error?: unknown }[]) => warnings
             .map(({ message, error }) => `${message} ${error instanceof Error ? error.message : String(error ?? '')}`).join('\n');
 
-        // The activation probe: the toast still names them (#1151); the log does not.
+
         const probe = createHarness({ local: createData([unproven()]), activationProbe: true, io: { syncAttachments: vi.fn(async (data: AppData) => data) } });
         const probeResult = await probe.run();
         expect(probeResult.error).toContain('"private-file-name.pdf" on task "Private task title"');
         expect(logged(probe.harness.warnings)).toContain('attachment-private');
         expect(leaks(logged(probe.harness.warnings))).toEqual([]);
 
-        // A regular cycle stores the refusal in the sync status and history, and writes the error log: IDs only.
+
         const cycle = createHarness({ local: createData([unproven()]), activationProbe: false, io: { syncAttachments: vi.fn(async (data: AppData) => data) } });
         const cycleResult = await cycle.run();
         const stored = JSON.stringify([cycleResult, vi.mocked(cycle.hooks.finalizeErrorStatus).mock.calls,
@@ -4087,7 +4066,7 @@ describe('activation proof with metadata-only attachments (no blob anywhere)', (
             createdAt: STAMP,
             updatedAt: STAMP,
         }];
-        // An unreadable path leaves the record untouched (attachment-transfer.ts).
+
         const syncAttachments = vi.fn(async (data: AppData) => data);
         const { io, run } = createHarness({
             local: createData([localTask]),
@@ -4146,17 +4125,15 @@ describe('sync cycle cost cuts', () => {
 
     it('skips the local document write when the merge produced nothing new', async () => {
         const bundle = createHarness({ fastSyncScope: 'scope-local-write' });
-        // Settle: the first cycles publish the normalized document and absorb
-        // the sanitized settings the remote copy materializes. Each one is
-        // followed by what mobile's post-sync refresh does, so the next cycle's
-        // reconcile takes the aligned path.
+
+
         await bundle.run();
         bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
         await bundle.run({ manual: true });
         bundle.harness.inMemory = cloneAppData(bundle.harness.persisted);
         vi.mocked(bundle.storage.persistLocal).mockClear();
         bundle.harness.statusUpdates.length = 0;
-        // Force the merge phase: a manual run never takes the fast-check skip.
+
         const second = await bundle.run({ manual: true });
 
         expect(second).toMatchObject({ success: true, localWriteSkipped: true });
@@ -4164,7 +4141,7 @@ describe('sync cycle cost cuts', () => {
         expect(bundle.harness.statusUpdates.at(-1)).toMatchObject({ lastSyncStatus: 'success' });
         const info = vi.mocked(bundle.hooks.finalizeSuccess).mock.calls.at(-1)?.[1];
         expect(info?.wroteLocal).toBe(false);
-        // The signal mobile's post-sync refresh reads.
+
         expect(info?.localWriteSkipped).toBe(true);
     });
 
@@ -4235,8 +4212,8 @@ describe('attachment pre-sync reconcile short-circuit', () => {
     });
 
     it('hands back the pre-synced side without merging when both sides align', async () => {
-        // Diverged content at identical revision metadata: only the
-        // short-circuit yields the pre-synced title.
+
+
         const inMemory = createData([createTask('t-1', 'Zebra title')]);
         const preSynced = createData([createTask('t-1', 'Apple title')]);
         let capturedLocal: AppData | null = null;
@@ -4256,10 +4233,8 @@ describe('attachment pre-sync reconcile short-circuit', () => {
     });
 
     it('still merges when only the attachment fields differ', async () => {
-        // Identical revision tuples on both sides; the cloudKey lives only on
-        // the IN-MEMORY side, so the assertion discriminates — a short-circuit
-        // on the change fingerprint alone hands back the pre-synced side and
-        // drops it.
+
+
         const base = createData([createTask('t-1', 'Shared task')]);
         const inMemory = withAttachment(base, 'attachments/a-1.txt');
         const preSynced = withAttachment(base, undefined);
@@ -4281,13 +4256,11 @@ describe('attachment pre-sync reconcile short-circuit', () => {
 });
 
 describe('local-only upload fast path', () => {
-    /** Backends that can turn a fingerprint into a real conditional write
-     *  (WebDAV strong ETag, Dropbox rev) report it through this port. */
+
+
     const conditionalIo = { adoptRemoteFingerprintForWrite: vi.fn(() => true) };
 
-    // A store write always moves the entity forward (`prepareStoreStateUpdate`
-    // bumps `rev` and stamps `updatedAt`), which is what makes the local
-    // document dominate the remote copy the fast path never reads.
+
     const editedTask = (id: string, title: string, rev = 4, updatedAt = '2026-07-12T10:00:00.000Z'): Task => ({
         ...createTask(id, title),
         rev,
@@ -4295,9 +4268,7 @@ describe('local-only upload fast path', () => {
         updatedAt,
     } as Task);
 
-    /** Raw store output: an edit, an uncompacted purged tombstone, and an
-     *  entity stamped in the future by a skewed clock. Deliberately NOT
-     *  canonical — the storage codecs materialize the fields it omits. */
+
     const rawLocal = (title: string, rev?: number, updatedAt?: string): AppData => createData([
         editedTask('t-local', title, rev, updatedAt),
         {
@@ -4313,15 +4284,11 @@ describe('local-only upload fast path', () => {
         tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
     };
 
-    /** The document a device actually holds: written by a previous cycle's
-     *  merge and read back through codecs that reproduce it field for field.
-     *  The fast path skips the empty-remote merge on exactly that guarantee
-     *  (`pass(readLocal(x)) === readLocal(x)`), so a fixture standing in for a
-     *  local read has to be a fixed point of the pass too. */
+
     const messyLocal = (title: string, rev?: number, updatedAt?: string): AppData =>
         mergeAppData(rawLocal(title, rev, updatedAt), EMPTY_REMOTE);
 
-    /** One settled cycle, then a purely local edit. */
+
     const settleThenEditLocally = async (bundle: ReturnType<typeof createHarness>, title: string) => {
         await bundle.run();
         bundle.harness.persisted = cloneAppData(messyLocal(title, 5, '2026-07-13T09:30:00.000Z'));
@@ -4338,8 +4305,8 @@ describe('local-only upload fast path', () => {
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-upload',
-            // Both platforms run the attachment pre-sync BEFORE this step; the
-            // fast path refuses when a platform does not (see the gate test).
+
+
             policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: conditionalIo,
         });
@@ -4364,13 +4331,13 @@ describe('local-only upload fast path', () => {
         const fast = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-bytes',
-            // Both platforms run the attachment pre-sync BEFORE this step; the
-            // fast path refuses when a platform does not (see the gate test).
+
+
             policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: conditionalIo,
         });
-        // Identical harness minus the conditional-write capability: it reads the
-        // remote and runs the two-sided merge.
+
+
         const full = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-full-bytes',
@@ -4387,10 +4354,8 @@ describe('local-only upload fast path', () => {
         expect(full.io.readRemote).toHaveBeenCalled();
         expect(toStableSyncJson(toRemoteSyncDocument(fast.harness.remote!)))
             .toBe(toStableSyncJson(toRemoteSyncDocument(full.harness.remote!)));
-        // Discriminating: the uploaded document really went through the merge
-        // normalizer (fields the fixture never sets are materialized, the
-        // purged tombstone lost its body), so this is not two unprocessed
-        // copies of the same input compared against each other.
+
+
         const uploaded = fast.harness.remote!;
         expect(uploaded.tasks.find((task) => task.id === 't-local')?.suppressMindwtrReminders).toBe(false);
         const purged = uploaded.tasks.find((task) => task.id === 't-purged');
@@ -4399,10 +4364,8 @@ describe('local-only upload fast path', () => {
     });
 
     it('skips the empty-remote merge entirely', async () => {
-        // Observable only with a deliberately non-canonical local document: a
-        // real one is a fixed point of the pass, which is the whole reason the
-        // skip is safe. The raw fixture omits fields the merge materializes, so
-        // the fast path publishes them missing where a full cycle fills them in.
+
+
         const nonCanonical = rawLocal('Edited only here', 5, '2026-07-13T09:30:00.000Z');
         const bundle = createHarness({
             local: messyLocal('Local task'),
@@ -4419,11 +4382,11 @@ describe('local-only upload fast path', () => {
 
         const uploaded = bundle.harness.remote!.tasks.find((task) => task.id === 't-local');
         expect(uploaded?.title).toBe('Edited only here');
-        // The merge would have materialized these; nothing else in the cycle does.
+
         expect(uploaded?.suppressMindwtrReminders).toBeUndefined();
         expect(uploaded?.isFocusedToday).toBeUndefined();
-        // The tombstone purge and the validate step still run: the purged
-        // tombstone is gone from the wire document, not merely uncompacted.
+
+
         expect(bundle.harness.remote!.tasks.find((task) => task.id === 't-purged')?.description)
             .toBeUndefined();
     });
@@ -4455,8 +4418,8 @@ describe('local-only upload fast path', () => {
                 performSyncCycle: async (io) => {
                     if (!exerciseBackstop) return performSyncCycle(io);
                     fastPathArmed = io.skipEmptyRemoteMerge?.() === true;
-                    // Stop immediately after the backstop, before the real
-                    // upload's own serialization can touch the document.
+
+
                     bundle.hooks.ensureNetworkStillAvailable = async () => { throw afterBackstop; };
                     try {
                         if (environment === 'process-undefined') {
@@ -4494,8 +4457,8 @@ describe('local-only upload fast path', () => {
     );
 
     it('reads the remote when the backend cannot make the write conditional', async () => {
-        // Weak ETag, no ETag at all, legacy-plaintext WebDAV: the backend
-        // refuses to adopt the fingerprint and the cycle runs in full.
+
+
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-weak',
@@ -4545,8 +4508,8 @@ describe('local-only upload fast path', () => {
             io: conditionalIo,
         });
         await settleThenEditLocally(bundle, 'Edited only here');
-        // Another device wrote: the harness fingerprint is derived from the
-        // remote's task ids, so an added task moves it.
+
+
         bundle.harness.remote = createData([
             ...bundle.harness.remote!.tasks,
             createTask('t-remote', 'Arrived from another device'),
@@ -4614,17 +4577,16 @@ describe('local-only upload fast path', () => {
     });
 
     it('reads the remote when the attachment pre-sync patched the local document', async () => {
-        // The pre-sync phase runs before this check on both platforms. Its
-        // patches (cloudKey, localStatus) are not "a local-document-only
-        // change", so the cycle reads.
+
+
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-presync',
             policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: {
                 ...conditionalIo,
-                // Prepare only: a post-merge mutation would mark the fast-sync
-                // state unsafe and this scenario would stop discriminating.
+
+
                 syncAttachments: vi.fn(async (data: AppData, attachmentHelpers) => (
                     attachmentHelpers.phase === 'prepare'
                         ? {
@@ -4674,9 +4636,8 @@ describe('local-only upload fast path', () => {
     });
 
     it('reads the remote when the platform runs the attachment pre-sync after the fast check', async () => {
-        // `preSyncedLocalData` can only witness attachment patches that landed
-        // BEFORE this step; a platform that orders the pre-sync afterwards must
-        // take the full cycle or a later patch would ride a write that never read.
+
+
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-late-presync',
@@ -4696,13 +4657,13 @@ describe('local-only upload fast path', () => {
         const bundle = createHarness({
             local: messyLocal('Local task'),
             fastSyncScope: 'scope-fast-precondition',
-            // Both platforms run the attachment pre-sync BEFORE this step; the
-            // fast path refuses when a platform does not (see the gate test).
+
+
             policy: { preSyncAttachmentsBeforeFastCheck: true },
             io: conditionalIo,
         });
         await settleThenEditLocally(bundle, 'Edited only here');
-        // The peer that won the swap; the write rejects on the stale precondition.
+
         const peerRemote = createData([
             ...bundle.harness.remote!.tasks,
             createTask('t-remote', 'Arrived from another device'),
@@ -4719,7 +4680,7 @@ describe('local-only upload fast path', () => {
         expect(bundle.io.readRemote).not.toHaveBeenCalled();
         expect(bundle.hooks.requestFollowUp).toHaveBeenCalled();
 
-        // The requeued cycle sees a moved fingerprint, reads, and merges.
+
         const followUp = await bundle.run();
 
         expect(followUp.success).toBe(true);
@@ -4728,11 +4689,7 @@ describe('local-only upload fast path', () => {
     });
 });
 
-// The AI endpoint, the extra request body and the offline speech model path are
-// device-local: a REMOTE document must never set them, but the live in-memory
-// store is this device's newest truth. The settings merge always takes them from
-// its first argument, and the sync run passes the disk copy first, so every
-// disk-vs-memory reconcile has to put the in-memory values back.
+
 describe('device-local AI settings survive a disk-vs-memory reconcile', () => {
     const withAi = (ai: AppData['settings']['ai']): AppData => createData([createTask('t-1', 'Task')], { ai });
 
@@ -4751,9 +4708,7 @@ describe('device-local AI settings survive a disk-vs-memory reconcile', () => {
         speechToText: { enabled: true, provider: 'openai', baseUrl: 'http://new-speech/v1', offlineModelPath: '/new/model.bin' },
     };
 
-    /** Pre-synced (disk) side carries `diskAi`; the live store carries `memoryAi`.
-     *  Bumping the change stamp inside readRemote forces the stale-snapshot abort,
-     *  which persists mergeAppData(preSynced, inMemory). */
+
     const runAbortCycle = async (
         diskAi: AppData['settings']['ai'],
         memoryAi: AppData['settings']['ai'],
@@ -4801,8 +4756,8 @@ describe('device-local AI settings survive a disk-vs-memory reconcile', () => {
             local: withAi(NEW_AI),
             remote: createData([createTask('t-remote', 'Remote task')]),
         });
-        // Disk still holds the endpoint from before the edit. The change
-        // fingerprint ignores these fields, so this takes the aligned fast path.
+
+
         harness.persisted = cloneAppData(withAi(OLD_AI));
 
         await run();
@@ -4836,9 +4791,7 @@ describe('device-local AI settings survive a disk-vs-memory reconcile', () => {
     });
 });
 
-// D9b change 4a (design.md W1, W3): a sliced cycle (a host that binds sliceYield) saves only on its own read's token, and an
-// abort writes nothing: no recovery save, no status. The storage is a real guarded SQLite adapter; a calendar write is the
-// foreign write that voids the token. Every unsliced cycle keeps today's saves.
+
 describe('sliced cycle write safety (D9b W1, W3)', () => {
     const closers: (() => void)[] = [];
     afterEach(() => { closers.splice(0).forEach((close) => close()); });
@@ -4871,7 +4824,7 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         return { ...bundle, adapter, voidToken };
     };
     const remoteWithNewTask = () => createData([createTask('t-local', 'Local task'), createTask('t-remote', 'Remote task')]);
-    // A prepare pass that changed attachment bookkeeping: an abort would have saved it through the recovery save.
+
     const preparedAttachments = { syncAttachments: vi.fn(async (data: AppData, helpers: { phase?: string }) => (helpers.phase === 'prepare' ? cloneAppData(data) : false)) };
 
     it.each([1, 2])('a foreign write before save %i refuses it: nothing more is written, no status, the marker stays, and the next cycle publishes', async (refuseAtSave) => {
@@ -4882,7 +4835,7 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         expect(result).toMatchObject({ success: true, skipped: 'requeued' });
         expect(bundle.hooks.requestFollowUp).toHaveBeenCalled();
         expect(bundle.harness.infos.find((line) => line.message === 'Sync cycle requeued')?.extra?.reason).toBe('stale-db');
-        // No recovery save after the refusal, and no sync status.
+
         expect(bundle.storage.persistLocal).toHaveBeenCalledTimes(refuseAtSave);
         expect(bundle.harness.statusUpdates).toEqual([]);
         const disk = await bundle.adapter.getData();
@@ -4890,7 +4843,7 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
             expect(disk.tasks.map((task) => task.id)).toEqual(['t-local']);
             expect(bundle.io.writeRemote).not.toHaveBeenCalled();
         } else {
-            // Save 1 committed the merge with the pending-write marker; the refused save 2 leaves it for the next cycle.
+
             expect(disk.tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
             expect(disk.settings.pendingRemoteWriteAt).toBeTruthy();
         }
@@ -4941,7 +4894,7 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         const bundle = await adapterHarness({ sliced: true, remote: remoteWithNewTask() });
         const read = bundle.storage.readPersistedLocal;
         bundle.storage.readPersistedLocal = vi.fn(async (options) => { bundle.harness.callOrder.push('read'); return read(options); });
-        // A store save pending since the cycle-start flush: the next flush writes its row through the same adapter.
+
         const [row] = (await bundle.adapter.getData()).tasks;
         let flushes = 0;
         bundle.store.flushPendingSave = vi.fn(async () => {
@@ -4954,13 +4907,13 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
 
         expect(result.success).toBe(true);
         expect(result.skipped).toBeUndefined();
-        // The cycle-start flush, then the one right before the read.
+
         const order = bundle.harness.callOrder;
         expect(order.slice(0, order.indexOf('read'))).toEqual(['flush', 'flush']);
     });
 
     it('a sliced cycle on a host without read tokens refuses its save as an error, never a requeue (fails closed)', async () => {
-        // Today's Android host-sync shape: no readTokenOf, and a saveData that ignores its options.
+
         const bundle = await adapterHarness({ sliced: true, remote: remoteWithNewTask() });
         bundle.storage.readTokenOf = undefined;
         bundle.storage.persistLocal = vi.fn(async (data: AppData) => { await bundle.adapter.saveData(data); });
@@ -5004,7 +4957,7 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain(NETWORK_ERROR);
         expect(bundle.hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
-        // Save 1's marker stays; the refused save recorded no backoff.
+
         const disk = await bundle.adapter.getData();
         expect(disk.settings.pendingRemoteWriteAt).toBeTruthy();
         expect(disk.settings.pendingRemoteWriteAttempts ?? 0).toBe(0);
@@ -5022,5 +4975,536 @@ describe('sliced cycle write safety (D9b W1, W3)', () => {
         expect(bundle.storage.readPersistedLocal).not.toHaveBeenCalled();
         expect(third.success).toBe(true);
         expect((await bundle.adapter.getData()).tasks.map((task) => task.id).sort()).toEqual(['t-local', 't-remote']);
+    });
+});
+
+describe('activation with attachment files that no device location can serve', () => {
+    const SCOPE = '["webdav","https://new.example/dav","me"]';
+    const OLD_KEY = 'attachments/attachment-old-only.pdf';
+    const HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const remoteOnlyTask = (overrides: Partial<NonNullable<Task['attachments']>[number]> = {}): Task => {
+        const task = createTask('t-old-file', 'Tax return');
+        task.attachments = [{
+            id: 'attachment-old-only',
+            kind: 'file',
+            title: 'scan.pdf',
+            uri: '',
+            cloudKey: OLD_KEY,
+            fileHash: HASH,
+            localStatus: 'missing',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+            ...overrides,
+        }];
+        return task;
+    };
+
+
+    const emptyLocationAdapter = (requested: string[] = []) => vi.fn(async (data: AppData) => {
+        const next = cloneAppData(data);
+        for (const task of next.tasks) {
+            for (const attachment of task.attachments ?? []) {
+                if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+                if (attachment.cloudKey && attachment.localStatus !== 'available') {
+                    requested.push(attachment.cloudKey);
+                    markAttachmentUnrecoverable(attachment);
+                }
+            }
+        }
+        return next;
+    });
+    const withRecord = (config: HarnessConfig) => {
+        const device = { record: null as string | null };
+        const harness = createHarness({
+            locationScope: SCOPE,
+            ...config,
+            storage: {
+                readUnreachableAttachments: vi.fn(async () => device.record),
+                writeUnreachableAttachments: vi.fn(async (raw: string) => { device.record = raw; }),
+                ...config.storage,
+            },
+        });
+        return { ...harness, device };
+    };
+
+    it('names the rows whose files are neither on this device nor at the new location', async () => {
+        const { io, storage, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: expect.stringContaining('[cloud] Candidate attachment proof failed'),
+            activationMissingAttachments: [{
+                id: 'attachment-old-only',
+                ownerType: 'task',
+                ownerId: 't-old-file',
+                title: 'scan.pdf',
+                ownerTitle: 'Tax return',
+            }],
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(storage.writeUnreachableAttachments).not.toHaveBeenCalled();
+    });
+
+    it('keeps the plain refusal on a platform that keeps no record', async () => {
+        const { io, run } = createHarness({
+            local: createData([remoteOnlyTask()]),
+            locationScope: SCOPE,
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Candidate attachment proof failed for attachment-old-only');
+        expect(result.activationMissingAttachments).toBeUndefined();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('activates with the accepted rows live and keyed, and records them for this location', async () => {
+        const { harness, storage, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result).toMatchObject({ success: true });
+        const published = harness.remote?.tasks[0]?.attachments?.[0];
+        expect(published).toMatchObject({ id: 'attachment-old-only', cloudKey: OLD_KEY, fileHash: HASH, updatedAt: STAMP });
+        expect(published?.deletedAt).toBeUndefined();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+        const line = harness.infos.find((info) => info.extra?.releaseCheck === 'v1.3.8/activation-continue-without-files');
+        expect(line?.extra).toEqual({
+            releaseCheck: 'v1.3.8/activation-continue-without-files',
+            backend: 'cloud',
+            missing: '1',
+        });
+        expect(JSON.stringify(harness.infos)).not.toContain('scan.pdf');
+        expect(JSON.stringify(harness.infos)).not.toContain('Tax return');
+    });
+
+    it('keeps the row live when the new location lists its key but answers 404', async () => {
+        const deadKey = 'attachments/dead-on-candidate.pdf';
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask({ cloudKey: deadKey })]),
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        expect(await run({ activationProbe: true })).toMatchObject({
+            success: false,
+            activationMissingAttachments: [expect.objectContaining({ id: 'attachment-old-only' })],
+        });
+        const accepted = await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(accepted).toMatchObject({ success: true });
+        const published = harness.remote?.tasks[0]?.attachments?.[0];
+        expect(published?.deletedAt).toBeUndefined();
+        expect(published?.cloudKey).toBeTruthy();
+        expect(published?.fileHash).toBe(HASH);
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+    });
+
+    it('publishes the key of the location that holds the file, so a return there downloads it', async () => {
+
+
+        const deadKey = 'attachments/dead-on-candidate.pdf';
+        const OLD_SCOPE = '["webdav","https://old.example/dav","me"]';
+        const requested: string[] = [];
+        let atOldLocation = false;
+        const adapter = vi.fn(async (data: AppData) => {
+            const next = cloneAppData(data);
+            for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+                if (!attachment.cloudKey || attachment.localStatus === 'available') continue;
+                requested.push(attachment.cloudKey);
+                if (atOldLocation && attachment.cloudKey === OLD_KEY) {
+                    attachment.uri = '/local/scan.pdf';
+                    attachment.localStatus = 'available';
+                } else {
+                    markAttachmentUnrecoverable(attachment);
+                }
+            }
+            return next;
+        });
+        const { harness, hooks, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask({ cloudKey: deadKey })]),
+            io: { syncAttachments: adapter },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toMatchObject({ cloudKey: OLD_KEY, fileHash: HASH });
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+
+        const newLocationSetup = vi.mocked(hooks.setupCycle).getMockImplementation()!;
+        vi.mocked(hooks.setupCycle).mockImplementation(async (...args) => ({
+            ...(await newLocationSetup(...args)),
+            locationScope: OLD_SCOPE,
+        }) as Awaited<ReturnType<typeof newLocationSetup>>);
+        atOldLocation = true;
+        harness.remote = createData([remoteOnlyTask()]);
+        requested.length = 0;
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(requested).toEqual([OLD_KEY]);
+        for (const data of [harness.persisted, harness.remote!]) {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.deletedAt).toBeUndefined();
+            expect(attachment?.cloudKey).toBe(OLD_KEY);
+        }
+        expect(harness.persisted.tasks[0]?.attachments?.[0]?.localStatus).toBe('available');
+
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+    });
+
+    it('refuses again when a row the user did not accept is also missing', async () => {
+        const task = remoteOnlyTask();
+        task.attachments!.push({ ...task.attachments![0]!, id: 'attachment-second', title: 'second.pdf', cloudKey: 'attachments/second.pdf' });
+        const { io, storage, run } = withRecord({
+            local: createData([task]),
+            activationProbe: true,
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.activationMissingAttachments?.map((item) => item.id).sort())
+            .toEqual(['attachment-old-only', 'attachment-second']);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.writeUnreachableAttachments).not.toHaveBeenCalled();
+    });
+
+    it('keeps the plain refusal for a local file that did not upload', async () => {
+        const { io, run } = withRecord({
+            local: createData([remoteOnlyTask({ uri: '/local/scan.pdf', localStatus: 'available' })]),
+            activationProbe: true,
+            io: { syncAttachments: vi.fn(async (data: AppData) => data) },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Candidate attachment proof failed for attachment-old-only');
+        expect(result.activationMissingAttachments).toBeUndefined();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('keeps the plain refusal when the new location holds a key whose download failed', async () => {
+        const { io, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask({ cloudKey: 'attachments/on-candidate.pdf' })]),
+            activationProbe: true,
+
+            io: { syncAttachments: vi.fn(async () => false) },
+        });
+
+        const result = await run({ acceptMissingAttachmentIds: ['attachment-old-only'] });
+
+        expect(result.success).toBe(false);
+        expect(result.activationMissingAttachments).toBeUndefined();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('asks the location again, and its not-found never turns the row into a tombstone', async () => {
+        const requested: string[] = [];
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            io: { syncAttachments: emptyLocationAdapter(requested) },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        requested.length = 0;
+
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(requested.length).toBeGreaterThan(0);
+        expect(new Set(requested)).toEqual(new Set([OLD_KEY]));
+        for (const data of [harness.persisted, harness.remote!]) {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.deletedAt).toBeUndefined();
+            expect(attachment?.cloudKey).toBe(OLD_KEY);
+            expect(attachment?.fileHash).toBe(HASH);
+        }
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+        const restoredLines = harness.infos.filter((info) => info.extra?.releaseCheck === 'v1.3.8/kept-attachment-not-found');
+        expect(restoredLines.length).toBeGreaterThan(0);
+        expect(restoredLines[0]!.extra).toEqual({ releaseCheck: 'v1.3.8/kept-attachment-not-found', backend: 'cloud', restored: '1' });
+        expect(JSON.stringify(harness.infos)).not.toContain('scan.pdf');
+    });
+
+    it('merges without the kept ids when the record cannot be read', async () => {
+        const { harness, run } = createHarness({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask()]),
+            locationScope: SCOPE,
+            storage: {
+                readUnreachableAttachments: vi.fn(async () => { throw new Error('storage unavailable'); }),
+                writeUnreachableAttachments: vi.fn(async () => {}),
+            },
+        });
+
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(harness.warnings.map((warning) => warning.message)).toContain('Kept attachment record could not be read before the merge');
+    });
+
+    it('keeps the active location through a refused probe of another one', async () => {
+        const OTHER_SCOPE = '["webdav","https://other.example/dav","me"]';
+        const { hooks, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask()]),
+            io: { syncAttachments: emptyLocationAdapter() },
+        });
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] })).toMatchObject({ success: true });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(isAttachmentKeptWithoutFile({ id: 'attachment-old-only' })).toBe(true);
+
+        const activeSetup = vi.mocked(hooks.setupCycle).getMockImplementation()!;
+        vi.mocked(hooks.setupCycle).mockImplementation(async (...args) => ({
+            ...(await activeSetup(...args)),
+            locationScope: OTHER_SCOPE,
+        }) as Awaited<ReturnType<typeof activeSetup>>);
+
+        expect(await run({ activationProbe: true })).toMatchObject({ success: false });
+
+        expect(isAttachmentKeptWithoutFile({ id: 'attachment-old-only' })).toBe(true);
+    });
+
+    it('leaves an idle library on the fast path while a kept row answers not-found', async () => {
+        const { io, storage, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            remote: createData([remoteOnlyTask()]),
+            fastSyncScope: 'fast-scope',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: {
+                syncAttachments: vi.fn(async (data: AppData) => {
+                    const next = cloneAppData(data);
+                    let changed = false;
+                    for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                        if (attachment.kind === 'file' && !attachment.deletedAt && attachment.cloudKey && attachment.localStatus !== 'available') {
+                            markAttachmentUnrecoverable(attachment);
+                            changed = true;
+                        }
+                    }
+                    return changed ? next : false;
+                }),
+            },
+        });
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] })).toMatchObject({ success: true });
+        vi.mocked(io.readRemote).mockClear();
+
+        for (let cycle = 0; cycle < 4; cycle += 1) expect(await run()).toMatchObject({ success: true });
+
+        expect(storage.writeFastSyncState).toHaveBeenCalled();
+        expect(io.readRemote).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes the key another device uploaded here even when it sorts before the kept key', async () => {
+        const uploadedKey = `attachments/attachment-old-only.${'f'.repeat(64)}.pdf`;
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            io: {
+                syncAttachments: vi.fn(async (data: AppData) => {
+                    const next = cloneAppData(data);
+                    for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                        if (attachment.kind !== 'file' || attachment.deletedAt || attachment.localStatus === 'available') continue;
+                        if (attachment.cloudKey === uploadedKey) {
+                            attachment.uri = '/local/scan.pdf';
+                            attachment.localStatus = 'available';
+                        } else if (attachment.cloudKey) {
+                            markAttachmentUnrecoverable(attachment);
+                        }
+                    }
+                    return next;
+                }),
+            },
+        });
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] })).toMatchObject({ success: true });
+
+        harness.remote = createData([remoteOnlyTask({ cloudKey: uploadedKey })]);
+
+
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toMatchObject({ cloudKey: uploadedKey, localStatus: 'available' });
+        expect(JSON.parse(device.record!)).toEqual({});
+    });
+
+    it('downloads the file once another device uploads it there, and drops the row from the record', async () => {
+        const blobs = new Set<string>();
+        const requested: string[] = [];
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask()]),
+            io: {
+                syncAttachments: vi.fn(async (data: AppData) => {
+                    const next = cloneAppData(data);
+                    for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                        if (attachment.kind !== 'file' || attachment.deletedAt || !attachment.cloudKey) continue;
+                        if (attachment.localStatus === 'available') continue;
+                        requested.push(attachment.cloudKey);
+                        if (blobs.has(attachment.cloudKey)) {
+                            attachment.uri = '/local/scan.pdf';
+                            attachment.localStatus = 'available';
+                        } else {
+                            markAttachmentUnrecoverable(attachment);
+                        }
+                    }
+                    return next;
+                }),
+            },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+        expect(JSON.parse(device.record!)).toEqual({ [SCOPE]: ['attachment-old-only'] });
+
+        blobs.add(OLD_KEY);
+        requested.length = 0;
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        expect(requested).toEqual([OLD_KEY]);
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toMatchObject({ cloudKey: OLD_KEY, localStatus: 'available' });
+        expect(JSON.parse(device.record!)).toEqual({});
+    });
+
+    it('uploads a kept file that comes back on this device with other bytes, and never deletes the row', async () => {
+
+        const H1 = '1111111111111111111111111111111111111111111111111111111111111111';
+        const URI = '/managed/attachment-old-only.pdf';
+        const disk = new Map<string, { hash: string; mtimeMs: number; size: number }>();
+        const blobs = new Map<string, string>();
+        const log: string[] = [];
+        const adapter = vi.fn(async (data: AppData, helpers?: { phase?: 'prepare' | 'post-merge' }) => {
+            const attachmentsById = new Map<string, Attachment>();
+            for (const owner of [...data.tasks, ...data.projects]) {
+                if (owner.deletedAt) continue;
+                for (const attachment of owner.attachments ?? []) attachmentsById.set(attachment.id, attachment);
+            }
+            const { patches } = await runAttachmentTransferLifecycle({
+                attachmentsById,
+                getLocalFilePresence: async (path) => (disk.has(path) ? 'present' : 'confirmed-not-found'),
+                getLocalFileStat: async (path) => {
+                    const stat = disk.get(path);
+                    return stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
+                },
+                computeLocalFileHash: async (path) => disk.get(path)?.hash ?? null,
+                createUploadSnapshot: async (path) => {
+                    const stat = disk.get(path);
+                    return stat
+                        ? { sourcePath: path, fileHash: stat.hash, stat: { mtimeMs: stat.mtimeMs, size: stat.size }, dispose: async () => {} }
+                        : null;
+                },
+                deferUploads: helpers?.phase === 'prepare',
+                contentChangePhase: helpers?.phase,
+                onUpload: async (attachment, _path, snapshot) => {
+                    const key = buildCloudKey(attachment);
+                    blobs.set(key, snapshot!.fileHash);
+                    attachment.cloudKey = key;
+                    log.push(`PUT ${key}`);
+                    return true;
+                },
+                onDownload: async (attachment) => {
+                    if (!attachment.cloudKey) return false;
+                    log.push(`GET ${attachment.cloudKey}`);
+                    const hash = blobs.get(attachment.cloudKey);
+                    if (!hash) return markAttachmentUnrecoverable(attachment);
+                    disk.set(URI, { hash, mtimeMs: 99, size: 99 });
+                    attachment.uri = URI;
+                    attachment.localStatus = 'available';
+                    return true;
+                },
+                onUploadError: () => {},
+                onDownloadError: () => {},
+            });
+            const next = applyAttachmentPatches(data, patches);
+            return next !== data ? next : false;
+        });
+        const { harness, device, run } = withRecord({
+            local: createData([remoteOnlyTask({ uri: URI, contentMtimeMs: 1, contentSize: 10 })]),
+            io: { syncAttachments: adapter },
+        });
+
+        expect(await run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+        expect(await run({ manual: true, ignorePendingRemoteWriteBackoff: true })).toMatchObject({ success: true });
+
+        disk.set(URI, { hash: H1, mtimeMs: 2, size: 11 });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+        expect(await run({ manual: true })).toMatchObject({ success: true });
+
+        for (const data of [harness.persisted, harness.remote!]) {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.deletedAt).toBeUndefined();
+            expect(attachment?.cloudKey).toBeTruthy();
+            expect(attachment?.fileHash).toBe(H1);
+            expect(attachment?.contentRev).toBe(1);
+        }
+        expect(log).toContain(`PUT ${harness.persisted.tasks[0]!.attachments![0]!.cloudKey}`);
+        expect(blobs.get(harness.persisted.tasks[0]!.attachments![0]!.cloudKey!)).toBe(H1);
+        expect(JSON.parse(device.record!)).toEqual({});
+    });
+
+    it('lets a second device holding the file join a File Sync folder this device continued at', async () => {
+        const FOLDER_SCOPE = '["file","/b/data.json"]';
+        const folder = new Set<string>();
+
+
+        const folderAdapter = (localFiles: Set<string>) => vi.fn(async (data: AppData) => {
+            const next = cloneAppData(data);
+            for (const attachment of next.tasks.flatMap((task) => task.attachments ?? [])) {
+                if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+                if (!attachment.cloudKey) {
+                    if (attachment.uri && localFiles.has(attachment.uri)) {
+                        attachment.cloudKey = `attachments/${attachment.id}.${HASH}.pdf`;
+                        folder.add(attachment.cloudKey);
+                        attachment.localStatus = 'available';
+                        attachment.pendingContentUpload = undefined;
+                    }
+                    continue;
+                }
+                if (attachment.localStatus === 'available') continue;
+                if (folder.has(attachment.cloudKey)) {
+                    attachment.uri = '/downloaded/scan.pdf';
+                    attachment.localStatus = 'available';
+                }
+            }
+            return next;
+        });
+        const first = withRecord({
+            backend: 'file',
+            locationScope: FOLDER_SCOPE,
+            local: createData([remoteOnlyTask()]),
+            io: { syncAttachments: folderAdapter(new Set()) },
+        });
+        expect(await first.run({ activationProbe: true, acceptMissingAttachmentIds: ['attachment-old-only'] }))
+            .toMatchObject({ success: true });
+
+        const second = createHarness({
+            backend: 'file',
+            local: createData([remoteOnlyTask({ uri: '/second/scan.pdf', localStatus: 'available' })]),
+            remote: cloneAppData(first.harness.remote!),
+            io: { syncAttachments: folderAdapter(new Set(['/second/scan.pdf'])) },
+        });
+        const joined = await second.run({ activationProbe: true });
+
+        expect(joined).toMatchObject({ success: true });
+        const published = second.harness.remote?.tasks[0]?.attachments?.[0];
+        expect(published?.deletedAt).toBeUndefined();
+        expect(folder.has(published!.cloudKey!)).toBe(true);
     });
 });

@@ -4,22 +4,7 @@ import { timeEstimateToMinutes } from './calendar-scheduling';
 import { DEFAULT_TASKNOTES_FOLDER } from './tasknotes-parser';
 import type { AppData, Task, TaskPriority } from './types';
 
-/**
- * Writes the TaskNotes format `tasknotes-parser.ts` reads — one Markdown file
- * per task with YAML frontmatter — so an export drops into an Obsidian vault
- * and both TaskNotes and Mindwtr's own vault import understand it (#1031).
- *
- * ONE-SHOT by design: no scheduler, no overwrite semantics. A periodic export
- * into a live vault is one-way file sync — either it clobbers edits the user
- * made in Obsidian or it accumulates stale twins that the vault import then
- * re-imports. Exporting is the user's explicit action, like the CSV export.
- *
- * Tombstones are excluded for the same structural reason as the CSV export.
- * Reference tasks are excluded too: TaskNotes files are tasks, and the format
- * has no status for "not actionable, keep forever".
- */
 
-/** Mindwtr status → TaskNotes status, the inverse of mapTaskNotesStatus. */
 const TASKNOTES_STATUS_BY_MINDWTR_STATUS: Partial<Record<Task['status'], string>> = {
     inbox: 'none',
     next: 'in-progress',
@@ -40,9 +25,7 @@ const isLive = (entity: { deletedAt?: string; purgedAt?: string }): boolean => (
     !entity.deletedAt && !entity.purgedAt
 );
 
-// The frontmatter reader strips one pair of surrounding quotes and re-parses
-// bare scalars as booleans/numbers, so quote anything that would round-trip
-// wrong as a bare value. It has no escape syntax; inner quotes stay literal.
+
 const yamlScalar = (value: string): string => {
     const needsQuotes = value === ''
         || value !== value.trim()
@@ -80,14 +63,14 @@ const slugifyTitle = (title: string): string => {
 };
 
 export type TaskNotesExportFile = {
-    /** Vault-relative path, e.g. "TaskNotes/Call-mom-1a2b3c4d.md". */
+
     path: string;
     content: string;
 };
 
 export type TaskNotesExportResult = {
     files: TaskNotesExportFile[];
-    /** Live tasks not exported because the format cannot express them (reference). */
+
     skippedReferenceCount: number;
 };
 
@@ -122,8 +105,8 @@ export function serializeTaskNotesExport(data: AppData): TaskNotesExportResult {
             ...yamlLines('scheduled', task.startTime),
             ...yamlLines('contexts', contexts),
             ...yamlLines('projects', projectTitle ? [`[[${projectTitle}]]`] : undefined),
-            // 'task' first: the marker tag TaskNotes uses; the vault import
-            // filters it back out.
+
+
             ...yamlLines('tags', ['task', ...tags]),
             ...yamlLines('timeEstimate', task.timeEstimate ? timeEstimateToMinutes(task.timeEstimate) : undefined),
             ...yamlLines('recurrence', typeof task.recurrence === 'object' && task.recurrence ? task.recurrence.rrule : undefined),
@@ -141,7 +124,7 @@ export function serializeTaskNotesExport(data: AppData): TaskNotesExportResult {
     return { files, skippedReferenceCount };
 }
 
-/** The export as a ZIP (one entry per task file), for saving or sharing. */
+
 export function buildTaskNotesExportZip(data: AppData): { zip: Uint8Array; fileCount: number; skippedReferenceCount: number } {
     const { files, skippedReferenceCount } = serializeTaskNotesExport(data);
     const entries: Record<string, Uint8Array> = {};

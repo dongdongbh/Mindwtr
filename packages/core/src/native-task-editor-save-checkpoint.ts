@@ -40,9 +40,7 @@ const utf8 = (text: string): number => {
     return size;
 };
 
-// Pure API boundary: JSON wire frames have no object aliases. Reject both
-// aliases and cycles, and bound work/bytes during descriptor-only traversal.
-// Never call an input object's getter, toJSON, iterator or serialization hook.
+
 const capture = (input: unknown, maximum: number): unknown => {
     const seen = new WeakSet<object>();
     let nodes = 0, bytes = 0;
@@ -95,7 +93,7 @@ const numberDisplay = (text: unknown, value: unknown): boolean => {
 };
 const safeIntegerDisplay = (number: number): string | null => Number.isSafeInteger(number) && number >= 0 ? String(number) : null;
 
-/** Correspondence only: grants no file, lineage, workspace, editability or Save authority. */
+
 export function validateNativeTaskEditorSaveCheckpoint(
     input: NativeTaskEditorSaveCheckpointInput,
     validateField: (field: TaskDraftField, value: unknown) => boolean,
@@ -103,7 +101,7 @@ export function validateNativeTaskEditorSaveCheckpoint(
     return validateEditorSaveCheckpoint(input, validateField, false);
 }
 
-/** Internal complete-owned selection; ordinary checkpoint grammar stays sealed. */
+
 export function validateNativeOwnedCompleteTaskEditorSaveCheckpoint(
     input: NativeTaskEditorSaveCheckpointInput,
     validateField: (field: TaskDraftField, value: unknown) => boolean,
@@ -169,8 +167,8 @@ function validateEditorSaveCheckpoint(input: NativeTaskEditorSaveCheckpointInput
             if (!checklistBase || !checklistValue || !taskEditValuesEqual(checklistBase, checklistOwned ? payload.checklistBase : opening.value.freshChecklistBase)
                 || !taskEditValuesEqual(checklistValue, checklistOwned ? payload.checklistValue : opening.value.freshChecklistBase)) return invalid();
         }
-        // Surrogate is solely the sealed parser's field-grammar admission. The real
-        // attachment half is matched above; no synthetic record escapes this call.
+
+
         const surrogate = { base: [], value: [{ id: '00000000-0000-4000-8000-000000000000', kind: 'link', title: 'Grammar',
             uri: 'https://example.invalid/', createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z' }] };
         const { requestId: _requestId, checklist: _checklist, intent: _intent, attachments: _attachments, ...completeFields } = request;

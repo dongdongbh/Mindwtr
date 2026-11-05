@@ -1,0 +1,3 @@
+tree-sitter==0.25.2
+tree-sitter-language-pack==1.23.1
+PyYAML==6.0.3

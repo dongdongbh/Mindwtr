@@ -8,7 +8,7 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 import { SyncDiagnosticsCard } from './sync-settings-sections';
 
-// The Encryption block comes with sync; this card is compared without it, as the native Data screen draws it.
+
 vi.mock('@/lib/sync-encryption-state', () => ({
   getSyncEncryptionDiagnosticsLines: () => Promise.reject(new Error('no sync')),
   logSyncEncryptionDiagnosticsBlock: () => Promise.resolve(),
@@ -17,7 +17,7 @@ vi.mock('@/lib/sync-encryption-state', () => ({
 const tc = { bg: '#0f172a', cardBg: '#111827', border: '#334155', text: '#f8fafc', secondaryText: '#94a3b8', tint: '#3b82f6' } as unknown as ThemeColors;
 const noop = () => undefined;
 
-/** RN's card as drawn: its texts in order and the switch's value. */
+
 async function renderCard(language: 'en' | 'zh', loggingEnabled: boolean, analytics: 'none' | 'on' | 'optedOut' = 'none') {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {

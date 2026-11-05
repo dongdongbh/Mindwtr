@@ -1,26 +1,6 @@
-// Home-screen widgets check for the isolated native Android development app (pass W1, widgets native).
-//
-//   node apps/android-native/scripts/check-widgets-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays) and checks RN's widget module in the native app,
-// from the app's own files (its database pulled and read by host-side core with bun, its pending-captures folder, RN's widget
-// payload in shared_prefs/mindwtr_widget.xml) and its log: (1) `dumpsys appwidget` lists RN's four providers (Tasks, Compact,
-// Quick capture, the legacy widget.TasksWidget) and the package query lists RN's Quick Settings tile; (2) three captures queued
-// while the app is closed are stored by the boot, and the payload Kotlin stored equals core's buildAndroidWidgetPublication on a
-// copy of the database, with the inputs the app logged (the phone's locale and night mode, checked against the phone); (3) a
-// Tasks widget hosted by the debug-only WidgetHostActivity (its own AppWidgetHost: the launcher's home screen is never touched)
-// draws RN's rows and header from that payload; (3b) its header's title opens the app on Focus (RN's mindwtr: link in the build's
-// scheme); (4) a ring tap on a row completes the task through the queue and CoreWork, once;
-// (5) a ring tap whose CoreWork job is held back (debug core_work_delay_ms), the app killed after the queue file is written: the
-// task is still open, then JobScheduler runs the job in a new process and completes it once, and a relaunch writes nothing
-// more; (6) RN's quick capture dialog (through the debug-only exported alias; RN's activity is not exported) stores its capture
-// once; (7) with the widgets' language set to German, then Chinese (debug `widget_language`; the synced setting is left alone),
-// the payload equals core's for that language,
-// its dates from the phone's ICU; (8) after the app is left, the stored payload (header date, Inbox count, every row) equals
-// core's publication on a copy of the database. Titles are 94 + a 12-digit run id + 1 to 6 (check-projects-device.mjs --prune-old removes
-// earlier runs'). It grants this package widget binding (`appwidget grantbind`) and revokes it at the end, types only digits,
-// never launches over another app, and leaves the device on its home screen. It needs host `bun` and `sqlite3`. Exit 0 = pass,
-// 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -65,7 +45,7 @@ const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${val
 const runAs = (command) => sh(`run-as ${PKG} sh -c '${command}'`);
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 
-// ---- the app's files ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -78,23 +58,23 @@ const sql = (query) => {
     const out = execFileSync('sqlite3', ['-json', pullDatabase(), query], { encoding: 'utf8' }).trim();
     return out ? JSON.parse(out) : [];
 };
-/** The live task titled [text] as stored (one row expected). */
+
 const stored = (text) => sql(`SELECT id, status, rev FROM tasks WHERE title = '${text}' AND deletedAt IS NULL`);
 const queued = () => runAs(`ls ${QUEUE} 2>/dev/null || true`).split(/\s+/).filter((name) => name.endsWith('.json'));
-/** The queue files that name [text] (a task id or a title): another check's leftovers are not this run's. */
+
 const queuedFor = (text) => queued().filter((name) => runAs(`cat ${QUEUE}/${name}`).includes(text));
-/** One queue item, written as RN's writer does (a temporary name, then a rename); `adb exec-in run-as` drops stdin, so base64. */
+
 const enqueue = (item) => {
     const bytes = Buffer.from(JSON.stringify(item), 'utf8').toString('base64');
     runAs(`mkdir -p ${QUEUE} && echo ${bytes} | base64 -d > ${QUEUE}/${item.id}.tmp && mv ${QUEUE}/${item.id}.tmp ${QUEUE}/${item.id}.json`);
 };
-/** RN's stored widget payload (WidgetPayloadStore: SharedPreferences `mindwtr_widget`, key `payload`). */
+
 const storedPayload = () => widgetPrefs(runAs(`cat ${WIDGET_PREFS} 2>/dev/null || true`)).payload;
 
-// ---- the log ----
+
 const allLogs = () => execFileSync(adbBin, ['-s', serial, 'logcat', '-d', '-s', `${TAG}:*`], { encoding: 'utf8', maxBuffer: 64 << 20 }).replace(/\\/g, '');
-const INGESTED = ['Native Android core work', '"job":"ingest","outcome":"success"'];
-/** The inputs the last publication used, from its log line's context. */
+const INGESTED = ['Native Android core work', '"job":"ingest"', '"outcome":"success"'];
+
 const lastInputs = () => publicationContext(allLogs()) ?? fail('no publication line');
 const waitUntil = async (description, predicate, timeoutMs = 60_000, everyMs = 1000) => {
     const deadline = Date.now() + timeoutMs;
@@ -105,19 +85,19 @@ const waitUntil = async (description, predicate, timeoutMs = 60_000, everyMs = 1
         await sleep(everyMs);
     }
 };
-/** The next refresh after [before] refreshes (Kotlin's line: the payload is stored and the widgets drawn), then quiet. */
+
 const nextRefresh = async (before, description) => {
     await waitUntil(description, () => count(allLogs(), REFRESHED) > before, 60_000);
     await sleep(2500);
 };
 
-// ---- the phone ----
+
 const phoneZone = sh('getprop persist.sys.timezone');
-/** The app's process gone, as after the system reclaimed it: a signal, never a force-stop (that cancels its scheduled work). */
+
 const killApp = async () => {
     if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME');
     for (let attempt = 0; attempt < 20 && pid(); attempt += 1) {
-        try { runAs(`kill -9 ${pid()}`); } catch { /* gone meanwhile */ }
+        try { runAs(`kill -9 ${pid()}`); } catch {                      }
         await sleep(500);
     }
     if (pid()) fail('the app process did not end');
@@ -135,7 +115,7 @@ const openApp = async () => {
 const jobIds = () => [...new Set([...sh('dumpsys jobscheduler').matchAll(new RegExp(`JOB #u\\d+a\\d+/(\\d+): \\w+ ${PKG.replace(/\./g, '\\.')}/androidx\\.work\\.impl\\.background\\.systemjob\\.SystemJobService`, 'g'))]
     .map((m) => m[1]))];
 
-// ---- the hosted widget ----
+
 const resourceId = (node) => (node['resource-id'] ?? '').split('/').pop();
 const hostedRows = (nodes) => nodes.filter((node) => resourceId(node) === 'mindwtr_widget_item_title').map((node) => node.text);
 const ringFor = (nodes, text) => {
@@ -147,7 +127,7 @@ const ringFor = (nodes, text) => {
         return t <= (top + bottom) / 2 && (top + bottom) / 2 <= b;
     }) ?? fail(`no check-off ring beside ${text}`);
 };
-/** The hosted widget's screen with row [text] in view: the widget's list scrolls (earlier runs' rows can come first). */
+
 const revealRow = async (text) => {
     let nodes = await screen();
     for (let step = 0; step < 15 && !hostedRows(nodes).includes(text); step += 1) {
@@ -177,7 +157,7 @@ const closeHost = async () => {
     }
 };
 
-/** The stored payload equals core's publication for the same data, language and inputs (the last publication's). */
+
 const parity = (step) => {
     const context = lastInputs();
     const stored = storedPayload() ?? fail(`${step} no stored payload`);
@@ -189,14 +169,14 @@ const parity = (step) => {
 };
 
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    try { await closeHost(); } catch { /* device gone */ }
-    // A killed host leaves its widget bound to its own AppWidgetHost: the host lets every one go.
-    try { start(`${HOST} --ez release true`); } catch { /* device gone */ }
-    try { sh(`appwidget revokebind --package ${PKG} --user 0`); } catch { /* device gone */ }
-    try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch { /* device gone */ }
-    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch { /* device gone */ }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+    try { await closeHost(); } catch {                   }
+
+    try { start(`${HOST} --ez release true`); } catch {                   }
+    try { sh(`appwidget revokebind --package ${PKG} --user 0`); } catch {                   }
+    try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch {                   }
+    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch {                   }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -210,18 +190,18 @@ try {
     sh(`appwidget grantbind --package ${PKG} --user 0`);
     sh('logcat -c');
 
-    // (1) RN's four providers and RN's tile, registered under RN's class names.
+
     {
         const providers = sh('dumpsys appwidget');
         for (const name of PROVIDERS) check(providers.includes(`ComponentInfo{${PKG}/${name}}`), `(1) dumpsys appwidget lists ${name}`);
-        // The package's service resolver table: the action, then each component that answers it.
+
         const services = sh(`dumpsys package ${PKG}`);
         const qsTile = services.slice(services.indexOf('android.service.quicksettings.action.QS_TILE:'));
         check(services.includes('android.service.quicksettings.action.QS_TILE:') && qsTile.split('\n').slice(1, 4).some((line) => line.includes(`${PKG}/${TILE}`)),
             `(1) the Quick Settings tile ${TILE} answers QS_TILE`);
     }
 
-    // (2) Three captures queued while the app is closed: the boot stores them, and the payload Kotlin stored is core's.
+
     const due = (days) => new Date(Date.now() + days * 86_400_000).toLocaleDateString('en-CA', { timeZone: phoneZone });
     const seeded = { [title(1)]: `${title(1)} /next /due:${due(0)}`, [title(2)]: `${title(2)} /next /due:${due(0)}`,
         [title(3)]: `${title(3)} /next /due:${due(3)}`, [title(4)]: title(4) };
@@ -237,7 +217,7 @@ try {
         check(!phoneLocale || context.locale === phoneLocale, `(2) the publication's locale is the phone's (${context.locale}, phone ${phoneLocale || 'not set'})`);
     }
 
-    // (3) A Tasks widget hosted in the app's own AppWidgetHost draws RN's rows and header from the payload.
+
     let nodes = await hostWidget(title(1));
     {
         const payload = JSON.parse(storedPayload());
@@ -248,8 +228,7 @@ try {
         console.log(`info - the hosted widget: ${resolve(work, 'widget.png')}`);
     }
 
-    // (3b) The header's title opens the widget's list in the app: RN's mindwtr: link, in this build's own scheme
-    // (mindwtr_link_scheme), which core routes. The app is on the Inbox first, so only the link can select Focus.
+
     {
         start(ACTIVITY);
         const tabs = await waitUntil('the app\'s tabs', async () => { const shown = await screen(); return tab(shown, 'Inbox') ? shown : null; }, 30_000);
@@ -268,7 +247,7 @@ try {
         nodes = await hostWidget(title(1));
     }
 
-    // (4) A ring tap: RN's Undo window, then the queue and CoreWork complete the task once.
+
     {
         const [before] = stored(title(1));
         const jobs = count(allLogs(), ...INGESTED);
@@ -284,7 +263,7 @@ try {
         check(nodes === null, '(4) CoreWork\'s refresh redrew the widget without the completed row');
     }
 
-    // (5) A ring tap whose CoreWork job is held back, and the app killed once the queue file is written.
+
     {
         const [before] = stored(title(2));
         setProp('core_work_delay_ms', '3600000');
@@ -314,7 +293,7 @@ try {
         check(stored(title(2))[0].rev === after.rev, '(5) a relaunch writes nothing more');
     }
 
-    // (6) RN's quick capture dialog: Save queues the capture, and CoreWork stores it once.
+
     {
         sh('input keyevent KEYCODE_HOME');
         await sleep(1000);
@@ -336,10 +315,10 @@ try {
         check(!front().includes('QuickCaptureActivity'), '(6) the dialog closed after Save');
     }
 
-    // (7) German, then Chinese: the payload is core's for that language, its dates from the phone's ICU.
+
     for (const language of ['de', 'zh']) {
         await killApp();
-        // The widgets' own language (a debug property): the app's synced language setting stays as it is.
+
         setProp('widget_language', language);
         await openApp();
         const { payload, context } = parity(`(7 ${language})`);
@@ -350,10 +329,8 @@ try {
     setProp('widget_language', '');
     await killApp();
     await openApp();
-    // (8) Leaving the app: what the app stored for its widgets is core's publication for the database it left, so a widget on
-    // the home screen shows today's date and the Inbox count the database holds (nothing is placed: the stored payload is
-    // what every placed widget of this app draws).
-    // Counted from here: a process killed earlier in the check can leave a publication without its stored line.
+
+
     const [publishedBefore, storedBefore] = (() => { const text = allLogs(); return [count(text, PUBLISHED), count(text, REFRESHED)]; })();
     sh('input keyevent KEYCODE_HOME');
     await sleep(3000);

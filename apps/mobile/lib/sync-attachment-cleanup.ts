@@ -12,10 +12,7 @@ import { getBaseSyncUrl, getCloudBaseUrl } from './attachment-sync';
 import { mobileAttachmentFileSystem } from './attachment-sync-utils';
 import { DropboxConflictError } from './dropbox-sync';
 
-// The cleanup run lives in core (`packages/core/src/mobile-attachment-cleanup.ts`) so the native
-// app cleans up the same way. This module binds it to expo-file-system, the Dropbox conflict
-// error and core's transports, each called when used so tests that replace them reach their
-// mocks.
+
 export const runMobileAttachmentCleanup = async (
   options: MobileSyncAttachmentCleanupOptions
 ): Promise<MobileAttachmentCleanupResult> => runCoreMobileAttachmentCleanup(options, {

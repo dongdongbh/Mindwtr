@@ -224,7 +224,7 @@ export function createArchivedTaskRestoreMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo('Native archived Task restore confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-task-restore', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

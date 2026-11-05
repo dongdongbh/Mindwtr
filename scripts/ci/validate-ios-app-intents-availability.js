@@ -10,8 +10,7 @@ const sourcePath = path.join(
 );
 const source = fs.readFileSync(sourcePath, 'utf8');
 
-// The widget extension declares AppIntents too (the iOS 18 capture control),
-// so its sources carry the same iOS 26 supportedModes archive hazard.
+
 const widgetsDir = path.join(repoRoot, 'apps/mobile/widgets-ios');
 const widgetSources = fs
   .readdirSync(widgetsDir)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the two Watch profiles only for a Watch-enabled TestFlight archive.
+
 set -euo pipefail
 
 install_profile() {

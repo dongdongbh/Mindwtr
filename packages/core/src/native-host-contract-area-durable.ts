@@ -7,7 +7,7 @@ import type { PreparedAreaAuthority, PreparedNativeSaveBoundary, TaskStore } fro
 const failure = (code: 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 
-/** The three Area commands read saved rows, not the loader's display-only projection. */
+
 export async function readAreaDurableData(allowFailedSave = false, rawTasks = false): Promise<NativeHostResult<{
     adapter: ReturnType<typeof getStorageAdapter>; authority: PreparedAreaAuthority;
 }>> {
@@ -27,7 +27,7 @@ export async function readAreaDurableData(allowFailedSave = false, rawTasks = fa
     return { ok: true, value: { adapter, authority: { snapshot, state } } };
 }
 
-/** Failure ownership only: the complete durable Area effect remains the replay proof. */
+
 export function createAreaSaveGuard(save: () => Promise<NativeHostResult<null>>) {
     let failedSave: { prepared: unknown; adapter: ReturnType<typeof getStorageAdapter>;
         failure: NonNullable<TaskStore['persistenceFailure']>; generation: number;
@@ -82,7 +82,7 @@ export function createAreaSaveGuard(save: () => Promise<NativeHostResult<null>>)
                 useTaskStore.setState({ persistenceFailure: null });
                 failedSave = null;
             }
-            // Flush the action's raw effect. Generic retryPersistence snapshots normalized memory.
+
             const saved = await save();
             const after = useTaskStore.getState();
             const status = getPersistenceStatus();

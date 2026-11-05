@@ -19,12 +19,8 @@ const storageAdapterState = vi.hoisted(() => ({
 }));
 const storeState = vi.hoisted(() => ({
     _allTasks: [] as Task[],
-    // PERF-03: the component reads _tasksById straight from the store
-    // instead of rebuilding a Map from _allTasks on every render. This mock
-    // has no real store behind it, so mirror that field as a getter over
-    // whichever tasks the test currently has assigned to _allTasks — every
-    // `storeState._allTasks = tasks` assignment below keeps it correct with
-    // no other test needing to change.
+
+
     get _tasksById() {
         return buildEntityMap(this._allTasks);
     },
@@ -387,7 +383,7 @@ describe('SearchScreen task results', () => {
     });
 
     it('completes a task from the search row check icon with an undo toast', async () => {
-        // #1051: the check icon is a real completion toggle, not decoration.
+
         updateTaskMock.mockResolvedValue({ success: true });
         let tree!: ReturnType<typeof create>;
         act(() => {
@@ -418,7 +414,7 @@ describe('SearchScreen task results', () => {
             actionLabel: expect.any(String),
             onAction: expect.any(Function),
         }));
-        // Completing from the icon must not open the editor.
+
         expect(taskEditModalPropsSpy.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
             visible: false,
         }));
@@ -556,8 +552,7 @@ describe('SearchScreen task results', () => {
         expect(tree.root.findByType(FlatList).props.data.map((result: any) => result.item.id)).toEqual(['task-1']);
     });
 
-    // A bare date on a search row cannot say whether it is a deadline or a
-    // record of when the work finished (#991).
+
     describe('result dates', () => {
         const completedAt = '2026-05-01T09:15:00.000Z';
 
@@ -577,7 +572,7 @@ describe('SearchScreen task results', () => {
                 tree = trackTree(create(<SearchScreen />));
             });
 
-            // Done and Archived matches are hidden until asked for.
+
             const hint = tree.root.findAllByType(TouchableOpacity).find((node) =>
                 node.findAllByType(Text).some((textNode) =>
                     String(textNode.props.children).includes('more in Done & Archived')
@@ -589,8 +584,7 @@ describe('SearchScreen task results', () => {
             return tree;
         };
 
-        // FlatList is a host component in the shim, so the row has to be
-        // rendered on its own to read what it puts on screen.
+
         const dateLineOf = (tree: ReturnType<typeof create>, taskId: string) => {
             const list = tree.root.findByType(FlatList);
             const index = list.props.data.findIndex((result: any) => result.item.id === taskId);
@@ -614,7 +608,7 @@ describe('SearchScreen task results', () => {
 
             const label = `Completed ${safeFormatDate(completedAt, 'Pp')}`;
             expect(dateLineOf(tree, 't-done')?.text).toBe(label);
-            // A status gate that only checks 'done' misses archived (#968).
+
             expect(dateLineOf(tree, 't-archived')?.text).toBe(label);
         });
 
@@ -624,7 +618,7 @@ describe('SearchScreen task results', () => {
             const due = dateLineOf(tree, 't-due');
             expect(due?.text).toBe(`Due ${safeFormatDate('2099-01-01', 'P')}`);
             expect(due?.color).toBe('#64748b');
-            // Red is reserved for a date that has passed (#640).
+
             expect(dateLineOf(tree, 't-overdue')?.color).toBe('#dc2626');
         });
 
@@ -632,7 +626,7 @@ describe('SearchScreen task results', () => {
             const tree = renderWithDateTasks();
 
             expect(dateLineOf(tree, 't-plain')).toBeNull();
-            // Finished with nothing to report: no fallback to the due date.
+
             expect(dateLineOf(tree, 't-unstamped')).toBeNull();
         });
     });

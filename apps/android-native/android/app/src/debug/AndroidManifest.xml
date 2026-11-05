@@ -1,27 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug builds only (scripts/check-widgets-device.mjs, check-share-files-device.mjs): what the shell needs to reach without touching the phone's home screen. -->
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <!-- RN's quick capture dialog is not exported; this alias lets the check start it as the widget and the tile do. -->
+
         <activity-alias
             android:name="${applicationId}.DebugQuickCapture"
             android:exported="true"
             android:targetActivity="tech.dongdongbh.mindwtr.androidwidget.QuickCaptureActivity" />
-        <!-- Hosts one of this app's widgets in its own AppWidgetHost, so the check draws and taps a widget without a launcher. -->
+
         <activity
             android:name="tech.dongdongbh.mindwtr.pilot.WidgetHostActivity"
             android:exported="true"
             android:label="Widget host" />
-        <!-- The other app of a file share (scripts/check-share-files-device.mjs): read-only, and only the files of its own folder. -->
+
         <provider
             android:name="tech.dongdongbh.mindwtr.pilot.ShareTestProvider"
             android:authorities="${applicationId}.sharetest"
             android:exported="true" />
-        <!-- Sends a file share (SEND or SEND_MULTIPLE) of that provider's files to the app, as another app's share sheet does. -->
+
         <activity
             android:name="tech.dongdongbh.mindwtr.pilot.ShareTestSender"
             android:exported="true"
             android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
+
+        <activity
+            android:name="tech.dongdongbh.mindwtr.pilot.SyncLockProbe"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+        <activity
+            android:name="tech.dongdongbh.mindwtr.pilot.SyncLockHolder"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:process=":lockholder"
             android:theme="@android:style/Theme.NoDisplay" />
     </application>
 </manifest>

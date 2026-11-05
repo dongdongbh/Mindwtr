@@ -207,6 +207,6 @@ export async function cancelNativeApplePccEvaluation(requestId: string): Promise
   try {
     await cancel.call(nativeModule, requestId);
   } catch {
-    // Cancellation is best-effort. The JS request lease still rejects late output.
+
   }
 }

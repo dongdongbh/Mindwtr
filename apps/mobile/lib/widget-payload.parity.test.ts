@@ -1,25 +1,6 @@
-/**
- * React Native's home-screen widget publications, replayed against the frozen
- * parity fixture (packages/core/src/widget-payload-parity.fixtures.json) that
- * core's widget payload builder is tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_WIDGET_PAYLOAD=1 MINDWTR_CAPTURE_WIDGET_PAYLOAD_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run lib/widget-payload.parity.test.ts
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code, this harness and its fixture. A publication runs the
- * real widget service over the real payload builder and records the exact
- * strings it hands the Android widget module (setPayload) and the iOS App
- * Group (setItem); only the native modules, AsyncStorage, the app log and the
- * system colour scheme are stand-ins.
- *
- * A deliberate behavior change recaptures only the observations it changes,
- * with the change still uncommitted on top of HEAD:
- *   MINDWTR_RECAPTURE_WIDGET_PAYLOAD='<what changed and why>' TZ=UTC bunx vitest run lib/widget-payload.parity.test.ts
- * It keeps the original provenance, refuses changed inputs, and appends the
- * base commit, the changed files and the recaptured scenario names under
- * `provenance.recaptured`.
- */
+
+
+
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -35,8 +16,8 @@ const CAPTURE = process.env.MINDWTR_CAPTURE_WIDGET_PAYLOAD === '1';
 const RECAPTURE_CHANGE = process.env.MINDWTR_RECAPTURE_WIDGET_PAYLOAD;
 const NOW = '2026-09-28T15:30:00.000Z';
 const LANGUAGES = ['en', 'de', 'zh'] as const;
-// The device locale Intl reported at the first capture. Pinned, so the "System"
-// date and time formats do not follow the machine that runs the test.
+
+
 const DEVICE_LOCALE = 'und';
 
 const harness = vi.hoisted(() => ({
@@ -69,8 +50,6 @@ vi.mock('react-native-widgetkit', () => ({
 vi.mock('./app-log', () => ({ logError: async () => undefined, logInfo: async () => undefined, logWarn: async () => undefined }));
 vi.mock('./system-color-scheme', () => ({ getSystemColorSchemeForWidget: () => harness.systemColorScheme }));
 
-// ---------------------------------------------------------------------------
-// Stores
 
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
     id,
@@ -248,8 +227,6 @@ const projectsStore = (): AppData => ({
 const STORES = { rich: richStore(), small: smallStore(), long: longStore(), projects: projectsStore() };
 type StoreName = keyof typeof STORES;
 
-// ---------------------------------------------------------------------------
-// Scenarios
 
 type Publication = {
     kind: 'publish';

@@ -369,7 +369,7 @@ describe('private iOS calendar push adapter', () => {
         await expect(pending).rejects.toThrow('NOT_READY: Calendar library changed');
         expect(f.pushCall.mock.calls.at(-1)).toEqual([{ op: 'ackMapping', operationId: OP1, entry: method === 'upsert' ? entry : null }]);
         expect(f.pushCall).toHaveBeenCalledTimes(2);
-        // Native acknowledged the old operation successfully; a later admission belongs to native authority.
+
         f.pushCall.mockImplementationOnce(async () => { throw new Error('Owner not ready'); });
         await expect(f.host.calendars.createEvent!('calendar-é', { ...details(), calendarId: 'calendar-é' }, context)).rejects.toThrow('Owner not ready');
         expect(f.pushCall).toHaveBeenCalledTimes(3);

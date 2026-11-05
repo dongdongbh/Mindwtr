@@ -47,8 +47,8 @@ export function SidebarAreaFilter({
 
     const isActive = isAreaFilterSelectionActive(selection);
     const activeCount = selection.included.length + selection.excluded.length;
-    // One included area reads as its name; a richer selection lists what it
-    // covers and leans on the count badge for the summary.
+
+
     const labelFor = (id: string) => options.find((option) => option.id === id)?.label ?? noAreaLabel;
     const selectedLabel = !isActive
         ? allAreasLabel
@@ -177,7 +177,7 @@ export function SidebarAreaFilter({
                                     type="button"
                                     data-area-filter-option="true"
                                     onClick={() => onChange(cycleAreaFilterSelection(selection, option.id))}
-                                    // Three states can't ride a boolean: 'mixed' marks excluded.
+
                                     aria-pressed={isExcluded ? 'mixed' : isIncluded}
                                     aria-label={isExcluded ? `${option.label} (${excludedLabel})` : undefined}
                                     className={cn(

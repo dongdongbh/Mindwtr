@@ -6,6 +6,7 @@ import {
     createPomodoroState,
     DEFAULT_POMODORO_DURATIONS,
     flushPendingSave,
+    logInfo,
     logWarn,
     recordPomodoroFocusSessions,
     resetPomodoroState,
@@ -24,11 +25,7 @@ import { getWorkspaceCache } from '../lib/workspace-cache';
 export const DESKTOP_POMODORO_SESSION_STORAGE_KEY = 'mindwtr:pomodoro:session:v1';
 export const DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY = 'mindwtr:pomodoro:collapsed:v1';
 
-/**
- * A finished focus session's time owed to its task: the task's time moves from `from` to `to`. It is stored with the
- * session before the task is written, and leaves once the task's save is on disk, so a quit in between credits it at the
- * next start, once (as React Native's controller does).
- */
+
 type PomodoroCredit = { taskId: string; from?: number; to: number };
 
 export type PomodoroSnapshot = {
@@ -38,13 +35,13 @@ export type PomodoroSnapshot = {
     lastEvent: PomodoroEvent | null;
     updatedAtMs: number;
     sessionHistory: PomodoroSessionHistory;
-    /** Credits owed, oldest first. */
+
     pendingCredits?: PomodoroCredit[];
 };
 
-/** Credits read back from storage: a task no longer at `from` already took them (or another device changed it). */
+
 const loadedCredits = new WeakSet<PomodoroCredit>();
-/** Credits this run wrote to their task in memory: a retry only waits for the save again. */
+
 const writtenCredits = new WeakSet<PomodoroCredit>();
 
 const readCredits = (value: unknown): PomodoroCredit[] => (Array.isArray(value) ? value : []).flatMap((item) => {
@@ -167,7 +164,7 @@ const readStoredPomodoroSnapshot = (nowMs: number): PomodoroSnapshot => {
     }
 };
 
-/** True once the snapshot is stored: owed credits are given to their tasks only then. */
+
 const saveStoredPomodoroSnapshot = (snapshot: PomodoroSnapshot): boolean => {
     if (typeof window === 'undefined') return false;
     try {
@@ -183,18 +180,12 @@ const saveStoredPomodoroSnapshot = (snapshot: PomodoroSnapshot): boolean => {
         }));
         return true;
     } catch {
-        // Pomodoro state is device-local convenience data; storage failures should not block timer controls.
+
         return false;
     }
 };
 
-// The clock ticks once a second for the whole session now that it runs app-wide
-// (#528), and each tick moves nothing but remainingSeconds and updatedAtMs. Both
-// are read back as a pair — reconciliation replays `now - updatedAtMs` onto the
-// stored remainingSeconds — so an older pair restores to exactly the same clock
-// as the current one, and the synchronous localStorage write can be skipped.
-// Everything else (pause, phase change, a credited session, a task link, new
-// durations) still persists immediately.
+
 const isCountdownTickOnly = (prev: PomodoroSnapshot, next: PomodoroSnapshot): boolean => (
     prev.timerState.isRunning
     && next.timerState.isRunning
@@ -219,14 +210,11 @@ const saveStoredCollapsed = (collapsed: boolean) => {
     try {
         getWorkspaceCache()?.setItem(DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY, collapsed ? 'true' : 'false');
     } catch {
-        // Collapse preference is device-local convenience; storage failures should not block the panel.
+
     }
 };
 
-// Completed focus sessions add their focus minutes to the linked task's
-// synced time-spent total. Runs on every snapshot commit, so panel ticks,
-// startup reconciles, and quick-starts all credit through one path. The
-// credits are owed in the snapshot first (withNewCredits), then settled.
+
 const withNewCredits = (prev: PomodoroSnapshot, next: PomodoroSnapshot): PomodoroSnapshot => {
     const prevByTask = prev.sessionHistory.completedFocusSessionsByTaskId;
     const nextByTask = next.sessionHistory.completedFocusSessionsByTaskId;
@@ -237,7 +225,7 @@ const withNewCredits = (prev: PomodoroSnapshot, next: PomodoroSnapshot): Pomodor
         const delta = count - (prevByTask[taskId] ?? 0);
         const task = tasks.find((candidate) => candidate.id === taskId);
         if (delta <= 0 || !task) continue;
-        // After a credit still owed to this task, from the time that credit leaves it at.
+
         const from = credits.filter((credit) => credit.taskId === taskId).pop()?.to ?? task.timeSpentMinutes;
         const to = addTimeSpentMinutes(from, delta * next.durations.focusMinutes);
         if (to !== undefined && to !== from) credits.push({ taskId, ...(from === undefined ? {} : { from }), to });
@@ -245,9 +233,9 @@ const withNewCredits = (prev: PomodoroSnapshot, next: PomodoroSnapshot): Pomodor
     return credits.length === (next.pendingCredits?.length ?? 0) ? next : { ...next, pendingCredits: credits };
 };
 
-/** Gives each owed credit to its task in order, once its save is on disk; the settled ones leave the stored snapshot. */
+
 let settling: Promise<void> | null = null;
-/** A hydrate starts a new generation: a settle left waiting by the session it replaced never blocks the new one. */
+
 let settleGeneration = 0;
 const settleCredits = (): Promise<void> => {
     const generation = settleGeneration;
@@ -255,30 +243,44 @@ const settleCredits = (): Promise<void> => {
         const credits = usePomodoroStore.getState().snapshot.pendingCredits ?? [];
         const done = new Set<PomodoroCredit>();
         for (const credit of credits) {
-            // The check and the write run as one command, so time a sync save brought is added to, not replaced.
+
             const outcome = await runStoreCommand(async () => {
                 const { tasks, updateTask } = useTaskStore.getState();
                 const task = tasks.find((candidate) => candidate.id === credit.taskId);
                 const time = task?.timeSpentMinutes;
                 if (!task) return 'gone';
-                // Already at `to`: written by this run (its save may have failed) or before a restart; only its save is awaited.
+
                 if (time === credit.to && credit.to !== credit.from) return 'written';
                 let to = credit.to;
                 if (time !== credit.from) {
                     if (loadedCredits.has(credit) || writtenCredits.has(credit)) return 'gone';
+                    let chainTo = credit.to;
                     to = addTimeSpentMinutes(time, credit.to - (credit.from ?? 0)) ?? credit.to;
                     credit.from = time;
                     credit.to = to;
-                    // The moved pair is stored before the task changes: a quit before its save then finds the task at `from`.
+
+                    const pending = usePomodoroStore.getState().snapshot.pendingCredits ?? [];
+                    let movedTo = to;
+                    for (const later of pending.slice(pending.indexOf(credit) + 1)) {
+                        if (later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
+                        chainTo = later.to;
+                        later.to = addTimeSpentMinutes(movedTo, later.to - later.from) ?? later.to;
+                        later.from = movedTo;
+                        movedTo = later.to;
+                    }
+
                     if (!saveStoredPomodoroSnapshot(usePomodoroStore.getState().snapshot)) return null;
+                    void logInfo('Pomodoro credit moved onto the task time', {
+                        scope: 'pomodoro', context: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' },
+                    });
                 }
                 await updateTask(credit.taskId, { timeSpentMinutes: to });
                 writtenCredits.add(credit);
                 return 'written';
             }).catch(() => null);
             if (!outcome) break;
-            // After its retries the store drops a failed save, and the next flush finds nothing to write: a failure still
-            // recorded means the time is not on disk.
+
+
             if (outcome === 'written' && !await flushPendingSave()
                 .then(() => useTaskStore.getState().persistenceFailure === null, () => false)) {
                 void logWarn('Pomodoro credit kept owed: the task save did not finish', {
@@ -302,15 +304,15 @@ const settleCredits = (): Promise<void> => {
 type PomodoroStoreState = {
     snapshot: PomodoroSnapshot;
     hasHydrated: boolean;
-    /** Device-local UI preference: is the desktop panel folded to its slim row? */
+
     collapsed: boolean;
-    /** Re-read persisted state and reconcile elapsed time (crediting offline sessions). */
+
     hydratePomodoro: (autoStartOptions: PomodoroAutoStartOptions) => void;
-    /** Apply an updater to the snapshot; persists and credits completed sessions. */
+
     commitPomodoro: (updater: (prev: PomodoroSnapshot) => PomodoroSnapshot) => void;
-    /** Fold/unfold the panel; persisted to its own local-storage key. */
+
     setPomodoroCollapsed: (collapsed: boolean) => void;
-    /** Link a task and start a focus session for it (never a free-running clock). */
+
     startPomodoroFocusForTask: (taskId: string, autoStartOptions: PomodoroAutoStartOptions) => void;
 };
 
@@ -320,8 +322,8 @@ export const usePomodoroStore = createWithEqualityFn<PomodoroStoreState>((set, g
     collapsed: readStoredCollapsed(),
     hydratePomodoro: (autoStartOptions) => {
         const nowMs = Date.now();
-        // A settle still running from the session this hydrate replaces reads its credits as loaded from now on: the new
-        // settle may give them first (React Native's rule), and a task no longer at `from` is never credited twice.
+
+
         get().snapshot.pendingCredits?.forEach((credit) => loadedCredits.add(credit));
         const stored = readStoredPomodoroSnapshot(nowMs);
         settleGeneration += 1;
@@ -334,9 +336,8 @@ export const usePomodoroStore = createWithEqualityFn<PomodoroStoreState>((set, g
     commitPomodoro: (updater) => {
         const prev = get().snapshot;
         const next = updater(prev);
-        // Every manual start passes through here inside the click's call stack —
-        // the only window WebKit allows an audible AudioContext to be created
-        // in, so the completion chime can sound later without a gesture (#528).
+
+
         if (!prev.timerState.isRunning && next.timerState.isRunning) {
             armPomodoroCompletionSound();
         }
@@ -353,7 +354,7 @@ export const usePomodoroStore = createWithEqualityFn<PomodoroStoreState>((set, g
         if (!get().hasHydrated) {
             get().hydratePomodoro(autoStartOptions);
         }
-        // A click on a task's play button reopens the timer if it was folded away.
+
         get().setPomodoroCollapsed(false);
         get().commitPomodoro((prev) => {
             const reconciled = reconcilePomodoroSnapshot(prev, Date.now(), autoStartOptions);

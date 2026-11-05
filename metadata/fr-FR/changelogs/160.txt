@@ -1,0 +1,1 @@
+Rappels avant le début et l’échéance. Tri propre à chaque recherche enregistrée. Ajoutez des entrées simples aux listes avec Annuler. Sections, revue hebdomadaire, listes et saisie IME améliorées. Widgets transparents avec actions disponibles. Démarrage, synchronisation et calendrier plus sûrs.

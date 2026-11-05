@@ -4,8 +4,7 @@ import Darwin
 import CryptoKit
 @testable import MindwtrNativeCore
 
-/// Local coordinated URLs, real descriptors, bundled JSC and the existing V3
-/// owner. These tests do not establish external document-provider/UI acceptance.
+
 final class NativeAttachmentProviderHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -38,8 +37,8 @@ final class NativeAttachmentProviderHostTests: XCTestCase {
         return try db.execute(statement, parametersJSON: json(args))
     }
     private func domain() throws -> String {
-        // Only outer row/column encoding is canonical. JSON held in SQL text
-        // cells remains opaque and is compared byte-for-byte as a String.
+
+
         try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks ORDER BY id").utf8)))
     }
     private func latest() throws -> EditorDraftSnapshot { try XCTUnwrap(editor.read()?.snapshot) }
@@ -131,8 +130,7 @@ final class NativeAttachmentProviderHostTests: XCTestCase {
         XCTAssertEqual(Darwin.chmod(parent.path, mode_t(0o111)), 0)
         defer { XCTAssertEqual(Darwin.chmod(parent.path, mode_t(0o755)), 0) }
 
-        // This must run as the ordinary Mac test account: the parent cannot be
-        // opened for directory reads, while the selected regular file can.
+
         let parentFD = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
         let parentError = errno
         if parentFD >= 0 { Darwin.close(parentFD) }
@@ -300,7 +298,7 @@ final class NativeAttachmentProviderHostTests: XCTestCase {
             let host = try await seed(begin: true, hooks: hooks), before = try latest(), source = try selection(), rows = try domain()
             await refused { _ = try await self.added(host, source: source) }
             XCTAssertEqual(try record().operations.count, 0); XCTAssertEqual(try latest(), before); XCTAssertEqual(try domain(), rows)
-            XCTAssertEqual(try cacheEntries().count, 1) // Ambiguous owner evidence forbids scratch cleanup too.
+            XCTAssertEqual(try cacheEntries().count, 1)
             XCTAssertEqual(try Data(contentsOf: XCTUnwrap(cacheEntries().first)), try Data(contentsOf: source)); await host.close()
         }
     }
@@ -446,8 +444,8 @@ final class NativeAttachmentProviderHostTests: XCTestCase {
         XCTAssertNil(try store.readVersioned()); XCTAssertEqual(try latest(), before); XCTAssertTrue(try cacheEntries().isEmpty)
         let files = try NativeAttachmentFiles(libraryRoot: root), token = NativeAttachmentCancellation()
         files.afterSourceOpened = { token.cancel() }
-        // The existing native token throws a fixed Jobs error; provider IO
-        // normalizes it to bounded refusal, rather than Swift CancellationError.
+
+
         XCTAssertThrowsError(try files.copyProviderSource(source, checkCancellation: token.check)) {
             XCTAssertEqual($0 as? NativeAttachmentFilesError, .unavailable)
         }
@@ -538,8 +536,8 @@ final class NativeAttachmentProviderHostTests: XCTestCase {
         XCTAssertEqual(picked["name"] as? String, source.lastPathComponent); XCTAssertTrue(picked["mimeType"] is NSNull)
         XCTAssertEqual(try domain(), rows); await host.close()
         let previous = try isolate(); defer { root = previous }
-        // Force the shared policy input only: local provider metadata/proofs and
-        // actual JSC validation remain real; no platform MIME mapping is claimed.
+
+
         let original = try String(contentsOf: bundle, encoding: .utf8)
         let probe = root.appendingPathComponent("blocked-policy-core-host.js")
         try (original + "\n;(()=>{const f=MindwtrHost.attachmentDraftPrepareV3;MindwtrHost.attachmentDraftPrepareV3=(raw)=>{const v=JSON.parse(raw);v.picked.mimeType='application/x-msdownload';return f(JSON.stringify(v));};})();\n")

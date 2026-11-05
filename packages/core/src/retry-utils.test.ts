@@ -94,7 +94,7 @@ describe('withRetry', () => {
             baseDelayMs: 10,
             maxDelayMs: 100,
             jitterRatio: 0.5,
-            random: () => 1, // max positive jitter
+            random: () => 1,
             onRetry: (_err, _attempt, delayMs) => delays.push(delayMs),
         })).rejects.toBeDefined();
 

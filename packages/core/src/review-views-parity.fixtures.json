@@ -65,7 +65,9 @@
      "weekly: no contexts step",
      "weekly: Monday week start"
     ],
-    "dailyReview": ["daily: rows, the editor and follow-ups"]
+    "dailyReview": [
+     "daily: rows, the editor and follow-ups"
+    ]
    }
   },
   "discussion1281ReviewCopy": {
@@ -73,15 +75,29 @@
    "sourceState": "uncommitted Review completion copy in the discussion-1281 worktree",
    "command": "cd apps/mobile && MINDWTR_CAPTURE_REVIEW_VIEWS=1 bunx vitest run components/review-modal.parity.test.tsx components/daily-review-modal.parity.test.tsx",
    "cases": {
-    "weeklyReview": ["weekly: every step, then finish", "weekly: Monday week start", "weekly: tracked time in the look-back", "weekly: estimates off hide the look-back totals", "weekly: an empty system"],
-    "dailyReview": ["daily: every step, then finish", "daily: no focus step", "daily: an empty system"]
+    "weeklyReview": [
+     "weekly: every step, then finish",
+     "weekly: Monday week start",
+     "weekly: tracked time in the look-back",
+     "weekly: estimates off hide the look-back totals",
+     "weekly: an empty system"
+    ],
+    "dailyReview": [
+     "daily: every step, then finish",
+     "daily: no focus step",
+     "daily: an empty system"
+    ]
    }
   },
   "ci36049852319ReviewEmpty": {
    "baseSha": "f28f81afa5222015392dd4b7ede4e623671aa91b",
    "sourceState": "React Native Review screen after the due and all scope change; parity harness selects All open tasks before legacy interactions and omits new scope and due action controls",
    "command": "cd apps/mobile && MINDWTR_CAPTURE_REVIEW_VIEWS=1 bunx vitest run 'app/(drawer)/review.parity.test.tsx'",
-   "cases": { "review": ["overview: empty"] }
+   "cases": {
+    "review": [
+     "overview: empty"
+    ]
+   }
   }
  },
  "review": {
@@ -18309,7 +18325,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -18353,7 +18372,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -19076,7 +19101,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -19120,7 +19148,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -20079,6 +20113,7 @@
       "Has Next Action",
       "2 active tasks",
       "▾",
+      "Open project Launch",
       "Garden",
       "Add Task",
       "Needs Action",
@@ -20215,6 +20250,7 @@
       "Waiting",
       "1 active task",
       "▾",
+      "Open project Vendor contract",
       "Launch",
       "Add Task",
       "Has Next Action",
@@ -20968,7 +21004,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -21012,7 +21051,13 @@
       "w-vendor"
      ],
      "backDisabled": true,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -23615,7 +23660,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -23659,7 +23707,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -23919,7 +23973,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -23963,7 +24020,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -24637,7 +24700,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -24678,7 +24744,13 @@
      "progress": "14.285714285714285%",
      "rows": [],
      "backDisabled": true,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -24799,7 +24871,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -24840,7 +24915,13 @@
      "progress": "14.285714285714285%",
      "rows": [],
      "backDisabled": true,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -24959,7 +25040,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -24999,7 +25083,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -25433,7 +25523,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -25477,7 +25570,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -26371,7 +26470,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -26412,7 +26514,13 @@
      "progress": "14.285714285714285%",
      "rows": [],
      "backDisabled": true,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -26626,7 +26734,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "← Back",
       "Next →"
      ],
@@ -26670,7 +26781,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -26898,7 +27015,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "Highlight stale items and cleanup suggestions.",
       "Run analysis",
       "← Back",
@@ -26944,7 +27064,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [],
      "editor": null,
      "sheets": [],
@@ -26982,7 +27108,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "Highlight stale items and cleanup suggestions.",
       "Run analysis",
       "Fix bike",
@@ -27035,7 +27164,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [
       true,
       true,
@@ -27102,7 +27237,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "Highlight stale items and cleanup suggestions.",
       "Run analysis",
       "Fix bike",
@@ -27155,7 +27293,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [
       false,
       true,
@@ -27191,7 +27335,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "Highlight stale items and cleanup suggestions.",
       "Run analysis",
       "Fix bike",
@@ -27244,7 +27391,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [
       true,
       true,
@@ -27280,7 +27433,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "Highlight stale items and cleanup suggestions.",
       "Run analysis",
       "Fix bike",
@@ -27333,7 +27489,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [
       true,
       false,
@@ -27369,7 +27531,10 @@
       "Stale items",
       "No recent activity. Update each one, complete it, or let it go.",
       "Old project",
+      "Add Task",
+      "Needs Action",
       "54 days inactive",
+      "▸",
       "Highlight stale items and cleanup suggestions.",
       "Run analysis",
       "Fix bike",
@@ -27421,7 +27586,13 @@
       "w-vendor"
      ],
      "backDisabled": false,
-     "projects": [],
+     "projects": [
+      [
+       "#16a34a",
+       "#EF444420",
+       "#EF4444"
+      ]
+     ],
      "suggestions": [
       true,
       false,

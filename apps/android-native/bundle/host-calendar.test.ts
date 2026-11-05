@@ -1,8 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'bun:test';
 import { useTaskStore } from '@mindwtr/core';
-import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
+import { createCalendarFeeds, createNativeCalendar, EVENT_READ_FAILED, UNMARKED_EVENT } from './host-calendar';
 
-// The native app's external calendars (C3): core's device on the host's ports, and each screen's feed as RN's screens hold it.
 
 type Load = { input: { slot: string; start: string; end: string; timeoutMs?: number; refresh?: boolean }; settle: (value: unknown) => void };
 
@@ -15,7 +15,7 @@ const harness = () => {
     });
     const ready = (events: unknown[]) => ({ ok: true, value: { status: 'ready', calendars: [{ id: 'c' }], events } });
     const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-    /** core's getCalendarView: its range from the state, and the feed it was given. */
+
     const reads: unknown[] = [];
     const view = (range: { start: string; end: string }) => (input: never) => {
         reads.push((input as { calendar?: unknown }).calendar);
@@ -34,7 +34,7 @@ describe('the Calendar feed', () => {
         const first = feeds.calendarView({ state: null }, view(OCTOBER));
         expect(first.ok && first.value.calendar).toEqual({ status: 'loading' });
         expect(loads.map((load) => load.input)).toEqual([{ slot: 'calendar', ...OCTOBER }]);
-        // A later window finds the same feed: no second load.
+
         feeds.calendarView({ state: null, offset: 100 }, view(OCTOBER));
         expect(loads).toHaveLength(1);
         loads[0].settle(ready([event]));
@@ -57,11 +57,11 @@ describe('the Calendar feed', () => {
         const during = feeds.calendarView({}, view(OCTOBER));
         expect(during.ok && during.value.calendar).toEqual({ status: 'loading', calendars: [{ id: 'c' }], events: [event] });
         expect(feeds.event(event.id)).toEqual({ event, canOpen: true });
-        // Actions work on the events shown, as RN's composer does while it reloads (core refuses a loading feed).
+
         expect(feeds.calendar({ taskId: 't' })).toEqual({ taskId: 't', calendar: { status: 'ready', calendars: [{ id: 'c' }], events: [event] } });
         const moved = feeds.calendarView({}, view(NOVEMBER));
         expect(moved.ok && moved.value.calendar).toEqual({ status: 'loading', calendars: [{ id: 'c' }] });
-        // The October reload ends after the move: it shows nothing.
+
         loads[1].settle(ready([]));
         await flush();
         expect(changed).toEqual(['calendar']);
@@ -109,29 +109,33 @@ describe('the reviews\' feeds', () => {
         await flush();
         expect(feeds.review('weeklyReview', {})).toEqual({ calendar: { status: 'ready', events: [event] } });
         expect(feeds.review('dailyReview', {})).toEqual({ calendar: { status: 'error', message: 'External calendar request timed out' } });
-        // A review's reload shows loading again, as RN's modal does on each open.
+
         feeds.refresh('weeklyReview');
         expect(feeds.review('weeklyReview', {})).toEqual({ calendar: { status: 'loading' } });
     });
 });
 
 describe('the pushed-event map', () => {
-    it('reads RN\'s calendar_sync rows (an exported task mirror without the notes marker stays out of the feed), and writes none', async () => {
+    it('reads and writes RN\'s calendar_sync rows on the boot adapter (an exported task mirror without the notes marker stays out of the feed)', async () => {
         const rows = [{ taskId: 't1', calendarEventId: '42', calendarId: '7', platform: 'android', lastSyncedAt: '2026-10-01T00:00:00.000Z' }];
-        const asked: string[] = [];
+        const calls: unknown[][] = [];
         const host = createNativeCalendar(
             { get: async () => null, set: async () => undefined, remove: async () => undefined },
             () => async () => [], () => async () => new Uint8Array(),
             () => ({
-                getAllCalendarSyncEntries: async (platform: string) => { asked.push(platform); return rows; },
+                ensureSchema: async () => { calls.push(['ensureSchema']); },
+                getAllCalendarSyncEntries: async (platform: string) => { calls.push(['getAll', platform]); return rows; },
                 getCalendarSyncEntry: async (taskId: string) => rows.find((row) => row.taskId === taskId) ?? null,
+                upsertCalendarSyncEntry: async (entry) => { calls.push(['upsert', entry.taskId]); },
+                deleteCalendarSyncEntry: async (taskId: string, platform: string) => { calls.push(['delete', taskId, platform]); },
             }),
         );
         expect(await host.syncEntries!.getAll('android')).toEqual(rows);
         expect(await host.syncEntries!.get('t1', 'android')).toEqual(rows[0]);
-        expect(asked).toEqual(['android']);
-        await expect(host.syncEntries!.upsert(rows[0])).rejects.toThrow();
-        await expect(host.syncEntries!.delete('t1', 'android')).rejects.toThrow();
+        await host.syncEntries!.ensureReady();
+        await host.syncEntries!.upsert(rows[0]);
+        await host.syncEntries!.delete('t1', 'android');
+        expect(calls).toEqual([['getAll', 'android'], ['ensureSchema'], ['upsert', 't1'], ['delete', 't1', 'android']]);
     });
 });
 
@@ -150,5 +154,38 @@ describe('the device', () => {
             { op: 'readBytes', uri: 'content://downloads/7' },
         ]);
         expect(host.platform.os).toBe('android');
+    });
+});
+
+describe('the push writes', () => {
+    it('send HostCalendars epoch ms, keep core\'s UTC zone for an all-day event, and drop the url Android has no column for', async () => {
+        const calls: Record<string, unknown>[] = [];
+        const host = createNativeCalendar(
+            { get: async () => null, set: async () => undefined, remove: async () => undefined },
+            () => async (request) => { calls.push(request); return '9'; }, () => async () => new Uint8Array(),
+        );
+        const details = { title: 'T', startDate: new Date('2026-10-30T00:00:00Z'), endDate: new Date('2026-10-31T00:00:00Z'), allDay: true,
+            notes: 'N', location: '', url: 'https://example.com', timeZone: 'UTC', endTimeZone: 'UTC' };
+        expect(await host.calendars.createEvent!('7', { ...details, calendarId: '7' })).toBe('9');
+        await host.calendars.updateEvent!('9', { ...details, allDay: false, timeZone: undefined, endTimeZone: undefined }, { taskId: 't1', calendarId: '7' });
+        await host.calendars.deleteEvent!('9', { taskId: 't1', calendarId: '7' });
+        await host.calendars.deleteCalendar!('7');
+        expect(await host.calendars.getSources!()).toEqual([]);
+        expect(host.calendars.updateCalendar).toBeUndefined();
+        const sent = { title: 'T', startMs: 1_793_318_400_000, endMs: 1_793_404_800_000, notes: 'N', location: '' };
+        expect(calls).toEqual([
+            { op: 'createEvent', calendarId: '7', details: { ...sent, allDay: true, timeZone: 'UTC', endTimeZone: 'UTC' } },
+            { op: 'updateEvent', eventId: '9', calendarId: '7', taskMarker: 'Mindwtr-Task-ID: t1', details: { ...sent, allDay: false } },
+            { op: 'deleteEvent', eventId: '9', calendarId: '7', taskMarker: 'Mindwtr-Task-ID: t1' },
+            { op: 'deleteCalendar', calendarId: '7' },
+        ]);
+    });
+});
+
+describe('the unmarked-event answer', () => {
+    it('is the text CalendarPushWrites.kt answers', () => {
+        const kotlin = readFileSync(new URL('../android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWrites.kt', import.meta.url), 'utf8');
+        expect(kotlin).toContain(`const val UNMARKED_EVENT = "${UNMARKED_EVENT}"`);
+        expect(kotlin).toContain(`const val EVENT_READ_FAILED = "${EVENT_READ_FAILED}"`);
     });
 });

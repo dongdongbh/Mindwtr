@@ -1,25 +1,6 @@
-/**
- * React Native's Settings › Notifications screen, replayed against the frozen parity
- * fixture (packages/core/src/notifications-settings-parity.fixtures.json) that core's
- * notifications settings model is tested against
- * (packages/core/src/notifications-settings-model.parity.test.ts).
- *
- * The fixture was captured from the screen as it was before core held its policy
- * (commit dba1097c7). To recapture, check that commit out in its own worktree, copy
- * this file in, and run there
- *   MINDWTR_CAPTURE_NOTIFICATIONS_SETTINGS=1 TZ=UTC bunx vitest run components/settings/notifications-settings-screen.parity.test.tsx
- * then copy the fixture back. The capture refuses to run while any file under
- * apps/mobile or packages/core differs from the named commit (this harness and the
- * fixture aside), so the provenance always names the code that ran.
- *
- * Each scenario renders the real screen with the real core store, drives it through
- * its own controls, and records what a user sees (each text with its color and
- * opacity; each switch and pressable row with its disabled flag; the time pickers;
- * the open day picker), what the store is asked to write, and what the screen asks
- * the device for (the notification permission, the persistent capture notification,
- * the exact-alarm settings). The device is stubbed: the platform, the permission
- * answer, the exact-alarm state and the system locale are the scenario's.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -117,11 +98,9 @@ vi.mock('lucide-react-native', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Scenario data.
 
 const SETTINGS: Record<string, AppSettings> = {
-  // A fresh profile: the store's first-run migration turns task reminders off.
+
   base: {},
   masterOn: { notificationsEnabled: true },
   allOff: { notificationsEnabled: false },
@@ -148,15 +127,8 @@ type Device = {
   persistentCapture?: boolean;
   exactAlarm?: { relevant: boolean; allowed: boolean };
 };
-/**
- * Actions: ['switch', index] flips a switch (a disabled one cannot be flipped);
- * ['press', label] presses a row or button outside the open picker;
- * ['modalPress', label] one inside it; ['dismiss'] closes the open picker;
- * ['pick', 'HH:MM'] picks a time on Android's open time picker and
- * ['pickDismiss'] dismisses it; ['draft', 'HH:MM'] turns iOS's spinner.
- * A label is the control's text (or the first of its texts); 'k:<key>' is that
- * key's translation.
- */
+
+
 type Scenario = { name: string; settings: string; device: Device; actions: [string, ...unknown[]][] };
 
 const scenarios: Scenario[] = [
@@ -236,8 +208,6 @@ const scenarios: Scenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -282,9 +252,6 @@ function setDevice(device: Device) {
   writeLog.length = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen. Hidden modals render their children in the test
-// shim; they are skipped, as a user would.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -292,11 +259,11 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Host nodes in screen order; `modals: false` skips every modal, `true` skips only hidden ones. */
+
 function hosts(root: ReactTestInstance, type: string, modals = false): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
-    // This frozen fixture predates the default selector; dedicated tests cover that control.
+
     if (node.props.testID === 'task-reminder-default') return;
     if (String(node.type) === 'Modal' && (!modals || !node.props.visible)) return;
     if (String(node.type) === type) out.push(node);
@@ -310,7 +277,7 @@ const flatten = (style: unknown): Record<string, unknown> => (Array.isArray(styl
   ? Object.assign({}, ...style.map(flatten))
   : style && typeof style === 'object' ? style as Record<string, unknown> : {});
 
-/** Each outermost Text: its words, color and opacity (a dimmed row draws at 0.5). */
+
 function textsIn(root: ReactTestInstance, modals = false): unknown[] {
   return hosts(root, 'Text', modals).filter((node) => {
     for (let parent = node.parent; parent; parent = parent.parent) if (String(parent.type) === 'Text') return false;
@@ -351,8 +318,6 @@ function observe(root: ReactTestInstance, seen: { writes: number; device: number
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Driving the screen.
 
 async function run(what: string, fn: (() => unknown) | undefined) {
   if (!fn) throw new Error(`Nothing to do for ${what}`);

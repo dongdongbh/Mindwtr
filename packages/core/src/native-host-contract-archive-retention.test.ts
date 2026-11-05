@@ -174,7 +174,7 @@ describe('native host contract: separate Archive retention card', () => {
             never: { label: t('settings.archiveRetentionNever'), edit: { type: 'archiveRetentionDays', value: 0 } },
             saveFailed: t('settings.archiveRetentionSaveFailed'),
         });
-        expect(Object.keys(value(host.getDataSettings())).sort()).toEqual(['backup', 'diagnostics', 'importData', 'revision', 'title', 'version']);
+        expect(Object.keys(value(host.getDataSettings())).sort()).toEqual(['archiveRetention', 'backup', 'diagnostics', 'importData', 'revision', 'title', 'version']);
         const on = value((await openHost({ gtd: { archiveRetentionDays: 45 } })).host.getArchiveRetentionOptions()).card;
         expect([on.days, on.current]).toEqual([45, `${t('settings.archiveRetentionCurrent')}: 45 days`]);
     });
@@ -241,5 +241,24 @@ describe('native host contract: separate Archive retention card', () => {
         for (const input of [{ days: 1.5 }, { days: -1 }, { days: 36501 }, { days: 30, extra: true }, {}]) {
             expect(on.getArchiveRetentionReview(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         }
+    });
+});
+
+describe('native host contract: the getDataSettings fields iOS reads', () => {
+    it('keeps the version, revision, title, every backup label and the diagnostics card iOS checks', async () => {
+        const view = value((await openHost({})).host.getDataSettings()) as unknown as Record<string, any>;
+        expect(view.version).toEqual(expect.any(Number));
+        for (const name of ['revision', 'title']) expect(view[name]).toMatch(/./);
+        for (const name of ['title', 'exportLabel', 'description', 'failed', 'csvLabel', 'csvDescription', 'csvFailed', 'tasknotesLabel',
+            'tasknotesDescription', 'tasknotesFailed', 'mergeLabel', 'mergeDescription', 'mergeFailed', 'restoreFileLabel', 'restoreFileDescription',
+            'csvImportLabel', 'csvImportDescription', 'todoistImportLabel', 'todoistImportDescription', 'ticktickImportLabel', 'ticktickImportDescription',
+            'dgtImportLabel', 'dgtImportDescription', 'omnifocusImportLabel', 'omnifocusImportDescription', 'snapshotsLabel', 'restoreLabel']) {
+            expect([name, view.backup[name]]).toEqual([name, expect.stringMatching(/./)]);
+        }
+        const labels = view.diagnostics;
+        expect(labels.title).toMatch(/./);
+        expect(labels.debugLogging.value).toEqual(expect.any(Boolean));
+        for (const name of ['toastTitle', 'logMissing', 'shareUnavailable', 'logCleared', 'logClearFailed']) expect([name, labels[name]]).toEqual([name, expect.any(String)]);
+        for (const name of ['shareLog', 'clearLog']) expect([name, labels[name] === null || typeof labels[name] === 'object']).toEqual([name, true]);
     });
 });

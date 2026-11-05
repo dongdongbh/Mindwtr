@@ -8,25 +8,25 @@ import type { TaskGroup } from './next-grouping';
 type GroupedTaskSectionsProps = {
     groups: TaskGroup[];
     renderTask: (task: Task, group: TaskGroup) => ReactNode;
-    /** When provided, group headers become collapse toggles. */
+
     onToggleGroup?: (groupId: string) => void;
     collapsedGroupIds?: Set<string>;
     getSectionDomId?: (group: TaskGroup, index: number) => string | undefined;
     onAddTaskToGroup?: (group: TaskGroup) => void;
     addTaskLabel?: (group: TaskGroup) => string | undefined;
-    /** Draws a group's projects (TaskGroup.projects) above its tasks. */
+
     renderProject?: (project: Project) => ReactNode;
 };
 
 type GroupedTaskListProps = GroupedTaskSectionsProps & {
     renderTask: (task: Task, group?: TaskGroup) => ReactNode;
-    /** The flat order, rendered when the list is not grouped. */
+
     tasks: Task[];
-    /** The header/task row model, null when the list is not grouped. */
+
     virtualRows?: GroupedVirtualRow[] | null;
-    /** The virtualizer positioning the rows, null when every row is rendered. */
+
     virtualizer?: Virtualizer<HTMLDivElement, Element> | null;
-    /** Gap under an ungrouped virtual row; density differs per view. */
+
     flatRowClassName?: string;
 };
 
@@ -75,12 +75,7 @@ export function buildGroupedVirtualRows(
     });
 }
 
-/**
- * The tasks a grouped list is showing, once per task. Tag and context grouping
- * put a task in every group it belongs to, but the keyboard walk and "Select
- * all" step by task rather than by row, so a repeat would leave the cursor on
- * an index no row claims (#970).
- */
+
 export function flattenVisibleGroupTasks(
     groups: TaskGroup[],
     collapsedGroupIds: ReadonlySet<string>,
@@ -108,7 +103,7 @@ type GroupedTaskSectionHeaderProps = {
     addTaskLabel?: (group: TaskGroup) => string | undefined;
 };
 
-/** A section's rows: its projects (#1319) and its tasks. */
+
 const groupRowCount = (group: { tasks: readonly unknown[]; projects?: readonly unknown[] }) => (
     group.tasks.length + (group.projects?.length ?? 0)
 );
@@ -199,10 +194,7 @@ export function GroupedTaskSectionHeader({
     );
 }
 
-// The section card, spelled once. Virtualized rows are positioned siblings
-// rather than children of one bordered box, so each has to carry the piece of
-// the card it sits on — and the two spellings have to agree, or a list changes
-// its look at the virtualization threshold.
+
 const SECTION_CARD = 'border-x border-border/40 bg-card/30';
 const SECTION_HEADER_CARD = 'border border-border/40 bg-card/30';
 
@@ -219,13 +211,7 @@ function GroupProjects({ group, renderProject, className }: {
     );
 }
 
-/**
- * A desktop task list, grouped or flat, virtualized or not. The three shapes
- * share one card contract, so they live in one component: below the
- * virtualization threshold a group is a bordered box with its rows inside;
- * above it the rows are absolutely positioned siblings that each paint their
- * slice of the same box.
- */
+
 export function GroupedTaskList({
     groups,
     tasks,
@@ -339,11 +325,7 @@ export function GroupedTaskList({
     );
 }
 
-/**
- * The one grouped-list section renderer: header card with dot, title, and
- * count, then the group's tasks. The virtual row builder above preserves the
- * same section order and collapse semantics for large grouped lists.
- */
+
 export function GroupedTaskSections({
     groups,
     renderTask,

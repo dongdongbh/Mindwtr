@@ -26,7 +26,7 @@ const renderTitle = (translations: Record<string, string>, showContextsField: bo
 describe('InboxContextSection', () => {
   it.each(['zh', 'zh-Hant'] as const)('titles the step with one %s word for contexts', async (language) => {
     const translations = await loadTranslations(language);
-    // Desktop's rule (#1335): both fields -> "Contexts & tags"; one field -> that field's label.
+
     expect(renderTitle(translations, true, true).startsWith(translations['filters.contexts'])).toBe(true);
     expect(renderTitle(translations, true, false)).toBe(translations['contexts.title']);
     expect(renderTitle(translations, false, true)).toBe(translations['taskEdit.tagsLabel']);

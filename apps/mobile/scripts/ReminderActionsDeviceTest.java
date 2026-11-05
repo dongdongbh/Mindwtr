@@ -4,6 +4,7 @@ import android.app.Application;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.ComponentName;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.app.Notification;
@@ -15,7 +16,7 @@ import java.util.HashMap;
 import java.util.Map;
 import tech.dongdongbh.mindwtr.notificationopenintents.NotificationOpenPayloadStore;
 
-/** Run only against Mindwtr Dev. Uses the installed alarm code and Android notification manager. */
+
 public class ReminderActionsDeviceTest extends InstrumentationTestCase {
     private static final String TASK = "pr1346-device-reminder";
     private Application app;
@@ -87,7 +88,7 @@ public class ReminderActionsDeviceTest extends InstrumentationTestCase {
             util.setAlarm(alarm);
             assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, pm.getComponentEnabledSetting(receiver));
             PendingIntent pending = PendingIntent.getBroadcast(app, alarm.getAlarmId(), new Intent(app, AlarmReceiver.class), PendingIntent.FLAG_IMMUTABLE);
-            app.getSystemService(AlarmManager.class).cancel(pending); // Simulate kernel alarm loss while retaining SQLite.
+            app.getSystemService(AlarmManager.class).cancel(pending);
             assertTrue(util.rearmFutureAlarm(alarm.getId()));
             assertEquals(alarm.getAlarmId(), db.getAlarm(alarm.getId()).getAlarmId());
             boolean delivered = false;
@@ -129,7 +130,7 @@ public class ReminderActionsDeviceTest extends InstrumentationTestCase {
             AlarmModel snooze = alarm(TASK, 1346201, "task-reminder");
             util.sendNotification(snooze);
             Notification snoozeNotification = shown(TASK).getNotification();
-            db.delete(snooze.getId()); // Reminder reconciliation has removed the fired row.
+            db.delete(snooze.getId());
             int beforeSnooze = matchingAlarms(TASK);
             press(snoozeNotification, "SNOOZE");
             for (int i = 0; i < 40 && matchingAlarms(TASK) <= beforeSnooze; i++) Thread.sleep(50);
@@ -142,13 +143,41 @@ public class ReminderActionsDeviceTest extends InstrumentationTestCase {
             for (int i = 0; i < 60 && matchingAlarms(TASK) > 1; i++) Thread.sleep(50);
             assertEquals("Done cancels task reminders but preserves Pomodoro", 1, matchingAlarms(TASK));
             assertNotNull(db.getAlarm(pomodoro.getId()));
-            boolean queued = false;
-            for (Map<String,String> item : NotificationOpenPayloadStore.peekCompletions(app))
-                if (TASK.equals(item.get("taskId"))) queued = true;
-            assertTrue("Cold Done must survive on disk", queued);
+
+
         } finally { cleanup(); }
     }
-    // Run these methods in separate instrumentation invocations, killing the app between them.
+    public void testDoneRequestsHeadlessProcessingWithoutActivity() {
+        cleanup();
+        final boolean[] started = { false };
+        ContextWrapper background = new ContextWrapper(app) {
+            @Override public ComponentName startService(Intent intent) {
+                assertEquals(app.getPackageName(), intent.getComponent().getPackageName());
+                assertEquals("tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService", intent.getComponent().getClassName());
+                boolean durable = false;
+                for (Map<String,String> item : NotificationOpenPayloadStore.peekCompletions(app))
+                    if (TASK.equals(item.get("taskId"))) durable = true;
+                assertTrue("Receipt must be durable before the background wake", durable);
+                started[0] = true;
+
+
+                throw new IllegalStateException("Disposable service refusal");
+            }
+            @Override public void startActivity(Intent intent) {
+                fail("Done must not launch the app Activity");
+            }
+        };
+        try {
+            Intent done = new Intent(Constants.NOTIFICATION_ACTION_COMPLETE);
+            done.putExtra("AlarmId", 1436001);
+            done.putExtra("taskId", TASK);
+            new AlarmReceiver().onReceive(background, done);
+            assertTrue("Done must request background processing", started[0]);
+            assertTrue("Refused wake must retain the durable receipt", NotificationOpenPayloadStore.peekCompletions(app)
+                .stream().anyMatch(item -> TASK.equals(item.get("taskId"))));
+        } finally { cleanup(); }
+    }
+
     public void testSeedDurableQueue() {
         cleanup();
         for (int i = 0; i < 55; i++) {

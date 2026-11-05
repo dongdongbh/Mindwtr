@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -83,17 +82,7 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/*
- * RN's Focus controls (app/(drawer)/(tabs)/focus.tsx) on core's controls view (NativeFocusControls, FocusModel.kt): the header
- * buttons, the saved Focus filters and the active chips over the sections, Today's Focus Reorder and its reorder screen, the
- * group headings of a grouped Next actions, and the sheets and dialogs: View options, the filter sheet with Save, the Save
- * filter dialog, and the delete questions. Every word, chip, option and edit is core's.
- */
 
-/**
- * RN's View options (Settings2) and Filters (SlidersHorizontal, core's count on a tint badge) buttons, each 44 round, tinted
- * while core says they are active (View options also while details show, the host's own flag).
- */
 @Composable
 fun FocusHeaderButtons(model: InboxViewModel, controls: JSONObject) {
     val header = controls.getJSONObject("header")
@@ -124,15 +113,12 @@ private fun HeaderButton(icon: ImageVector, label: String, tinted: Boolean, badg
     }
 }
 
-/**
- * RN's rows under the header: core's saved Focus filters (All, then each filter with its delete button; a long-press deletes
- * too), and the active filters (each chip removes itself) with Clear. Deleting asks core's question first.
- */
+
 @Composable
 fun FocusFilterRows(model: InboxViewModel, controls: JSONObject) = with(model.menu.focusControls) {
     val c = LocalTheme.current.colors
     val idle = model.menu.idle
-    val revision = model.focus?.revision ?: return
+    val revision = model.focus?.let { model.focusRevision } ?: return
     Column {
         controls.optJSONObject("savedFilters")?.let { saved ->
             Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -165,7 +151,7 @@ fun FocusFilterRows(model: InboxViewModel, controls: JSONObject) = with(model.me
     }
 }
 
-/** RN's saved filter chip, attached to its delete button (Trash2) when it has one; TalkBack has the delete as an action. */
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, enabled: Boolean, onDelete: () -> Unit, action: () -> Unit) {
@@ -174,7 +160,7 @@ private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, en
     val edge = if (selected) c.tint else c.border
     Row(Modifier.height(IntrinsicSize.Min)) {
         val shape = if (deleteLabel != null) RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp) else RoundedCornerShape(22.dp)
-        Box(Modifier.widthIn(min = 44.dp, max = 180.dp).heightIn(min = 44.dp).clip(shape).background(fill).border(1.dp, edge, shape)
+        Box(Modifier.widthIn(min = 44.dp, max = 180.dp).heightIn(min = 44.dp).clip(shape).background(fill).rnBorder(1.dp, edge, shape)
             .clearAndSetSemantics {
                 contentDescription = label; role = Role.Button; this.selected = selected
                 if (enabled) {
@@ -188,7 +174,7 @@ private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, en
         }
         deleteLabel?.let { spoken ->
             val end = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp)
-            Box(Modifier.width(44.dp).fillMaxHeight().clip(end).background(fill).border(1.dp, edge, end)
+            Box(Modifier.width(44.dp).fillMaxHeight().clip(end).background(fill).rnBorder(1.dp, edge, end)
                 .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (enabled) onClick { onDelete(); true } else disabled() }
                 .clickable(enabled = enabled, onClick = onDelete), contentAlignment = Alignment.Center) {
                 Icon(Lucide.Trash2, null, tint = if (selected) c.onTint else c.secondaryText, modifier = Modifier.size(16.dp))
@@ -197,13 +183,13 @@ private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, en
     }
 }
 
-/** RN's Reorder beside Today's Focus: GripVertical and core's label; it opens the reorder screen. */
+
 @Composable
-fun ReorderToggle(model: InboxViewModel, label: String) {
+fun ReorderToggle(model: InboxViewModel, label: String, hint: String) {
     val c = LocalTheme.current.colors
     val enabled = model.menu.idle
     Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
-        .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { model.menu.focusControls.reorder(true); true } else disabled() }
+        .clearAndSetSemantics { contentDescription = "$label, $hint"; role = Role.Button; if (enabled) onClick { model.menu.focusControls.reorder(true); true } else disabled() }
         .clickable(enabled = enabled) { model.menu.focusControls.reorder(true) }.padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Icon(Lucide.GripVertical, null, tint = c.secondaryText, modifier = Modifier.size(15.dp))
@@ -211,54 +197,55 @@ fun ReorderToggle(model: InboxViewModel, label: String) {
     }
 }
 
-/** RN's group heading in a grouped Next actions: core's dot (muted: the secondary text), title in capitals, and count. */
+
 @Composable
-fun FocusGroupHeading(heading: JSONObject) {
+fun FocusGroupHeading(heading: JSONObject, onToggle: () -> Unit) {
     val c = LocalTheme.current.colors
     val muted = heading.getBoolean("muted")
     val title = heading.getString("title")
     val count = heading.getInt("count")
-    Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp).clearAndSetSemantics { contentDescription = "$title $count"; heading() },
+    val collapsed = heading.optBoolean("collapsed")
+    val state = t(if (collapsed) "markdown.expand" else "markdown.collapse")
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp).heightIn(min = 44.dp)
+        .clearAndSetSemantics { contentDescription = "$title $count"; role = Role.Button; onClick(label = state) { onToggle(); true } }
+        .clickable(onClick = onToggle).padding(top = 4.dp, start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(if (muted) c.secondaryText else coreColorOrNull(heading.menuText("dotColor")) ?: c.tint))
+        Text(if (collapsed) "▸" else "▾", style = rnText(12, 400), color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.width(14.dp))
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (muted) c.secondaryText else LocalTheme.current.identityColorOrNull(heading.menuText("dotColor")) ?: c.tint))
         Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (muted) c.secondaryText else c.text, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         Text("$count", style = rnText(12, 700), color = c.secondaryText)
     }
 }
 
-/** A row under a group heading: indented, with RN's 2-wide rule at its left (contextGroupTaskWrapper). */
+
 @Composable
 fun GroupedRow(grouped: Boolean, content: @Composable () -> Unit) {
     if (!grouped) return content()
     val c = LocalTheme.current.colors
+
     Box(Modifier.padding(start = 13.dp).drawBehind { drawLine(c.border, Offset(1.dp.toPx(), 0f), Offset(1.dp.toPx(), size.height), 2.dp.toPx()) }
-        .padding(start = 10.dp)) { content() }
+        .padding(start = 12.dp)) { content() }
 }
 
-/**
- * RN's reorder screen for Today's Focus: core's title and Done, then core's rows (title and secondary line) in their order.
- * A long-press lifts a row and a drag moves it (its new place shows on the badge); the drop sends the new order to core's
- * reorderFocus, which writes only the moved tasks. TalkBack has core's Move up and Move down (core's whole orders) on each row.
- * Core's hint shows until the first move.
- */
+
 @Composable
 fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) = with(model.menu.focusControls) {
     val theme = LocalTheme.current
     val c = theme.colors
     val rows = screen.getJSONObject("rows").menuObjects("items")
     val ids = rows.map { it.getString("id") }
-    // Each row's revision as core showed it: reorderFocus sends them all.
+
     val revisions = JSONObject().apply { rows.forEach { put(it.getString("id"), it.optString("taskRevision")) } }
     var hint by rememberSaveable { mutableStateOf(true) }
     val enabled = model.menu.idle
     Column(modifier.background(c.bg)) {
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(screen.getString("title").uppercase(), style = rnText(13, 700, letterSpacing = 1f), color = c.text, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
             val done = screen.getString("doneLabel")
-            Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(theme.filledBg).border(1.dp, theme.filledBg, RoundedCornerShape(20.dp))
+            Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(theme.filledBg).rnBorder(1.dp, theme.filledBg, RoundedCornerShape(20.dp))
                 .clearAndSetSemantics { contentDescription = done; role = Role.Button; onClick { reorder(false); true } }
                 .clickable { reorder(false) }.padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
                 Text(done, style = rnText(14, 700), color = theme.filledText)
@@ -272,7 +259,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
             itemsIndexed(rows, key = { _, row -> row.getString("id") }) { index, row ->
                 val id = row.getString("id")
                 val active = dragged == id
-                // The place a drop would take: the row's own, moved by whole rows under the finger.
+
                 val target = if (active) (index + (shift / rowHeight).roundToInt()).coerceIn(0, rows.size - 1) else index
                 val moves = listOfNotNull(
                     row.optJSONArray("moveUp")?.let { order -> CustomAccessibilityAction(screen.getString("moveUpLabel")) { if (enabled) { hint = false; reorderTo(order.ids(), revisions) }; enabled } },
@@ -281,7 +268,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
                 Box(Modifier.height(80.dp).padding(vertical = 4.dp).then(if (active) Modifier.offset { IntOffset(0, shift.roundToInt()) } else Modifier)) {
                     val shape = RoundedCornerShape(12.dp)
                     Row(Modifier.fillMaxSize().then(if (active) Modifier.shadow(4.dp, shape) else Modifier).clip(shape).background(if (active) c.filterBg else c.cardBg)
-                        .border(if (active) 1.dp else 0.5.dp, if (active) c.tint else c.border, shape)
+                        .rnBorder(if (active) 1.dp else 0.5.dp, if (active) c.tint else c.border, shape)
                         .clearAndSetSemantics {
                             contentDescription = row.getString("positionLabel"); role = Role.Button
                             if (enabled) customActions = moves else disabled()
@@ -293,7 +280,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
                                 onDragEnd = {
                                     val to = (index + (shift / rowHeight).roundToInt()).coerceIn(0, ids.size - 1)
                                     dragged = null; shift = 0f
-                                    // The drop's order: this row taken out and put back at the place it was dropped.
+
                                     if (to != index) reorderTo(ids.toMutableList().apply { add(to, removeAt(index)) }, revisions)
                                 },
                                 onDragCancel = { dragged = null; shift = 0f },
@@ -323,7 +310,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
     }
 }
 
-/** Focus's open sheet or dialog (FocusModel.dialog), over the tabs: View options, the filter sheet, Save filter, or a delete question. */
+
 @Composable
 fun FocusDialogs(model: InboxViewModel) = with(model.menu.focusControls) {
     val open = dialog ?: return
@@ -348,7 +335,7 @@ fun FocusDialogs(model: InboxViewModel) = with(model.menu.focusControls) {
     }
 }
 
-/** RN's bottom sheet (focus.tsx sheet): the 0.35 backdrop (a tap closes), a card from the bottom, radius 24, at most [tall] or 78% high. */
+
 @Composable
 private fun FocusSheet(model: InboxViewModel, tall: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val theme = LocalTheme.current
@@ -358,12 +345,12 @@ private fun FocusSheet(model: InboxViewModel, tall: Boolean = false, content: @C
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val height = (LocalConfiguration.current.screenHeightDp * (if (tall) 0.82f else 0.78f)).dp
         Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (tall) Modifier.height(height) else Modifier.heightIn(max = height))
-            .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+            .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp), content = content)
     }
 }
 
-/** A sheet's text button (Done, Clear, Back): the tint, 13/600, 44 high. */
+
 @Composable
 private fun SheetText(label: String, enabled: Boolean = true, action: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -372,7 +359,7 @@ private fun SheetText(label: String, enabled: Boolean = true, action: () -> Unit
         .clickable(enabled = enabled, onClick = action).fade(if (enabled) 1f else 0.5f).padding(horizontal = 10.dp, vertical = 12.dp))
 }
 
-/** RN's View options: core's sort chips (a control edit), group chips (core's setFocusGroupBy) and the Show details chip. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ViewOptionsSheet(model: InboxViewModel, controls: JSONObject) = with(model.menu.focusControls) {
@@ -403,13 +390,7 @@ private fun ViewOptionsSheet(model: InboxViewModel, controls: JSONObject) = with
     }
 }
 
-/**
- * RN's filter sheet for Focus (TaskFilterSheet with no search box) on core's filterSheet: the title with Save (BookmarkPlus, while
- * core says there is something to save) and Clear, the active filters (core's chips, and an applied saved filter's criteria no
- * picker expresses, which ask core's question before they go), the contexts and tags and the projects pickers (core's options,
- * the match modes under the tokens), time estimate, energy level, and more filters (priority and location). Every chip and row
- * sends core's edit; the typed location sends core's setLocation once typing pauses.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: JSONObject) = with(model.menu.focusControls) {
@@ -420,7 +401,7 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
     val summaries = sheet.getJSONObject("summaries")
     val all = text.getString("all")
     val picker = open.menuText("page")
-    val revision = model.focus?.revision ?: return
+    val revision = model.focus?.let { model.focusRevision } ?: return
     val idle = model.menu.idle
     FocusSheet(model, tall = picker != null) {
         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -442,8 +423,8 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
         }
         if (picker != null) {
             val window = sheet.getJSONObject(picker)
-            // RN's picker search: core's matching options (the query from offset zero), read again whenever Focus changes, since a
-            // tap changes the options' states.
+
+
             val query = open.optString("query")
             val found = pickerFound?.takeIf { it.getString("name") == picker && it.getString("query") == query && it.getString("revision") == revision }
             LaunchedEffect(revision, picker) { if (query.isNotBlank()) searchPicker(picker, query, pickerFound?.optJSONArray("items")?.length() ?: 0) }
@@ -458,7 +439,7 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
                     modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp))
                 for (option in options) {
                     val label = option.optString("title").ifEmpty { option.getString("value") }
-                    val out = option.optString("state") == "excluded"
+                    val out = option.optString("state") == "excluded" || option.optBoolean("excluded")
                     val on = option.optString("state") == "included" || option.optBoolean("selected")
                     val spoken = if (out) "$label ($excluded)" else label
                     val optionEdit = option.getJSONObject("edit")
@@ -537,10 +518,7 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
     }
 }
 
-/**
- * RN's Save filter dialog: core's title, the name (starting with core's name for the filter), Cancel and Save (off while the name
- * is blank). Save is core's saveFocusFilter with the dialog's request UUID, on disk first; while its retry is owed it re-sends it.
- */
+
 @Composable
 private fun SaveFilterDialog(model: InboxViewModel, controls: JSONObject, open: JSONObject) = with(model.menu.focusControls) {
     val theme = LocalTheme.current
@@ -552,7 +530,7 @@ private fun SaveFilterDialog(model: InboxViewModel, controls: JSONObject, open: 
     Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { if (!model.busy && !owed) back() }.imePadding().padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             Text(text.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -561,7 +539,7 @@ private fun SaveFilterDialog(model: InboxViewModel, controls: JSONObject, open: 
                 cursorBrush = SolidColor(c.tint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { if (canSave) save() }),
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = text.getString("placeholder") },
                 decorationBox = { inner ->
-                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).border(1.dp, c.border, field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).rnBorder(1.dp, c.border, field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                         if (name.isEmpty()) Text(text.getString("placeholder"), style = rnText(15, 400), color = c.secondaryText)
                         inner()
                     }

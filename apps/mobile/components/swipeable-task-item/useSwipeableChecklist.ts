@@ -5,8 +5,8 @@ import { settleStoreAction } from '../store-action-result';
 
 type UpdateTask = ReturnType<typeof useTaskStore.getState>['updateTask'];
 type ChecklistItem = NonNullable<Task['checklist']>[number];
-// The row's edits by item id, replayed on the list as stored when the save is admitted: a sync save admitted
-// first may have published another device's item, and a list built from the row on screen would drop it.
+
+
 type PendingChecklist = { taskId: string; completed: Map<string, boolean>; added: ChecklistItem[] };
 
 export function useSwipeableChecklist(
@@ -43,9 +43,8 @@ export function useSwipeableChecklist(
         if (!pending) return;
         pendingChecklist.current = null;
         const { taskId, completed, added } = pending;
-        // Deliberately not toasted: this also flushes from the unmount cleanup, and
-        // a toast fired during teardown lands on whatever screen the user moved to.
-        // Logged so a dropped checklist tick is at least diagnosable.
+
+
         void settleStoreAction(() => runStoreCommand(async () => {
             const latestTask = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);
             if (!latestTask || latestTask.deletedAt) return undefined;

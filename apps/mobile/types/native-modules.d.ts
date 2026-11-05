@@ -226,10 +226,11 @@ declare module 'expo-calendar' {
   export function requestRemindersPermissionsAsync(): Promise<{ status: PermissionStatus }>;
   export function getCalendarsAsync(entityType?: string): Promise<Calendar[]>;
   export function getEventsAsync(calendarIds: string[], startDate: Date, endDate: Date): Promise<Event[]>;
+  export function getEventAsync(id: string): Promise<Event>;
   export function getRemindersAsync(calendarIds: (string | null)[], status: string | null, startDate: Date | null, endDate: Date | null): Promise<Reminder[]>;
   export function getSourcesAsync(): Promise<Source[]>;
 
-  // Write APIs
+
   export function createCalendarAsync(details?: Partial<Calendar>): Promise<string>;
   export function updateCalendarAsync(id: string, details?: Partial<Calendar>): Promise<string>;
   export function deleteCalendarAsync(id: string): Promise<void>;

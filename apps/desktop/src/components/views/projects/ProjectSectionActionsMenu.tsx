@@ -24,7 +24,7 @@ type ProjectSectionActionsMenuProps = {
     onToggleNotes: () => void;
     onRename: () => void;
     onDelete: () => void;
-    /** Present only while the project's Flow mode is Per section (#1429). */
+
     flow?: {
         label: string;
         parallelLabel: string;

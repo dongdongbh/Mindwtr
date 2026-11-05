@@ -32,15 +32,7 @@ type UseTaskItemAttachmentsProps = {
     t: (key: string) => string;
 };
 
-// addFileAttachment/addDroppedFileAttachments copy bytes into the managed
-// attachments dir immediately, but the attachment *record* only lives in
-// editor-local state until Save — cancelling (or reopening the editor)
-// discards records added since the last save and orphans their files.
-// Delete only what's provably ours: a `kind: 'file'` attachment whose uri is
-// the attachment-id-named copy inside the managed attachments dir. Never touch `kind: 'link'`
-// (points at the user's own file) or a uri outside that dir (legacy
-// path-referencing attachments). Best-effort — failures are logged, never
-// thrown, so they can't block the reset.
+
 const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<void> => {
     if (isSandboxMode()) return;
     if (!isTauriRuntime()) return;
@@ -51,10 +43,8 @@ const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<vo
         const managedDirPrefix = `${managedDir}/`;
         const { remove } = await import('@tauri-apps/plugin-fs');
         for (const attachment of fileOrphans) {
-            // A bare `startsWith(managedDir)` would also match a sibling
-            // directory that merely shares the prefix (e.g. `attachments-old/`)
-            // — require the path separator so only files actually inside the
-            // managed dir are "provably ours" to delete.
+
+
             const normalizedUri = normalizeAttachmentPathForUrl(attachment.uri);
             if (!normalizedUri.startsWith(managedDirPrefix)) continue;
             const fileName = normalizedUri.slice(managedDirPrefix.length).split(/[?#]/, 1)[0];
@@ -84,18 +74,14 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     const preparedGenerationRef = useRef<number | null>(null);
     const [pendingFileImports, setPendingFileImports] = useState(0);
     const [editAttachments, setEditAttachments] = useState<Attachment[]>(task.attachments || []);
-    // Mirrors editAttachments for resetAttachmentState (a useCallback) to read
-    // the latest value without depending on it — StrictMode double-invokes a
-    // setEditAttachments updater, which would run the orphan-file delete twice.
+
+
     const editAttachmentsRef = useRef(editAttachments);
     editAttachmentsRef.current = editAttachments;
     const baselineAttachmentsRef = useRef<Attachment[]>(task.attachments || []);
     const observedStoreFileGenerationsRef = useRef(new Set<string>());
-    // Once an attachment-bearing task update reaches the optimistic store, both
-    // the old persisted file and the new draft file may still be needed until
-    // SQLite confirms the write. A failed durability barrier deliberately keeps
-    // this guard raised: leaking a managed copy is recoverable; deleting the only
-    // bytes referenced by either snapshot is not.
+
+
     const attachmentSaveAwaitingDurabilityRef = useRef(false);
     const [attachmentError, setAttachmentError] = useState<string | null>(null);
     const [audioAttachment, setAudioAttachment] = useState<Attachment | null>(null);
@@ -122,13 +108,13 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, [t]);
 
     const resolveAudioBlobSource = useCallback(async (attachment: Attachment) => {
-        // Web build: no filesystem, so the bytes come from the self-hosted cloud server or
-        // nowhere. The caller owns and revokes the returned URL either way.
+
+
         if (!isTauriRuntime()) return fetchWebCloudAttachmentBlob(attachment);
         const uri = await resolveAttachmentReadPath(attachment.uri, attachment.id);
         try {
-            // Blob playback is limited to app-managed files (attachments and
-            // audio captures under the managed data dir, portable-aware).
+
+
             const managedDir = await getManagedDataDir();
             const normalizedUri = normalizeAttachmentPathForUrl(uri);
             const normalizedBaseDir = normalizeAttachmentPathForUrl(managedDir);
@@ -199,15 +185,14 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
             if (!isTauriRuntime() && !(attachment.uri || '').trim()) {
                 const blobUrl = await fetchWebCloudAttachmentBlob(attachment);
                 if (!blobUrl) throw new Error(t('attachments.fileNotSupported'));
-                // Browser tabs have no matching React close lifecycle. Retain a small global
-                // window of opened URLs; opening more revokes the oldest instead of leaking
-                // one full attachment blob per click for the rest of the session.
+
+
                 retainOpenedWebAttachmentUrl(blobUrl);
                 window.open(blobUrl, '_blank');
                 return;
             }
-            // The id lets the native side find a file's managed copy, or a
-            // folder link's device-local bookmark on the App Store build.
+
+
             await openAttachmentTarget(attachment.uri, attachment.id);
         } catch (error) {
             if (isUpNoteHref(attachment.uri)) {
@@ -331,8 +316,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
                 }
             }
 
-            // Transcription takes seconds: build tags/contexts on the row as it is when the write is admitted,
-            // so a tag a sync save brought meanwhile is kept.
+
             const projectId = updates.projectId;
             await updateTaskFromLatest(task.id, (latest) => {
                 const { updates: latestUpdates } = buildTaskUpdatesFromSpeechResult(latest, result, currentSettings);
@@ -498,7 +482,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         }
         setAttachmentError(null);
         const generation = importGenerationRef.current;
-        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('../../lib/native-dialog');
         const selected = await open({ multiple: false, directory: false, title: t('attachments.addFile') });
         if (!selected || typeof selected !== 'string' || generation !== importGenerationRef.current) return;
         setPendingFileImports((count) => count + 1);
@@ -578,8 +562,8 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
                         kind: 'link',
                         title: normalized.title,
                         uri: normalized.uri,
-                        // A pointer owns no managed copy: drop the file
-                        // bookkeeping a pre-conversion item carried (#1001).
+
+
                         mimeType: undefined,
                         size: undefined,
                         cloudKey: undefined,
@@ -607,9 +591,8 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, [editingLinkAttachmentId, linkPromptVariant]);
 
     const editLinkAttachment = useCallback((attachment: Attachment) => {
-        // 'file' is allowed on purpose: a pre-#1001-fix "Add link" item was
-        // recorded as a file attachment, and re-saving it here is the explicit
-        // conversion path back to a true pointer.
+
+
         setAttachmentError(null);
         setEditingLinkAttachmentId(attachment.id);
         setLinkPromptVariant('link');
@@ -653,8 +636,8 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         setEditAttachments((currentDraft) => {
             const merged = new Map<string, Attachment>();
             for (const stored of latestStoreAttachments) merged.set(stored.id, stored);
-            // Local edits win for records that existed when the editor opened,
-            // while records that arrived later in the store are retained too.
+
+
             for (const drafted of currentDraft) merged.set(drafted.id, drafted);
             merged.set(attachment.id, attachment);
             return [...merged.values()];

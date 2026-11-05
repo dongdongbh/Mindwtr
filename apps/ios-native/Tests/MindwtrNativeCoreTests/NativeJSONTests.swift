@@ -29,8 +29,8 @@ final class NativeJSONTests: XCTestCase {
         XCTAssertEqual(object.count, 4)
         XCTAssertEqual(object.object(forKey: "é" as NSString) as? String, "composed")
         XCTAssertEqual(object.object(forKey: "e\u{0301}" as NSString) as? String, "decomposed")
-        // A directly bridged NSString literal loses its leading BOM on Apple
-        // platforms; build the lookup from bytes independently of that path.
+
+
         let bomKey = String(decoding: [0xEF, 0xBB, 0xBF, 0x6B, 0x65, 0x79], as: UTF8.self) as NSString
         XCTAssertEqual(bomKey.character(at: 0), 0xFEFF)
         XCTAssertEqual(object.object(forKey: bomKey) as? String, "kept")

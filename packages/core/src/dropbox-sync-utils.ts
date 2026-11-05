@@ -22,9 +22,8 @@ export const parseDropboxApiErrorTag = async (
     signal?: AbortSignal,
 ): Promise<string> => {
     try {
-        // Production responses expose text(); keep the body reader under the caller's
-        // composed timeout/abort signal. The json()-only branch preserves compatibility
-        // with lightweight consumers and test doubles that have no response stream.
+
+
         const payload = typeof response.text === 'function'
             ? JSON.parse(await readResponseText(response as Response, MAX_ERROR_BODY_BYTES, signal)) as DropboxApiErrorPayload
             : await response.json() as DropboxApiErrorPayload;

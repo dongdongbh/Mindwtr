@@ -99,10 +99,8 @@ describe('android-manifest-fixes', () => {
   });
 
   it('enrolls nothing in backup or device transfer', () => {
-    // expo-secure-store's rules include every sharedpref file, so any new one
-    // would be silently enrolled. Ours name a path that does not exist, which
-    // is how an exhaustive include list says "nothing" — an empty rule set
-    // would mean "everything".
+
+
     [BACKUP_RULES_XML, DATA_EXTRACTION_RULES_XML].forEach((xml) => {
       const includes = xml.match(/<include [^>]*\/>/g) ?? [];
       expect(includes.length).toBeGreaterThan(0);
@@ -118,8 +116,8 @@ describe('android-manifest-fixes', () => {
   });
 
   it('keeps the exported Compose PreviewActivity of expo-dev-client out of the app, idempotently', () => {
-    // expo-dev-launcher and expo-dev-menu ship androidx.compose.ui:ui-tooling as an implementation
-    // dependency, so its exported PreviewActivity reached the v1.3.6 release APK.
+
+
     const application = { activity: [{ $: { 'android:name': '.MainActivity' } }] };
 
     removeComposePreviewActivity(application);

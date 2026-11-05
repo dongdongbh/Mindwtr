@@ -41,10 +41,10 @@ jobs:
         shell: bash
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: "22.14.0"
           registry-url: https://registry.npmjs.org/
@@ -60,12 +60,12 @@ jobs:
           fi
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
       - name: Cache Bun dependencies
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -197,9 +197,9 @@ jobs:
           set -euo pipefail
           SERVER_NAME=$(node -p "require('./apps/mcp-server/server.json').name")
           SERVER_VERSION=$(node -p "require('./apps/mcp-server/server.json').version")
-          # Query the exact version, not the search listing: the listing lags a
-          # fresh publish by seconds, which let a retag run race the first tag's
-          # publish and fail with "cannot publish duplicate version" (v1.2.8).
+
+
+
           ENCODED_NAME=$(node -p "encodeURIComponent(process.argv[1])" "$SERVER_NAME")
           if curl -fsS -o /dev/null "https://registry.modelcontextprotocol.io/v0.1/servers/$ENCODED_NAME/versions/$SERVER_VERSION"; then
             EXISTS=true

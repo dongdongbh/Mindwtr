@@ -112,7 +112,7 @@ const plan = (request: SavedSearchWriteRequest, before: SavedSearchWriteScope, p
     return { kind: 'prepared', prepared: { version: 1, request, before, after, preparedAt, result } };
 };
 
-/** Pure validation of a cold journal before opening the native store. */
+
 const readPrepared = (value: unknown): PreparedSavedSearchWrite | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

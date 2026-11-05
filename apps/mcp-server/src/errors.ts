@@ -1,4 +1,4 @@
-export type MindwtrToolErrorCode = 'read_only' | 'not_found' | 'validation_error' | 'internal_error';
+export type MindwtrToolErrorCode = 'read_only' | 'not_found' | 'validation_error' | 'task_version_conflict' | 'idempotency_conflict' | 'idempotency_capacity' | 'internal_error';
 
 export class MindwtrToolError extends Error {
   readonly code: MindwtrToolErrorCode;

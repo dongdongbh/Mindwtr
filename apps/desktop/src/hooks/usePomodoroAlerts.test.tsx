@@ -10,8 +10,7 @@ vi.mock('../lib/pomodoro-alert', () => ({
     sendDesktopPomodoroCompletionAlert: (...args: unknown[]) => sendAlert(...args),
 }));
 
-// Deliberately renders nothing: the point is that the timer alerts from App,
-// with no pomodoro UI mounted anywhere (#528).
+
 function Harness() {
     usePomodoroAlerts();
     return null;
@@ -72,10 +71,8 @@ describe('usePomodoroAlerts', () => {
     });
 
     it('stays quiet for a session that ran out while the app was closed', () => {
-        // The hook mounts with App, before the store hydrates, so the FIRST
-        // lastEvent it ever sees is the one reconciliation replays for a session
-        // that ended possibly hours ago. Its minutes are credited silently and
-        // the alert must stay silent with them (#528).
+
+
         window.localStorage.setItem(
             DESKTOP_POMODORO_SESSION_STORAGE_KEY,
             JSON.stringify(runningSnapshot('focus', 5, Date.now() - 60 * 60 * 1000)),
@@ -126,8 +123,8 @@ describe('usePomodoroAlerts', () => {
     });
 
     it('alerts while task reminders are off', () => {
-        // Task reminders are off on every fresh install, and the completion alert
-        // used to be gated on them, so a timer the user started never alerted (#528).
+
+
         useTaskStore.setState({ settings: { features: { pomodoro: true }, notificationsEnabled: false } });
         startRunningPhase('focus', 2);
         render(<LanguageProvider><Harness /></LanguageProvider>);

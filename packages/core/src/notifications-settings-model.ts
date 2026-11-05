@@ -1,16 +1,6 @@
-/**
- * The mobile Settings › Notifications screen as data, as React Native draws it
- * (apps/mobile/components/settings/notifications-settings-screen.tsx): three cards
- * (task reminders with the exact-alarm notice and Android's persistent capture
- * notification; the weekly review; the daily digest), every row's text and value,
- * which rows are dimmed and disabled, and the write each control makes. The native
- * host contract draws it (native-host-contract-settings.ts); RN's parity test
- * compares RN's screen with it.
- *
- * RN asks for the notification permission before any switch turns on (a toggle's
- * `askPermission`): only a granted permission sends the write. Turning one off
- * always writes.
- */
+
+
+
 import { normalizeDateFormatSetting, resolveDateLocaleTag } from './date';
 import { tFallback } from './i18n';
 import {
@@ -24,7 +14,7 @@ import type { AppSettings } from './types';
 
 type Translate = (key: string) => string;
 
-/** RN's AsyncStorage key for the persistent capture notification ('true' while on; removed when off). */
+
 export const PERSISTENT_CAPTURE_STORAGE_KEY = 'mindwtr:persistentCaptureNotification';
 
 export const NOTIFICATIONS_BOOLEAN_SETTINGS = [
@@ -48,14 +38,14 @@ type Toggle = {
     label: string;
     description: string;
     value: boolean;
-    /** Drawn faded and unpressable (RN's dimmed and disabled). */
+
     disabled: boolean;
     edit: NotificationsSettingsEdit;
-    /** RN asks for the notification permission first; the edit goes only once it is granted. */
+
     askPermission: boolean;
 };
 
-/** A row that opens Android's time picker: send `{ type, value: 'HH:MM' }` with the time picked. */
+
 type TimeRow = { label: string; description: string; value: string; hour: number; minute: number; disabled: boolean; type: typeof NOTIFICATIONS_TIME_SETTINGS[number] };
 
 export type NotificationsSettingsModel = {
@@ -65,9 +55,9 @@ export type NotificationsSettingsModel = {
         startReminders: Toggle;
         dueReminders: Toggle;
         taskDefault: { label: string; description: string; disabled: false; pickerTitle: string; options: { label: string; selected: boolean; edit: NotificationsSettingsEdit }[] };
-        /** RN's exact-alarm row while a notification feature is on; the host shows it only while Android 12+ denies exact alarms. */
+
         exactAlarmNotice: { label: string; description: string; actionLabel: string } | null;
-        /** Android only: the persistent capture notification's switch. */
+
         persistentCapture: Toggle | null;
     };
     weeklyReview: {
@@ -83,7 +73,7 @@ export type NotificationsSettingsModel = {
         evening: Toggle;
         eveningTime: TimeRow;
     };
-    /** What the persistent capture notification shows, and its channel's name (RN's strings). */
+
     persistentCaptureNotification: { title: string; text: string; channelName: string };
 };
 
@@ -92,11 +82,11 @@ export type NotificationsSettingsInput = {
     t: Translate;
     language: string;
     systemLocale: string;
-    /** The persistent capture switch on a device that has one (Android); absent elsewhere. */
+
     persistentCapture?: { enabled: boolean };
 };
 
-/** RN's weekday name for 0 (Sunday) to 6, in the user's date locale. */
+
 export const getNotificationWeekdayLabel = (dayIndex: number, locale: string): string => {
     const base = new Date(2024, 0, 7 + dayIndex);
     return base.toLocaleDateString(locale, { weekday: 'long' });
@@ -107,7 +97,7 @@ const timeParts = (time: string) => {
     return { hour: Number.isFinite(hours) ? hours : 9, minute: Number.isFinite(minutes) ? minutes : 0 };
 };
 
-/** RN's time value: 'HH:MM', two digits each. */
+
 export const NOTIFICATIONS_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function buildNotificationsSettingsModel(input: NotificationsSettingsInput): NotificationsSettingsModel {
@@ -195,12 +185,12 @@ export function buildNotificationsSettingsModel(input: NotificationsSettingsInpu
     };
 }
 
-/** The synced settings write an edit makes (RN's updateSettings); null for the device-local persistent capture switch. */
+
 export const buildNotificationsSettingsUpdate = (edit: NotificationsSettingsEdit): Partial<AppSettings> | null => (
     edit.type === 'persistentCapture' ? null : { [edit.type]: edit.value } as Partial<AppSettings>
 );
 
-/** The stored value already says it: a replay writes nothing. */
+
 export const isNotificationsSettingStored = (settings: AppSettings, edit: NotificationsSettingsEdit): boolean => (
     edit.type !== 'persistentCapture' && (settings as Record<string, unknown>)[edit.type] === edit.value
 );

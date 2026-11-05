@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 
-// Which Inbox-processing presentation this device uses. Deliberately NOT the
-// synced `settings.gtd.inboxProcessing.defaultMode`: that one stays desktop-only
-// because screen size, not preference, decides how many decisions fit at once —
-// same reasoning as the calendar's per-device week-day count.
+
 export const INBOX_PROCESSING_MODE_STORAGE_KEY = 'mindwtr:view:inboxProcessingMode:v1';
 
 export const INBOX_PROCESSING_MODES = ['guided', 'quick'] as const;

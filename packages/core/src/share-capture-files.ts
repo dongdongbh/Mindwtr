@@ -1,8 +1,6 @@
-/**
- * The capture a file share opens, shared by React Native (use-root-layout-external-capture.ts) and the native Android app
- * (native-host-contract prepareSharedFiles): moved from React Native's hook as it was. The host does the IO: it persists a
- * file into its managed attachments folder, deletes one, makes IDs and logs.
- */
+
+
+
 import { validateAttachmentForUpload } from './attachment-validation';
 import type { PersistAttachmentOutcome } from './mobile-attachment-files';
 import type { Attachment, Task } from './types';
@@ -22,7 +20,7 @@ export type ShareIntentFileCaptureResult = {
 
 type ShareLogContext = { scope: string; extra?: Record<string, string> };
 
-/** The host's IO for a file share's capture. */
+
 export type ShareIntentFileCaptureHost = {
     newId: () => string;
     persistAttachmentLocallyDetailed: (attachment: Attachment) => Promise<PersistAttachmentOutcome>;
@@ -39,10 +37,7 @@ const trimSharedValue = (value: string | null | undefined): string => (
 
 const stripFileExtension = (value: string): string => value.replace(/\.[A-Za-z0-9]{1,8}$/, '');
 
-// Shared files (PDFs, images, audio, ...) become copied attachments on the
-// capture draft, mirroring the in-app attach flow: the share-extension file
-// lives in a temporary container, so the bytes must be re-homed into the
-// managed attachments dir before the capture sheet ever sees them.
+
 export async function buildShareIntentFileCaptureParams({
     files,
     shareSubject,
@@ -75,8 +70,8 @@ export async function buildShareIntentFileCaptureParams({
             localStatus: 'available',
         };
         try {
-            // Some providers omit the size; 0 still runs the mime blocklist,
-            // and the post-copy check below enforces the size cap.
+
+
             const validation = await validateAttachmentForUpload(attachment, attachment.size ?? 0);
             if (!validation.valid) {
                 void host.logWarn('Skipped shared file failing attachment validation', {
@@ -87,8 +82,8 @@ export async function buildShareIntentFileCaptureParams({
             }
             const persisted = await host.persistAttachmentLocallyDetailed(attachment);
             if (persisted.status !== 'copied' && persisted.status !== 'already-local') {
-                // A share-container path goes stale as soon as the intent is
-                // consumed, so a failed copy means the file is lost to us.
+
+
                 void host.logWarn('Failed to copy shared file into attachments', {
                     scope: 'share-intent',
                     extra: { status: persisted.status },
@@ -97,8 +92,8 @@ export async function buildShareIntentFileCaptureParams({
             }
             const cached = persisted.attachment;
             if (typeof attachment.size !== 'number' && typeof cached.size === 'number') {
-                // The copy revealed the real size of a sizeless share; drop the
-                // bytes again if they exceed the attachment cap.
+
+
                 const sizeValidation = await validateAttachmentForUpload(cached, cached.size);
                 if (!sizeValidation.valid) {
                     void host.deleteFile(cached.uri).catch(() => undefined);
@@ -122,8 +117,8 @@ export async function buildShareIntentFileCaptureParams({
     const text = trimSharedValue(shareText);
     const title = subject || text || stripFileExtension(attachments[0].title);
     const props: Partial<Task> = { attachments };
-    // Only a real email subject earns a description; plain file shares keep
-    // their long-standing shape (title only, no body).
+
+
     if (subject && text) {
         props.description = text;
     }

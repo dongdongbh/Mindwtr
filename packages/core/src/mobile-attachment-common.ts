@@ -1,15 +1,6 @@
-// The mobile attachment passes' shared layer: sealing and opening attachment bytes when sync
-// encryption is on (#1056), staging and installing downloads through the native installer,
-// immutable upload snapshots, the adapter onto core's transfer lifecycle, the bespoke Cloud and
-// Dropbox content checks, the local-migration and remote-presence pre-passes, abort-aware
-// delays and the streamed WebDAV PUT. It moved here from React Native's
-// `apps/mobile/lib/attachment-sync-backends/common.ts` so the native apps run the same rules;
-// each host binds it to its file IO, crypto, native installer, timers and upload tasks.
-//
-// Data safety: local attachment files stay plaintext; only what leaves the device is sealed.
-// Downloads land in a unique scratch file and reach the real path only through the native
-// generation-bound installer; once that installer starts, the scratch file is never deleted
-// here, since a conflict can name it as the only preserved copy of a generation.
+
+
+
 import type { Attachment } from './types';
 import { applyAttachmentContentStat, bumpAttachmentContentRevision, checkAttachmentContentChange, isStaleCopyOfRemoteWinner, logUninstalledRemoteWinner } from './attachment-change-detection';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
@@ -38,8 +29,7 @@ import type { MobileSyncEncryptionPort } from './mobile-sync-service';
 const DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
 const WEBDAV_STREAM_UPLOAD_TIMEOUT_MS = 30_000;
 
-/** One request per attachment is the fallback shape, so the pass is bounded. See the
- *  ceiling note on `repairMissingRemoteAttachments`'s `maxChecks` in core. */
+
 export const CLOUD_ATTACHMENT_PRESENCE_MAX_CHECKS_PER_PASS = 200;
 
 const encodeBase64Utf8 = (value: string): string => {
@@ -126,9 +116,7 @@ const snapshotsMatch = (
 const isInstallerUnavailableError = (error: unknown): boolean => error instanceof Error
   && (error as Error & { code?: unknown }).code === 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE';
 
-/** Fallback where the native installer cannot exist (React Native: Expo Go). JavaScript can
- * neither create without replacement nor replace a checked generation atomically, so every
- * installation fails closed with the stage preserved. */
+
 const installStagedDownloadWithoutNativeInstaller = (
   stagedPath: string,
 ): AttachmentFileInstallResult => ({ status: 'conflict', preservedPath: stagedPath });
@@ -150,7 +138,7 @@ export type PreparedPlaintextDownloadInput = Readonly<{
   size: number;
 }>;
 
-/** A private live native receipt handle, never a file path or publication result. */
+
 export type PreparedPlaintextDownloadSource = Readonly<{
   kind: 'prepared-source';
   sourceToken: string;
@@ -179,8 +167,7 @@ const isPreparedPlaintextDownloadSource = (value: unknown): value is PreparedPla
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(source.sourceToken);
 };
 
-/** A present expectation was hashed from attachment.uri, so publication must
- * CAS that exact path even when remote metadata now suggests another suffix. */
+
 export const resolveAttachmentDownloadTargetPath = (
   attachment: Attachment,
   fallbackTargetPath: string,
@@ -217,17 +204,16 @@ export type BespokeAttachmentRemoteWinnerCheck =
 
 export type MobileAttachmentUploadProgressEvent = { totalBytesSent?: number; totalBytesExpectedToSend?: number };
 
-/** A native streamed upload in flight. `uploadAsync` resolves with the HTTP result
- *  (`{ status, body }`); `cancelAsync` stops it. */
+
 export type MobileAttachmentUploadTask = {
   uploadAsync(): Promise<unknown>;
   cancelAsync?(): Promise<unknown>;
 };
 
-/** Native streamed PUTs of a local file (React Native: expo-file-system's upload task). */
+
 export type MobileAttachmentUploadPort = {
-  /** Null when this platform has no cancellable streamed upload; the caller then falls back
-   *  to a buffered PUT. */
+
+
   createUploadTask(
     url: string,
     fileUri: string,
@@ -242,14 +228,14 @@ export type MobileAttachmentCommonHost = {
   crypto: SyncCryptoPrimitives;
   encryption: Pick<MobileSyncEncryptionPort, 'logSyncEncryptionEvent'>;
   installer: Pick<MobileAttachmentInstaller, 'installAttachmentFileGeneration'>;
-  /** True where a missing native installer is expected (React Native: Expo Go). Installs
-   *  there fail closed as a conflict; anywhere else a missing installer is a packaging bug. */
+
+
   installerMayBeMissing(): boolean;
-  /** True while the platform has JavaScript timers paused (Android, in the background). */
+
   timersPaused(): boolean;
   uploads: MobileAttachmentUploadPort;
-  /** Selected preparation only: the adapter owns bounded plaintext and its live receipt.
-   * Ordinary installation never calls this port. */
+
+
   preparePlaintextDownload?: (
     input: PreparedPlaintextDownloadInput,
     bytes: Uint8Array,
@@ -263,29 +249,12 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
   let uploadSnapshotSequence = 0;
   let downloadStageSequence = 0;
 
-  /**
-   * The attachment byte seams (`sealAttachmentBytesForUpload`, `openAttachmentBytesFromDownload`)
-   * get their own `remote-read` line, same builder and event as the document-read seams in the
-   * sync service, through the same shared `logSyncEncryptionEvent` emitter. Not forced — rides
-   * the Debug logging switch like `state`/`remote-read` everywhere else.
-   */
+
   const logAttachmentByteRemoteRead = (input: SyncEncryptionRemoteReadLogInput): void => {
     void host.encryption.logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.remoteRead, buildSyncEncryptionRemoteReadExtra(input));
   };
 
-  /**
-   * Attachment bytes at the storage seam (#1056). Local attachment files always stay
-   * plaintext — only what leaves the device is sealed — and attachments keep their exact
-   * remote names (`cloudKey` is identity-keyed and immutable-once-uploaded), so the only
-   * change is the byte content.
-   *
-   * `null` material is the encryption-off path and returns the input untouched.
-   *
-   * `artifact` (review finding S1) is the caller's `cloudKey`, passed straight through to
-   * `buildSyncEncryptionRemoteReadExtra`, which reduces any string to its leaf name via
-   * `syncEncryptionArtifactLabel`. Optional: a caller with no identity yet still gets a valid
-   * line, just with the absent marker.
-   */
+
   const sealAttachmentBytesForUpload = async (
     bytes: Uint8Array,
     material: SyncKeyMaterial | null | undefined,
@@ -299,23 +268,15 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     return bytes;
   };
 
-  /**
-   * Inverse of the above. A remote attachment that is still plaintext is passed through:
-   * an interrupted enable-transition legitimately leaves some attachments unmigrated, and
-   * `validateAttachmentHash` downstream is the backstop for content that is neither. Bytes
-   * that DO carry the MWENC1 magic must decrypt or fail closed — a broken container is
-   * never quietly treated as file content.
-   *
-   * `artifact`: see `sealAttachmentBytesForUpload` above.
-   */
+
   const openAttachmentBytesFromDownload = async (
     bytes: Uint8Array,
     material: SyncKeyMaterial | null | undefined,
     artifact?: string | null,
   ): Promise<Uint8Array> => {
     if (!material) {
-      // No key here, yet the location holds ciphertext: an encryption change was cut off there. Its bytes are never this
-      // attachment's content, and this device must not write beside them (the cycle pauses the location).
+
+
       if (inspectSyncArtifact(bytes).kind !== 'plaintext') {
         logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'encrypted', decision: 'no-key' });
         throw new SyncEncryptionPartlyEncryptedError();
@@ -371,9 +332,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     };
   };
 
-  /** Native-copy a File/SAF generation into app-private scratch. The remote size is
-   * rejected before copying whenever its provider reports one; the owned scratch
-   * is always statted afterward, so unknown SAF metadata never authorizes a JS read. */
+
   const copyAttachmentDownloadToStage = async (
     attachment: Attachment,
     attachmentsDir: string,
@@ -410,9 +369,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     }
   };
 
-  /** Bounded fallback for encrypted or unverifiable File Sync generations. Reads
-   * fixed-size native chunks from an already-owned scratch file, never reading
-   * the entire provider document in one JS allocation. */
+
   const readAttachmentDownloadStageBytes = async (
     stagedPath: string,
   ): Promise<Uint8Array> => {
@@ -441,12 +398,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     return bytes;
   };
 
-  /**
-   * Validate the exact app-private scratch file, then hand publication to the
-   * native generation-bound installer. Once native installation starts, JS must
-   * never delete the scratch path: a conflict or interrupted journal may name it
-   * as the only preserved copy of one generation.
-   */
+
   const installStagedAttachmentDownload = async ({
     attachment,
     stagedPath,
@@ -485,10 +437,8 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
           actualStagedHash,
         );
       } catch (error) {
-        // Where the native installer cannot exist, JavaScript cannot safely publish either
-        // expectation, so return a recoverable conflict there; any other binary keeps
-        // failing loudly because its missing installer is a packaging bug, not something
-        // to paper over.
+
+
         if (!isInstallerUnavailableError(error) || !host.installerMayBeMissing()) throw error;
         nativeInstallStarted = false;
         result = installStagedDownloadWithoutNativeInstaller(stagedPath);
@@ -517,9 +467,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     }
   };
 
-  /** Write plaintext download bytes to a unique managed scratch file and install
-   * that exact generation. A false result is a local-generation conflict; the
-   * native result owns every preserved path, so no JS cleanup occurs. */
+
   const installAttachmentDownloadBytes = async (
     attachment: Attachment,
     attachmentsDir: string,
@@ -550,8 +498,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     });
   };
 
-  /** Preparation never creates JS scratch or acknowledges installed availability.
-   * A rejected/canceled reply leaves source ownership with the adapter. */
+
   const prepareAttachmentDownloadBytes = preparePlaintextDownload ? async (
     attachment: Attachment,
     targetURI: string,
@@ -609,7 +556,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       if (stagedStat && maxBufferedUploadBytes !== undefined) {
         assertBufferedAttachmentUploadSize(stagedStat.size, maxBufferedUploadBytes);
       }
-      // A host that hashes files itself (fs.sha256) hashes the copy where it lies; else its bytes are read and hashed here.
+
       const hostHashed = Boolean(fs.sha256 && stagedStat);
       const [staged, sourceStatAfter] = await Promise.all([
         hostHashed
@@ -653,11 +600,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     }
   };
 
-  /**
-   * Copy the live attachment into an app-private file before hashing or uploading
-   * it. Native streaming transports and every retry then read the same immutable
-   * source instead of reopening a URI that another app may still be editing.
-   */
+
   const createMobileAttachmentUploadSnapshot: NonNullable<
     AttachmentTransferLifecycleOptions['createUploadSnapshot']
   > = async (sourcePath, attachment) => createMobileAttachmentUploadSnapshotWithLimit(
@@ -665,17 +608,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     attachment,
   );
 
-  /**
-   * Thin adapter over core's shared reconciliation loop (`runAttachmentTransferLifecycle`),
-   * mirroring desktop's `syncBasicRemoteAttachments` (apps/desktop/src/lib/sync-attachments.ts).
-   * The one platform-specific override: the mobile file API needs the uri verbatim (including
-   * its `file://`/`content://` scheme) — unlike Tauri's native absolute paths, there's nothing
-   * to strip, so `resolveLocalPath` is the identity function rather than the core default
-   * (which strips `file://`).
-   *
-   * Like core's lifecycle it never writes to the attachments it is given: changes come back as
-   * patches for `applyAttachmentPatches` to fold into a fresh document.
-   */
+
   async function runMobileAttachmentLifecycle(
     options: Omit<
       AttachmentTransferLifecycleOptions,
@@ -696,12 +629,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     });
   }
 
-  /**
-   * Cloud and Dropbox keep bespoke transfer loops for their batch/credential semantics.
-   * Give those loops the same prepare-side content candidate behavior as the shared
-   * lifecycle: a confirmed local edit updates only local metadata and is uploaded only
-   * if that identity survives merge.
-   */
+
   const prepareBespokeAttachmentContentCandidate = async (
     attachment: Attachment,
     localPath: string,
@@ -746,8 +674,8 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     }
     if (!check.hash) return false;
     if (isStaleCopyOfRemoteWinner(attachment, check.hash)) {
-      // Exactly the old file of a remote version the merge chose but did not download: never this device's own edit (it would
-      // outrank the winner and upload the old bytes over it). The post-merge remote-winner check installs the winner.
+
+
       logUninstalledRemoteWinner(attachment);
       return false;
     }
@@ -757,8 +685,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     return true;
   };
 
-  /** Fail closed if a pending winner's on-disk bytes changed after the merge candidate
-   * was recorded. A later prepare pass will record the newer identity and retry. */
+
   const pendingBespokeAttachmentContentStillMatches = async (
     attachment: Attachment,
     localPath: string,
@@ -777,16 +704,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     return true;
   };
 
-  /**
-   * Post-merge companion to `prepareBespokeAttachmentContentCandidate` for the
-   * Cloud and Dropbox adapters that cannot use core's generic transfer loop.
-   *
-   * The merged attachment already names the winning remote content generation.
-   * A hash-confirmed mismatch therefore needs a generation-bound download, but
-   * only while the live file still has the exact stat that was hashed. This is
-   * the same hash + immediate re-stat rule used by core's lifecycle before its
-   * `{ kind: 'present' }` download callback.
-   */
+
   const checkBespokeAttachmentRemoteWinner = async (
     attachment: Attachment,
     localPath: string,
@@ -844,17 +762,12 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     };
   };
 
-  /**
-   * Record a downloaded generation as the local baseline only if the path still
-   * contains the exact remote bytes and remains stable across hash + stat. A
-   * writer that edits immediately after native publication is left for the next
-   * prepare pass instead of being mislabeled as the remote baseline.
-   */
+
   const refreshBespokeAttachmentDownloadedContentStat = async (
     attachment: Attachment,
     localPath: string,
   ): Promise<boolean> => {
-    // Called right after an install: the disk no longer holds an older marked copy, whether or not a stat is recorded below.
+
     attachment.staleContentHash = undefined;
     const expectedRemoteHash = attachment.fileHash?.trim().toLowerCase();
     if (!isSha256Hex(expectedRemoteHash)) return false;
@@ -874,20 +787,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     return true;
   };
 
-  /**
-   * Pre-pass run before the reconciliation loop (or a backend's own bespoke loop): migrates any
-   * attachment whose uri still points outside the managed attachments dir — legacy Android
-   * content:// / SAF references — into it, capped per call by
-   * `createAttachmentLocalMigrationLimiter`. An attachment that hits the cap is removed from the
-   * map entirely, so nothing downstream (lifecycle or bespoke loop) touches it again this round.
-   * A migration attempt that fails (rather than being capped) leaves the attachment in the map
-   * with its uri unchanged, so the caller still tries to upload/copy straight from wherever the
-   * file currently lives.
-   *
-   * Pure with respect to the document: the migration writes to a per-attachment working copy,
-   * which is returned as a patch AND put back into `attachmentsById` so the lifecycle (or a
-   * bespoke loop) that runs next reads the migrated uri.
-   */
+
   const migrateAttachmentsLocallyBeforeSync = async (
     attachmentsById: Map<string, Attachment>,
     signal?: AbortSignal,
@@ -925,27 +825,12 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     return patches;
   };
 
-  /**
-   * #1119 follow-up: the "does the sync location still hold this blob?" pre-pass for Dropbox
-   * and the self-hosted cloud, mirroring desktop's `reconcileRemoteAttachmentPresence` in
-   * apps/desktop/src/lib/sync-attachment-backends.ts so the two apps repair the same way.
-   * WebDAV keeps its own inline loop on both platforms, because that walk also prunes
-   * unreadable attachments and clears download backoffs.
-   *
-   * Only an attachment this device can actually re-upload is eligible — `canUploadAttachmentFrom`
-   * plus readable local bytes — because clearing `cloudKey` is a request to upload again, and a
-   * device with no readable copy would just drop the pointer to the blob. The rest of the
-   * safety rule (a definitive not-found and nothing else may clear anything) lives in core.
-   *
-   * Returns whether the proof ran to the end: `false` means the caller must not advance the
-   * once-a-day stamp, so the next cycle retries.
-   */
+
   const reconcileRemoteAttachmentPresence = async (options: {
     label: string;
     attachmentsById: Map<string, Attachment>;
-    /** Opens the pass. Called only once there is something to ask about, so a library with
-     *  nothing to prove costs no request at all; `null` means the remote could not be asked
-     *  (a listing that failed), which proves nothing and clears nothing. */
+
+
     createProbe: () => Promise<((attachment: Attachment) => Promise<boolean | null>) | null>;
     recordPatch: (attachment: Attachment) => void;
     maxChecks?: number;
@@ -983,9 +868,8 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
   const waitForAttachmentSyncDelay = async (ms: number, signal?: AbortSignal): Promise<void> => {
     assertAttachmentSyncNotAborted(signal);
     if (ms <= 0) return;
-    // Android pauses every JS timer while the app is backgrounded, and the background sync
-    // task runs exactly then. A bare setTimeout here never fires, so the background job
-    // would hold its wakelock until the OS kills it (#1001-class drain).
+
+
     if (host.timersPaused()) return;
     if (!signal) {
       await new Promise((resolve) => setTimeout(resolve, ms));
@@ -1055,17 +939,14 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
           () => { cancellationState = { state: 'confirmed' }; },
           (error) => { cancellationState = { state: 'failed', error }; },
         );
-        // Do not reject until the native request is terminal. Otherwise the retry/finally
-        // path can release the remote mutation fence while the old PUT is still live.
+
+
       };
       onAbort = () => beginCancellation(createUploadAbortError(signal));
 
       signal?.addEventListener('abort', onAbort, { once: true });
-      // While Android has JS timers paused (background), this setTimeout would never fire,
-      // so don't arm it. Nothing in JavaScript bounds a stalled background upload after
-      // this: the host's request deadline only covers its fetch, and the job-level deadline
-      // timer is itself a paused setTimeout. The only remaining bound is the OS job
-      // allowance; a native-backed AbortSignal for uploads is the open follow-up.
+
+
       if (timeoutMs !== undefined && !host.timersPaused()) {
         timeoutId = setTimeout(() => {
           beginCancellation(new Error(timeoutMessage));
@@ -1116,16 +997,13 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     expectedEtag: string | null | undefined = undefined,
     timeoutMs = WEBDAV_STREAM_UPLOAD_TIMEOUT_MS,
   ): Promise<boolean> => {
-    // Before anything is read or sent: this uploader bypasses core's transports, so it is
-    // the only place the cleartext guard can run for it (SEC-10a).
+
+
     assertMobileWebdavConnection(url, allowInsecureHttp);
     assertUploadNotAborted(signal);
     if (!fileUri.startsWith('file://')) return false;
-    // Only a create-only PUT may stream. The native uploader follows a redirect by itself and
-    // can turn the PUT into a GET (a 303 on iOS, a 301-303 on Android). With `If-None-Match: *`
-    // that GET fails loudly (304 or 404); with `If-Match`, or with no condition, it answers 200
-    // from the old file and would read as a finished overwrite. Overwrites take the buffered
-    // PUT, whose redirect core refuses.
+
+
     if (expectedEtag !== null) return false;
 
     const authHeader = buildBasicAuthHeader(username, password);
@@ -1135,8 +1013,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     };
     if (authHeader) headers.Authorization = authHeader;
 
-    // A platform without a cancellable upload task falls back to the bounded byte PUT
-    // rather than start an upload that can outlive the remote mutation lease.
+
     const task = host.uploads.createUploadTask(
       url,
       fileUri,
@@ -1164,7 +1041,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     installStagedAttachmentDownload,
     installAttachmentDownloadBytes,
     ...(prepareAttachmentDownloadBytes ? { prepareAttachmentDownloadBytes } : {}),
-    /** CloudKit's native fetch must receive scratch, never the canonical target. */
+
     createAttachmentDownloadStagePath: buildAttachmentDownloadStagePath,
     createMobileAttachmentUploadSnapshot,
     createMobileAttachmentUploadSnapshotWithLimit,

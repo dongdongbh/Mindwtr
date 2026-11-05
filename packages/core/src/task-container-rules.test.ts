@@ -125,9 +125,7 @@ describe('buildTaskMovePatch', () => {
         });
     });
 
-    // A patch key that is absent means "leave this field alone" to the store
-    // (buildTaskContainerMovePatch tests hasOwnProperty), so a Move that clears a
-    // container has to send the key with an undefined value, not omit it.
+
     it('always carries all three container keys', () => {
         for (const destination of [
             { kind: 'none' },

@@ -169,8 +169,8 @@ describe('prepared native task promotion', () => {
         const originalArea = area('work', origin === 'deleted' ? { deletedAt: at } : {});
         const { host, saves } = await open({ tasks: [task({ areaId: 'work' })],
             areas: origin === 'deleted' ? [originalArea] : [] });
-        // Load normalization repairs dangling references. A later imported or
-        // synced saved row can still carry the inherited reference at prepare.
+
+
         const source = { ...useTaskStore.getState()._allTasks[0], areaId: 'work' };
         useTaskStore.setState({ _allTasks: [source], _tasksById: new Map([[source.id, source]]) });
         const input = request();

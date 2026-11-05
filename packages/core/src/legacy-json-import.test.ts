@@ -27,7 +27,7 @@ const data = (tasks: Task[]): AppData => ({ tasks, projects: [], sections: [], a
 const state = (overrides: Partial<LegacyJsonImportState> = {}): LegacyJsonImportState => ({
     jsonAhead: false, reconciled: true, backupVersion: '2', backupJson: null, ...overrides,
 });
-// SQLite holds `kept` at rev 2; the backup holds an older `kept` and a task SQLite never took.
+
 const sqlite = data([task('kept', 2)]);
 const backupJson = JSON.stringify(data([task('kept', 1, { title: 'stale' }), task('json-only', 1)]));
 const titles = (appData?: AppData) => appData?.tasks.map((item) => `${item.id}:${item.title}`).sort();
@@ -39,6 +39,19 @@ describe('native upgrade source gate', () => {
             JSON.stringify({ ...data([]), tasks: [{ id: 'broken', title: 'Missing required data' }] })]) {
             expect(() => assertNativeLegacyBackupSafe({ jsonAhead: true, backupJson })).toThrow('recovery');
         }
+    });
+
+
+    it('allows a copy whose only faults the SQLite repair fixes, and still refuses what it cannot fix', () => {
+        const repairable = {
+            ...data([task('untitled', 1, { title: null as unknown as string }), task('kept', 1, { sectionId: 'orphan' })]),
+            tasks: [null, task('untitled', 1, { title: null as unknown as string }), task('kept', 1, { sectionId: 'orphan' })],
+            sections: [{ id: 'orphan', projectId: 'gone', title: 'S', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }],
+        };
+        expect(() => assertNativeLegacyBackupSafe({ jsonAhead: true, backupJson: JSON.stringify(repairable) })).not.toThrow();
+
+        const duplicate = { ...repairable, tasks: [...repairable.tasks, task('kept', 2)] };
+        expect(() => assertNativeLegacyBackupSafe({ jsonAhead: true, backupJson: JSON.stringify(duplicate) })).toThrow('recovery');
     });
 
     it('allows valid raw RN backup data without changing fields or legacy import policy', () => {
@@ -59,7 +72,7 @@ describe('planLegacyJsonImport', () => {
         const plan = planLegacyJsonImport(state({ jsonAhead: true, backupJson }), sqlite, true);
         expect(plan).toMatchObject({ outcome: 'imported', path: 'json-ahead', clearJsonAhead: true, setReconciled: false });
         expect(titles(plan.merged)).toEqual(['json-only:json-only', 'kept:kept']);
-        // RN's tasksFromBackup also counts rows whose tie resolved to the backup copy.
+
         expect(plan.counts).toMatchObject({ backupTasks: 2, sqliteTasks: 1, mergedTasks: 2 });
     });
 
@@ -100,6 +113,39 @@ describe('planLegacyJsonImport', () => {
             .toEqual({ outcome: 'abandoned', path: 'migrate', reason: 'backup-corrupt', clearJsonAhead: false, setReconciled: false });
         expect(planLegacyJsonImport(state({ reconciled: false }), data([]), false))
             .toEqual({ outcome: 'none', clearJsonAhead: false, setReconciled: false });
+    });
+
+
+    it('keeps the copy\'s device-local settings on the first move and on the json-ahead path', () => {
+        const settings = { theme: 'dark', notificationsEnabled: false, syncPreferences: { appearance: false }, savedFilters: [null] };
+        const copy = JSON.stringify({ ...data([task('a', 1)]), settings });
+        const kept = { theme: 'dark', notificationsEnabled: false, syncPreferences: { appearance: false }, savedFilters: [] };
+        for (const input of [state({ reconciled: false, backupJson: copy }), state({ jsonAhead: true, backupJson: copy })]) {
+            expect(planLegacyJsonImport(input, data([]), false).merged?.settings).toEqual(expect.objectContaining(kept));
+        }
+
+        const during = planLegacyJsonImport(state({ reconciled: false, backupJson: copy }), { ...data([]), settings: { language: 'de' } }, false);
+        expect(during.merged?.settings).toEqual(expect.objectContaining({ notificationsEnabled: false, language: 'de' }));
+    });
+
+    it('keeps SQLite\'s own settings on the json-ahead path when SQLite already has some', () => {
+        const copy = JSON.stringify({ ...data([task('a', 1)]), settings: { notificationsEnabled: false, dailyDigestMorningEnabled: true } });
+        const plan = planLegacyJsonImport(state({ jsonAhead: true, backupJson: copy }),
+            { ...data([]), settings: { notificationsEnabled: true } }, true);
+        expect(plan.merged?.settings.notificationsEnabled).toBe(true);
+
+        expect(plan.merged?.settings.dailyDigestMorningEnabled).toBeUndefined();
+    });
+
+    it('repairs the copy before the merge: titles from SQLite first, no task dropped, counts reported', () => {
+        const copy = JSON.stringify({
+            ...data([task('known', 1, { title: null as unknown as string }), task('new', 1, { title: null as unknown as string })]),
+            tasks: [null, task('known', 1, { title: null as unknown as string }), task('new', 1, { title: null as unknown as string })],
+        });
+        const plan = planLegacyJsonImport(state({ reconciled: false, backupJson: copy }), data([task('known', 1, { title: 'Real title' })]), true);
+
+        expect(titles(plan.merged)).toEqual(['known:Real title', 'new:Untitled']);
+        expect(plan.repairs).toMatchObject({ nullEntries: 1, untitledTasks: 2 });
     });
 
     it('normalizes a partial backup the way RN parses it', () => {
@@ -170,8 +216,8 @@ describe.runIf(DatabaseSync)('legacy JSON import through SqliteAdapter', () => {
         await adapter.saveData(plan.merged!);
         const saved = await adapter.getData();
         expect(legacyImportMismatch(plan.merged!, saved)).toBeNull();
-        // A second plan over the saved import is already saved: the host skips its write. (RN stamps
-        // every entity; one without timestamps would get fresh merge timestamps on each plan.)
+
+
         expect(legacyImportMismatch(planLegacyJsonImport({ ...input, jsonAhead: true }, saved, true).merged!, saved)).toBeNull();
 
         const lost = structuredClone(saved);
@@ -180,9 +226,37 @@ describe.runIf(DatabaseSync)('legacy JSON import through SqliteAdapter', () => {
         expect(legacyImportMismatch(plan.merged!, lost)).toBe('tasks');
         expect(legacyImportMismatch(plan.merged!, { ...saved, people: [] })).toBe('people');
         expect(legacyImportMismatch(plan.merged!, { ...saved, settings: { ...saved.settings, theme: 'light' } })).toBe('settings');
-        // Null is missing, and an absent saved-filter list is an empty one.
+
         const bare = { ...saved, settings: { ...saved.settings, savedFilters: undefined, language: null } } as unknown as AppData;
         expect(legacyImportMismatch({ ...bare, settings: { ...bare.settings, savedFilters: [] } }, bare)).toBeNull();
+    });
+
+    it('saves a repaired copy SQLite would reject, confirms it, and re-plans to no change', async () => {
+        const at = '2026-09-20T10:00:00.000Z';
+        const copy = {
+            tasks: [null, { id: 't1', title: null, status: 'inbox', tags: [], contexts: [], sectionId: 's-orphan', rev: 2, revBy: 'rn', createdAt: at, updatedAt: at }],
+            projects: [{ id: 'p1', title: null, status: 'active', color: '#94a3b8', rev: 1, revBy: 'rn', createdAt: at, updatedAt: at }],
+            sections: [{ id: 's-orphan', projectId: 'gone', title: 'S', rev: 1, revBy: 'rn', createdAt: at, updatedAt: at }],
+            areas: [{ id: 'a1', name: null, order: 0, rev: 1, revBy: 'rn', createdAt: at, updatedAt: at }],
+            people: [], settings: { notificationsEnabled: false },
+        };
+        const db = new DatabaseSync!(':memory:');
+        db.exec('PRAGMA foreign_keys = ON');
+        const sqliteClient = client(db);
+        const adapter = new SqliteAdapter(sqliteClient);
+        await adapter.ensureSchema();
+        const input = state({ reconciled: false, backupJson: JSON.stringify(copy) });
+
+        const plan = planLegacyJsonImport(input, await adapter.getData(), false);
+        await adapter.saveData(plan.merged!);
+        const saved = await adapter.getData();
+
+        expect(legacyImportMismatch(plan.merged!, saved)).toBeNull();
+        expect(saved.tasks.map((item) => [item.id, item.title, item.sectionId ?? null])).toEqual([['t1', 'Untitled', null]]);
+        expect(saved.projects[0]?.title).toBe('Untitled');
+        expect(saved.areas[0]?.name).toBe('Untitled');
+        expect(saved.settings.notificationsEnabled).toBe(false);
+        expect(legacyImportMismatch(planLegacyJsonImport({ ...input, jsonAhead: true }, saved, true).merged!, saved)).toBeNull();
     });
 
     it('counts every RN table to tell empty SQLite from data', async () => {

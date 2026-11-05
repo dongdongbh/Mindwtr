@@ -11,13 +11,13 @@ import {
     inspectSyncArtifact,
     type SyncCryptoKdfParams,
     type SyncCryptoPrimitives,
+    syncPassphraseBytes,
 } from './sync-crypto';
 import vectors from './__fixtures__/sync-crypto/vectors.json';
 import primitiveVectors from './__fixtures__/sync-crypto/primitive-vectors.json';
 import { computeSha256Hex } from './attachment-hash';
 
-// Cheap params for tests that don't care about the real KDF cost — the pinned production default
-// (SYNC_CRYPTO_DEFAULT_KDF_PARAMS) is exercised by the 'small-json-default-params' fixture vector.
+
 const LIGHT: SyncCryptoKdfParams = { mKib: 64, t: 1, p: 1 };
 
 function b64ToBytes(b64: string): Uint8Array {
@@ -90,7 +90,7 @@ describe('sync-crypto MWENC1 format', () => {
         const encrypted = b64ToBytes(vector.encryptedB64);
 
         const tampered = new Uint8Array(encrypted);
-        tampered[20] ^= 0xff; // inside the KDF salt field, part of the 54-byte AAD
+        tampered[20] ^= 0xff;
 
         await expect(decryptSyncArtifact(tampered, material.key)).rejects.toThrow(SyncCryptoAuthError);
     });
@@ -143,9 +143,9 @@ describe('sync-crypto MWENC1 format', () => {
 
     it('derives the same key from NFC-composed and decomposed forms of the same passphrase', async () => {
         const salt = new Uint8Array(16).fill(7);
-        const composedPassphrase = 'caf\u00e9'; // single precomposed e-acute codepoint
-        const decomposedPassphrase = 'cafe\u0301'; // plain e + combining acute accent (U+0301)
-        expect(composedPassphrase).not.toBe(decomposedPassphrase); // sanity: the raw strings really do differ
+        const composedPassphrase = 'caf\u00e9';
+        const decomposedPassphrase = 'cafe\u0301';
+        expect(composedPassphrase).not.toBe(decomposedPassphrase);
         const composed = await deriveSyncKeyMaterial(composedPassphrase, salt, LIGHT);
         const decomposed = await deriveSyncKeyMaterial(decomposedPassphrase, salt, LIGHT);
         expect(decomposed.key).toEqual(composed.key);
@@ -173,7 +173,7 @@ describe('sync-crypto MWENC1 format', () => {
 
     it('wraps out-of-range Argon2id params as SyncCryptoUnsupportedError, not a raw Error', async () => {
         const salt = new Uint8Array(16).fill(1);
-        // m below 8*p is out of Argon2's valid range (RFC 9106) -- @noble/hashes throws a plain Error.
+
         await expect(deriveSyncKeyMaterial('x', salt, { mKib: 4, t: 1, p: 1 })).rejects.toThrow(
             SyncCryptoUnsupportedError,
         );
@@ -184,8 +184,7 @@ describe('sync-crypto MWENC1 format', () => {
         const material = await deriveSyncKeyMaterial('x', salt, LIGHT);
         const plaintext = new TextEncoder().encode('x');
 
-        // p=256 would wrap to 0 mod 256 when written into the header's single p byte, producing a
-        // file whose recorded params can never reproduce the key they were derived with.
+
         await expect(
             encryptSyncArtifact(plaintext, { ...material, params: { mKib: 64, t: 1, p: 256 } }),
         ).rejects.toThrow(SyncCryptoUnsupportedError);
@@ -212,20 +211,20 @@ describe('sync-crypto MWENC1 format', () => {
         const first = await encryptSyncArtifact(plaintext, material, countingPrims);
         const second = await encryptSyncArtifact(plaintext, material, countingPrims);
 
-        expect(randomBytesCalls).toBe(2); // exactly once per encrypt call, never hoisted or reused
-        expect(first.slice(34, 46)).not.toEqual(second.slice(34, 46)); // nonces differ
-        expect(first).not.toEqual(second); // GCM nonce reuse would otherwise be silent
+        expect(randomBytesCalls).toBe(2);
+        expect(first.slice(34, 46)).not.toEqual(second.slice(34, 46));
+        expect(first).not.toEqual(second);
     });
 
     describe('KDF cost ceiling on the read path', () => {
-        // A minimal, otherwise-valid 54-byte header with no ciphertext -- enough to exercise
-        // parseHeader's cost-ceiling check without needing a real fixture.
+
+
         function hostileHeader(overrides: Partial<SyncCryptoKdfParams>): Uint8Array {
             const header = new Uint8Array(54);
             header.set(new TextEncoder().encode('MWENC1'), 0);
-            header[6] = 0x01; // format_version
-            header[7] = 0x01; // kdf_id
-            header[17] = 0x01; // cipher_id
+            header[6] = 0x01;
+            header[7] = 0x01;
+            header[17] = 0x01;
             const view = new DataView(header.buffer);
             view.setUint32(8, overrides.mKib ?? 64, true);
             view.setUint32(12, overrides.t ?? 1, true);
@@ -261,8 +260,7 @@ describe('sync-crypto MWENC1 format', () => {
     });
 });
 
-// The raw primitive outputs every SyncCryptoPrimitives must reproduce (RN's OpenSSL adapter and the Android host's HostCrypto.kt
-// test the same file): Argon2id keys checked against OpenSSL when generated, AES-GCM and SHA-256 from OpenSSL.
+
 describe('sync-crypto primitive vectors', () => {
     const fromHex = (hex: string): Uint8Array => new Uint8Array(Buffer.from(hex, 'hex'));
     const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
@@ -289,5 +287,14 @@ describe('sync-crypto primitive vectors', () => {
         for (const vector of primitiveVectors.sha256) {
             expect(await computeSha256Hex(fromHex(vector.inputHex))).toBe(vector.digestHex);
         }
+    });
+});
+
+describe('syncPassphraseBytes', () => {
+    it('derives the same bytes from a passphrase typed precomposed or decomposed (NFC)', () => {
+        const hex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+        expect(hex(syncPassphraseBytes('cafe\u0301'))).toBe(hex(syncPassphraseBytes('caf\u00e9')));
+        expect(hex(syncPassphraseBytes('\u1112\u1161\u11ab'))).toBe(hex(syncPassphraseBytes('\ud55c')));
+        expect(hex(syncPassphraseBytes('caf\u00e9'))).toBe('636166c3a9');
     });
 });

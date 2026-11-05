@@ -40,7 +40,7 @@ describe('native host contract: Focus controls', () => {
         vi.restoreAllMocks();
     });
 
-    // Revisions read the clock.
+
     const freezeClock = () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(fixture.now));
@@ -58,7 +58,7 @@ describe('native host contract: Focus controls', () => {
         return result.value;
     };
     type Host = ReturnType<typeof createNativeHostContract>;
-    /** Today's Focus rows' revisions, as the reorder screen shows them. */
+
     const reorderRevisions = (host: Host) => Object.fromEntries(value(host.getFocus({ limit: 1, controls: DEFAULT_FOCUS_CONTROL_STATE })).controls.reorder!.rows.items
         .map((row) => [row.id, row.taskRevision]));
     const direct = (state: FocusControlState) => {
@@ -68,7 +68,7 @@ describe('native host contract: Focus controls', () => {
         });
     };
 
-    // The contract view carries what a host draws; criteria and save flags stay in core's model.
+
     const contractPart = (observations: unknown[]) => observations.map((entry) => {
         const copy = structuredClone(entry) as { sheet: { selections: Record<string, unknown> } };
         for (const key of ['criteria', 'currentCriteria', 'hasCurrentCriteria', 'canSave']) delete copy.sheet.selections[key];
@@ -185,24 +185,35 @@ describe('native host contract: Focus controls', () => {
         }
     });
 
+
+    it("gives the Reorder button RN's translated screen-reader hint", async () => {
+        freezeClock();
+        const host = await openHost('base');
+        expect(value(host.getFocus({ limit: 1, controls: DEFAULT_FOCUS_CONTROL_STATE })).controls.reorder!.screenHint)
+            .toBe('Opens a focused screen for reordering these tasks');
+    });
+
     it('round trips task-date options, widget criteria, preserved advanced chips and clear', async () => {
         freezeClock();
         const host = await openHost('base');
         const saved = { id: 'date-filter', name: 'Dates', view: 'focus' as const,
-            criteria: { anyDateRange: { preset: 'next_7_days' as const }, dueDateRange: { preset: 'today' as const }, statuses: ['next' as const], futureDateRule: { keep: true },
+            criteria: { anyDateRange: { preset: 'overdue_next_7_days' as const }, dueDateRange: { preset: 'today' as const }, statuses: ['next' as const], futureDateRule: { keep: true },
                 priority: ['none' as const], timeEstimates: ['custom:45'], locations: ['Office', 'Home'] },
             createdAt: fixture.now, updatedAt: fixture.now };
         useTaskStore.setState((state) => ({ settings: { ...state.settings, savedFilters: [saved] } }));
         const applied = value(host.getFocus({ limit: 100, controlEdit: { type: 'applySavedFilter', id: saved.id } }));
         const options = applied.controls.filterSheet.taskDates.options;
-        expect(options.map((option) => option.value)).toEqual(['', 'today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
-        expect(options.find((option) => option.selected)?.value).toBe('next_7_days');
-        expect(applied.controls.widgetFilter.criteria).toMatchObject({ anyDateRange: { preset: 'next_7_days' }, dueDateRange: { preset: 'today' } });
+        expect(options.map((option) => option.value)).toEqual(['', 'today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming']);
+        expect(options.find((option) => option.selected)?.value).toBe('overdue_next_7_days');
+        expect(applied.controls.widgetFilter.criteria).toMatchObject({ anyDateRange: { preset: 'overdue_next_7_days' }, dueDateRange: { preset: 'today' } });
         expect(applied.controls.filterSheet.advancedChips.map((chip) => chip.criterionId)).not.toContain('anyDateRange');
         const next30 = options.find((option) => option.value === 'next_30_days')!;
         const edited = value(host.getFocus({ limit: 100, controls: applied.controls.state, controlEdit: next30.edit }));
         expect(edited.controls.state.savedFilterId).toBeNull();
         expect(edited.controls.widgetFilter.criteria).toEqual({ ...saved.criteria, anyDateRange: { preset: 'next_30_days' } });
+        const overdueEdit = options.find((option) => option.value === 'overdue_next_7_days')!.edit;
+        expect(value(host.getFocus({ limit: 100, controls: edited.controls.state, controlEdit: overdueEdit }))
+            .controls.widgetFilter.criteria.anyDateRange).toEqual({ preset: 'overdue_next_7_days' });
         expect(edited.controls.filterSheet.chips.map((chip) => chip.id)).toEqual(expect.arrayContaining([
             'preserved:priority', 'preserved:timeEstimates', 'preserved:location:Office', 'preserved:location:Home',
         ]));
@@ -234,16 +245,16 @@ describe('native host contract: Focus controls', () => {
         const view = value(host.getFocus({ limit: 1, controls: DEFAULT_FOCUS_CONTROL_STATE, controlEdit: { type: 'applySavedFilter', id: 'sf-phone' } }));
         expect(view.controls.state).toMatchObject({ savedFilterId: 'sf-phone', sortBy: 'due' });
         const next = view.sections.find((section) => section.key === 'next')!;
-        // Call bank has two contexts: it is listed under each, and counted once in the header.
+
         expect({ total: next.total, rowTotal: next.rowTotal, rows: next.rows.map((row) => row.id), groups: next.groups }).toEqual({
             total: 1, rowTotal: 2, rows: ['n2'],
-            groups: [{ id: 'context:@office', title: '@office', count: 1, muted: false, dotColor: '#2563eb', start: 0 }],
+            groups: [{ id: 'context:@office', title: '@office', count: 1, muted: false, dotColor: '#2563eb', start: 0, axis: 'context', collapsed: false }],
         });
         const page = value(host.getFocusSectionWindow({ key: 'next', offset: 1, limit: 1, revision: view.revision, controls: view.controls.state }));
         expect({ rows: page.rows.map((row) => row.id), groups: page.groups, total: page.total, rowTotal: page.rowTotal }).toEqual({
-            rows: ['n2'], groups: [{ id: 'context:@phone', title: '@phone', count: 1, muted: false, dotColor: '#15803d', start: 1 }], total: 1, rowTotal: 2,
+            rows: ['n2'], groups: [{ id: 'context:@phone', title: '@phone', count: 1, muted: false, dotColor: '#15803d', start: 1, axis: 'context', collapsed: false }], total: 1, rowTotal: 2,
         });
-        // Paging with another control state is another view.
+
         expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: view.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(view.controls.state).toEqual({ ...controls, filters: { ...controls.filters, tokens: ['@phone'] }, sortBy: 'due' });
     });
@@ -258,18 +269,26 @@ describe('native host contract: Focus controls', () => {
         const after = value(host.getFocus({ limit: 100 }));
         expect(after.sections).toEqual(before.sections);
         const next = after.sections.find((section) => section.key === 'next')!;
-        // Call bank (n2) has two contexts and is still listed once.
+
         expect(next.rows.map((row) => row.id)).toEqual(['n2', 'n5', 'n1', 'n3', 'n4']);
         expect(after.sections.every((section) => !('rowTotal' in section) && !('groups' in section))).toBe(true);
         const afterPage = value(host.getFocusSectionWindow({ key: 'next', offset: 1, limit: 2, revision: after.revision }));
         expect({ ...afterPage, revision: '' }).toEqual({ ...beforePage, revision: '' });
         expect('groups' in afterPage || 'rowTotal' in afterPage).toBe(false);
-        // A read that sends controls gets the stored grouping.
+
         const grouped = value(host.getFocus({ limit: 100, controls: DEFAULT_FOCUS_CONTROL_STATE }));
         const groupedNext = grouped.sections.find((section) => section.key === 'next')!;
         expect(groupedNext.rows.filter((row) => row.id === 'n2')).toHaveLength(2);
         expect(groupedNext.groups?.map((group) => group.id)).toContain('context:@phone');
         expect(grouped.revision).not.toBe(after.revision);
+    });
+
+    it('sends the grey default dot for a Project with no Area and no color, which the native headers paint (#1422)', async () => {
+        freezeClock();
+        const host = await openHost('base');
+        value(await host.setFocusGroupBy({ requestId: generateUUID(), controls: DEFAULT_FOCUS_CONTROL_STATE, groupBy: 'project' }));
+        const next = value(host.getFocus({ limit: 100, controls: DEFAULT_FOCUS_CONTROL_STATE })).sections.find((section) => section.key === 'next')!;
+        expect(next.groups?.find((group) => group.id === 'project:p-alpha')?.dotColor).toBe('#94a3b8');
     });
 
     it('changes the revision on a control edit or a relevant store edit, and refuses a stale page', async () => {
@@ -323,7 +342,7 @@ describe('native host contract: Focus controls', () => {
         expect(filtered.revision).toBe(view.revision);
         expect(filtered.items[0]).toMatchObject(list === 'tokens'
             ? { state: 'none', edit: { type: 'filter', edit: { type: 'toggleToken', value: '@picker-133' } } }
-            : { selected: false, edit: { type: 'filter', edit: { type: 'toggleProject', value: 'picker-project-133' } } });
+            : { selected: false, edit: { type: 'filter', edit: { type: 'cycleProject', value: 'picker-project-133' } } });
         for (const empty of ['', ' \t\n ']) {
             expect(value(host.getFocusControlsList({ ...input, query: empty }))).toEqual(unfiltered);
         }
@@ -395,7 +414,7 @@ describe('native host contract: Focus controls', () => {
 
         const office = first.controls.filterSheet.tokens.items.find((token) => token.value === '@office')!;
         const changed = value(host.getFocus({ limit: 100, controls: first.controls.state, controlEdit: office.edit }));
-        // RN retains the inherited sort when a picker change detaches the saved filter.
+
         expect(changed.controls.state).toMatchObject({ savedFilterId: null, sortBy: 'title' });
         expect(value(host.getFocus({ limit: 100, controls: changed.controls.state }))).toEqual(changed);
         expect(host.getFocusControlsList({ list: 'projects', offset: 0, limit: 100, revision: changed.revision, controls: changed.controls.state })).toMatchObject({ ok: true });
@@ -414,7 +433,7 @@ describe('native host contract: Focus controls', () => {
     it('refuses what Focus cannot hold or offer', async () => {
         freezeClock();
         const host = await openHost('prioritiesOff');
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
         expect(host.getFocus({ limit: 1, controls: { filters: { searchQuery: 'x' } } })).toMatchObject(invalid);
@@ -432,10 +451,33 @@ describe('native host contract: Focus controls', () => {
         expect(await host.reorderFocus({ requestId: generateUUID(), controls: withFilters({ tokens: ['@office'] }), ids: ['f2', 'f1', 'f3'], taskRevisions })).toMatchObject(invalid);
         expect(await host.reorderFocus({ requestId: generateUUID(), controls: { sortBy: 'due' }, ids: ['f2', 'f1', 'f3'], taskRevisions })).toMatchObject(invalid);
         expect(await host.reorderFocus({ ...input(), ids: ['f2', 'f1', 'f3'], taskRevisions, requestId: 'not-a-uuid' })).toMatchObject(invalid);
-        // The order carries the revision the reorder screen showed for each task, and for nothing else.
+
         expect(await host.reorderFocus({ ...input(), ids: ['f3', 'f1', 'f2'] } as never)).toMatchObject(invalid);
         expect(await host.reorderFocus({ ...input(), ids: ['f3', 'f1', 'f2'], taskRevisions: twoRevisions })).toMatchObject(invalid);
         expect(focusControlsWrites()).toEqual([]);
+    });
+
+    it('saves a Contexts filter through the Android command and preserves its scope on restart', async () => {
+        freezeClock();
+        const host = await openHost('base');
+        const requestId = generateUUID();
+        const controls = { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: {
+            contexts: ['@person/Emma'], statuses: ['next' as const, 'someday' as const], excludedProjects: ['shared-project'],
+        } };
+        const input = { requestId, controls, name: 'Emma', view: 'contexts' as const };
+        value(await host.saveFocusFilter(input));
+        expect(useTaskStore.getState().settings.savedFilters?.find((filter) => filter.id === requestId))
+            .toMatchObject({ view: 'contexts', criteria: controls.preservedCriteria });
+        const restarted = createNativeHostContract();
+        await restarted.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' });
+        await restarted.activate({ writeSafetyReady: true });
+        expect(value(await restarted.saveFocusFilter(input))).toMatchObject({ changed: false });
+        expect(focusControlsWrites()).toHaveLength(1);
+        expect(await restarted.saveFocusFilter({ ...input, controls: { ...controls,
+            preservedCriteria: { ...controls.preservedCriteria, excludedProjects: [] } } }))
+            .toMatchObject({ ok: false });
+        expect(await host.saveFocusFilter({ ...input, requestId: generateUUID(), view: 'all' as never }))
+            .toMatchObject({ ok: false });
     });
 
     it('writes nothing again for a target already reached, even after a restart', async () => {
@@ -446,7 +488,7 @@ describe('native host contract: Focus controls', () => {
         const saved = value(await host.saveFocusFilter({ requestId, controls: withFilters({ tokens: ['@phone'] }), name: 'Calls' }));
         expect(saved.controls.savedFilterId).toBe(requestId.toLowerCase());
         expect(focusControlsWrites()).toHaveLength(1);
-        // A new host has no receipts: the filter the request created answers it.
+
         const restarted = createNativeHostContract();
         expect(await restarted.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' })).toMatchObject({ ok: true });
         expect(await restarted.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
@@ -455,7 +497,7 @@ describe('native host contract: Focus controls', () => {
         expect(value(await restarted.deleteFocusFilter({ requestId: generateUUID(), controls, id: 'sf-list' }))).toEqual({ controls, changed: false });
         expect(value(await restarted.reorderFocus({ requestId: generateUUID(), controls, ids: ['f2', 'f1', 'f3'], taskRevisions: reorderRevisions(restarted) })))
             .toEqual({ controls, changed: false });
-        // A saved filter's grouping differs from the stored one: choosing the stored one detaches it and writes nothing.
+
         const bound = { ...controls, savedFilterId: 'sf-phone' };
         value(await restarted.setFocusGroupBy({ requestId: generateUUID(), controls, groupBy: 'tag' }));
         expect(value(await restarted.setFocusGroupBy({ requestId: generateUUID(), controls: bound, groupBy: 'tag' })))
@@ -484,7 +526,7 @@ describe('native host contract: Focus controls', () => {
             expect(retried).toMatchObject({ ok: true, value: { changed: true } });
             expect(focusControlsWrites()).toHaveLength(1);
             check(saveData.mock.lastCall?.[0]);
-            // A lost reply repeats the request: no write, no save.
+
             const saves = saveData.mock.calls.length;
             expect(await run(host, requestId)).toEqual(retried);
             expect(saveData).toHaveBeenCalledTimes(saves);
@@ -526,7 +568,7 @@ describe('native host contract: Focus controls', () => {
         });
 
         it('reorderFocus', async () => {
-            // The revisions the screen showed before the first try: the retry is the same request.
+
             let taskRevisions: Record<string, string> | null = null;
             await retry('base', (host, requestId) => host.reorderFocus({
                 requestId, controls: DEFAULT_FOCUS_CONTROL_STATE, ids: ['f3', 'f2', 'f1'], taskRevisions: taskRevisions ??= reorderRevisions(host),
@@ -539,7 +581,7 @@ describe('native host contract: Focus controls', () => {
 
     describe('a replay after a restart (a new host, no receipts) never undoes a later change', () => {
         const savedFilters = () => useTaskStore.getState().settings.savedFilters ?? [];
-        /** Another writer's edit of one saved filter. */
+
         const editFilter = (id: string, fields: Record<string, unknown>) => useTaskStore.getState().updateSettings({
             savedFilters: savedFilters().map((filter) => (filter.id === id ? { ...filter, ...fields } : filter)),
         });
@@ -595,7 +637,7 @@ describe('native host contract: Focus controls', () => {
             const host = await openHost('base');
             const input = { requestId: generateUUID(), controls: DEFAULT_FOCUS_CONTROL_STATE, ids: ['f3', 'f2', 'f1'], taskRevisions: reorderRevisions(host) };
             expect(value(await host.reorderFocus(input))).toMatchObject({ changed: true });
-            // The user puts the old order back.
+
             await useTaskStore.getState().reorderFocusedTasks(['f2', 'f1', 'f3']);
             const { result, wrote } = await replayAfterRestart((restarted) => restarted.reorderFocus(input));
             expect(result).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });

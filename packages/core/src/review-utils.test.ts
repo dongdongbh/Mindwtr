@@ -224,7 +224,7 @@ describe('partitionByReviewDate', () => {
 });
 
 describe('getAdvancedReviewDate', () => {
-    const localNow = new Date(2026, 5, 10, 15, 30); // 2026-06-10 15:30 local
+    const localNow = new Date(2026, 5, 10, 15, 30);
 
     it('returns a date-only value one week out for date-only review dates', () => {
         expect(getAdvancedReviewDate('2026-06-01', localNow)).toBe('2026-06-17');
@@ -249,7 +249,7 @@ describe('getAdvancedReviewDate', () => {
 });
 
 describe('getDailyReviewBuckets', () => {
-    const dailyNow = new Date(2026, 2, 1, 9, 0, 0); // 2026-03-01 09:00 local
+    const dailyNow = new Date(2026, 2, 1, 9, 0, 0);
 
     it('keeps a next task starting later today in the focus candidates (#867)', () => {
         const laterToday = createTask({
@@ -263,8 +263,7 @@ describe('getDailyReviewBuckets', () => {
         expect(buckets.focusCandidates.map((task) => task.id)).toEqual(['next-later-today']);
     });
 
-    // Inbox remains a global capture queue even when another review inventory
-    // opts into area narrowing.
+
     it('spans every area by default and keeps Inbox global with an area filter', () => {
         const project = createProject({ id: 'project-work', areaId: 'area-work' });
         const workTask = createTask({ id: 'inbox-work', status: 'inbox', projectId: project.id });
@@ -548,7 +547,7 @@ describe('getWeeklyReviewBuckets', () => {
             taskIds: entry.tasks.map((task) => task.id),
             nextActionState: entry.nextActionState,
         }))).toEqual([
-            // A waiting-only project is delegated, not stuck (#1086).
+
             { id: 'p-due', taskIds: ['due-waiting'], nextActionState: 'waiting' },
             { id: 'p-due-2', taskIds: [], nextActionState: 'none' },
             { id: 'p-active', taskIds: ['active-inbox', 'active-next'], nextActionState: 'next' },
@@ -564,8 +563,8 @@ describe('getWeeklyReviewBuckets', () => {
         expect(buckets.summary).toEqual({
             inboxCount: 2,
             activeProjectCount: 3,
-            // p-due is waiting-only and no longer counts as "without next action"
-            // (#1086); only the taskless p-due-2 does.
+
+
             projectsWithoutNextAction: 1,
             staleWaitingCount: 2,
         });
@@ -640,7 +639,7 @@ describe('getReviewOverviewGroups', () => {
         expect(groups[1]).toMatchObject({
             taskCount: 4,
             projectCount: 2,
-            // alpha is waiting-only — delegated, not "needs action" (#1086).
+
             needsActionCount: 0,
         });
         expect(groups[1].projectGroups.map((group) => ({
@@ -856,50 +855,11 @@ describe('parseStoredReviewStepSession', () => {
 });
 
 
-describe('opt-in Review sequence grouping', () => {
+describe('Review manual sequence availability (#1495)', () => {
     const project = createProject({ isSequential: true });
     const head = createTask({ id: 'head', projectId: project.id, status: 'waiting', order: 0 });
     const tail = createTask({ id: 'tail', projectId: project.id, order: 1 });
-    const derive = (tasks: Task[], projects = [project], sections: Section[] = []) => getWeeklyReviewBuckets(tasks, projects, { now, sections, ...{ sequenceAware: true } });
-
-    it('keeps the legacy bucket bytes while excluding blocked tails from opted-in stale candidates', () => {
-        const tasks = [tail, head];
-        const legacy = getWeeklyReviewBuckets(tasks, [project], { now });
-        expect(legacy.staleItems.map((item) => item.id)).toContain('tail');
-        expect(legacy.projectEntries[0]).not.toHaveProperty('currentTasks');
-        const detailed = derive(tasks);
-        expect(detailed.projectEntries[0]).toMatchObject({ currentTasks: [head], laterTasks: [tail], nextActionState: 'waiting' });
-        expect(detailed.staleItems.map((item) => item.id)).toEqual(['head', `project:${project.id}`]);
-        expect(getWeeklyReviewBuckets(tasks, [project], { now })).toEqual(legacy);
-    });
-
-    it('advances independent section heads, respects manual order and keeps explicitly due review tasks current', () => {
-        const sections: Section[] = [{ id: 'sequence', projectId: project.id, title: 'Sequence', order: 0, isSequential: true, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt }];
-        const mixed = { ...project, isSequential: false, perSectionFlow: true };
-        const current = { ...head, sectionId: 'sequence' }, later = { ...tail, sectionId: 'sequence' };
-        const parallel = createTask({ id: 'parallel', projectId: project.id });
-        expect(derive([later, current, parallel], [mixed], sections).projectEntries[0]).toMatchObject({ currentTasks: [current, parallel], laterTasks: [later], nextActionState: 'next' });
-        expect(derive([{ ...head, status: 'done' }, tail]).projectEntries[0]).toMatchObject({ currentTasks: [tail], laterTasks: [] });
-        expect(derive([head, { ...tail, order: -1 }]).projectEntries[0]).toMatchObject({ nextActionState: 'next', laterTasks: [] });
-        const due = { ...tail, reviewAt: '2026-02-28', dueDate: '2026-03-02' };
-        expect(derive([head, due]).staleItems.some((item) => item.id === tail.id)).toBe(true);
-        const overview = getReviewOverviewGroups({ tasks: [head, due], projects: [project], orderedAreas: [], areaFilter: { included: [], excluded: [] }, sortBy: 'title', scope: 'due', now, ...{ sequenceAware: true } });
-        expect(overview[0].projectGroups[0]).toMatchObject({ currentTasks: [due], laterTasks: [], nextActionState: 'waiting' });
-    });
-
-    it('orders later section chains without changing parallel projects or task history', () => {
-        const sections: Section[] = [
-            { id: 'b', projectId: project.id, title: 'B', order: 1, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt },
-            { id: 'a', projectId: project.id, title: 'A', order: 0, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt },
-        ];
-        const tasks = [{ ...tail, id: 'b-tail', sectionId: 'b', order: 1 }, { ...tail, id: 'a-tail', sectionId: 'a', order: 2 },
-            { ...head, sectionId: 'a' }, { ...tail, id: 'b-head', sectionId: 'b', order: 0 }];
-        const before = JSON.stringify(tasks);
-        expect(derive(tasks, [project], sections).projectEntries[0].laterTasks?.map(task => task.id)).toEqual(['a-tail', 'b-head', 'b-tail']);
-        expect(derive(tasks, [{ ...project, sequentialScope: 'section' }], sections).projectEntries[0].laterTasks?.map(task => task.id)).toEqual(['a-tail', 'b-tail']);
-        expect(derive(tasks, [{ ...project, isSequential: false }], sections).projectEntries[0]).toMatchObject({ currentTasks: tasks, laterTasks: [] });
-        expect(JSON.stringify(tasks)).toBe(before);
-    });
+    const derive = (tasks: Task[], projects = [project], sections: Section[] = []) => getWeeklyReviewBuckets(tasks, projects, { now, sections });
 
     it('uses the same later predicate for new Apply without imposing stale-age or Waiting requirements', () => {
         const fresh = { ...tail, updatedAt: now.toISOString() };
@@ -909,9 +869,59 @@ describe('opt-in Review sequence grouping', () => {
         expect([...getReviewSequenceBlockedNextIds([head, { ...fresh, status: 'someday' }], [project], [], now)]).toEqual([]);
     });
 
-    it('treats a future head as Scheduled without exposing its blocked tail as a stale next action', () => {
+    it('keeps Waiting and project inactivity, excludes blocked Next from stale and keeps the plan', () => {
+        const buckets = derive([tail, head]);
+        expect(buckets.staleItems.map((item) => item.id)).toEqual(['head', `project:${project.id}`]);
+        expect(buckets.projectEntries[0]).toMatchObject({ nextActionState: 'waiting', currentTasks: [head], laterTasks: [tail] });
+        expect(buckets.projectEntries[0].tasks).toEqual([tail, head]);
+        expect(buckets.summary).toEqual(getWeeklyReviewSummary([tail, head], [project], now));
+        expect(buckets.summary.projectsWithoutNextAction).toBe(0);
+        expect(buckets.summary.staleWaitingCount).toBe(1);
+        expect(getStaleItems([tail, head], [project], 14, now)).toEqual(buckets.staleItems);
+        expect(tail.updatedAt).toBe(staleUpdatedAt);
+    });
+
+    it('a future head holds its slot and reports Scheduled; independent heads can advance', () => {
         const future = { ...head, status: 'next' as const, startTime: '2026-04-01' };
-        expect(derive([tail, future]).projectEntries[0]).toMatchObject({ nextActionState: 'deferred', currentTasks: [future], laterTasks: [tail] });
+        expect(derive([tail, future]).projectEntries[0].nextActionState).toBe('deferred');
         expect(derive([tail, future]).staleItems.filter((item) => item.status !== 'project')).toEqual([]);
+        const parallel = createTask({ id: 'parallel', projectId: project.id, sectionId: 'parallel' });
+        const sections: Section[] = [{ id: 'sequence', projectId: project.id, title: 'Sequence', order: 0, isSequential: true, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt }];
+        const mixed = { ...project, isSequential: false, perSectionFlow: true };
+        const tasks = [{ ...future, sectionId: 'sequence' }, { ...tail, sectionId: 'sequence' }, parallel];
+        const mixedBuckets = derive(tasks, [mixed], sections);
+        expect(mixedBuckets.projectEntries[0].nextActionState).toBe('next');
+        expect(mixedBuckets.projectEntries[0].laterTasks.map((task) => task.id)).toEqual(['tail']);
+        expect(mixedBuckets.staleItems.some((item) => item.id === parallel.id)).toBe(true);
+        expect(mixedBuckets.summary).toEqual(getWeeklyReviewSummary(tasks, [mixed], now, sections));
+    });
+
+    it('completion, Undo and manual reorder rederive the current step without modifying task history', () => {
+        expect(derive([{ ...head, status: 'done' }, tail]).projectEntries[0]).toMatchObject({ nextActionState: 'next', currentTasks: [tail], laterTasks: [] });
+        expect(derive([head, tail]).projectEntries[0].laterTasks).toEqual([tail]);
+        expect(derive([head, { ...tail, order: -1 }]).projectEntries[0]).toMatchObject({ nextActionState: 'next', laterTasks: [] });
+    });
+
+    it('section chains advance independently, while whole-project sequencing honors section order', () => {
+        const sections: Section[] = [
+            { id: 'b', title: 'B', projectId: project.id, order: 1, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt },
+            { id: 'a', title: 'A', projectId: project.id, order: 0, createdAt: staleUpdatedAt, updatedAt: staleUpdatedAt },
+        ];
+        const tasks = [{ ...tail, id: 'b-tail', sectionId: 'b', order: 1 }, { ...tail, id: 'a-tail', sectionId: 'a', order: 2 },
+            { ...head, sectionId: 'a' }, { ...tail, id: 'b-head', sectionId: 'b', order: 0 }];
+        expect(derive(tasks, [project], sections).projectEntries[0].laterTasks.map((task) => task.id)).toEqual(['a-tail', 'b-head', 'b-tail']);
+        const within = derive(tasks, [{ ...project, sequentialScope: 'section' }], sections);
+        expect(within.projectEntries[0].nextActionState).toBe('next');
+        expect(within.projectEntries[0].laterTasks.map((task) => task.id)).toEqual(['a-tail', 'b-tail']);
+    });
+
+    it('explicit review due remains current in Due, and dates remain in the calendar', () => {
+        const dueTail = { ...tail, reviewAt: '2026-02-28', dueDate: '2026-03-02' };
+        const buckets = derive([head, dueTail]);
+        expect(buckets.staleItems.some((item) => item.id === tail.id)).toBe(true);
+        expect(buckets.calendarItems.some((item) => item.task.id === tail.id)).toBe(true);
+        const overview = (scope: 'all' | 'due') => getReviewOverviewGroups({ tasks: [head, dueTail], projects: [project], orderedAreas: [], areaFilter: { included: [], excluded: [] }, sortBy: 'title', now, scope });
+        expect(overview('due')[0].projectGroups[0]).toMatchObject({ currentTasks: [dueTail], laterTasks: [], nextActionState: 'waiting' });
+        expect(overview('all')[0].projectGroups[0]).toMatchObject({ currentTasks: [head], laterTasks: [dueTail] });
     });
 });

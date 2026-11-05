@@ -64,7 +64,7 @@ async function open(path: string, seed = false) {
     expect(await host.activate({ writeSafetyReady: true })).toMatchObject({ ok: true });
     await flushPendingSave();
     if (seed) {
-        // Actual opaque SQLite spellings must survive a notification-only save, including load-normalized values.
+
         db.prepare('UPDATE tasks SET contexts = ?, tags = ?, focusOrder = ? WHERE id = ?')
             .run('[ "@raw" ]', '[ "keep" ]', 9, 'raw');
     }
@@ -225,7 +225,7 @@ describe('notification Settings SQLite receipts', () => {
         expect(env.fault.failedCommits).toBe(failures);
         expect(settingsRow(env.db)).toEqual(beforeSettings); expect(taskRow(env.db)).toEqual(beforeTask);
         expect(receiptRows(env.db)).toEqual([]);
-        // Only the original retained failure authorizes this exact raw snapshot retry.
+
         useTaskStore.setState({ persistenceFailure: ownFailure });
         expect(await env.host.commitPreparedNotificationSetting(envelope)).toMatchObject({ ok: true });
     });

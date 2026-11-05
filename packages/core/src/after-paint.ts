@@ -1,4 +1,4 @@
-/** A cancellable paint opportunity, not proof of native display or input latency. */
+
 export function afterPaint(
     callback: () => void,
     schedule: (callback: FrameRequestCallback) => number = requestAnimationFrame,

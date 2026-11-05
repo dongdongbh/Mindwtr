@@ -40,10 +40,7 @@ const parseAbsoluteHttpUrl = (value: string): string | null => {
 
 type LegacyAttachmentOwnerKind = 'task' | 'project';
 
-/**
- * Timestamps a recovered attachment inherits from its owner, so two peers
- * repairing the same raw document produce byte-identical records.
- */
+
 const legacyAttachmentTimestamps = (owner: Record<string, unknown>): { createdAt: string; updatedAt: string } => {
     const createdAt = isValidTimestamp(owner.createdAt)
         ? owner.createdAt
@@ -54,14 +51,7 @@ const legacyAttachmentTimestamps = (owner: Record<string, unknown>): { createdAt
     return { createdAt, updatedAt };
 };
 
-/**
- * A pre-1.3.0 REST client could store an attachment array entry with fields
- * missing (`attachments: [{ kind: 'link', uri }]`, or a bare `{ url }`), and
- * rejecting it made the whole namespace unreadable for every client. Repair
- * only what an absolute HTTP(S) URL makes unambiguous; a `file` record is never
- * invented from one, because its bytes are not addressable this way.
- * Returns null when the entry stays a hard error.
- */
+
 const repairLegacyAttachmentEntry = (
     attachment: Record<string, unknown>,
     owner: Record<string, unknown>,
@@ -103,12 +93,7 @@ type LegacyAttachmentRecoveryResult = {
     repairedOwners: number;
 };
 
-/**
- * An older API accepted one bare URL where Attachment[] belongs.
- * Repair only that exact legacy shape at the sync ingress, before any caller
- * dereferences attachment records. All generated fields derive from synced
- * owner data so two peers produce byte-identical link records.
- */
+
 const recoverLegacyAttachmentUrls = (
     input: unknown,
     source: SyncDocumentSource,
@@ -131,8 +116,7 @@ const recoverLegacyAttachmentUrls = (
             if (attachments === undefined) return;
             const fieldPath = `${surface}[${ownerIndex}].attachments`;
 
-            // Cloud task/project PATCH has always used null as an explicit clear.
-            // The downstream merge/sanitizer already treats it as absent.
+
             if (attachments === null) return;
 
             if (typeof attachments === 'string') {
@@ -200,8 +184,8 @@ const recoverLegacyAttachmentUrls = (
                 if (!isValidTimestamp(attachment.updatedAt)) {
                     entryErrors.push(`${source} payload field "${attachmentPath}.updatedAt" must be a valid ISO timestamp`);
                 }
-                // A record that already validates is published untouched; only a
-                // broken one is rebuilt, and only when it stays unambiguous.
+
+
                 if (entryErrors.length === 0) return;
                 const repaired = repairLegacyAttachmentEntry(attachment, owner, ownerKind);
                 if (!repaired) {
@@ -228,12 +212,7 @@ const recoverLegacyAttachmentUrls = (
     return { data: nextData ?? input, errors, repairedOwners };
 };
 
-/**
- * Remote documents must never seed device-local attachment state. This is a
- * deliberately narrower operation than `sanitizeAppDataForRemote`: outbound
- * sanitization also applies missing-file tombstone policy, while an inbound
- * document must retain its synced deletion/content metadata unchanged.
- */
+
 const stripRemoteAttachmentDeviceState = (data: AppData): AppData => {
     const stripAttachments = <T extends { attachments?: AppData['tasks'][number]['attachments'] }>(
         owners: T[],
@@ -303,7 +282,7 @@ export const parseSyncDocument = (
 
 declare const remoteSyncDocumentBrand: unique symbol;
 
-/** An AppData snapshot after device-local fields have been removed for transport. */
+
 export type RemoteSyncDocument = AppData & {
     readonly [remoteSyncDocumentBrand]: true;
 };
@@ -311,10 +290,7 @@ export type RemoteSyncDocument = AppData & {
 export const toRemoteSyncDocument = (data: AppData): RemoteSyncDocument =>
     sanitizeAppDataForRemote(data) as RemoteSyncDocument;
 
-/**
- * A snapshot's remote document as stable sync JSON, the form both {@link computeRemoteSyncDocumentFingerprint} and
- * {@link areRemoteSyncDocumentsEqual} serialize, as a cooperative pass (cooperative.ts).
- */
+
 export function* remoteSyncDocumentStableJsonPass(data: AppData): CooperativePass<string> {
     return yield* toStableSyncJsonPass(yield* sanitizeAppDataForRemotePass(data));
 }

@@ -194,8 +194,7 @@ describe('mergeParsedProcessInboxFields token parsing', () => {
         expect(mergeParsedProcessInboxFields({}, { assignedTo: 'Bob' }).assignedTo).toBe('Bob');
     });
 
-    // The parsed-token path is the only route a typed /priority: has into the
-    // clarify decision; the picker writes `priority` directly (#1105).
+
     it('lands a /priority: typed in the clarify title on the merged fields', () => {
         const parsedTitle = parseProcessInboxTitleInput('Call plumber /priority:high /energy:low');
         expect(parsedTitle.title).toBe('Call plumber');

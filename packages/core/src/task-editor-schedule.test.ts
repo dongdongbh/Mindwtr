@@ -161,8 +161,7 @@ describe('task editor schedule parity with the mobile editor', () => {
         expect(display).toEqual(snapshot.display);
     });
 
-    // The mobile editor after the move: core computes each draft write; React keeps
-    // the picker's pending day and the weekly day selection as UI state.
+
     const replayDateOp = (task: Task, settings: AppSettings, field: TaskEditorDateField, op: string) => {
         const formatDate = createDateFormatter(fixture.formats.us);
         const defaultScheduleTime = normalizeClockTimeInput(settings.gtd?.defaultScheduleTime) || '';
@@ -176,7 +175,7 @@ describe('task editor schedule parity with the mobile editor', () => {
             pending = hasTimeComponent(value) ? safeParseDate(value) : new Date(day);
             edit(target, value);
         };
-        // The picked hour and minute, as a host sends them.
+
         const pickTime = (target: TaskEditorDateField, time: string) => {
             const [hours, minutes] = time.split(':').map(Number);
             edit(target, setTaskDraftTime(draft[target], { hours, minutes }, pending));
@@ -187,7 +186,7 @@ describe('task editor schedule parity with the mobile editor', () => {
             const patch = control && getTaskDraftRelativeStartEdit(draft.dueDate, control.amount, control.unit);
             if (patch) draft = applyFields(draft, patch);
         };
-        // Only the picked local day matters.
+
         const day = (value: string) => {
             const [year, month, date] = value.split('-').map(Number);
             return new Date(year, month - 1, date, 12, 0, 0);
@@ -256,8 +255,8 @@ describe('task editor schedule parity with the mobile editor', () => {
         }
         expect(Object.keys(ops).length).toBeGreaterThan(600);
         expect(ops).toEqual(dst.ops);
-        // Spelled out: 02:30 does not exist on 2027-03-14 and becomes 03:30; on 2027-03-20
-        // (picked while today is 2027-03-14) it stays 02:30; 23:30 stays on its own day.
+
+
         const due = (key: string) => (dst.ops[key] as [string[]])[0][1];
         expect(safeParseDate(due('2027-03-14T10:00:00|spring-day|plain|dueDate|time:02:30'))?.getHours()).toBe(3);
         expect(safeParseDate(due('2027-03-14T10:00:00|spring-week|plain|dueDate|time:02:30'))?.getHours()).toBe(2);
@@ -278,7 +277,7 @@ describe('task editor schedule parity with the mobile editor', () => {
             draft = applyFields(draft, next);
         };
         for (const rawStep of op.split('+')) {
-            // "weekday:MO+TH" presses Monday, then Thursday.
+
             const step = WEEKDAY_ORDER.includes(rawStep as RecurrenceWeekday) ? `weekday:${rawStep}` : rawStep;
             const [name, arg] = [step.slice(0, step.indexOf(':') === -1 ? step.length : step.indexOf(':')), step.slice(step.indexOf(':') + 1)];
             if (name === 'rule') {
@@ -309,7 +308,7 @@ describe('task editor schedule parity with the mobile editor', () => {
             }
         }
         const display = recurrenceDisplay(task, draft, weekdays, formatDate);
-        // The interval input keeps the text as typed until it is left.
+
         if (typedInterval !== null && draft.recurrence) display.interval = [typedInterval];
         return [encodeDraft(draft), display];
     };
@@ -337,7 +336,7 @@ describe('task editor schedule parity with the mobile editor', () => {
             expected[key] = value;
         }
         expect(ops).toEqual(expected);
-        // The native review's case, spelled out: Weekly with COUNT=5, then Daily.
+
         expect((snapshot.ops['weekly-count|plain|recurrence|rule:recurrence.daily'][0] as string[])[6]).toBe('FREQ=DAILY;COUNT=5');
     });
 
@@ -382,7 +381,7 @@ describe('task editor schedule parity with the mobile editor', () => {
                 const input = typed.slice('type:'.length);
                 const parsed = parseTaskEditorTimeEstimate(input);
                 if (parsed) expect(parsed, key).toBe(value);
-                // A text that does not parse keeps the estimate, and leaving the input restores its text.
+
                 if (!parsed && blur) expect(text, key).toEqual([formatTimeEstimateLabel(value as never)]);
                 if (!blur || parsed) expect(text, key).toEqual([input]);
             } else if (step === 'spent' && typed) {
@@ -536,14 +535,14 @@ describe('task editor schedule rules', () => {
         const moved = setTaskDraftField(draft, 'dueDate', '2026-10-05');
         expect(moved).toMatchObject({ startTime: '2026-10-03', relativeStartOffset: { amount: -2, unit: 'day' } });
         expect(setTaskDraftField(draft, 'dueDate', '').relativeStartOffset).toBeUndefined();
-        // Hours cannot be computed before a date-only due: the link ends.
+
         const hours = createTaskDraft({ ...base, dueDate: '2026-09-28T18:00', startTime: '2026-09-28T15:00', relativeStartOffset: { amount: -3, unit: 'hour' } });
         expect(setTaskDraftField(hours, 'dueDate', '2026-09-28')).toMatchObject({ startTime: '2026-09-28T15:00', relativeStartOffset: undefined });
         expect(setTaskDraftField(draft, 'startTime', '2026-09-25').relativeStartOffset).toBeUndefined();
-        // The start the link computes keeps it, so "offset, then its start" writes both.
+
         const relative = applyFields(createTaskDraft({ ...base, dueDate: '2026-09-28' }), getTaskDraftRelativeStartEdit('2026-09-28', 1, 'week')!);
         expect(relative).toMatchObject({ startTime: '2026-09-21', relativeStartOffset: { amount: -1, unit: 'week' } });
-        // The editor's start controls end the link even on the computed start.
+
         expect(applyFields(draft, getTaskDraftDateEdit('startTime', '2026-09-26')).relativeStartOffset).toBeUndefined();
     });
 
@@ -555,7 +554,7 @@ describe('task editor schedule rules', () => {
         expect(applyTaskUpdates(stored, patch, '2026-09-23T14:00:00.000Z').updatedTask).toMatchObject({
             dueDate: '2026-10-05', startTime: '2026-10-03', relativeStartOffset: { amount: -2, unit: 'day' },
         });
-        // An unrelated edit does not send the link.
+
         const titled = setTaskDraftField(createTaskDraft(stored), 'title', 'Renamed');
         expect(buildTaskEditUpdatePatch({ draft: titled, checklist: undefined, attachments: undefined }, stored)).toEqual({ title: 'Renamed' });
     });
@@ -576,9 +575,7 @@ describe('task editor schedule rules', () => {
     });
 });
 
-// Literal output oracle captured from the unmodified RN caller at 2d62a09a.
-// The cleared-date expectation includes date-less daily projection (#1322).
-// Existing schedule/model fixture JSON remains byte-for-byte unchanged.
+
 describe('task editor recurrence calendar preview parity', () => {
     const originalTZ = process.env.TZ;
     beforeAll(() => { process.env.TZ = 'America/New_York'; });

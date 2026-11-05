@@ -194,7 +194,7 @@ describe('strict prepared Board same-column ordering', () => {
         } finally { await sqlite.close(); }
     });
     it('does not invoke the RN effect planner during a large Board read or paging', async () => {
-        // The revision carries the minute; a slow 5,000-task read must not cross one between its two calls.
+
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const sqlite = await open(seed(Array.from({ length: 5000 }, (_, i) => task(`large-${i}`, i * 1024))));
         try {

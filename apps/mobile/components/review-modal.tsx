@@ -74,6 +74,11 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         canGoBack,
         closeEditModal,
         closeProjectTaskPrompt,
+        closeProjectCompletionPrompt,
+        completeProject,
+        completingProjectId,
+        projectCompletionPrompt,
+        projectCompletionError,
         completion,
         contextReviewGroups,
         currentStep,
@@ -91,6 +96,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         handleFinish,
         handleNavigateToProject,
         handleNavigateToToken,
+        handleOpenProject,
         handleReviewDismiss,
         handleSaveTask,
         handleStatusChange,
@@ -125,13 +131,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         toggleSuggestion,
         waitingList,
     } = useReviewModalController({ visible, onClose });
+    const [expandedLaterProjects, setExpandedLaterProjects] = useState<Set<string>>(new Set());
     const closeLabel = t('common.close');
     const closeText = closeLabel && closeLabel !== 'common.close' ? closeLabel : 'Close';
     const onFilled = filledButton.textColor ?? tc.onTint;
 
-    // Every step's rows share one actions object so stepping through the review
-    // does not hand each row a fresh set of arrows (#766). The handlers come
-    // from the controller, so they are read through a ref rather than closed over.
+
     const rowSourcesRef = useRef({ handleTaskPress, handleStatusChange, handleDelete });
     rowSourcesRef.current = { handleTaskPress, handleStatusChange, handleDelete };
     const rowActions = useMemo<TaskRowActions>(() => ({
@@ -152,7 +157,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         }
     }, [showInboxProcessing, showMindSweep, showShareCard, visible]);
 
-    // Formatted each render: the app's date settings can change while the review is open.
+
     const calendarView = getWeeklyReviewCalendar(externalCalendarReviewItems, calendarReviewItems, labels, safeFormatDate);
 
     const renderSummaryRow = (good: boolean, text: string) => (
@@ -381,6 +386,112 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         );
     };
 
+
+    const renderProjectEntry = (entry: (typeof projectReviewEntries)[number], meta?: string) => {
+        const isExpanded = expandedProject === entry.project.id;
+        return (
+            <View key={entry.project.id}>
+                <TouchableOpacity
+                    style={[styles.projectItem, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                    accessibilityState={{ expanded: isExpanded }}
+                    onPress={() => toggleExpandedProject(entry.project.id)}
+                >
+                    <View style={styles.projectHeader}>
+                        <View style={[styles.projectDot, { backgroundColor: entry.areaColor ?? tc.tint }]} />
+                        <Text style={[styles.projectTitle, { color: tc.text }]}>{entry.project.title}</Text>
+                        <TouchableOpacity
+                            style={[styles.reviewProjectAddTaskButton, { borderColor: tc.border }]}
+                            onPress={(event) => {
+                                event.stopPropagation();
+                                openProjectTaskPrompt(entry.project.id, entry.project.title);
+                            }}
+                        >
+                            <Text style={[styles.reviewProjectAddTaskButtonText, { color: tc.text }]}>
+                                {labels.addTask}
+                            </Text>
+                        </TouchableOpacity>
+                        <View style={[styles.statusBadge, { backgroundColor: entry.badge.background }]}>
+                            <Text style={[styles.statusText, { color: entry.badge.color }]}>
+                                {entry.badge.label}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.projectMeta}>
+                        <Text style={[styles.taskCount, { color: tc.secondaryText }]}>
+                            {meta ?? entry.countLabel}
+                        </Text>
+                        <Text style={[styles.expandIcon, { color: tc.secondaryText }]}>
+                            {isExpanded ? '▾' : '▸'}
+                        </Text>
+                    </View>
+                </TouchableOpacity>
+                {isExpanded && (
+                    <View style={styles.projectTasks}>
+                        {entry.currentTasks.map((task) => (
+                            <SwipeableTaskItem
+                                key={task.id}
+                                task={task}
+                                isDark={isDark}
+                                tc={tc}
+                                actions={rowActions}
+                            />
+                        ))}
+                        {entry.laterTasks.length > 0 && (
+                            <View style={styles.scheduledSection}>
+                                <AppPressable
+                                    style={styles.scheduledToggle}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`${labels.laterInSequence} (${entry.laterTasks.length})`}
+                                    accessibilityState={{ expanded: expandedLaterProjects.has(entry.project.id) }}
+                                    onPress={() => setExpandedLaterProjects((current) => {
+                                        const next = new Set(current);
+                                        if (next.has(entry.project.id)) next.delete(entry.project.id);
+                                        else next.add(entry.project.id);
+                                        return next;
+                                    })}
+                                >
+                                    {expandedLaterProjects.has(entry.project.id)
+                                        ? <ChevronDown size={14} color={tc.secondaryText} />
+                                        : <ChevronRight size={14} color={tc.secondaryText} />}
+                                    <Text style={[styles.scheduledToggleText, { color: tc.secondaryText }]}>
+                                        {labels.laterInSequence} ({entry.laterTasks.length})
+                                    </Text>
+                                </AppPressable>
+                                {expandedLaterProjects.has(entry.project.id) && entry.laterTasks.map((task) => (
+                                    <SwipeableTaskItem key={task.id} task={task} isDark={isDark} tc={tc} actions={rowActions} />
+                                ))}
+                            </View>
+                        )}
+                        <TouchableOpacity
+                            style={styles.reviewOpenProjectButton}
+                            accessibilityRole="button"
+                            onPress={() => handleOpenProject(entry.project.id)}
+                        >
+                            <FolderOpen size={14} color={tc.tint} strokeWidth={2} />
+                            <Text style={[styles.reviewOpenProjectText, { color: tc.tint }]} numberOfLines={1}>
+                                {formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title })}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.reviewOpenProjectButton, { opacity: completingProjectId ? 0.5 : 1 }]}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('projects.complete')}
+                            accessibilityState={{ disabled: completingProjectId !== null }}
+                            disabled={completingProjectId !== null}
+                            testID={`review-complete-project-${entry.project.id}`}
+                            onPress={() => { void completeProject(entry.project.id); }}
+                        >
+                            <CheckCircle2 size={14} color={tc.tint} strokeWidth={2} />
+                            <Text style={[styles.reviewOpenProjectText, { color: tc.tint }]}>
+                                {t('projects.complete')}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </View>
+        );
+    };
+
     const renderContextsList = (groups: ContextReviewGroup[]) => {
         if (groups.length === 0) {
             return (
@@ -511,7 +622,10 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                     actions={rowActions}
                                 />
                             ))}
-                            {staleProjectItems.map((item) => (
+                            {staleProjectItems.map((item) => {
+                                const entry = projectReviewEntries.find((candidate) => `project:${candidate.project.id}` === item.id);
+                                if (entry) return renderProjectEntry(entry, item.daysLabel);
+                                return (
                                 <View key={item.id} style={[styles.calendarDayCard, { borderColor: tc.border }]}>
                                     <Text style={[styles.calendarEventTitle, { color: tc.text }]} numberOfLines={1}>
                                         {item.title}
@@ -520,7 +634,8 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                         {item.daysLabel}
                                     </Text>
                                 </View>
-                            ))}
+                                );
+                            })}
                             {aiEnabled && (
                                 <>
                                     <View style={[styles.stepTitleRow, { marginTop: 16 }]}>
@@ -701,59 +816,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         ) : (
                             <FlatList
                                 data={projectReviewEntries}
-                                renderItem={({ item: entry }) => {
-                                    const isExpanded = expandedProject === entry.project.id;
-                                    return (
-                                        <View>
-                                            <TouchableOpacity
-                                                style={[styles.projectItem, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                                onPress={() => toggleExpandedProject(entry.project.id)}
-                                            >
-                                                <View style={styles.projectHeader}>
-                                                    <View style={[styles.projectDot, { backgroundColor: entry.areaColor ?? tc.tint }]} />
-                                                    <Text style={[styles.projectTitle, { color: tc.text }]}>{entry.project.title}</Text>
-                                                    <TouchableOpacity
-                                                        style={[styles.reviewProjectAddTaskButton, { borderColor: tc.border }]}
-                                                        onPress={(event) => {
-                                                            event.stopPropagation();
-                                                            openProjectTaskPrompt(entry.project.id, entry.project.title);
-                                                        }}
-                                                    >
-                                                        <Text style={[styles.reviewProjectAddTaskButtonText, { color: tc.text }]}>
-                                                            {labels.addTask}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <View style={[styles.statusBadge, { backgroundColor: entry.badge.background }]}>
-                                                        <Text style={[styles.statusText, { color: entry.badge.color }]}>
-                                                            {entry.badge.label}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                                <View style={styles.projectMeta}>
-                                                    <Text style={[styles.taskCount, { color: tc.secondaryText }]}>
-                                                        {entry.countLabel}
-                                                    </Text>
-                                                    <Text style={[styles.expandIcon, { color: tc.secondaryText }]}>
-                                                        {isExpanded ? '▾' : '▸'}
-                                                    </Text>
-                                                </View>
-                                            </TouchableOpacity>
-                                            {isExpanded && entry.tasks.length > 0 && (
-                                                <View style={styles.projectTasks}>
-                                                    {entry.tasks.map((task) => (
-                                                        <SwipeableTaskItem
-                                                            key={task.id}
-                                                            task={task}
-                                                            isDark={isDark}
-                                                            tc={tc}
-                                                            actions={rowActions}
-                                                        />
-                                                    ))}
-                                                </View>
-                                            )}
-                                        </View>
-                                    );
-                                }}
+                                renderItem={({ item: entry }) => renderProjectEntry(entry)}
                                 keyExtractor={(entry) => entry.project.id}
                                 style={styles.taskList}
                                 initialNumToRender={12}
@@ -835,9 +898,14 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     };
 
     return (
-        <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={handleClose} onDismiss={handleReviewDismiss}>
+        <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal={!projectCompletionPrompt} onRequestClose={projectCompletionPrompt ? closeProjectCompletionPrompt : handleClose} onDismiss={handleReviewDismiss}>
             <GestureHandlerRootView style={{ flex: 1 }}>
-                <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'bottom']}>
+                <SafeAreaView
+                    style={[styles.container, { backgroundColor: tc.bg }]}
+                    edges={['top', 'bottom']}
+                    accessibilityElementsHidden={Boolean(projectCompletionPrompt)}
+                    importantForAccessibility={projectCompletionPrompt ? 'no-hide-descendants' : 'auto'}
+                >
                     <SandboxWorkspaceCue />
                     <View style={[styles.header, { borderBottomColor: tc.border }]}>
                         <TouchableOpacity
@@ -869,6 +937,11 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     {renderStepRail()}
 
                     <View style={styles.content}>
+                        {projectCompletionError && (
+                            <Text accessibilityRole="alert" style={[styles.hint, { color: tc.danger }]}>
+                                {projectCompletionError}
+                            </Text>
+                        )}
                         {renderStepContent()}
                     </View>
 
@@ -922,6 +995,39 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         </View>
                     )}
                 </SafeAreaView>
+
+                {projectCompletionPrompt && (
+                    <View style={[styles.promptBackdrop, styles.promptOverlay]} accessibilityViewIsModal onAccessibilityEscape={closeProjectCompletionPrompt}>
+                        <View style={[styles.promptCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+                            <Text style={[styles.promptTitle, { color: tc.text }]} numberOfLines={2} accessibilityLabel={projectCompletionPrompt.title}>
+                                {projectCompletionPrompt.title}
+                            </Text>
+                            <Text style={[styles.promptProject, { color: tc.secondaryText }]}>{t('projects.completeConfirm')}</Text>
+                            <View style={styles.promptActions}>
+                                <TouchableOpacity
+                                    style={[styles.promptButton, { borderColor: tc.border }]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('common.cancel')}
+                                    onPress={closeProjectCompletionPrompt}
+                                    disabled={completingProjectId !== null}
+                                >
+                                    <Text style={[styles.promptButtonText, { color: tc.text }]}>{t('common.cancel')}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.promptButtonPrimary, { backgroundColor: filledButton.backgroundColor, opacity: completingProjectId ? 0.5 : 1 }]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('projects.complete')}
+                                    accessibilityState={{ disabled: completingProjectId !== null }}
+                                    testID="review-confirm-complete-project"
+                                    onPress={() => { void completeProject(projectCompletionPrompt.id, true); }}
+                                    disabled={completingProjectId !== null}
+                                >
+                                    <Text style={[styles.promptButtonPrimaryText, { color: onFilled }]}>{t('projects.complete')}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                )}
 
                 <TaskEditModal
                     visible={showEditModal}

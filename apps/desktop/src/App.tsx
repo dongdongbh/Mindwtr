@@ -35,6 +35,7 @@ import {
     recordUpdateReminderChecked,
     recordUpdateReminderDismissed,
     recordUpdateReminderShown,
+    setHostSystemLocale,
     shouldShowAppAnnouncement,
     shouldShowDonationPrompt,
     withSupportPromptShown,
@@ -76,8 +77,10 @@ import { migratePortableAttachments } from './lib/portable-migration';
 import { logDesktopStartupContext } from './lib/startup-context';
 import * as LocalDataWatcher from './lib/local-data-watcher';
 import { invokeNative } from './lib/tauri-invoke';
+import { getSystemDefaultLocale } from './lib/system-locale';
 import { getInstallSourceOrFallback, isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from './lib/runtime';
 import { useDesktopShellSync } from './lib/desktop-shell-sync';
+import { useAppLockStore } from './lib/app-lock';
 import { reportError as reportAppError } from './lib/report-error';
 import { syncNativeProxyUrl } from './lib/tauri-http';
 import { persistLastView, readRestorableLastView } from './lib/session-restore';
@@ -170,10 +173,8 @@ const DONATION_PROMPT_ENABLED = (
     || import.meta.env.VITE_DONATION_PROMPT_ENABLED === 'true'
 );
 const DONATION_PROMPT_STARTUP_DELAY_MS = 2000;
-// #913: a hung save_data invoke used to leave the pre-close flush awaited with
-// no bound, wedging the window shut forever. Past this, stop blocking and ask
-// the user — generously past any normal save, and past the native watchdog's
-// 5s so its forced trace lands first if the whole channel is dead.
+
+
 const CLOSE_FLUSH_TIMEOUT_MS = 10_000;
 const MS_STORE_REVIEW_URL = 'ms-windows-store://review/?ProductId=9N0V5B0B6FRX';
 const MAC_APP_STORE_REVIEW_URL = 'macappstore://itunes.apple.com/app/id6758597144?action=write-review';
@@ -205,7 +206,7 @@ const writeDesktopOnboardingDismissed = () => {
     try {
         window.localStorage.setItem(DESKTOP_ONBOARDING_STORAGE_KEY, 'dismissed');
     } catch {
-        // If localStorage is unavailable, keep the in-memory dismissal for this session.
+
     }
 };
 
@@ -264,30 +265,25 @@ const buildPromptTestReviewAnnouncement = (installSource: InstallSource | null):
     };
 };
 
-// Task titles cannot contain a NUL, so it is safe to join the Focus titles into a
-// single string for the tray-tooltip selector. A visible separator such as a space
-// would split multi-word titles apart when the string is parsed back.
+
 const FOCUS_TITLE_SEPARATOR = '\u0000';
 
 function App() {
     const sandboxMode = isSandboxMode();
-    // Reopening shortly after the app closed resumes the interrupted session on
-    // the same screen; a fresh session starts on the default view (#842).
+
+
     const [restoredLastView] = useState(() => {
         if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return null;
         return readRestorableLastView();
     });
-    // The URL is explicit user intent (a link, or a refresh mid-Settings) and
-    // wins over the localStorage snapshot, which in turn wins over the
-    // default (#931).
+
+
     const [viewFromUrl] = useState(() => readViewFromUrl());
     const [currentView, setCurrentView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
     const [activeView, setActiveView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
     const [navigationTrace, setNavigationTrace] = useState<RendererNavigationTrace | null>(null);
-    // handleViewChange keeps ?view= in sync on every later navigation, but a
-    // fresh load that resolves the view from localStorage (no ?view= yet)
-    // never calls it — write the resolved initial view back once so copying
-    // the URL right after load still links to what's on screen (#931 follow-up).
+
+
     useEffect(() => {
         writeViewToUrl(currentView);
     }, []);
@@ -333,13 +329,11 @@ function App() {
     const showToast = useUiStore((state) => state.showToast);
     const { requestConfirmation, confirmModal } = useConfirmDialog();
     const { t, language, setLanguage } = useLanguage();
-    // App-wide so a running timer still ticks and still alerts while the user is
-    // in another view or another workspace (#528).
+
+
     usePomodoroAlerts();
-    // Selected as one joined string, not an array: a fresh array would fail the
-    // store's identity check and re-render on every write. NUL is the separator
-    // because it cannot occur in a task title — a space would split multi-word
-    // titles into separate entries.
+
+
     const focusTasks = useTaskStore((state) => state.tasks);
     const localDayKey = useLocalDayKey();
     const focusTaskTitles = useMemo(() => {
@@ -348,11 +342,14 @@ function App() {
             focusTasks.filter((task) => isTaskFocusedNow(task, now) && !isTaskFinished(task))
         ).map((task) => task.title).join(FOCUS_TITLE_SEPARATOR);
     }, [focusTasks, localDayKey]);
+    const appLocked = useAppLockStore((state) => state.locked);
+    const appLockEnabled = useAppLockStore((state) => state.enabled);
+
     const trayTooltip = useMemo(() => buildTrayTooltip({
         appName: translateWithFallback(t, 'app.name', 'Mindwtr'),
         focusLabel: translateWithFallback(t, 'agenda.todaysFocus', "Today's Focus"),
-        titles: focusTaskTitles ? focusTaskTitles.split(FOCUS_TITLE_SEPARATOR) : [],
-    }), [focusTaskTitles, t]);
+        titles: focusTaskTitles && !appLocked ? focusTaskTitles.split(FOCUS_TITLE_SEPARATOR) : [],
+    }), [appLocked, focusTaskTitles, t]);
     const isActiveRef = useRef(true);
     const lastSyncErrorRef = useRef<string | null>(null);
     const lastSyncErrorAtRef = useRef(0);
@@ -364,8 +361,8 @@ function App() {
     const [startupDataReady, setStartupDataReady] = useState(false);
     const taskLinkController = useTaskDeepLink(startupDataReady && !isLoading, isTauriRuntime() && !sandboxMode, t);
     useArchiveRetentionRunner(hasHydratedSettings && !isLoading, sandboxMode);
-    // App tests seed the store directly and deliberately skip the native startup
-    // hydration effect; in the app, only the completed fetch opens this gate.
+
+
     const viewSettingsHydrated = hasHydratedSettings
         || import.meta.env.MODE === 'test'
         || import.meta.env.VITEST
@@ -380,10 +377,7 @@ function App() {
     const stopObsidianWatcher = useObsidianStore((state) => state.stopWatcher);
     const activeAnnouncement = testAnnouncement ?? ACTIVE_APP_ANNOUNCEMENT;
 
-    // Startup prompts share one gate and open one at a time. The descriptors
-    // below carry each prompt's own eligibility/present logic; the queue owns
-    // precedence (announcement > update > donation), the startup delays, and
-    // session dismissal. See packages/core/src/startup-prompts.ts.
+
     const startupPromptsEnabled = !sandboxMode && !(
         import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test'
     );
@@ -397,8 +391,8 @@ function App() {
     );
     const startupPromptDescriptors = useMemo<StartupPromptDescriptor[]>(() => [
         {
-            // Maintainer announcement: highest precedence; when one is configured
-            // it also blocks the donation/update prompts (see their isEligible).
+
+
             id: 'announcement',
             priority: 30,
             delayMs: 250,
@@ -416,14 +410,13 @@ function App() {
             present: () => true,
         },
         {
-            // Update reminder: records the check on selection, then confirms an
-            // update actually exists before opening (declines otherwise).
+
+
             id: 'update-reminder',
             priority: 20,
             delayMs: 1750,
-            // checkForUpdates is a plain fetch with no timeout; cap present() so a
-            // hung network never holds the single slot and starves the donation
-            // prompt for the whole session.
+
+
             presentTimeoutMs: 15000,
             isEligible: () => {
                 if (!desktopInstallSource) return false;
@@ -476,8 +469,8 @@ function App() {
             },
         },
         {
-            // Donation ask: lowest precedence; suppressed whenever an announcement
-            // is configured or an update reminder is showing (via the queue).
+
+
             id: 'donation',
             priority: 10,
             delayMs: DONATION_PROMPT_STARTUP_DELAY_MS,
@@ -598,9 +591,8 @@ function App() {
     }, [applyActiveNativeTheme, getActiveThemeMode, hasHydratedSettings, sandboxMode]);
 
     useEffect(() => {
-        // Hydrate the shared pomodoro store once tasks are loaded so task rows
-        // can show per-task session counts and a focus session that finished
-        // while the app was closed credits its minutes without opening Agenda.
+
+
         if (sandboxMode || !hasHydratedSettings || isLoading) return;
         const { settings: currentSettings } = useTaskStore.getState();
         if (!resolveFeatureFlags(currentSettings).pomodoro) return;
@@ -631,8 +623,8 @@ function App() {
 
     useEffect(() => {
         if (sandboxMode || !hasHydratedSettings) return;
-        // Native sync reads the proxy from config.toml; re-mirror after every
-        // hydration so upgrades and synced-in changes take effect (#864).
+
+
         syncNativeProxyUrl(settingsProxyUrl).catch((error) => {
             reportAppError('Failed to apply proxy to native sync', error);
         });
@@ -655,7 +647,7 @@ function App() {
         if (!hasHydratedSettings) return;
         const fontFamily = coerceDesktopFontFamily(settingsFontFamily);
         if (!sandboxMode) {
-            // Mirrors text size: cached so the first paint after launch already uses it.
+
             if (fontFamily) localStorage.setItem(FONT_FAMILY_STORAGE_KEY, fontFamily);
             else localStorage.removeItem(FONT_FAMILY_STORAGE_KEY);
         }
@@ -717,10 +709,8 @@ function App() {
     }, [currentView]);
 
     useEffect(() => {
-        const systemLocale = (() => {
-            const candidates = navigator.languages?.length ? navigator.languages : [navigator.language];
-            return String(candidates?.[0] || '').trim();
-        })();
+        const systemLocale = getSystemDefaultLocale();
+        setHostSystemLocale(systemLocale || null);
         configureDateFormatting({
             language: settingsLanguage || language,
             dateFormat: settingsDateFormat,
@@ -733,12 +723,8 @@ function App() {
     const translateOrFallback = useCallback((key: string, fallback: string) => {
         return translateWithFallback(t, key, fallback);
     }, [t]);
-    // `t` is rebuilt on every LanguageProvider render (translations loading,
-    // language switch), so translateOrFallback is not referentially stable.
-    // The desktop setup effect below registers close listeners, file watchers
-    // and notifications — depending on it directly would tear all of that down
-    // and re-run fetchData every time translations settle. Read it through a
-    // ref instead so the effect keeps only stable dependencies.
+
+
     const translateOrFallbackRef = useRef(translateOrFallback);
     translateOrFallbackRef.current = translateOrFallback;
 
@@ -759,20 +745,15 @@ function App() {
     }), [translateOrFallback]);
 
     const hideToTray = useCallback(async () => {
-        // Hiding abandons the close: the process keeps running, so the next close
-        // must flush again rather than reuse this one's settled gate. This is the
-        // tray-side counterpart to quitApp's gate — every tray path (the modal's
-        // "keep running", and handleDesktopCloseRequest's direct 'tray' branch,
-        // which cannot reset the gate itself) funnels through here.
+
+
         resetCloseFlushGate();
         await hideMainWindowToTray();
     }, []);
 
     const quitApp = useCallback(async () => {
-        // Never exit while a pre-close flush is in flight (see close-flush-gate.ts).
-        // Single-flight: instant when a close path already settled it; starts a
-        // bounded flush when a quit arrives without one — that gap is the race
-        // this gate exists to close (#913 follow-up).
+
+
         await beginCloseFlush({
             flush: flushPendingSave,
             timeoutMs: CLOSE_FLUSH_TIMEOUT_MS,
@@ -785,8 +766,8 @@ function App() {
         });
         void logInfo('Close trace: invoking quit_app', { scope: 'app', force: true });
         await invokeNative('quit_app');
-        // app.exit(0) should tear the process down before this resolves; if
-        // this line ever logs, the native exit call returned without exiting (#913).
+
+
         void logInfo('Close trace: quit_app invoke returned without exit', { scope: 'app', force: true });
     }, []);
 
@@ -828,8 +809,7 @@ function App() {
             })
             .catch((error) => reportError('Data load failed', error));
 
-        // Sandbox hydration ends here. Personal watchers and services are not
-        // started and therefore do not need to be stopped through native APIs.
+
         if (sandboxMode) {
             return () => {
                 cancelled = true;
@@ -854,26 +834,24 @@ function App() {
                         if (closingPromise || isClosing) return;
                         isClosing = true;
                         event.preventDefault();
-                        // Forced close-path trace: #913 reports the quit chain dying
-                        // silently on Windows, so each hop logs even with
-                        // diagnostics off — a stuck run's log then names the hop.
+
+
                         const logStep = (step: string) => {
                             void logInfo(`Close trace: ${step}`, { scope: 'app', force: true });
                         };
-                        const racePromise = beginCloseFlush({
+                        const boundedCloseFlushPromise = beginCloseFlush({
                             flush: flushPendingSave,
                             timeoutMs: CLOSE_FLUSH_TIMEOUT_MS,
                             logStep,
                             reportError,
                         });
-                        closingPromise = racePromise.then(() => undefined);
+                        closingPromise = boundedCloseFlushPromise.then(() => undefined);
                         let timedOut = false;
                         try {
-                            ({ timedOut } = await racePromise);
+                            ({ timedOut } = await boundedCloseFlushPromise);
                         } finally {
-                            // Un-latch as soon as the bounded race is over so a repeat
-                            // close attempt (Alt+F4 again) is never silently swallowed
-                            // forever — the #913 reporter's "nothing happened at all".
+
+
                             closingPromise = null;
                             isClosing = false;
                         }
@@ -890,8 +868,8 @@ function App() {
                         });
                         if (!closeAnyway) {
                             logStep('user kept the window open while save continues');
-                            // Abandoned close: the next close attempt must flush
-                            // again rather than reuse this settled result.
+
+
                             resetCloseFlushGate();
                             return;
                         }
@@ -907,15 +885,13 @@ function App() {
                 .catch((error) => reportError('Window listener failed', error));
         }
 
-        // Reminders are not Tauri-only: the notification service falls back to Web
-        // Notifications, so the self-hosted web app schedules them too while a tab
-        // is open (#962). Everything below this genuinely needs the native shell.
+
         startDesktopNotifications().catch((error) => reportError('Notifications failed', error));
 
         if (isTauriRuntime()) {
             SyncService.startFileWatcher().catch((error) => reportError('File watcher failed', error));
 
-            // Watch local data.json and SQLite sidecar files for external changes (CLI/MCP/Local REST).
+
             Promise.all([
                 invokeNative<string>('get_data_path_cmd'),
                 invokeNative<string>('get_db_path_cmd'),
@@ -933,8 +909,8 @@ function App() {
         const handleSyncFailure = (message: string) => {
             const nowMs = Date.now();
             const isSameError = message === lastSyncErrorRef.current;
-            // Throttle repeated identical errors to once per 2 minutes, but always
-            // show new/different error messages immediately so the user stays informed.
+
+
             const shouldAlert = !isSameError || nowMs - lastSyncErrorAtRef.current > 2 * 60 * 1000;
             if (shouldAlert) {
                 lastSyncErrorRef.current = message;
@@ -950,9 +926,8 @@ function App() {
         const autoSyncController = createAutoSyncController({
             canSync: () => canDesktopAutoSync(SyncService),
             syncEncryptionSuspension: async () => {
-                // Both states are terminal until the user acts, so neither may keep auto-sync
-                // retrying: no key for an encrypted remote, or a key for a remote that went
-                // back to plaintext. Hand the state itself over so the log says which.
+
+
                 const { state } = await SyncService.getSyncEncryptionStatus();
                 return state === 'remote-encrypted-no-key' || state === 'remote-plaintext' ? state : null;
             },
@@ -1240,12 +1215,15 @@ function App() {
 
     useDesktopShellSync({
         enabled: !sandboxMode, showTray, trayTooltip, closeBehavior,
-        trayLabels: { quickAdd: t('tray.quickAdd'), show: t('tray.show'), quit: t('tray.quit') },
+        trayLabels: {
+            quickAdd: t('tray.quickAdd'), show: t('tray.show'), quit: t('tray.quit'),
+            lock: appLockEnabled ? t('appLock.lockNow') : null,
+        },
     });
 
     useEffect(() => {
         if (sandboxMode || import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
-        // Settings is frequently opened from menu actions; preload it eagerly to avoid first-open delay.
+
         void import('./components/views/SettingsView');
         const idleCallback =
             (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
@@ -1265,8 +1243,7 @@ function App() {
         return () => idleCancel(id);
     }, [sandboxMode]);
 
-    // Geometry follows the route that is actually committed inside Suspense.
-    // Sidebar selection remains urgent through currentView while a lazy route loads.
+
     const renderedView = activeView === 'timeline' && !timelineEnabled ? DEFAULT_DESKTOP_VIEW : activeView;
 
     const renderView = () => {
@@ -1274,9 +1251,8 @@ function App() {
             const savedSearchId = renderedView.replace('savedSearch:', '');
             return <SearchView savedSearchId={savedSearchId} />;
         }
-        // Timeline is opt-in (#1111). The hydration-gated effect below
-        // canonicalizes route state; this local guard keeps the transition safe
-        // while loaded settings and the state update settle.
+
+
         switch (renderedView) {
             case 'inbox':
                 return <ListView title={t('list.inbox')} statusFilter="inbox" />;
@@ -1344,8 +1320,8 @@ function App() {
             if (nextView === 'settings') {
                 beginSettingsOpenTrace('handleViewChange');
             }
-            // Settings can still suspend on its first render after a preload.
-            // Keep the current screen visible, just as for the other lazy routes.
+
+
             startTransition(() => {
                 setActiveView(nextView);
                 setNavigationTrace(trace);
@@ -1355,9 +1331,7 @@ function App() {
         else runAfterTaskEditExit(changeView);
     }, [currentView, sandboxMode, startTransition]);
 
-    // A search result's highlight waits until its destination is the screen on
-    // display: views switch inside a transition, and the screen being left
-    // would otherwise scroll to the task first (#1262).
+
     const pendingSearchHighlightRef = useRef<{ view: string; taskId: string } | null>(null);
     const handleSearchNavigate = useCallback((view: string, _id?: string, options?: { highlightTaskId?: string }) => {
         const taskId = options?.highlightTaskId;
@@ -1379,8 +1353,8 @@ function App() {
     useEffect(() => {
         if (!viewSettingsHydrated || isLoading || timelineEnabled) return;
         if (currentView !== 'timeline' && activeView !== 'timeline') return;
-        // The route is state, not just rendered content. Canonicalize every copy
-        // together so the URL, selected nav item and layout agree with Focus.
+
+
         handleViewChange(DEFAULT_DESKTOP_VIEW);
     }, [activeView, currentView, handleViewChange, isLoading, timelineEnabled, viewSettingsHydrated]);
 
@@ -1389,14 +1363,13 @@ function App() {
         handleViewChange('settings');
     }, [currentView, handleViewChange, isObsidianEnabled]);
 
-    // Restore the project that was open when the interrupted session ended.
+
     useEffect(() => {
         if (restoredLastView?.view !== 'projects' || !restoredLastView.projectId) return;
         useUiStore.getState().setProjectView({ selectedProjectId: restoredLastView.projectId });
     }, []);
 
-    // The saved timestamp must reflect when the session ended, not the last
-    // in-app navigation: refresh it whenever the window hides or closes.
+
     useEffect(() => {
         if (sandboxMode) return;
         const refreshLastView = () => {
@@ -1523,7 +1496,7 @@ function App() {
                     APP_ANNOUNCEMENT_DISMISSED_VALUE,
                 );
             } catch {
-                // Keep the in-memory dismissal for this session when localStorage is unavailable.
+
             }
         }
         startupPromptQueue.dismiss('announcement');
@@ -1552,10 +1525,7 @@ function App() {
         }
     }, []);
 
-    // Shared by all three startup-prompt action handlers below: dismissal and
-    // any prompt-specific side effect (e.g. the update reminder's dismissed-version record)
-    // happen in the handler itself; only the "feedback -> Settings, otherwise
-    // open the URL" branch was tripled, so it lives here once.
+
     const performAnnouncementNavigation = useCallback((action: AppAnnouncementAction) => {
         if (action.type === 'feedback') {
             setSettingsInitialPage('about');
@@ -1587,7 +1557,7 @@ function App() {
         } catch (error) {
             void logError(error, { scope: 'prompt-state', step: 'recordDonationShown' });
         }
-        // Synced so the other installs on this dataset skip the same ask (#1237).
+
         void updateSettings({
             supportPrompt: withSupportPromptShown(useTaskStore.getState().settings.supportPrompt, nowMs),
         });
@@ -1610,8 +1580,7 @@ function App() {
         performAnnouncementNavigation(action);
     }, [dismissUpdateReminder, performAnnouncementNavigation]);
 
-    // Single shared gate: previously each of the three <AppAnnouncementModal>
-    // instances repeated this same 4-clause check inline (#19 follow-up).
+
     const startupPromptsBlocked = desktopOnboardingOpen || closePromptOpen || Boolean(externalSyncChange);
 
     const startupPrompts = useMemo<StartupPromptPresentation[]>(() => [
@@ -1808,8 +1777,8 @@ function App() {
                         onRememberChange={setClosePromptRememberValue}
                         onCancel={() => {
                             setClosePromptOpenValue(false);
-                            // Abandoned close: the next close attempt must flush
-                            // again rather than reuse this settled result.
+
+
                             resetCloseFlushGate();
                         }}
                         onStay={() => {
@@ -1818,8 +1787,8 @@ function App() {
                                     await persistCloseBehavior('tray');
                                 }
                                 setClosePromptOpenValue(false);
-                                // hideToTray resets the close-flush gate — it is the
-                                // single owner for every tray path.
+
+
                                 await hideToTray();
                             };
                             apply().catch((error) => {

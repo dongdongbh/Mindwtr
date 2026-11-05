@@ -1,17 +1,6 @@
-/**
- * React Native's More sheet, Waiting, Someday (with its sections), Reference and
- * Done, replayed against the frozen parity fixture that core's menu-views model
- * and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit or stash every other change first, then run
- *   MINDWTR_CAPTURE_MENU_VIEWS=1 MINDWTR_CAPTURE_MENU_VIEWS_COMMIT=$(git rev-parse HEAD) bunx vitest run components/views/menu-views-parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code, so the provenance always names the code that ran.
- * Each scenario renders the real
- * screen with the real core store, drives it through its own controls and
- * handlers, and records what a user sees and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -58,7 +47,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('@/contexts/language-context', () => ({
   useLanguage: () => ({ t: (key: string) => english.strings[key] ?? key, language: 'en' }),
 }));
-vi.mock('@/contexts/theme-context', () => ({ useTheme: () => ({ isDark: false }) }));
+vi.mock('@/contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/contexts/theme-context')>(), useTheme: () => ({ isDark: false }) }));
 vi.mock('@/contexts/toast-context', () => ({
   useToast: () => ({
     showToast: (toast: { tone?: string; title?: string; message?: string; actionLabel?: string; onAction?: () => void }) => {
@@ -212,8 +202,6 @@ vi.mock('../list-overflow-menu', () => ({
   ListOverflowMenu: (props: any) => React.createElement('ListOverflowMenu', props),
 }));
 
-// ---------------------------------------------------------------------------
-// Inputs
 
 export const TIME_ZONE = 'America/New_York';
 export const NOW = '2026-09-23T14:00:00.000Z';
@@ -319,15 +307,15 @@ export type MenuViewAction =
   | ['deleteSection', string]
   | ['collapse', string]
   | ['includeArchived', boolean]
-  /** Another device removes a Someday section; the screen has not re-rendered its dialog yet. */
+
   | ['removeSectionElsewhere', string];
 export type MenuViewScenario = {
   name: string;
   screen: Screen;
   settings: string;
-  /** Task and project ids left out of the store for this scenario. */
+
   omit?: string[];
-  /** Device-local view state stored before the screen mounts. */
+
   storage?: Record<string, string>;
   actions: MenuViewAction[];
 };
@@ -522,13 +510,11 @@ export const scenarios: MenuViewScenario[] = [
   { name: 'done: empty', screen: 'done', settings: 'base', omit: ['d-a', 'd-b', 'd-c', 'd-d', 'd-e', 'd-f', 'd-g'], actions: [] },
 ];
 
-// ---------------------------------------------------------------------------
-// Harness
 
 const t = (key: string) => english.strings[key] ?? key;
 const writeLog: unknown[] = [];
 const createdIds = new Map<string, string>();
-/** Created ids are random, so they read as `<created:title>` wherever they appear. */
+
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
   entry === undefined ? '<undefined>' : entry
 )).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|someday-[0-9a-z]+-[0-9a-z]+/g, (match) => (
@@ -623,13 +609,12 @@ const renderElement = (element: unknown): ReactTestRenderer | null => {
   return renderer;
 };
 let lastToastAction: (() => void) | null = null;
-/** Drains the toasts shown since the last observation; an Undo stays reachable for the next action. */
+
 const toastEntries = () => toastLog.entries.splice(0).map(({ tone, title, message, actionLabel, onAction }) => {
   if (onAction) lastToastAction = onAction;
   return [tone, title, message, actionLabel];
 });
 
-// ------------------------------- More sheet --------------------------------
 
 const observeMore = (root: ReactTestInstance) => {
   const tabs = byName(root, 'NativeTabBar')[0];
@@ -655,7 +640,6 @@ const observeMore = (root: ReactTestInstance) => {
   };
 };
 
-// --------------------------------- Waiting ---------------------------------
 
 const observeWaiting = (root: ReactTestInstance) => {
   const list = byName(root, 'TaskListView')[0];
@@ -683,7 +667,7 @@ const observeWaiting = (root: ReactTestInstance) => {
 };
 
 function statsOf(root: ReactTestInstance) {
-  // The two stat blocks: value then label, in screen order.
+
   const statItems = hostOf(root, 'View').filter((node) => (node.props.style as { alignItems?: string })?.alignItems === 'center'
     && hostOf(node, 'Text').length === 2);
   return statItems.map((node) => hostOf(node, 'Text').map(textOf));
@@ -712,7 +696,6 @@ function deferredOf(renderer: ReactTestRenderer | null) {
   };
 }
 
-// --------------------------------- Someday ---------------------------------
 
 const menuOf = (root: ReactTestInstance) => {
   const menu = byName(root, 'ListOverflowMenu')[0] ?? hostOf(root, 'ListOverflowMenu')[0];
@@ -762,7 +745,7 @@ const observeSomeday = (root: ReactTestInstance) => {
     rows: groups
       ? groups.flatMap((group) => [
         ['heading', group.id, group.title, group.muted === true],
-        // TaskListView draws a group's projects only through renderProject.
+
         ...(list.props.renderProject ? group.projects ?? [] : []).map((entry) => ['project', entry.id]),
         ...group.tasks.map((entry) => ['task', entry.id]),
       ])
@@ -834,7 +817,7 @@ async function runRowAction(action: MenuViewAction, rowActions: { status: (task:
 async function runDeferredAction(list: ReactTestInstance, projectId: string) {
   const title = projects.find((entry) => entry.id === projectId)!.title;
   const findSwipe = (root: ReactTestInstance) => hostOf(root, 'Swipeable').find((node) => hostOf(node, 'Text').map(textOf)[0] === title);
-  // A parked project sits in the header block, or in its Someday section group (#1319).
+
   const header = renderElement(list.props.ListHeaderComponent)!;
   const grouped = (list.props.taskGroups as { projects?: Project[] }[] | undefined)
     ?.flatMap((group) => group.projects ?? []).find((entry) => entry.id === projectId);
@@ -846,7 +829,6 @@ async function runDeferredAction(list: ReactTestInstance, projectId: string) {
   act(() => { header.unmount(); row?.unmount(); });
 }
 
-// ------------------------------ Reference/Done ------------------------------
 
 const observeTaskList = (root: ReactTestInstance) => {
   const flat = hostOf(root, 'FlatList')[0];
@@ -953,7 +935,6 @@ async function runTaskListAction(root: ReactTestInstance, action: MenuViewAction
   if (!handled) throw new Error(`Unknown action ${JSON.stringify(action)}`);
 }
 
-// --------------------------------- Runner ----------------------------------
 
 async function runScenario(scenario: MenuViewScenario) {
   writeLog.splice(0);
@@ -1002,7 +983,7 @@ async function runScenario(scenario: MenuViewScenario) {
 
   const observations: Record<string, unknown>[] = [];
   if (scenario.screen === 'reference' || scenario.screen === 'done') {
-    // Token options are only built while the filter sheet is open; keep it open.
+
     await act(async () => { hostOf(root, 'TaskListHeader')[0].props.onOpenFilters(); });
   }
   if (scenario.screen === 'someday-sections') {
@@ -1030,87 +1011,88 @@ async function runScenario(scenario: MenuViewScenario) {
         }
       } else if (scenario.screen === 'waiting' || scenario.screen === 'someday') {
         const list = byName(root, 'TaskListView')[0];
-        if (await runRowAction(action, {
+        const rowActionHandled = await runRowAction(action, {
           status: list.props.onChangeTaskStatus,
           remove: list.props.onDeleteTask,
-        })) {
-          // handled
-        } else if (action[0] === 'activateProject') {
-          await runDeferredAction(list, action[1]);
-        } else if (action[0] === 'person') {
-          const chips = hostOf(root, 'ScrollView')[0];
-          const chip = hostOf(chips, 'TouchableOpacity').find((node) => (action[1] ? textOf(node) === action[1] : textOf(node) === t('common.all')));
-          if (!chip) throw new Error(`No person chip ${action[1]}`);
-          await act(async () => { chip.props.onPress(); });
-        } else if (action[0] === 'clearPerson') {
-          const chips = hostOf(root, 'ScrollView')[0];
-          const clear = hostOf(root, 'TouchableOpacity').find((node) => textOf(node) === t('common.clear') && !hostOf(chips, 'TouchableOpacity').includes(node));
-          await act(async () => { clear!.props.onPress(); });
-        } else if (action[0] === 'sort' || action[0] === 'group' || action[0] === 'details') {
-          const raw = hostOf(root, 'ListOverflowMenu')[0].props.actions as Record<string, any>[];
-          const target = action[0] === 'details'
-            ? raw.find((entry) => entry.id === 'details')
-            : raw.find((entry) => entry.id === action[0])!.submenu.actions.find((entry: { id: string }) => entry.id === `${action[0]}:${action[1]}`);
-          if (!target) throw new Error(`No menu action ${JSON.stringify(action)}`);
-          await act(async () => { target.onPress(); });
-        } else if (action[0] === 'filter' || action[0] === 'clearFilters' || action[0] === 'clearChip') {
-          await runFilterAction(root, action);
-        } else if (action[0] === 'select') {
-          for (const id of action[1]) {
+        });
+        if (!rowActionHandled) {
+          if (action[0] === 'activateProject') {
+            await runDeferredAction(list, action[1]);
+          } else if (action[0] === 'person') {
+            const chips = hostOf(root, 'ScrollView')[0];
+            const chip = hostOf(chips, 'TouchableOpacity').find((node) => (action[1] ? textOf(node) === action[1] : textOf(node) === t('common.all')));
+            if (!chip) throw new Error(`No person chip ${action[1]}`);
+            await act(async () => { chip.props.onPress(); });
+          } else if (action[0] === 'clearPerson') {
+            const chips = hostOf(root, 'ScrollView')[0];
+            const clear = hostOf(root, 'TouchableOpacity').find((node) => textOf(node) === t('common.clear') && !hostOf(chips, 'TouchableOpacity').includes(node));
+            await act(async () => { clear!.props.onPress(); });
+          } else if (action[0] === 'sort' || action[0] === 'group' || action[0] === 'details') {
+            const raw = hostOf(root, 'ListOverflowMenu')[0].props.actions as Record<string, any>[];
+            const target = action[0] === 'details'
+              ? raw.find((entry) => entry.id === 'details')
+              : raw.find((entry) => entry.id === action[0])!.submenu.actions.find((entry: { id: string }) => entry.id === `${action[0]}:${action[1]}`);
+            if (!target) throw new Error(`No menu action ${JSON.stringify(action)}`);
+            await act(async () => { target.onPress(); });
+          } else if (action[0] === 'filter' || action[0] === 'clearFilters' || action[0] === 'clearChip') {
+            await runFilterAction(root, action);
+          } else if (action[0] === 'select') {
+            for (const id of action[1]) {
+              const current = byName(root, 'TaskListView')[0];
+              await act(async () => {
+                current.props.selection.toggleMultiSelect(id, { visibleTaskIds: (current.props.tasks as Task[]).map((entry) => entry.id) });
+              });
+            }
+          } else if (action[0] === 'moveToSection') {
             const current = byName(root, 'TaskListView')[0];
             await act(async () => {
-              current.props.selection.toggleMultiSelect(id, { visibleTaskIds: (current.props.tasks as Task[]).map((entry) => entry.id) });
+              if (action[1].length > 0) {
+                current.props.onMoveTaskToSection(useTaskStore.getState()._allTasks.find((entry) => entry.id === action[1][0]));
+              } else {
+                current.props.onMoveSelectionToSection();
+              }
             });
-          }
-        } else if (action[0] === 'moveToSection') {
-          const current = byName(root, 'TaskListView')[0];
-          await act(async () => {
-            if (action[1].length > 0) {
-              current.props.onMoveTaskToSection(useTaskStore.getState()._allTasks.find((entry) => entry.id === action[1][0]));
-            } else {
-              current.props.onMoveSelectionToSection();
-            }
-          });
-          observations.push({ opened: normalize(observeSomeday(root)) });
-          const picker = hostOf(root, 'Modal').filter((node) => node.props.visible)
-            .flatMap((node) => hostOf(node, 'SomedaySectionPicker'))[0];
-          await act(async () => { await picker.props.onSelect(action[2] ?? undefined); });
-        } else if (action[0] === 'undo') {
-          const undo = lastToastAction as (() => void) | null;
-          lastToastAction = null;
-          await act(async () => { await undo!(); });
-        } else if (action[0] === 'addTask') {
-          const current = byName(root, 'TaskListView')[0];
-          await act(async () => { current.props.onAddTaskToSection(action[1]); });
-          observations.push({ opened: normalize(observeSomeday(root)) });
-          const input = hostOf(root, 'Modal').filter((node) => node.props.visible).flatMap((node) => hostOf(node, 'TextInput'))[0];
-          await act(async () => { input.props.onChangeText(action[2]); });
-          const modal = hostOf(root, 'Modal').filter((node) => node.props.visible).find((node) => hostOf(node, 'TextInput').length > 0)!;
-          const save = hostOf(modal, 'TouchableOpacity').at(-1)!;
-          await act(async () => { await save.props.onPress(); });
-        } else if (action[0] === 'removeSectionElsewhere') {
-          const current = useTaskStore.getState().settings;
-          await act(async () => {
-            await realActions!.updateSettings({
-              gtd: {
-                ...(current.gtd ?? {}),
-                viewSections: {
-                  ...(current.gtd?.viewSections ?? {}),
-                  someday: (current.gtd?.viewSections?.someday ?? []).filter((section) => section.id !== action[1]),
+            observations.push({ opened: normalize(observeSomeday(root)) });
+            const picker = hostOf(root, 'Modal').filter((node) => node.props.visible)
+              .flatMap((node) => hostOf(node, 'SomedaySectionPicker'))[0];
+            await act(async () => { await picker.props.onSelect(action[2] ?? undefined); });
+          } else if (action[0] === 'undo') {
+            const undo = lastToastAction as (() => void) | null;
+            lastToastAction = null;
+            await act(async () => { await undo!(); });
+          } else if (action[0] === 'addTask') {
+            const current = byName(root, 'TaskListView')[0];
+            await act(async () => { current.props.onAddTaskToSection(action[1]); });
+            observations.push({ opened: normalize(observeSomeday(root)) });
+            const input = hostOf(root, 'Modal').filter((node) => node.props.visible).flatMap((node) => hostOf(node, 'TextInput'))[0];
+            await act(async () => { input.props.onChangeText(action[2]); });
+            const modal = hostOf(root, 'Modal').filter((node) => node.props.visible).find((node) => hostOf(node, 'TextInput').length > 0)!;
+            const save = hostOf(modal, 'TouchableOpacity').at(-1)!;
+            await act(async () => { await save.props.onPress(); });
+          } else if (action[0] === 'removeSectionElsewhere') {
+            const current = useTaskStore.getState().settings;
+            await act(async () => {
+              await realActions!.updateSettings({
+                gtd: {
+                  ...(current.gtd ?? {}),
+                  viewSections: {
+                    ...(current.gtd?.viewSections ?? {}),
+                    someday: (current.gtd?.viewSections?.someday ?? []).filter((section) => section.id !== action[1]),
+                  },
                 },
-              },
+              });
             });
-          });
-        } else if (action[0] === 'newSection') {
-          const raw = hostOf(root, 'ListOverflowMenu')[0].props.actions as Record<string, any>[];
-          await act(async () => { raw.at(-1)!.onPress(); });
-          const picker = hostOf(root, 'SomedaySectionPicker').find((node) => node.props.createOnly)!;
-          let created: string | null = null;
-          await act(async () => { created = await picker.props.onCreate(action[1]); });
-          await act(async () => { picker.props.onSelect(created); });
-          observations.push({ created: normalize(created) as unknown });
-        } else {
-          throw new Error(`Unknown action ${JSON.stringify(action)}`);
+          } else if (action[0] === 'newSection') {
+            const raw = hostOf(root, 'ListOverflowMenu')[0].props.actions as Record<string, any>[];
+            await act(async () => { raw.at(-1)!.onPress(); });
+            const picker = hostOf(root, 'SomedaySectionPicker').find((node) => node.props.createOnly)!;
+            let created: string | null = null;
+            await act(async () => { created = await picker.props.onCreate(action[1]); });
+            await act(async () => { picker.props.onSelect(created); });
+            observations.push({ created: normalize(created) as unknown });
+          } else {
+            throw new Error(`Unknown action ${JSON.stringify(action)}`);
+          }
         }
       } else if (scenario.screen === 'someday-sections') {
         const manager = byName(root, 'SomedaySectionManager')[0];
@@ -1153,10 +1135,7 @@ async function runScenario(scenario: MenuViewScenario) {
   return observations;
 }
 
-/**
- * The commit a recapture runs at. It must be declared, equal HEAD, and the checkout
- * must hold no other change than this harness and its fixture.
- */
+
 function captureProvenance() {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: new URL('.', import.meta.url).pathname, encoding: 'utf8' });
   const head = git('rev-parse', 'HEAD').trim();
@@ -1177,7 +1156,7 @@ function captureProvenance() {
 describe('React Native list views parity fixture', () => {
   const originalTz = process.env.TZ;
   beforeAll(async () => {
-    // Some screens rely on the app's automatic JSX runtime; the test transform may emit classic calls.
+
     (globalThis as { React?: typeof React }).React = React;
     Alert.alert = (title: string, message?: string, buttons?: { text?: string; style?: string; onPress?: () => void }[]) => {
       alertLog.entries.push({ title, message, buttons });

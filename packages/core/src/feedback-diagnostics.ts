@@ -1,8 +1,7 @@
 import type { DiagnosticsLogEntry } from './diagnostics-log';
 import { sanitizeForLog, sanitizeLogContext } from './log-sanitize';
 
-/** Local, volatile diagnostics. Callers supply entries through their existing
- * sanitizers; this buffer never writes to disk or sends anything. */
+
 type DiagnosticEntry = {
     ts: string;
     level: 'info' | 'warn' | 'error';
@@ -46,7 +45,7 @@ export function createFeedbackDiagnosticsBuffer(now: () => number = Date.now) {
             entries.push({ entry, line, recordedAt: now(), signature: identity });
             let chars = entries.reduce((total, item) => total + item.line.length + 1, 0);
             while (entries.length > MAX_BUFFER_ENTRIES || chars > MAX_BUFFER_CHARS) {
-                // Routine traffic must not evict the failure that led to feedback.
+
                 const lowest = Math.min(...entries.map((item) => priority(item.entry)));
                 const index = entries.findIndex((item) => priority(item.entry) === lowest);
                 chars -= entries[index].line.length + 1;
@@ -61,8 +60,7 @@ export function createFeedbackDiagnosticsBuffer(now: () => number = Date.now) {
     };
 }
 
-/** Preserve complete JSON lines, with failures ahead of routine traffic. The
- * final snapshot reserves room for the current activity trail and capture proof. */
+
 export function buildFeedbackDiagnostics(
     sources: readonly (string | null | undefined)[],
     snapshot: string,
@@ -83,7 +81,7 @@ export function buildFeedbackDiagnostics(
                 const previous = candidates.get(identity);
                 if (!previous || entry.ts >= previous.entry.ts) candidates.set(identity, { entry, line });
             } catch {
-                // Rotated logs can start halfway through an entry. Never attach that fragment.
+
             }
         }
     }
@@ -101,10 +99,7 @@ export function buildFeedbackDiagnostics(
     return [...selected.map((item) => item.line), snapshot].join('\n');
 }
 
-/**
- * The snapshot line that ends the attached diagnostics: whether debug logging is on and the recent app flow (the breadcrumbs).
- * Built in memory, so attaching never writes a log while logging is off. RN's collectFeedbackDiagnostics and the native host's.
- */
+
 export function buildFeedbackDiagnosticsSnapshot(input: { debugLoggingEnabled: boolean; breadcrumbs: readonly string[]; now?: Date }): string {
     const { breadcrumbs } = input;
     return JSON.stringify({
@@ -122,7 +117,7 @@ export function buildFeedbackDiagnosticsSnapshot(input: { debugLoggingEnabled: b
     });
 }
 
-/** Only existing sanitized diagnostic fields can enter explicit feedback: a diagnostics line's fields, through the log sanitizer. */
+
 export function feedbackDiagnosticEntry(value: unknown): DiagnosticsLogEntry | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const entry = value as Record<string, unknown>;
@@ -138,17 +133,14 @@ export function feedbackDiagnosticEntry(value: unknown): DiagnosticsLogEntry | n
     };
 }
 
-/**
- * The saved log's recent part as feedback attaches it: each line through [feedbackDiagnosticEntry] again (a line saved before a
- * sanitizer rule, or by another writer, may carry a title or a secret); a rotated fragment or a foreign line is dropped.
- */
+
 export function sanitizeSavedFeedbackLog(saved: string | null | undefined): string {
     const sanitized: string[] = [];
     for (const line of (saved ?? '').slice(-FEEDBACK_DIAGNOSTICS_SOURCE_CHARS).split('\n')) {
         try {
             const entry = feedbackDiagnosticEntry(JSON.parse(line));
             if (entry) sanitized.push(JSON.stringify(entry));
-        } catch { /* Never export a rotated fragment or an invalid diagnostic line. */ }
+        } catch {                                                                      }
     }
     return sanitized.join('\n');
 }

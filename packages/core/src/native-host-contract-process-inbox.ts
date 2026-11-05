@@ -197,7 +197,7 @@ type PlanningContext = {
     parseTitle: (input: string) => ProcessInboxParsedTitle;
     nextId: () => string;
     allowMembershipDiscovery?: boolean;
-    /** Created actions inherit it. Validation reads it back from their frozen rows, so the witness keeps its shape. */
+
     taskReminderDefault: 'send' | 'skip';
 };
 type Planned = { effect: PreparedInboxEffect; result: NativeInboxDurableResult;
@@ -326,7 +326,7 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
                     if (frozen !== undefined && frozen !== original && !validDate(frozen)) {
                         throw new Error('Invalid frozen Inbox date');
                     }
-                    // Explicit picker edits (including clearing) outrank title tokens in RN.
+
                     if (!draft.dirtyScheduleFields.includes(field) && parsed !== undefined && frozen !== parsed) {
                         throw new Error('Parsed Inbox date was altered');
                     }
@@ -432,7 +432,7 @@ const planWrite = ({ request, witness, parseTitle, nextId, allowMembershipDiscov
     return { effect, result, decisionRequest, preparedDecision };
 };
 
-/** The ordinary core contract supplies an already checked, pre-write session. */
+
 export function prepareNativeInboxWrite(input: {
     request: NativeInboxWriteRequest;
     source: Task;
@@ -499,9 +499,8 @@ export function prepareNativeInboxWrite(input: {
             sectionIds: state._allSections.filter((section) => section.projectId === reopened.after.id).map((section) => section.id).sort() };
         planned.effect.guards.reactivation = witness.membership;
     }
-    // The first plan ran against live state. Retain only rows read by its
-    // affected set and the bounded order/dedupe/membership guards. Replanning
-    // this reduced witness must yield the same complete effect and receipt.
+
+
     const relevantTasks = new Set<string>([
         source.id,
         ...planned.effect.tasks.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
@@ -527,6 +526,7 @@ export function prepareNativeInboxWrite(input: {
     const relevantSections = new Set<string>([
         ...planned.effect.sections.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
         ...planned.effect.guards.reactivation?.sectionIds ?? [],
+
         ...[source.sectionId, input.draft.sectionId].filter((id): id is string => Boolean(id)),
     ]);
     witness.lists = {
@@ -560,7 +560,7 @@ export function prepareNativeInboxWrite(input: {
     return { kind: 'prepared', prepared };
 }
 
-/** Pure verification, including a self-consistent full-effect reconstruction. */
+
 export function readNativePreparedInboxWrite(input: unknown): NativePreparedInboxWrite | null {
     const envelope = detach(input);
     if (!isRecord(envelope) || !exactKeys(envelope, ['request', 'prepared'])
@@ -651,7 +651,7 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
                 && recomputed.effect.tasks.some((row) => row.after.id === witness.source.id
                     && row.after.status === 'reference' && row.after[field] === 0);
         });
-        // Old v1 journals retain their exact effect bytes before each field's transition-only Off value existed.
+
         const legacyReference = legacyReferenceFields.length > 0;
         const effect = legacyReference ? { ...recomputed.effect, tasks: recomputed.effect.tasks.map((row) => {
             if (row.after.id !== witness.source.id) return row;

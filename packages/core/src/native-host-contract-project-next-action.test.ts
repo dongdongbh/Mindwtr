@@ -345,9 +345,8 @@ describe('Reference prompt captured parser authority and old durable bytes', () 
                     value(await sqlite.host.commitPreparedProjectLifecycle(envelope as never)); }
                 const [receipt] = await sqlite.sql<{ method: string }>('SELECT method FROM native_request_receipts WHERE request_id=?', [kind === 'ordinaryUndo' ? WRITE : ORIGIN]);
                 if (kind === 'capture') {
-                    // Existing prepared capture is intentionally not a durable
-                    // request-receipt endpoint. Its unchanged default commit
-                    // remains task-ID replay; the new prompt never calls it.
+
+
                     expect(receipt).toBeUndefined();
                     expect(Object.keys((envelope as { prepared: object }).prepared).sort()).toEqual(['version','request','task','project','deviceIdToInitialize','result'].sort());
                 } else expect(receipt.method).toBe(`${prefix}:${uuid.deterministicHash128Hex(canonical([prefix, envelope]))}`);
@@ -494,8 +493,8 @@ describe('Reference prompt current durable origin proof', () => {
             else if (drift === 'method') await sqlite.client().run('UPDATE native_request_receipts SET method=? WHERE request_id=?', ['referenceTaskCompletion:00000000000000000000000000000000', ORIGIN]);
             else if (drift === 'reply') await sqlite.client().run('UPDATE native_request_receipts SET reply=? WHERE request_id=?', [JSON.stringify({ id: 'foreign' }), ORIGIN]);
             else await sqlite.client().run('UPDATE native_request_receipts SET saved_at=? WHERE request_id=?', ['not-an-instant', ORIGIN]);
-            // The old outcome cache still proves the landed origin, so this
-            // specifically tests new-family current durable authority.
+
+
             expect(value(sqlite.host.taskCompletionOutcome(proof.envelope))).not.toBeNull();
             const before = await raw(sqlite); const receipts = await sqlite.sql('SELECT * FROM native_request_receipts'); const beforeMutations = mutations;
             expect(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope as never)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -556,8 +555,8 @@ describe('Reference prompt transactional receipt prerequisite', () => {
                 [original.request_id, original.method, original.reply, original.saved_at]);
             value(await sqlite.host.commitPreparedReferenceProjectNextAction(envelope as never)); expect(await raw(sqlite)).toEqual(normal);
             expect(await sqlite.sql('SELECT * FROM native_request_receipts ORDER BY request_id')).toEqual(normalReceipts);
-            // Proven commit releases the prerequisite. An unrelated ordinary
-            // writer succeeds after original proof deletion, without checking it.
+
+
             await sqlite.client().run('DELETE FROM native_request_receipts WHERE request_id=?', [ORIGIN]);
             expect(await useTaskStore.getState().updateTask('candidate', { title: 'Later unrelated edit' })).toEqual({ success: true }); await flushPendingSave();
             expect(useTaskStore.getState()._tasksById.get('candidate')?.title).toBe('Later unrelated edit');

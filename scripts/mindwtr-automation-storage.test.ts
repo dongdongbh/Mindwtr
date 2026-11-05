@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { spawn } from 'child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
@@ -10,6 +10,8 @@ import type { AppData, Person, Project, Task } from '@mindwtr/core';
 
 import { createMindwtrAutomationStorage } from './mindwtr-automation-storage';
 import { createMindwtrAutomationService } from './mindwtr-automation-core';
+
+setDefaultTimeout(20_000);
 
 const tempDirs: string[] = [];
 
@@ -333,7 +335,7 @@ describe('automation script sqlite writes', () => {
         const movedData = join(root, 'data', 'data.json');
         const movedDb = join(root, 'data', 'mindwtr.db');
 
-        // The app has already moved this profile; the pinned paths are one folder off.
+
         const moved = createMindwtrAutomationStorage({ dataPath: movedData, dbPath: movedDb });
         await moved.saveData(emptyData());
         expect(existsSync(movedDb)).toBe(true);
@@ -371,7 +373,7 @@ describe('automation script sqlite writes', () => {
         const contents = '{"someOtherTool":true}';
         writeFileSync(unrelated, contents);
 
-        // A fresh sandbox profile inside a folder that already holds a data.json.
+
         const pinnedData = join(root, 'data', 'data.json');
         const pinnedDb = join(root, 'data', 'mindwtr.db');
         const storage = createMindwtrAutomationStorage({ dataPath: pinnedData, dbPath: pinnedDb });
@@ -399,7 +401,7 @@ describe('automation script sqlite writes', () => {
         const seed = createMindwtrAutomationStorage({ dataPath, dbPath });
         await seed.saveData({ ...emptyData(), tasks: [task(5, 'Newer desktop write')] });
 
-        // A second process reads, then saves a snapshot that predates the seed.
+
         const stale = createMindwtrAutomationStorage({ dataPath, dbPath });
         await stale.saveData({ ...emptyData(), tasks: [task(4, 'Stale automation write')] });
 
@@ -654,8 +656,7 @@ describe('automation script sqlite writes', () => {
         expect(stderrLines.join('')).toContain('v1.3.2/automation-failed-operation-settled');
     });
 
-    // Real save retries wait 250 + 500 + 1000 + 2000 ms before terminal failure.
-    // Leave room for filesystem work without racing Bun's default five-second deadline.
+
     test('preserves the operation error when failed settlement is terminal', async () => {
         const firstRoot = mkdtempSync(join(tmpdir(), 'mindwtr-automation-storage-'));
         tempDirs.push(firstRoot);

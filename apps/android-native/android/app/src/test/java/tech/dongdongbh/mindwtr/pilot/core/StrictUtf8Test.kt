@@ -7,12 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
 
-/**
- * HostIo hands JavaScript a fetch body as text only when it is strict UTF-8, so the host's answer must be the polyfill's fatal
- * TextDecoder's answer for every input. scripts/utf8-parity-cases.json holds Node's fatal decoder's answers (BOM kept), and
- * check-boot-gates.mjs proves the polyfill gives the same: incomplete sequences, overlong forms, surrogate code points, values
- * above U+10FFFF, astral characters, a BOM, and random bytes.
- */
+
 class StrictUtf8Test {
     private val cases = JSONArray(File("../../scripts/utf8-parity-cases.json").readText())
 
@@ -25,14 +20,14 @@ class StrictUtf8Test {
             if (case.isNull("text")) assertNull("malformed $hex", decoded)
             else {
                 assertEquals("text of $hex", case.getString("text"), decoded)
-                // The polyfill rebuilds bytes from this text when asked: they must be the body's own.
+
                 assertArrayEquals("bytes of $hex", bytes, decoded!!.toByteArray(Charsets.UTF_8))
             }
         }
     }
 
     @Test fun aNulKeepsItsBytes() {
-        // The bridge passes strings as modified UTF-8: NUL would arrive as U+FFFD, so a body with one stays bytes.
+
         val bytes = byteArrayOf(0x61, 0, 0x62)
         assertEquals("a\u0000b", StrictUtf8.decodeOrNull(bytes))
         assertNull(StrictUtf8.bridgeTextOrNull(bytes))

@@ -50,7 +50,7 @@ export const readCalendarSubscriptionSettingWitness = (value: unknown): Calendar
     return detach(value);
 };
 
-/** Saved JSON and exact legacy bytes, never the display cache or its stamp alone. */
+
 export function calendarSubscriptionSettingSource(settings: AppSettings, legacyRaw: string | null): CalendarSubscriptionSettingSource | null {
     try {
         const present = own(settings, 'externalCalendars');
@@ -88,7 +88,7 @@ export function calendarSubscriptionSettingSource(settings: AppSettings, legacyR
     } catch { return null; }
 }
 
-/** Existing RN no-op/edit rules. Staleness is checked only for a changed plan. */
+
 export function planCalendarSubscriptionSetting(feeds: readonly ExternalCalendarSubscription[], edit: CalendarSubscriptionSettingEdit)
     : { changed: boolean; feeds: ExternalCalendarSubscription[] } | null {
     const matches = feeds.filter((feed) => feed.id === edit.feedId);

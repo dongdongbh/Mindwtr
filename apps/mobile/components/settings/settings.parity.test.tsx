@@ -1,22 +1,6 @@
-/**
- * React Native's Settings menu, General and Manage screens, replayed against the
- * frozen parity fixture (packages/core/src/settings-screens-parity.fixtures.json)
- * that core's settings models and the native host contract are tested against.
- *
- * To recapture, keep every file under apps/ at HEAD except this one, then run
- *   MINDWTR_CAPTURE_SETTINGS_SCREENS=1 TZ=UTC bunx vitest run components/settings/settings.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD,
- * so the provenance always names the React Native code that ran. After a
- * recorded React Native fix, MINDWTR_DUMP_SETTINGS_SCREENS=<file> writes this
- * run's observations, to replace only the ones the fix changes (see provenance.recaptured).
- *
- * Each scenario renders the real screen with the real core store, drives it
- * through its own controls, and records what a user sees, what the store is
- * asked to write, and what the screen stores on the device. The device is
- * stubbed: its locale is the scenario's `systemLocale`, and its short date
- * (toLocaleDateString, for the System date format label) is core's System
- * short date for that locale, since the native host has no Intl.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -116,7 +100,8 @@ vi.mock('@/contexts/language-context', () => ({
     isReady: true,
   }),
 }));
-vi.mock('@/contexts/theme-context', () => ({
+vi.mock('@/contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/contexts/theme-context')>(),
   useTheme: () => ({
     themeMode: harness.themeMode,
     setThemeMode: (mode: string) => {
@@ -168,7 +153,7 @@ vi.mock('@/lib/mobile-app-lock', async () => {
     },
   };
 });
-// The other settings screens are not part of this fixture.
+
 vi.mock('@/components/settings/about-settings-screen', () => ({ AboutSettingsScreen: () => null }));
 vi.mock('@/components/settings/ai-settings-screen', () => ({ AISettingsScreen: () => null }));
 vi.mock('@/components/settings/calendar-settings-screen', () => ({ CalendarSettingsScreen: () => null }));
@@ -176,7 +161,7 @@ vi.mock('@/components/settings/sync-settings-screen', () => ({ DataSettingsScree
 vi.mock('@/components/settings/gtd-settings-screen', () => ({ GtdSettingsScreen: () => null }));
 vi.mock('@/components/settings/notifications-settings-screen', () => ({ NotificationsSettingsScreen: () => null }));
 vi.mock('@/components/settings/sandbox-settings-screen', () => ({ SandboxSettingsScreen: () => null }));
-// Each lucide icon is its own component, so the menu's icons can be told apart.
+
 vi.mock('lucide-react-native', () => {
   const icons = new Map<string, unknown>();
   return new Proxy({ __esModule: true } as Record<string, unknown>, {
@@ -192,8 +177,6 @@ vi.mock('lucide-react-native', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Scenario data.
 
 const at = (day: string) => `2026-${day}T12:00:00.000Z`;
 const task = (id: string, title: string, status: Task['status'], extra: Partial<Task> = {}): Task => ({
@@ -202,7 +185,7 @@ const task = (id: string, title: string, status: Task['status'], extra: Partial<
 const area = (id: string, name: string, order: number, extra: Partial<Area> = {}): Area => ({
   id, name, order, createdAt: at('09-01'), updatedAt: at('09-01'), ...extra,
 });
-// Every project stores the placeholder colour.
+
 const project = (id: string, title: string, extra: Partial<Project> = {}): Project => ({
   id, title, status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: at('09-01'), updatedAt: at('09-01'), ...extra,
 });
@@ -272,7 +255,7 @@ const SETTINGS: Record<string, AppSettings> = {
 
 const ALL_OPEN = '{"areas":true,"people":true,"somedaySections":true,"contexts":true,"tags":true}';
 
-/** What a scenario's device holds; the defaults are an English en-US phone. */
+
 type Device = {
   language?: string;
   systemLocale?: string;
@@ -288,7 +271,7 @@ type Scenario = {
   data: string;
   settings: string;
   device: Device;
-  /** Menu only: the sync badge the device's sync status resolves to (what a native host sends). */
+
   syncBadge?: 'hidden' | 'syncing' | 'healthy' | 'attention';
   actions: [string, ...unknown[]][];
 };
@@ -317,7 +300,7 @@ const generalScenarios: Scenario[] = [
   {
     name: 'general: theme picker',
     data: 'none', settings: 'base', device: {},
-    // The last pick is the choice already stored: nothing is written again.
+
     actions: [['open', 'theme'], ['pick', 9], ['open', 'theme'], ['pick', 4], ['open', 'theme'], ['dismiss'], ['open', 'theme'], ['pick', 4]],
   },
   { name: 'general: stored values', data: 'none', settings: 'stored', device: { themeMode: 'nord', systemLocale: 'en-GB' }, actions: [['regional'], ['open', 'quickAccess']] },
@@ -336,7 +319,7 @@ const generalScenarios: Scenario[] = [
   {
     name: 'general: app lock relock delay',
     data: 'none', settings: 'stored', device: { themeMode: 'nord' },
-    // The last pick is the choice already stored: nothing is written again.
+
     actions: [['open', 'appLockRelock'], ['pick', 2], ['open', 'appLockRelock'], ['pick', 2], ['open', 'appLockRelock'], ['dismiss']],
   },
   {
@@ -441,8 +424,6 @@ const manageScenarios: Scenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -492,9 +473,6 @@ function setDevice(device: Device) {
   writeLog.length = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen. Hidden modals render their children in the test
-// shim; they are skipped, as a user would.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -502,7 +480,7 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Host nodes in screen order; `modals: false` skips every modal, `true` skips only hidden ones. */
+
 function hosts(root: ReactTestInstance, type: string, modals = false): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -514,7 +492,7 @@ function hosts(root: ReactTestInstance, type: string, modals = false): ReactTest
   return out;
 }
 
-/** The visible text outside modals, one entry per outermost Text, in screen order. */
+
 function textsIn(root: ReactTestInstance, modals = false): string[] {
   const out: string[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -600,7 +578,7 @@ function observeGeneral(root: ReactTestInstance, seen: Seen) {
     const groups: unknown[][] = [[]];
     for (const child of list.children) {
       if (typeof child === 'string') continue;
-      // The divider before the styled themes is a plain View.
+
       if ((child.type as { displayName?: string }).displayName === 'View') {
         groups.push([]);
         continue;
@@ -648,8 +626,6 @@ function observeManage(root: ReactTestInstance, seen: Seen) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Driving the screens.
 
 const MENU_TITLE_KEYS: Record<string, string> = {
   general: 'settings.general', gtd: 'settings.gtd', manage: 'settings.manage', notifications: 'settings.notifications',
@@ -666,7 +642,7 @@ async function run(what: string, fn: (() => unknown) | undefined) {
   await act(async () => { await fn(); });
 }
 
-/** The row (a View) holding a Text with exactly this text, and its buttons. */
+
 function rowButtons(root: ReactTestInstance, text: string): ReactTestInstance[] {
   const label = hosts(root, 'Text').find((node) => deepText(node) === text);
   let row = label?.parent ?? null;
@@ -681,7 +657,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
   const modal = () => visibleModal(root);
   const labelled = (label: string) => pressables(root).find((node) => node.props.accessibilityLabel === label);
   switch (kind) {
-    // Menu
+
     case 'search':
       return run('search', () => hosts(root, 'TextInput')[0].props.onChangeText(target));
     case 'tap': {
@@ -689,7 +665,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       const item = root.findAll((node) => typeof node.type === 'function' && (node.type as { name?: string }).name === 'MenuItem' && node.props.title === title)[0];
       return run('tap', item?.props.onPress);
     }
-    // General
+
     case 'regional':
       return run('regional formats', byTestId(root, 'regional-formats-toggle').props.onPress);
     case 'open': {
@@ -710,7 +686,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       const id = target === 'somedaySections' ? 'someday-sections' : target;
       return run('section', byTestId(root, `manage-section-toggle-${String(id)}`)?.props.onPress);
     }
-    // Manage
+
     case 'editUnassigned':
       return run('unassigned', hosts(byTestId(root, 'manage-unassigned-area-color'), 'TouchableOpacity')[0]?.props.onPress);
     case 'editArea':
@@ -746,7 +722,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       return run('color', pressables(modal()!, true).find((node) => String(node.props.accessibilityLabel).endsWith(`: ${String(target)}`))?.props.onPress);
     case 'save': {
       const save = byTestId(modal()!, 'manage-editor-save');
-      // A disabled Save cannot be pressed.
+
       if (save.props.disabled) return undefined;
       return run('save', save.props.onPress);
     }
@@ -869,7 +845,7 @@ describe('React Native settings screens parity fixture', () => {
     for (const scenario of menuScenarios) captured[scenario.name] = await runScenario(scenario, 'menu');
     for (const scenario of generalScenarios) captured[scenario.name] = await runScenario(scenario, 'general');
     for (const scenario of manageScenarios) captured[scenario.name] = await runScenario(scenario, 'manage');
-    // Writes this run's observations to a file, to replace only the ones a fix changes.
+
     if (process.env.MINDWTR_DUMP_SETTINGS_SCREENS) writeFileSync(process.env.MINDWTR_DUMP_SETTINGS_SCREENS, JSON.stringify(captured));
     if (CAPTURE) {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify({ provenance: captureProvenance(), ...inputs(), observations: captured }, null, 1)}\n`);

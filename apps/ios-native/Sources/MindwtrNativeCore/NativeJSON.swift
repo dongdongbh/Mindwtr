@@ -1,7 +1,6 @@
 import Foundation
 
-/// Preserves leading U+FEFF in JSON strings without changing Foundation's
-/// object, number, and distinct NSString-key semantics.
+
 public enum NativeJSON {
     public static func jsonObject(with data: Data,
                                   options: JSONSerialization.ReadingOptions = []) throws -> Any {
@@ -9,7 +8,7 @@ public enum NativeJSON {
         guard options.subtracting(supported).isEmpty else {
             throw HostFailure("Unsupported native JSON reading option")
         }
-        // Keep the ordinary path byte-for-byte compatible with Foundation.
+
         guard containsBOM(data) else {
             return try JSONSerialization.jsonObject(with: data, options: options)
         }
@@ -17,7 +16,7 @@ public enum NativeJSON {
         return try restoreStrings(parsed, mutableContainers: options.contains(.mutableContainers))
     }
 
-    /// Checks member uniqueness after ordinary JSON validation, preserving decoded key bytes.
+
     static func hasUniqueObjectKeys(_ text: String) throws -> Bool {
         let bytes = Array(text.utf8)
         var index = 0, objects: [Set<Data>] = []
@@ -61,7 +60,7 @@ public enum NativeJSON {
         return false
     }
 
-    /// Only tracks quote and backslash state; JSONSerialization validates JSON.
+
     private static func protectStrings(_ data: Data) -> Data {
         var result = Data()
         result.reserveCapacity(data.count)
@@ -75,7 +74,7 @@ public enum NativeJSON {
                 else if byte == 0x22 { quoted = false }
             } else if byte == 0x22 {
                 quoted = true
-                result.append(0x78) // ASCII x precedes every string's first byte.
+                result.append(0x78)
             }
         }
         return result
@@ -83,8 +82,8 @@ public enum NativeJSON {
 
     private static func restoreText(_ value: String) throws -> String {
         guard value.utf8.first == 0x78 else { throw HostFailure("Invalid protected native JSON string") }
-        // Drop a UTF-8 byte, never a Swift Character (which may include a
-        // leading combining mark or U+FEFF in the same grapheme cluster).
+
+
         return String(decoding: value.utf8.dropFirst(), as: UTF8.self)
     }
 

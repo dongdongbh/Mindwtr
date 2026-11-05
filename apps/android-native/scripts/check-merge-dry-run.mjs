@@ -1,14 +1,6 @@
-// Commands during a sync merge (D9), without a phone: the real native bundle (core-host.js) as two devices in Node VMs
-// (sync-harness.mjs hostDevice, bound as the Android host binds it) against a local WebDAV folder.
-//
-//   node apps/android-native/scripts/build-bundle.mjs
-//   node apps/android-native/scripts/check-merge-dry-run.mjs [rounds=3]
-//
-// Device A holds a 2,000-task library. Each round the other device's edits reach the folder (400 tasks retitled), A syncs,
-// and while that sync runs A's screens send commands while it waits on the network: a quick capture, the same capture again with the
-// same capture id (a retry), and Done on a daily task. After A's follow-up cycles and device B's sync, every device and
-// the folder hold: every remote edit, each capture exactly once, the daily task done once with exactly one next occurrence,
-// and the same library on both devices. Exit 0 = pass, 1 = fail.
+
+
+
 import { randomInt, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -34,7 +26,7 @@ const check = (ok, message) => {
 const live = (doc) => (doc?.tasks ?? []).filter((task) => !task.deletedAt);
 
 const dav = await serveWebdav({ port: PORT, username: USER, password: PASSWORD });
-// The library, as another device wrote it: 2,000 tasks and one daily task in the Inbox.
+
 const tasks = Array.from({ length: 2000 }, (_, i) => ({
     id: `merge-${i}`, title: `Task ${i}`, status: ['inbox', 'next', 'waiting', 'someday'][i % 4], tags: [`#t${i % 7}`], contexts: [`@c${i % 4}`],
     createdAt: AT, updatedAt: AT, rev: 1, revBy: 'seed',
@@ -59,7 +51,7 @@ try {
     check(a.lines.some((line) => line.includes('[sync] Sync step')), 'A syncs');
     let completed = false;
     for (let round = 1; round <= rounds; round += 1) {
-        // The other device's edits.
+
         const doc = webdavDocument(dav, FOLDER);
         for (const task of live(doc).filter((row) => row.id.startsWith('merge-')).slice(0, 400)) {
             task.title = `${task.title.replace(/ \(remote \d+\)$/, '')} (remote ${round})`;
@@ -68,7 +60,7 @@ try {
             task.updatedAt = new Date().toISOString();
         }
         put(doc);
-        // A's sync, and A's screens while it runs.
+
         const linesBefore = a.lines.length;
         let syncing = true;
         const syncing$ = a.syncNow('webdav', { ...webdav, password: null }).finally(() => { syncing = false; });
@@ -91,7 +83,7 @@ try {
         check(during.some(Boolean), `round ${round}: commands answered while the sync ran (${during.map((d) => (d ? 'during' : 'after')).join(', ')})`);
         check(a.lines.slice(linesBefore).some((line) => line.includes('Sync step')), `round ${round}: A synced`);
     }
-    // A's follow-up cycles (a local edit aborts a cycle and asks for another), then B.
+
     for (let i = 0; i < 6; i += 1) {
         await a.syncNow('webdav', { ...webdav, password: null });
         await sleep(200);
@@ -106,7 +98,7 @@ try {
     const daily = byTitle(DAILY);
     check(daily.filter((task) => task.status === 'done').length === 1 && daily.filter((task) => task.status !== 'done').length === 1,
         `the daily task is done once, with exactly one next occurrence (${daily.map((task) => task.status).join(', ')})`);
-    // A capture during the sync's read is a later write, never a failed read.
+
     const failedReads = a.lines.filter((line) => /Incomplete \w+ load/.test(line));
     check(failedReads.length === 0, `no read failed for a write during the sync (${failedReads.length} "Incomplete … load")`);
     const [rowsA, rowsB] = [a.tasks(), b.tasks()];

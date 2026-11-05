@@ -1,12 +1,6 @@
 import { getProjectAccentColor } from './task-accent-color';
-/**
- * The Board screen's logic, shared by the React Native Board and the native host
- * contract: the status columns and their order (board order, then list order),
- * headers, counts and empty states, the filter bar and the due-date filter, the
- * card (project badge, tokens, time estimate), the swipe panels, and the write
- * behind a drop. The screens keep gestures, layout measurement and theme colors;
- * a tone here names the theme color the column uses.
- */
+
+
 import { projectMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
 import { normalizeBulkTaskTokenInput } from './bulk-task-tokens';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
@@ -22,7 +16,7 @@ import type { Area, FilterCriteria, MultiValueFilterMatchMode, Project, Task, Ta
 type Translate = (key: string) => string;
 
 export type BoardStatus = Extract<TaskStatus, 'inbox' | 'next' | 'waiting' | 'someday' | 'done'>;
-/** The theme color a column's top border and count badge use. */
+
 export type BoardColumnTone = 'text' | 'tint' | 'warning' | 'secondaryText' | 'success';
 
 export const BOARD_COLUMNS: readonly { status: BoardStatus; labelKey: string; label: string; tone: BoardColumnTone }[] = [
@@ -35,7 +29,7 @@ export const BOARD_COLUMNS: readonly { status: BoardStatus; labelKey: string; la
 
 export const isBoardStatus = (status: unknown): status is BoardStatus => BOARD_COLUMNS.some((column) => column.status === status);
 
-/** The Board's filter sheet offers tokens and projects only. */
+
 export const BOARD_FILTER_VISIBILITY: TaskMetadataFilterVisibility = {
     energyLevel: false,
     location: false,
@@ -46,7 +40,7 @@ export const BOARD_FILTER_VISIBILITY: TaskMetadataFilterVisibility = {
 export type BoardDuePreset = 'today' | 'this_week' | 'this_month' | 'overdue' | 'no_date';
 export const BOARD_DUE_DATE_PRESETS: BoardDuePreset[] = ['today', 'this_week', 'this_month', 'overdue', 'no_date'];
 
-/** Toggle a due-date preset; selecting the active preset again clears it. */
+
 export const toggleBoardDuePreset = (criteria: FilterCriteria, preset: BoardDuePreset): FilterCriteria => {
     const isActive = criteria.dueDateRange
         && 'preset' in criteria.dueDateRange
@@ -60,17 +54,14 @@ export const toggleBoardDuePreset = (criteria: FilterCriteria, preset: BoardDueP
     return next;
 };
 
-/** The Board preset a criteria's due-date range holds, if any. */
+
 export const getBoardDuePreset = (criteria: FilterCriteria): BoardDuePreset | null => {
     const dueDateRange = criteria.dueDateRange;
     if (!dueDateRange || !('preset' in dueDateRange)) return null;
     return BOARD_DUE_DATE_PRESETS.includes(dueDateRange.preset as BoardDuePreset) ? dueDateRange.preset as BoardDuePreset : null;
 };
 
-// ---------------------------------------------------------------------------
-// What the Board lists.
 
-/** The tasks the Board can show: the area-visible tasks without Reference. */
 export const selectBoardTasks = (visibleTasks: readonly Task[]): Task[] => visibleTasks.filter((task) => task.status !== 'reference');
 
 export type BoardColumn = {
@@ -78,14 +69,11 @@ export type BoardColumn = {
     label: string;
     tone: BoardColumnTone;
     tasks: Task[];
-    /** "No tasks" when the column is empty. */
+
     empty: string | null;
 };
 
-/**
- * The columns for the Board's tasks, its criteria and its title search: tasks with
- * a board order first, by that order, then the rest in list order.
- */
+
 export function buildBoardColumns(input: {
     tasks: readonly Task[];
     criteria: FilterCriteria;
@@ -111,24 +99,19 @@ export function buildBoardColumns(input: {
     });
 }
 
-// ---------------------------------------------------------------------------
-// Cards.
 
 export type BoardProjectBadge = { title: string; color?: string };
 
-/**
- * Every project's badge: its title, and its area's color. A project's own stored
- * color is the placeholder, never shown here.
- */
+
 export const getBoardProjectBadges = (projects: readonly Project[], areaById: Map<string, Area>): Map<string, BoardProjectBadge> => new Map(
     projects.map((project) => [project.id, { title: project.title, color: getProjectAccentColor(project, areaById) }]),
 );
 
 export type BoardCard = {
     projectTitle: string | null;
-    /** Null: the theme's secondary text color. */
+
     projectColor: string | null;
-    /** At most six of each. */
+
     tags: string[];
     contexts: string[];
     timeEstimateLabel: string | null;
@@ -155,18 +138,13 @@ export function getBoardCard(task: Task, options: { badges: Map<string, BoardPro
 
 export type BoardCardAction = 'duplicate' | 'trash';
 
-/**
- * A card's two swipe panels: the one on its left (a swipe to the right) and the one
- * on its right, with what each runs, in order.
- *
- * Mobile passes the opened side to this mapping, so each panel runs one action.
- */
+
 export const BOARD_CARD_SWIPES: Record<'left' | 'right', { labelKey: string; actions: readonly BoardCardAction[] }> = {
     left: { labelKey: 'taskEdit.duplicateTask', actions: ['duplicate'] },
     right: { labelKey: 'board.delete', actions: ['trash'] },
 };
 
-/** The texts a card's actions show: the swipe panels and a failed duplicate's error toast. */
+
 export const getBoardCardText = (t: Translate) => ({
     duplicate: t(BOARD_CARD_SWIPES.left.labelKey),
     delete: t(BOARD_CARD_SWIPES.right.labelKey),
@@ -174,21 +152,14 @@ export const getBoardCardText = (t: Translate) => ({
     duplicateFailed: t('task.duplicateFailed'),
 });
 
-// ---------------------------------------------------------------------------
-// Drops.
 
 export type BoardDropPlan =
-    /** updateTask(taskId, { status }): the card keeps its board order in the new column. */
+
     | { kind: 'status'; taskId: string; status: BoardStatus }
-    /** reorderBoardTasks(status, orderedIds): the column as shown, top to bottom. */
+
     | { kind: 'reorder'; status: BoardStatus; orderedIds: string[]; taskId: string };
 
-/**
- * The write behind a drop, as mobile makes it. Into another column only the status
- * changes (a drop there has no position). Inside the card's own column, `columnIds`
- * is the column as shown and the card lands after `afterId` (null: first); null when
- * it is already there, or when the drop names no position.
- */
+
 export function planBoardDrop(input: {
     task: Pick<Task, 'id' | 'status'>;
     status: BoardStatus;
@@ -206,10 +177,7 @@ export function planBoardDrop(input: {
     return orderedIds.every((id, index) => id === columnIds[index]) ? null : { kind: 'reorder', status, orderedIds, taskId: task.id };
 }
 
-// ---------------------------------------------------------------------------
-// Filters.
 
-/** The filter sheet's token and project options for the Board's tasks. */
 export function getBoardFilterOptions(input: {
     tasks: Task[];
     projects: readonly Project[];
@@ -239,10 +207,7 @@ export function getBoardFilterOptions(input: {
     };
 }
 
-/**
- * The filter bar and the due-date section for the Board's criteria (the sheet's
- * plus the due date) and its title search.
- */
+
 export function getBoardFilterSummary(input: { criteria: FilterCriteria; searchQuery: string; t: Translate }) {
     const { criteria, t } = input;
     const search = input.searchQuery.trim();
@@ -254,7 +219,7 @@ export function getBoardFilterSummary(input: { criteria: FilterCriteria; searchQ
     const dueSummary = duePreset ? t(`filters.datePreset.${duePreset}`) : tFallback(t, 'common.all', 'All');
     return {
         searchActive,
-        /** The Clear button and the tinted Filters button show while anything filters. */
+
         active: filtersActive || searchActive,
         activeCount,
         filterLabel: `${t('filters.label')}${activeCount > 0 ? ` (${activeCount})` : ''}`,
@@ -267,7 +232,7 @@ export function getBoardFilterSummary(input: { criteria: FilterCriteria; searchQ
             accessibilityLabel: `${dueLabel}: ${dueSummary}`,
             presets: BOARD_DUE_DATE_PRESETS.map((preset) => ({ preset, label: t(`filters.datePreset.${preset}`), selected: duePreset === preset })),
         },
-        /** The sheet's chips for the search and the due date, after its own. */
+
         chips: [
             ...(searchActive ? [{ id: 'board-search' as const, label: `${t('common.search')}: ${search}` }] : []),
             ...(duePreset ? [{ id: 'board-due-date' as const, label: `${dueLabel}: ${t(`filters.datePreset.${duePreset}`)}` }] : []),
@@ -275,11 +240,7 @@ export function getBoardFilterSummary(input: { criteria: FilterCriteria; searchQ
     };
 }
 
-/**
- * The Board's filter state as plain data, for hosts without the React hook: the
- * sheet's selections, the title search and the due-date preset. Match modes stay
- * 'any' until a second token of their kind is picked, as on mobile.
- */
+
 export type BoardFilterState = {
     searchQuery: string;
     tokens: string[];
@@ -301,18 +262,18 @@ export const EMPTY_BOARD_FILTER_STATE: BoardFilterState = {
 };
 
 export type BoardFilterEdit =
-    | Extract<ListFilterEdit, { type: 'toggleToken' | 'removeToken' | 'toggleProject' | 'setMatchMode' | 'setSearch' | 'clear' }>
+    | Extract<ListFilterEdit, { type: 'toggleToken' | 'removeToken' | 'toggleProject' | 'removeProject' | 'setMatchMode' | 'setSearch' | 'clear' }>
     | { type: 'toggleDuePreset'; preset: BoardDuePreset }
     | { type: 'clearDuePreset' };
 
-/** Mobile resets a match mode to 'any' while no token of its kind is included. */
+
 const withMatchModes = (state: BoardFilterState): BoardFilterState => ({
     ...state,
     contextMatchMode: state.tokens.some((token) => token.startsWith('@')) ? state.contextMatchMode : 'any',
     tagMatchMode: state.tokens.some((token) => token.startsWith('#')) ? state.tagMatchMode : 'any',
 });
 
-/** One control's change: the sheet's pickers, the search box, a due preset or a chip, and Clear. */
+
 export function applyBoardFilterEdit(state: BoardFilterState, edit: BoardFilterEdit): BoardFilterState {
     switch (edit.type) {
         case 'setSearch':
@@ -337,11 +298,7 @@ export function applyBoardFilterEdit(state: BoardFilterState, edit: BoardFilterE
     }
 }
 
-/**
- * A filter state against what the sheet offers now: selections no longer offered
- * are dropped, as the hook drops them. Returns the state to keep, the Board's
- * criteria and the sheet's own chips.
- */
+
 export function resolveBoardFilterState(
     input: BoardFilterState,
     options: { tokens: readonly string[]; projectIds: readonly string[]; getProjectLabel: (projectId: string) => string | undefined; t: Translate },

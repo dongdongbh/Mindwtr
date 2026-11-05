@@ -23,7 +23,7 @@ const updateSettings = vi.fn(async () => undefined);
 describe('global quick add shortcut startup', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        // Exercise the production effect, including its hydration guard.
+
         vi.stubEnv('MODE', 'development');
         vi.stubEnv('VITEST', '');
         vi.stubEnv('NODE_ENV', 'development');
@@ -39,8 +39,8 @@ describe('global quick add shortcut startup', () => {
     });
 
     it('initializes the native default before either webview can apply saved settings', () => {
-        // Architecture invariant, supplementary to the behavioral hydration
-        // tests below: creating the second WebView2 pumps main-webview IPC.
+
+
         const setup = nativeStartupSource.slice(nativeStartupSource.indexOf('.setup(move |app| {'));
         const nativeDefault = setup.indexOf('apply_global_quick_add_shortcut(');
         const mainWebview = setup.indexOf('main_window_builder.build()?');

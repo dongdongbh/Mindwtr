@@ -1,8 +1,7 @@
 import Foundation
 import Darwin
 
-/// The bridge exposes operations, never paths. All names below are host-owned.
-/// Shared core owns logging policy, sanitization, rotation and serialization.
+
 final class NativeDiagnosticsLogFile {
     private let root: URL
     var mainURL: URL { root.appendingPathComponent("logs", isDirectory: true).appendingPathComponent("mindwtr.log") }
@@ -74,7 +73,7 @@ final class NativeDiagnosticsLogFile {
             guard Darwin.fstat(fd, &info) == 0, info.st_size >= 0 else { throw failure() }
             return String(info.st_size)
         case "append":
-            // Shared rotation may have just moved an unreadable main aside.
+
             guard kind != .other else { throw failure() }
             let fd = try openRegular(directory, "mindwtr.log", O_WRONLY | O_APPEND | O_CREAT)
             defer { Darwin.close(fd) }
@@ -127,15 +126,14 @@ final class NativeDiagnosticsLogFile {
             if errno == ENOENT { return .absent }
             throw failure()
         }
-        // A symlink is present, but cannot be read, overwritten or shared.
+
         guard info.st_mode & mode_t(S_IFMT) != mode_t(S_IFLNK) else { throw failure() }
         return info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) ? .regular : .other
     }
 
     private func logs(create: Bool) throws -> Int32 {
-        // iOS permits opening its own container, but denies reading ancestors
-        // such as /private/var. Trust only the OS-provided home as the anchor;
-        // every library-owned component below it still uses O_NOFOLLOW.
+
+
         let home = Self.normalizingSystemVarAlias(URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
         let components = root.pathComponents
         let homeComponents = home.pathComponents

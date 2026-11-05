@@ -2,6 +2,7 @@ package tech.dongdongbh.mindwtr.pilot.core
 
 import android.Manifest
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,24 +14,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
-/**
- * The device calendar reads core's external calendars take (external-calendar-feeds.ts DeviceCalendarReader), as RN's
- * expo-calendar gives them on Android (CalendarModule.kt): the permission (READ_CALENDAR and WRITE_CALENDAR together, with
- * expo's "asked" record, so an upgrade from RN keeps its answer), every calendar row, and the instances of the chosen calendars.
- * Each call runs on HostIo's calendar thread; [call] answers once through `reply`. Calendar writes are pass C4's.
- */
 class HostCalendars(context: Context) {
     private val app = context.applicationContext
-    /** expo-modules-core's PermissionsService record of the permissions it asked for (didAsk). */
-    private val asked = app.getSharedPreferences("expo.modules.permissions.asked", Context.MODE_PRIVATE)
 
-    /** [json] is `{ op, ... }`; `reply` gets the call's value (JSON text, an object or an array), or its failure. */
+    private val asked = app.getSharedPreferences("expo.modules.permissions.asked", Context.MODE_PRIVATE)
+    private val writes = CalendarPushWrites(ProviderRows(app))
+
+
     fun call(json: String, reply: (Result<Any?>) -> Unit) {
         val request = JSONObject(json)
         when (val op = request.getString("op")) {
             "getPermissions" -> reply(Result.success(JSONObject().put("status", status())))
             "requestPermissions" -> {
-                // expo marks them asked first; with no screen to ask on it answers denied, as expo does.
+
                 asked.edit().apply { PERMISSIONS.forEach { putBoolean(it, true) } }.apply()
                 CalendarPermissionPrompt.ask { reply(Result.success(JSONObject().put("status", status()))) }
             }
@@ -41,6 +37,11 @@ class HostCalendars(context: Context) {
                 events(List(ids.length()) { ids.getString(it) }, Instant.parse(request.getString("start")).toEpochMilli(),
                     Instant.parse(request.getString("end")).toEpochMilli())
             })
+            "createCalendar" -> reply(runCatching { requireGranted(); writes.createCalendar(request.getJSONObject("details")) })
+            "deleteCalendar" -> reply(runCatching { requireGranted(); writes.deleteCalendar(request.getString("calendarId")); null })
+            "createEvent" -> reply(runCatching { requireGranted(); writes.createEvent(request.getString("calendarId"), request.getJSONObject("details")) })
+            "updateEvent" -> reply(runCatching { requireGranted(); writes.updateEvent(request.getString("eventId"), request.optString("calendarId").ifEmpty { null }, request.optString("taskMarker").ifEmpty { null }, request.getJSONObject("details")); null })
+            "deleteEvent" -> reply(runCatching { requireGranted(); writes.deleteEvent(request.getString("eventId"), request.optString("calendarId").ifEmpty { null }, request.optString("taskMarker").ifEmpty { null }); null })
             else -> reply(Result.failure(IllegalArgumentException("Unsupported calendar call $op")))
         }
     }
@@ -50,7 +51,7 @@ class HostCalendars(context: Context) {
 
     private fun requireGranted() = check(status() == "granted") { "CALENDAR permission is required to do this operation." }
 
-    /** expo's getCalendarsAsync(EVENT) on Android: every Calendars row, serialized as serializeEventCalendar does. */
+
     private fun calendars(): JSONArray = JSONArray().apply {
         app.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, CALENDAR_COLUMNS, null, null, null)!!.use { cursor ->
             while (cursor.moveToNext()) {
@@ -71,11 +72,7 @@ class HostCalendars(context: Context) {
         }
     }
 
-    /**
-     * expo's getEventsAsync on Android (findEvents): the instances of [calendarIds] in [start]..[end], selected as expo selects
-     * them (contained in the window, visible), sorted by start, each bound an ISO instant in UTC as expo's GMT formatter writes it.
-     * Core widens the window and clips by overlap itself.
-     */
+
     private fun events(calendarIds: List<String>, start: Long, end: Long): JSONArray = JSONArray().apply {
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also { ContentUris.appendId(it, start); ContentUris.appendId(it, end) }.build()
         val chosen = if (calendarIds.isEmpty()) "" else " AND (${calendarIds.joinToString(" OR ") { "${CalendarContract.Instances.CALENDAR_ID} = ?" }})"
@@ -98,10 +95,7 @@ class HostCalendars(context: Context) {
     companion object {
         val PERMISSIONS = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
 
-        /**
-         * expo's status for the pair (PermissionsService): each is granted, denied once asked, else undetermined; the pair is granted
-         * when both are, denied when both are, else undetermined.
-         */
+
         fun status(granted: List<Boolean>, asked: List<Boolean>): String {
             val each = granted.indices.map { if (granted[it]) "granted" else if (asked[it]) "denied" else "undetermined" }
             return when {
@@ -126,11 +120,11 @@ class HostCalendars(context: Context) {
 
         private fun Cursor.text(column: String): String? = getColumnIndex(column).takeIf { it >= 0 && !isNull(it) }?.let(::getString)
         private fun Cursor.int(column: String): Int = getColumnIndex(column).takeIf { it >= 0 && !isNull(it) }?.let(::getInt) ?: 0
-        /** expo's `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` in GMT: always three fraction digits, as JS's toISOString. */
+
         private fun Instant.iso(): String = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
             .withZone(java.time.ZoneOffset.UTC).format(this)
 
-        /** RN's "Open in calendar" (expo-calendar's editEventInCalendarAsync on Android): the calendar app's view of the event. */
+
         fun openEvent(context: Context, eventId: String): Boolean = runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId.toLong()))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -138,14 +132,60 @@ class HostCalendars(context: Context) {
     }
 }
 
-/**
- * The system prompt for the calendar pair, on the open screen (MainActivity registers [launcher] and hands each answer to
- * [answered]). A prompt asked while one shows waits for the same answer, as expo queues them; with no screen it answers at once
- * (the status then reads denied: expo marked the permissions asked).
- */
+internal fun <C : AutoCloseable> C?.liveDescription(first: C.() -> Boolean, description: C.() -> String?): String? =
+    (this ?: throw IllegalStateException(CalendarPushWrites.EVENT_READ_FAILED)).use { if (it.first()) it.description() ?: "" else null }
+
+private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
+    private val resolver = context.contentResolver
+
+    override fun calendarExists(id: Long): Boolean = resolver.query(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id),
+        arrayOf(CalendarContract.Calendars._ID), null, null, null)?.use { it.count > 0 } ?: false
+
+    override fun calendarName(id: Long): String? = resolver.query(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id),
+        arrayOf(CalendarContract.Calendars.NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+
+    override fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long? {
+        val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType).build()
+        return resolver.insert(uri, values.toContentValues())?.lastPathSegment?.toLongOrNull()
+    }
+
+    override fun deleteCalendar(id: Long): Int = resolver.delete(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id), null, null)
+
+    override fun insertEvent(values: Map<String, Any>): Long? =
+        resolver.insert(CalendarContract.Events.CONTENT_URI, values.toContentValues())?.lastPathSegment?.toLongOrNull()
+
+    override fun liveEventDescription(id: Long, calendarId: Long?): String? = resolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
+        arrayOf(CalendarContract.Events.DESCRIPTION),
+        "(${CalendarContract.Events.DELETED} != 1)" + (calendarId?.let { " AND ${CalendarContract.Events.CALENDAR_ID} = $it" } ?: ""),
+        null, null).liveDescription(Cursor::moveToFirst) { getString(0) }
+
+    override fun updateEvent(id: Long, values: Map<String, Any>): Int =
+        resolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), values.toContentValues(), null, null)
+
+    override fun deleteEvent(id: Long): Int = resolver.delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), null, null)
+
+    override fun deleteReminders(eventId: Long) {
+        resolver.delete(CalendarContract.Reminders.CONTENT_URI, "${CalendarContract.Reminders.EVENT_ID} = ?", arrayOf(eventId.toString()))
+    }
+
+    private fun Map<String, Any>.toContentValues() = ContentValues().also { out ->
+        forEach { (column, value) ->
+            when (value) {
+                is String -> out.put(column, value)
+                is Int -> out.put(column, value)
+                is Long -> out.put(column, value)
+                else -> error("Unsupported calendar column $column")
+            }
+        }
+    }
+}
+
 object CalendarPermissionPrompt {
     private val main = Handler(Looper.getMainLooper())
-    /** The open Activity's launcher; null while none is open. Main thread. */
+
     var launcher: ((Array<String>) -> Unit)? = null
     private val waiting = ArrayList<() -> Unit>()
 
@@ -155,7 +195,7 @@ object CalendarPermissionPrompt {
         if (waiting.size == 1) runCatching { launch(HostCalendars.PERMISSIONS) }.onFailure { answered() }
     }
 
-    /** The prompt closed (whatever the answer: the status is read again). Main thread. */
+
     fun answered() {
         val done = waiting.toList()
         waiting.clear()

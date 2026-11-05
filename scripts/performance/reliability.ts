@@ -30,7 +30,7 @@ function open(path: string, fault?: Fault) {
   return { adapter: new SqliteAdapter(client), db, arm: () => { armed = true; } };
 }
 
-// Only child processes created by this runner may open its newly created DB.
+
 if (process.argv[2] === '--crash-child') {
   const [directory, fault] = process.argv.slice(3);
   assert(['before-commit', 'after-ack', 'write-error'].includes(fault));
@@ -101,8 +101,8 @@ if (process.argv[2] === '--crash-child') {
       const latest = await fresh.adapter.getData();
       const task = latest.tasks[0];
       await fresh.adapter.saveTask({ ...task, title: 'Synthetic newer writer', rev: (task.rev ?? 0) + 1 });
-      // Row-level revision guards may safely skip stale rows without rejecting
-      // the whole snapshot. Test the durable outcome, not an exception policy.
+
+
       await stale.adapter.saveData(snapshot);
       assert.equal((await fresh.adapter.getData()).tasks.find(item => item.id === task.id)?.title, 'Synthetic newer writer');
       report.staleSnapshotPreservedNewerWrite = true;
@@ -128,7 +128,7 @@ if (process.argv[2] === '--crash-child') {
         const start = performance.now();
         try { return await action(); } finally { durations[name] = (durations[name] ?? 0) + performance.now() - start; }
       };
-      tick += 60_000; // Advance past retry backoff without sleeping or altering production policy.
+      tick += 60_000;
       try {
         const result = await time('totalMs', () => performSyncCycle({
           readLocal: () => time('sqliteReadMs', () => connection.adapter.getData()),
@@ -152,8 +152,7 @@ if (process.argv[2] === '--crash-child') {
       } finally { connection.db.close(); }
     }
 
-    // Each round edits separate IDs on disconnected peers, then reconnects in
-    // rotating order. Peer c keeps stale live rows until the first exchange.
+
     for (let round = 0; round < rounds; round++) {
       for (let peer = 0; peer < peers.length; peer++) {
         const connection = open(peers[peer]);

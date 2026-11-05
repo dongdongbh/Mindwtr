@@ -32,7 +32,7 @@ export const isSyncPathBookmarksAvailable = (): boolean => (
   Platform.OS === 'ios' && SyncPathBookmarks !== null
 );
 
-// OTA JS updates can run against an older native binary without the IO functions.
+
 export const supportsBookmarkedSyncFileIO = (): boolean => (
   isSyncPathBookmarksAvailable()
   && typeof SyncPathBookmarks?.readTextFile === 'function'

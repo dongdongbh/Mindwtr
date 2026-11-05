@@ -47,10 +47,7 @@ export interface SqliteClient {
 
 const SQL_WORD_CHAR = /[A-Za-z0-9_]/;
 
-// Splits a multi-statement SQL script for engines whose execute() prepares a
-// single statement at a time (op-sqlite). A naive split on ';' breaks
-// CREATE TRIGGER bodies apart ("incomplete input"), so track quoted strings,
-// comments, and BEGIN/CASE...END blocks and only split at top-level ';'.
+
 export const splitSqlStatements = (sql: string): string[] => {
     const statements: string[] = [];
     let current = '';
@@ -94,8 +91,8 @@ export const splitSqlStatements = (sql: string): string[] => {
             let j = i + 1;
             while (j < sql.length && SQL_WORD_CHAR.test(sql[j])) j += 1;
             const word = sql.slice(i, j).toUpperCase();
-            // A statement-leading BEGIN is transaction control and terminates at
-            // its own ';'. Mid-statement BEGIN (trigger body) opens a block.
+
+
             if (word === 'CASE' || (word === 'BEGIN' && current.trim() !== '')) {
                 blockDepth += 1;
             } else if (word === 'END') {
@@ -186,22 +183,18 @@ const buildSqliteSaveFailureContext = (data: AppData, step: string): Record<stri
     };
 };
 
-// TASK_SQLITE_COLUMNS and TASK_SQLITE_MIGRATION_COLUMNS are generated from
-// TASK_SYNC_FIELD_SCHEMA in task-sync-schema.ts (see the comment there for why the
-// derivation itself lives in that dependency-free file rather than here). Re-exported here
-// under their existing names/values for this module's existing consumers
-// (index.ts, apps/mcp-server/src/queries.ts).
+
 export { TASK_SQLITE_COLUMNS, TASK_SQLITE_MIGRATION_COLUMNS };
-// Same generation story as tasks (see the comment above), for projects and sections.
+
 export { PROJECT_SQLITE_COLUMNS, PROJECT_SQLITE_MIGRATION_COLUMNS };
 export { SECTION_SQLITE_COLUMNS, SECTION_SQLITE_MIGRATION_COLUMNS };
-// Same generation story, for areas and people (area-sync-schema.ts / person-sync-schema.ts).
+
 export { AREA_SQLITE_COLUMNS, AREA_SQLITE_MIGRATION_COLUMNS };
 export { PERSON_SQLITE_COLUMNS, PERSON_SQLITE_MIGRATION_COLUMNS };
 
 const TASK_UPSERT_COLUMNS = TASK_SQLITE_COLUMNS;
 
-// `id` is the upsert conflict target, so it's excluded from the SET clause.
+
 export const TASK_UPSERT_UPDATE_CLAUSE = `${TASK_SQLITE_COLUMNS
     .filter((column) => column !== 'id')
     .map((column) => `${column}=excluded.${column}`)
@@ -236,19 +229,10 @@ export const PERSON_UPSERT_UPDATE_CLAUSE = `${PERSON_SQLITE_COLUMNS
     .join(',\n')}
 WHERE people.rev IS NULL OR people.rev <= excluded.rev`;
 
-// taskToSqliteRow is now generated from TASK_SYNC_FIELD_SCHEMA (task-sync-schema.ts) — see the
-// comment there. Re-exported under its existing name for this module's existing consumers.
+
 export { taskToSqliteRow };
 
-// Serialized row + fingerprint cache keyed by task object identity. Store and
-// sync updates are immutable — a changed task is a new object — and
-// taskToSqliteRow is pure, so an unchanged object always serializes to the
-// same row. The attachment transfer lifecycle (attachment-transfer.ts) upholds
-// this by never mutating in place: it returns patches that applyAttachmentPatches
-// folds into fresh owner objects, so only genuinely changed rows re-serialize.
-// This turns the per-save serialization/fingerprint pass over every
-// task into a lookup for unchanged rows, which dominated saveData time on
-// large mobile libraries (#766).
+
 type TaskRowEntry = { row: unknown[]; fingerprint: string };
 const SAVED_FILTER_UPSERT_COLUMNS = ['id', 'name', 'icon', 'view', 'criteria', 'sortBy', 'sortOrder', 'groupBy', 'createdAt', 'updatedAt', 'deletedAt'];
 const taskRowEntryCache = new WeakMap<Task, TaskRowEntry>();
@@ -262,7 +246,14 @@ const getTaskRowEntry = (task: Task): TaskRowEntry => {
     return entry;
 };
 
-/** A save's entity rows and their fingerprints (each row as JSON), per table, in saveData's write order. */
+
+export const warmTaskRowEntries = (tasks: readonly Task[], from: number, count: number): number => {
+    const end = Math.min(tasks.length, Math.max(0, from) + Math.max(0, count));
+    for (let index = Math.max(0, from); index < end; index += 1) getTaskRowEntry(tasks[index]);
+    return end;
+};
+
+
 type SqliteSaveRows = Record<'areas' | 'projects' | 'people' | 'sections' | 'tasks', { rows: unknown[][]; fingerprints: string[] }>;
 
 function* saveRowsPass(data: AppData, nowIso: string): CooperativePass<SqliteSaveRows> {
@@ -284,7 +275,7 @@ const isFts5SyntaxError = (error: unknown): boolean => (
 const READ_PAGE_SIZE = 1000;
 const FTS_LOCK_TTL_MS = 5 * 60 * 1000;
 const FTS_LOCK_REFRESH_INTERVAL_MS = Math.max(15_000, Math.floor(FTS_LOCK_TTL_MS / 3));
-// Bump when the indexed projection changes so existing content is rebuilt once.
+
 const FTS_TRIGGER_MIGRATION_VERSION = 3;
 const SQLITE_ROW_VERSION_INSERT_BATCH_SIZE = 200;
 const SEARCH_TASK_SELECT = [
@@ -308,6 +299,13 @@ const SEARCH_PROJECT_SELECT = [
 
 let tempIdTableCounter = 0;
 
+
+const READ_ROW_COLUMNS: Record<string, readonly string[]> = {
+    tasks: TASK_UPSERT_COLUMNS, projects: PROJECT_UPSERT_COLUMNS, sections: SECTION_UPSERT_COLUMNS,
+    areas: AREA_UPSERT_COLUMNS, people: PERSON_UPSERT_COLUMNS, saved_filters: SAVED_FILTER_UPSERT_COLUMNS,
+};
+const readRowFingerprint = (columns: readonly string[], row: Record<string, unknown>): string => JSON.stringify(columns.map((column) => row[column]));
+
 type SqliteEntityTable = 'tasks' | 'projects' | 'sections' | 'areas' | 'people' | 'saved_filters';
 
 type SqliteKnownRowVersion = {
@@ -326,9 +324,7 @@ const TOMBSTONE_KIND_BY_TABLE: Record<SqliteTombstoneTable, EntityTombstoneKind>
     people: 'person',
 };
 
-// Every foreign key in sqlite-schema.ts, keyed by the table it points at, as
-// [child table, child column]. Shared with the tombstone purge; a test compares
-// it with PRAGMA foreign_key_list.
+
 const SQLITE_FOREIGN_KEY_CHILDREN: Partial<Record<SqliteEntityTable, ReadonlyArray<readonly [string, string]>>> =
     ENTITY_FOREIGN_KEY_CHILDREN;
 
@@ -341,12 +337,7 @@ const createTempIdTableName = (table: SqliteEntityTable): string => {
     return `temp_${table}_ids_${timestamp}_${tempIdTableCounter.toString(36)}_${random}`;
 };
 
-// mapSqliteTaskRow layers the three normalizers taskFromSqliteRow (task-sync-schema.ts) can't
-// perform itself — normalizeTaskStatus, normalizeRecurrenceForLoad, and
-// normalizeRelativeStartOffset all transitively import date-fns, which task-sync-schema.ts may
-// not depend on (see the zero-dependency comment there). Every other field comes back from
-// taskFromSqliteRow unchanged, so this produces byte-for-byte the same Task the previous
-// hand-written mapSqliteTaskRow did.
+
 export function mapSqliteTaskRow(row: Record<string, unknown>): Task {
     const base = taskFromSqliteRow(row);
     return {
@@ -357,20 +348,14 @@ export function mapSqliteTaskRow(row: Record<string, unknown>): Task {
     };
 }
 
-/**
- * Emitted when an incremental save rewrites a suspiciously large share of a
- * table — the fingerprint of a sync-rewrite loop (#766). Names the columns
- * that actually differed on a small sample, so a user log can identify the
- * oscillating field (the rc.2 loop would have shown `changedColumns:
- * ["pushCount"]`, `purgedChangedRows` ≈ all) without a repro environment.
- */
+
 export type SqliteRewriteDiagnostic = {
     table: string;
     changedRows: number;
     tableRows: number;
-    /** Rows in the changed set whose purgedAt column is set (tombstones). */
+
     purgedChangedRows?: number;
-    /** Union of differing column names across the sampled changed rows. */
+
     changedColumns: string[];
     sampleSize: number;
 };
@@ -385,47 +370,35 @@ export type SqliteSaveDataStats = {
     removedRows: number;
     totalRows: number;
     settingsWritten: boolean;
-    /** Present only when a table tripped the large-rewrite threshold. */
+
     rewriteDiagnostics?: SqliteRewriteDiagnostic[];
-    /** Await time spent on BEGIN IMMEDIATE (long values point at writer-lock contention). */
+
     beginMs: number;
-    /** Await time spent on COMMIT (long values point at fsync/checkpoint cost). */
+
     commitMs: number;
-    /** Total await time across all SQL statements in this save, including begin/commit. */
+
     sqlMs: number;
-    /** Number of SQL statements executed (per-statement average separates bridge latency from statement volume). */
+
     sqlCount: number;
 };
 
-/**
- * The database state a guarded read came from (design.md W3): PRAGMA data_version, which moves when another connection
- * commits, and this adapter's write generation, which moves at each of its own write transactions. A save given a token
- * writes only while both still match.
- */
+
 export type SqliteReadToken = { readonly epoch: number; readonly generation: number };
-/** A sliced sync cycle's quiet requeue: what a guarded read or a token save throws when the database moved under it. */
+
 export type SqliteStaleOption = { onStale?: () => Error };
-/** A table whose rows a read loaded, for a subclass's check of that read (afterReadNow). */
+
 export type SqliteReadTable = typeof SQLITE_ENTITY_TABLES[number];
 
-// A lock hold longer than this is logged: every other SQL caller of the connection waited for it.
+
 const LONG_LOCK_HOLD_MS = 1000;
 
 export type SqliteAdapterOptions = {
-    /**
-     * Reject a write when another connection changed the snapshot since getData().
-     * Long-lived app processes normally merge concurrent state above this layer;
-     * short-lived automation clients use this guard so retry can reload first.
-     */
+
+
     rejectConcurrentWrites?: boolean;
 };
 
-/**
- * Put live saved filters a stale list omitted back into it. One the stored
- * settings list holds returns whole, right after the nearest filter that
- * stood before it there (first when none did); one only the table holds
- * returns as the table has it, at the end.
- */
+
 const restoreOmittedSavedFilters = (
     list: readonly SavedFilter[],
     storedList: readonly SavedFilter[],
@@ -434,7 +407,7 @@ const restoreOmittedSavedFilters = (
 ): SavedFilter[] => {
     const result = [...list];
     const pending = new Set(keptIds);
-    // ponytail: quadratic in the list length; saved filters number in the tens.
+
     storedList.forEach((filter, index) => {
         if (!pending.delete(filter.id)) return;
         let at = 0;
@@ -458,40 +431,34 @@ export class SqliteAdapter {
     private client: SqliteClient;
     private rejectConcurrentWrites: boolean;
     private schemaReadyPromise: Promise<void> | null = null;
-    // Fingerprints of rows submitted by this adapter's last committed save.
-    // Revision-guarded upserts make it safe for another process to advance a row;
-    // this cache is nulled whenever a transaction fails, and only repopulated
-    // after a successful COMMIT.
+
+
     private lastSavedFingerprints: { tables: Map<string, Map<string, string>>; settingsJson: string | null } | null = null;
-    // Rows this adapter has actually observed or successfully written. Snapshot
-    // omission may physically delete only one of these rows, only while its
-    // database version still matches, only while it is a tombstone, and only
-    // while no row references it by foreign key. This keeps a stale full snapshot
-    // from deleting rows added or advanced by another process between read and
-    // save, live rows the snapshot never saw, or children through FK actions.
+
+
     private lastKnownRowVersions: Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>> | null = null;
-    // PRAGMA data_version is a connection-local epoch that advances when another
-    // connection commits. It gives guarded automation writes an O(1) stale-read
-    // check without scanning every persisted row under BEGIN IMMEDIATE.
+
+
     private lastObservedExternalChangeEpoch: number | undefined;
     private lastSaveDataStats: SqliteSaveDataStats | null = null;
-    // Entity writes this adapter has started (saveTask, saveData), committed or not.
+
     private writesStarted = 0;
-    // The rows of the last consistent full read (getData), by reference, while no write has started since. A save with no
-    // fingerprints of its own (the first after a cold start) compares its rows with these instead of rewriting every row.
-    // Only with rejectConcurrentWrites: that save checks inside its transaction that no other connection committed since.
+
+
     private lastReadRows: { tables: Map<string, Record<string, unknown>[]>; settingsJson: string | null; writesStarted: number } | null = null;
-    // Every write transaction this adapter has started (entity, receipt, calendar and host writes). Unlike writesStarted it
-    // voids a read token without voiding the cold-start fingerprint shortcut, which only entity writes can stale.
+
+    private warmedRead: { read: NonNullable<SqliteAdapter['lastReadRows']>; tables: Map<string, Map<string, string>>; table: number; row: number; done: boolean } | null = null;
+
+
     private generation = 0;
+
+
+    private rowBaseline: { epoch: number; generation: number; changes: number; rows: [Record<string, unknown>[][], Record<string, unknown> | undefined, Record<string, unknown>[]] } | null = null;
     private readonly readTokens = new WeakMap<object, SqliteReadToken>();
-    /** Rows a sliced sync cycle built before its save (prepareSaveRows), with the write generation they were built at. */
+
     private readonly preparedSaveRows = new WeakMap<AppData, { generation: number; rows: SqliteSaveRows }>();
-    // One owner at a time for a guarded adapter's SQL (design.md W2): a public method holds the lock through every statement
-    // it runs, so no other caller's SQL lands inside its transaction or between its reads. A public method takes it and runs
-    // its protected …Now body; a …Now body assumes the lock and calls only …Now bodies, never a public method (no re-entry).
-    // The store's write gate is outer: code holding this lock never waits on the gate. Unguarded adapters (React Native)
-    // stay unserialized.
+
+
     private lockHeld = false;
     private readonly lockWaiters: (() => void)[] = [];
     private serializedLogged = false;
@@ -501,10 +468,10 @@ export class SqliteAdapter {
         this.rejectConcurrentWrites = options.rejectConcurrentWrites === true;
     }
 
-    /** Read-only capability for prepared native writes that require a BEGIN epoch fence. */
+
     get concurrentWritesGuarded(): boolean { return this.rejectConcurrentWrites; }
 
-    /** Whether the caller had to wait for another holder. */
+
     private async acquireLock(): Promise<boolean> {
         if (!this.lockHeld) {
             this.lockHeld = true;
@@ -514,7 +481,7 @@ export class SqliteAdapter {
         return true;
     }
 
-    // FIFO: the lock passes straight to the next waiter.
+
     private releaseLock(): void {
         const next = this.lockWaiters.shift();
         if (next) next();
@@ -525,9 +492,9 @@ export class SqliteAdapter {
         if (!this.rejectConcurrentWrites) return work();
         const askedAt = Date.now();
         if (await this.acquireLock() && !this.serializedLogged) {
-            // Once per adapter (per boot on the phones): proof the lock kept one caller's SQL out of another's.
+
             this.serializedLogged = true;
-            // Forced: the line is written even while detailed logging is off, or the one chance per boot would be lost.
+
             logInfo('SQLite adapter lock serialized a caller', {
                 scope: 'sqlite', category: 'storage', force: true,
                 context: { releaseCheck: 'v1.3.7/sqlite-adapter-lock', operation, waitMs: Date.now() - askedAt },
@@ -545,7 +512,7 @@ export class SqliteAdapter {
         }
     }
 
-    /** Inside a hold, between statements: let queued SQL run while [work] waits (a sleep), then take the lock back. */
+
     private async outsideLock<T>(work: () => Promise<T>): Promise<T> {
         if (!this.rejectConcurrentWrites) return work();
         this.releaseLock();
@@ -556,15 +523,14 @@ export class SqliteAdapter {
         }
     }
 
-    /** A write transaction starts: every read token taken before it is void. */
+
     protected noteWrite(): void {
         this.generation += 1;
+
+        this.rowBaseline = null;
     }
 
-    /**
-     * Host SQL on this adapter's connection (the native host's own reads and receipt maintenance), inside the lock. A
-     * [write] raises the generation, so a read token taken before it no longer authorizes a save.
-     */
+
     async withConnection<T>(work: () => Promise<T>, options?: { write?: boolean }): Promise<T> {
         return this.exclusive('withConnection', async () => {
             if (options?.write) this.noteWrite();
@@ -572,32 +538,27 @@ export class SqliteAdapter {
         });
     }
 
-    /** The token of a guarded read's snapshot, or of a token save's document (its successor). */
+
     readTokenOf(data: AppData): SqliteReadToken | undefined {
         return this.readTokens.get(data);
     }
 
-    /**
-     * Design D9b §2: a sliced sync cycle builds [data]'s save rows and fingerprints here, in slices, before it takes the
-     * write gate. It runs no SQL and takes no lock. saveData uses them for this exact document while no write transaction
-     * has run since; otherwise it builds them in its transaction (correct, slower, logged).
-     */
+
     *prepareSaveRows(data: AppData): CooperativePass<void> {
         const generation = this.generation;
         const rows = yield* saveRowsPass(data, new Date().toISOString());
         this.preparedSaveRows.set(data, { generation, rows });
     }
 
-    /**
-     * Runs at the end of every full read (getData) and row-version read (readRowBaseline), in the read's own lock hold:
-     * a subclass checks the read against the database. A throw fails the read before it becomes a baseline.
-     */
+
     protected async afterReadNow(_loaded: (table: SqliteReadTable) => number, _settings: AppData['settings']): Promise<void> {}
 
-    /** A domain transaction changed rows outside the ordinary save/cache pipeline. */
+
     protected invalidateWriteBaselineAfterDirectSQL(): void {
         this.lastSavedFingerprints = null;
         this.lastReadRows = null;
+        this.warmedRead = null;
+        this.rowBaseline = null;
         this.lastKnownRowVersions = null;
         this.lastObservedExternalChangeEpoch = undefined;
     }
@@ -686,6 +647,14 @@ export class SqliteAdapter {
             }
         }
         return expiredTombstones;
+    }
+
+
+    private async readTotalChanges(): Promise<number> {
+        const row = await this.client.get<Record<string, unknown>>('SELECT total_changes() AS changes');
+        const changes = Number(row?.changes);
+        if (!Number.isFinite(changes)) throw new Error('SQLite did not return a valid total_changes() value');
+        return changes;
     }
 
     private async readExternalChangeEpoch(): Promise<number> {
@@ -777,11 +746,11 @@ export class SqliteAdapter {
             await this.client.run(SQLITE_FTS_SCHEMA);
             await this.client.run(SQLITE_INDEX_SCHEMA);
         }
-        // FTS operations are optional - don't block startup if they fail
+
         try {
             const schemaChanged = await this.ensureFtsSchema();
             const triggersChanged = await this.ensureFtsTriggers(schemaChanged);
-            // Schema setup keeps the lock while it sleeps: a caller let in meanwhile would wait on this same setup.
+
             await this.ensureFtsPopulated(schemaChanged || triggersChanged, sleep);
         } catch (error) {
             logWarn('FTS setup failed, search may not work', {
@@ -812,15 +781,7 @@ export class SqliteAdapter {
         const hasAssignedTo = columns.some((column) => column.name === 'assignedTo');
         if (hasChecklist && hasAssignedTo) return false;
 
-        // These DROPs run outside ensureFtsTriggers' BEGIN IMMEDIATE (deliberately —
-        // widening that transaction to cover this DROP TABLE is a bigger change than
-        // this method warrants), so a crash or SQLITE_BUSY here can leave the task
-        // triggers gone. That's fine: ensureSchemaInternal always calls
-        // ensureFtsTriggers(schemaChanged) right after this returns true, and
-        // ensureFtsTriggers now verifies each trigger against sqlite_master before
-        // trusting the migration marker — restoration is guaranteed by that check,
-        // not by hoping this ran back-to-back with SQLITE_FTS_SCHEMA's blanket
-        // CREATE TRIGGER IF NOT EXISTS re-exec on the next launch.
+
         await this.client.run('DROP TRIGGER IF EXISTS tasks_ai');
         await this.client.run('DROP TRIGGER IF EXISTS tasks_ad');
         await this.client.run('DROP TRIGGER IF EXISTS tasks_au');
@@ -841,7 +802,7 @@ export class SqliteAdapter {
         return true;
     }
 
-    /** Trigger names from FTS_MAINTENANCE_TRIGGERS actually present in sqlite_master. */
+
     private async getExistingFtsTriggerNames(): Promise<Set<string>> {
         const names = FTS_MAINTENANCE_TRIGGERS.map((trigger) => trigger.name);
         const placeholders = names.map(() => '?').join(', ');
@@ -859,10 +820,8 @@ export class SqliteAdapter {
                 [FTS_TRIGGER_MIGRATION_VERSION]
             );
             if (hasCurrentTriggers?.applied === 1) {
-                // Don't trust the marker alone: a mid-migration SQLITE_BUSY from a
-                // concurrent MCP/CLI writer could leave triggers missing while
-                // schema_migrations still records this version as applied. Verify
-                // against sqlite_master and force a re-migration if anything is gone.
+
+
                 const existingTriggers = await this.getExistingFtsTriggerNames();
                 const allTriggersPresent = FTS_MAINTENANCE_TRIGGERS.every(
                     (trigger) => existingTriggers.has(trigger.name)
@@ -873,8 +832,8 @@ export class SqliteAdapter {
         }
 
         try {
-            // DDL is transactional in SQLite. BEGIN IMMEDIATE keeps another app/MCP
-            // writer from changing rows while the maintenance triggers are absent.
+
+
             await this.client.run('BEGIN IMMEDIATE');
             try {
                 const alreadyMigrated = await this.client.get<{ applied?: number }>(
@@ -909,7 +868,7 @@ export class SqliteAdapter {
                 category: 'fts',
                 error,
             });
-            // Continue without migrating - triggers may still work or will fail gracefully
+
             return false;
         }
     }
@@ -1143,7 +1102,7 @@ export class SqliteAdapter {
                 await this.client.run('BEGIN');
                 try {
                     if (needsTaskRebuild) {
-                        // Use FTS5 delete-all command for contentless tables (content='')
+
                         await this.client.run("INSERT INTO tasks_fts(tasks_fts) VALUES('delete-all')");
                         await this.client.run(
                             `INSERT INTO tasks_fts (rowid, title, description, tags, contexts, checklist, location, assignedTo)
@@ -1151,7 +1110,7 @@ export class SqliteAdapter {
                         );
                     }
                     if (needsProjectRebuild) {
-                        // Use FTS5 delete-all command for contentless tables (content='')
+
                         await this.client.run("INSERT INTO projects_fts(projects_fts) VALUES('delete-all')");
                         await this.client.run(
                             `INSERT INTO projects_fts (rowid, title, supportNotes, tagIds, areaTitle)
@@ -1173,7 +1132,7 @@ export class SqliteAdapter {
                 category: 'fts',
                 error,
             });
-            // Continue without FTS - search will fail gracefully
+
         }
     }
 
@@ -1205,8 +1164,7 @@ export class SqliteAdapter {
         };
     }
 
-    // The table copy as stored: a NOT NULL column saved empty was missing
-    // (see the saved-filters upsert), so it stays missing here.
+
     private mapSavedFilterRow(row: Record<string, unknown>): SavedFilter | null {
         const filter: Record<string, unknown> = { id: row.id };
         for (const column of ['name', 'icon', 'view', 'criteria', 'sortBy', 'sortOrder', 'groupBy', 'createdAt', 'updatedAt', 'deletedAt']) {
@@ -1220,12 +1178,10 @@ export class SqliteAdapter {
         return this.exclusive('getData', () => this.getDataNow(options));
     }
 
-    /**
-     * A guarded read is bracketed by data_version: e1 and e2 around the rows (one retry), e3 after afterReadNow's check.
-     * A move before e2 or after it is another connection's commit, never corruption: onStale (a sliced cycle's requeue),
-     * else today's SQLITE_BUSY error. Only a check that fails with e3 = e2 keeps its own error.
-     */
+
     protected async getDataNow(options?: { rawTasks?: true } & SqliteStaleOption): Promise<AppData & { people: Person[] }> {
+
+        this.rowBaseline = null;
         await this.ensureSchemaNow();
         const loadSnapshotRows = () => Promise.all([
             this.loadAllRows('tasks'),
@@ -1269,9 +1225,8 @@ export class SqliteAdapter {
         const tasks: Task[] = tasksRows.map((row) => {
             if (!options?.rawTasks) return this.mapTaskRow(row);
             const task = taskFromSqliteRow(row);
-            // The display codec uses null as its recurrence fallback. For a
-            // durable raw edit, SQL NULL must remain absence, while a literal
-            // JSON "null" value remains distinct.
+
+
             if (row.recurrence === null) task.recurrence = undefined;
             return task;
         });
@@ -1279,9 +1234,7 @@ export class SqliteAdapter {
         const sections: Section[] = sectionsRows.map((row) => sectionFromSqliteRow(row));
         const nowIso = new Date().toISOString();
 
-        // areaFromSqliteRow/personFromSqliteRow share one nowIso per read, matching the
-        // original inline mapping's behaviour (every area/person in this read falls back to
-        // the same timestamp, not a fresh one per row).
+
         const areas: Area[] = areasRows.map((row) => areaFromSqliteRow(row, nowIso));
         const people: Person[] = peopleRows.map((row) => personFromSqliteRow(row, nowIso));
 
@@ -1289,8 +1242,8 @@ export class SqliteAdapter {
         const counts: Record<SqliteReadTable, number> = {
             tasks: tasks.length, projects: projects.length, sections: sections.length, areas: areas.length, people: people.length,
         };
-        // e3 brackets only a read a subclass checks: without a check the rows are consistent as of e2, and a later save's
-        // epoch check refuses them after any external commit.
+
+
         const checked = this.afterReadNow !== SqliteAdapter.prototype.afterReadNow;
         if (epoch === undefined || !checked) {
             await this.afterReadNow((table) => counts[table], settings);
@@ -1308,8 +1261,7 @@ export class SqliteAdapter {
         }
         this.lastReadRows = lastReadRows;
 
-        // A read is the deletion baseline for this adapter. Retain exact row
-        // versions so later snapshot omissions can use compare-and-swap deletion.
+
         this.lastKnownRowVersions = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>([
             ['tasks', this.knownRowVersionsFromRows(tasksRows)],
             ['projects', this.knownRowVersionsFromRows(projectsRows)],
@@ -1349,13 +1301,7 @@ export class SqliteAdapter {
         return settings;
     }
 
-    /**
-     * The deletion baseline a full getData() would leave, without reading or mapping whole rows: rowid, id, rev and updatedAt
-     * of every row in the entity tables and saved_filters, with each entity table's ids, and the settings as getData() maps
-     * them. For a guarded adapter (rejectConcurrentWrites) after its own saves: the native boot's check after activation.
-     * Null, changing nothing, unless the external-change epoch is still the one this adapter's last full read accepted:
-     * after another connection's commit only a full getData() is a current baseline.
-     */
+
     async readRowBaseline(): Promise<{ ids: Record<SqliteTombstoneTable, string[]>; settings: AppData['settings'] } | null> {
         return this.exclusive('readRowBaseline', () => this.readRowBaselineNow());
     }
@@ -1365,25 +1311,34 @@ export class SqliteAdapter {
         const accepted = this.lastObservedExternalChangeEpoch;
         if (!this.rejectConcurrentWrites || accepted === undefined) return null;
         if (await this.readExternalChangeEpoch() !== accepted) return null;
-        const [entityRows, settingsRow, savedFilterRows] = await Promise.all([
+
+        const changes = await this.readTotalChanges();
+
+
+        const reused = this.rowBaseline;
+        const reuse = reused !== null && reused.epoch === accepted && reused.generation === this.generation && changes === reused.changes;
+        const read = reuse ? reused.rows : await Promise.all([
             Promise.all(SQLITE_ENTITY_TABLES.map((table) => this.client.all<Record<string, unknown>>(
                 `SELECT rowid AS _rowid, id, rev, updatedAt FROM ${table}`,
             ))),
             this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1'),
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
         ]);
-        if (await this.readExternalChangeEpoch() !== accepted) return null;
+        if (!reuse && await this.readExternalChangeEpoch() !== accepted) return null;
+        const [entityRows, settingsRow, savedFilterRows] = read;
         const light = {
             ids: Object.fromEntries(SQLITE_ENTITY_TABLES.map((table, index) => [table, entityRows[index].map((row) => String(row.id))])) as Record<SqliteTombstoneTable, string[]>,
             settings: this.mapSettings(settingsRow, savedFilterRows),
         };
         await this.afterReadNow((table) => light.ids[table].length, light.settings);
-        // As getData's e3: another connection's commit during the check makes this read no baseline.
+
         if (this.afterReadNow !== SqliteAdapter.prototype.afterReadNow && await this.readExternalChangeEpoch() !== accepted) return null;
+        if (reuse) return light;
         this.lastKnownRowVersions = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>([
             ...SQLITE_ENTITY_TABLES.map((table, index) => [table, this.knownRowVersionsFromRows(entityRows[index])] as const),
             ['saved_filters', this.knownRowVersionsFromRows(savedFilterRows)],
         ]);
+        this.rowBaseline = { epoch: accepted, generation: this.generation, changes, rows: read };
         return light;
     }
 
@@ -1420,9 +1375,8 @@ export class SqliteAdapter {
         if (tokens.length === 0) {
             return { tasks: [], projects: [] };
         }
-        // Quoted so a token that survived cleaning with a leading '#'/'@' (contexts,
-        // tags) is a valid FTS5 string literal instead of punctuation FTS5 rejects
-        // as a syntax error (e.g. bare `@home*`).
+
+
         const ftsQuery = tokens.map((token) => `"${token.replace(/"/g, '""')}"*`).join(' ');
         const runSearch = async (): Promise<SearchResults> => {
             const [taskRows, projectRows] = await Promise.all([
@@ -1448,14 +1402,13 @@ export class SqliteAdapter {
             return await runSearch();
         } catch (error) {
             if (isFts5SyntaxError(error)) {
-                // Quoting above makes this impossible by construction; if it still
-                // happens, it's a bad query, not a corrupt index — rebuilding
-                // (full delete-and-reinsert) would just repeat the same error.
+
+
                 logWarn('Search failed', { scope: 'sqlite', category: 'fts', error });
                 return { tasks: [], projects: [] };
             }
             try {
-                // Another process's rebuild lock: queued SQL runs while this search waits for it.
+
                 await this.ensureFtsPopulated(true, (ms) => this.outsideLock(() => sleep(ms)));
                 return await runSearch();
             } catch (retryError) {
@@ -1479,29 +1432,51 @@ export class SqliteAdapter {
 
     protected async beforeCommit(_write: { data: AppData } | { task: Task }): Promise<void> {}
 
-    /** A specialized writer can keep untrusted document identifiers out of failure diagnostics. */
+
     protected buildSaveFailureContext(data: AppData, step: string): Record<string, unknown> {
         return buildSqliteSaveFailureContext(data, step);
     }
 
-    /**
-     * Fingerprints of the rows the last full read saw, in the form saveData compares (each row's upsert columns as JSON): the
-     * rows on disk then. Null once any write started since, or when there was no such read. Used once.
-     */
+
     private fingerprintsFromLastRead(): { tables: Map<string, Map<string, string>>; settingsJson: string | null } | null {
         const read = this.lastReadRows;
         this.lastReadRows = null;
+        const warmed = this.warmedRead;
+        this.warmedRead = null;
         if (!read || read.writesStarted !== this.writesStarted) return null;
-        const columnsByTable: Record<string, readonly string[]> = {
-            tasks: TASK_UPSERT_COLUMNS, projects: PROJECT_UPSERT_COLUMNS, sections: SECTION_UPSERT_COLUMNS,
-            areas: AREA_UPSERT_COLUMNS, people: PERSON_UPSERT_COLUMNS, saved_filters: SAVED_FILTER_UPSERT_COLUMNS,
-        };
+        if (warmed?.read === read && warmed.done) return { tables: warmed.tables, settingsJson: read.settingsJson };
         const tables = new Map<string, Map<string, string>>();
         for (const [table, rows] of read.tables) {
-            const columns = columnsByTable[table];
-            tables.set(table, new Map(rows.map((row) => [String(row.id), JSON.stringify(columns.map((column) => row[column]))])));
+            const columns = READ_ROW_COLUMNS[table];
+            tables.set(table, new Map(rows.map((row) => [String(row.id), readRowFingerprint(columns, row)])));
         }
         return { tables, settingsJson: read.settingsJson };
+    }
+
+
+    warmReadFingerprints(count: number): boolean {
+        const read = this.lastReadRows;
+
+
+        if (!read || read.writesStarted !== this.writesStarted || this.lastSavedFingerprints) { this.warmedRead = null; return true; }
+        if (this.warmedRead?.read !== read) this.warmedRead = { read, tables: new Map(), table: 0, row: 0, done: false };
+        const warm = this.warmedRead;
+        if (warm.done) return true;
+        const entries = [...read.tables];
+        let left = Math.max(1, count);
+        while (left > 0 && warm.table < entries.length) {
+            const [table, rows] = entries[warm.table];
+            const columns = READ_ROW_COLUMNS[table];
+            let fingerprints = warm.tables.get(table);
+            if (!fingerprints) warm.tables.set(table, fingerprints = new Map());
+            const end = Math.min(rows.length, warm.row + left);
+            for (let index = warm.row; index < end; index += 1) fingerprints.set(String(rows[index].id), readRowFingerprint(columns, rows[index]));
+            left -= end - warm.row;
+            warm.row = end;
+            if (warm.row >= rows.length) { warm.table += 1; warm.row = 0; }
+        }
+        warm.done = warm.table >= entries.length;
+        return warm.done;
     }
 
     async saveTask(task: Task): Promise<void> {
@@ -1544,11 +1519,7 @@ export class SqliteAdapter {
         }
     }
 
-    /**
-     * With [options.onStale] (a sliced sync cycle) the save is token-checked: right after BEGIN, before it touches any
-     * baseline, it refuses unless [options.token] still matches the generation and data_version. A refused save writes
-     * nothing and keeps the last save's fingerprints. A committed one gives [data] its successor token (readTokenOf).
-     */
+
     async saveData(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<void> {
         return this.exclusive('saveData', () => this.saveDataNow(data, options));
     }
@@ -1560,20 +1531,17 @@ export class SqliteAdapter {
             logWarn('SQLite save refused: no read token', { scope: 'sqlite', category: 'storage' });
             throw new Error('SQLite save refused: no read token');
         }
-        // A snapshot with zero entities while the database still holds rows is
-        // accepted only when the rows are unchanged tombstones observed by this
-        // adapter and every one has reached the default retention cutoff. The
-        // proof and deletion share one BEGIN IMMEDIATE transaction; otherwise the
-        // #852 empty-snapshot backstop leaves the database untouched.
+
+
         const incomingEntityCount = (data.tasks?.length ?? 0)
             + (data.projects?.length ?? 0)
             + (data.sections?.length ?? 0)
             + (data.areas?.length ?? 0)
             + (data.people?.length ?? 0);
-        // A cold start's first save has no fingerprints of its own: the last full read's rows stand in for them. The
-        // transaction below refuses the save if another connection committed since that read.
+
+
         let previousSave = null as { tables: Map<string, Map<string, string>>; settingsJson: string | null } | null;
-        // From here this save owns the baselines: a refused token save never reaches it, so it leaves them as they were.
+
         const claimBaselines = () => {
             previousSave = this.lastSavedFingerprints ?? this.fingerprintsFromLastRead();
             this.writesStarted += 1;
@@ -1626,7 +1594,7 @@ export class SqliteAdapter {
             }
             claimBaselines();
         }
-        // Rows prepared for this document count only if no write ran since: a write voids them as it voids a token.
+
         const prepared = this.preparedSaveRows.get(data);
         this.preparedSaveRows.delete(data);
         const preparedRows = prepared?.generation === this.generation ? prepared.rows : undefined;
@@ -1701,10 +1669,8 @@ export class SqliteAdapter {
                 nextKnownRows.set(table, knownVersions);
                 stats.totalRows += rows.length;
                 stats.writtenRows += changedRows.length;
-                // A large-share rewrite of pre-existing rows is the fingerprint
-                // of a sync-rewrite loop (#766): name the oscillating columns
-                // from a small sample so a single user log can identify the
-                // field. Zero cost below the threshold.
+
+
                 if (
                     changedRows.length >= REWRITE_DIAGNOSTIC_MIN_ROWS
                     && changedRows.length >= rows.length * REWRITE_DIAGNOSTIC_MIN_SHARE
@@ -1720,7 +1686,7 @@ export class SqliteAdapter {
                                 }
                             }
                         } catch {
-                            // A malformed previous fingerprint only costs the sample.
+
                         }
                     }
                     const purgedIndex = columns.indexOf('purgedAt');
@@ -1759,11 +1725,7 @@ export class SqliteAdapter {
                 }
             };
 
-            // Mindwtr deletes by tombstone, so a LIVE row missing from the snapshot
-            // means the snapshot is stale (for example a startup snapshot saved before
-            // the SQLite load applied), never that the user deleted it. Omission may
-            // prune only tombstones; a kept live row comes back on the next load.
-            // Returns the kept live rows (every column for saved_filters, else ids).
+
             const syncIds = async (table: SqliteEntityTable, ids: string[]): Promise<Record<string, unknown>[]> => {
                 const knownRows = previousKnownRows?.get(table);
                 if (!knownRows) return [];
@@ -1801,9 +1763,8 @@ export class SqliteAdapter {
                          WHERE COALESCE(${table}.deletedAt, '') = '' AND ${observedUnchanged}`
                     ));
                     if (keptLive.length > 0) keptLiveRows.push({ table, count: keptLive.length });
-                    // A referenced parent waits until no row points at it: its
-                    // ON DELETE CASCADE / SET NULL would delete or rewrite that
-                    // child without a revision bump.
+
+
                     const unreferenced = (SQLITE_FOREIGN_KEY_CHILDREN[table] ?? [])
                         .map(([child, column]) => ` AND NOT EXISTS (SELECT 1 FROM ${child} WHERE ${child}.${column} = ${table}.id)`)
                         .join('');
@@ -1812,7 +1773,7 @@ export class SqliteAdapter {
                     );
                     const deleted = await timed(() => this.client.get<{ count?: unknown }>('SELECT changes() AS count'));
                     const deletedCount = Number(deleted?.count);
-                    // A client that cannot report changes() keeps the old estimate.
+
                     stats.removedRows += Number.isSafeInteger(deletedCount)
                         ? deletedCount
                         : removedRows.length - keptLive.length;
@@ -1915,8 +1876,8 @@ export class SqliteAdapter {
             await syncIds('people', people.map((person) => person.id));
 
             const rawSavedFilters = data.settings?.savedFilters;
-            // The stored settings list, read in this transaction: the complete
-            // copy of every filter (the table holds only its own columns).
+
+
             let storedFilterList: SavedFilter[] | null | undefined;
             const readStoredFilterList = async () => {
                 if (storedFilterList === undefined) {
@@ -1926,11 +1887,11 @@ export class SqliteAdapter {
                 }
                 return storedFilterList;
             };
-            // A snapshot without a list says nothing about saved filters: the stored list stays.
+
             const filterList = Array.isArray(rawSavedFilters) ? rawSavedFilters : await readStoredFilterList();
             const savedFilters = keepSavedFilters(filterList);
-            // Normalized filters can be fresh objects. Bind the read metadata to
-            // the supplied filter, then compare its current normalized projection.
+
+
             const suppliedFilters = new Map((Array.isArray(filterList) ? filterList : []).map((filter) => [filter.id, filter]));
             saveStep = 'saved-filters';
             await upsertBatch(
@@ -1952,12 +1913,8 @@ export class SqliteAdapter {
                 { updatedAt: 9 },
             );
             saveStep = 'sync-saved-filter-ids';
-            // The table mirrors settings.savedFilters, which this save rewrites.
-            // A kept live filter goes back into that list too, whole and at its
-            // stored place, so the next load (which reads the list, or the table
-            // when there is no list) still shows it and the two copies never
-            // disagree. It also stays known, so a second stale save before a
-            // reload keeps it again.
+
+
             const keptFilterRows = await syncIds('saved_filters', savedFilters.map((filter) => filter.id));
             const knownFilterVersions = nextKnownRows.get('saved_filters');
             const keptFilterRowById = new Map(keptFilterRows.map((row) => {
@@ -2044,7 +2001,6 @@ export class SqliteAdapter {
         }
     }
 
-    // MARK: - Calendar Sync CRUD
 
     async getCalendarSyncEntry(taskId: string, platform: string): Promise<CalendarSyncEntry | null> {
         return this.exclusive('getCalendarSyncEntry', () => this.getCalendarSyncEntryNow(taskId, platform));

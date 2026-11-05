@@ -343,7 +343,7 @@ fn path_to_c_string(path: &Path) -> io::Result<CString> {
 pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
-    // SAFETY: both paths are valid, NUL-terminated C strings retained for the call.
+
     let result = unsafe {
         libc::renameat2(
             libc::AT_FDCWD,
@@ -364,7 +364,7 @@ pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<(
 pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
-    // SAFETY: both paths are valid, NUL-terminated C strings retained for the call.
+
     let result =
         unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
     if result == 0 {
@@ -389,9 +389,7 @@ pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<(
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    // No REPLACE_EXISTING flag: a late destination creation must win. WRITE_THROUGH
-    // makes the namespace update durable before the command acknowledges it.
-    // SAFETY: both buffers are NUL-terminated and retained for the call.
+
     let result = unsafe {
         MoveFileExW(
             source.as_ptr(),
@@ -426,8 +424,6 @@ fn sync_directory(path: &Path) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<(), String> {
-    // Windows namespace moves use MOVEFILE_WRITE_THROUGH above. A stale journal
-    // deletion after a crash is harmless because recovery verifies all file hashes.
     Ok(())
 }
 
@@ -532,9 +528,6 @@ fn recover_existing_install(root: &Path, target_path: &Path) -> Result<RecoveryO
         if path_exists_as_regular_file(quarantine_path)? {
             if path_exists_as_regular_file(target_path)? {
                 if sha256_file(target_path)? == staged_sha256 {
-                    // Publication completed before the crash. The displaced local inode
-                    // remains at its unique preservation path indefinitely: a writer may
-                    // still hold it open and mutate it after any hash check we make here.
                     remove_journal(root, &journal_path)?;
                     return Ok(RecoveryOutcome::Installed {
                         sha256: staged_sha256,
@@ -732,10 +725,6 @@ where
                 }
             }
 
-            // A writer that already held the displaced inode can continue writing it
-            // after the rename. Re-hash once to catch an edit that already landed; even
-            // after that check, retain the inode forever because another write can land
-            // before or after this function returns.
             if sha256_file(&quarantine_path)? != expected_sha256 {
                 move_no_replace(target_path, &owned_stage_path).map_err(|error| {
                     format!("failed to preserve downloaded bytes during rollback: {error}")

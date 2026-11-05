@@ -12,10 +12,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['vitest.setup.ts'],
-    // Harness timeout, not a performance budget: heavy screen renders cross
-    // Vitest's 5 s default when the machine is busy. Budgets live in the perf suite.
+
+
     testTimeout: 30_000,
-    // Vitest 4 narrowed discovery defaults; retain the Vitest 3 boundary.
+
     exclude: [
       ...configDefaults.exclude,
       '**/dist/**',
@@ -25,7 +25,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      // Keep Vitest 3's unloaded-source denominator and exclusions.
+
       include: ['**/*.{js,cjs,mjs,ts,mts,tsx,jsx,vue,svelte,marko,astro}'],
       exclude: [
         'coverage/**',
@@ -36,7 +36,7 @@ export default defineConfig({
         '**/*.d.ts',
         '**/virtual:*',
         '**/__x00__*',
-        // Do not retain the old raw-NUL glob: picomatch strips NUL and excludes every file.
+
         'cypress/**',
         'test?(s)/**',
         'test?(-*).?(c|m)[jt]s?(x)',

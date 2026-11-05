@@ -25,7 +25,7 @@ const fixture = JSON.parse(
 const t = (key: string) => fixture.translations[key] ?? key;
 const visibleSections = fixture.sections.filter((section) => !section.deletedAt);
 
-/** The mobile project workspace defaults (ProjectDetailModal -> ProjectTaskList -> TaskList), through core. */
+
 const buildLikeMobile = (scenario: Scenario, overrides: Partial<ProjectTaskListModelInput> = {}) => {
     const project = fixture.projects.find(({ id }) => id === scenario.projectId)!;
     const options = getProjectDetailTaskListOptions(project, scenario.showCompletedTasks);
@@ -76,8 +76,8 @@ describe('project task list model', () => {
         'matches the frozen list with the #1401 reference-sort correction: %s',
         (name, item) => {
             const { model, cues } = buildLikeMobile(item);
-            // Keep the historical fixture intact; #1401 deliberately corrects only
-            // the title-sorted Reference pile (Loose reading precedes Style guide).
+
+
             const expected = name === 'live-sorted-title'
                 ? fixture.mobileSnapshot[name].map((row) => {
                     const item = row as { id?: string };
@@ -149,6 +149,27 @@ describe('project task list model', () => {
         expect(model.items.map((item) => (item.type === 'section' ? `#${item.id}` : item.task.id)))
             .toEqual(['#project-reference-tasks', 'live-ref']);
         expect(model.orderedTasks).toEqual([]);
+    });
+
+    it.each([
+        ['default', ['archived-m', 'done-z', 'done-a-new', 'done-a-old']],
+        ['title', ['done-a-old', 'done-a-new', 'archived-m', 'done-z']],
+        ['due', ['done-a-new', 'archived-m', 'done-z', 'done-a-old']],
+    ] as const)('applies %s sort and its tie order to the expanded Completed pile', (sortBy, expected) => {
+        const base = fixture.tasks.find((task) => task.status === 'done')!;
+        const tasks: Task[] = [
+            { ...base, id: 'done-z', title: 'Zulu', completedAt: '2026-10-23', createdAt: '2026-10-02', dueDate: '2026-10-20' },
+            { ...base, id: 'done-a-new', title: 'Alpha', completedAt: '2026-10-22', createdAt: '2026-10-03', dueDate: '2026-10-19' },
+            { ...base, id: 'done-a-old', title: 'Alpha', completedAt: '2026-10-21', createdAt: '2026-10-01', dueDate: '2026-10-21' },
+            { ...base, id: 'archived-m', title: 'Mike', status: 'archived', completedAt: '2026-10-23', createdAt: '2026-10-01', dueDate: '2026-10-20' },
+        ];
+        const before = JSON.stringify(tasks);
+        const { model } = buildLikeMobile(scenario('live-default'), {
+            tasks, visibleTasks: [], sections: [], allSections: [], sortBy,
+            groupCompletedTasksLast: true, completedCollapsed: false,
+        });
+        expect(model.items.flatMap((item) => item.type === 'task' ? [item.task.id] : [])).toEqual(expected);
+        expect(JSON.stringify(tasks)).toBe(before);
     });
 
     it('keeps only the requested status and the caller visibility rule', () => {

@@ -12,12 +12,12 @@ class UpNoteLinkTest {
         val keys = listOf("common.error", "markdown.openLinkFailed", "markdown.copyLink", "markdown.copyLinkFailed")
         for (language in listOf("fr", "de")) {
             val translated = keys.associateWith { "$language:$it translated" }
-            // This is the same request/response boundary as boot: core replies only to LABEL_KEYS.
+
             val response = JSONObject().put("language", language).put("missing", JSONArray())
                 .put("strings", JSONObject(translated.filterKeys { LABEL_KEYS.contains(it) }))
             Labels.load(response, reportLoaded = {})
             for (key in keys) {
-                // A missing label logs through android.util.Log (a stub in JVM tests), then the UI's fallback is the raw key.
+
                 val displayed = runCatching { t(key) }.getOrElse { key }
                 assertEquals(translated.getValue(key), displayed)
             }
@@ -42,5 +42,27 @@ class UpNoteLinkTest {
         for (href in listOf("https://example.org", "mailto:a@example.org", "tel:123", "javascript:alert(1)", "file:///secret", "data:text/plain,x", "obsidian://vault", "upnote:opaque")) {
             assertNull(attemptUpNoteLink(href, { fail("Must not open") }, { fail("Must not offer recovery") }))
         }
+    }
+
+
+    @Test fun anyExternalLinkThatNothingOpensOffersItsExactTextForCopy() {
+        for (href in listOf("https://example.org/a?b=1#c", "mailto:a@example.org", "obsidian://open?vault=Notes&file=A%20B", original)) {
+            val failed = mutableListOf<String>()
+            var calls = 0
+            assertFalse(href, attemptExternalLink(href, { calls++; throw android.content.ActivityNotFoundException() }, { failed.add(it) }))
+            assertEquals(href, 1, calls)
+            assertEquals(href, listOf(href), failed)
+            val opened = mutableListOf<String>()
+            assertTrue(href, attemptExternalLink(href, { opened.add(it) }, { fail("Must not offer recovery") }))
+            assertEquals(listOf(href), opened)
+        }
+    }
+
+
+    @Test fun aFailedOpenReportsItsFailureBeforeOfferingCopy() {
+        val events = mutableListOf<String>()
+        val missing = android.content.ActivityNotFoundException()
+        assertFalse(attemptExternalLink("https://example.org", { throw missing }, { events.add("copy $it") }) { events.add("log ${it === missing}") })
+        assertEquals(listOf("log true", "copy https://example.org"), events)
     }
 }

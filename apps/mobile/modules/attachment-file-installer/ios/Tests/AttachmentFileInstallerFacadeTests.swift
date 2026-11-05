@@ -4,7 +4,7 @@ import Foundation
 import XCTest
 import AttachmentFileInstallerEngine
 
-// Deliberately no @testable: native consumers must need only the public facade.
+
 final class AttachmentFileInstallerFacadeTests: XCTestCase {
   func testAbsentInstallAndHashExposeTypedPublicResults() throws {
     try withFixture { fixture in

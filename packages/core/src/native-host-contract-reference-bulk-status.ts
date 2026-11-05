@@ -93,8 +93,7 @@ const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).si
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 
-// The existing bounded JSON rules, with a narrow exception for the public
-// revision dictionary: it can contain one entry per selected ID, not only128.
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number, path: string): boolean => {
         if (depth > 24) return false;
@@ -155,7 +154,7 @@ const validArea = (row: unknown): row is Area => record(row) && text(row.id, 500
     && typeof row.name === 'string' && [row.createdAt, row.updatedAt].every((value) =>
         iso(value) || (typeof value === 'string' && !value.trim()))
     && (row.deletedAt === undefined || iso(row.deletedAt));
-// Match the existing Reference raw codec allowance without changing the guarded BEFORE.
+
 const validContextProject = (row: unknown): row is Project => record(row) && text(row.id, 500)
     && (row.deletedAt === undefined || iso(row.deletedAt)) && (row.purgedAt === undefined || iso(row.purgedAt))
     && validProject({ ...row, tagIds: row.tagIds ?? [], deletedAt: undefined, purgedAt: undefined,
@@ -170,10 +169,8 @@ const frozenInstant = (value: unknown): boolean => record(value) && exact(value,
     && Number.isInteger(value.offsetMinutes) && Math.abs(value.offsetMinutes as number) <= 840
     && typeof value.local === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}$/.test(value.local)
     && Date.parse(`${value.local}Z`) + (value.offsetMinutes as number) * 60_000 === value.epochMs;
-// This is a frozen native journal witness, as in task-checklist. The shared builder
-// validates source anchors, field presence, UNTIL and RRULE; replay never derives
-// the next occurrence using a later local clock or timezone. A completely coherently
-// rewritten precommit journal is outside this unauthenticated witness boundary.
+
+
 const validRecurrenceProjection = (value: unknown): boolean => {
     if (value === null) return true;
     if (!record(value) || !hasOnly(value, ['version', 'sourceAnchorDays', 'candidate', 'until'], ['rruleUntilSourceToken', 'rruleText'])
@@ -215,7 +212,7 @@ const moveSettings = (settings: AppData['settings'], source: MoveSource): AppDat
     return JSON.parse(JSON.stringify({ ...value, features: { ...value.features, priorities: settings.features?.priorities } })) as AppData['settings'];
 };
 
-/** Bounded container membership, plus every normalized projectless recurrence peer. */
+
 export const referenceTasksMoveScope = (request: MoveRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope => {
     if ('source' in request && request.source === 'project') {
@@ -337,7 +334,7 @@ const moveTemporal = (prepared: Pick<MovePrepared, 'request' | 'futureBoundary' 
 const referenceSourcesMatch = (request: NativeReferenceTasksMoveRequest, scope: NativeReferenceTasksMoveScope, at: string): boolean =>
     sourceOf(request) === 'reference' && selectedSourcesMatch(request, scope, at);
 
-/** Actual RN loaded-before batch planner. UUID allocation never happens during replay. */
+
 export const referenceTasksMoveEffect = (prepared: Pick<MovePrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates' | 'recurrenceProjections' | 'allocatedIds'>,
     allocate = false): NativeReferenceTasksMovePrepared['effect'] | null => {
@@ -419,7 +416,7 @@ export const readTasksMoveEnvelope = (input: unknown, family: MoveFamily): MoveE
 export const readReferenceTasksMoveEnvelope = (input: unknown): NativeReferenceTasksMoveEnvelope | null =>
     readTasksMoveEnvelope(input, 'reference') as NativeReferenceTasksMoveEnvelope | null;
 
-/** Exact raw scope plus a frozen replan; the adapter epoch fence proves it again inside BEGIN. */
+
 export const referenceTasksMoveAuthorityMatches = (prepared: MovePrepared, data: AppData): boolean => {
     const current = rawScope(referenceTasksMoveScope(prepared.request, data));
     return Boolean(current && same(current, prepared.scope) && selectedSourcesMatch(prepared.request, current, prepared.updateAt, moveTemporal(prepared))
@@ -582,7 +579,7 @@ export function createTasksMoveMethods(deps: {
                 try { logInfo(`Native ${labelOf(envelope.request)} bulk status confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' || statusList ? { force: true } : {}),
                     context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-status' : statusList ? 'v1.3.8/ios-status-list-bulk-status' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-status' : 'v1.3.4/ios-reference-bulk-status', count: confirmed.value.count,
                         status: confirmed.value.status, outcome: 'moved' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
@@ -599,7 +596,7 @@ export function createReferenceTasksMoveMethods(deps: Parameters<typeof createTa
     };
 }
 
-/** Additive reuse for Reference batch families; Move V1 bodies/bytes stay unchanged. */
+
 export { detach as detachReferenceBatchJson, jsonSafe as detachReferenceBatchValue,
     validRecurrenceProjection as validReferenceBatchRecurrenceProjection,
     readRequest as readReferenceBatchSelectionRequest, readMoveRequest as readStatusBatchSelectionRequest,

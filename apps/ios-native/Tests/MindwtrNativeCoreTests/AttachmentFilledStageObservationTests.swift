@@ -20,7 +20,7 @@ final class AttachmentFilledStageObservationTests: XCTestCase {
     private var cache: URL!
 
     override func setUpWithError() throws {
-        // Streaming fixtures stay on the checkout's disk, never Darwin /tmp.
+
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let fixture = checkout.appendingPathComponent(".build/task249-fixtures/\(UUID().uuidString)", isDirectory: true)
@@ -90,7 +90,7 @@ final class AttachmentFilledStageObservationTests: XCTestCase {
     func testExactFilledStageSucceedsWithBorrowedSourceGoneAndNonregularTargetUntouched() throws {
         let item = try fixture()
         try FileManager.default.removeItem(at: item.source)
-        // A FIFO at the public target would block an accidental ordinary read.
+
         XCTAssertEqual(Darwin.mkfifo(item.target.path, mode_t(0o600)), 0)
         let targetIdentity = try token(item.target)
         let result = try observe(item)
@@ -190,8 +190,8 @@ final class AttachmentFilledStageObservationTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: stage), item.bytes)
             XCTAssertEqual(try token(stage), item.proof.stagedIdentity)
             XCTAssertFalse(FileManager.default.fileExists(atPath: item.target.path))
-            // Model an exact rename publication with the retained empty private
-            // directory. Digest/inode proof is valid; only the grammar is invalid.
+
+
             try FileManager.default.moveItem(at: stage, to: item.target)
             XCTAssertThrowsError(try files.verifyPublishedAttachment(targetURI: item.target.absoluteString,
                 stageProof: proof, sha256: digest(item.bytes), size: Int64(item.bytes.count))) {
@@ -308,7 +308,7 @@ final class AttachmentFilledStageObservationTests: XCTestCase {
         refused {
             _ = try self.observe(item, check: {
                 callbacks += 1
-                // Initial admission, prehash check, read, EOF, final check.
+
                 if callbacks == 5 { try changed.write(to: item.stage, options: []) }
             })
         }

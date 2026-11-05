@@ -19,7 +19,6 @@ import {
     type DragEndEvent,
     type DragStartEvent,
 } from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
     AREA_FILTER_ALL,
     AREA_FILTER_NONE,
@@ -47,6 +46,7 @@ import { ProjectToSectionDialog } from './projects/ProjectToSectionDialog';
 import { computeProjectAreaDragResult } from './projects/project-area-dnd';
 import {
     projectsViewCollisionDetection,
+    projectsViewKeyboardCoordinates,
     resolveTaskSidebarDropTarget,
     type ProjectsDragData,
     type TaskSidebarDropTarget,
@@ -158,7 +158,7 @@ function saveCollapsedAreas(state: Record<string, boolean>) {
     try {
         getWorkspaceCache()?.setItem(COLLAPSED_AREAS_STORAGE_KEY, JSON.stringify(state));
     } catch {
-        // storage unavailable — fall back to in-memory only
+
     }
 }
 
@@ -443,7 +443,7 @@ export function ProjectsView() {
     }, [duplicateProject, setSelectedProjectId, showToast, t]);
 
     const handleConvertProjectToSection = useCallback(async (projectId: string) => {
-        // The title and notes editors commit on blur. Flush them before freezing the preview.
+
         if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         try {
             await flushPendingSave();
@@ -523,21 +523,19 @@ export function ProjectsView() {
     }, [NO_AREA, projects, selectedArea, selectedTag, sortedAreas]);
 
     useEffect(() => {
-        // Keep persisted tag selections through the empty startup frame; reset only after we have a real tag inventory.
+
         if (tagOptions.list.length === 0 && !tagOptions.hasNoTags) return;
         if (selectedTag === ALL_TAGS || selectedTag === NO_TAGS || tagOptions.list.includes(selectedTag)) return;
         setSelectedTag(ALL_TAGS);
     }, [selectedTag, tagOptions.hasNoTags, tagOptions.list, setSelectedTag]);
 
-    // One DndContext spans the sidebar and the workspace so task rows can be
-    // dropped on sidebar projects/areas; drags carry typed data and handlers
-    // branch on it (ADR 0023).
+
     const dndSensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: { distance: 5 },
         }),
         useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
+            coordinateGetter: projectsViewKeyboardCoordinates,
         }),
     );
     const [activeDrag, setActiveDrag] = useState<ProjectsViewActiveDrag | null>(null);
@@ -651,10 +649,8 @@ export function ProjectsView() {
                         .catch(failTaskMove);
                 };
                 if (settings?.undoNotificationsEnabled === false) {
-                    // Undo toasts are off, but Ctrl+Z should still work, and
-                    // a move still needs *some* confirmation — just not one
-                    // dressed up as an undo notification the setting asked
-                    // to hide.
+
+
                     registerUndoableAction(undo);
                     showToast(message, 'success');
                 } else {
@@ -680,6 +676,10 @@ export function ProjectsView() {
         const data = event.active.data.current as ProjectsDragData | undefined;
         if (data?.type === 'project') {
             handleProjectDragEnd(data.section, event);
+            return;
+        }
+        if (data?.type === 'project-section') {
+            taskDragEndRef.current?.(event);
             return;
         }
         if (data?.type === 'task') {
@@ -759,6 +759,60 @@ export function ProjectsView() {
         }
     }, [areaById, selectedArea, selectedProject, selectedProjectId, setSelectedProjectId]);
 
+    const projectSidebar = (
+        <ProjectsSidebar
+            t={t}
+            areaFilterLabel={areaFilterLabel ?? undefined}
+            selectedTag={selectedTag}
+            noAreaId={NO_AREA}
+            allTagsId={ALL_TAGS}
+            noTagsId={NO_TAGS}
+            tagOptions={tagOptions}
+            isCreating={isCreating}
+            isCreatingProject={isCreatingProject}
+            newProjectTitle={newProjectTitle}
+            newProjectAreaId={newProjectAreaId}
+            areaOptions={sortedAreas}
+            onStartCreate={() => setIsCreating(true)}
+            onCancelCreate={() => {
+                setIsCreating(false);
+                setNewProjectAreaId(selectedAreaValue !== ALL_AREAS && selectedAreaValue !== NO_AREA ? selectedAreaValue : '');
+            }}
+            onCreateProject={handleCreateProject}
+            onChangeNewProjectTitle={setNewProjectTitle}
+            onChangeNewProjectAreaId={setNewProjectAreaId}
+            onSelectTag={setSelectedTag}
+            groupedActiveProjects={groupedActiveProjects}
+            groupedDeferredProjects={groupedDeferredProjects}
+            groupedArchivedProjects={groupedArchivedProjects}
+            areaById={areaById}
+            collapsedAreas={collapsedAreas}
+            onToggleAreaCollapse={toggleAreaCollapse}
+            showDeferredProjects={showDeferredProjects}
+            onToggleDeferredProjects={() => setShowDeferredProjects((prev) => !prev)}
+            showArchivedProjects={showArchivedProjects}
+            onToggleArchivedProjects={() => setShowArchivedProjects((prev) => !prev)}
+            selectedProjectId={selectedProjectId}
+            onSelectProject={setSelectedProjectId}
+            onActivateProject={() => {
+                if (isCompactProjectsLayout) setCompactSidebarOpen(false);
+            }}
+            navigationVisible={projectsSidebarVisible}
+            onRequestNavigationVisible={isCompactProjectsLayout
+                ? () => setCompactSidebarOpen(true)
+                : undefined}
+            getProjectColor={getProjectColorForTask}
+            projectTaskSummaryById={projectTaskSummaryById}
+            projects={projects}
+            focusedProjectCount={focusedProjectCount}
+            toggleProjectFocus={toggleProjectFocus}
+            onDuplicateProject={handleDuplicateProject}
+            draggingSection={activeDrag?.type === 'project' ? activeDrag.section : null}
+            collapseLabel={collapseProjectsSidebarLabel}
+            onToggleCollapsed={toggleProjectsSidebarCollapsed}
+        />
+    );
+
     return (
         <ErrorBoundary>
             <div className="h-full px-4 pt-3">
@@ -787,57 +841,7 @@ export function ProjectsView() {
                             style={{ width: `${sidebarWidth}px` }}
                         >
                             <div id="projects-sidebar-panel" className="h-full min-w-0">
-                                <ProjectsSidebar
-                                    t={t}
-                                    areaFilterLabel={areaFilterLabel ?? undefined}
-                                    selectedTag={selectedTag}
-                                    noAreaId={NO_AREA}
-                                    allTagsId={ALL_TAGS}
-                                    noTagsId={NO_TAGS}
-                                    tagOptions={tagOptions}
-                                    isCreating={isCreating}
-                                    isCreatingProject={isCreatingProject}
-                                    newProjectTitle={newProjectTitle}
-                                    newProjectAreaId={newProjectAreaId}
-                                    areaOptions={sortedAreas}
-                                    onStartCreate={() => setIsCreating(true)}
-                                    onCancelCreate={() => {
-                                        setIsCreating(false);
-                                        setNewProjectAreaId(selectedAreaValue !== ALL_AREAS && selectedAreaValue !== NO_AREA ? selectedAreaValue : '');
-                                    }}
-                                    onCreateProject={handleCreateProject}
-                                    onChangeNewProjectTitle={setNewProjectTitle}
-                                    onChangeNewProjectAreaId={setNewProjectAreaId}
-                                    onSelectTag={setSelectedTag}
-                                    groupedActiveProjects={groupedActiveProjects}
-                                    groupedDeferredProjects={groupedDeferredProjects}
-                                    groupedArchivedProjects={groupedArchivedProjects}
-                                    areaById={areaById}
-                                    collapsedAreas={collapsedAreas}
-                                    onToggleAreaCollapse={toggleAreaCollapse}
-                                    showDeferredProjects={showDeferredProjects}
-                                    onToggleDeferredProjects={() => setShowDeferredProjects((prev) => !prev)}
-                                    showArchivedProjects={showArchivedProjects}
-                                    onToggleArchivedProjects={() => setShowArchivedProjects((prev) => !prev)}
-                                    selectedProjectId={selectedProjectId}
-                                    onSelectProject={setSelectedProjectId}
-                                    onActivateProject={() => {
-                                        if (isCompactProjectsLayout) setCompactSidebarOpen(false);
-                                    }}
-                                    navigationVisible={projectsSidebarVisible}
-                                    onRequestNavigationVisible={isCompactProjectsLayout
-                                        ? () => setCompactSidebarOpen(true)
-                                        : undefined}
-                                    getProjectColor={getProjectColorForTask}
-                                    projectTaskSummaryById={projectTaskSummaryById}
-                                    projects={projects}
-                                    focusedProjectCount={focusedProjectCount}
-                                    toggleProjectFocus={toggleProjectFocus}
-                                    onDuplicateProject={handleDuplicateProject}
-                                    draggingSection={activeDrag?.type === 'project' ? activeDrag.section : null}
-                                    collapseLabel={collapseProjectsSidebarLabel}
-                                    onToggleCollapsed={toggleProjectsSidebarCollapsed}
-                                />
+                                {projectSidebar}
                             </div>
                             {!isCompactProjectsLayout && <div
                                 role="separator"
@@ -918,7 +922,7 @@ export function ProjectsView() {
                         onChangeNewAreaName={(event) => setNewAreaName(event.target.value)}
                         onCreateArea={async () => {
                             const name = newAreaName.trim();
-                            // A live area has this name: nothing to create, and the typed name stays.
+
                             if (!name || isManageAreaNameTaken('newArea', name, areas)) return;
                             setIsAreaCreating(true);
                             try {

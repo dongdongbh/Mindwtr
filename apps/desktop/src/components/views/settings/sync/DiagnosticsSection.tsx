@@ -5,12 +5,7 @@ import { SettingRow } from '../SettingRow';
 import { getDesktopSyncEncryptionDiagnosticsLines } from '../../../../lib/sync-service';
 import type { SettingsDataPageProps } from './types';
 
-/**
- * The `Encryption` block (#1056 diagnostics). Read-only and selectable, rendered with the same
- * `label: value` tokens the `[sync-encryption]` log lines use so a user can paste either into a
- * report and the two match. Loads its own data: nothing else on the Data page needs the
- * encryption posture, and threading it through the settings props would touch four files.
- */
+
 function SyncEncryptionDiagnostics({ title }: { title: string }) {
     const [lines, setLines] = useState<string[] | null>(null);
 
@@ -28,9 +23,8 @@ function SyncEncryptionDiagnostics({ title }: { title: string }) {
 
     if (!lines) return null;
     return (
-        // Folded by default: the block is reference data for a bug report, not
-        // something to read on every visit. The lines are still loaded on mount so
-        // the log stamp above happens whether or not the user unfolds it.
+
+
         <details data-settings-key="syncEncryptionDiagnostics" className="text-xs text-muted-foreground">
             <summary className="font-medium mb-1 cursor-pointer select-none">{title}</summary>
             <pre className="font-mono whitespace-pre-wrap break-all select-text m-0">{lines.join('\n')}</pre>
@@ -102,8 +96,8 @@ export function DiagnosticsSection({
                     />
                 </SettingRow>
                 <div className="flex items-center gap-2">
-                    {/* Named for what it does here: the phone's "Share log" opens a share sheet,
-                        this one saves a copy the tester can attach. */}
+                    {
+                                                                       }
                     <button
                         type="button"
                         onClick={onSaveLog}
@@ -119,9 +113,9 @@ export function DiagnosticsSection({
                         {t.clearLog}
                     </button>
                 </div>
-                {/* Below the actions on purpose: Save log is the way to get the file out. The path is
-                    a detail for people who follow the file live, and on sandboxed installs the only
-                    way to learn where it really is. */}
+                {
+
+                                                       }
                 {loggingEnabled && logPath && (
                     <div data-settings-key="logFile" className="text-xs text-muted-foreground">
                         <span className="font-medium">{t.logFile}:</span>{' '}

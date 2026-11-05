@@ -1,22 +1,6 @@
-// Entry points check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-entry-points-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays) and checks RN's system entry points on the
-// development scheme mindwtr-native-dev (the phone's RN app keeps mindwtr://, so no link here can reach it):
-// (a) `cmd shortcut get-shortcuts` lists RN's launcher shortcuts (Capture, Add task…, Focus, Calendar) on RN's component name;
-// (b) a text share (ACTION_SEND text/plain) opens RN's capture screen with the shared text, and Save stores it once (core,
-// on a copy of the app's database); (c) links land on core's screen: the Inbox, Focus (open-feature today), Waiting,
-// Someday (open-feature), the Calendar, the global search with its query, a task (the editor over Focus), a project, the
-// capture popup (open-feature capture), the capture screen with a capture link's title or an assistant note's name
-// (CREATE_NOTE), and a capture link without a title (core's toast); (d) a widget's quick capture link (capture-quick) opens
-// the capture screen, its Cancel puts the app behind the previous screen (RN's #1169), and a warm Back stays in the app;
-// (e) two shares sent together open
-// one after the other; (f) a share arriving over a typed capture draft waits until the draft closes; (g) the closed screens
-// stored nothing; (h) a share waiting behind the editor survives a force-stop and opens after the relaunch. Nothing but (b)'s share is saved; its title is 77 + a 12-digit run id + 1
-// (check-projects-device.mjs --prune-old removes earlier runs'). It types only digits, never launches over another app, and
-// leaves the app on its Inbox. Leave the device on its home screen before running. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -48,10 +32,10 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/entry-points-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits only: no keyboard is involved, and the prune shape stays simple.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const titles = { shared: `77${run}1`, link: `77${run}2`, note: `77${run}3`, typed: `77${run}4`, first: `77${run}5`, second: `77${run}6`,
-    overDraft: `77${run}7`, killed: `77${run}8` };
+    overDraft: `77${run}7`, killed: `77${run}8`, clean: `77${run}9` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tapExpecting } = device;
@@ -60,7 +44,7 @@ const lines = (...needles) => device.logs(pid(), TAG).replace(/\\/g, '').split('
 const entries = (outcome) => lines('native-android-entry-point', `"outcome":"${outcome}"`);
 const captures = () => lines('native-android-dev-task-command', '"operation":"captureModal"', '"outcome":"saved"');
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -69,7 +53,7 @@ const pullDatabase = () => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/** The live tasks titled like this run's entries, with their ids, and one live project that takes tasks (id and title). */
+
 const core = () => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, isSelectableProjectForTaskAssignment, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -94,16 +78,14 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase(), CHECK_TITLES: JSON.stringify(titles) } }).trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const onTabs = (name) => (nodes) => tabSelected(nodes, name) && !inEditor(nodes) && !tagged(nodes, 'global-search') && !tagged(nodes, 'menu-screen');
 const inScreen = (title) => (nodes) => Boolean(tagged(nodes, 'menu-screen')) && hasText(nodes, title);
 const popup = (text) => (nodes) => Boolean(tagged(nodes, 'quick-capture')) && draftText(nodes) === text;
-/** RN's capture screen with [text] in its title field. */
+
 const modal = (text) => (nodes) => Boolean(tagged(nodes, 'capture-modal')) && tagged(nodes, 'capture-modal-title')?.text === text;
-/**
- * Sends [intent] (am start arguments) to this app only, waits until core has answered it (its entry-point log line: a
- * later intent would replace one not yet opened), then waits for [expected].
- */
+
+
 const send = async (intent, expected, description, timeoutMs = 20_000) => {
     requireAppFront();
     const answered = lines('native-android-entry-point');
@@ -115,9 +97,9 @@ const send = async (intent, expected, description, timeoutMs = 20_000) => {
     }
     return waitFor(description, expected, timeoutMs);
 };
-/** Sends a text share to this app only, without waiting for core: the entry may wait in the queue behind open work. */
+
 const share = (text) => { requireAppFront(); sh(`am start -W -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT '${text}' ${PKG}`); };
-/** [still] holds on every read for [ms]: a waiting entry has not opened over the user's work. */
+
 const holds = async (still, ms, description) => {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
@@ -128,10 +110,8 @@ const holds = async (still, ms, description) => {
 const link = (path, expected, description, timeoutMs) => send(`-a android.intent.action.VIEW -d '${SCHEME}://${path}'`, expected, description, timeoutMs);
 const atTabs = (nodes) => Boolean(tab(nodes, en['tab.inbox'])) && !tagged(nodes, 'menu-screen') && !tagged(nodes, 'global-search') && !inEditor(nodes)
     && !tagged(nodes, 'capture-modal');
-/**
- * Leaves a screen the check opened with the system Back, back to the tabs. A project open on RN's Projects screen takes
- * two Backs (the project, then the screen); Back is pressed again only while the tabs are not showing.
- */
+
+
 const back = async (description) => {
     for (let press = 0; press < 3; press += 1) {
         requireAppFront();
@@ -146,20 +126,20 @@ const back = async (description) => {
 };
 const closePopup = (nodes) => tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close on the capture popup'),
     (current) => !tagged(current, 'quick-capture'), 'the popup to close');
-/** RN's capture screen's Cancel (above the keyboard): nothing is written. */
+
 const cancelModal = (nodes, expected = (current) => !tagged(current, 'capture-modal'), description = 'the capture screen to close') =>
     tapExpecting(tagged(nodes, 'capture-modal-cancel') ?? fail('no Cancel on the capture screen'), expected, description);
 
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    // Leave the app on its Inbox: the other checks start there.
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+
     try {
         if (front().includes(`${PKG}/`)) {
             let nodes = await screen();
             if (tagged(nodes, 'quick-capture')) { sh('input keyevent KEYCODE_BACK'); await sleep(800); nodes = await screen(); }
-            // A capture screen: Back cancels it (the first Back may only close the keyboard).
+
             for (let step = 0; step < 2 && tagged(nodes, 'capture-modal'); step += 1) { sh('input keyevent KEYCODE_BACK'); await sleep(800); nodes = await screen(); }
             for (let step = 0; step < 3 && (inEditor(nodes) || tagged(nodes, 'menu-screen') || tagged(nodes, 'global-search')); step += 1) {
                 sh('input keyevent KEYCODE_BACK');
@@ -168,11 +148,11 @@ const restore = async () => {
             }
             if (tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await device.tap(tab(nodes, en['tab.inbox']));
         }
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -189,10 +169,7 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the tabs', (nodes) => Boolean(tab(nodes, en['tab.inbox'])), 60_000);
 
-    // (a) RN's launcher shortcuts are the package's manifest shortcuts, on RN's component name (the alias). Android 16
-    // hides shortcut ids in its dumps, so each is known by its label's resource name; the App Actions ids in the same XML
-    // carry no intent, so Android publishes none of them (the gate checks them). The phone's RN development app, when
-    // installed, publishes the same four from the same XML (#1333 added Add task…).
+
     const manifestShortcuts = (pkg) => sh(`cmd shortcut get-shortcuts ${pkg}`).split('ShortcutInfo {').slice(1)
         .filter((entry) => /flags=0x[0-9a-f]+ \[[^\]]*Man/.test(entry))
         .map((entry) => ({ label: /shortLabel=[^\n]*\[(\w+)\]/.exec(entry)?.[1], activity: /activity=ComponentInfo\{([^}]+)\}/.exec(entry)?.[1] }));
@@ -209,7 +186,7 @@ try {
         check(JSON.stringify(rn) === JSON.stringify(labels), `(a) the same shortcuts as the phone's RN development app: ${JSON.stringify(rn)}`);
     }
 
-    // (b) A text share opens RN's capture screen with the text; Save stores it once, and the screen closes to the Inbox.
+
     const capturesBefore = captures();
     let nodes = await send(`-a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT '${titles.shared}'`, modal(titles.shared), 'the capture screen with the shared text');
     await tapExpecting(tagged(nodes, 'capture-modal-save') ?? fail('no Save on the capture screen'), onTabs(en['tab.inbox']), 'the share to save');
@@ -217,7 +194,7 @@ try {
     let stored = core();
     check(stored.tasks.shared.length === 1 && stored.tasks.shared[0].status === 'inbox', `(b) the shared text is stored once, in the Inbox (${JSON.stringify(stored.tasks.shared)})`);
 
-    // (c) Links land on core's screens.
+
     await link('/inbox', onTabs(en['tab.inbox']), 'the Inbox');
     check(true, '(c) inbox opens the Inbox tab');
     await link('/open-feature?feature=today', onTabs(en['tab.next']), 'Focus');
@@ -256,13 +233,13 @@ try {
     await link('/capture?note=77', (current) => hasText(current, en['shortcuts.captureUnavailable']), 'core\'s toast for a capture link without a title', 5_000);
     check(true, '(c) a capture link without a title shows core\'s toast');
 
-    // (d) A widget's quick capture: RN's capture screen (origin=system), and its Cancel puts the app behind the previous screen.
+
     nodes = await link('/capture-quick', modal(''), 'the quick capture screen');
     await cancelModal(nodes, () => !front().includes(`${PKG}/`), 'the app to go behind');
     check(true, '(d) capture-quick opens the capture screen, and its Cancel returns to the previous screen');
     device.launch(ACTIVITY);
     await waitFor('the tabs again', (current) => Boolean(tab(current, en['tab.inbox'])), 30_000);
-    // A warm Back pops the screen as RN's Back pops its route: the app stays (the first Back may only close the keyboard).
+
     await link('/capture-quick', modal(''), 'the quick capture screen again');
     for (let press = 0; press < 2 && tagged(await screen(), 'capture-modal'); press += 1) {
         requireAppFront();
@@ -272,18 +249,18 @@ try {
     await waitFor('the tabs after Back', atTabs, 10_000);
     check(front().includes(`${PKG}/`), '(d) Back from the quick capture screen stays in the app');
 
-    // (e) Two shares sent together open one after the other: the second waits in the queue while the first's screen is open.
+
     nodes = await waitFor('the tabs', atTabs, 20_000);
     share(titles.first);
     share(titles.second);
     nodes = await waitFor('the first share\'s capture screen', modal(titles.first), 20_000);
     await holds(modal(titles.first), 3_000, 'the first share\'s capture screen');
-    // Cancelling the first screen opens the second share's at once: it waited in the queue.
+
     nodes = await cancelModal(await screen(), modal(titles.second), 'the second share\'s capture screen');
     await cancelModal(nodes, atTabs, 'the tabs');
     check(true, '(e) two shares open in the order they came, the second after the first\'s screen closed');
 
-    // (f) A share arriving over a capture draft waits: the typed draft stays until the user closes it, then the share opens.
+
     await device.type(titles.typed);
     share(titles.overDraft);
     await holds(popup(titles.typed), 4_000, 'the typed capture draft');
@@ -298,8 +275,21 @@ try {
     check(entries('captureModal') >= 7 && entries('capture') >= 1 && entries('notice') >= 1 && entries('task') >= 1 && entries('screen') >= 5,
         `(g) the entry-point log lines: captureModal ${entries('captureModal')}, capture ${entries('capture')}, notice ${entries('notice')}, task ${entries('task')}, screen ${entries('screen')}`);
 
-    // (h) A share that waits behind the editor survives a force-stop before it opened: the relaunch opens it.
+
     await link(`/open?task=${stored.tasks.shared[0].id}`, (current) => inEditor(current) && hasText(current, titles.shared), 'the shared task in the editor');
+    share(titles.clean);
+    nodes = await waitFor('the share\'s capture screen over the closed clean editor', modal(titles.clean), 15_000);
+    await cancelModal(nodes, (current) => !tagged(current, 'capture-modal') && !inEditor(current), 'the tabs, with no editor');
+    check(core().tasks.clean.length === 0, '(h) a share over a clean editor closes it and opens at once (#1410)');
+
+
+    await link(`/open?task=${stored.tasks.shared[0].id}`, (current) => inEditor(current) && hasText(current, titles.shared), 'the shared task in the editor');
+    nodes = await screen();
+    await tapExpecting(withDescription(nodes, 'Edit') ?? fail('no Edit tab in the editor'), (current) => Boolean(field(current)), 'the editor\'s Form tab');
+
+    await device.focusAtEnd(field(await screen()) ?? fail('no title field in the editor'));
+    sh('input text 9');
+    await waitFor('the unsaved title edit', (current) => field(current)?.text === `${titles.shared}9`, 10_000);
     share(titles.killed);
     await holds((current) => inEditor(current) && !tagged(current, 'capture-modal'), 3_000, 'the editor');
     sh(`am force-stop ${PKG}`);
@@ -308,7 +298,7 @@ try {
     nodes = await waitFor('the waiting share\'s capture screen after the relaunch', modal(titles.killed), 60_000);
     await cancelModal(nodes);
     stored = core();
-    check(stored.tasks.killed.length === 0 && entries('captureModal') >= 1, '(h) a share queued before a force-stop opens after the relaunch, once');
+    check(stored.tasks.killed.length === 0 && entries('captureModal') >= 1, '(i) a share queued before a force-stop opens after the relaunch, once');
     console.log('Entry points device check passed');
 } catch (error) {
     evidenced(error);

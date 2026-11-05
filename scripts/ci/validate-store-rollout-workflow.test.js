@@ -7,6 +7,32 @@ import { parse } from 'yaml';
 
 const workflow = (name) => parse(readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
 
+test('Play status discovers production and its maximum without an empty version code', () => {
+  const step = workflow('rollout').jobs.play.steps.find((entry) => entry.env?.VERSION_CODE);
+  const directory = mkdtempSync(join(tmpdir(), 'mindwtr-play-status-'));
+  try {
+    const result = spawnSync('bash', ['-c', `
+      python3() {
+        printf '%s\\n' "$*"
+        for argument in "$@"; do
+          [ -n "$argument" ] || return 1
+        done
+        printf '{}' > "\${!#}"
+      }
+      ${step.run}
+    `], {
+      encoding: 'utf8',
+      env: { ...process.env, RUNNER_TEMP: directory, GITHUB_STEP_SUMMARY: join(directory, 'summary'), ROLLOUT_ACTION: 'status', VERSION_CODE: '', ROLLOUT_PERCENTAGE: '20' },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('rollout --package tech.dongdongbh.mindwtr --action status --result');
+    expect(result.stdout).not.toContain('--version-code');
+    expect(result.stdout).toContain('max-version-code --package tech.dongdongbh.mindwtr --result');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('stable policy is validated before publishing and forwarded to every production store', () => {
   const stable = workflow('release');
   const inputs = stable.on.workflow_dispatch.inputs;
@@ -30,12 +56,11 @@ test('an open production rollout fails the stable release before any build job',
   const preflight = stable.jobs['rollout-preflight'];
   expect(preflight.needs).toBe('validate');
   expect(preflight.if).toContain("needs.validate.outputs.rollout_mode == 'staged'");
-  // Forks hold no Store credentials, so the check is skipped there, not failed.
+
   expect(preflight.if).toContain("github.repository == 'dongdongbh/Mindwtr'");
   expect(preflight.concurrency.group).toBe('google-play-production');
 
-  // A recovery dispatch that reaches no store must not be refused by its own
-  // tag's open rollout, so only a publishing run is checked, store by store.
+
   const selected = new Function('github', 'inputs', 'needs', `return Boolean(${
     preflight.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/always\(\)/g, 'true')
       .replace(/\bneeds\.([\w-]+)/g, 'needs["$1"]')
@@ -77,7 +102,7 @@ test('an open production rollout fails the stable release before any build job',
     'android', 'android-foss', 'ios-appstore', 'macos-appstore',
   ]) {
     expect(stable.jobs[job].needs).toContain('rollout-preflight');
-    // A skipped preflight (immediate mode or a fork) must not skip the builds.
+
     expect(stable.jobs[job].if).toContain(
       "(needs['rollout-preflight'].result == 'success' || needs['rollout-preflight'].result == 'skipped')",
     );
@@ -117,7 +142,7 @@ test('the Windows stable Store path fails instead of exiting zero on an open rol
   expect(publish.if).toContain("steps.version.outputs.store_stable == 'true'");
   const refusals = [...publish.run.matchAll(/if \(& \$is(RolloutOpen|StoreBusy) \$errText\) \{\n(.*)\n/g)]
     .map((match) => [match[1], match[2].trim()]);
-  // Every tolerated store-busy skip is preceded by the rollout-open failure.
+
   expect(refusals.map(([matcher]) => matcher)).toEqual([
     'RolloutOpen', 'StoreBusy', 'RolloutOpen', 'StoreBusy',
   ]);
@@ -196,7 +221,7 @@ test('rollout workflow schedules one automatic stage per day and retains explici
   expect(rollout.jobs.msstore.if).toContain("github.event_name == 'schedule'");
   expect(rollout.jobs.play.if).toContain("needs.promotion-gate.outputs.ready == 'true'");
   expect(rollout.jobs.msstore.if).toContain("needs.promotion-gate.outputs.ready == 'true'");
-  // A fork holds no Store credentials, so the daily schedule must not run there.
+
   for (const job of [rollout.jobs.play, rollout.jobs.msstore]) {
     expect(job.if).toContain("github.repository == 'dongdongbh/Mindwtr'");
   }
@@ -266,13 +291,15 @@ def default_platform(*); end
 def platform(*); yield; end
 def lane(*); yield; end
 def app_store_connect_api_key(**); nil; end
-def deliver(options); puts JSON.generate(options); end
+def update_app_age_rating(**options); $age_rating = JSON.parse(File.read(options.fetch(:age_rating_config_path))); end
+def deliver(options); puts JSON.generate(options.merge(age_rating: $age_rating)); end
 `;
     for (const [phased, skipMetadata] of [['true', 'false'], ['false', 'false'], ['true', 'true']]) {
       const result = spawnSync('ruby', ['-'], {
         input: stubs + fastfile,
         encoding: 'utf8',
         env: { ...process.env, PHASED_RELEASE: phased, SKIP_METADATA: skipMetadata,
+          GITHUB_WORKSPACE: process.cwd(),
           EXPECTED_BUNDLE_ID: 'tech.dongdongbh.mindwtr', APP_VERSION: '1.0.5',
           IPA_PATH: 'fixture.ipa', PKG_PATH: 'fixture.pkg', FASTLANE_METADATA_PATH: 'fixture',
           FASTLANE_ASC_KEY_ID: 'fixture', FASTLANE_ASC_ISSUER_ID: 'fixture', ASC_KEY_PATH: 'fixture',
@@ -281,6 +308,7 @@ def deliver(options); puts JSON.generate(options); end
       expect(result.status).toBe(0);
       const options = JSON.parse(result.stdout);
       expect(options.automatic_release).toBe(true);
+      expect(options.age_rating).toEqual(skipMetadata === 'true' ? null : { socialMedia: false, socialMediaAgeRestricted: false });
       expect(options.phased_release).toBe(skipMetadata === 'true' ? undefined : phased === 'true');
     }
   }
@@ -295,7 +323,7 @@ test('all Play edit sessions share the rollout lock, including RC and version lo
   ]) {
     const release = workflow(name);
     for (const job of jobs) expect(release.jobs[job].concurrency).toEqual(expected);
-    // The enclosing workflow never reacquires a child's lock.
+
     expect(release.concurrency.group).not.toBe(expected.group);
   }
 });

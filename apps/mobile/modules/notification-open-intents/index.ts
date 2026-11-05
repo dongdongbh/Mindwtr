@@ -87,7 +87,7 @@ export async function consumePendingNotificationOpenPayload(): Promise<Notificat
   return payload ? normalizePayload(payload) : null;
 }
 
-/** Durable Android receipts, oldest first; reading never removes them. */
+
 export async function peekPendingNotificationCompletions(): Promise<NotificationOpenPayload[]> {
   if (Platform.OS !== 'android') return [];
   if (!nativeModule?.peekPendingCompletions) throw new Error('Completion replay unavailable');
@@ -106,8 +106,7 @@ export async function ensureReminderNotificationChannel(channelId: string, chann
   nativeModule?.ensureReminderChannel?.(channelId, channelName);
 }
 
-// Persistent "quick add" capture notification (#819). Android-only: iOS has no
-// ongoing notifications; iOS users capture via the widget or Shortcuts instead.
+
 export function showPersistentCaptureNotification(title: string, text: string, channelName: string): void {
   if (Platform.OS !== 'android') return;
   nativeModule?.showPersistentCaptureNotification?.(title, text, channelName);
@@ -118,11 +117,7 @@ export function hidePersistentCaptureNotification(): void {
   nativeModule?.hidePersistentCaptureNotification?.();
 }
 
-/**
- * Re-post the pinned capture notification from its native last-posted mirror
- * if the toggle is on. Needs no strings, so callers that just wiped the shade
- * (NotificationManager.cancelAll) can re-assert the handle without i18n access.
- */
+
 export function restorePersistentCaptureNotification(): void {
   if (Platform.OS !== 'android') return;
   nativeModule?.restorePersistentCaptureNotification?.();

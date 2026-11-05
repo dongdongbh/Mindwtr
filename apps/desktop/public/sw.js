@@ -13,14 +13,12 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('mindwtr-pwa-') && k !== CACHE_NAME).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
-// A cached HTML body under a script/style URL (an SPA fallback for a missing
-// hashed chunk) would permanently break that page with "Importing a module
-// script failed", so only successful non-HTML responses are cacheable.
+
 function isCacheableAssetResponse(res) {
   if (!res || !res.ok) return false;
   const contentType = res.headers.get('content-type') || '';
@@ -34,8 +32,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Navigations go network-first so a redeploy is picked up on the next load;
-  // the cached shell is only an offline fallback.
+
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -54,8 +51,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Only static assets are served from the cache. Everything else (API calls,
-  // sync data on same-origin deployments) always goes to the network.
+
   const isStaticAsset = url.pathname.startsWith('/assets/')
     || STATIC_DESTINATIONS.has(req.destination)
     || PRECACHE_URLS.includes(url.pathname);

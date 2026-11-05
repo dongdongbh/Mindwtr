@@ -112,8 +112,7 @@ describe('prepared native Task Focus durable replay', () => {
         expect(first.stored().tasks[0]).toEqual(envelope.prepared.effect.task.after);
         expect(first.stored().settings.deviceId).toBe(envelope.prepared.deviceIdToInitialize);
 
-        // The row was saved, but the original response was lost. Another durable
-        // settings write happened before the host restarted and replayed the UUID.
+
         const later = structuredClone(first.stored());
         later.settings.deviceId = 'later-device';
         const cold = await open(later);

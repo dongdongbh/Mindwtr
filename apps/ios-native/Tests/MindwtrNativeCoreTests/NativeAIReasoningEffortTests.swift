@@ -82,7 +82,7 @@ private final class AIReasoningEffortNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Actual production bundle/JSC/SQLite. These are authored Apple checks, not Linux or device acceptance.
+
 final class NativeAIReasoningEffortTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -290,8 +290,8 @@ final class NativeAIReasoningEffortTests: XCTestCase {
 
     func testCancellationAfterJournalAndActualCommitFailureRetainsExactWarmRetryAndRejectsGenericRecovery() async throws {
         try await seed(configured())
-        // Hold only delivery of the first real commit's terminal reply until its caller cancels.
-        // The production route, store action, SQLite COMMIT and raw retry remain unchanged.
+
+
         let suffix = """
         ;(() => {
             const commit = MindwtrHost.iosAIReasoningEffortCommit, poll = MindwtrHost.poll, cancel = MindwtrHost.cancel;
@@ -558,7 +558,7 @@ final class NativeAIReasoningEffortTests: XCTestCase {
         try XCTUnwrap(retained.fence)()
         XCTAssertTrue(retained.observedEngine)
         XCTAssertNil(retained.facade); XCTAssertNil(retained.engine)
-        guard retained.engine == nil else { return } // Baseline failure never calls an unsafe retained owner.
+        guard retained.engine == nil else { return }
         let owner = try XCTUnwrap(retained.context?.objectForKeyedSubscript("__retainedEffortOwner"))
         XCTAssertFalse(owner.isUndefined)
         XCTAssertEqual(owner.call(withArguments: [])?.toString(), "!MindwtrNativeError:AI reasoning effort owner is unavailable")

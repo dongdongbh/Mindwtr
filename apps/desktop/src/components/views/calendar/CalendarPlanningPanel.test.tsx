@@ -14,9 +14,8 @@ const controller = {
 
 describe('CalendarPlanningPanel', () => {
     it('keeps the collapsed panel expandable at every width', () => {
-        // The collapse button renders at all widths, so the expand affordance
-        // must too — a `hidden xl:block` collapsed rail trapped the panel
-        // collapsed on narrow windows (#977).
+
+
         const onCollapsedChange = vi.fn();
         const { container } = render(
             <CalendarPlanningPanel

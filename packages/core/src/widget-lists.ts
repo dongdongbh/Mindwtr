@@ -96,7 +96,7 @@ const LIST_TITLE_KEYS: Record<WidgetFixedListId, [string, string]> = {
 };
 
 
-export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters' | 'groupBy' | 'groupDefault' | 'groupNone' | 'groupContext' | 'groupProject' | 'groupPriority', string> {
+export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters' | 'groupBy' | 'groupDefault' | 'groupNone' | 'groupContext' | 'groupProject' | 'groupPriority' | 'background' | 'backgroundLightText' | 'backgroundDarkText', string> {
     return {
         ...(Object.fromEntries(
             WIDGET_FIXED_LIST_IDS.map((id) => [id, tr[LIST_TITLE_KEYS[id][0]] ?? LIST_TITLE_KEYS[id][1]]),
@@ -108,6 +108,9 @@ export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixed
         groupContext: tr['list.groupByContext'] ?? 'Context',
         groupProject: tr['list.groupByProject'] ?? 'Project',
         groupPriority: tr['taskEdit.priorityLabel'] ?? 'Priority',
+        background: tr['widget.background'] ?? 'Background',
+        backgroundLightText: tr['widget.backgroundLightText'] ?? 'Transparent, light text',
+        backgroundDarkText: tr['widget.backgroundDarkText'] ?? 'Transparent, dark text',
     };
 }
 
@@ -157,6 +160,12 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
     const pool = status ? activeTasks.filter((task) => task.status === status) : activeTasks;
     const projects = data.projects || [];
     const matched = applyFilter(pool, filter.criteria, { projects, tokenMatchMode: 'all', now: context.now });
+    if (filter.criteria.excludedProjects?.length || ((filter.view === 'contexts' || filter.view === 'all') && filter.criteria.statuses?.length)) {
+        try { logInfo('Context filter projected for widget', { scope: 'widget-lists', category: 'unknown', force: true, context: {
+            releaseCheck: 'v1.3.8/context-filter-criteria', count: matched.length, outcome: 'projected',
+            excludedProjectCount: filter.criteria.excludedProjects?.length ?? 0, selectionStatusCount: filter.criteria.statuses?.length ?? 0,
+        } }); } catch {                                                      }
+    }
     if (filter.criteria.anyDateRange) {
         logInfo('Task date filter projected for widget', {
             scope: 'widget-lists',

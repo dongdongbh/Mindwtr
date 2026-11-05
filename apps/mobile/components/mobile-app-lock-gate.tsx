@@ -7,6 +7,7 @@ import { resolveMobileAppLockRelockDelayMinutes, translateWithFallback, useTaskS
 import { useLanguage } from '@/contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
+import { logInfo } from '@/lib/app-log';
 import {
   authenticateWithDeviceLock,
   getMobileAppLockErrorKey,
@@ -17,12 +18,14 @@ import {
 type MobileAppLockGateProps = {
   enabled: boolean;
   children: React.ReactNode;
+
+  onLockedChange?: (locked: boolean) => void;
 };
 
 const AUTHENTICATE_AFTER_ACTIVE_DELAY_MS = 250;
 
-export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps) {
-  // Minutes away before a return asks again; 0 asks every time. A cold start always asks.
+export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileAppLockGateProps) {
+
   const relockDelayMinutes = useTaskStore((state) => (
     resolveMobileAppLockRelockDelayMinutes(state.settings?.security?.mobileAppLockRelockDelayMinutes)
   ));
@@ -40,8 +43,13 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
   const wasEnabledRef = useRef(enabled);
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
-  // When the app last left 'active' while unlocked; null while locked or after a cold start.
+
   const leftUnlockedAtRef = useRef<number | null>(null);
+
+  const coversApp = enabled && locked;
+  useEffect(() => {
+    onLockedChange?.(coversApp);
+  }, [coversApp, onLockedChange]);
 
   const resolveText = useCallback((key: string, fallback: string) => (
     translateWithFallback(t, key, fallback)
@@ -106,7 +114,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
       const previous = appStateRef.current;
       appStateRef.current = nextAppState;
       if (previous === 'active' && (nextAppState === 'inactive' || nextAppState === 'background')) {
-        // The lock screen still covers the app while it is away; the delay only skips the prompt on return.
+
         leftUnlockedAtRef.current = lockedRef.current ? null : Date.now();
         lockApp();
       } else if (nextAppState === 'active') {
@@ -114,6 +122,13 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
         leftUnlockedAtRef.current = null;
         if (isWithinMobileAppLockRelockDelay({ delayMinutes: relockDelayMinutes, leftUnlockedAt, now: Date.now() })) {
           setLocked(false);
+          if (Platform.OS === 'android') {
+            void logInfo('App lock grace return cleared privacy cover', {
+              scope: 'app-lock',
+              extra: { releaseCheck: 'v1.3.9/app-lock-resume-cover', outcome: 'grace-return' },
+              force: true,
+            }).catch(() => undefined);
+          }
         }
       }
     });
@@ -160,7 +175,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
         <Text style={[styles.title, { color: tc.text }]} accessibilityRole="header">
           {resolveText('appLock.title', 'Mindwtr is locked')}
         </Text>
-        {/* A live region, so TalkBack reads a failed or cancelled unlock. */}
+        {                                                                    }
         <Text style={[styles.description, { color: tc.secondaryText }]} accessibilityLiveRegion="polite">{message}</Text>
         <TouchableOpacity
           activeOpacity={0.85}
@@ -181,10 +196,7 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
     </SafeAreaView>
   );
 
-  // Android keeps the app mounted under the lock, so a return keeps the open task and screen and
-  // shows at once (#1423). The lock is a Modal, a window added after the app's own dialogs, so it
-  // also covers an open task editor. iOS cannot present it over an already presented modal, so
-  // iOS still renders only the lock screen while locked.
+
   if (Platform.OS === 'android') {
     return (
       <>
@@ -196,7 +208,9 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
           navigationBarTranslucent
           onRequestClose={() => {}}
         >
-          {lockScreen}
+          {locked && (appState === 'active' ? lockScreen : (
+            <View testID="app-lock-privacy-cover" style={{ flex: 1, backgroundColor: tc.bg }} />
+          ))}
         </Modal>
       </>
     );

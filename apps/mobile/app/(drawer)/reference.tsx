@@ -30,7 +30,7 @@ export default function ReferenceScreen() {
     setGroupBy(next);
     void workspaceSessionStorage.setItem(GROUP_BY_STORAGE_KEY, next).catch(() => undefined);
   };
-  // The screen's texts come from core, shared with the native host.
+
   const { title, emptyText, emptyHint } = getStatusListScreenText('reference', t);
   const navBarInset = Platform.OS === 'android' && insets.bottom >= 24 ? insets.bottom : 0;
 

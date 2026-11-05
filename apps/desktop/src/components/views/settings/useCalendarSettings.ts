@@ -151,8 +151,7 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         };
     }, [loadEnabled, loadFailedMessage, supportsSystemCalendar, refreshCalendarPushTargets]);
 
-    // [edit] runs on the list as stored when the write is admitted, so a calendar another device
-    // added or changed since stays. The shown list is the fallback before settings hold one.
+
     const persistCalendars = useCallback(async (edit: (calendars: ExternalCalendarSubscription[]) => ExternalCalendarSubscription[]) => {
         setCalendarError(null);
         try {
@@ -182,8 +181,8 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         }
         const name = (newCalendarName.trim() || resolveFeedback('calendar.title', 'Calendar')).trim();
         const id = generateUUID();
-        // No color yet: an unset color means "no explicit pick", so a feed
-        // hint or the deterministic hash fallback can still apply (#974).
+
+
         setNewCalendarName('');
         setNewCalendarUrl('');
         persistCalendars((calendars) => [
@@ -202,7 +201,7 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         }
         setCalendarError(null);
         try {
-            const { open } = await import('@tauri-apps/plugin-dialog');
+            const { open } = await import('../../../lib/native-dialog');
             const selected = await open({
                 multiple: false,
                 directory: false,
@@ -228,8 +227,8 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
     }, [persistCalendars]);
 
     const handleCalendarColorChange = useCallback((id: string, color: string | undefined) => {
-        // `undefined` is the Auto swatch: drop the pick so the feed hint or
-        // the assigned default applies again (#974).
+
+
         const normalized = color === undefined ? undefined : normalizeExternalCalendarColor(color);
         if (color !== undefined && !normalized) return;
         persistCalendars((calendars) => calendars.map((calendar) => {
@@ -318,8 +317,7 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         }
     }, [calendarPushEnabled, saveFailedMessage, showSaved, supportsSystemCalendar]);
 
-    // Only user-initiated work blocks the controls; loading the target list in
-    // the background must never leave the push toggle stuck greyed out (#575).
+
     const handleRefreshCalendarPushTargets = useCallback(async () => {
         setCalendarPushLoading(true);
         try {
@@ -331,7 +329,7 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
 
     return {
         externalCalendars,
-        // Swatch fills only — a pick is still stored as the canonical hex (#974).
+
         theme: settings?.theme,
         newCalendarName,
         newCalendarUrl,

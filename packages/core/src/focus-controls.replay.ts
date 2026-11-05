@@ -1,11 +1,6 @@
-/**
- * Test support only (imported by the Focus controls tests; not exported).
- * Replays the frozen React Native Focus controls scenarios
- * (focus-controls-parity.fixtures.json, captured by
- * apps/mobile/lib/focus-controls-parity.test.tsx) through core: either core's
- * functions directly, or the native host contract. Both produce the screen as
- * the mobile harness observed it.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { splitTodayTasksByStartTime } from './task-utils';
 import {
@@ -62,11 +57,9 @@ export const loadFocusControlsFixture = (): FocusControlsFixture => JSON.parse(
 
 type Translate = (key: string) => string;
 
-// ---------------------------------------------------------------------------
-// Store seeding and write recording, as the mobile harness did.
 
 const writeLog: unknown[] = [];
-/** The store writes since the last seed, as the mobile harness records them. */
+
 export const focusControlsWrites = (): unknown[] => writeLog;
 let knownIds = new Set<string>();
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -119,8 +112,6 @@ export async function seedFocusControlsStore(
     });
 }
 
-// ---------------------------------------------------------------------------
-// The observation the mobile harness recorded, from its parts.
 
 const encodeItem = (item: FocusListItem | { type: 'project'; id: string }): string => {
     if (item.type === 'task') return `${item.task.id}${item.grouped ? '~' : ''}`;
@@ -145,7 +136,7 @@ type Screen = {
 
 function observation(screen: Screen) {
     const list = !screen.reorderMode;
-    // The save dialog replaces the sheet's body: no overview rows, no Clear.
+
     const sheet = screen.saveName === null ? screen.sheet : { ...(screen.sheet as object), rows: [], clear: false };
     return normalize({
         sections: list ? screen.sections ?? [] : null,
@@ -165,7 +156,7 @@ function observation(screen: Screen) {
     });
 }
 
-/** RN's setFocusWidgetFilter keeps the previous value while the new one has the same JSON. */
+
 function createWidgetMirror() {
     let current: Screen['widget'] = { criteria: {}, sortBy: DEFAULT_FOCUS_SORT_BY, sortOrder: null };
     return (next: Screen['widget']) => {
@@ -216,8 +207,6 @@ const sheetRows = (
     return rows;
 };
 
-// ---------------------------------------------------------------------------
-// Core functions called directly.
 
 export function createCoreFocusDriver(t: Translate, now: () => Date) {
     const tf = (key: string, fallback: string) => tFallback(t, key, fallback);
@@ -439,8 +428,6 @@ export function createCoreFocusDriver(t: Translate, now: () => Date) {
     return { observe, perform };
 }
 
-// ---------------------------------------------------------------------------
-// The native host contract.
 
 type Host = ReturnType<typeof createNativeHostContract>;
 
@@ -450,18 +437,18 @@ const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; error: { code:
 };
 
 export function createContractFocusDriver(host: Host, t: Translate) {
-    const tf = (key: string, fallback: string) => tFallback(t, key, fallback);
     let state: FocusControlState = DEFAULT_FOCUS_CONTROL_STATE;
     let reorderMode = false;
     let saveName: string | null = null;
     const widget = createWidgetMirror();
     const read = (controlEdit?: FocusControlEdit): NativeFocusView => {
-        const view = unwrap(host.getFocus({ limit: 100, controls: state, ...(controlEdit ? { controlEdit } : {}) }));
+
+        const view = unwrap(host.getFocus({ limit: 100, controls: state, collapsedGroupIds: [], ...(controlEdit ? { controlEdit } : {}) }));
         state = view.controls.state;
         return view;
     };
     const commandInput = () => ({ requestId: generateUUID(), controls: state });
-    /** A new order, with each row's revision as the reorder screen shows it. */
+
     const reorderInput = (controls: NativeFocusView['controls'], ids: string[]) => ({
         ...commandInput(),
         ids,
@@ -475,14 +462,12 @@ export function createContractFocusDriver(host: Host, t: Translate) {
         const sheet = controls.filterSheet;
         const sections = view.sections.map((section) => {
             const items: string[] = [];
-            const laterTodayCount = section.rows.filter((row) => row.laterToday).length;
+
+            const firstHeading = section.groups?.[0]?.start ?? Infinity;
             section.rows.forEach((row, index) => {
                 const group = section.groups?.find(({ start }) => start === index);
                 if (group) items.push(`#${group.id}|${group.title}|${group.count}|${group.muted ? 1 : 0}|${group.dotColor ?? ''}`);
-                if (row.laterToday && !section.rows[index - 1]?.laterToday) {
-                    items.push(`#focus:schedule:later-today|${tf('agenda.laterToday', 'Later today')}|${laterTodayCount}|1|`);
-                }
-                items.push(`${row.id}${section.groups || row.laterToday ? '~' : ''}`);
+                items.push(`${row.id}${index >= firstHeading ? '~' : ''}`);
             });
             return { type: section.key, title: section.title, total: section.total, items };
         });
@@ -517,7 +502,7 @@ export function createContractFocusDriver(host: Host, t: Translate) {
                     visibility: sheet.visibility,
                 },
                 rows: [
-                    // The native sheets summarize Task dates as their Disclosure does: the chosen option, else All.
+
                     [sheet.taskDates.label, sheet.taskDates.options.filter((option) => option.selected).map((option) => option.label).join(', ') || sheet.text.all],
                     ...(sheet.tokens.total > 0 ? [[sheet.text.contexts, sheet.summaries.tokens]] : []),
                     ...(sheet.projects.total > 0 ? [[sheet.text.projects, sheet.summaries.projects]] : []),
@@ -559,7 +544,7 @@ export function createContractFocusDriver(host: Host, t: Translate) {
             case 'filter': {
                 const [method, ...rest] = args as [string, ...unknown[]];
                 const sheet = controls.filterSheet;
-                // The option's own edit where the sheet offers one; the rest are typed input.
+
                 const offered = method === 'toggleToken' ? sheet.tokens.items.find((token) => token.value === rest[0])?.edit
                     : method === 'toggleProject' ? sheet.projects.items.find((project) => project.id === rest[0])?.edit
                         : method === 'togglePriority' ? sheet.priorities.find((option) => option.value === rest[0])?.edit
@@ -652,7 +637,7 @@ const selectionsFromView = (view: NativeFocusView) => {
     };
 };
 
-/** The observation keys the contract view carries (criteria and save flags live in core's model only). */
+
 export const CONTRACT_SELECTION_KEYS = [
     'tokens', 'excludedTokens', 'projects', 'priorities', 'energyLevels', 'timeEstimates', 'locationQuery',
     'contextMatchMode', 'tagMatchMode', 'activeSavedFilterId', 'activeCount', 'hasActive', 'showContextMatchMode',

@@ -36,8 +36,8 @@ public enum MindwtrWatchPayloadValidator {
         "protocolVersion", "id", "createdAt", "source", "kind",
     ]
 
-    private static let minimumTimestamp = Date(timeIntervalSince1970: 946_684_800) // 2000-01-01
-    private static let maximumTimestamp = Date(timeIntervalSince1970: 4_102_444_800) // 2100-01-01
+    private static let minimumTimestamp = Date(timeIntervalSince1970: 946_684_800)
+    private static let maximumTimestamp = Date(timeIntervalSince1970: 4_102_444_800)
 
     private static let isoWithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -314,8 +314,8 @@ public enum MindwtrWatchPayloadValidator {
             "focus": focus,
             "pomodoro": pomodoro,
         ]
-        // UTF-8 estimates on the phone are not the binary property-list wire size.
-        // Omit whole detail blocks, never a misleading partial checklist.
+
+
         var boundedFocus = focus
         while let data = try? PropertyListSerialization.data(fromPropertyList: normalized, format: .binary, options: 0),
               data.count > maxApplicationContextBytes,

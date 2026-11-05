@@ -6,6 +6,7 @@ import { GripVertical, Trash2 } from 'lucide-react';
 import { TaskItem } from '../../TaskItem';
 import { AreaColorPicker } from './AreaColorPicker';
 import type { ProjectAreaSection } from './project-area-collapse';
+import { isImeComposing } from '../../../lib/ime';
 
 type AreaRowProps = {
     area: Area;
@@ -65,6 +66,7 @@ export function SortableAreaRow({
                     commitAreaName(e.target.value);
                 }}
                 onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
                     if (e.key === 'Enter') {
                         e.preventDefault();
                         commitAreaName(e.currentTarget.value);
@@ -129,8 +131,7 @@ export function SortableProjectRow({
     );
 }
 
-// Sequential-project rows read as "one live task, the rest queued": the
-// available next action gets the tinted card, later tasks render muted.
+
 function getSequenceCuePresentation(
     sequenceCue: ProjectSequenceTaskCue | undefined,
     availableSequenceLabel: string,
@@ -151,11 +152,7 @@ function getSequenceCuePresentation(
     return { taskContainerClassName: 'flex-1 min-w-0' };
 }
 
-// A row's actions strip is `shrink-0`, so in a container as narrow as a section
-// column it takes its full width out of the row and the title — the only
-// `min-w-0` sibling — collapses to nothing and wraps a character per line.
-// `actionsOverlay` lifts the strip out of the flow instead, which is how Board
-// columns have always fit a task row into ~40ch.
+
 const NARROW_TASK_ITEM_PROPS = {
     actionsOverlay: true,
     showStatusSelect: false,
@@ -233,8 +230,7 @@ export function SortableProjectTaskRow({
     );
 }
 
-// Task row for non-default sort modes: draggable to the sidebar (move to another
-// project or area) but not sortable, so the list itself is never a drop target.
+
 export function DraggableProjectTaskRow({
     task,
     project,

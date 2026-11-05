@@ -161,9 +161,8 @@ export function createMindwtrAutomationStorage(options: AutomationStorageOptions
 
     const saveNormalizedData = async (data: AppData) => {
         const normalized = normalizeAppData(data);
-        // Core owns the SQLite write: it carries every column of the schema and the
-        // `rev <= excluded.rev` guard, so a snapshot loaded a moment ago can never
-        // overwrite a row the desktop app advanced in the meantime.
+
+
         await sqlite.saveData(normalized);
         const committed = normalizeAppData(await sqlite.getData());
         writeJsonData(paths.dataPath, committed);

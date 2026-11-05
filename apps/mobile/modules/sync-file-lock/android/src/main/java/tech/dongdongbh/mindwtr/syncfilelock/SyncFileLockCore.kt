@@ -21,7 +21,7 @@ private const val MAX_LOCK_DOCUMENT_CREATE_ATTEMPTS = 3
 private const val LOG_TAG = "SyncFileLock"
 private const val LOCK_IDENTITY_LOST_CODE = "SYNC_FILE_LOCK_IDENTITY_LOST"
 
-/** A File Sync lock refusal; the message starts with its code (SYNC_FILE_LOCK_BUSY, _UNAVAILABLE, _IDENTITY_LOST). */
+
 class SyncFileLockUnavailableException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 internal data class HeldSyncFileLock(
@@ -206,11 +206,7 @@ internal data class CreatedLockDocument(
   val displayName: String?,
 )
 
-/**
- * Resolve the one exact lock document without ever deleting a document that
- * this invocation did not create. Some providers permit duplicate display
- * names, so a first-use race can leave both peers visible after create.
- */
+
 internal fun resolveExactLockDocument(
   listExactDocuments: () -> List<String>,
   createDocument: () -> CreatedLockDocument,
@@ -234,9 +230,7 @@ internal fun resolveExactLockDocument(
       return created.uri
     }
 
-    // The returned URI is the only document whose ownership is proven. If a
-    // peer appeared, or the provider rewrote the display name, remove only our
-    // creation before deciding whether the peer is now uniquely lockable.
+
     val deleted = try {
       deleteOwnedDocument(created.uri)
     } catch (error: Throwable) {
@@ -280,10 +274,6 @@ internal fun drainHeldSyncFileLocks(heldLocks: MutableMap<String, HeldSyncFileLo
 }
 
 
-/**
- * File Sync's folder lock for one app process, with no Expo type: React Native's SyncFileLock module and the native Android app
- * both run it. [acquire] answers an opaque token; [revalidate] and [release] take it; [destroy] releases every lease held.
- */
 class SyncFileLockCore(private val contextProvider: () -> Context) {
   private val context: Context get() = contextProvider()
 
@@ -363,7 +353,7 @@ class SyncFileLockCore(private val contextProvider: () -> Context) {
       val lockResult = StableRootLockNative.tryLock(descriptor.fd)
       when {
         lockResult == 0 -> Unit
-        // Linux aliases EWOULDBLOCK to EAGAIN; Android exposes only EAGAIN.
+
         lockResult == OsConstants.EAGAIN -> {
           throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_BUSY: another File Sync operation is active")
         }
@@ -379,10 +369,8 @@ class SyncFileLockCore(private val contextProvider: () -> Context) {
   }
 
   private fun acquirePrivateSafAuthority(directoryUri: Uri): StableSyncAuthority {
-    // SAF providers commonly cannot open directory documents. Current-version
-    // processes instead converge on an app-private inode keyed by the canonical
-    // tree/document authority; the shared provider lock remains secondary for
-    // older clients. Cross-device safety remains CAS/final-inventory based.
+
+
     val digest = MessageDigest.getInstance("SHA-256")
       .digest(directoryUri.toString().toByteArray(StandardCharsets.UTF_8))
       .joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -508,8 +496,8 @@ class SyncFileLockCore(private val contextProvider: () -> Context) {
               null,
             )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
           } catch (_: Throwable) {
-            // Returning an unverified name makes the resolver remove only this
-            // returned URI before retrying or failing closed.
+
+
             null
           }
           CreatedLockDocument(created.toString(), actualName)
@@ -589,7 +577,7 @@ class SyncFileLockCore(private val contextProvider: () -> Context) {
     return held
   }
 
-  /** Takes the folder's lease for [uriValue] (a SAF tree URI or a file path) and answers its token. */
+
   fun acquire(uriValue: String): String {
     val held = if (Uri.parse(uriValue).scheme == "content") {
       acquireSafLock(uriValue)
@@ -642,7 +630,7 @@ class SyncFileLockCore(private val contextProvider: () -> Context) {
     held.revalidate()
   }
 
-  /** Releases every lease; later acquisitions are refused. Answers the release errors (logged by the caller). */
+
   fun destroy(): List<Throwable> = synchronized(stateGuard) {
     destroyed = true
     drainHeldSyncFileLocks(heldLocks)

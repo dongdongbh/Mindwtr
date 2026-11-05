@@ -1,23 +1,6 @@
-/**
- * React Native's Settings › Sync screen, replayed against the frozen parity
- * fixture (packages/core/src/sync-settings-parity.fixtures.json) that core's sync
- * settings model and the native host contract are tested against.
- *
- * To recapture, keep every file under apps/ at HEAD except this one, then run
- *   MINDWTR_CAPTURE_SYNC_SETTINGS=1 TZ=UTC bunx vitest run components/settings/sync-settings-screen.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD,
- * so the provenance always names the React Native code that ran. After a
- * recorded React Native fix, MINDWTR_DUMP_SYNC_SETTINGS=<file> writes this run's
- * observations, to replace only the ones the fix changes (see provenance.recaptured).
- *
- * Each scenario renders the real screen (sync mode) with the real core store,
- * drives it through its own controls, and records what a user sees, what the
- * store is asked to write, what the screen stores on the device (AsyncStorage
- * and the secure store), its toasts, and every call it makes to the sync IO.
- * The device is stubbed: the sync run, the WebDAV probe, the self-hosted check,
- * the folder picker, Dropbox sign-in and the encryption service answer from the
- * scenario's queues. A secure text field is recorded as the dots a user sees.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -67,18 +50,13 @@ const harness = vi.hoisted(() => ({
 
 const translate = (key: string) => harness.strings[harness.language]?.[key] || harness.strings.en?.[key] || key;
 
-/** The next answer for `name`, or `fallback` when the scenario queued none. */
+
 const next = (name: string, fallback: unknown) => {
   const queue = harness.queues[name];
   return queue && queue.length > 0 ? queue.shift() : fallback;
 };
 
-/**
- * Answers a call from its queue: a string answers itself, `{ error }` rejects with
- * that message, `{ value }` answers the value, and 'hold' waits for a `release`
- * action, then answers the next entry. An entry's `encryption` is the encryption
- * state the call leaves stored (a probe that found an encrypted remote).
- */
+
 const answer = async (name: string, fallback: unknown): Promise<any> => {
   const entry = next(name, fallback);
   if (entry === 'hold') {
@@ -214,7 +192,7 @@ vi.mock('@/lib/analytics-heartbeat', () => ({
 vi.mock('@/lib/sandbox-workspace', () => ({ reloadIntoMobileSandbox: async () => undefined }));
 vi.mock('./sandbox-entry-confirmation', () => ({ requestMobileSandboxEntry: () => undefined }));
 vi.mock('./apple-reminders-import-section', () => ({ AppleRemindersImportSection: () => null }));
-// The Data screen's actions; the Sync screen draws only the recovery snapshots card from them.
+
 vi.mock('./use-sync-settings-backup-actions', () => {
   const noop = async () => undefined;
   return {
@@ -318,7 +296,7 @@ vi.mock('@/lib/sync-encryption-service', () => {
       this.name = 'SyncEncryptionCleanupDeferredError';
     }
   }
-  /** Runs a transition: 'ok' moves the state to `after`, `{ cleanup }` commits it and defers the cleanup. */
+
   const transition = async (name: string, after: string, onProgress?: (progress: unknown) => void) => {
     const entry = next(name, 'ok');
     if (entry === 'hold') {
@@ -365,8 +343,6 @@ vi.mock('@/lib/sync-encryption-service', () => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Scenario data.
 
 const at = (day: string, time = '12:00:00') => `2026-${day}T${time}.000Z`;
 const TASKS: Task[] = [
@@ -453,13 +429,8 @@ type Device = {
   encryption?: { state?: EncryptionState; unavailable?: boolean; pending?: boolean; incomplete?: string | null };
   queues?: Record<string, unknown[]>;
 };
-/**
- * Actions: ['press', label] a control; ['switch', index] flips a switch;
- * ['type', index, text] types into a text field; ['release'] answers the call
- * a 'hold' queue entry is holding; ['device', patch] changes the stubbed device
- * (another device's change). A label is the control's text (or its accessibility
- * label, or the first of its texts); 'k:<key>' is that key's translation.
- */
+
+
 type Scenario = { name: string; settings: string; data?: 'none' | 'titles'; device: Device; actions: [string, ...unknown[]][] };
 
 const ok = { value: { success: true } };
@@ -542,7 +513,7 @@ const scenarios: Scenario[] = [
     device: {
       ...WEBDAV_STORED,
       storage: { [KEYS.webdavUrl]: 'https://dav.example.com/mindwtr', [KEYS.webdavUser]: 'alice' },
-      // The probe reads an encrypted document and stores the no-key state.
+
       queues: { sync: [{ value: { success: false, error: 'Sync paused: passphrase required', activationProof: 'remote-encrypted-no-key' }, encryption: 'remote-encrypted-no-key' }] },
     },
     actions: [['press', 'k:settings.syncBackendWebdav'], ['press', 'k:settings.syncBackendWebdav']],
@@ -768,8 +739,6 @@ const scenarios: Scenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -835,8 +804,6 @@ function setDevice(device: Device) {
   writeLog.length = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -860,7 +827,7 @@ const flatten = (style: unknown): Record<string, unknown> => (Array.isArray(styl
 
 const colorOf = (node: ReactTestInstance) => String(flatten(node.props.style).color ?? '').toLowerCase();
 
-/** The visible text, one entry per outermost Text, in screen order; a danger or warning line is marked. */
+
 function textsIn(root: ReactTestInstance): unknown[] {
   const out: unknown[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -882,13 +849,13 @@ const controlLabel = (node: ReactTestInstance) => node.props.accessibilityLabel 
 function readScreen(root: ReactTestInstance) {
   return {
     texts: textsIn(root),
-    // [label, first text drawn in the tint, disabled, spinner shown]
+
     controls: hosts(root, 'TouchableOpacity').map((node) => {
       const first = hosts(node, 'Text')[0];
       return [controlLabel(node), first ? colorOf(first) === TINT : false, node.props.disabled === true, hosts(node, 'ActivityIndicator').length > 0];
     }),
     switches: hosts(root, 'Switch').map((node) => [node.props.value, node.props.disabled === true]),
-    // [label, placeholder, the text a user sees (dots for a secure field), secure]
+
     inputs: hosts(root, 'TextInput').map((node) => {
       const secure = node.props.secureTextEntry === true;
       const shown = String(node.props.value ?? '');
@@ -917,8 +884,6 @@ type Seen = Parameters<typeof drain>[0];
 
 const observe = (root: ReactTestInstance, seen: Seen) => normalize({ ...readScreen(root), ...drain(seen) });
 
-// ---------------------------------------------------------------------------
-// Driving the screen.
 
 async function run(what: string, fn: (() => unknown) | undefined) {
   if (!fn) throw new Error(`Nothing to do for ${what}`);
@@ -939,7 +904,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       const label = labelText(target as string);
       const control = hosts(root, 'TouchableOpacity').find((node) => matches(node, label));
       if (!control) throw new Error(`No control ${label}`);
-      // A disabled control cannot be pressed.
+
       if (control.props.disabled) return undefined;
       return run(`press ${label}`, control.props.onPress);
     }
@@ -980,7 +945,7 @@ async function runScenario(scenario: Scenario) {
     await settle();
     observations.push(observe(renderer.root, seen));
   }
-  // Let anything still held finish before the screen goes away.
+
   while (harness.held.length > 0) await act(async () => { harness.held.shift()?.(); });
   await settle();
   await act(async () => { renderer.unmount(); });
@@ -1016,7 +981,7 @@ describe('React Native Settings › Sync parity fixture', () => {
     process.env.TZ = 'UTC';
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(NOW));
-    // The device locale: toLocaleString without a locale formats as en-US.
+
     vi.spyOn(Date.prototype, 'toLocaleString').mockImplementation(function toLocaleString(this: Date, locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
       return originalToLocaleString.call(this, locales ?? 'en-US', options);
     });
@@ -1034,7 +999,7 @@ describe('React Native Settings › Sync parity fixture', () => {
   it('replays every scenario exactly as frozen', async () => {
     const captured: Record<string, unknown> = {};
     for (const scenario of scenarios) captured[scenario.name] = await runScenario(scenario);
-    // Writes this run's observations to a file, to replace only the ones a fix changes.
+
     if (process.env.MINDWTR_DUMP_SYNC_SETTINGS) writeFileSync(process.env.MINDWTR_DUMP_SYNC_SETTINGS, JSON.stringify(captured));
     if (CAPTURE) {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify({ provenance: captureProvenance(), ...inputs(), observations: captured }, null, 1)}\n`);

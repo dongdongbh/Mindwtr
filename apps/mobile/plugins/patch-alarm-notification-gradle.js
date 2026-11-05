@@ -14,16 +14,16 @@ const patchFile = (filePath, transform) => {
 const applyGradleCompatPatchToSource = (original) => {
   let next = original;
 
-  // Removed in modern Gradle.
+
   next = next.replace(/^\s*apply plugin: 'maven'\s*$/gm, '');
 
-  // AGP 8 expects modern compileSdk DSL.
+
   next = next.replace(
     "compileSdkVersion safeExtGet('compileSdkVersion', DEFAULT_COMPILE_SDK_VERSION)",
     "compileSdk safeExtGet('compileSdkVersion', DEFAULT_COMPILE_SDK_VERSION)"
   );
 
-  // Legacy publishing tasks rely on deprecated configurations (e.g. compile).
+
   const marker = 'afterEvaluate { project ->';
   const markerIndex = next.indexOf(marker);
   if (markerIndex >= 0) {
@@ -170,11 +170,8 @@ const applyAlarmTimingPatchToSource = (original) => {
     next.includes(firedNotificationIdMarker)
     && !next.includes('int snoozedAlarmRowId = getAlarmDB().insert(alarm);')
   ) {
-    // Snooze persists the rescheduled reminder as its own alarm row instead of
-    // mutating the original. The JS reschedule cycle only tracks alarms it
-    // scheduled (keyed by their original row id); the past-due task would
-    // otherwise be reaped on the next cycle, cancelling the snoozed alarm
-    // before it fires. An independent row is invisible to that reconciliation.
+
+
     next = next.replace(
       `        getAlarmDB().update(alarm);
 
@@ -350,10 +347,7 @@ ${indentation}}`
   return next;
 };
 
-// Old one-shot rows remain active in the library DB after delivery. A reboot
-// then schedules their past fire time again. Keep the row for notification
-// actions, but consume it after posting; discard older pending rows before
-// either boot scheduling or a delayed broadcast can post them.
+
 const applyAlarmStaleOnceUtilPatchToSource = (original) => {
   let next = original;
   const marker = '    void setAlarm(AlarmModel alarm) {';
@@ -461,10 +455,8 @@ const applyAlarmReminderBehaviorPatchToSource = (original) => {
 };
 
 const applyAlarmLockScreenPrivacyPatchToSource = (original) => {
-  // Android's lock screen "hide sensitive content" setting only redacts
-  // notifications marked VISIBILITY_PRIVATE; the library ships reminders as
-  // VISIBILITY_PUBLIC, which keeps task titles visible on the locked phone
-  // no matter what the user chose (#823).
+
+
   return original.replace(
     '.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)',
     '.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)'
@@ -473,10 +465,8 @@ const applyAlarmLockScreenPrivacyPatchToSource = (original) => {
 
 const POMODORO_WHEN_ANCHOR = '                    .setDeleteIntent(createOnDismissedIntent(mContext, alarm.getId()));\n';
 const applyAlarmPomodoroWhenPatchToSource = (original) => {
-  // dd's choice (2026-10-22): a Pomodoro alert carries its phase's end time
-  // (the JS side puts it in the alarm data as endsAtMs), so one shown late,
-  // after a reboot re-armed it or by the immediate path, reads as "2 h ago"
-  // in the tray instead of looking like a phase that just ended.
+
+
   if (original.includes('String pomodoroEndsAtMs = bundle.getString("endsAtMs");')) return original;
   if (!original.includes(POMODORO_WHEN_ANCHOR)) return original;
   return original.replace(POMODORO_WHEN_ANCHOR, `${POMODORO_WHEN_ANCHOR}
@@ -727,14 +717,7 @@ ${pendingPayloadCacheBlock}
   );
 };
 
-// The action intents only ever carried the DB row id (`alarm.getId()`),
-// which `removeFiredNotification` resolves back to the notification's real
-// post id (`alarm.getAlarmId()`) via a DB lookup — `sendNotification` posts
-// every reminder under `notificationID = alarm.getAlarmId()`. A later
-// reschedule cycle that deletes the row before a stale notification is
-// tapped makes that lookup fail silently, so the tray notification never
-// clears (#1028). Carry the post id as its own extra so the receiver can
-// clear the notification directly, without needing the row to still exist.
+
 const applyAlarmDeadRowUtilPatchToSource = (original) => {
   let next = original;
 
@@ -768,10 +751,7 @@ const applyAlarmDeadRowUtilPatchToSource = (original) => {
     );
   }
 
-  // Each insertion above is an independent .replace() — none is atomic with
-  // the others, so one silently drifting (e.g. a comment landing on the
-  // completeIntent anchor) must not pass as "the patch applied" just because
-  // the other three still matched. Assert every marker this transform owns.
+
   const requiredMarkers = [
     'completeIntent.putExtra("NotificationId", notificationID);',
     'snoozeIntent.putExtra("NotificationId", notificationID);',
@@ -787,17 +767,7 @@ const applyAlarmDeadRowUtilPatchToSource = (original) => {
   return next;
 };
 
-// Hardens the three notification action cases against a dead alarm row (the
-// row was deleted by a reschedule cycle after the notification was posted
-// but before it was tapped — #1028). Every case now: logs a receipt (action,
-// id, whether the row was found), and on a dead row still clears the tray
-// notification and stops the sound instead of silently doing nothing.
-// COMPLETE still delivers its payload (built from intent extras, which
-// already carry the full bundle via putExtras) and still emits/caches
-// OnNotificationOpened. DISMISS still emits OnNotificationDismissed with the
-// intent's id. SNOOZE degrades to a plain dismiss on a dead row — the JS
-// reschedule cycle owns alarm state and will re-add anything still due, so
-// the receiver must not try to reconstruct or reschedule from nothing.
+
 const applyAlarmActionDeadRowPatchToSource = (original) => {
   if (original.includes('Log.d(TAG, "ACTION_SNOOZE id="')) return original;
 
@@ -848,14 +818,7 @@ const applyAlarmActionDeadRowPatchToSource = (original) => {
 `
   );
 
-  // applyAlarmCompleteReceiverPatchToSource inserts this case through two
-  // different paths depending on whether it already existed: a fresh
-  // full-case insert (what a pristine install goes through — e.g. CI, which
-  // never has a pre-patched node_modules) leaves TWO blank lines before
-  // removeFiredNotification; an incremental cache-block-only insert into an
-  // already-present case leaves ONE (what a dev machine's already-patched
-  // node_modules can carry from an earlier prebuild). Try the pipeline-fresh
-  // (canonical) shape first, then the other — see #1028 correction.
+
   const completeCaseOld = `                    case Constants.NOTIFICATION_ACTION_COMPLETE:
                         id = intent.getExtras().getInt("AlarmId");
 
@@ -1007,9 +970,7 @@ const applyAlarmActionDeadRowPatchToSource = (original) => {
 `
   );
 
-  // Each case above is rewritten by its own .replace() — one anchor drifting
-  // (e.g. upstream touching just the SNOOZE case) must not pass silently
-  // while the other two cases still applied. Assert every case's receipt.
+
   const requiredMarkers = [
     'Log.d(TAG, "ACTION_SNOOZE id="',
     'Log.d(TAG, "ACTION_COMPLETE id="',
@@ -1024,15 +985,7 @@ const applyAlarmActionDeadRowPatchToSource = (original) => {
   return next;
 };
 
-// A task's reminders (start, due and every due-time repeat) used to stack: each
-// alarm posts under its own id. Core now gives every reminder of one task the
-// same `tag`, and a tagged reminder posts under (tag, one fixed id), so the next
-// one replaces the notification already shown and alerts again. The alarm's own
-// id (`alarm.getAlarmId()`) stays its post id for everything else: the action
-// intents, getNotificationId and JS's later clearNotification. A small ledger
-// maps that id to the slot it posted into, and the slot to the alarm shown in
-// it, so cancelling an alarm's notification clears the slot only while that
-// alarm is the one shown there — never a newer reminder that replaced it.
+
 const REMINDER_SLOT_HELPERS = `    // Mindwtr reminder notification slots
     private static final int REMINDER_SLOT_NOTIFICATION_ID = 1;
     private static final String REMINDER_SLOT_PREFS = "mindwtr_reminder_notification_slots";
@@ -1137,9 +1090,8 @@ const applyAlarmReminderSlotPatchToSource = (original) => {
 `,
     ],
   ];
-  // Each anchor is replaced on its own: one drifting upstream (or behind an
-  // earlier patch) must fail the prebuild, not leave a cancel path that misses
-  // the slot and a reminder that can never be cleared from the tray.
+
+
   for (const [anchor, replacement] of replacements) {
     if (!next.includes(anchor)) {
       throw new Error(`alarm-reminder-slot: expected anchor not found: ${anchor.trim().split('\n')[0]}`);
@@ -1152,15 +1104,7 @@ const applyAlarmReminderSlotPatchToSource = (original) => {
   return next;
 };
 
-// Two notification buttons failed once a reminder cycle had reaped the fired
-// alarm's row (it does on the next app start, or 5 s after a reminder while the
-// app is in front): Snooze degraded to a plain dismiss, so it never reminded
-// again. And Done only reached JS, which cancels the task's other alarms on its
-// next cycle; JS timers stop while the app is in the background, so a task's
-// next due-time repeat still fired for the task just completed. Now the snooze
-// intent carries the alarm itself, and Done cancels the task's other armed
-// reminders natively: the same per-task tag, or, for an alarm armed before
-// tags, a task reminder with the same taskId (never the Pomodoro alert).
+
 const REMINDER_ACTION_HELPERS = `    // Mindwtr task reminder actions
     // Whether an alarm (its tag, and its data as "key==>value;;" pairs) is a reminder of the
     // task Done was tapped for.
@@ -1224,10 +1168,10 @@ const applyAlarmReminderActionsUtilPatchToSource = (original) => {
   ]);
 };
 
-const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
+const applyAlarmReminderActionsReceiverReceiptPatchToSource = (original) => {
   if (original.includes('String completionReceipt = NotificationOpenPayloadStore.persistCompletion')) return original;
   if (!original.includes('case Constants.NOTIFICATION_ACTION_COMPLETE')) return original;
-  // Upgrade a dependency already patched by PR1346 without requiring a fresh install.
+
   if (original.includes('cancelTaskReminders(reminderTag')) {
     return replaceRequiredAnchors(original, 'alarm-reminder-actions-receiver', [[
       '                            NotificationOpenPayloadStore.cache(pendingPayload);',
@@ -1276,6 +1220,34 @@ const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
                                 // Dead row: degrade snooze to dismiss instead of`,
     ],
   ]) + patched;
+};
+
+
+const applyAlarmReminderActionsReceiverPatchToSource = (original) => {
+  const next = applyAlarmReminderActionsReceiverReceiptPatchToSource(original);
+  if (next.includes('tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService')) return next;
+  if (!next.includes('case Constants.NOTIFICATION_ACTION_COMPLETE')) return next;
+  const start = next.indexOf('case Constants.NOTIFICATION_ACTION_COMPLETE:');
+  const end = next.indexOf('case Constants.NOTIFICATION_ACTION_DISMISS:', start);
+  const completion = next.slice(start, end);
+  const deliveryStart = completion.indexOf('                            if (ANModule.getReactAppContext() != null) {');
+  const deliveryEnd = completion.indexOf('                        } catch (Exception e)', deliveryStart);
+  if (deliveryStart < 0 || deliveryEnd < 0 || !completion.slice(deliveryStart, deliveryEnd).includes('context.startActivity(launchIntent);')) {
+    throw new Error('alarm-reminder-actions-receiver: expected Done delivery anchor not found');
+  }
+  const delivery = `                            try {
+                                Intent completionService = new Intent().setClassName(context.getPackageName(), "tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService");
+                                context.startService(completionService);
+                                com.facebook.react.HeadlessJsTaskService.acquireWakeLockNow(context);
+                            } catch (RuntimeException error) {
+                                // The receipt stays durable for the next app/scheduled wake.
+                                Log.w(TAG, "Done background processing start refused: " + error.getClass().getSimpleName());
+                            }
+                            if (ANModule.getReactAppContext() != null) {
+                                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationOpened", BundleJSONConverter.convertToJSON(payload).toString());
+                            }
+`;
+  return next.slice(0, start) + completion.slice(0, deliveryStart) + delivery + completion.slice(deliveryEnd) + next.slice(end);
 };
 
 const getAndroidSourceCandidates = (projectRoot, fileName) => [
@@ -1430,12 +1402,7 @@ API_AVAILABLE(ios(10.0)) {
     'if([details[@"has_button"] isEqualToNumber: [NSNumber numberWithInt: 1]] || [details[@"has_complete_action"] isEqualToNumber: [NSNumber numberWithInt: 1]]){\n                content.categoryIdentifier = @"CUSTOM_ACTIONS";\n            }'
   );
 
-  // ?: @NO on both injected values: these land inside an Objective-C @{...}
-  // dictionary literal, where a nil value raises NSInvalidArgumentException
-  // and rejects the whole scheduleAlarm call. The task-reminder path always
-  // passes has_complete_action, so the crash only hit callers that omit it —
-  // the pomodoro completion alert never scheduled on iOS because of exactly
-  // this (#888).
+
   next = next.replace(
     /@"has_button": \[contentInfo\.userInfo objectForKey:@"has_button"\],\n                @"schedule_type":/g,
     '@"has_button": [contentInfo.userInfo objectForKey:@"has_button"],\n                @"has_complete_action": ([contentInfo.userInfo objectForKey:@"has_complete_action"] ?: @NO),\n                @"schedule_type":'
@@ -1464,8 +1431,7 @@ API_AVAILABLE(ios(10.0)) {
     );
   }
 
-  // Dismiss silences this alert. The stock foreground option opens Mindwtr
-  // even though the action does not need UI; also upgrade already-patched sources.
+
   next = next.replace(
     /(actionWithIdentifier:@"DISMISS_ACTION"\s+title:@"[^"]*"\s+options:)UNNotificationActionOptionForeground/g,
     '$1UNNotificationActionOptionNone'
@@ -1474,14 +1440,7 @@ API_AVAILABLE(ios(10.0)) {
   return next;
 };
 
-// The stock iOS module derives every notification identifier from the epoch
-// SECOND it was created in (`timeIntervalSince1970` cast to long), and
-// UNUserNotificationCenter replaces a pending request when a new one reuses
-// its identifier. Any two alarms scheduled within the same wall-clock second
-// therefore silently cancel each other — a batch reschedule eats its own
-// task reminders, and a pomodoro completion alert scheduled in the same
-// second as a task alarm never fires (#888). Replace the id with
-// milliseconds plus a rotating counter so identifiers are unique.
+
 const applyAlarmIosUniqueIdentifierPatchToSource = (original) => {
   let next = original;
 
@@ -1504,26 +1463,13 @@ const applyAlarmIosUniqueIdentifierPatchToSource = (original) => {
   return next;
 };
 
-// Upstream declares the cancel methods as `(NSInteger *)id` — a POINTER to an
-// integer, not an integer. Under the New Architecture the interop layer
-// (ObjCTurboModule::setInvocationArg) picks the marshalling branch by ObjC
-// argument encoding: `@encode(NSInteger)` ("q") writes the converted integer,
-// anything else falls through to writing the raw `double` bytes. `NSInteger *`
-// encodes as "^q", so the method receives the IEEE-754 bit pattern of the id
-// (~4.8e18 for a real ~1.75e15 identifier) and
-// removePendingNotificationRequestsWithIdentifiers gets a string that matches
-// nothing. Cancelling a pending iOS reminder was therefore a silent no-op, so
-// every reschedule left the previous request pending and one occurrence fired
-// as a stack of duplicates (#1020). Sibling `removeFiredNotification` already
-// takes `(NSInteger)` by value, which is why clearing *delivered*
-// notifications kept working and hid the bug.
+
 const applyAlarmIosDeletePendingPatchToSource = (original) => original.replace(
   /RCT_EXPORT_METHOD\((deleteAlarm|deleteRepeatingAlarm): \(NSInteger \*\)id\)/g,
   'RCT_EXPORT_METHOD($1: (NSInteger)id)'
 );
 
-// Keep pending Pomodoro requests identifiable after the next phase replaces
-// the JS current-alarm record. Export only the discriminator, not task data.
+
 const applyAlarmIosPendingKindPatchToSource = (original) => {
   if (original.includes('// Mindwtr pending notification kind')) return original;
   return original.replace(
@@ -1540,12 +1486,7 @@ const applyAlarmIosPendingKindPatchToSource = (original) => {
   );
 };
 
-// iOS cannot replace a delivered notification from a pending one: two pending
-// requests may not share an identifier (#888), and no app code runs when a
-// local notification is delivered in the background. So a task's reminders get
-// the task's `tag` as their thread (Notification Center stacks them as one),
-// snooze and the repeat re-arm keep it, and JS collapses each reminder thread
-// to its newest delivered notification on every reminder cycle.
+
 const applyAlarmIosReminderThreadPatchToSource = (original) => {
   if (original.includes('// Mindwtr reminder threads')) return original;
   const removeAllMarker = 'RCT_EXPORT_METHOD(removeAllFiredNotifications){';
@@ -1597,34 +1538,7 @@ const logPatchedCandidate = (label, candidate) => {
   console.log(`[${label}] patched ${candidate}`);
 };
 
-// --- Declarative patch registry -------------------------------------------
-//
-// Each entry fully describes one patch: which file(s) it targets, whether a
-// failure to apply is tolerable, whether to keep trying candidates after one
-// succeeds, and how to recognise "already applied" (for idempotent re-runs
-// and to tell a genuine no-op apart from an already-satisfied patch).
-//
-// `required: true` (the default — see `isRequired` below) means `applyPatches`
-// throws, naming the patch id, if the patch neither changed a candidate file
-// nor found its `appliedMarker` in one. That turns a silent no-op (upstream
-// shifted a character, the patch stopped applying, reminders quietly break)
-// into a loud prebuild failure instead. Only `alarm-duplicate-toast` is
-// declared non-required: losing it just brings back a native "already set"
-// Toast on a duplicate-schedule attempt — a cosmetic regression, not a broken
-// or dropped reminder.
-//
-// `firstMatchOnly` reproduces the exact break/no-break behaviour the old
-// per-candidate loops had (see the handoff for this task): candidates are
-// [locally-installed, hoisted-to-root] copies of the same upstream file, and
-// today's code is inconsistent about whether it stops at the first one that
-// applies or keeps going. This registry *declares* what was already
-// happening rather than changing it.
-// Android 12+ (API 31) lets the user revoke "Alarms & reminders". AlarmUtil's
-// setExactOrAllowWhileIdle then degrades to an inexact alarm, which lands
-// reminders and the pomodoro alert up to ~30 s late (#528). Nothing upstream
-// exposes that state to JS, so the settings screens cannot offer the system
-// permission screen. Fully qualified names keep the patch out of the import
-// block.
+
 const applyAlarmExactPermissionModulePatchToSource = (original) => {
   if (original.includes('public void canScheduleExactAlarms(')) return original;
   const marker = `    @ReactMethod
@@ -1726,13 +1640,7 @@ const applyAlarmBootRecoveryModulePatchToSource = (original) => {
 ${marker}`);
 };
 
-// A reminder cycle forgets an expired alarm and deletes its row, but its
-// notification stays in the tray. When the task is later completed, JS still has
-// to remove that notification. removeFiredNotification cannot: it looks the post
-// id up through the deleted row. So JS reads the post id while the row exists
-// (an inactive, fired row too, which getScheduledAlarms does not list) and later
-// clears the notification by that id. AlarmUtil.clearNotification comes from
-// alarm-dead-row-util.
+
 const applyAlarmDeliveredNotificationModulePatchToSource = (original) => {
   if (original.includes('public void clearNotification(int notificationId)')) return original;
   const marker = `    @ReactMethod
@@ -1775,7 +1683,7 @@ const PATCHES = [
     getCandidates: androidGradleCandidates,
     transform: applyGradleCompatPatchToSource,
     required: true,
-    // Original loop broke after the first successful write.
+
     firstMatchOnly: true,
     appliedMarker: "implementation project(':notification-open-intents')",
   },
@@ -1785,7 +1693,7 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmUtil.java'),
     transform: applyAlarmPendingIntentPatchToSource,
     required: true,
-    // Original AlarmUtil.java loop never broke — all 8 patches applied to every candidate.
+
     firstMatchOnly: false,
     appliedMarker: 'getUpdateCurrentImmutableFlags()',
   },
@@ -1803,9 +1711,8 @@ const PATCHES = [
     platform: 'android',
     getCandidates: androidJavaCandidates('AlarmUtil.java'),
     transform: applyAlarmDuplicateToastPatchToSource,
-    // Cosmetic: losing this patch brings back a native "already set" Toast on
-    // a duplicate schedule attempt. No reminder is delayed, dropped, or
-    // mis-scheduled, so this is the one patch that may silently no-op.
+
+
     required: false,
     firstMatchOnly: false,
     appliedMarker: 'Duplicate alarms are reported to JS via promise rejection',
@@ -1817,19 +1724,15 @@ const PATCHES = [
     transform: applyAlarmTimingPatchToSource,
     required: true,
     firstMatchOnly: false,
-    // Same marker the exact-repeat patch below already depends on internally.
+
     appliedMarker: 'private void setExactOrAllowWhileIdle(',
   },
   {
     id: 'alarm-exact-repeat-util',
     platform: 'android',
     getCandidates: androidJavaCandidates('AlarmUtil.java'),
-    // Same transform as `alarm-exact-repeat-receiver` below — it no-ops on
-    // whichever file's anchors it doesn't recognise. Declared as two
-    // registry entries (not one) because the two files can independently
-    // fail: AlarmUtil.java could patch fine while AlarmReceiver.java's rearm
-    // hook silently doesn't, which would otherwise mask a real regression
-    // (a repeating reminder that fires once and never re-arms).
+
+
     transform: applyAlarmExactRepeatPatchToSource,
     required: true,
     firstMatchOnly: false,
@@ -1886,8 +1789,8 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmUtil.java'),
     transform: applyAlarmDeadRowUtilPatchToSource,
     required: true,
-    // Must run after alarm-complete-action-util: it extends that block's
-    // action intents with a NotificationId extra.
+
+
     firstMatchOnly: false,
     appliedMarker: 'void clearNotification(int notificationId)',
   },
@@ -1897,9 +1800,8 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmUtil.java'),
     transform: applyAlarmReminderSlotPatchToSource,
     required: true,
-    // Must run after alarm-timing (snooze's firedNotificationId cancel) and
-    // alarm-dead-row-util (clearNotification): it routes those cancels through
-    // the slot ledger too.
+
+
     firstMatchOnly: false,
     appliedMarker: '// Mindwtr reminder notification slots',
   },
@@ -1909,8 +1811,8 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmUtil.java'),
     transform: applyAlarmReminderActionsUtilPatchToSource,
     required: true,
-    // Must run after alarm-dead-row-util: it extends the action intents that
-    // patch gives a NotificationId extra.
+
+
     firstMatchOnly: false,
     appliedMarker: '// Mindwtr task reminder actions',
   },
@@ -1920,7 +1822,7 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AudioInterface.java'),
     transform: applyAlarmAudioInterfacePatchToSource,
     required: true,
-    // Original AudioInterface.java loop never broke either (single patch, both candidates tried).
+
     firstMatchOnly: false,
     appliedMarker: 'Settings.System.DEFAULT_NOTIFICATION_URI',
   },
@@ -1930,7 +1832,7 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmDismissReceiver.java'),
     transform: applyAlarmDismissReceiverPatchToSource,
     required: true,
-    // Original loop broke after the first successful write.
+
     firstMatchOnly: true,
     appliedMarker: 'if (ANModule.getReactAppContext() != null) {\n                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationDismissed"',
   },
@@ -1940,7 +1842,7 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmReceiver.java'),
     transform: applyAlarmReceiverPatchToSource,
     required: true,
-    // Original AlarmReceiver.java loop never broke — all 3 patches applied to every candidate.
+
     firstMatchOnly: false,
     appliedMarker: 'if (ANModule.getReactAppContext() != null) {\n                                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationDismissed"',
   },
@@ -1977,9 +1879,8 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmReceiver.java'),
     transform: applyAlarmActionDeadRowPatchToSource,
     required: true,
-    // Must run after alarm-receiver-dismiss-guard and
-    // alarm-complete-action-receiver: it rewrites the case blocks those
-    // produce.
+
+
     firstMatchOnly: false,
     appliedMarker: 'Log.d(TAG, "ACTION_SNOOZE id="',
   },
@@ -1989,9 +1890,9 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('AlarmReceiver.java'),
     transform: applyAlarmReminderActionsReceiverPatchToSource,
     required: true,
-    // Must run after alarm-dead-row-actions: it extends the hardened cases.
+
     firstMatchOnly: false,
-    appliedMarker: 'cancelTaskReminders(reminderTag',
+    appliedMarker: 'tech.dongdongbh.mindwtr.androidwidget.CaptureSyncHeadlessService',
   },
   {
     id: 'alarm-complete-action-constants',
@@ -1999,7 +1900,7 @@ const PATCHES = [
     getCandidates: androidJavaCandidates('Constants.java'),
     transform: applyAlarmCompleteConstantsPatchToSource,
     required: true,
-    // Original loop broke after the first successful write.
+
     firstMatchOnly: true,
     appliedMarker: 'NOTIFICATION_ACTION_COMPLETE',
   },
@@ -2045,7 +1946,7 @@ const PATCHES = [
     getCandidates: iosSourceCandidates,
     transform: applyAlarmIosCompleteActionPatchToSource,
     required: true,
-    // Original loop broke after the first successful write.
+
     firstMatchOnly: true,
     appliedMarker: 'RCT_EXPORT_METHOD(consumePendingNotificationOpenPayload',
   },
@@ -2064,7 +1965,7 @@ const PATCHES = [
     getCandidates: iosSourceCandidates,
     transform: applyAlarmIosUniqueIdentifierPatchToSource,
     required: true,
-    // Original loop broke after the first successful write.
+
     firstMatchOnly: true,
     appliedMarker: 'mindwtrAlarmIdCounter',
   },
@@ -2098,18 +1999,12 @@ const PATCHES = [
   },
 
 
-
 ];
 
-// A patch is required unless it explicitly opts out.
+
 const isRequired = (patch) => patch.required !== false;
 
-// Applies every patch in `patches` (default: the full registry) to whichever
-// candidate file(s) each one resolves against `projectRoot`. Preserves the
-// exact write/break semantics the old per-candidate loops had — the only
-// addition is `satisfied` bookkeeping used to decide whether a `required`
-// patch that never wrote anything was already applied (marker present, fine)
-// or has silently stopped matching upstream (marker absent — throw).
+
 const applyPatches = (projectRoot, patches = PATCHES) => {
   for (const patch of patches) {
     let satisfied = false;
@@ -2207,11 +2102,7 @@ const applyAlarmManifestEntries = (manifest) => {
   ensurePermission(manifest, 'android.permission.RECEIVE_BOOT_COMPLETED');
   ensurePermission(manifest, 'android.permission.SCHEDULE_EXACT_ALARM');
 
-  // Every alarm PendingIntent is created by this app, so AlarmManager and our
-  // own notification actions reach these receivers on the creator's identity
-  // and do not need them exported. Exported they would let any installed app
-  // cancel reminders or fire stored alarms early — AlarmIds are small and
-  // sequential.
+
   ensureReceiver(
     application,
     'com.emekalites.react.alarm.notification.AlarmReceiver',
@@ -2231,8 +2122,7 @@ const applyAlarmManifestEntries = (manifest) => {
     }
   );
 
-  // Stays exported: BOOT_COMPLETED is a protected broadcast only the system
-  // can send, and reminders have to be rescheduled after a reboot.
+
   ensureReceiver(
     application,
     'com.emekalites.react.alarm.notification.AlarmBootReceiver',

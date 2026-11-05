@@ -2,17 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { withDangerousMod } = require('@expo/config-plugins');
 
-// expo-document-picker 14 keeps no read grant for a document it does not copy.
-//
-// With copyToCacheDirectory: false (a local .ics calendar, the sync file) the app keeps the
-// provider's content:// URI. The picker's ACTION_OPEN_DOCUMENT grants read access only until the
-// app's process ends unless the app takes the persistable grant, so after a reboot the saved URI
-// stops reading. The fix takes that grant when the pick is not copied. A provider that offers no
-// persistable grant throws SecurityException; the pick then works as before.
-//
-// Delivered as a prebuild patch, as patch-expo-background-task.js is, because FOSS builds install
-// with `npm ci`, which ignores bun patchedDependencies. expo-* packages ship a prebuilt AAR, so
-// `expo.autolinking.android.buildFromSource` in apps/mobile/package.json lists expo-document-picker.
 
 const MODULE_RELATIVE_PATH = path.join(
   'expo-document-picker',

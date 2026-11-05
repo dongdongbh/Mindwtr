@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Mindwtr",
-  "version": "1.3.7",
+  "version": "1.3.8",
   "identifier": "tech.dongdongbh.mindwtr",
   "build": {
     "frontendDist": "../dist",
@@ -80,7 +80,7 @@
       "requireLiteralLeadingDot": false
     },
     "shell": {
-      "open": "^(mailto:[^\\s]+|tel:[^\\s]+|mid:[^\\s]+|https?://[^\\s]+|[uU][pP][nN][oO][tT][eE]://[^\\s]+|obsidian://[^\\s]+|ms-windows-store://[^\\s]+)$"
+      "open": "^(mailto:[^\\s]+|tel:[^\\s]+|mid:[^\\s]+|https?://[^\\s]+|[uU][pP][nN][oO][tT][eE]://[^\\s]+|[jJ][oO][pP][lL][iI][nN]://[^\\s]+|obsidian://[^\\s]+|ms-windows-store://[^\\s]+)$"
     }
   }
 }

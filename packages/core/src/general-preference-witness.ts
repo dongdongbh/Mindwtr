@@ -12,7 +12,7 @@ const iso = (value: unknown): value is string => typeof value === 'string' && va
 export const legacyGeneralPreferenceNumber = (value: unknown): value is number =>
     typeof value === 'number' && Number.isSafeInteger(value) && Math.abs(value) <= 1_000_000;
 
-/** The raw value and its local or sync-group revision used by a General journal. */
+
 export const generalPreferenceWitness = (settings: AppSettings, type: GeneralPreferenceType): GeneralPreferenceWitness | null => {
     if (type === 'appLockRelockDelay') {
         const security = settings.security;

@@ -40,8 +40,8 @@ export const selectTaskItemStoreState = ({ task, propProject, isEditing, hasQuic
             deleteTask: state.deleteTask,
             moveTask: state.moveTask,
             projects: isEditing ? state.projects : EMPTY_PROJECTS,
-            // The star check needs the real sections too: section order decides which task
-            // heads each section's sequence (within sections and Per section, #1429).
+
+
             sections: isEditing || includeQuickActionFocusData ? state.sections : EMPTY_SECTIONS,
             areas: includePickers ? state.areas : EMPTY_AREAS,
             project,

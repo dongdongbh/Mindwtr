@@ -10,8 +10,7 @@ import { useTheme, type ThemeContextType } from '../contexts/theme-context';
 
 type ResolvableTheme = Pick<ThemeContextType, 'isDark' | 'themeStyle' | 'themePreset' | 'themeMode'>;
 
-// Generic color shape — source of truth lives here; use-theme-colors.ts re-exports it,
-// so the module dependency is one-directional (use-theme-colors → use-theme-tokens) with no cycle.
+
 export interface ThemeColors {
   bg: string; cardBg: string; taskItemBg: string; text: string; secondaryText: string;
   icon: string; border: string; tint: string; onTint: string; tabIconDefault: string;
@@ -43,7 +42,7 @@ function m3RolesFor(theme: ResolvableTheme): M3ColorRoles {
   return scheme === 'dark' ? M3Colors.dark : M3Colors.light;
 }
 
-// Generic ThemeColors mapping (preserves today's non-Material output; Materializes when M3).
+
 function resolveGenericColors(theme: ResolvableTheme): ThemeColors {
   if (theme.themePreset !== 'default') {
     return THEME_PRESETS[theme.themePreset];
@@ -86,14 +85,11 @@ const FALLBACK: ThemeTokens = {
   isDark: false,
 };
 
-// These four fields are the whole input: everything below is derived from them
-// plus module constants, so the same key always yields the same tokens.
+
 const themeCacheKey = (theme: ResolvableTheme) =>
   `${theme.isDark}|${theme.themeStyle}|${theme.themePreset}|${theme.themeMode}`;
 
-// One entry is enough — the theme is app-wide, so every caller in a render pass
-// asks for the same one. Callers hand `tokens.colors` straight to memoized rows
-// as `tc`, and a fresh object per call would defeat that comparison (#766).
+
 let cached: { key: string; tokens: ThemeTokens } | null = null;
 
 export function resolveThemeTokens(theme?: ResolvableTheme | null): ThemeTokens {

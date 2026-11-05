@@ -441,7 +441,7 @@ final class NativePomodoroAlarmEffectsHostTests: XCTestCase {
         let fireAt = try XCTUnwrap(observed.first?.identity?.fireAtMs)
         await core.close()
         try mutateSession { session, timer in timer["isRunning"] = false; session.removeValue(forKey: "phaseEndsAt") }
-        // Advance the clock inside the actual private planner after its first future cancellation plan.
+
         let patch = "\n(() => { const prepare = MindwtrHost.iosPomodoroAlarmPrepare; let calls = 0; MindwtrHost.iosPomodoroAlarmPrepare = function(...args) { if (++calls >= 3) Date.now = () => \(fireAt + 2000); return prepare.apply(this, args); }; })();\n"
         try (String(contentsOf: bundle, encoding: .utf8) + patch).write(to: bundle, atomically: true, encoding: .utf8)
         let stopped = host(); _ = try await stopped.start()
@@ -455,14 +455,14 @@ final class NativePomodoroAlarmEffectsHostTests: XCTestCase {
         let core = host(); _ = try await core.start(); _ = try await core.reconcilePomodoroAlarms()
         await core.close()
         try mutateSession { session, timer in timer["isRunning"] = false; session.removeValue(forKey: "phaseEndsAt") }
-        // The fourth plan is the final pending withdrawal; a slow JS check must not separate it from SDK entry.
+
         let patch = "\n(() => { const prepare = MindwtrHost.iosPomodoroAlarmPrepare, current = MindwtrHost.iosPomodoroAlarmCurrent; let plans = 0, finalPlan = false; MindwtrHost.iosPomodoroAlarmPrepare = function(...args) { if (++plans === 4) finalPlan = true; return prepare.apply(this, args); }; MindwtrHost.iosPomodoroAlarmCurrent = function(...args) { if (finalPlan) throw new Error('Synthetic post-plan await refused'); return current.apply(this, args); }; })();\n"
         try (String(contentsOf: bundle, encoding: .utf8) + patch).write(to: bundle, atomically: true, encoding: .utf8)
         let stopped = host(); _ = try await stopped.start()
         await refusal { try await stopped.reconcilePomodoroAlarms() }
         checkEqual(await port.mutations.map(\.operation), ["add", "remove-pending"])
         checkTrue(await port.inventory().pending.isEmpty)
-        // The post-effect refusal prevents an acknowledgement even though the accepted callback drained.
+
         checkEqual(try markers().count, 1)
     }
 

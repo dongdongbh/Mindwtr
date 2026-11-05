@@ -12,8 +12,7 @@ type UseProjectAttachmentActionsParams = {
     readOnly?: boolean;
 };
 
-// Attachment writes are built on the project row as it is when the write is admitted, so an attachment a sync save
-// brought meanwhile is kept. An archived project is never written.
+
 export const appendProjectAttachments = (projectId: string, added: Attachment[]) => updateProjectFromLatest(projectId, (latest) => (
     latest.status === 'archived' ? null : { attachments: [...(latest.attachments || []), ...added] }
 ));
@@ -55,8 +54,8 @@ export function useProjectAttachmentActions({
             return;
         }
         try {
-            // The id lets the native side find a file's managed copy, or a
-            // folder link's device-local bookmark on the App Store build.
+
+
             await openAttachmentTarget(attachment.uri, attachment.id);
         } catch (error) {
             if (isUpNoteHref(attachment.uri)) {
@@ -87,7 +86,7 @@ export function useProjectAttachmentActions({
         setIsProjectAttachmentBusy(true);
         setAttachmentError(null);
         try {
-            const { open } = await import('@tauri-apps/plugin-dialog');
+            const { open } = await import('../../../lib/native-dialog');
             const selected = await open({
                 multiple: false,
                 directory: false,

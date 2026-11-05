@@ -1,12 +1,5 @@
-// Desktop's adapter of core's sync encryption service (#1056): WebDAV and Dropbox transitions
-// through `createDesktopSyncEncryptionService`, the attachment byte seams, and the failure
-// classification. The Rust-driven seams — File Sync and native WebDAV — are covered by
-// apps/desktop/src-tauri/src/sync.rs's tests; the service's own rules by core's and mobile's.
-//
-// The Tauri layer is faked with an in-memory keyring + state sidecar so the transitions run
-// end to end against the real core service and real MWENC1 containers. Argon2id is replaced
-// by a cheap deterministic stand-in: what is under test here is the wiring, and the KDF itself
-// is already pinned by the shared TS/Rust interop fixtures.
+
+
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -48,7 +41,7 @@ const base64ToBytes = (value: string): Uint8Array =>
 
 vi.mock('./tauri-invoke', () => {
     const derive = async (passphrase: string, saltHex: string) => {
-        // Stand-in KDF: deterministic in (passphrase, salt), 32 bytes, no Argon2 cost.
+
         const seed = new TextEncoder().encode(`${passphrase}:${saltHex}`);
         const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', seed));
         return bytesToBase64(digest);
@@ -62,7 +55,7 @@ vi.mock('./tauri-invoke', () => {
                     ? { state: 'off', hasKey: false, incompleteTransition: native.state.incompleteTransition }
                     : { state: native.state.state, kdfParams: native.state.kdfParams, hasKey: Boolean(native.state.key), incompleteTransition: native.state.incompleteTransition };
             case 'get_sync_encryption_key_material':
-                // `remote-plaintext` still holds a key on purpose (see SYNC_ENCRYPTION_KEYED_STATES).
+
                 return native.state.state !== 'off'
                     && native.state.state !== 'remote-encrypted-no-key'
                     && native.state.key
@@ -71,8 +64,8 @@ vi.mock('./tauri-invoke', () => {
             case 'set_sync_encryption_key_material':
                 if (native.failSetAfterKeyWriteOnce) {
                     native.failSetAfterKeyWriteOnce = false;
-                    // Rust stores the keyring entry before replacing its state
-                    // sidecar. Model a sidecar failure at that exact boundary.
+
+
                     native.state = { ...native.state, key: args?.key as string };
                     throw new Error('local encryption state unavailable');
                 }
@@ -147,7 +140,7 @@ const {
 
 const BASE_URL = 'https://dav.example/sync';
 
-/** The service as SyncService binds it, with the backend and the transport under test. */
+
 const serviceFor = (backend: 'off' | 'webdav' | 'dropbox', fetcher: typeof fetch) =>
     createDesktopSyncEncryptionService({
         location: {
@@ -173,7 +166,7 @@ const peerFence = () => jsonBytes({
     expiresAt: Date.parse(SERVER_DATE) + 60_000,
 });
 
-/** A blob store both fakes serve from, keyed exactly the way the remote names it. */
+
 const createBlobStore = (seed: Record<string, Uint8Array>) => {
     const files = new Map<string, Uint8Array>(Object.entries(seed));
     const versions = new Map<string, number>(Object.keys(seed).map((name) => [name, 1]));
@@ -365,7 +358,7 @@ beforeEach(() => {
     clearSyncEncryptionMaterialCache();
 });
 
-/** Wraps a fake transport, seeing the path of every Dropbox request. */
+
 const watchDropboxPaths = (
     transport: typeof fetch,
     onRequest: (endpoint: string, path: string) => void,
@@ -419,7 +412,7 @@ describe('Dropbox sync encryption transitions', () => {
         const error = await dropboxService(fetcher).enableSyncEncryption('correct horse battery')
             .then(() => null, (failure: unknown) => failure);
 
-        // The class the settings UI checks: one class, shared with core, so instanceof holds.
+
         expect(error).toBeInstanceOf(SyncEncryptionCleanupDeferredError);
         expect(native.state.state).toBe('enabled');
         expect(isEncrypted(store.files.get('data.json.enc'))).toBe(true);
@@ -428,7 +421,7 @@ describe('Dropbox sync encryption transitions', () => {
     it('restores the prior material and journal when the lease is lost after final persistence', async () => {
         const store = seedRemote();
         const transport = createDropboxFetch(store);
-        // A peer takes the fence over once this device has committed `enabled`.
+
         const fetcher = watchDropboxPaths(transport, (endpoint, path) => {
             if (endpoint === 'download' && path === FENCE_PATH && native.state.state === 'enabled') {
                 store.files.set(SYNC_REMOTE_MUTATION_FENCE_NAME, peerFence());
@@ -451,7 +444,7 @@ describe('Dropbox sync encryption transitions', () => {
         expect(isEncrypted(store.files.get('data.json.enc.bak'))).toBe(true);
         expect(store.files.has('data.json')).toBe(false);
         expect(store.files.has('data.json.bak')).toBe(false);
-        // Attachments keep their exact name — cloudKey is identity-keyed and immutable.
+
         expect(isEncrypted(store.files.get('attachments/a1.png'))).toBe(true);
         expect(await getSyncEncryptionStatus()).toEqual({
             state: 'enabled',
@@ -497,7 +490,7 @@ describe('Dropbox sync encryption transitions', () => {
         const service = dropboxService(createDropboxFetch(store));
         await service.enableSyncEncryption('correct horse battery');
 
-        // A second device: knows the remote is encrypted, has no key.
+
         native.state = { state: 'remote-encrypted-no-key' };
         clearSyncEncryptionMaterialCache();
         const before = new Map(store.files);
@@ -558,7 +551,7 @@ describe('Dropbox sync encryption transitions', () => {
         native.state = { ...native.state, state: 'remote-encrypted-no-key', key: undefined };
         const previousState = structuredClone(native.state);
         clearSyncEncryptionMaterialCache();
-        // A peer replaces the fence just before the renewal that precedes the final state write.
+
         let fenceWrites = 0;
         const fetcher = watchDropboxPaths(transport, (endpoint, path) => {
             if (endpoint === 'upload' && path === FENCE_PATH && ++fenceWrites === 2) {
@@ -633,8 +626,7 @@ describe('WebDAV sync encryption transitions', () => {
         );
     });
 
-    // A server without strong ETags serves the fence without one too: the fence's read-back has no version, so Enable
-    // failed as "fence lost" after writing the fence. Core's port runs the strong-ETag proof first (ab7ae85c2).
+
     it.each([
         ['missing', 'strong'],
         ['weak', 'strong'],
@@ -658,7 +650,7 @@ describe('WebDAV sync encryption transitions', () => {
             expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes(init?.method ?? 'GET'))).toBe(true);
             expect(store.files).toEqual(snapshot);
             expect(native.state).toEqual({ state: 'off' });
-            // The refusal is in the shareable log: the transition's end line names it.
+
             expect(appLog.logWarn).toHaveBeenCalledWith(
                 '[sync-encryption] transition',
                 expect.objectContaining({
@@ -718,13 +710,13 @@ describe('attachment bytes', () => {
         const sealed = await sealAttachmentBytes(plain);
         expect(isEncrypted(sealed)).toBe(true);
         expect(await openAttachmentBytes(sealed)).toEqual(plain);
-        // A peer on an older app version can still upload plaintext mid-transition.
+
         expect(await openAttachmentBytes(plain)).toBe(plain);
     });
 
     it('S3: fail closed on upload when local state says enabled but the keyring has no key', async () => {
-        // Simulates Android/OS-keyring invalidation: local state still says 'enabled'
-        // (the sidecar file), but the keyring read comes back empty.
+
+
         native.state = {
             state: 'enabled',
             kdfParams: { mKib: 19456, t: 2, p: 1 },
@@ -765,7 +757,7 @@ describe('attachment bytes', () => {
 describe('unsupported base document', () => {
     it('classifies a truncated container as terminal instead of throwing a raw JSON parse error', async () => {
         const store = seedRemote();
-        // Magic present, header short: neither plaintext to parse nor ciphertext to open.
+
         const truncated = new Uint8Array(20);
         truncated.set(new TextEncoder().encode('MWENC1'), 0);
         store.files.set('data.json.enc', truncated);
@@ -790,8 +782,7 @@ describe('passphrase-change resume', () => {
         await expect(service.changeSyncEncryptionPassphrase('old-pw', 'new-pw'))
             .rejects.toThrow('local encryption state unavailable');
 
-        // Simulate a new webview: the native key and state must still describe
-        // the original material, with the retry journal retained.
+
         clearSyncEncryptionMaterialCache();
         expect(native.state).toEqual({
             ...previous,
@@ -814,9 +805,7 @@ describe('passphrase-change resume', () => {
         await service.enableSyncEncryption('old-pw');
         const enabledKey = base64ToBytes(native.state.key!);
 
-        // The interrupted attempt: attachments run first, then the documents, so a crash after
-        // the base document means EVERY artifact is already sealed under that attempt's own
-        // (now abandoned) salt, and the cached key opens none of them.
+
         const abandoned = await deriveSyncKeyMaterial(
             'new-pw',
             new Uint8Array(16).fill(0xab),
@@ -832,9 +821,8 @@ describe('passphrase-change resume', () => {
         await service.changeSyncEncryptionPassphrase('old-pw', 'new-pw');
 
         const finalKey = base64ToBytes(native.state.key!);
-        // Every artifact — the attachment included — must be readable under the key the run
-        // settled on. An enumeration that silently returned no attachments would leave
-        // attachments/a1.png stranded under a salt nothing ever derives again.
+
+
         for (const name of sealedNames) {
             await expect(
                 decryptRemoteArtifactOrThrow(store.files.get(name)!, finalKey, desktopSyncCryptoPrimitives),
@@ -857,7 +845,7 @@ describe('failure classification', () => {
         await markRemoteSyncEncryptionPlaintext();
 
         expect(native.state.state).toBe('remote-plaintext');
-        // The key must survive: running the disable transition is the only way out and needs it.
+
         expect(native.state.key).toBeTruthy();
     });
 
@@ -872,7 +860,7 @@ describe('failure classification', () => {
             .toBe('remote-plaintext');
         expect(classifySyncEncryptionFailure(new Error('SYNC_ENCRYPTION_TERMINAL: nope')))
             .toBe('needs-passphrase');
-        // The two failure classes it must never be confused with.
+
         expect(classifySyncEncryptionFailure('WebDAV GET failed (403): forbidden')).toBeNull();
         expect(classifySyncEncryptionFailure('Invalid sync payload shape: expected an object')).toBeNull();
     });
@@ -880,7 +868,7 @@ describe('failure classification', () => {
 
 
 describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
-    /** Only the `[sync-encryption]` lines, message + extras, as one string to search. */
+
     type LoggedCall = [string, { extra: Record<string, string> }];
     const capturedTrail = (): string => JSON.stringify(
         ([...appLog.logInfo.mock.calls, ...appLog.logWarn.mock.calls] as unknown as LoggedCall[])
@@ -895,9 +883,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
         appLog.logWarn.mockClear();
     });
 
-    // fresh-join-attachment-posture packet -10: the attachment byte seams (sealAttachmentBytes,
-    // openAttachmentBytes) now emit their own `remote-read` line, same shape as the document
-    // reads, immediately before anything that can throw SyncEncryptionTerminalError.
+
     describe('attachment byte seams', () => {
         it('precedes a failing attachment decrypt (no key) with a remote-read line', async () => {
             native.state = {
@@ -960,9 +946,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
             expect(trail).toContain('"kind":"plaintext"');
         });
 
-        // Added item B: the byte-seam lines used to say `artifact: absent` for every
-        // attachment, so a trail full of seals named nothing. The backends now pass the
-        // cloudKey, which `syncEncryptionArtifactLabel` reduces to its leaf.
+
         it('names the attachment on both the seal and the open line', async () => {
             native.state = {
                 state: 'enabled',
@@ -994,7 +978,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
         expect(material).not.toBeNull();
 
         const trail = capturedTrail();
-        // The trail exists at all — otherwise "no secret found" is vacuously true.
+
         expect(trail).toContain('[sync-encryption] transition');
         expect(trail).toContain('"kind":"enable"');
         expect(trail).toContain('"kind":"unlock"');
@@ -1004,14 +988,14 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
         expect(trail).not.toContain(passphrase);
         expect(trail).not.toContain(hex(material!.key));
         expect(trail).not.toContain(bytesToBase64(material!.key));
-        // The salt is public but is never logged in full by any transition line.
+
         expect(trail).not.toContain(hex(material!.salt));
     });
 
     it('clamps a transition failure message instead of logging it whole', async () => {
         const longMessage = `/home/someone/very/long/sync/folder/path/${'x'.repeat(400)}`;
 
-        // File Sync transitions run in Rust under core's diagnostics wrapper and this logger.
+
         await expect(runSyncEncryptionTransitionWithDiagnostics(logSyncEncryptionEvent, 'disable', 'file', undefined, async () => {
             throw new Error(longMessage);
         })).rejects.toThrow();
@@ -1028,9 +1012,8 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
     });
 
     it('logs one progress line per completed transition phase, with planned and done filled', async () => {
-        // Core reports progress BEFORE it increments its counter, so a `completed >= total`
-        // guard never fires. Driven through the real transition, not a synthetic progress
-        // sequence: the bug this covers was a wrong belief about core's callback order.
+
+
         const store = seedRemote();
         const progress = vi.fn();
         await dropboxService(createDropboxFetch(store)).enableSyncEncryption(
@@ -1047,7 +1030,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
             expect(Number(extra.done)).toBeGreaterThan(0);
             expect(Number(extra.done)).toBeLessThanOrEqual(Number(extra.planned));
         }
-        // The last phase's line is emitted after the run returned, so everything planned is done.
+
         const finalPhase = phases[phases.length - 1]!;
         expect(finalPhase.done).toBe(finalPhase.planned);
     });

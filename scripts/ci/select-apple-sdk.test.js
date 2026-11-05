@@ -76,8 +76,7 @@ test('iOS 27 matrix validation includes an unsigned archive and states its limit
   expect(steps.find((step) => step.name === 'Record archive validation limits').run).toContain('remain separate validation gates');
 });
 
-// Execute the release preflight, including its toolchain guard: do not merely
-// assert that the YAML contains an Xcode version string.
+
 test('release preflight accepts validated Xcode 27.x and rejects other SDKs', () => {
   const release = parse(readFileSync('.github/workflows/release-ios-appstore.yml', 'utf8'));
   const job = release.jobs['ios-appstore'];

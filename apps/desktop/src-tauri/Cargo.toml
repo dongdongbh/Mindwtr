@@ -1,6 +1,6 @@
 [package]
 name = "mindwtr"
-version = "1.3.7"
+version = "1.3.8"
 description = "A complete Getting Things Done (GTD) productivity system - Mind Like Water"
 authors = ["DongDong"]
 license = "AGPL-3.0-only"
@@ -20,12 +20,11 @@ cc = "1.2"
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-# Pinned to the same 0.8.x line tauri-build/system-deps already resolve
-# transitively (see Cargo.lock) so promoting it to a direct dependency adds no
-# new package to the lockfile, only a new edge to an already-resolved one.
+
+
 toml = "0.8"
-# Already resolved transitively (see Cargo.lock); used to turn Windows'
-# canonical `\\?\C:\...` paths back into the `C:\...` form the app builds.
+
+
 dunce = "1"
 log = "0.4"
 fs2 = "0.4"
@@ -34,33 +33,27 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-global-shortcut = "2"
-# Mindwtr uses header/token authentication, not cookie sessions. Keeping the
-# plugin's default `cookies` feature would create `.cookies` under the OS app
-# cache on every launch, which breaks Windows portable mode (#855).
-# unsafe-headers: the JS fetch wrapper otherwise drops Accept-Encoding as a forbidden
-# header, so the WebDAV identity-encoding request (#1056 weak-ETag fix) never left the
-# app and proxied servers kept answering with gzip + weak ETags on desktop.
+
+
 tauri-plugin-http = { version = "2", default-features = false, features = ["rustls-tls", "http2", "charset", "macos-system-configuration", "unsafe-headers"] }
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
+
+
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
 dirs = "5"
 rusqlite = { version = "0.31", features = ["bundled"] }
 keyring = "2"
-# rustls on macOS/Linux, native-tls (schannel) on Windows — see the split in
-# sync.rs blocking_http_client. macOS native-tls is Secure Transport, which
-# never gained TLS 1.3, so TLS-1.3-only servers reject the handshake with "bad
-# protocol version" (#973). On Windows, rustls-native-roots is NOT enough:
-# corporate TLS interception (Zscaler, #663) needs schannel's chain building
-# (intermediate/enterprise cert stores, AIA fetching), so rustls fails with
-# "invalid peer certificate: UnknownIssuer" where curl/Chrome work.
+
+
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 imap = "2.4"
-# IMAP capture still uses native-tls; keep OpenSSL vendored so Linux packages do
-# not depend on the build machine's libssl.
+
+
 native-tls = { version = "0.2", features = ["vendored"] }
-mail-parser = "0.11"
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 hound = "3.5"
 whisper-rs = "0.16.0"
 cpal = "0.15"
@@ -73,20 +66,15 @@ sha2 = "0.10"
 notify = "8.2"
 tempfile = "3.23"
 tauri-plugin-autostart = "2.5.1"
-# Remembers the main window's geometry across restarts (#936). Restoring a
-# window correctly is mostly edge cases — a monitor that is no longer attached,
-# a saved position now off-screen, per-monitor DPI — so this uses the official
-# plugin rather than a hand-rolled save/restore that would get those wrong.
+
+
 tar = "0.4"
-# Sync encryption format v1 (#1056 phase 1): Argon2id KDF + AES-256-GCM AEAD, matching the
-# TypeScript implementation in packages/core/src/sync-crypto.ts byte-for-byte (see sync_crypto.rs).
+
+
 aes-gcm = "0.10.3"
 argon2 = "0.5.3"
-# The format requires NFC-normalizing the passphrase before hashing so the same passphrase typed
-# on a platform whose IME emits decomposed accents (macOS) derives the same key as one typed where
-# it emits precomposed accents (Windows/Linux) -- and matches packages/core's `.normalize('NFC')`.
-# There is no std facility for this; unicode-normalization is the standard, dependency-free
-# implementation used throughout the Rust ecosystem (idna, url, ...).
+
+
 unicode-normalization = "0.1.25"
 fontdb = "0.24.0"
 
@@ -94,20 +82,20 @@ fontdb = "0.24.0"
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["ApplicationModel", "Data_Xml_Dom", "Foundation", "Foundation_Collections", "Services_Store", "UI_Notifications"] }
+windows = { version = "0.61", features = ["ApplicationModel", "Data_Xml_Dom", "Foundation", "Foundation_Collections", "Security_Credentials_UI", "Services_Store", "UI_Notifications", "Win32_Foundation", "Win32_System_WinRT"] }
+windows-future = "0.2"
 windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_System_IO", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
-# Windows sync goes through schannel (see blocking_http_client); this only adds
-# the native-tls backend to Windows builds, other targets stay rustls-only.
+
+
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = "0.11"
-# Portal-backed encrypted storage for Flatpak; 0.5 supports our Rust toolchain.
+
 oo7 = { version = "0.5", default-features = false, features = ["tokio", "native_crypto"] }
 libloading = "0.8"
-tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
 webkit2gtk = "2"
-# Already resolved through Tauri; used for timestamped X11 Quick Add activation.
+
 gtk = "0.18"
 gdkx11 = "0.18"
 zbus = { version = "=5.12.0", default-features = false, features = ["tokio"] }

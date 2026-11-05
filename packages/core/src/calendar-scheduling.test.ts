@@ -5,6 +5,8 @@ import {
     buildCalendarEventTaskDraft,
     buildCalendarPushEventFields,
     hasCalendarPushTaskMarker,
+    calendarPushTaskMarkerLine,
+    notesCarryCalendarPushTaskMarker,
     buildCalendarQuickAddTaskDraft,
     createCustomTimeEstimate,
     findFreeSlotForDay,
@@ -67,9 +69,7 @@ const area = (overrides: Partial<Area>): Area => ({
     ...overrides,
 });
 
-// Deliberately diverges from the real English strings ('min'/'hr' instead of 'm'/'h') so a
-// test asserting against this stub can only pass if formatTimeEstimateLabel/
-// formatCalendarDurationLabel actually call the provided `t`, not the built-in English default.
+
 const STUB_UNIT_TRANSLATIONS: Record<string, string> = {
     'units.minutesShort': '{{minutes}}min',
     'units.hoursShort': '{{hours}}hr',
@@ -88,8 +88,7 @@ describe('calendar scheduling helpers', () => {
         expect(timeEstimateToMinutes('2hr', { enabled: false })).toBe(30);
     });
 
-    // The preset editor is gone from both apps, so a list saved by an older
-    // version must not narrow the choices any more.
+
     it('offers every time estimate, plus a custom one the task already has', () => {
         expect(TIME_ESTIMATE_OPTIONS).toEqual(['5min', '10min', '15min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+']);
         expect(resolveTimeEstimateOptions()).toEqual(TIME_ESTIMATE_OPTIONS);
@@ -113,14 +112,12 @@ describe('calendar scheduling helpers', () => {
     });
 
     it('formats and parses custom time estimates', () => {
-        // Default (no options) reproduces this module's own English strings — every call
-        // site that predates the {t, locale} seam must see zero behavior change.
+
+
         expect(formatTimeEstimateLabel(createCustomTimeEstimate(150))).toBe('2h 30m');
         expect(formatTimeEstimateLabel(createCustomTimeEstimate(150), { t: stubT })).toBe('2hr30min');
-        // custom:90 regression (#Part-C): every call site that re-rolled this function
-        // instead of using the core one collapsed an unrecognized custom estimate straight
-        // to a '4h+'-shaped fallback. The one true implementation must keep splitting
-        // hours/minutes for any custom minutes value, not just the ones with a preset.
+
+
         expect(formatTimeEstimateLabel(createCustomTimeEstimate(90))).toBe('1h 30m');
         expect(formatTimeEstimateLabel(createCustomTimeEstimate(90), { t: stubT })).toBe('1hr30min');
         expect(parseTimeEstimateInput('150')).toBe(150);
@@ -159,7 +156,7 @@ describe('calendar scheduling helpers', () => {
         expect(formatCalendarDurationLabel(120)).toBe('2h');
         expect(formatCalendarDurationLabel(30, { t: stubT })).toBe('30min');
         expect(formatCalendarDurationLabel(120, { t: stubT })).toBe('2hr');
-        // locale controls only the fractional-hours decimal separator, independent of `t`.
+
         expect(formatCalendarDurationLabel(90, { locale: 'de-DE' })).toBe('1,5h');
     });
 
@@ -189,10 +186,7 @@ describe('calendar scheduling helpers', () => {
         }));
     });
 
-    // The composer is a capture surface like quick add, so the same typed text has
-    // to mean the same thing in both. Without the parse bag both multi-word tokens
-    // split at the space: `@John Smith` captured `@John` and left "Smith" in the
-    // title, and `%"Jim Smith"` never matched the known person.
+
     it('resolves multi-word contexts and people exactly like quick add', () => {
         const input = 'Sync notes @John Smith %"Jim Smith"';
         const now = new Date('2026-04-25T10:00:00.000Z');
@@ -215,7 +209,7 @@ describe('calendar scheduling helpers', () => {
         expect(draft.title).toBe(quickAdd.title);
         expect(draft.props.contexts).toEqual(quickAdd.props.contexts);
         expect(draft.props.assignedTo).toBe(quickAdd.props.assignedTo);
-        // Pin the shared answer, so a parity that degrades on both sides still fails.
+
         expect(draft.props.contexts).toEqual(['@John Smith']);
         expect(draft.props.assignedTo).toBe('Jim Smith');
     });
@@ -501,15 +495,27 @@ describe('buildCalendarPushEventFields (#743)', () => {
         expect(hasCalendarPushTaskMarker(result.notes.replace(/\n/g, '\r\n'))).toBe(true);
     });
 
-    // A tester's pushed events came back through Google and Apple Calendar. A service that adds
-    // one trailing newline must not bring every pushed task back as a duplicate event.
+
+    it('tells whether an event\'s notes carry one task\'s marker line, and names no line for a task ID it cannot encode', () => {
+        const notes = buildCalendarPushEventFields(task({ id: 'task:projected/one', description: 'Mindwtr-Task-ID: someone-else' })).notes;
+        const line = calendarPushTaskMarkerLine('task:projected/one');
+        expect(line).toBe('Mindwtr-Task-ID: task%3Aprojected%2Fone');
+        expect(notesCarryCalendarPushTaskMarker(notes, line!)).toBe(true);
+        expect(notesCarryCalendarPushTaskMarker(`${notes.replace(/\n/g, '\r\n')}  \r\n`, line!)).toBe(true);
+        expect(notesCarryCalendarPushTaskMarker(notes, calendarPushTaskMarkerLine('task-two')!)).toBe(false);
+        expect(notesCarryCalendarPushTaskMarker('Dentist', line!)).toBe(false);
+        expect(notesCarryCalendarPushTaskMarker(null, line!)).toBe(false);
+        expect(calendarPushTaskMarkerLine(' padded ')).toBeNull();
+        expect(calendarPushTaskMarkerLine('')).toBeNull();
+    });
+
     it('still finds the marker when a calendar service pads the notes with trailing whitespace', () => {
         const notes = 'Project: Update Will\nStatus: Next\n\n[Mindwtr Calendar Mirror]\nMindwtr-Task-ID: 3f7e355c-620d-4ee9-a8d6-23cc15f1903a\n[/Mindwtr Calendar Mirror]';
         expect(hasCalendarPushTaskMarker(notes)).toBe(true);
         expect(hasCalendarPushTaskMarker(`${notes}\n`)).toBe(true);
         expect(hasCalendarPushTaskMarker(`${notes} \r\n\r\n`)).toBe(true);
         expect(hasCalendarPushTaskMarker(notes.replace(/\n/g, ' \n'))).toBe(true);
-        // Still exact about what surrounds it: glued to prose is not a marker.
+
         expect(hasCalendarPushTaskMarker(notes.replace('\n\n[Mindwtr', '\n[Mindwtr'))).toBe(false);
     });
 

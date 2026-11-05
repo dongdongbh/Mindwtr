@@ -25,7 +25,7 @@ const same = (a: Identity | null, b: Identity) => a !== null && a.sessionID === 
     && isPomodoroAlarmUnchanged(a, b.fireAtMs, b.phase);
 const encoded = (state: State) => JSON.stringify(state);
 
-/** Native checks duplicate JSON members and retains exact raw bytes for the private CAS. */
+
 function readState(raw: string | null): State {
     if (raw === null) return { version: 1, libraries: [] };
     if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > 1024 * 1024) return invalid();
@@ -58,12 +58,18 @@ function observations(value: unknown): NativePomodoroAlarmObservation[] {
     return value as NativePomodoroAlarmObservation[];
 }
 
-/** No OS effects: native publishes each exact state before advancing to the corresponding effect. */
+
+export type NativePomodoroAlarmLedger = { deliveryLedger: true; lateLimitMs: number };
+
+
 export function planNativePomodoroAlarmEffects(input: {
     intent: Intent; granted: boolean; raw: string | null; scope: string;
-    pending: unknown; delivered: unknown; nowMs: number;
+    pending: unknown; delivered: unknown; nowMs: number; android?: NativePomodoroAlarmLedger;
 }) {
     if (!scopeValid(input.scope) || typeof input.granted !== 'boolean' || !instant(input.nowMs)) return invalid();
+    const ledger = input.android;
+    if (ledger !== undefined && (!record(ledger) || !exact(ledger, ['deliveryLedger', 'lateLimitMs'])
+        || ledger.deliveryLedger !== true || !Number.isSafeInteger(ledger.lateLimitMs) || ledger.lateLimitMs <= 0)) return invalid();
     const state = readState(input.raw), pending = observations(input.pending), delivered = observations(input.delivered);
     const all = new Map<string, NativePomodoroAlarmObservation>();
     for (const observation of [...pending, ...delivered]) {
@@ -94,8 +100,11 @@ export function planNativePomodoroAlarmEffects(input: {
         if (found) {
             next = { sessionID: intent.sessionID, phase: intent.phase, fireAtMs: intent.fireAtMs,
                 immediate: held ? prior!.immediate : intent.immediate, status: 'confirmed' };
-        } else if (attemptedNearDeadline) {
-            // An empty tray can mean dismissal or a crash after add; neither authorizes a second immediate attempt.
+        } else if (ledger && input.nowMs - intent.fireAtMs > ledger.lateLimitMs) {
+
+            outcome = 'retained';
+        } else if (attemptedNearDeadline && !ledger) {
+
             outcome = prior!.status === 'attempted' ? 'uncertain' : 'retained';
         } else {
             schedule = { ...intent, observedAtMs: input.nowMs, immediate: isPomodoroAlarmImmediate(intent.fireAtMs, input.nowMs) };
@@ -121,13 +130,13 @@ export function planNativePomodoroAlarmEffects(input: {
     library.alarm = next;
     const writeAhead = encoded(state);
     if (schedule) library.alarm = { ...next!, status: 'confirmed' };
-    // Retired scopes remain discoverable until native verifies their pending/delivered inventory is absent.
+
     const published = encoded(state), after = encoded({ version: 1, libraries: [library] });
     if (!schedule && outcome === 'retained' && (cancelPending.length || cancelDelivered.length)) outcome = 'cancelled';
     return { writeAhead, published, after, schedule, cancelPending, cancelDelivered, outcome };
 }
 
-/** Refresh only the same owner's unpublished SDK attempt after its durable write-ahead has settled. */
+
 export function prepareNativePomodoroAlarmDispatch(input: {
     intent: Intent; attempt: unknown; raw: string | null; scope: string;
 }) {
@@ -137,7 +146,7 @@ export function prepareNativePomodoroAlarmDispatch(input: {
     const library = state.libraries.find((entry) => entry.scope === input.scope), receipt = library?.alarm;
     if (!library || !receipt || receipt.status !== 'attempted' || !same(receipt, intent)
         || receipt.immediate && !intent.immediate) return invalid();
-    // Once an immediate fence is durable, a clock rollback cannot reopen a future dispatch.
+
     library.alarm = { ...receipt, immediate: intent.immediate };
     const writeAhead = receipt.immediate === intent.immediate && input.raw !== null ? input.raw : encoded(state);
     library.alarm = { ...library.alarm, status: 'confirmed' };

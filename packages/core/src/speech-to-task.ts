@@ -222,8 +222,8 @@ export function buildRemoteGeminiSpeechRequest(config: GeminiSpeechRequestConfig
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const padding = audioBase64.endsWith('==') ? 2 : audioBase64.endsWith('=') ? 1 : 0;
     const bytes = audioBase64.length / 4 * 3 - padding;
-    if (bytes > NATIVE_VOICE_MAX_AUDIO_BYTES || padding === 2 && alphabet.indexOf(audioBase64.at(-3)!) % 16 !== 0
-        || padding === 1 && alphabet.indexOf(audioBase64.at(-2)!) % 4 !== 0) throw new Error('Voice audio request is invalid');
+    if (bytes > NATIVE_VOICE_MAX_AUDIO_BYTES || padding === 2 && alphabet.indexOf(audioBase64.charAt(audioBase64.length - 3)) % 16 !== 0
+        || padding === 1 && alphabet.indexOf(audioBase64.charAt(audioBase64.length - 2)) % 4 !== 0) throw new Error('Voice audio request is invalid');
     const language = normalizeSpeechLanguage(config.language);
     const prompt = config.mode === 'transcribe_only' ? buildSpeechTranscriptionPrompt(language)
         : buildSpeechToTaskPrompt({ fieldStrategy: config.fieldStrategy, language, now: config.now, timeZone: config.timeZone });

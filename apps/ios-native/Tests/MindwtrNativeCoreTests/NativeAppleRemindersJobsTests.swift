@@ -7,7 +7,7 @@ final class NativeAppleRemindersJobsTests: XCTestCase {
     private func result(_ jobs: NativeAppleRemindersJobs) throws -> [String: Any] {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(try XCTUnwrap(jobs.next()).json.utf8)) as? [String: Any])
     }
-    // Start, callback handoff, then drained settlement; this is not a provider drain.
+
     private func barrier(_ jobs: NativeAppleRemindersJobs) { jobs.workerBarrier(); jobs.workerBarrier(); jobs.workerBarrier() }
 
     func testAcceptedRemovalCancellationAndCloseWaitForSDKReturn() async throws {
@@ -179,7 +179,7 @@ final class NativeAppleRemindersJobsTests: XCTestCase {
     func testWholeReplyByteLimitFailsWithoutPartialValue() throws {
         let sdk = AppleRemindersTestSDK()
         let jobs = NativeAppleRemindersJobs(registry: .init(), providerFactory: { .init(status: { .granted }, sdkFactory: { sdk }) })
-        // Each note fits its field cap. The second case exceeds only after JSON escaping.
+
         for note in [String(repeating: "x", count: 1_048_576), String(repeating: "\n", count: 524_288)] {
             _ = try jobs.submit(read); barrier(jobs)
             sdk.deliver((0..<8).map { AppleRemindersTestSDK.row(String($0), notes: note) })

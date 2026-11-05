@@ -1,6 +1,6 @@
 import Foundation
 
-/// A trusted launch choice only. Preparing or admitting the selected filesystem remains the caller's work.
+
 public enum NativeLaunchSelection: Sendable {
     public static let productionNamespace = "tech.dongdongbh.mindwtr"
 
@@ -21,7 +21,7 @@ public enum NativeLaunchSelection: Sendable {
         var errorDescription: String? { "Native iOS launch selection is unavailable." }
     }
 
-    /// Inputs come from the process and system container, never a notification payload or stored preference.
+
     public static func resolve(arguments: [String], bundleIdentifier: String?, supportURL: URL, homeURL: URL,
                                mode: BuildMode) throws -> NativeLaunchSelection {
         switch mode {

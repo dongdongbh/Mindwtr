@@ -48,7 +48,7 @@ const planFor = (request: NativeSomedaySectionCreateRequest) =>
     planSomedaySectionCreate(request.expected.sections as ViewSectionDefinition[] | undefined,
         request.title, () => request.requestId);
 
-/** Pure validation for a cold native journal, before SQLite opens. */
+
 export function validateSomedaySectionCreateWrite(input: unknown): NativeHostResult<NativeSomedaySectionCreateResult> {
     const request = readRequest(input);
     if (!request) return fail('INVALID_INPUT', 'A bounded checked Someday section request is required');
@@ -149,8 +149,8 @@ export function createSomedaySectionCreateMethods(deps: {
                     buildSomedaySectionsSettingsUpdate(settings, plan.sections)));
                 return settleWrite(written, checked.value);
             });
-            // Saved in-memory receipts also need the target check: a later rename
-            // or delete must not make an old exact retry claim the row still exists.
+
+
             return outcome.ok ? target(request) : outcome;
         },
     };

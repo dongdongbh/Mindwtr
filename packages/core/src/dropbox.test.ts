@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     deleteDropboxFileVersioned,
     downloadDropboxAppData,
@@ -17,8 +17,7 @@ import type { AppData } from './types';
 
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
-/** Minimal in-memory fake of the two Dropbox endpoints these functions call, keyed by
- * `path` from the `Dropbox-API-Arg` header — enough to round-trip upload/download. */
+
 function createFakeDropbox() {
     const files = new Map<string, Uint8Array>();
     const fetcher = async (url: string | URL, init?: RequestInit): Promise<Response> => {
@@ -40,7 +39,7 @@ function createFakeDropbox() {
                 text: async () => new TextDecoder().decode(bytes),
             } as Response;
         }
-        // upload
+
         const bodyBytes = init!.body instanceof ArrayBuffer
             ? new Uint8Array(init!.body)
             : new TextEncoder().encode(init!.body as string);
@@ -55,6 +54,10 @@ function createFakeDropbox() {
     };
     return { files, fetcher };
 }
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe('dropbox sync-document encryption', () => {
     it('aborts a bounded Dropbox request and reports a retryable timeout', async () => {
@@ -130,21 +133,19 @@ describe('dropbox sync-document encryption', () => {
         const { files, fetcher } = createFakeDropbox();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(2), FAST_KDF);
         await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher, { material });
-        expect(files.has('/data.json')).toBe(false); // plain path genuinely gone
+        expect(files.has('/data.json')).toBe(false);
 
-        const result = await downloadDropboxAppData('token', fetcher); // no material — this device is 'off'
+        const result = await downloadDropboxAppData('token', fetcher);
         expect(result.data).toBeNull();
         expect(result.encryptedNoKey).toBeDefined();
         expect(result.encryptedNoKey!.salt.length).toBe(16);
     });
 
-    // The other direction of the same one-extra-probe rule: a peer disabled encryption, so
-    // `/data.json.enc` is gone and `/data.json` is back. "Empty remote" here would push this
-    // device's whole store into a fresh generation and fork the two silently.
+
     it('an enabled device reports a peer-disabled (plaintext-restored) remote instead of treating it as empty', async () => {
         const { files, fetcher } = createFakeDropbox();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(4), FAST_KDF);
-        await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher); // the peer's plaintext write
+        await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher);
         expect(files.has('/data.json.enc')).toBe(false);
 
         const result = await downloadDropboxAppData('token', fetcher, { material });
@@ -329,31 +330,40 @@ describe('bounded Dropbox folder inventory', () => {
     });
 
     it('times out and cancels a first page whose body stalls after headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const { cancel, response } = hangingBodyResponse();
 
-        await expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
+        const outcome = expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
             .rejects.toThrow('Dropbox folder inventory request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('times out and cancels a stalled Dropbox error body used for path classification', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const { cancel, response } = hangingBodyResponse({}, 409);
 
-        await expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
+        const outcome = expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
             .rejects.toThrow('Dropbox folder inventory request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('times out and cancels a continuation body that stalls after headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const { cancel, response } = hangingBodyResponse();
         const fetcher = vi.fn()
             .mockResolvedValueOnce(Response.json({ entries: [], cursor: 'next-page', has_more: true }))
             .mockResolvedValueOnce(response) as typeof fetch;
 
-        await expect(listDropboxFolderFiles('token', '/attachments', fetcher, { timeoutMs: 1 }))
+        const outcome = expect(listDropboxFolderFiles('token', '/attachments', fetcher, { timeoutMs: 1 }))
             .rejects.toThrow('Dropbox folder inventory request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('classifies authorization failures for a caller refresh retry', async () => {
         await expect(listDropboxFolderFiles('token', '/attachments', async () => (
@@ -395,20 +405,23 @@ describe('versioned Dropbox transition byte operations', () => {
     });
 
     it('times out a versioned download whose body stalls after headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), {
             status: 200,
             headers: { 'Dropbox-API-Result': JSON.stringify({ rev: 'abc123456' }) },
         });
 
-        await expect(downloadDropboxFileVersioned(
+        const outcome = expect(downloadDropboxFileVersioned(
             'token',
             '/attachments/a.bin',
             async () => response,
             { timeoutMs: 1 },
         )).rejects.toThrow('Dropbox versioned file download timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('uses add for create and update(rev) for replacement', async () => {
         const args: unknown[] = [];
@@ -425,10 +438,11 @@ describe('versioned Dropbox transition byte operations', () => {
     });
 
     it('times out an upload whose revision body stalls after the mutation response headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
 
-        await expect(uploadDropboxFileVersioned(
+        const outcome = expect(uploadDropboxFileVersioned(
             'token',
             '/a.bin',
             new Uint8Array([1]),
@@ -436,8 +450,10 @@ describe('versioned Dropbox transition byte operations', () => {
             async () => response,
             { timeoutMs: 1 },
         )).rejects.toThrow('Dropbox versioned file upload timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('sends parent_rev on delete and maps stale revisions to conflict', async () => {
         let body: unknown;
@@ -458,12 +474,15 @@ describe('versioned Dropbox transition byte operations', () => {
             'token', fetcher, { timeoutMs: 1 },
         ), 409],
     ])('times out and cancels a stalled %s response body', async (_kind, request, status) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
 
-        await expect(request(async () => response)).rejects.toThrow(/timed out/i);
+        const outcome = expect(request(async () => response)).rejects.toThrow(/timed out/i);
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('cancels an unread 401 body before surfacing the Dropbox error', async () => {
         const cancel = vi.fn();

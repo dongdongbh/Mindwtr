@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const entry = readFileSync(new URL('./host-entry.ts', import.meta.url), 'utf8');
-// The method name alone anchors the slice, so a new parameter cannot hide the bridge.
+
 const start = entry.indexOf('    iosPruneReceipts(');
-const end = entry.indexOf('    /** `name` is one of ', start);
+const end = entry.indexOf('    aboutRequest(', start);
 if (start < 0 || end < 0) throw new Error('Private receipt retention bridge unavailable');
 const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(`globalThis.port = {${entry.slice(start, end)}};`);
 const id = 'abcdefab-cdef-4abc-8abc-abcdefabcdef';
@@ -17,7 +17,7 @@ const fixture = (platform = 'ios', failLog = false) => {
     const state = { TextEncoder, __mindwtrHostPlatform: platform, port: undefined as unknown as {
         iosPruneReceipts(raw: string, owed?: string | null, owedInbox?: string[]): Promise<{ pruned: number }>;
     }, sqlite: {}, submit: (work: () => Promise<unknown>) => work(),
-    // host-entry's prune runs inside core's adapter lock; this seam has no adapter.
+
     withHostConnection: (work: () => Promise<unknown>) => work(),
     pruneNativeRequestReceipts: async (...args: unknown[]) => { calls.push(args); return 7; },
     diagnosticsLog: { append: async (value: unknown) => { if (failLog) throw new Error('PRIVATE_ERROR'); logs.push(value); } } };

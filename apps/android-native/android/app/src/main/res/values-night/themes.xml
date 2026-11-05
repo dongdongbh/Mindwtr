@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- RN's splash background in dark mode (app.json's expo-splash-screen "dark"). -->
+
+
+    <style name="Theme.NativeDev" parent="android:Theme.Material.NoActionBar" />
+
     <color name="splashscreen_background">#0b1020</color>
 </resources>

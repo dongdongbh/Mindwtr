@@ -11,8 +11,7 @@ vi.mock('@react-native-community/datetimepicker', () => ({
   default: (props: Record<string, unknown>) => React.createElement('DateTimePicker', props),
 }));
 
-// Stubbed only to keep react-native-safe-area-context out of this render test; the
-// assertions below still match on the real component identity.
+
 vi.mock('@/contexts/toast-context', () => ({
   ToastViewport: () => null,
   useToast: () => ({ showToast: () => {}, dismissToast: () => {} }),
@@ -902,7 +901,7 @@ describe('Quick capture modal composition', () => {
       });
 
       const input = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'quickAdd.inputLabel')!;
-      // Return blurs and submits (no newline inserted) when not adding another.
+
       expect(input.props.multiline).toBe(true);
       expect(input.props.submitBehavior).toBe('blurAndSubmit');
 
@@ -977,8 +976,8 @@ describe('Quick capture modal composition', () => {
     });
 
     const input = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'quickAdd.inputLabel')!;
-    // Multiline title accepts pasted newlines, but return still submits and,
-    // in add-another mode, keeps focus instead of inserting a newline.
+
+
     expect(input.props.multiline).toBe(true);
     expect(input.props.submitBehavior).toBe('submit');
 
@@ -1119,9 +1118,8 @@ describe('Quick capture modal composition', () => {
       const scroll = tree.root.findByType(ScrollView);
       expect(scroll.props.testID).toBe('quick-capture-scroll');
       expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
-      // The description and metadata scroll, but the title stays OUTSIDE: a focused
-      // TextInput inside an iOS ScrollView gets auto-scrolled above the keyboard and
-      // flies off the top of the sheet on every refocus (#887).
+
+
       expect(scroll.findAllByType(TextInput).map((node) => node.props.accessibilityLabel))
         .toEqual(['taskEdit.descriptionLabel']);
       expect(tree.root.findAllByType(TextInput)[0].props.accessibilityLabel).toBe('quickAdd.inputLabel');
@@ -1188,10 +1186,7 @@ describe('Quick capture modal composition', () => {
         );
       });
 
-      // Tapping More hides the Android keyboard, but it comes back the moment the user
-      // taps the title to keep typing. The measured lift then shrinks the space left for
-      // a sheet whose expanded content is taller than the screen, so the More panel has
-      // to scroll inside the sheet instead of pushing the title off the top (#1120).
+
       const scroll = tree.root.findByType(ScrollView);
       expect(scroll.props.testID).toBe('quick-capture-scroll');
       expect(scroll.findAllByType(TextInput).map((node) => node.props.accessibilityLabel))
@@ -1199,14 +1194,13 @@ describe('Quick capture modal composition', () => {
       const sheet = tree.root
         .findAllByType(View)
         .find((node) => flattenStyle(node.props.style).maxHeight === 500);
-      // Without this the bottom-anchored sheet keeps its full height and overflows the
-      // top of the keyboard-padded container.
+
+
       expect(flattenStyle(sheet?.props.style).flexShrink).toBe(1);
-      // The title input stays outside the scroll area, in the pinned part of the sheet.
+
       expect(tree.root.findAllByType(TextInput)[0].props.accessibilityLabel).toBe('quickAdd.inputLabel');
-      // Without a viewport inside the native modal, toasts fired from the sheet (the
-      // speech-not-configured notice) only appear after the sheet closes (#886). It has
-      // to live inside the keyboard-avoiding view or the keyboard covers it.
+
+
       expect(tree.root.findByType(KeyboardAvoidingView).findAllByType(ToastViewport)).toHaveLength(1);
     } finally {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
@@ -1293,14 +1287,14 @@ describe('Quick capture modal composition', () => {
 
     act(() => collapsed.update(renderBody(true)));
     expect(findNote(collapsed)).toHaveLength(1);
-    // Expanding metadata keeps the first editor in the scroll area mounted.
+
     expect(findNote(collapsed)[0]).toBe(note);
     expect(collapsed.root.findByType(ScrollView).findAllByType(TextInput)).toEqual([note]);
     expect(collapsed.root.findAllByType(ScrollView)).toHaveLength(1);
   });
 
   it('carries the canonical priority flag on overlay rows and tints the trigger flag when set', () => {
-    // Overlay rows: the four non-empty rows carry ramp-tinted flags; Clear's flag is uncolored.
+
     let pickerTree!: ReactTestRenderer;
     act(() => {
       pickerTree = create(
@@ -1356,10 +1350,10 @@ describe('Quick capture modal composition', () => {
     expect(flagColor('high')).toBe('#f97316');
     expect(flagColor('urgent')).toBe('#dc2626');
     const clearFlag = pickerTree.root.findByProps({ testID: 'priority-flag-clear' });
-    // Clear's flag is uncolored: it rides the row's theme color, not the ramp.
+
     expect(clearFlag.props.color).toBe(tc.text);
 
-    // Trigger: the expanded priority chip tints its flag only once a priority is set.
+
     const renderTrigger = (selectedPriority: 'medium' | null) => {
       let tree!: ReactTestRenderer;
       act(() => {

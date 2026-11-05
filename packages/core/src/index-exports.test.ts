@@ -5,18 +5,6 @@ import { describe, expect, it } from 'vitest';
 import * as barrel from './index';
 import exportsBaseline from './index-exports.baseline.json';
 
-// Three guardrails for the barrel (see the header comment in index.ts for why they exist):
-//
-// 1. The barrel's export-name set must never shrink below a committed snapshot. `export *`
-//    growing the surface over time is expected and fine -- update index-exports.baseline.json
-//    (Object.keys(await import('./index')).sort()) when that happens. A name disappearing is
-//    the failure this guards against.
-// 2. Every packages/core/package.json "exports" target must exist on disk.
-// 3. Every '@mindwtr/core/<module>' subpath imported anywhere under apps/ must be reachable
-//    from the barrel. Mobile's Metro resolver collapses every such subpath onto index.ts and
-//    ignores package.json "exports" entirely, so a module reachable only by subpath (and not
-//    re-exported here) is `undefined` at runtime on a real device even though vitest resolves
-//    it fine. Seven imports broke exactly this way in one batch before this test existed.
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(srcDir, '..', '..', '..');
@@ -41,8 +29,7 @@ describe('package.json exports map', () => {
     });
 });
 
-// 'target', 'ios' and 'android' hold no .ts but carry ~5.5k directories of Rust/Pods/Gradle
-// build output between them -- skipping them is the difference between walking 105 dirs and 5673.
+
 const SKIP_DIRS = new Set([
     'node_modules', 'dist', 'build', 'coverage', '.expo', '.git', '.gradle', 'target', 'ios', 'android',
 ]);
@@ -73,8 +60,8 @@ describe('@mindwtr/core subpath imports under apps/', () => {
     it('are all barrel-reachable', async () => {
         const barrelNames = new Set(Object.keys(barrel));
         const subpaths = findImportedSubpaths(join(repoRoot, 'apps'));
-        // Sanity check on the check itself: if this ever finds zero subpaths, the regex or the
-        // apps/ directory moved and the test below would pass vacuously.
+
+
         expect(subpaths.size).toBeGreaterThan(0);
 
         const unreachable: string[] = [];
@@ -87,9 +74,7 @@ describe('@mindwtr/core subpath imports under apps/', () => {
             }
         }
         expect(unreachable).toEqual([]);
-    // Dynamically importing every subpath module pulls a large transitive graph through the
-    // transform pipeline. On a loaded machine that overran the 5s default and reported a
-    // timeout -- which reads as "flaky, rerun" instead of "your export is missing". A guard
-    // must give a real verdict under load, so it gets a generous explicit budget.
+
+
     }, 60_000);
 });

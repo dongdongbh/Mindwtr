@@ -13,6 +13,7 @@ import {
     buildTaskMovePatch,
     compareAreasByOrder,
     getProjectChoiceState,
+    groupProjectsForPicker,
     tFallback,
     type Area,
     type Project,
@@ -25,7 +26,7 @@ import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { logError } from '@/lib/app-log';
 import { styles } from './task-edit-modal.styles';
 
-/** Writes core's move patch into the draft, where '' is this screen's "none". */
+
 export function applyTaskEditDestination(
     setDraftField: (field: 'projectId' | 'areaId' | 'sectionId', value: string) => void,
     currentProjectId: string | undefined,
@@ -101,6 +102,8 @@ export function TaskEditDestinationPicker({
         () => getProjectChoiceState(projects, query, allProjects ?? projects),
         [allProjects, projects, query],
     );
+
+    const projectGroups = useMemo(() => groupProjectsForPicker(projectChoices.filteredProjects, areas), [areas, projectChoices.filteredProjects]);
     const activeAreas = useMemo(
         () => areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder),
         [areas],
@@ -175,6 +178,7 @@ export function TaskEditDestinationPicker({
 
     const destinationLabel = t('task.destination');
     const projectsLabel = t('nav.projects');
+    const deferredLabel = tFallback(t, 'projects.deferredSection', 'Someday / Waiting');
     const areasLabel = t('taskEdit.areaLabel');
     const noneLabel = t('common.none');
 
@@ -278,12 +282,14 @@ export function TaskEditDestinationPicker({
                             <Text style={[styles.pickerItemText, { color: tc.text }]}>{noneLabel}</Text>
                         </Pressable>
 
-                        {allowProjects ? (
-                            <>
+                        {allowProjects ? [[projectsLabel, projectGroups.active] as const, [deferredLabel, projectGroups.deferred] as const]
+                            .filter(([label, group]) => label === projectsLabel || group.length > 0)
+                            .map(([label, group]) => (
+                            <React.Fragment key={label}>
                                 <Text style={[styles.pickerItemText, { color: tc.secondaryText, fontWeight: '700' }]}>
-                                    {projectsLabel}
+                                    {label}
                                 </Text>
-                                {projectChoices.filteredProjects.map((project) => (
+                                {group.map((project) => (
                                     <Pressable
                                         key={`project:${project.id}`}
                                         onPress={() => selectAndClose({ kind: 'project', id: project.id })}
@@ -296,8 +302,8 @@ export function TaskEditDestinationPicker({
                                         <Text style={[styles.pickerItemText, { color: tc.text }]}>{project.title}</Text>
                                     </Pressable>
                                 ))}
-                            </>
-                        ) : null}
+                            </React.Fragment>
+                        )) : null}
 
                         {allowAreas ? (
                             <>

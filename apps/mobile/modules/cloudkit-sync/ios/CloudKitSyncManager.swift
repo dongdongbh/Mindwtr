@@ -1,8 +1,7 @@
 import CloudKit
 import Foundation
 
-/// Manages the CKContainer, custom record zone, and subscriptions.
-/// All CloudKit operations go through this class.
+
 final class CloudKitSyncManager {
 
     static let shared = CloudKitSyncManager()
@@ -17,8 +16,7 @@ final class CloudKitSyncManager {
     private(set) lazy var privateDB = container.privateCloudDatabase
     private(set) lazy var zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
 
-    // Guards against concurrent ensureZone/ensureSubscription calls.
-    // Tasks awaiting the same operation share the first caller's result.
+
     private var zoneTask: Task<Void, Error>?
     private var subscriptionTask: Task<Void, Error>?
 
@@ -128,7 +126,7 @@ final class CloudKitSyncManager {
         let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
         op.savePolicy = .changedKeys
         op.qualityOfService = .userInitiated
-        // Moves the asset bytes up, so it gets the long transfer budget.
+
         CloudKitOperationTimeouts.apply(to: op, resourceSeconds: CloudKitOperationTimeouts.assetResourceSeconds)
 
         let savedRecord = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKRecord, Error>) in
@@ -199,11 +197,7 @@ final class CloudKitSyncManager {
         let parentURL = destinationURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
 
-        // Copy to a temp file in the same directory first, then atomically replace
-        // the destination (#1057). The previous copy-in-place (remove destination,
-        // then copy over it) could leave `destinationURL` missing or truncated if the
-        // app was killed or the volume hiccuped mid-copy — a later sync would then
-        // treat that truncated file as new content and re-upload it.
+
         let tempURL = parentURL.appendingPathComponent(".tmp-\(UUID().uuidString)-\(destinationURL.lastPathComponent)")
         if FileManager.default.fileExists(atPath: tempURL.path) {
             try? FileManager.default.removeItem(at: tempURL)
@@ -226,7 +220,6 @@ final class CloudKitSyncManager {
         return metadata
     }
 
-    // MARK: - Account Status
 
     func accountStatus() async throws -> CKAccountStatus {
         try operations.checkActive()
@@ -235,7 +228,6 @@ final class CloudKitSyncManager {
         return result
     }
 
-    // MARK: - Zone Management
 
     func ensureZone() async throws {
         try operations.checkActive()
@@ -267,18 +259,16 @@ final class CloudKitSyncManager {
             try await task.value
             try operations.checkActive()
         } catch {
-            zoneTask = nil // Allow retry on failure
+            zoneTask = nil
             throw error
         }
     }
 
-    /// Forget the cached zone setup so the next ensureZone call recreates the
-    /// zone. Called after CloudKit reports the zone deleted or missing.
+
     func invalidateZone() {
         zoneTask = nil
     }
 
-    // MARK: - Subscription Management
 
     func ensureSubscription() async throws {
         if let existing = subscriptionTask {
@@ -286,12 +276,12 @@ final class CloudKitSyncManager {
             return
         }
         let task = Task<Void, Error> {
-            // Check if subscription already exists
+
             do {
                 _ = try await privateDB.subscription(for: subscriptionID)
                 return
             } catch let error as CKError where error.code == .unknownItem {
-                // Subscription doesn't exist yet — create it
+
             }
 
             let subscription = CKRecordZoneSubscription(
@@ -299,7 +289,7 @@ final class CloudKitSyncManager {
                 subscriptionID: subscriptionID
             )
             let notificationInfo = CKSubscription.NotificationInfo()
-            notificationInfo.shouldSendContentAvailable = true // Silent push
+            notificationInfo.shouldSendContentAvailable = true
             subscription.notificationInfo = notificationInfo
 
             let op = CKModifySubscriptionsOperation(
@@ -325,15 +315,12 @@ final class CloudKitSyncManager {
         do {
             try await task.value
         } catch {
-            subscriptionTask = nil // Allow retry on failure
+            subscriptionTask = nil
             throw error
         }
     }
 
-    // MARK: - Batch Save
 
-    /// Saves records to CloudKit using fetch-then-update to preserve system fields.
-    /// Returns IDs of records that had server conflicts, and throws for non-conflict errors.
     func saveRecords(
         _ jsonRecords: [[String: Any]],
         recordType: String
@@ -341,8 +328,7 @@ final class CloudKitSyncManager {
         try operations.checkActive()
         if jsonRecords.isEmpty { return [] }
 
-        // Step 1: Fetch existing records so we have their system fields (changeTag etc).
-        // Records that don't exist yet will simply not appear in the fetch results.
+
         let recordIDs = jsonRecords.compactMap { json -> CKRecord.ID? in
             guard let id = json["id"] as? String, !id.isEmpty else { return nil }
             return CKRecord.ID(recordName: id, zoneID: zoneID)
@@ -359,8 +345,7 @@ final class CloudKitSyncManager {
             }
         }
 
-        // Step 2: Build CKRecords — reuse fetched records (with system fields) when they exist,
-        // create new CKRecords only for genuinely new records.
+
         var recordsToSave: [CKRecord] = []
         for json in jsonRecords {
             guard let id = json["id"] as? String, !id.isEmpty else { continue }
@@ -379,12 +364,7 @@ final class CloudKitSyncManager {
 
         if recordsToSave.isEmpty { return [] }
 
-        // Step 3: Save in batches, collecting conflicts AND non-conflict errors separately.
-        // The zone is atomic: one refused request fails every record in it. Smaller
-        // saves keep each request light and let a refused upload resume from the
-        // records that already landed (#1278). A refused batch is retried once after
-        // CloudKit's interval, then halved on each further refusal; waits stay short
-        // because iOS may end a background sync early.
+
         var conflictIDs: [String] = []
         var nonConflictErrors: [Error] = []
         var saveBatchSize = 100
@@ -410,7 +390,7 @@ final class CloudKitSyncManager {
             op.qualityOfService = .userInitiated
             CloudKitOperationTimeouts.apply(to: op)
 
-            // Serialize per-record callbacks — CloudKit dispatches on arbitrary queues.
+
             let cbQueue = DispatchQueue(label: "tech.dongdongbh.mindwtr.savecb")
 
             var operationError: Error?
@@ -443,7 +423,7 @@ final class CloudKitSyncManager {
                             case .failure(let error):
                                 if let ckError = error as? CKError,
                                    ckError.code == .partialFailure {
-                                    // Partial failure: per-record callbacks already captured details
+
                                     continuation.resume(returning: (conflicts, perRecordErrors))
                                 } else {
                                     continuation.resume(throwing: error)
@@ -472,23 +452,20 @@ final class CloudKitSyncManager {
                 saveBatchSize = max(minSaveBatchSize, saveBatchSize / 2)
                 continue
             }
-            // A whole-operation refusal keeps its original error for the sync layer.
+
             if let operationError { throw operationError }
             conflictIDs.append(contentsOf: batchConflicts)
             nonConflictErrors.append(contentsOf: batchErrors)
-            // Stop at the first refused batch; the next sync resumes from here.
+
             break
         }
 
-        // If there were non-conflict per-record errors, log them and throw
+
         if !nonConflictErrors.isEmpty {
             let descriptions = nonConflictErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
             NSLog("[CloudKitSyncManager] saveRecords had \(nonConflictErrors.count) non-conflict error(s): \(descriptions)")
-            // An atomic zone save reports the one record that failed with its real
-            // error and every other record with `batchRequestFailed` ("Atomic
-            // failure"). The victims come first in callback order, so showing
-            // errors[0] hid the cause from the Sync screen and the shared log
-            // (App Store 1.2.7 report). Prefer the culprit.
+
+
             let isBatchVictim: (Error) -> Bool = { error in
                 (error as? CKError)?.code == .batchRequestFailed
             }
@@ -514,16 +491,14 @@ final class CloudKitSyncManager {
         return conflictIDs
     }
 
-    /// Fetch records by ID, returning only those that exist on the server.
+
     private func fetchRecordsByID(_ ids: [CKRecord.ID]) async throws -> [CKRecord.ID: CKRecord] {
         try operations.checkActive()
         if ids.isEmpty { return [:] }
         let op = CKFetchRecordsOperation(recordIDs: ids)
         op.qualityOfService = .userInitiated
-        // This is how both saveAttachmentAsset and fetchAttachmentAsset pull an
-        // existing attachment record down, asset bytes included, so it gets the
-        // long transfer budget too. (saveRecords also calls it, for conflict
-        // re-reads of plain records, which finish well inside either budget.)
+
+
         CloudKitOperationTimeouts.apply(to: op, resourceSeconds: CloudKitOperationTimeouts.assetResourceSeconds)
 
         let cbQueue = DispatchQueue(label: "tech.dongdongbh.mindwtr.fetchcb")
@@ -537,7 +512,7 @@ final class CloudKitSyncManager {
                     case .success(let record):
                         results[recordID] = record
                     case .failure(let error):
-                        // unknownItem means record doesn't exist yet — that's fine, skip it
+
                         if let ckError = error as? CKError,
                            ckError.code == .unknownItem {
                             return
@@ -561,7 +536,7 @@ final class CloudKitSyncManager {
                     case .failure(let error):
                         if let ckError = error as? CKError,
                            ckError.code == .partialFailure {
-                            // Some records may be unknownItem (new records) — ignore only those.
+
                             if perRecordErrors.isEmpty {
                                 continuation.resume(returning: results)
                             } else {
@@ -579,7 +554,6 @@ final class CloudKitSyncManager {
         }
     }
 
-    // MARK: - Batch Delete
 
     func deleteRecords(recordType: String, recordIDs: [String]) async throws {
         try operations.checkActive()
@@ -603,7 +577,7 @@ final class CloudKitSyncManager {
                 op.perRecordDeleteBlock = { recordID, result in
                     cbQueue.sync {
                         if case .failure(let error) = result {
-                            // unknownItem means already deleted — safe to ignore
+
                             if let ckError = error as? CKError,
                                ckError.code == .unknownItem {
                                 return
@@ -622,7 +596,7 @@ final class CloudKitSyncManager {
                         case .failure(let error):
                             if let ckError = error as? CKError,
                                ckError.code == .partialFailure {
-                                // Only suppress if every per-record error was unknownItem
+
                                 if realErrors.isEmpty {
                                     continuation.resume()
                                 } else {
@@ -641,11 +615,7 @@ final class CloudKitSyncManager {
         }
     }
 
-    // MARK: - Full Fetch
 
-    /// CloudKit server error code for queries against a record type that does
-    /// not yet exist in the container schema (Development environment).
-    /// Not published by Apple; determined empirically, stable across iOS 16-18.
     private static let ckServerErrorUnknownRecordType = 2003
 
     /// Fetches all records of a given type from the custom zone.
@@ -702,10 +672,7 @@ final class CloudKitSyncManager {
         return allRecords
     }
 
-    /// Locale-independent check for a missing record type.
-    /// CKErrorUnknownItem: client framework doesn't recognize the type.
-    /// CKErrorServerRejectedRequest with underlying code 2003: server rejects
-    /// the query because the type doesn't exist in the schema yet.
+
     private static func isUnknownRecordTypeError(_ error: Error) -> Bool {
         if let ckError = error as? CKError {
             if ckError.code == .unknownItem { return true }

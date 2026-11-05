@@ -69,8 +69,8 @@ export function useProjectNotesEditor({
     pendingSelectedProjectNotesSelectionRef.current = null;
     selectedProjectNotesSelectionRef.current = { start: selectionEnd, end: selectionEnd };
     setSelectedProjectNotesSelection({ start: selectionEnd, end: selectionEnd });
-    // supportNotes is a one-time snapshot for the newly selected project; keying this
-    // reset on it would wipe the undo stack and selection on every notes keystroke.
+
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, selectedProject?.status]);
 

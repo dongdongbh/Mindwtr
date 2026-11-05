@@ -17,7 +17,7 @@ export interface DeferredProjectsSectionProps {
   onOpenProject: (projectId: string) => void;
 }
 
-/** Renders nothing when there is nothing deferred, so callers can pass it straight to a list header. */
+
 export function DeferredProjectsSection({
   projects,
   areaById,
@@ -65,11 +65,11 @@ export interface DeferredProjectRowProps {
   t: (key: string) => string;
   onActivateProject: (projectId: string) => void;
   onOpenProject: (projectId: string) => void;
-  /** Long press (and the accessibility action) offers "Move to section…" when given. */
+
   onMoveToSection?: (project: Project) => void;
 }
 
-/** One parked project: tap opens it, swipe right reactivates it. */
+
 export function DeferredProjectRow({
   project,
   areaById,

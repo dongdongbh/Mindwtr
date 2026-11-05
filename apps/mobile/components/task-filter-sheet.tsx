@@ -17,6 +17,7 @@ import {
   type TaskMetadataFilterVisibility,
   type TaskPriority,
   type TimeEstimate,
+  type TaskStatus,
 } from '@mindwtr/core';
 import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,15 +28,9 @@ import { ThemedAlertHost } from '@/components/themed-alert';
 import type { TaskFilterSelections } from '@/hooks/use-task-filter-selections';
 import { useKeyboardInset } from '@/lib/use-android-keyboard-inset';
 
-/**
- * The one filter sheet for Focus and the task list. Both views hold their
- * selections in useTaskFilterSelections and render them here, so a filter
- * concept only ever has one picker. View-specific controls arrive through the
- * header, top-content, and advanced-chip slots rather than forking the sheet.
- */
 
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
-const DATE_PRESETS = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
+const DATE_PRESETS = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
 const ENERGY_LEVEL_OPTIONS: TaskEnergyLevel[] = ['low', 'medium', 'high'];
 
 export type TaskFilterSheetColors = {
@@ -54,23 +49,19 @@ export type FilterChipVariant = 'advanced' | 'excluded';
 
 type FilterChipProps = {
   label: string;
-  /** Decorative node (priority dot) rendered before the label. */
+
   leading?: React.ReactNode;
   selected: boolean;
   themeColors: TaskFilterSheetColors;
   onPress?: () => void;
   variant?: FilterChipVariant;
-  /** Accessible name for the advanced chip's remove button. */
+
   removeLabel?: string;
   excludedLabel?: string;
   removable?: boolean;
 };
 
-/**
- * One filter chip. `advanced` marks a saved-filter criterion no picker can
- * express (dashed, removable); `excluded` marks a token that subtracts and
- * relies on the strikethrough so the state survives E-ink/mono themes.
- */
+
 export function FilterChip({
   label,
   selected,
@@ -140,9 +131,9 @@ export function FilterChip({
 }
 
 export type TaskFilterSheetOptions = {
-  /** Context and tag chips offered by the visible tasks. */
+
   tokens: string[];
-  /** Project chips, including the "no project" sentinel when it applies. */
+
   projects?: { id: string; title: string }[];
   timeEstimates: TimeEstimate[];
   visibility: TaskMetadataFilterVisibility;
@@ -156,24 +147,23 @@ export type TaskFilterSheetActiveChip = {
 };
 
 type TaskFilterSheetProps = {
+  statusOptions?: readonly TaskStatus[];
   visible: boolean;
   onClose: () => void;
   selections: TaskFilterSelections;
   options: TaskFilterSheetOptions;
   themeColors: TaskFilterSheetColors;
   t: (key: string) => string;
-  /** Extra header buttons, left of Clear (Focus's save-filter action). */
+
   headerActions?: React.ReactNode;
-  /** View-local controls above the shared category rows. */
+
   topContent?: React.ReactNode;
-  /**
-   * Rendered in place of the sheet body inside the same modal (Focus's
-   * save-filter dialog), so stepping into it does not remount the modal.
-   */
+
+
   overlay?: React.ReactNode;
-  /** View-local controls that participate in Clear without entering filter criteria. */
+
   hasAdditionalActiveFilters?: boolean;
-  /** Focus-only saved criteria that no shared picker can express. */
+
   additionalActiveChips?: TaskFilterSheetActiveChip[];
 };
 
@@ -196,6 +186,7 @@ export function TaskFilterSheet({
   overlay,
   hasAdditionalActiveFilters = false,
   additionalActiveChips = [],
+  statusOptions = [],
 }: TaskFilterSheetProps) {
   const safeAreaInsets = useSafeAreaInsets();
   const keyboardInset = useKeyboardInset(visible);
@@ -270,10 +261,10 @@ export function TaskFilterSheet({
   ], allLabel), [allLabel, excludedLabel, selections.excludedTokens, selections.tokens]);
   const projectSummary = useMemo(() => joinSummary(
     projectOptions
-      .filter((project) => selections.projects.includes(project.id))
-      .map((project) => project.title),
+      .filter((project) => selections.projects.includes(project.id) || selections.excludedProjects.includes(project.id))
+      .map((project) => selections.excludedProjects.includes(project.id) ? `${excludedLabel}: ${project.title}` : project.title),
     allLabel,
-  ), [allLabel, projectOptions, selections.projects]);
+  ), [allLabel, excludedLabel, projectOptions, selections.projects, selections.excludedProjects]);
   const timeSummary = joinSummary(
     selections.timeEstimates.map((estimate) => formatTimeEstimateLabel(estimate)),
     allLabel,
@@ -447,8 +438,8 @@ export function TaskFilterSheet({
       return renderPickerOption(
         item.title,
         selections.projects.includes(item.id),
-        false,
-        () => selections.toggleProject(item.id),
+        selections.excludedProjects.includes(item.id),
+        () => selections.cycleProject(item.id),
       );
     };
     const matchModeFooter = isTokenPicker ? (
@@ -597,6 +588,16 @@ export function TaskFilterSheet({
               {topContent}
 
               <View style={styles.overviewRows}>
+                {statusOptions.length > 0 ? (
+                  <View style={styles.controlGroup}>
+                    <Text style={[styles.sheetSectionLabel, { color: themeColors.secondaryText }]}>{t('taskEdit.statusLabel')}</Text>
+                    <View style={styles.sheetChipRow}>
+                      {statusOptions.map((status) => <FilterChip key={status} label={t(`status.${status}`)}
+                        selected={selections.statuses.includes(status)} themeColors={themeColors}
+                        onPress={() => selections.toggleStatus(status)} />)}
+                    </View>
+                  </View>
+                ) : null}
                 <View>
                   {renderOverviewRow({
                     label: t('filters.taskDates'),
@@ -754,8 +755,8 @@ export function TaskFilterSheet({
         </View>
       </View>
       )}
-      {/* Confirms raised by the host screen while this sheet is up would
-          otherwise never reach the screen on iOS (#940). */}
+      {
+                                                            }
       <ThemedAlertHost />
     </Modal>
   );

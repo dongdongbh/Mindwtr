@@ -12,18 +12,15 @@ enum NativeAttachmentInstallerError: LocalizedError, Equatable {
     }
 }
 
-/// The native file bridge's install/hash boundary. Storage roots come from the
-/// library owner, never from a JS request. RN's existing Apple engine owns file
-/// identity, locking, streaming hashes, and interrupted-install recovery.
-/// Calls must be serialized by the file-port owner, outside the JS engine queue.
+
 final class NativeAttachmentInstaller {
     private let managedRoot: URL
     private let sourceRoots: [URL]
     private let candidateFiles: NativeAttachmentFiles?
     private var installer: AttachmentFileInstaller {
         get throws {
-            // A missing root can canonicalize differently once the existing
-            // owned ensure creates it. RN binds its stateless facade per call.
+
+
             do { return try AttachmentFileInstaller(targetRoot: managedRoot, sourceRoots: sourceRoots) }
             catch { throw NativeAttachmentInstallerError.unavailable }
         }
@@ -119,8 +116,7 @@ final class NativeAttachmentInstaller {
         return String(decoding: try JSONSerialization.data(withJSONObject: response, options: [.sortedKeys]), as: UTF8.self)
     }
 
-    /// Native-only FIFO operation; never reachable from the compatibility JSON
-    /// handler. The RN facade retains all reservation/publication semantics.
+
     func prepareStage(targetURI: String, operationID: String) throws -> NativeAttachmentFiles.ReservedAttachmentStageProof {
         let target = try fileURL(targetURI)
         guard operationID.utf8.count == 32,
@@ -137,7 +133,7 @@ final class NativeAttachmentInstaller {
             } else { prepared = try installer.prepareImmutableStage(targetInput: target, operationId: operationID) }
             let expected = target.deletingLastPathComponent()
                 .appendingPathComponent(".mindwtr-install-" + operationID + ".candidate", isDirectory: true).appendingPathComponent("stage")
-            // Retain the native record's root spelling across RN system aliases.
+
             guard prepared.stagedUrl.standardizedFileURL.resolvingSymlinksInPath() == expected.standardizedFileURL.resolvingSymlinksInPath() else {
                 throw NativeAttachmentInstallerError.unavailable
             }
@@ -172,8 +168,7 @@ final class NativeAttachmentInstaller {
         } catch { throw NativeAttachmentInstallerError.unavailable }
     }
 
-    /// Native-only strict retirement; the caller owns its durable decision and
-    /// latest live-reference check. The compatibility JSON allowlist is sealed.
+
     func retirePrivateStage(stage: NativeAttachmentFiles.ReservedAttachmentStageProof,
                             targetURI: String, operationID: String) throws -> String {
         _ = try fileURL(stage.stageURI)
@@ -204,8 +199,8 @@ final class NativeAttachmentInstaller {
                   stageParts.dropLast(2).elementsEqual(rootParts, by: { $0.utf8.elementsEqual($1.utf8) }) else {
                 throw NativeAttachmentInstallerError.unavailable
             }
-            // Missing children can retain an Apple alias after canonicalization.
-            // Translate only the validated root; RN still checks each named child.
+
+
             let root = managedRoot.standardizedFileURL.resolvingSymlinksInPath()
             let target = root.appendingPathComponent(String(targetName))
             let staged = root.appendingPathComponent(candidate, isDirectory: true).appendingPathComponent("stage")

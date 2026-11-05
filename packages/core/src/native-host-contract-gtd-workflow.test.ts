@@ -11,6 +11,7 @@ import type { AppData, Area, Task } from './types';
 import { generateUUID } from './uuid';
 import { getTranslator } from './i18n';
 import { buildGtdSettingsModel, resolveGtdPomodoroDurations } from './gtd-settings-model';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
 const ID = '00000000-0000-4000-8000-000000000103';
 const AT = '2026-09-01T00:00:00.000Z';
@@ -1493,7 +1494,7 @@ describe('prepared GTD Auto-archive', () => {
         start.settings.gtd = { ...start.settings.gtd, autoArchiveDays: 0 };
         start.tasks = [
             { ...terminal, id: 'archive-old', status: 'done', deletedAt: undefined,
-                completedAt: old, updatedAt: old, rev: 7 },
+                completedAt: old, updatedAt: old, rev: 7, tags: ['#Legacy'] },
             { ...terminal, id: 'archive-recent', status: 'done', deletedAt: undefined,
                 completedAt: recent, updatedAt: recent },
             { ...terminal, id: 'archive-active', status: 'next', deletedAt: undefined,
@@ -1521,6 +1522,12 @@ describe('prepared GTD Auto-archive', () => {
         expect(env.data().settings.gtd).toEqual({ ...start.settings.gtd, autoArchiveDays: 7 });
         expect(env.data().tasks[0]).toEqual(prepared.archiveEffects?.[0].after);
         expect(env.data().tasks.slice(1)).toEqual(start.tasks.slice(1));
+
+        expect(getSavedTaxonomyTokens(env.data().settings, 'tag')).toEqual(['#Legacy']);
+        const rn = await open(start);
+        await useTaskStore.getState().updateSettings({ gtd: { ...start.settings.gtd, autoArchiveDays: 7 } });
+        await flushPendingSave();
+        expect(getSavedTaxonomyTokens(rn.data().settings, 'tag')).toEqual(['#Legacy']);
     });
 
     it('Never preserves already archived tasks and has an empty frozen effect batch', async () => {
@@ -1870,8 +1877,8 @@ describe('GTD Review variants in the original v1 workflow journal', () => {
             const toggle = type === 'dailyReviewFocusStep'
                 ? options.value.review.dailyFocusStep : options.value.review.weeklyContextStep;
             expect(toggle).toMatchObject({ value: true, edit: { type, value: false } });
-            // Materializing true from absence differs from raw storage and is
-            // not the edit offered by RN's shared toggle model.
+
+
             expect(await absent.host.prepareGtdWorkflow({ requestId: ID,
                 edit: { type, value: true }, expected: options.value.expected[type] }))
                 .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -2510,7 +2517,7 @@ describe('durable Pomodoro Settings', () => {
         expect(env.data().settings.gtd).toEqual({ ...before.settings.gtd, pomodoro: {
             ...before.settings.gtd?.pomodoro, customDurations: { focusMinutes: 33, breakMinutes: 8 } } });
         expect(env.data().settings.language).toBe('ko');
-        // The existing settings owner strips the API credential on every save.
+
         expect(env.data().settings.ai).toEqual({ ...before.settings.ai, apiKey: undefined });
     });
 

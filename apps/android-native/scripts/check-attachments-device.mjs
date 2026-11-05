@@ -1,27 +1,6 @@
-// Attachments check for the isolated native Android development app (pass A2), on this computer and the test phone only.
-//
-//   node apps/android-native/scripts/check-attachments-device.mjs <adb-serial> [apk]
-//
-// It pushes two test files to the phone's Download/mindwtr-test-a2/ (a PDF and a PNG; removed on exit), starts a local
-// WebDAV folder (sync-harness.mjs, reached through `adb reverse`; never a real server) and a second device on this computer
-// (the same native bundle in a Node VM, with a file bridge on a folder here). Then:
-//   (1) the phone syncs to the local folder (Settings › Sync, as a user fills it); the second device joins it and adds a project;
-//   (2) the task editor: Add file picks the PDF in the system's document picker, Add photo picks the PNG in the photo picker,
-//       Add link saves a link; Save stores the three once (the pulled database) and the two files' bytes under
-//       files/attachments/ (their SHA-256 equals the pushed files');
-//   (3) Open on the PDF starts a viewer through the FileProvider (another app comes to the front; Back returns);
-//   (4) Remove on the link, then Save: the link is soft-deleted (deletedAt), the others stay;
-//   (5) the phone's Sync now uploads both files; the second device syncs and holds the same bytes;
-//   (6) the project's Attachments card: Add link writes at once (the database), Remove soft-deletes it;
-//   (7) a kill during an install: the second device adds a file to the project; the phone's sync dies once the installer's
-//       journal is on disk (debug property install_stop=journal); the next boot's recovery rolls it back (no installer file,
-//       no half file), and the next sync installs the whole file;
-//   (8) a remote 404: a project file whose remote copy is gone is marked unrecoverable (cloudKey cleared, soft-deleted) and no
-//       bytes are written; the PDF's remote copy removed, a sync keeps its local bytes;
-//   (9) sync Off again.
-// It installs with `install -r` (development data stays), touches only the development package, never launches over another
-// app, clears its debug property, removes the port mapping and the pushed files, and puts the keyboard back. Leave the phone on
-// its home screen. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,7 +8,8 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, inList, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
-import { hostDevice, serveWebdav } from './sync-harness.mjs';
+import { removeNowhereFiles } from './nowhere-files.mjs';
+import { hostDevice, serveWebdav, webdavDocument } from './sync-harness.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -56,10 +36,10 @@ const PHONE_DIR = '/sdcard/Download/mindwtr-test-a2';
 const work = resolve(app, 'android/build/attachments-check');
 const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'));
 const { getAttachmentDisplayTitle } = await import(resolve(repo, 'packages/core/src/attachment-link-utils.ts'));
-/** A link's row title as core shows it (RN's getAttachmentDisplayTitle: no scheme). */
+
 const linkRow = (uri) => getAttachmentDisplayTitle({ kind: 'link', title: uri, uri });
 
-// This run's names: digits and plain letters only (the phone types them through an English layout).
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const WEBDAV_PORT = Number(process.env.MINDWTR_ATTACHMENTS_WEBDAV_PORT ?? 18773);
 const FOLDER = `/dav/mindwtr-a2-${run}`;
@@ -68,7 +48,7 @@ const PASSWORD = `pw${run}secret`;
 const webdavFields = { url: `http://127.0.0.1:${WEBDAV_PORT}${FOLDER}`, username: USER, password: PASSWORD, allowInsecureHttp: true };
 const names = { task: `94${run}`, project: `A2 project ${run}`, pdf: `a2doc${run}.pdf`, png: `a2pic${run}.png`, link: `https://example.com/a2/${run}` };
 
-// ---- The test files (made here, pushed to the phone's Download folder) ----
+
 mkdirSync(work, { recursive: true });
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const pdfBytes = Buffer.from(`%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n`
@@ -85,7 +65,7 @@ const logs = () => device.logs(pid(), TAG);
 const allLogs = () => device.adbRaw('logcat', '-d', '-s', `${TAG}:*`).toString('utf8');
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 
-// ---- The phone's storage ----
+
 const pullFile = (remote, name) => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -101,13 +81,13 @@ const sqlite = (file, sql) => {
     return out ? JSON.parse(out) : [];
 };
 const quote = (text) => `'${text.replace(/'/g, "''")}'`;
-/** The stored attachments of the task or project titled [title] (all records, removed ones included). */
+
 const stored = (table, title) => {
     const row = sqlite(pullFile(`files/${DB}`, 'db'), `SELECT attachments FROM ${table} WHERE title = ${quote(title)} AND deletedAt IS NULL`)[0];
     return row?.attachments ? JSON.parse(row.attachments) : [];
 };
 const live = (list) => list.filter((attachment) => !attachment.deletedAt);
-/** The phone's files/attachments/ names, and one file's SHA-256 (toybox), or null when it is not there. */
+
 const attachmentFiles = () => runAs('ls -a files/attachments 2>/dev/null || true').split(/\s+/).filter((name) => name && name !== '.' && name !== '..');
 const phoneSha = (uri) => {
     const path = uri.replace(/^file:\/\/\/data\/user\/0\/[^/]+\//, '').replace(/^file:\/\/\/data\/data\/[^/]+\//, '');
@@ -115,7 +95,7 @@ const phoneSha = (uri) => {
     return /^[0-9a-f]{64}/.exec(out)?.[0] ?? null;
 };
 
-// ---- UI (core's English) ----
+
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onSync = (nodes) => Boolean(tagged(nodes, 'settings-sync'));
@@ -145,7 +125,7 @@ const toInbox = async () => {
     if (!onInbox(nodes)) await device.toTop();
     return waitFor('the Inbox', onInbox, 30_000);
 };
-/** The node [find] picks, scrolled into the screen's main list (from the top, then down). */
+
 const reveal = (find, description, fromTop = true) => device.revealNode(find, description, fromTop);
 const openSync = async () => {
     const nodes = await screen();
@@ -176,12 +156,12 @@ const insecureOn = async () => {
     const node = await reveal((current) => withDescription(current, label), 'Allow insecure HTTP');
     if (!switchOn(await screen(), label)) await tapExpecting(node, (current) => switchOn(current, label), 'insecure HTTP on');
 };
-/** How many times [operation] answered (host-entry.ts taskResult's line; its context's quotes arrive escaped). */
-/** The [operation] answers logged with [outcome] after [since] (a logStamp; '' counts the whole buffer). */
+
+
 const commands = (operation, outcome = 'saved', since = '') => linesAfter(logs().replace(/\\/g, ''), since)
     .filter((line) => line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 const stamp = () => logStamp(logs());
-// A Save runs a verification sync and then a normal sync; on the test phone's ~5,600-task library that measured ~95 s (10-13).
+
 const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
     const since = stamp();
     await tapTag(tag, () => commands(operation, 'saved', since) > 0, description, timeoutMs);
@@ -199,6 +179,35 @@ const capture = async (text) => {
     await waitFor(`"${text}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === text, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
+
+const projectList = async () => {
+    let nodes = await toTabs();
+    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
+    const inProject = (current) => current.some((node) => /(^|\/)project-(title-input|details-[a-z]+|attachment-add-link)$/.test(node['resource-id'] ?? ''));
+    for (let step = 0; step < 4 && inProject(nodes); step += 1) {
+        await hideKeyboard();
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(1000);
+        nodes = await screen();
+    }
+    return inProject(nodes) ? fail('the project list did not come back') : nodes;
+};
+
+const removeProjectFile = async (project, file) => {
+    await projectList();
+    let nodes = await device.reveal(project);
+    nodes = await tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
+    if (!tagged(nodes, 'project-attachment-add-link')) {
+        nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
+    }
+    const row = await reveal((current) => current.find((node) => node.text === file), file, false);
+    nodes = await screen();
+    const [, top, , bottom] = box(row);
+    const remove = nodes.find((node) => node.text === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
+    await tapExpecting(remove ?? fail(`no Remove beside ${file}`), (current) => !current.some((node) => node.text === file), `${file} removed`);
+    await projectList();
+};
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -208,12 +217,11 @@ const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) =
     }
 };
 
-// ---- The editor's attachments ----
-/** The editor's attachment rows: the titles core lists (each row carries the test tag `attachment-row`). */
+
 const rowTitles = (nodes) => nodes.filter((node) => /(^|\/)attachment-row$/.test(node['resource-id'] ?? ''))
     .map((row) => { const [l, t, r, b] = box(row); return nodes.find((node) => node.text && node.class === 'android.widget.TextView'
         && box(node)[0] >= l && box(node)[1] >= t && box(node)[2] <= r && box(node)[3] <= b)?.text; }).filter(Boolean);
-/** The editor's Attachments field on screen: scrolled to, its Details section opened when it is folded. */
+
 const revealAttachments = async () => {
     let nodes = await screen();
     for (let step = 0; step < 14 && !tagged(nodes, 'attachment-add-file'); step += 1) {
@@ -235,7 +243,7 @@ const backToApp = async () => {
     }
     if (!front().includes(`${PKG}/`)) throw new Stopped(`the app did not come back to the front: ${front().trim()}`);
 };
-/** Nodes of whatever app is in front (the system pickers), without the app-in-front guard. */
+
 const anyScreen = async () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
@@ -244,7 +252,7 @@ const anyScreen = async () => {
                 return [...xml.matchAll(/<node [^>]*>/g)].map(([tag]) => Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)]
                     .map(([, name, value]) => [name, value.replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))).replace(/&quot;/g, '"').replace(/&amp;/g, '&')])));
             }
-        } catch { /* briefly unavailable */ }
+        } catch {                           }
         await sleep(500);
     }
     return fail('uiautomator dump failed in the picker');
@@ -254,7 +262,7 @@ const tapAny = async (node) => {
     sh(`input tap ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)}`);
     await sleep(900);
 };
-/** The system document picker (ACTION_OPEN_DOCUMENT): the file named [name], found in the list or through its search. */
+
 const pickDocument = async (name) => {
     await until('the document picker', otherAppFront, 15_000, 500);
     await sleep(1500);
@@ -262,7 +270,7 @@ const pickDocument = async (name) => {
         let nodes = await anyScreen();
         const hit = nodes.find((node) => node.text === name);
         if (hit) return tapAny(hit);
-        // The picker's search: its button, the query, Enter, then the result.
+
         const search = nodes.find((node) => /search/i.test(`${node['content-desc']} ${node['resource-id']}`) && node.clickable === 'true');
         if (search) {
             await tapAny(search);
@@ -277,12 +285,12 @@ const pickDocument = async (name) => {
     }
     return fail(`the document picker did not show ${name}`);
 };
-/** The system photo picker (PickVisualMedia): the newest photo, which is this run's PNG (pushed last; its name is checked after). */
+
 const pickNewestPhoto = async () => {
     await until('the photo picker', otherAppFront, 15_000, 500);
     await sleep(2000);
     const nodes = await anyScreen();
-    // The thumbnail's description ("Photo taken on …") sits on a non-clickable child of the clickable cell; both share its bounds.
+
     const photo = nodes.filter((node) => /^(Photo|Image)\b/i.test(node['content-desc'] ?? ''))
         .sort((a, b) => box(a)[1] - box(b)[1] || box(a)[0] - box(b)[0])[0];
     if (!photo) return fail('the photo picker shows no photo');
@@ -305,8 +313,8 @@ try {
     console.log(`apk: ${apk}\napk sha256: ${sha256(readFileSync(apk))}\nrun: ${run}`);
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
-    // The test files; the media scanner indexes them. The PNG is dated far ahead (removed on exit) so the photo picker, which
-    // lists the newest first, shows it before any photo another check or the user left (run 2: "29.png" was newer).
+
+
     sh(`mkdir -p ${PHONE_DIR}`);
     execFileSync(adbBin, ['-s', serial, 'push', resolve(work, names.pdf), `${PHONE_DIR}/${names.pdf}`], { stdio: 'ignore' });
     execFileSync(adbBin, ['-s', serial, 'push', pngFile, `${PHONE_DIR}/${names.png}`], { stdio: 'ignore' });
@@ -317,9 +325,9 @@ try {
     check(true, `the test files are in ${PHONE_DIR} (PDF ${pdfBytes.length} bytes, PNG ${pngBytes.length} bytes) and the PNG is in the media store`);
 
     dav = await serveWebdav({ port: WEBDAV_PORT, username: USER, password: PASSWORD });
-    // No port mapping until a backend left by a cut-off run (its finally never ran) is set Off below: until then the app's
-    // stale WebDAV backend finds no server and reads as offline.
-    try { execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }); } catch { /* none mapped */ }
+
+
+    try { execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }); } catch {                   }
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     sh('setprop debug.mindwtr.native.install_stop \'\'');
     await device.stopApp();
@@ -327,7 +335,10 @@ try {
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 60_000);
 
-    // (1) The phone and the second device on one local WebDAV folder; the second device adds the project.
+    await removeNowhereFiles({ query: (sql) => sqlite(pullFile(`files/${DB}`, 'db'), sql), removeProjectFile });
+    check(true, 'no file that exists nowhere is left from an earlier run (it would stall a switch of sync location)');
+
+
     let nodes = await openSync();
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
         console.log('note - a backend left by an earlier run is set Off before the check maps its port');
@@ -345,14 +356,14 @@ try {
         log: (line) => { if (/error|fail/i.test(line)) console.log(`note - ${line.slice(0, 240)}`); } });
     await second.boot();
     await second.configure('webdav', webdavFields);
-    // core's createProject names the project by its request UUID.
+
     const projectId = (await second.call('createProject', names.project, '', randomUUID())).id;
     await second.syncNow('webdav', { ...webdavFields, password: null });
     await syncNow('Sync now (the second device\'s project)');
     await until('the project on the phone', () => sqlite(pullFile(`files/${DB}`, 'db'), `SELECT id FROM projects WHERE id = ${quote(projectId)}`).length === 1, 30_000);
     check(true, '(1) the phone synced to the local WebDAV folder and has the second device\'s project');
 
-    // (2) The editor: Add file, Add photo, Add link, Save.
+
     await capture(names.task);
     nodes = await device.reveal(names.task);
     await tapExpecting(inList(nodes, names.task) ?? fail('no task row'), inEditor, 'the editor');
@@ -366,11 +377,11 @@ try {
     await pickNewestPhoto();
     await until('the app back with a photo row', async () => front().includes(`${PKG}/`) && rowTitles(await screen()).length >= 2, 30_000, 1_000);
     const photoRow = rowTitles(await screen()).find((title) => title !== names.pdf);
-    // The photo picker names a pick by its media ID ("31.png": its DISPLAY_NAME, which RN's expo-image-picker reads too), so the
-    // pick is told by its bytes: the draft's new copy under files/attachments/ must be this run's PNG.
+
+
     const pngSha = sha256(pngBytes);
     if (!attachmentFiles().some((name) => phoneSha(`file:///data/user/0/${PKG}/files/attachments/${name}`) === pngSha)) {
-        // Not this run's PNG (the picker's newest is someone's photo): discard the draft, so its copies go, and stop.
+
         await backToApp();
         await hideKeyboard();
         requireAppFront();
@@ -399,7 +410,7 @@ try {
     check(phoneSha(pdf.uri) === sha256(pdfBytes) && phoneSha(png.uri) === sha256(pngBytes), '(2) their bytes under files/attachments/ equal the pushed files\' (SHA-256)');
     check(pdf.mimeType === 'application/pdf' && pdf.size === pdfBytes.length, `(2) the PDF's type and size are the picker's (${pdf.mimeType}, ${pdf.size})`);
 
-    // (3) Open the PDF: a viewer comes to the front through the FileProvider; Back returns.
+
     nodes = await device.reveal(names.task);
     await tapExpecting(inList(nodes, names.task), inEditor, 'the editor again');
     await revealAttachments();
@@ -409,7 +420,7 @@ try {
     check(!viewer.includes(PKG), `(3) Open handed the PDF to another app (${viewer.replace(/.*u0 /, '').split(' ')[0]})`);
     await backToApp();
 
-    // (4) Remove the link, Save: soft-deleted. The link is the third row, below the fold once the editor is long.
+
     await reveal((current) => withDescription(current, linkRow(names.link)), 'link row', false);
     nodes = await screen();
     const linkTitle = withDescription(nodes, linkRow(names.link)) ?? fail('no link row');
@@ -421,7 +432,7 @@ try {
     saved = stored('tasks', names.task);
     check(live(saved).length === 2 && saved.length === 3, '(4) Remove soft-deleted the link (deletedAt) and kept the two files');
 
-    // (5) Sync now uploads both files; the second device holds the same bytes.
+
     await syncNow('Sync now (the task\'s files)');
     await until('both files on the WebDAV folder', () => {
         const now = stored('tasks', names.task);
@@ -436,11 +447,11 @@ try {
     const secondCopy = (id, ext) => { try { return sha256(readFileSync(resolve(second.files.dir, 'attachments', `${id}${ext}`))); } catch { return null; } };
     check(secondCopy(pdf.id, '.pdf') === sha256(pdfBytes) && secondCopy(png.id, '.png') === sha256(pngBytes), '(5) the second device downloaded both files byte for byte');
 
-    // (6) The project's Attachments (in its Details): Add link writes at once; Remove soft-deletes it.
+
     nodes = await toTabs();
     nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
     nodes = await device.reveal(names.project);
-    // The project's Attachments sit inside its Details panel (RN's ProjectDetailModal), folded when the project opens.
+
     nodes = await tapExpecting(inList(nodes, names.project) ?? fail('no project row'), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project and its Details');
     await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details and its Attachments');
     await tapExpecting(tagged(await screen(), 'project-attachment-add-link'), (current) => Boolean(tagged(current, 'attachment-link-sheet')), 'the project link sheet');
@@ -457,7 +468,7 @@ try {
     await until('the project link soft-deleted', () => stored('projects', names.project).find((a) => a.uri === projectLink)?.deletedAt, 15_000, 1_000);
     check(true, '(6) Remove soft-deleted the project link (deletedAt)');
 
-    // (7) A kill during an install recovers at the next boot.
+
     const addProjectFile = async (label) => {
         const file = resolve(second.files.cache, `a2-${label}-${run}.bin`);
         writeFileSync(file, extraBytes(label));
@@ -470,7 +481,7 @@ try {
     const killedId = await addProjectFile('install');
     sh('setprop debug.mindwtr.native.install_stop journal');
     const processBefore = pid();
-    // An automatic sync may reach the install first (the app dies on its way to Settings › Sync): either death counts.
+
     await openSync().then(() => tapTag('sync-now', () => pid() !== processBefore, 'the sync to die at the install', 120_000)).catch(() => null);
     await until('the app process to die at the install journal', () => pid() !== processBefore, 120_000, 1_000);
     sh('setprop debug.mindwtr.native.install_stop \'\'');
@@ -484,16 +495,16 @@ try {
     await waitFor('the Inbox after the restart', onInbox, 60_000);
     const recovery = /Native Android install recovery (.+)/.exec(logs())?.[1] ?? '';
     check(/restored=1/.test(recovery), `(7) the boot's recovery rolled the install back (${recovery})`);
-    // The startup sync's pre-sync pass may already have installed the file again (it runs about a second after the
-    // recovery): what proves the rollback is no installer file left and a target that is absent or the whole file, never part.
+
+
     const afterBoot = attachmentFiles();
     const target = afterBoot.find((name) => name.startsWith(killedId));
     const whole = Boolean(target) && phoneSha(`file:///data/user/0/${PKG}/files/attachments/${target}`) === sha256(extraBytes('install'));
     check(!afterBoot.some((name) => name.startsWith('.mindwtr-install-')) && (!target || whole),
         `(7) no installer file and no half file is left; the target is ${target ? 'the whole file (the startup sync installed it again)' : 'absent'}`);
     if (!target) await syncNow('Sync now (the install again)');
-    // The file lands in the pre-sync pass; its record's uri is saved once that sync's merge ends, seconds later. When the
-    // startup sync did the install, nothing above waited for that save (10-07 to 10-09: the record still read uri '', missing).
+
+
     const installedWhole = () => {
         const installed = live(stored('projects', names.project)).find((a) => a.id === killedId);
         return Boolean(installed?.uri) && phoneSha(installed.uri) === sha256(extraBytes('install'));
@@ -501,7 +512,7 @@ try {
     await until('(7) the whole file (SHA-256) in its stored record', installedWhole, 120_000, 3_000);
     check(true, '(7) the next sync installed the whole file (SHA-256)');
 
-    // (8) A remote 404 is terminal and writes no bytes; a removed remote copy never deletes local bytes.
+
     const goneId = await addProjectFile('gone');
     const gone = (await second.call('menuRead', 'attachmentList', JSON.stringify({ owner: { kind: 'project', projectId } }))).rows.find((row) => row.id === goneId);
     const goneKey = [...dav.state.files.keys()].find((path) => path.includes(goneId));
@@ -509,14 +520,33 @@ try {
     dav.state.files.delete(goneKey);
     const pdfKey = `${FOLDER}/${stored('tasks', names.task).find((a) => a.id === pdf.id).cloudKey}`;
     dav.state.files.delete(pdfKey);
+    const goneCloudKey = goneKey.slice(FOLDER.length + 1);
     await syncNow('Sync now (the 404)');
-    await until('the 404 to settle', () => stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt, 120_000, 3_000);
-    const unrecoverable = stored('projects', names.project).find((a) => a.id === goneId);
-    check(!unrecoverable.cloudKey && unrecoverable.localStatus === 'missing' && !attachmentFiles().some((name) => name.startsWith(goneId)),
-        '(8) the 404 marked the file unrecoverable (cloudKey cleared, missing, soft-deleted) and wrote no bytes');
+    const kept = stored('projects', names.project).find((a) => a.id === goneId);
+    check(Boolean(kept) && !kept.deletedAt && kept.cloudKey === goneCloudKey && kept.localStatus !== 'available'
+        && !attachmentFiles().some((name) => name.startsWith(goneId)),
+        '(8) the 404 kept the attachment (live, its key, not available) and wrote no bytes');
     check(phoneSha(pdf.uri) === sha256(pdfBytes), '(8) the PDF\'s remote copy gone, the sync kept its local bytes');
 
-    // (9) Sync Off again.
+
+    const removed = await second.call('menuCommand', 'attachmentRemove', JSON.stringify({ requestId: randomUUID(), owner: { kind: 'project', projectId }, attachmentId: goneId }));
+    if (removed.kind !== 'saved') fail(`the second device did not remove the kept attachment (${JSON.stringify(removed)})`);
+    await second.syncNow('webdav', { ...webdavFields, password: null });
+
+    const remoteGone = () => webdavDocument(dav, FOLDER)?.projects?.find((p) => p.id === projectId)?.attachments?.find((a) => a.id === goneId);
+    await until('the second device\'s delete in the folder', async () => {
+        if (remoteGone()?.deletedAt) return true;
+        await second.syncNow('webdav', { ...webdavFields, password: null });
+        return Boolean(remoteGone()?.deletedAt);
+    }, 120_000, 5_000);
+
+    for (let attempt = 0; attempt < 3 && !stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt; attempt += 1) {
+        await syncNow(`Sync now (the second device removed the kept file, try ${attempt + 1})`);
+    }
+    await until('the kept attachment deleted on the phone', () => stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt, 60_000, 3_000);
+    check(true, '(8) the second device\'s Remove deleted the kept attachment on the phone (a real delete still wins)');
+
+
     await openSync();
     await tapTag('sync-backend-off', (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     await toTabs();
@@ -525,13 +555,13 @@ try {
     try {
         console.log(`evidence - app log (attachments):\n${logs().split('\n').filter((line) => /attachment|Attachment|install|Core action|sync state/.test(line))
             .slice(-60).map((line) => line.slice(0, 300)).join('\n')}`);
-    } catch { /* the app is gone */ }
+    } catch {                       }
     evidenced(error);
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {
-    // A failed run leaves the phone's backend on a folder about to stop: set Sync Off, as step (9) does, so the next check's
-    // app does not keep syncing against it (check-encryption-device.mjs does the same).
+
+
     if (process.exitCode === 1 && dav) {
         try {
             if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);

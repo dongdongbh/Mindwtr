@@ -7,12 +7,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import org.json.JSONObject
 
-/**
- * The device's network state for core's sync service, as RN reads it with expo-network (NetworkModule.kt, Android 10+):
- * `isInternetReachable` is whether there is an active network, `isConnected` whether its transport is a known one. [changed]
- * gets the state again whenever a network comes or goes (expo-network's listener: onAvailable and onLost); it is called on
- * ConnectivityManager's thread, so it only hands the text on.
- */
+
 class HostNetwork(context: Context, private val changed: (String) -> Unit) {
     private val manager = context.getSystemService(ConnectivityManager::class.java)
     private val callback = object : ConnectivityManager.NetworkCallback() {

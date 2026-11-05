@@ -2,7 +2,6 @@ import { Swipeable } from 'react-native-gesture-handler';
 import {
     formatTaskMarkedDoneMessage,
     getFocusStarBlockedText,
-    formatI18nTemplate,
     getProjectNextActionPromptData,
     isTaskFinished,
     isTaskActionable,
@@ -10,6 +9,9 @@ import {
     buildQuickAddParseOptions,
     buildTaskMovePatch,
     buildTaskRowMeta,
+    buildTaskRowSwipeActions,
+    canMoveTaskToChecklist,
+    resolveQuickCaptureDefaultAreaId,
     flushPendingSave,
     getDateFormattingConfig,
     parseProjectNextActionInput,
@@ -20,88 +22,82 @@ import {
     undoTaskCompletion,
     useTaskStore,
 } from '@mindwtr/core';
-import type { Area, Project, ProjectSequenceTaskCue, Section, Task, TaskMoveDestination, TaskStatus } from '@mindwtr/core';
+import type { Area, Project, ProjectSequenceTaskCue, Section, Task, TaskMoveDestination, TaskRowSwipeAction, TaskStatus } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
-import { ArrowRight, Check, RotateCcw, Trash2 } from 'lucide-react-native';
+import { Platform, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { ThemeColors } from '../hooks/use-theme-colors';
 import { useStatusColors } from '../hooks/use-status-colors';
 import { useTaskDisplayClock } from '../hooks/use-task-display-clock';
 import { useToast } from '../contexts/toast-context';
-import { AppPressable } from './app-pressable';
 import { logNextActionSavedForEditing, presentProjectNextActionPrompt, ProjectNextActionEditor } from './project-next-action-prompt';
 import { SwipeableTaskItemContent } from './swipeable-task-item/SwipeableTaskItemContent';
 import { ProjectNextActionPromptModal } from './swipeable-task-item/ProjectNextActionPromptModal';
 import { SwipeableTaskItemStatusMenu } from './swipeable-task-item/SwipeableTaskItemStatusMenu';
+import { SwipeableTaskItemTray } from './swipeable-task-item/SwipeableTaskItemTray';
+import { SwipeableTaskItemDatesSheet } from './swipeable-task-item/SwipeableTaskItemDatesSheet';
 import { CompletedAtPicker } from './completed-at-picker';
-import { styles } from './swipeable-task-item/swipeable-task-item.styles';
-import { CompactText } from '@/components/compact-text';
 import { useSwipeableChecklist } from './swipeable-task-item/useSwipeableChecklist';
 import { settleStoreAction } from './store-action-result';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
+import { ChecklistTargetPicker } from './swipeable-task-item/ChecklistTargetPicker';
 
-/**
- * Everything a row can mutate, on one object whose identity never changes
- * (#766). Rows bind their own task into these, so a list can hand every row the
- * same object instead of a fresh arrow per row per render — a fresh arrow is
- * what defeats the memo boundary below.
- */
+
 export type TaskRowActions = {
     edit: (task: Task) => void;
     changeStatus: (task: Task, status: TaskStatus) => void | Promise<unknown>;
     remove: (task: Task) => void | Promise<unknown>;
     moveToSection?: (task: Task) => void;
-    /** Omitted by lists without multi-select. */
+
     toggleSelect?: (task: Task) => void;
 };
 
 export interface SwipeableTaskItemProps {
     task: Task;
     isDark: boolean;
-    /** Theme colors object from useThemeColors hook */
+
     tc: ThemeColors;
-    /** Preferred over the per-row `onPress`/`onStatusChange`/`onDelete` arrows. */
+
     actions?: TaskRowActions;
     onPress?: () => void;
     onStatusChange?: (status: TaskStatus) => void | Promise<unknown>;
     onDelete?: () => void | Promise<unknown>;
     onMoveToSection?: () => void;
-    /** Receives the row's task so callers can pass one stable handler. */
+
     onLongPressAction?: (task: Task) => void;
     onLongPressActionLabel?: string;
-    /** Hide context tags (useful when viewing a specific context) */
+
     hideContexts?: boolean;
-    /** Multi-select mode for bulk actions */
+
     selectionMode?: boolean;
     isMultiSelected?: boolean;
     onToggleSelect?: () => void;
     isHighlighted?: boolean;
     showFocusToggle?: boolean;
-    /** Announce-and-disable the star instead of offering a tap that can only refuse
-     *  (Focus "Upcoming": every row there is deferred by construction). */
+
+
     focusToggleDisabledLabel?: string;
-    /** Keep the focus star while allowing context-specific lists to avoid a redundant card outline. */
+
     showFocusHighlight?: boolean;
     hideStatusBadge?: boolean;
-    /** Render the status control as a compact icon button (no status-name label) for single-status lists */
+
     statusBadgeAsIcon?: boolean;
     sequenceCue?: ProjectSequenceTaskCue;
     sequenceLabel?: string;
     disableSwipe?: boolean;
     interactionDisabled?: boolean;
-    /** Keep the primary row press available for historical inspection only. */
+
     allowInspectionWhenDisabled?: boolean;
     hideChecklistProgress?: boolean;
     hideProjectMeta?: boolean;
-    /** Title-only row: suppress the description preview and metadata parts row. */
+
     hideDetails?: boolean;
     onProjectPress?: (projectId: string) => void;
     onContextPress?: (context: string) => void;
     onTagPress?: (tag: string) => void;
     projectDeadlineLabel?: string;
-    /** Optional compact content rendered inside the task card below its metadata. */
+
     footerContent?: React.ReactNode;
     rowContext?: SwipeableTaskItemRowContext;
 }
@@ -137,6 +133,7 @@ export type SwipeableTaskItemRowContext = {
 const TASK_SWIPE_FRICTION = 1.25;
 const TASK_SWIPE_OPEN_THRESHOLD = 72;
 const TASK_SWIPE_DRAG_OFFSET = 28;
+const TRAY_LABEL_MAX_FONT_SCALE = 1.2;
 
 type ResolvedRowCallbacks = {
     onPress: () => void;
@@ -155,7 +152,7 @@ type SwipeableTaskItemInnerProps = Omit<SwipeableTaskItemResolvedProps, 'rowCont
 
 const noop = () => {};
 
-/** Binds this row's task into the shared `actions`, inside the memo boundary. */
+
 function resolveRowCallbacks(props: SwipeableTaskItemProps): ResolvedRowCallbacks {
     const { actions, task } = props;
     const toggleSelect = actions?.toggleSelect;
@@ -170,21 +167,12 @@ function resolveRowCallbacks(props: SwipeableTaskItemProps): ResolvedRowCallback
     };
 }
 
-// Renders of task rows, read by TaskList to report how many rows a commit
-// actually re-rendered (#766). Shared across lists on purpose: it is a diff
-// taken around one list's render, and a second list rendering in the same pass
-// is itself the thing worth seeing.
+
 let taskRowRenderCount = 0;
 
 export const readTaskRowRenderCount = (): number => taskRowRenderCount;
 
-// The memo boundary for a single row (#766). Any store change re-renders the
-// list, but a row re-renders only when the task object it draws — or one of the
-// flags it draws — actually changed. Every prop is compared by identity, which
-// is why per-row callbacks belong in `actions`. `tc` included: resolveThemeTokens
-// hands out one object per distinct theme, so it only changes when the theme does.
-// Not core's `shallow`: that one is stubbed out in several suites, which would
-// quietly turn the boundary off under test.
+
 function areRowPropsEqual(prev: SwipeableTaskItemProps, next: SwipeableTaskItemProps): boolean {
     const keys = Object.keys(prev) as (keyof SwipeableTaskItemProps)[];
     if (keys.length !== Object.keys(next).length) return false;
@@ -225,15 +213,7 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
     return <SwipeableTaskItemInner {...props} rowContext={rowContext} />;
 }
 
-/**
- * A swipeable task item with context-aware left swipe actions:
- * - Inbox: swipe to Next
- * - Next: swipe to Done
- * - Waiting/Someday: swipe to Next
- * - Done: swipe to restore to Inbox
- * 
- * Right swipe always shows Delete action.
- */
+
 function SwipeableTaskItemInner({
     task,
     isDark,
@@ -270,6 +250,7 @@ function SwipeableTaskItemInner({
     rowContext,
 }: SwipeableTaskItemInnerProps) {
     const swipeableRef = useRef<Swipeable>(null);
+    const { fontScale } = useWindowDimensions();
     const ignorePressUntil = useRef<number>(0);
     const { t, language } = useLanguage();
     const { showToast } = useToast();
@@ -298,7 +279,7 @@ function SwipeableTaskItemInner({
         toggleChecklist,
         toggleChecklistItem,
     } = useSwipeableChecklist(task, updateTask, interactionDisabled);
-    // The lookups scan the project and area lists, so they rerun only when a container changes.
+
     const lookup = useMemo(() => resolveTaskRowLookup(
         { projectId: task.projectId, areaId: task.areaId, sectionId: task.sectionId },
         projects,
@@ -306,7 +287,7 @@ function SwipeableTaskItemInner({
         sectionById,
     ), [areas, projects, sectionById, task.areaId, task.projectId, task.sectionId]);
     const displayRevision = useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge));
-    // The configuration the root layout applied, so labels match the rest of the app.
+
     const dateFormatting = getDateFormattingConfig();
     const meta = useMemo(() => {
         void displayRevision;
@@ -351,8 +332,16 @@ function SwipeableTaskItemInner({
     const canShowFocusToggle = !interactionDisabled
         && showFocusToggle
         && meta.canFocus;
+    const swipeActions = useMemo(() => buildTaskRowSwipeActions({
+        task: { status: task.status, isFocusedToday: task.isFocusedToday },
+        t,
+        selectionMode,
+        interactionDisabled,
+    }), [interactionDisabled, selectionMode, t, task.isFocusedToday, task.status]);
     const [showStatusMenu, setShowStatusMenu] = useState(false);
+    const [showDatesSheet, setShowDatesSheet] = useState(false);
     const [showDestinationPicker, setShowDestinationPicker] = useState(false);
+    const [showChecklistPicker, setShowChecklistPicker] = useState(false);
     const [projectNextActionPrompt, setProjectNextActionPrompt] = useState<ProjectNextActionPromptState | null>(null);
     const [projectNextActionTitle, setProjectNextActionTitle] = useState('');
     const [isProjectNextActionSubmitting, setIsProjectNextActionSubmitting] = useState(false);
@@ -425,10 +414,8 @@ function SwipeableTaskItemInner({
                     return;
                 }
                 if (status === 'done' && previousStatus !== 'done') {
-                    // Completing mirrors deleting: immediate, with an undo toast
-                    // instead of a confirmation (matches the desktop undo).
-                    // No title: the one-line message plus Undo is the whole point,
-                    // and a "Notice" header just makes the toast taller (#1044).
+
+
                     showToast({
                         message: formatTaskMarkedDoneMessage(t, task.title),
                         tone: 'info',
@@ -462,6 +449,7 @@ function SwipeableTaskItemInner({
     useEffect(() => {
         if (!interactionDisabled) return;
         setShowStatusMenu(false);
+        setShowDatesSheet(false);
         setCompletedAtPicker(null);
         closeProjectNextActionPrompt();
     }, [closeProjectNextActionPrompt, interactionDisabled]);
@@ -506,8 +494,8 @@ function SwipeableTaskItemInner({
         if (interactionDisabled || !projectNextActionPrompt || isProjectNextActionSubmitting) return;
         const { projectId } = projectNextActionPrompt;
         setIsProjectNextActionSubmitting(true);
-        // Archiving completes the project's remaining tasks in core and is
-        // reversible (Reactivate); no confirmation, matching the Archive button.
+
+
         void settleStoreAction(() => useTaskStore.getState().updateProject(projectId, { status: 'archived' }))
             .then((outcome) => {
                 if (!outcome.ok) {
@@ -581,11 +569,10 @@ function SwipeableTaskItemInner({
         showActionFailure,
     ]);
 
-    const toggleFocus = () => {
+
+    const toggleFocus = (promoteInbox: boolean) => {
         if (interactionDisabled || selectionMode) return;
-        // Core focus-star module decides eligibility, cap, and the patch;
-        // status promotion happens in the store's star↔status rules.
-        const action = useTaskStore.getState().getFocusStarAction(task);
+        const action = useTaskStore.getState().getFocusStarAction(task, { promoteInbox });
         if (!action.canToggle) {
             const blockedText = getFocusStarBlockedText(t, action, focusTaskLimit);
             if (blockedText) {
@@ -605,8 +592,6 @@ function SwipeableTaskItemInner({
             });
     };
 
-    const leftAction = meta.swipe;
-    const leftActionColor = statusColors[leftAction.target].text;
     const swipeAccessibilityHint = interactionDisabled
         ? (allowInspectionWhenDisabled
             ? tFallback(t, 'projects.archivedTaskInspectionHint', 'Double-tap to inspect this task. Reactivate the project to edit it.')
@@ -619,53 +604,74 @@ function SwipeableTaskItemInner({
                 'Double-tap to edit task details. More actions are available in the accessibility actions menu.',
             );
 
-    const renderLeftActions = () => {
-        const LeftIcon = leftAction.icon === 'restore' ? RotateCcw : leftAction.icon === 'done' ? Check : ArrowRight;
-        return (
-            <AppPressable
-                style={[styles.swipeActionLeft, { backgroundColor: leftActionColor }]}
-                pressedColor="rgba(0, 0, 0, 0.18)"
-                onPress={() => {
-                    swipeableRef.current?.close();
-                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-                    handleStatusChange(leftAction.target);
-                }}
-                onLongPress={() => {
-                    swipeableRef.current?.close();
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
-                    setShowStatusMenu(true);
-                }}
-                accessibilityLabel={formatI18nTemplate(
-                    tFallback(t, 'task.aria.action', '{action} action'),
-                    { action: leftAction.label },
-                )}
-                accessibilityRole="button"
-                accessibilityHint={t('taskStatus.changeStatus')}
-            >
-                <LeftIcon size={20} color="#FFFFFF" />
-                <CompactText style={styles.swipeActionText} numberOfLines={1}>
-                    {leftAction.label}
-                </CompactText>
-            </AppPressable>
-        );
+    const handleDatesSave = (patch: Partial<Task>) => {
+        setShowDatesSheet(false);
+        if (interactionDisabled) return;
+        void settleStoreAction(() => updateTask(task.id, patch)).then((outcome) => {
+            if (!outcome.ok) showActionFailure(outcome.message);
+        });
     };
 
-    const renderRightActions = () => (
-        <AppPressable
-            style={styles.swipeActionRight}
-            pressedColor="rgba(0, 0, 0, 0.18)"
-            onPress={() => {
-                swipeableRef.current?.close();
+
+    const runSwipeAction = (action: TaskRowSwipeAction) => {
+        if (interactionDisabled || selectionMode || !action.enabled) return;
+        switch (action.id) {
+            case 'focus':
+                toggleFocus(true);
+                return;
+            case 'organize':
+                setShowStatusMenu(true);
+                return;
+            case 'dates':
+                setShowDatesSheet(true);
+                return;
+            case 'delete':
                 handleDelete();
-            }}
-            accessibilityLabel={tFallback(t, 'task.aria.delete', 'Delete task')}
-            accessibilityRole="button"
-        >
-            <Trash2 size={20} color="#FFFFFF" />
-            <CompactText style={styles.swipeActionText} numberOfLines={1}>
-                {t('common.delete')}
-            </CompactText>
-        </AppPressable>
+                return;
+            default:
+                if (action.status) handleStatusChange(action.status);
+        }
+    };
+
+    const pressTrayAction = (action: TaskRowSwipeAction) => {
+        swipeableRef.current?.close();
+        if (action.id === 'done' || action.id === 'restore' || action.id === 'next') {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+        }
+        runSwipeAction(action);
+    };
+
+    const canBackdateCompletion = !interactionDisabled && !selectionMode && task.status !== 'done';
+
+    const longPressTrayDone = canBackdateCompletion ? () => {
+        swipeableRef.current?.close();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+        setCompletedAtPicker('complete');
+    } : undefined;
+
+    const showTrayLabels = fontScale <= TRAY_LABEL_MAX_FONT_SCALE;
+
+    const renderLeftActions = () => (
+        <SwipeableTaskItemTray
+            actions={swipeActions.swipeRight}
+            side="left"
+            showLabels={showTrayLabels}
+            statusColors={statusColors}
+            t={t}
+            onAction={pressTrayAction}
+            onLongPressDone={longPressTrayDone}
+        />
+    );
+
+    const renderRightActions = () => (
+        <SwipeableTaskItemTray
+            actions={swipeActions.swipeLeft}
+            side="right"
+            showLabels={showTrayLabels}
+            statusColors={statusColors}
+            t={t}
+            onAction={pressTrayAction}
+        />
     );
 
     const handlePress = () => {
@@ -681,9 +687,7 @@ function SwipeableTaskItemInner({
         onPress();
     };
 
-    // Deleting is a recoverable move to Trash, so it happens immediately with
-    // an undo toast instead of a confirmation alert. Permanent purge (in Trash)
-    // keeps its confirmation.
+
     const handleDelete = () => {
         if (interactionDisabled) return;
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
@@ -711,10 +715,34 @@ function SwipeableTaskItemInner({
             });
     };
 
+
+    const handleMoveToChecklist = (targetId: string) => {
+        if (interactionDisabled) return;
+        void settleStoreAction(() => useTaskStore.getState().moveTaskToChecklist(task.id, targetId))
+            .then((outcome) => {
+                if (!outcome.ok) {
+                    showActionFailure(outcome.message);
+                    return;
+                }
+                showToast({
+                    message: tFallback(t, 'task.addedToChecklist', 'Added to checklist'),
+                    tone: 'info',
+                    actionLabel: tFallback(t, 'common.undo', 'Undo'),
+                    onAction: () => {
+                        void settleStoreAction(() => useTaskStore.getState().undoMoveTaskToChecklist(task.id, targetId))
+                            .then((undoOutcome) => {
+                                if (!undoOutcome.ok) showActionFailure(undoOutcome.message);
+                            });
+                    },
+                    durationMs: 5200,
+                });
+            });
+    };
+
     const handleLongPress = () => {
         if (interactionDisabled) return;
         ignorePressUntil.current = Date.now() + 500;
-        // Note: onDragStart is handled by the drag handle directly, not here
+
         if (onLongPressAction) {
             onLongPressAction(task);
             return;
@@ -737,11 +765,10 @@ function SwipeableTaskItemInner({
         },
         ...(!selectionMode
             ? [
-                { name: 'changeStatus', label: leftAction.label },
+                ...[...swipeActions.swipeRight, ...swipeActions.swipeLeft].map((action) => ({ name: action.id, label: action.label })),
                 ...(onLongPressAction && onLongPressActionLabel
                     ? [{ name: 'longPressAction', label: onLongPressActionLabel }]
                     : []),
-                { name: 'delete', label: tFallback(t, 'common.delete', 'Delete') },
             ]
             : []),
     ];
@@ -757,17 +784,12 @@ function SwipeableTaskItemInner({
             return;
         }
         if (selectionMode) return;
-        if (actionName === 'changeStatus') {
-            handleStatusChange(leftAction.target);
-            return;
-        }
         if (actionName === 'longPressAction' && onLongPressAction) {
             onLongPressAction(task);
             return;
         }
-        if (actionName === 'delete') {
-            handleDelete();
-        }
+        const action = [...swipeActions.swipeRight, ...swipeActions.swipeLeft].find((item) => item.id === actionName);
+        if (action) runSwipeAction(action);
     };
 
     const content = (
@@ -802,7 +824,7 @@ function SwipeableTaskItemInner({
             footerContent={footerContent}
             onToggleChecklist={toggleChecklist}
             onToggleChecklistItem={toggleChecklistItem}
-            onToggleFocus={toggleFocus}
+            onToggleFocus={() => toggleFocus(false)}
             focusToggleDisabledLabel={task.isFocusedToday ? undefined : focusToggleDisabledLabel}
             selectionMode={selectionMode}
             sequenceCue={sequenceCue}
@@ -841,14 +863,22 @@ function SwipeableTaskItemInner({
                 onStatusChange={handleStatusChange}
                 onMoveToDestination={() => setShowDestinationPicker(true)}
                 onMoveToSection={onMoveToSection}
-                onBackdatedComplete={interactionDisabled || task.status === 'done'
-                    ? undefined
-                    : () => setCompletedAtPicker('complete')}
+                onAddToChecklist={canMoveTaskToChecklist(task, resolveQuickCaptureDefaultAreaId(useTaskStore.getState().settings, useTaskStore.getState().areas)) ? () => setShowChecklistPicker(true) : undefined}
+                onBackdatedComplete={canBackdateCompletion ? () => setCompletedAtPicker('complete') : undefined}
                 taskId={task.id}
                 taskStatus={task.status}
                 tc={tc}
                 t={t}
             />
+            {!interactionDisabled && showDatesSheet ? (
+                <SwipeableTaskItemDatesSheet
+                    task={task}
+                    tc={tc}
+                    t={t}
+                    onClose={() => setShowDatesSheet(false)}
+                    onSave={handleDatesSave}
+                />
+            ) : null}
             {!interactionDisabled && showDestinationPicker ? (
                 <TaskEditDestinationPicker
                     visible
@@ -860,6 +890,15 @@ function SwipeableTaskItemInner({
                     t={t}
                     onClose={() => setShowDestinationPicker(false)}
                     onSelect={handleMoveToDestination}
+                />
+            ) : null}
+            {!interactionDisabled && showChecklistPicker ? (
+                <ChecklistTargetPicker
+                    sourceId={task.id}
+                    tc={tc}
+                    t={t}
+                    onClose={() => setShowChecklistPicker(false)}
+                    onSelect={handleMoveToChecklist}
                 />
             ) : null}
             {!interactionDisabled && completedAtPicker ? (

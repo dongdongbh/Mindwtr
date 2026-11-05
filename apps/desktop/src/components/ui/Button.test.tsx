@@ -49,7 +49,7 @@ describe('Button', () => {
         );
         const button = getByRole('button', { name: 'Custom' });
         expect(button.className).toContain('bg-emerald-500');
-        // twMerge should drop the base bg-primary utility (the hover variant stays).
+
         expect(button.className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
     });
 });

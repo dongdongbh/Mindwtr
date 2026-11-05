@@ -15,7 +15,7 @@ const renderWithProviders = (ui: React.ReactElement) => {
     );
 };
 
-// Keep review calendar stages genuinely empty unless a test seeds calendar work.
+
 vi.mock('../../lib/external-calendar-events', () => ({
     fetchExternalCalendarEvents: vi.fn(async () => ({ calendars: [], events: [], warnings: [] })),
     summarizeExternalCalendarWarnings: vi.fn((warnings: string[]) => warnings[0] ?? null),
@@ -93,6 +93,54 @@ describe('ReviewView', () => {
             },
             expandedTaskIds: {},
         });
+    });
+
+    it('keeps sequence tails editable behind a local disclosure and never hides explicit due reviews', () => {
+        const project = makeProject('sequence', { isSequential: true });
+        const tasks = [
+            makeTask('head', { projectId: project.id, title: 'Waiting head', status: 'waiting', order: 0 }),
+            makeTask('tail', { projectId: project.id, title: 'Later tail', order: 1 }),
+            makeTask('due-tail', { projectId: project.id, title: 'Review due tail', order: 2, reviewAt: '2020-01-01' }),
+        ];
+        const updateTask = vi.fn();
+        useTaskStore.setState({ _allTasks: tasks, tasks, _allProjects: [project], projects: [project], updateTask });
+        const { getByRole, getByText, queryByText, container } = renderWithProviders(<ReviewView />);
+        expect(getByText('Review due tail')).toBeInTheDocument();
+        expect(queryByText('Later tail')).not.toBeInTheDocument();
+        expect(queryByText(/Later in sequence/)).not.toBeInTheDocument();
+        fireEvent.click(getByRole('button', { name: 'All open tasks' }));
+        expect(getByText('Waiting head')).toBeInTheDocument();
+        const disclosure = getByRole('button', { name: 'Later in sequence (2)' });
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+        expect(queryByText('Later tail')).not.toBeInTheDocument();
+        fireEvent.click(disclosure);
+        expect(getByText('Later tail')).toBeInTheDocument();
+        expect(container.querySelector('[data-task-id="tail"]')).toBeInTheDocument();
+        fireEvent.click(disclosure);
+        expect(queryByText('Later tail')).not.toBeInTheDocument();
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks).toEqual(tasks);
+        fireEvent.click(disclosure);
+        fireEvent.doubleClick(getByText('Later tail'));
+        expect(useUiStore.getState().editingTaskId).toBe('tail');
+    });
+
+    it('keeps manual later sequence order when the ordinary review list uses title sort', () => {
+        const project = makeProject('sequence', { isSequential: true });
+        const tasks = [
+            makeTask('head', { projectId: project.id, status: 'waiting', order: 0 }),
+            makeTask('zulu', { projectId: project.id, title: 'Zulu comes first', order: 1 }),
+            makeTask('alpha', { projectId: project.id, title: 'Alpha comes later', order: 2 }),
+        ];
+        useTaskStore.setState({ _allTasks: tasks, tasks, _allProjects: [project], projects: [project], settings: { taskSortBy: 'title' } });
+        const { getByRole, getByText, container } = renderWithProviders(<ReviewView />);
+        fireEvent.click(getByRole('button', { name: 'All open tasks' }));
+        fireEvent.click(getByRole('button', { name: 'Select' }));
+        fireEvent.click(getByRole('button', { name: 'Select All' }));
+        expect(getByText('1 selected - 1 tasks')).toBeInTheDocument();
+        expect(getByRole('button', { name: 'Select All' })).toBeDisabled();
+        fireEvent.click(getByRole('button', { name: 'Later in sequence (2)' }));
+        expect(Array.from(container.querySelectorAll('[data-task-id]')).map((row) => row.getAttribute('data-task-id'))).toEqual(['head', 'zulu', 'alpha']);
     });
 
     it('renders the review list with a guide button', () => {
@@ -236,7 +284,7 @@ describe('ReviewView', () => {
         const tasks = [target, due];
         useTaskStore.setState({ tasks, _allTasks: tasks });
         expect(resolveTaskNavigationView(target)).toBe('review');
-        // App applies the search highlight when its destination is displayed.
+
         useTaskStore.getState().setHighlightTask(target.id);
         const { getByRole, getByText, queryByText } = renderWithProviders(<ReviewView />);
 
@@ -258,7 +306,7 @@ describe('ReviewView', () => {
         act(() => useTaskStore.setState({ tasks: [...tasks] }));
         expect(getByRole('button', { name: 'Due for review' })).toHaveAttribute('aria-pressed', 'true');
 
-        // A second selection of the same result is a new navigation request.
+
         const highlightAt = useTaskStore.getState().highlightTaskAt!;
         const clock = vi.spyOn(Date, 'now').mockReturnValue(highlightAt + 1);
         act(() => useTaskStore.getState().setHighlightTask(target.id));

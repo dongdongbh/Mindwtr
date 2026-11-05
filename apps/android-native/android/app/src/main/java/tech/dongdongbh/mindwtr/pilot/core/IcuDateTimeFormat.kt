@@ -11,21 +11,14 @@ import org.json.JSONObject
 import java.text.CharacterIterator
 import java.util.Date
 
-/**
- * Intl.DateTimeFormat for the JS host (host-polyfills.js), built as RN's Hermes builds it on Android, over android.icu:
- * a port of facebook/hermes `lib/Platform/Intl/java/com/facebook/hermes/intl` (DateTimeFormat.java,
- * PlatformDateTimeFormatterICU.java, LocaleResolver.java, LocaleMatcher.java, UnicodeExtensionKeys.java) at the Hermes
- * RN 0.81 ships (e0fc671). Same option resolution, skeleton, ICU DateFormat and part types, so a date reads as in RN.
- * The polyfill does Hermes's C++ part (reading the locales and options, toLocale*String's defaults, TimeClip).
- * Pure (no IO); made and used on the engine thread only.
- */
+
 class IcuDateTimeFormat {
     private class Format(val format: DateFormat, val resolved: JSONObject)
 
-    /** One formatter per `{ locales, options }` JSON from the polyfill. */
+
     private val formats = HashMap<String, Format>()
 
-    /** [op] is "resolvedOptions", "format" or "formatToParts"; [time] is the epoch ms (TimeClipped by the polyfill). */
+
     fun reply(spec: String, op: String, time: Double): String {
         val format = formats.getOrPut(spec) { create(JSONObject(spec)) }
         return when (op) {
@@ -36,11 +29,11 @@ class IcuDateTimeFormat {
         }
     }
 
-    /** DateTimeFormat.initializeDateTimeFormat, then PlatformDateTimeFormatterICU.configure. */
+
     private fun create(spec: JSONObject): Format {
         val locales = spec.getJSONArray("locales").let { list -> List(list.length()) { list.getString(it) } }
         val options = spec.getJSONObject("options")
-        // ToDateTimeOptions(options, "any", "date").
+
         if (listOf("weekday", "year", "month", "day", "hour", "minute", "second", "dateStyle", "timeStyle").none(options::has)) {
             for (name in listOf("year", "month", "day")) options.put(name, "numeric")
         }
@@ -55,8 +48,7 @@ class IcuDateTimeFormat {
         val hour12 = if (options.has("hour12")) options.getBoolean("hour12") else null
         val hourCycle = option("hourCycle", listOf("h11", "h12", "h23", "h24"))
 
-        // LocaleResolver.resolveLocale for the keys ca, nu and hc. hour12 makes the hourCycle option null (JS null), which
-        // still replaces the locale's own hc. ponytail: localeMatcher "lookup" matches as "best fit" (core never asks for it).
+
         val (matched, extensions) = match(locales)
         var locale = matched
         val requested = mapOf("ca" to calendar, "nu" to numberingSystem, "hc" to hourCycle.takeIf { hour12 == null })
@@ -114,8 +106,7 @@ class IcuDateTimeFormat {
             if (value != null) resolvedOptions.put(name, value)
         }
 
-        // PlatformDateTimeFormatterICU.getSkeleton. (Its step for the locale's own hc compares strings with Java's ==,
-        // so it never runs; the resolved hour cycle below covers that extension anyway.)
+
         val twelve = cycle == "h11" || cycle == "h12"
         val skeleton = if (dateStyle != null || timeStyle != null) {
             val pattern = StringBuilder(stylePattern(locale, dateStyle, timeStyle))
@@ -136,7 +127,7 @@ class IcuDateTimeFormat {
                 symbol(timeZoneName, mapOf("long" to "zzzz", "longOffset" to "OOOO", "longGeneric" to "vvvv", "short" to "z",
                     "shortOffset" to "O", "shortGeneric" to "v"))
         }
-        // PlatformDateTimeFormatterICU.configure: a requested calendar or numbering system goes on the formatter's locale.
+
         val calendarInstance = resolved["ca"]?.let { Calendar.getInstance(ULocale.Builder().setLocale(locale).setUnicodeLocaleKeyword("ca", it).build()) }
         resolved["nu"]?.let { name ->
             requireNotNull(runCatching { NumberingSystem.getInstanceByName(name) }.getOrNull()) { "Invalid numbering system: $name" }
@@ -148,7 +139,7 @@ class IcuDateTimeFormat {
         return Format(format, resolvedOptions)
     }
 
-    /** LocaleMatcher.bestFitMatch: the first requested tag ICU has without falling back, else the device's format locale. */
+
     private fun match(locales: List<String>): Pair<ULocale, Map<String, String>> {
         for (tag in locales) {
             val requested = ULocale.Builder().setLanguageTag(tag).build()
@@ -156,7 +147,7 @@ class IcuDateTimeFormat {
             val found = ULocale.acceptLanguage(arrayOf(ULocale.Builder().setLocale(requested).clearExtensions().build()),
                 ULocale.getAvailableLocales(), fallback)
             if (found != null && !fallback[0]) {
-                // LocaleObjectICU.getUnicodeExtensions: ICU's keywords under their BCP 47 keys, with ICU's values.
+
                 val extensions = HashMap<String, String>()
                 requested.keywords?.forEach { key -> extensions[ULocale.toUnicodeLocaleKey(key) ?: key] = requested.getKeywordValue(key) }
                 return found to extensions
@@ -165,14 +156,14 @@ class IcuDateTimeFormat {
         return ULocale.getDefault(ULocale.Category.FORMAT) to emptyMap()
     }
 
-    /** UnicodeExtensionKeys.resolveKnownAliases for ca and nu. */
+
     private fun alias(key: String, value: String) = when {
         key == "ca" && value == "gregorian" -> "gregory"
         key == "nu" && value == "traditional" -> "traditio"
         else -> value
     }
 
-    /** UnicodeExtensionKeys.isValidKeyword: a value ICU lists for the key, or any value where ICU lists none. */
+
     private fun validKeyword(key: String, value: String, locale: ULocale): Boolean {
         val values = when (key) {
             "ca" -> Calendar.getKeywordValuesForLocale("ca", locale, false)
@@ -182,10 +173,10 @@ class IcuDateTimeFormat {
         return values.isEmpty() || value in values
     }
 
-    /** IntlTextUtils.isUnicodeExtensionKeyTypeItem: one item of 3 to 8 ASCII letters or digits (so "islamic-civil" is refused). */
+
     private fun isTypeItem(value: String) = value.length in 3..8 && value.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
 
-    /** PlatformDateTimeFormatterICU.getDefaultHourCycle: from the letters of the locale's full time pattern. */
+
     private fun defaultHourCycle(locale: ULocale): String {
         val pattern = (DateFormat.getTimeInstance(DateFormat.FULL, locale) as? SimpleDateFormat)?.toPattern() ?: return "h24"
         val letters = pattern.split('\'').filterIndexed { index, _ -> index % 2 == 0 }.joinToString("")
@@ -211,7 +202,7 @@ class IcuDateTimeFormat {
         for (index in pattern.indices) if (pattern[index] in from) pattern.setCharAt(index, to)
     }
 
-    /** DateTimeFormat.formatToParts: one part per attribute run, typed by PlatformDateTimeFormatterICU.fieldToString. */
+
     private fun parts(format: DateFormat, time: Double): JSONArray {
         val out = JSONArray()
         val iterator = format.formatToCharacterIterator(time)

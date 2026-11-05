@@ -54,10 +54,7 @@ type CalendarTaskComposerModalProps = {
     controller: CalendarTaskComposerModalController;
 };
 
-// The global list shortcuts stay silent while a modal dialog is open, so the
-// "edit selected task" key would otherwise do nothing here (#1241). The pop-up
-// holds exactly one task, so the key edits it without selecting the row first.
-// `e` is the edit key in the Standard and Vim presets, Shift+Enter in Emacs.
+
 function isEditShortcut(event: KeyboardEvent<HTMLDivElement>): boolean {
     if (event.key === 'e') return !event.ctrlKey && !event.metaKey && !event.altKey;
     return event.key === 'Enter' && event.shiftKey;
@@ -89,10 +86,8 @@ export function CalendarOpenTaskModal({ controller, readOnly = false }: Calendar
     if (!openTask) return null;
 
     return (
-        // my-auto centres the panel when there is room and collapses to zero
-        // when the editor is taller than the viewport, so a long task never has
-        // its top cut off — which plain items-center would do. The scrim itself
-        // scrolls here rather than the panel.
+
+
         <Dialog
             onClose={closeOpenTask}
             onKeyDown={handleKeyDown}
@@ -157,8 +152,8 @@ export function CalendarTaskComposerModal({ controller }: CalendarTaskComposerMo
             label={resolveText('calendar.addToCalendar', 'Add to calendar')}
             placement="top"
             overlayClassName="p-4"
-            // Capped under the 10vh offset so the date/time grid can never push
-            // Save off a short window (#957).
+
+
             panelClassName="mt-[10vh] max-w-xl max-h-[80vh] border-border"
         >
             <form
@@ -282,8 +277,8 @@ export function CalendarTaskComposerModal({ controller }: CalendarTaskComposerMo
                     )}
 
                     <div className="grid gap-3 sm:grid-cols-4">
-                        {/* Not a <label> wrapper: it would swallow clicks meant for
-                            DateField's calendar button. */}
+                        {
+                                                           }
                         <div className="space-y-1 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
                             {dateLabel}
                             <DateField

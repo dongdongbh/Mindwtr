@@ -3,9 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { configureDateFormatting } from './date';
 import { loadTranslations } from './i18n/i18n-loader';
 import type { Language } from './i18n/i18n-types';
-import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaPart } from './task-row-meta';
+import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaPart } from './task-row-meta';
 import { getProjectRowStatus } from './project-row-meta';
-import { TASK_PRIORITY_COLORS } from './color-constants';
+import { DEFAULT_AREA_COLOR, TASK_PRIORITY_COLORS } from './color-constants';
 import type { Area, Project, Section, Task } from './types';
 
 type ViewOptions = {
@@ -61,8 +61,7 @@ const fixture = JSON.parse(
     };
 };
 
-// How the mobile row drew each part at snapshot time: its text nodes, the first text's
-// color (theme tokens by name, stylesheet colors as literals), the dot and the icon.
+
 const TONE_COLOR = { overdue: 'danger', dueSoon: 'warning', normal: 'secondaryText' } as const;
 const PART_STYLE: Record<TaskRowMetaPart['kind'], { color: string; icon?: string }> = {
     project: { color: 'secondaryText' },
@@ -113,7 +112,7 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
         const english = await loadTranslations('en');
         for (const config of Object.values(fixture.configs)) {
             const map = await loadTranslations(config.language);
-            // The mobile language context's `t`.
+
             translators.set(config.language, (key) => map[key] || english[key] || key);
         }
     });
@@ -122,8 +121,8 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
         else process.env.TZ = originalTz;
         configureDateFormatting();
     });
-    // The function must format with the configuration it is given, so the global
-    // one is set to something no fixture configuration uses.
+
+
     beforeEach(() => configureDateFormatting({ language: 'fa', dateFormat: 'mdy', timeFormat: '12h', calendarSystem: 'jalali', systemLocale: 'fa-IR' }));
 
     it('matches the captured React Native swipe action for every task status', () => {
@@ -174,7 +173,7 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
                 ),
                 features: resolveTaskRowFeatures(config.settings),
                 language: config.language,
-                // What the mobile root layout passed to configureDateFormatting.
+
                 dateFormatting: {
                     language: config.settings.language || config.language,
                     dateFormat: config.settings.dateFormat,
@@ -229,6 +228,16 @@ describe('buildTaskRowMeta', () => {
         expect(meta.priority).toBe('urgent');
     });
 
+    it('gives a project or area with no color the grey default dot, like the group headers (#1422)', () => {
+        const project: Project = { id: 'p', title: 'Plain', status: 'active', color: DEFAULT_AREA_COLOR, order: 0,
+            tagIds: [], createdAt: '', updatedAt: '' };
+        const area = { id: 'a', name: 'Area', order: 0, createdAt: '', updatedAt: '' };
+        const inProject = buildTaskRowMeta({ ...base, task: task({ projectId: 'p' }), lookup: { project } }).parts;
+        expect(inProject.find((part) => part.kind === 'project')).toMatchObject({ dotColor: DEFAULT_AREA_COLOR });
+        const inArea = buildTaskRowMeta({ ...base, task: task({ areaId: 'a' }), lookup: { taskArea: area } }).parts;
+        expect(inArea.find((part) => part.kind === 'area')).toMatchObject({ dotColor: DEFAULT_AREA_COLOR });
+    });
+
     it('carries the sequence label only for the available cue', () => {
         const label = (sequenceCue: 'available' | 'later') => buildTaskRowMeta({
             ...base, task: task({}), sequenceCue, sequenceLabel: 'Available next action',
@@ -236,12 +245,59 @@ describe('buildTaskRowMeta', () => {
         expect(label('available')).toBe('Task. Status: status.next. Available next action');
         expect(label('later')).toBe('Task. Status: status.next');
     });
+
+    it('flags the status control hidden while the editor layout hides Status, as React Native and desktop rows do (#1405)', () => {
+        const hidden = resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: ['status'] } } });
+        expect(hidden.status).toBe(false);
+        const meta = buildTaskRowMeta({ ...base, features: hidden, task: task({}) });
+        expect(meta.statusHidden).toBe(true);
+
+        expect(meta.statusLabel).toBe('status.next');
+        const shown = buildTaskRowMeta({ ...base, features: resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: [] } } }), task: task({}) });
+        expect(shown.statusHidden).toBe(false);
+        expect(shown.statusLabel).toBe('status.next');
+    });
 });
 
 describe('resolveTaskRowFeatures', () => {
     it('shows time spent only when Pomodoro is linked to tasks', () => {
-        expect(resolveTaskRowFeatures(undefined)).toEqual({ priorities: true, timeEstimates: true, timeSpent: false, taskAge: false });
+        expect(resolveTaskRowFeatures(undefined)).toEqual({ priorities: true, timeEstimates: true, timeSpent: false, taskAge: false, status: true });
         expect(resolveTaskRowFeatures({ features: { pomodoro: true } }).timeSpent).toBe(false);
         expect(resolveTaskRowFeatures({ features: { pomodoro: true }, gtd: { pomodoro: { linkTask: true } } }).timeSpent).toBe(true);
+    });
+});
+
+
+describe('getTaskRowMetaValidUntil', () => {
+    const t = (key: string) => key;
+    const features = resolveTaskRowFeatures({ appearance: { showTaskAge: true } });
+    const meta = (task: Task, now: number) => buildTaskRowMeta({
+        task, lookup: {}, features, language: 'en', dateFormatting: { language: 'en', systemLocale: 'en-US' }, t, now: new Date(now),
+    });
+    const now = Date.parse('2026-10-28T10:00:00.000Z');
+    const hour = 60 * 60 * 1000;
+    const task = (extra: Partial<Task>): Task => ({
+        id: 't', title: 'Pay rent', status: 'next', tags: [], contexts: [], createdAt: '2026-10-20T09:30:00.000Z',
+        updatedAt: '2026-10-20T09:30:00.000Z', ...extra,
+    });
+
+    it.each([
+        ['due in 3 days (dueSoon next)', task({ dueDate: new Date(now + 80 * hour).toISOString() })],
+        ['due in 5 hours (overdue next)', task({ dueDate: new Date(now + 5 * hour).toISOString() })],
+        ['due tomorrow, a date only', task({ dueDate: '2026-10-29' })],
+        ['overdue, its age next', task({ dueDate: new Date(now - hour).toISOString() })],
+        ['no due date, its age next', task({})],
+    ])('is the first instant the row reads differently: %s', (_name, row) => {
+        const at = getTaskRowMetaValidUntil(row, new Date(now), features);
+        expect(at).toBeGreaterThan(now);
+        expect(meta(row, at! - 1)).toEqual(meta(row, now));
+        expect(meta(row, at!)).not.toEqual(meta(row, now));
+    });
+
+    it('is null for a row the clock never changes', () => {
+        const done = task({ status: 'done', dueDate: new Date(now + hour).toISOString(), completedAt: '2026-10-27T10:00:00.000Z' });
+        expect(getTaskRowMetaValidUntil(done, new Date(now), features)).toBeNull();
+        expect(getTaskRowMetaValidUntil(task({ dueDate: new Date(now - hour).toISOString() }), new Date(now), { ...features, taskAge: false })).toBeNull();
+        expect(getTaskRowMetaValidUntil(task({ status: 'reference', dueDate: new Date(now + hour).toISOString() }), new Date(now), features)).toBeNull();
     });
 });

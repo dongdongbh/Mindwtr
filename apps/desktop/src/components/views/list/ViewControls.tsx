@@ -17,7 +17,7 @@ type ViewControlsProps<Axis extends TaskGroupAxis, Sort extends SortField> = {
     t: (key: string) => string;
 };
 
-/** Direct Sort and Group controls shared by desktop list toolbars. */
+
 export function ViewControls<Axis extends TaskGroupAxis, Sort extends SortField = TaskSortBy>({
     sortBy,
     defaultSortBy,

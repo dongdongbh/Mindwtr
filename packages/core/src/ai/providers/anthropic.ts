@@ -32,14 +32,11 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 2;
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const DEFAULT_MAX_TOKENS = 1024;
-// Floor for models that may spend adaptive-thinking tokens inside max_tokens;
-// without headroom the visible JSON answer gets truncated mid-thought.
+
+
 const ADAPTIVE_THINKING_MAX_TOKENS = 4096;
 
-// Sonnet 5+, Opus 4.7+, and the Fable/Mythos families reject a non-default
-// `temperature` and the manual `budget_tokens` thinking config with a 400;
-// they use adaptive thinking instead. Version-compare so future releases in
-// those families stay covered without a hardcoded ID list.
+
 function isAdaptiveThinkingModel(model: string): boolean {
     const id = String(model || '').trim().toLowerCase();
     if (/^claude-(fable|mythos)-/.test(id)) return true;
@@ -60,8 +57,8 @@ async function buildAnthropicError(response: BufferedAIResponse, usingOfficialAn
     let message = '';
     let type = '';
     let raw = '';
-    // The request id is the handle Anthropic support and logs key off; prefer the
-    // response header (present even when the body isn't JSON) and fall back to the body.
+
+
     let requestId = response.headers.get('request-id') ?? '';
     raw = response.bodyText;
     if (raw) {
@@ -76,12 +73,11 @@ async function buildAnthropicError(response: BufferedAIResponse, usingOfficialAn
                 raw = '';
             }
         } catch {
-            // Not JSON; fall back to the raw body text below.
+
         }
     }
 
-    // Keep Anthropic's own explanation (and request id) on the friendly messages —
-    // e.g. a 401 may be "invalid x-api-key" vs a disabled org, which changes the fix.
+
     const detail = [
         message || raw,
         requestId ? `request-id: ${requestId}` : '',
@@ -124,16 +120,16 @@ async function requestAnthropic(
     prompt: { system: string; user: string },
     options?: AIRequestOptions
 ) {
-    // Trim to tolerate keys pasted with a trailing newline or spaces, which
-    // Anthropic otherwise rejects with a 401 (see OpenAI provider for parity).
+
+
     const apiKey = String(config.apiKey || '').trim();
     if (!apiKey) {
         throw new Error('Anthropic API key is required.');
     }
     const url = config.endpoint || ANTHROPIC_BASE_URL;
     const usingOfficialAnthropic = url === ANTHROPIC_BASE_URL;
-    // Retired-id remap applies to Anthropic's own API only — a compatible
-    // custom endpoint owns its model namespace.
+
+
     const model = usingOfficialAnthropic ? resolveAnthropicModel(config.model) : config.model;
     const thinkingBudget = typeof config.thinkingBudget === 'number' ? config.thinkingBudget : 0;
     const adaptiveThinking = isAdaptiveThinkingModel(model);
@@ -142,8 +138,8 @@ async function requestAnthropic(
             ? Math.max(DEFAULT_MAX_TOKENS, thinkingBudget + 256)
             : DEFAULT_MAX_TOKENS;
     if (adaptiveThinking) {
-        // Sonnet 5 runs adaptive thinking even when the toggle is off, and the
-        // thinking tokens count against max_tokens.
+
+
         maxTokens = Math.max(maxTokens, ADAPTIVE_THINKING_MAX_TOKENS);
     }
 
@@ -154,8 +150,7 @@ async function requestAnthropic(
         messages: [{ role: 'user', content: prompt.user }],
     };
 
-    // Adaptive-thinking models 400 on any non-default temperature; older
-    // models 400 on temperature != 1 whenever extended thinking is enabled.
+
     if (!adaptiveThinking && thinkingBudget <= 0) {
         body.temperature = 0.2;
     }
@@ -180,9 +175,8 @@ async function requestAnthropic(
                         'Content-Type': 'application/json',
                         'x-api-key': apiKey,
                         'anthropic-version': '2023-06-01',
-                        // Requests carry a browser Origin (Tauri webview / web build), which
-                        // Anthropic blocks unless this header opts in. Safe here: the key is
-                        // user-supplied and stored locally, not exposed in a public web page.
+
+
                         'anthropic-dangerous-direct-browser-access': 'true',
                     },
                     body: JSON.stringify(body),

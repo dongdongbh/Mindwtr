@@ -70,10 +70,24 @@ struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: "List")
     var list: MindwtrWidgetListEntity?
 
+
+    @Parameter(
+        title: "Include available actions",
+        description: "Focus only: adds Next Actions whose start date has arrived. Not tasks marked in progress.",
+        default: false
+    )
+    var includeAvailableActions: Bool
+
     init() {}
 
     init(list: MindwtrWidgetListEntity?) {
         self.list = list
+    }
+
+
+    var payloadListId: String {
+        let listId = list?.id ?? mindwtrDefaultWidgetListId
+        return listId == mindwtrDefaultWidgetListId && includeAvailableActions ? mindwtrFocusAvailableListId : listId
     }
 }
 
@@ -97,7 +111,7 @@ struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
         let now = Date()
         let entries = MindwtrTasksWidgetSnapshotStore.timelineEntries(
             for: context.family,
-            listId: configuration.list?.id ?? mindwtrDefaultWidgetListId,
+            listId: configuration.payloadListId,
             now: now
         )
         let refresh = Calendar.current.date(byAdding: .minute, value: 30, to: now)
@@ -112,13 +126,13 @@ struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
     ) -> MindwtrTasksWidgetEntry {
         MindwtrTasksWidgetSnapshotStore.entry(
             for: family,
-            listId: configuration.list?.id ?? mindwtrDefaultWidgetListId,
+            listId: configuration.payloadListId,
             date: date
         )
     }
 }
 
-// The app target has the same intent and opens the task through its existing launcher.
+
 @available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct MindwtrOpenWidgetTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Open Task"

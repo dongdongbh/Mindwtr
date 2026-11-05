@@ -7,19 +7,13 @@ import {
 } from '@mindwtr/core';
 import type { NavigationState } from '@react-navigation/native';
 
-// Device-local UI-session state (P14): which screen was open and when it was
-// last seen, so reopening shortly after Android kills the app resumes the
-// interrupted session (#842). Never part of the synced settings document. The
-// snapshot's rules live in core (session-restore.ts), shared with the native apps.
 
 const TRANSIENT_ACTIVITY_ROOT_ROUTES = new Set(['capture-modal']);
 const SAFE_ACTIVITY_ROUTE_PARAMS = new Set(['id', 'projectId', 'settingsScreen', 'tab']);
 const MAX_ACTIVITY_NAVIGATION_DEPTH = 12;
 const MAX_ACTIVITY_ROUTES_PER_STATE = 64;
 
-// Tapping a project row opens it via component state without touching the
-// route, so the route params alone can't tell which project is open — the
-// projects screen mirrors it here for snapshots (#842).
+
 let sessionOpenProjectId: string | null = null;
 
 export function setSessionRestoreOpenProject(projectId: string | null): void {
@@ -65,8 +59,8 @@ const sanitizeActivityNavigationStateNode = (
             state: nestedState ?? undefined,
         }];
     });
-    // Index is a startup redirect, not useful back history. Keeping it mounted
-    // beside a recovered route lets its async Redirect race resetRoot.
+
+
     if (root && routes.length > 1) {
         routes = routes.filter((route) => route.name !== 'index');
     }
@@ -97,10 +91,7 @@ const sanitizeActivityNavigationStateNode = (
     } as NavigationState;
 };
 
-/**
- * Removes routed capture and one-shot action payloads before a same-process
- * Activity snapshot can be replayed through React Navigation resetRoot.
- */
+
 export function sanitizeAndroidActivityNavigationState(state: NavigationState | undefined): NavigationState | null {
     return sanitizeActivityNavigationStateNode(state, 0, true);
 }
@@ -111,7 +102,7 @@ export async function persistLastRoute(pathname: string, params?: Record<string,
         if (snapshot === null) return;
         await AsyncStorage.setItem(LAST_ROUTE_STORAGE_KEY, snapshot);
     } catch {
-        // Convenience state only — a storage failure just skips restoration.
+
     }
 }
 

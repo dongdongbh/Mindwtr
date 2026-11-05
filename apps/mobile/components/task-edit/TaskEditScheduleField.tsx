@@ -30,7 +30,6 @@ import {
 } from 'lucide-react-native';
 
 import { QuickDateChips } from '../QuickDateChips';
-import { CompactText } from '@/components/compact-text';
 import { FieldHeading } from './FieldHeading';
 import { RecurrenceIntervalInput } from './RecurrenceIntervalInput';
 import type {
@@ -72,6 +71,7 @@ export function TaskEditScheduleField({
     tc,
     task,
 }: TaskEditScheduleFieldProps) {
+    const [advanceReminderOptionsExpanded, setAdvanceReminderOptionsExpanded] = React.useState(false);
     const [repeatReminderOptionsExpanded, setRepeatReminderOptionsExpanded] = React.useState(false);
     const reminderSettings = useTaskStore((state) => state.settings);
     if (!draft) return null;
@@ -114,7 +114,7 @@ export function TaskEditScheduleField({
     const getDatePickerValue = (mode: NonNullable<ShowDatePickerMode>) => {
         if (mode === 'start') return getSafePickerDateValue(draft.startTime);
         if (mode === 'start-time') return pendingStartDate ?? getSafePickerDateValue(draft.startTime);
-        if (mode === 'review') return getSafePickerDateValue(draft.reviewAt);
+        if (mode === 'review' || mode === 'review-time') return getSafePickerDateValue(draft.reviewAt);
         if (mode === 'recurrence-end') {
             return getSafePickerDateValue(recurrenceDetails.until);
         }
@@ -122,7 +122,7 @@ export function TaskEditScheduleField({
         return getSafePickerDateValue(draft.dueDate);
     };
     const getDatePickerMode = (mode: NonNullable<ShowDatePickerMode>) =>
-        mode === 'start-time' || mode === 'due-time' ? 'time' : 'date';
+        mode === 'start-time' || mode === 'due-time' || mode === 'review-time' ? 'time' : 'date';
     const renderInlineIOSDatePicker = (targetModes: NonNullable<ShowDatePickerMode>[]) => {
         if (Platform.OS !== 'ios' || !showDatePicker || !targetModes.includes(showDatePicker)) {
             return null;
@@ -205,6 +205,48 @@ export function TaskEditScheduleField({
             </View>
         );
     };
+    const renderAdvanceReminderControl = () => {
+        const start = fieldId === 'startTime' ? reminders.startAdvance : null;
+        if (fieldId === 'startTime' ? !start : fieldId !== 'dueDate' || (!draft.dueDate && !draft.dueReminderLeadMinutes && !reminders.showSkip)) return null;
+        const control = start ?? {
+            enabled: reminders.showAdvance, label: reminders.advanceLabel, valueLabel: reminders.advanceValueLabel,
+            hint: reminders.advanceHint, options: reminders.advanceOptions,
+        };
+        return (
+            <View style={{ marginTop: 8 }}>
+                <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`${control.label}: ${control.valueLabel}`}
+                    accessibilityState={{ disabled: !control.enabled, expanded: advanceReminderOptionsExpanded }}
+                    disabled={!control.enabled}
+                    style={[styles.dateBtn, { backgroundColor: tc.cardBg, borderColor: tc.border, opacity: control.enabled ? 1 : 0.5 }]}
+                    onPress={() => setAdvanceReminderOptionsExpanded((expanded) => !expanded)}
+                >
+                    <Text style={[styles.modalLabel, { color: tc.text }]}>{control.label}: {control.valueLabel}</Text>
+                </TouchableOpacity>
+                {control.hint && <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>{control.hint}</Text>}
+                {control.enabled && advanceReminderOptionsExpanded && (
+                    <View style={[styles.statusContainer, { marginTop: 8 }]} accessibilityRole="radiogroup" accessibilityLabel={control.label}>
+                        {control.options.map((option) => (
+                            <TouchableOpacity
+                                key={option.value}
+                                accessibilityRole="radio"
+                                accessibilityLabel={option.label}
+                                accessibilityState={{ checked: option.selected }}
+                                style={getStatusChipStyle(option.selected)}
+                                onPress={() => {
+                                    setDraftField(start ? 'startReminderLeadMinutes' : 'dueReminderLeadMinutes', option.value);
+                                    setAdvanceReminderOptionsExpanded(false);
+                                }}
+                            >
+                                <Text style={getStatusTextStyle(option.selected)}>{option.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
+            </View>
+        );
+    };
     const renderRepeatReminderControl = () => {
         if (fieldId !== 'dueDate' || !reminders.showRepeat) return null;
         const label = reminders.repeatLabel;
@@ -263,7 +305,7 @@ export function TaskEditScheduleField({
         }
     };
 
-    // A new due date moves a relative start, or ends the link, through the draft's cascade.
+
     const updateDueDate = (dueDate: string | undefined) => {
         setDraftField('dueDate', dueDate ?? '');
     };
@@ -554,13 +596,14 @@ export function TaskEditScheduleField({
                                         setDraftField('relativeStartOffset', undefined);
                                     }}
                                     accessibilityRole="button"
-                                    accessibilityLabel={t('common.clear')}
+                                    accessibilityLabel={`${t('common.clear')} ${t('taskEdit.startDateLabel')}`}
                                 >
                                     <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                         </View>
                         {renderQuickDateChips('start', parsed)}
+                        {renderAdvanceReminderControl()}
                         {renderDateIssue()}
                         {relativeStart && (() => {
                             const relativeUnit = relativeStart.unit;
@@ -635,44 +678,6 @@ export function TaskEditScheduleField({
             const parsed = draft.dueDate ? safeParseDate(draft.dueDate) : null;
             const hasTime = hasTimeComponent(draft.dueDate);
             const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
-            if (!draft.dueDate) {
-                const notSetLabel = t('common.notSet');
-                return (
-                    <View style={styles.formGroup}>
-                        <TouchableOpacity
-                            style={[styles.compactFieldRow, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                            onPress={() => openDatePicker('due')}
-                            accessibilityRole="button"
-                            accessibilityLabel={`${t('taskEdit.dueDateLabel')}: ${notSetLabel}`}
-                        >
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
-                                <CalendarDays
-                                    size={14}
-                                    color={tc.secondaryText}
-                                    aria-hidden
-                                    accessible={false}
-                                    pointerEvents="none"
-                                />
-                                <CompactText
-                                    style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
-                                >
-                                    {t('taskEdit.dueDateLabel')}
-                                </CompactText>
-                            </View>
-                            <CompactText
-                                style={[styles.compactFieldValue, { color: tc.tint }]}
-                                numberOfLines={2}
-                            >
-                                {notSetLabel}
-                            </CompactText>
-                        </TouchableOpacity>
-                        {renderQuickDateChips('due', parsed)}
-                        {renderInlineIOSDatePicker(['due'])}
-                        {renderReminderHandoffControl()}
-                        {renderRepeatReminderControl()}
-                    </View>
-                );
-            }
             return (
                 <View style={styles.formGroup}>
                     <FieldHeading
@@ -686,6 +691,8 @@ export function TaskEditScheduleField({
                             <TouchableOpacity
                                 style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
                                 onPress={() => openDatePicker('due')}
+                                accessibilityRole="button"
+                                accessibilityLabel={`${t('taskEdit.dueDateLabel')}: ${formatDueDate(draft.dueDate)}`}
                             >
                                 <Text style={{ color: tc.text }}>{formatDueDate(draft.dueDate)}</Text>
                             </TouchableOpacity>
@@ -714,7 +721,7 @@ export function TaskEditScheduleField({
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => updateDueDate(undefined)}
                                     accessibilityRole="button"
-                                    accessibilityLabel={t('common.clear')}
+                                    accessibilityLabel={`${t('common.clear')} ${t('taskEdit.dueDateLabel')}`}
                                 >
                                     <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
@@ -724,6 +731,7 @@ export function TaskEditScheduleField({
                         {renderDateIssue()}
                         {renderInlineIOSDatePicker(['due', 'due-time'])}
                         {renderReminderHandoffControl()}
+                        {renderAdvanceReminderControl()}
                         {renderRepeatReminderControl()}
                     </View>
                 </View>
@@ -732,6 +740,7 @@ export function TaskEditScheduleField({
         case 'reviewAt': {
             const parsed = draft.reviewAt ? safeParseDate(draft.reviewAt) : null;
             const hasTime = hasTimeComponent(draft.reviewAt);
+            const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
             return (
                 <View style={styles.formGroup}>
                     <FieldHeading
@@ -748,6 +757,18 @@ export function TaskEditScheduleField({
                             >
                                 <Text style={{ color: tc.text }}>{formatStartDateTime(draft.reviewAt)}</Text>
                             </TouchableOpacity>
+                            {!!draft.reviewAt && (
+                                <TouchableOpacity
+                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
+                                    onPress={() => openDatePicker('review-time')}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={hasTime && timeOnly
+                                        ? `${t('task.aria.reviewTime')}: ${timeOnly}`
+                                        : tFallback(t, 'calendar.changeTime', 'Add time')}
+                                >
+                                    <Clock size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
+                                </TouchableOpacity>
+                            )}
                             {!!draft.reviewAt && hasTime && (
                                 <TouchableOpacity
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
@@ -761,14 +782,14 @@ export function TaskEditScheduleField({
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => setDraftField('reviewAt', '')}
                                     accessibilityRole="button"
-                                    accessibilityLabel={t('common.clear')}
+                                    accessibilityLabel={`${t('common.clear')} ${t('taskEdit.reviewDateLabel')}`}
                                 >
                                     <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
                             )}
                         </View>
                         {renderQuickDateChips('review', parsed)}
-                        {renderInlineIOSDatePicker(['review'])}
+                        {renderInlineIOSDatePicker(['review', 'review-time'])}
                     </View>
                 </View>
             );

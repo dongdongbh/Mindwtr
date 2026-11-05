@@ -77,14 +77,7 @@ const pruneSavedFilterTombstones = (
     };
 };
 
-/**
- * Every reference between synced entities, keyed by the collection it points at,
- * as [child collection, child field]. These names are also the SQLite tables and
- * columns of the foreign keys in sqlite-schema.ts. An expired parent tombstone
- * stays while any remaining entity, in any state, still references it: the purge
- * below and the SQLite adapter's prune both follow this map, so the store and the
- * database agree and a kept parent is not purged again on every load (#718 class).
- */
+
 export const ENTITY_FOREIGN_KEY_CHILDREN = {
     sections: [['tasks', 'sectionId']],
     projects: [['tasks', 'projectId'], ['sections', 'projectId']],
@@ -108,15 +101,8 @@ const collectReferencedIds = (
 };
 
 export type PurgeExpiredTombstonesOptions = {
-    /**
-     * Sections the remote document dropped while still holding their parent
-     * project. A <=1.3.0 peer has no archive-section retention exception, so it
-     * purges these on its own cycle; re-publishing them would rewrite the remote
-     * document forever. ADR 0008 (no delta log) gives no way to tell that apart
-     * from "never published", so the caller only fills this in when the remote
-     * still holds the parent project -- an empty or project-less remote keeps
-     * the section and the first sync still publishes it.
-     */
+
+
     peerPurgedSectionIds?: ReadonlySet<string>;
 };
 
@@ -176,9 +162,7 @@ export const purgeExpiredTombstones = (
         nextTasks.push(task);
     }
 
-    // Children before parents (tasks, sections, projects, areas), so a parent is
-    // kept only for a child that itself survives this pass, and an expired child
-    // and its expired parent both go in one pass.
+
     const restorableArchivedProjectIds = new Set(
         data.projects.filter((project) => (
             project.status === 'archived'

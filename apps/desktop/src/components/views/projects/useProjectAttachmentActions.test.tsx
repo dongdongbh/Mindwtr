@@ -18,6 +18,11 @@ vi.mock('../../../lib/runtime', () => ({
     isTauriRuntime: vi.fn(() => false),
 }));
 
+
+vi.mock('../../../lib/app-lock', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../lib/app-lock')>()),
+    withMindwtrDialog: <T,>(run: () => Promise<T>) => run(),
+}));
 vi.mock('@tauri-apps/plugin-dialog', () => ({
     open: dialogOpenMock,
 }));
@@ -48,7 +53,7 @@ describe('useProjectAttachmentActions', () => {
         useTaskStore.setState(initialTaskState, true);
     });
 
-    /** The hook writes through the store: [updateProject] is the store write it reaches. */
+
     const setup = (selectedProject: Project | undefined = baseProject, updateProject = vi.fn()) => {
         useTaskStore.setState({ _allProjects: selectedProject ? [selectedProject] : [], updateProject });
         const params: Parameters<typeof useProjectAttachmentActions>[0] = {

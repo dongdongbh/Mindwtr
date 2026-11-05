@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -49,14 +48,10 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * RN's Review (app/(drawer)/review.tsx), as a stack screen or the quick-access tab, on core's getReviewOverview (with its
- * scope) and runReviewAction: the Due and All scope buttons with core's help, the expansion button and Start Review, the bulk
- * bar while rows are selected (core's actions and its Organize dialog), and core's areas, projects and task rows as far as they
- * are expanded, each row due for review with Mark reviewed and Review in 1 week. Back leaves selection first, as in RN.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReviewList(model: InboxViewModel) = with(model.menu) {
@@ -72,7 +67,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
     LazyColumn(Modifier.fillMaxSize().testTag("review-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         scope?.let {
             item(key = "scope") {
-                FlowRow(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                FlowRow(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (option in it.menuObjects("options")) {
                         val on = option.getString("id") == it.getString("selected")
@@ -83,7 +78,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
                             Text(option.getString("label"), style = rnText(14, 400), color = if (on) c.onTint else c.text)
                         }
                     }
-                    // RN's All scope links to History's Done list.
+
                     if (!due) Box(Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(enabled = idle, role = Role.Button) { openRoute("/done") }
                         .semantics { contentDescription = "${t("nav.done")} ${t("common.tasks")}" }, contentAlignment = Alignment.Center) {
                         Text(t("nav.done"), style = rnText(14, 400), color = c.tint)
@@ -93,13 +88,13 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
             }
         }
         if (bulk == null) item(key = "actions") {
-            Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 10.dp),
+            Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 val expansion = view.getJSONObject("expansion")
                 val off = expansion.getBoolean("disabled")
                 val shape = RoundedCornerShape(10.dp)
                 val label = expansion.getString("label")
-                Box(Modifier.fade(if (off) 0.45f else 1f).size(42.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                Box(Modifier.fade(if (off) 0.45f else 1f).size(42.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                     .clickable(enabled = idle && !off, role = Role.Button) { reviewExpansion(JSONObject().put("type", "cycle")) }
                     .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
                     Icon(if (expansion.getBoolean("allExpanded")) Lucide.ChevronsUp else Lucide.ChevronsDown, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
@@ -122,6 +117,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
                 when (item.type) {
                     "area" -> ReviewArea(model, item.json)
                     "project" -> ReviewProject(model, item.json)
+                    "later" -> ReviewLater(model, item.json, "review")
                     else -> item.row?.let { row ->
                         Column(Modifier.padding(start = 30.dp, top = 8.dp)) {
                             TaskRowItem(model, row, status = RowStatus.Badge, actions = RowActions(
@@ -129,7 +125,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
                                 delete = { act("reviewAction", trashTask(row.id, row.taskRevision)) },
                                 selecting = bulk != null, selected = row.id in selected, select = { toggleRow("review", row.id) },
                             ))
-                            // RN's Mark reviewed and Review in 1 week under every row due for review, in either scope: core's two actions.
+
                             item.json.optJSONObject("review")?.let { review ->
                                 Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                                     for (name in listOf("markReviewed", "advance")) {
@@ -147,7 +143,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's Review text button (Mark reviewed, Review in 1 week): 44 high, the tint; a disabled one is dimmed and TalkBack hears it is unavailable. */
+
 @Composable
 private fun ReviewLink(label: String, description: String, enabled: Boolean, tag: String, action: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -158,7 +154,7 @@ private fun ReviewLink(label: String, description: String, enabled: Boolean, tag
     }
 }
 
-/** RN's area header: core's color dot (the tint without one), title, summary, and the chevron; a tap folds it (core's toggle). */
+
 @Composable
 private fun ReviewArea(model: InboxViewModel, area: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -168,7 +164,7 @@ private fun ReviewArea(model: InboxViewModel, area: JSONObject) = with(model.men
         .semantics { contentDescription = area.getString("accessibilityLabel"); stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") }
         .padding(horizontal = 4.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.padding(end = 10.dp).size(8.dp).clip(CircleShape).background(coreColorOrNull(area.menuText("color")) ?: c.tint))
+            Box(Modifier.padding(end = 10.dp).size(8.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(area.menuText("color")) ?: c.tint))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(area.getString("title"), style = rnText(16, 700), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(area.getString("summary"), style = rnText(12, 500, 17), color = c.secondaryText, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -178,7 +174,7 @@ private fun ReviewArea(model: InboxViewModel, area: JSONObject) = with(model.men
     }
 }
 
-/** RN's project group header: title, chevron, core's status dot and summary (amber when core says it needs action). */
+
 @Composable
 private fun ReviewProject(model: InboxViewModel, project: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
@@ -201,16 +197,13 @@ private fun ReviewProject(model: InboxViewModel, project: JSONObject) = with(mod
     }
 }
 
-/**
- * RN's Review bulk bar: core's count and Cancel, then core's actions in core's order. Organize opens the lists' Bulk organize
- * dialog on Review's own bar (core's `bulk.organize`); Mark reviewed sends the revisions the bar showed.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReviewBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>) = with(model.menu) {
     val c = LocalTheme.current.colors
     val context = LocalContext.current
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(bulk.getString("countLabel"), style = rnText(12, 600), color = c.secondaryText)
@@ -232,7 +225,7 @@ private fun ReviewBulkBar(model: InboxViewModel, bulk: JSONObject, selected: Lis
                                 "addTag" -> keepDialog(JSONObject().put("kind", "reviewTag").put("text", ""))
                                 "removeTag" -> keepDialog(JSONObject().put("kind", "tokens").put("list", "review").put("picked", org.json.JSONArray()))
                                 "share" -> {
-                                    // RN's Share.share with core's text, then it leaves selection mode.
+
                                     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, bulk.getString("shareText"))
                                     runCatching { context.startActivity(Intent.createChooser(send, null)) }.onSuccess { endSelection(); reload() }
                                 }
@@ -244,10 +237,7 @@ private fun ReviewBulkBar(model: InboxViewModel, bulk: JSONObject, selected: Lis
     }
 }
 
-/**
- * Review's modals, RN's centered cards over a dimmed screen: Start Review (core's Daily and Weekly choices and Cancel), Move to
- * (core's statuses), and Add tag (the typed tag, Cancel and Save).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
@@ -269,7 +259,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     ModalTitle(start.getString("label"))
                     for (option in start.menuObjects("options")) {
                         val shape = RoundedCornerShape(10.dp)
-                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                             .clickable(role = Role.Button) { keepDialog(null); openReview(option.getString("id")) }.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(option.getString("label"), style = rnText(15, 700), color = c.text, modifier = Modifier.weight(1f))
@@ -285,7 +275,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         for (status in move.menuObjects("statuses")) {
                             val shape = RoundedCornerShape(10.dp)
                             Text(status.getString("label"), style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.filterBg)
-                                .border(1.dp, c.border, shape).clickable(enabled = idle && selected.isNotEmpty(), role = Role.Button) {
+                                .rnBorder(1.dp, c.border, shape).clickable(enabled = idle && selected.isNotEmpty(), role = Role.Button) {
                                     keepDialog(null)
                                     act("reviewAction", moveTasks(selected, status.getString("status"), move.getJSONObject("taskRevisions")))
                                 }.padding(horizontal = 10.dp, vertical = 8.dp))
@@ -302,7 +292,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
                         modifier = Modifier.fillMaxWidth().semantics { contentDescription = tag.getString("placeholder") }.testTag("menu-dialog-field"),
                         decorationBox = { inner ->
-                            Box(Modifier.heightIn(min = 40.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
+                            Box(Modifier.heightIn(min = 40.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.CenterStart) {
                                 if (text.isEmpty()) Text(tag.getString("placeholder"), style = rnText(14, 400), color = c.secondaryText)
                                 inner()
@@ -330,11 +320,32 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
 private fun ModalTitle(text: String) = Text(text, style = rnText(16, 700), color = LocalTheme.current.colors.text, textAlign = TextAlign.Center,
     modifier = Modifier.fillMaxWidth().semantics { heading() })
 
-/** Review's scope (core's option id): RN leaves selection mode first. */
+
 private fun MenuModel.reviewScope(id: String) {
     editOwn("review") { put("scope", id).put("selected", org.json.JSONArray()) }
     reload()
 }
 
-/** An expansion control's edit (RN's cycle, and an area's or project's fold): core applies it and answers the new expansion. */
+
 private fun MenuModel.reviewExpansion(edit: JSONObject) = reload(edit)
+
+
+@Composable
+internal fun ReviewLater(model: InboxViewModel, item: JSONObject, list: String) = with(model.menu) {
+    val expanded = item.getBoolean("expanded")
+    val id = item.getString("id")
+    val c = LocalTheme.current.colors
+    Row(Modifier.padding(start = 30.dp).heightIn(min = 44.dp)
+        .clickable(enabled = idle, role = Role.Button) {
+            editOwn(list) {
+                val ids = optJSONArray("expandedLaterProjectIds")?.let { values -> (0 until values.length()).map { values.getString(it) }.toMutableSet() } ?: mutableSetOf()
+                if (expanded) ids.remove(id) else ids.add(id)
+                put("expandedLaterProjectIds", JSONArray(ids.toList()))
+            }
+            refresh()
+        }.semantics { stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") },
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (expanded) Lucide.ChevronDown else Lucide.ChevronRight, null, Modifier.size(16.dp), tint = c.secondaryText)
+        Text(item.getString("label"), style = rnText(13, 500), color = c.secondaryText)
+    }
+}

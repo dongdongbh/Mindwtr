@@ -44,9 +44,7 @@ export function useSelectedTasksCsvExport(
     const exportSelectedTasks = useCallback(async (): Promise<boolean> => {
         if (exportingRef.current || selectedTaskIds.length === 0) return false;
 
-        // Capture both the selected ids and the full metadata snapshot before
-        // the lazy import or native save dialog can yield. Only live selected
-        // tasks from this snapshot are eligible for the export.
+
         const frozenSelectedIds = [...selectedTaskIds];
         const exportData = getSnapshot();
         const taskById = new Map(exportData.tasks.map((task) => [task.id, task]));

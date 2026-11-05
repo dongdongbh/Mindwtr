@@ -88,8 +88,8 @@ describe('InboxProcessingScheduleFields calendar system', () => {
     const originalLanguages = navigator.languages;
 
     afterEach(() => {
-        // Unmount before restoring the store, or the settings write lands on a
-        // still-mounted DateField outside act().
+
+
         cleanup();
         useTaskStore.setState({ settings: originalSettings });
         Object.defineProperty(navigator, 'languages', {
@@ -99,24 +99,30 @@ describe('InboxProcessingScheduleFields calendar system', () => {
     });
 
     it('renders Jalali dates when the calendarSystem setting is jalali', () => {
-        // resolveCalendarSystemSetting only honours 'jalali' for a Persian
-        // language or system locale, so the setting alone is not enough.
+
+        const resolvedOptionsSpy = vi
+            .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+            .mockReturnValue({ locale: 'fa-IR' } as Intl.ResolvedDateTimeFormatOptions);
         Object.defineProperty(navigator, 'languages', {
             value: ['fa-IR'],
             configurable: true,
         });
-        useTaskStore.setState({
-            settings: { ...useTaskStore.getState().settings, calendarSystem: 'jalali' },
-        });
-        const fields = createControls({ due: createField({ date: '2026-04-19' }) });
+        try {
+            useTaskStore.setState({
+                settings: { ...useTaskStore.getState().settings, calendarSystem: 'jalali' },
+            });
+            const fields = createControls({ due: createField({ date: '2026-04-19' }) });
 
-        const { getByLabelText } = render(
-            <LanguageProvider>
-                <InboxProcessingScheduleFields t={t} fields={fields} visibleFieldKeys={['due']} />
-            </LanguageProvider>
-        );
+            const { getByLabelText } = render(
+                <LanguageProvider>
+                    <InboxProcessingScheduleFields t={t} fields={fields} visibleFieldKeys={['due']} />
+                </LanguageProvider>
+            );
 
-        expect((getByLabelText('Due Date') as HTMLInputElement).value).toBe('1405-01-30');
+            expect((getByLabelText('Due Date') as HTMLInputElement).value).toBe('1405-01-30');
+        } finally {
+            resolvedOptionsSpy.mockRestore();
+        }
     });
 
     it('renders Gregorian dates by default', () => {

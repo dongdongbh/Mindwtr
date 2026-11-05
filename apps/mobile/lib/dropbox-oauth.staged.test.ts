@@ -25,8 +25,7 @@ vi.mock('expo-web-browser', () => ({
     maybeCompleteAuthSession: mocks.maybeCompleteAuthSession,
 }));
 
-// This mock is intentionally present as a regression tripwire: the production
-// OAuth module should keep this as a type-only dependency and never save here.
+
 vi.mock('./dropbox-auth', () => ({
     saveDropboxTokens: mocks.saveDropboxTokens,
 }));

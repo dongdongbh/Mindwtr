@@ -61,7 +61,7 @@ describe('taskMatchesFilterSelections', () => {
 
     it('subtracts an excluded token even when every include matches', () => {
         expect(matches({ contexts: ['@work'] })).toBe(true);
-        // Excluding the parent tag drops the child tag with it.
+
         expect(matches({ contexts: ['@work'], excludedTags: ['#client'] })).toBe(false);
     });
 

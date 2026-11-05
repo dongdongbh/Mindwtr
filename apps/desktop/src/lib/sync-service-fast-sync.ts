@@ -99,7 +99,7 @@ export function clearLocalSyncStatus(): void {
     try {
         localStorage.removeItem(LOCAL_SYNC_STATUS_KEY);
     } catch {
-        // Best-effort local cache cleanup.
+
     }
 }
 
@@ -108,7 +108,7 @@ export function clearFastSyncState(): void {
     try {
         localStorage.removeItem(FAST_SYNC_STATE_KEY);
     } catch {
-        // Best-effort local cache cleanup.
+
     }
 }
 

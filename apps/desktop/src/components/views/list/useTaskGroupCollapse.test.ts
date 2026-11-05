@@ -32,9 +32,7 @@ describe('getGroupDomIdSegment', () => {
     });
 });
 
-// Focus used to sanitize section ids its own way, so the same group title got
-// one id in Focus and another in Next/Archive and `aria-controls` pointed at
-// nothing (#963/#970). Every view now builds them the same way.
+
 describe('buildSectionDomId', () => {
     it('gives every view the same id for the same group, apart from its prefix', () => {
         const ids = ['next-group', 'archived-group', 'agenda-next-group'].map((prefix) => (
@@ -99,10 +97,7 @@ describe('buildGroupedVirtualRows', () => {
     });
 });
 
-// `GroupedTaskList` decides grouped-versus-flat from `virtualRows` alone, so
-// the hook has to answer "am I grouped" in the rows themselves. When both call
-// sites paired the rows with their own flag, a third one could forget the
-// pairing and render grouped data as a flat list with nothing to catch it.
+
 describe('useTaskGroupCollapse', () => {
     const groups = [group('alpha', [task('a1'), task('a2')])];
     const tasks = [task('a1'), task('a2')];

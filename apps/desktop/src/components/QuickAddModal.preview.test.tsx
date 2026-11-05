@@ -10,9 +10,7 @@ const coreSpies = vi.hoisted(() => ({
     parseQuickAdd: vi.fn(),
 }));
 
-// The preview and the submit path have to run ONE parse configuration. Spying
-// on the shared entry point is the only way to prove they do: a preview built
-// from a second, hand-rolled options bag would still render plausible chips.
+
 vi.mock('@mindwtr/core', async () => {
     const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     coreSpies.parseQuickAdd.mockImplementation(actual.parseQuickAdd);
@@ -100,7 +98,7 @@ describe('QuickAddModal live preview', () => {
             const previewCall = coreSpies.parseQuickAdd.mock.calls[coreSpies.parseQuickAdd.mock.calls.length - 1];
             expect(previewCall[4].knownPeople).toEqual(knownPerson ? ['John Smith'] : []);
             expect(screen.getByTestId('quick-add-preview')).toHaveTextContent('John Smith');
-            // Without a trailing space, the first Enter accepts /waiting.
+
             if (!trailingSpace) {
                 await user.keyboard('{Enter}');
                 expect(addTask).not.toHaveBeenCalled();
@@ -132,7 +130,7 @@ describe('QuickAddModal live preview', () => {
         const preview = screen.getByTestId('quick-add-preview');
         expect(preview).toHaveTextContent('@errands');
         expect(preview).toHaveTextContent('#family');
-        // The resolved due date, not the phrase that produced it.
+
         expect(preview).toHaveTextContent('Due Date');
         expect(preview).not.toHaveTextContent('/due:tomorrow');
     });
@@ -149,8 +147,8 @@ describe('QuickAddModal live preview', () => {
 
         const submitCall = coreSpies.parseQuickAdd.mock.calls[previewCalls];
         expect(submitCall).toBeDefined();
-        // input, projects, areas and the options bag: same values, and the bag
-        // is literally the same object the preview memo read.
+
+
         expect(submitCall[0]).toBe(previewCall[0]);
         expect(submitCall[1]).toBe(previewCall[1]);
         expect(submitCall[3]).toBe(previewCall[3]);

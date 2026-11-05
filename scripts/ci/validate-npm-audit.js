@@ -1,17 +1,22 @@
 import { readFileSync } from "node:fs";
 
 export const AUDIT_EXCEPTIONS = {
-  braces: { version: "3.0.3", advisories: { "GHSA-vfj7-8cjw-p6xm": "<=3.0.3" } },
-  "node-forge": { version: "1.4.0", advisories: { "GHSA-86w9-cpqp-85rv": "<=1.4.0" } },
-  "image-size": { version: "1.2.1", advisories: {
-    "GHSA-5p2g-fcmc-qvqq": ">=1.2.0 <=2.0.2",
-    "GHSA-w3rx-r6r6-pgpr": ">=0.6.3 <=2.0.2",
+  deepmerge: { versions: ["4.3.1"], advisories: { "GHSA-gcqx-w48m-w2h4": { range: ">=4.2.0 <=4.3.1", severity: "low" } } },
+  glob: { versions: ["6.0.4", "7.2.3", "10.5.0", "13.0.1", "13.0.6"], advisories: {
+    "GHSA-3g3m-2fjr-6pw4": { range: ">=9.0.0 <=14.0.1", severity: "moderate" },
+  } },
+  minimatch: { versions: ["3.1.5", "5.1.8", "9.0.9", "10.2.4", "10.2.6"], advisories: {
+    "GHSA-g3hv-75wg-m249": { range: ">=7.0.0 <11.0.1", severity: "moderate" },
+  } },
+  "image-size": { versions: ["1.2.1"], advisories: {
+    "GHSA-5p2g-fcmc-qvqq": { range: ">=1.2.0 <=2.0.2", severity: "high" },
+    "GHSA-w3rx-r6r6-pgpr": { range: ">=0.6.3 <=2.0.2", severity: "high" },
   } },
 };
 const PROFILE_ROOTS = {
-  desktop: ["braces"], mobile: ["braces", "node-forge", "image-size"], eas: ["braces", "node-forge"],
+  mobile: ["image-size", "deepmerge", "glob", "minimatch"], eas: ["deepmerge", "glob", "minimatch"], desktop: ["minimatch"],
 };
-export const PROFILE_PREFIXES = { desktop: "apps/desktop", mobile: "apps/mobile", eas: "tools/eas-cli" };
+export const PROFILE_PREFIXES = { mobile: "apps/mobile", eas: "tools/eas-cli", desktop: "apps/desktop" };
 const reviewedTopology = JSON.parse(readFileSync(new URL("./audit-build-tool-topology.json", import.meta.url), "utf8"));
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const dependencyName = (path) => path.split("node_modules/").at(-1);
@@ -19,10 +24,7 @@ const sorted = (value) => JSON.stringify(Object.entries(value).sort(([a], [b]) =
   name, { ...metadata, edges: Object.fromEntries(Object.entries(metadata.edges).sort(([a], [b]) => a.localeCompare(b))) },
 ]));
 
-// Snapshot every reviewed ancestor version and dependency edge. New consumers, nested
-// copies, versions, or production classifications cannot inherit these exceptions.
-// Peer-only audit propagation through React Native/Expo does not itself bundle their
-// separate Node CLI packages into the mobile application's runtime.
+
 export const npmAuditTopology = (lockfile, profile) => {
   if (!PROFILE_ROOTS[profile] || lockfile?.lockfileVersion !== 3 || !isRecord(lockfile.packages)) throw new Error("invalid audit profile or npm lockfile");
   const names = new Set(PROFILE_ROOTS[profile]);
@@ -31,7 +33,7 @@ export const npmAuditTopology = (lockfile, profile) => {
     changed = false;
     for (const [path, metadata] of Object.entries(lockfile.packages)) {
       if (!path || !isRecord(metadata)) continue;
-      if (Object.keys({ ...metadata.dependencies, ...metadata.optionalDependencies }).some((name) => names.has(name))) {
+      if (Object.keys({ ...metadata.dependencies, ...metadata.optionalDependencies, ...metadata.peerDependencies }).some((name) => names.has(name))) {
         const name = dependencyName(path);
         if (!names.has(name)) { names.add(name); changed = true; }
       }
@@ -42,11 +44,10 @@ export const npmAuditTopology = (lockfile, profile) => {
     if (path && !names.has(dependencyName(path))) continue;
     if (!isRecord(metadata)) throw new Error("invalid npm lockfile package metadata");
     const edges = {};
-    for (const kind of ["dependencies", "optionalDependencies", "devDependencies"]) {
+    for (const kind of ["dependencies", "optionalDependencies", "peerDependencies", "devDependencies"]) {
       for (const [name, version] of Object.entries(metadata[kind] ?? {})) if (names.has(name)) edges[`${kind}:${name}`] = version;
     }
     graph[path] = { version: path ? metadata.version : null, edges };
-    if (profile === "desktop" && path) graph[path].dev = metadata.dev === true;
   }
   return graph;
 };
@@ -62,7 +63,7 @@ export const bunAuditTopology = (lockfile) => {
   while (changed) {
     changed = false;
     for (const metadata of Object.values(lockfile.packages)) {
-      if (Object.keys({ ...metadata[2]?.dependencies, ...metadata[2]?.optionalDependencies }).some((name) => names.has(name))) {
+      if (Object.keys({ ...metadata[2]?.dependencies, ...metadata[2]?.optionalDependencies, ...metadata[2]?.peerDependencies }).some((name) => names.has(name))) {
         const name = metadata[0].slice(0, metadata[0].lastIndexOf("@"));
         if (!names.has(name)) { names.add(name); changed = true; }
       }
@@ -72,7 +73,7 @@ export const bunAuditTopology = (lockfile) => {
   for (const [path, metadata] of Object.entries(lockfile.packages)) {
     if (!names.has(metadata[0].slice(0, metadata[0].lastIndexOf("@")))) continue;
     const edges = {};
-    for (const kind of ["dependencies", "optionalDependencies"]) {
+    for (const kind of ["dependencies", "optionalDependencies", "peerDependencies"]) {
       for (const [name, version] of Object.entries(metadata[2]?.[kind] ?? {})) if (names.has(name)) edges[`${kind}:${name}`] = version;
     }
     graph[path] = { version: metadata[0], edges };
@@ -121,8 +122,9 @@ export const validateNpmAuditReport = (report, profile, lockfile) => {
       } else if (isRecord(cause)) {
         const match = typeof cause.url === "string" && cause.url.match(/^https:\/\/github\.com\/advisories\/(GHSA-[a-z0-9-]+)$/);
         if (!match || cause.name !== name || cause.dependency !== name || !PROFILE_ROOTS[profile].includes(name)
-          || AUDIT_EXCEPTIONS[name]?.advisories[match[1]] !== cause.range
-          || vulnerability.nodes.some((node) => lockfile.packages[node].version !== AUDIT_EXCEPTIONS[name].version)) throw new Error(`npm audit returned unexpected direct advisories for ${name}`);
+          || AUDIT_EXCEPTIONS[name]?.advisories[match[1]]?.range !== cause.range
+          || AUDIT_EXCEPTIONS[name].advisories[match[1]].severity !== cause.severity
+          || vulnerability.nodes.some((node) => !AUDIT_EXCEPTIONS[name].versions.includes(lockfile.packages[node].version))) throw new Error(`npm audit returned unexpected direct advisories for ${name}`);
         directAdvisories.push(`${name}:${match[1]}`);
       } else throw new Error(`npm audit returned an invalid cause for ${name}`);
     }
@@ -144,7 +146,7 @@ export const validateNpmAuditReport = (report, profile, lockfile) => {
 if (import.meta.main) {
   try {
     const [reportPath, profile] = process.argv.slice(2);
-    if (!reportPath || !PROFILE_PREFIXES[profile]) throw new Error("usage: validate-npm-audit.js <report.json> <desktop|mobile|eas>");
+    if (!reportPath || !PROFILE_PREFIXES[profile]) throw new Error("usage: validate-npm-audit.js <report.json> <mobile|eas|desktop>");
     const lockfile = JSON.parse(readFileSync(`${PROFILE_PREFIXES[profile]}/package-lock.json`, "utf8"));
     validateNpmAuditReport(JSON.parse(readFileSync(reportPath, "utf8")), profile, lockfile);
     console.log(`Accepted only the reviewed ${profile} build-tool advisory closure.`);

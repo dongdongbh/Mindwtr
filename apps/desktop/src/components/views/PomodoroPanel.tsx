@@ -27,7 +27,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
     const updateTask = useTaskStore((state) => state.updateTask);
     const customDurations = useTaskStore((state) => state.settings.gtd?.pomodoro?.customDurations);
     const linkTaskEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.linkTask === true);
-    // Links can outlive Focus membership (#867), but must follow live task status.
+
     const liveTasks = useTaskStore((state) => state.tasks);
     const actionableTasksById = useMemo(
         () => new Map(liveTasks.filter(isTaskActionable).map((task) => [task.id, task])),
@@ -50,7 +50,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
     const commitSnapshot = usePomodoroStore((state) => state.commitPomodoro);
 
     useEffect(() => {
-        // Re-read persisted state on mount, including any session that completed while the app was closed.
+
         hydratePomodoro(autoStartOptions);
     }, []);
 
@@ -63,10 +63,6 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
         commitSnapshot((prev) => ({ ...prev, selectedTaskId: undefined }));
     }, [commitSnapshot, linkTaskEnabled, snapshot.selectedTaskId, actionableTasksById]);
 
-    // The clock tick and the completion alert live in usePomodoroAlerts, mounted
-    // by App: this panel only exists inside Agenda, so running them here meant a
-    // timer stopped ticking and stopped alerting the moment the user left the
-    // view (#528).
 
     const durations = snapshot.durations;
     const timerState = snapshot.timerState;
@@ -74,10 +70,8 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
     const lastEvent = snapshot.lastEvent;
 
     const selectedTask = linkTaskEnabled && selectedTaskId ? actionableTasksById.get(selectedTaskId) : undefined;
-    // The picker offers Focus tasks, but a task linked from Review or the calendar
-    // will not be among them. Include it so the trigger can name what is linked and
-    // the dropdown can unlink it, instead of reading "Timer only" while a timer runs
-    // against a task the panel refuses to show (#867).
+
+
     const pickerTasks = useMemo(() => {
         const focusTasks = tasks.flatMap((task) => {
             const liveTask = actionableTasksById.get(task.id);

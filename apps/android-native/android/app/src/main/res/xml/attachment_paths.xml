@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the managed attachments folder: a file the app opens or shares (Attachments.kt) is under files/attachments/. -->
+
 <paths>
     <files-path name="attachments" path="attachments/" />
 </paths>

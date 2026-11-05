@@ -4,11 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
-/** An attachment's log line names its URI as core's describeAttachmentUriForLog does, and a failure by its class only. */
+
 class AttachmentLogTest {
     @Test fun aLaunchFailureLogsNoPartOfTheLinkOrTheExceptionText() {
         val link = "missing-app://alice:secret@example.test/document?token=secret"
-        // Android 7 formats the URI into the launch exception's message (Instrumentation.checkStartActivityResult).
+
         val failure = android.content.ActivityNotFoundException("No Activity found to handle Intent { act=android.intent.action.VIEW dat=$link }")
         val line = attachmentLaunchLog("link", link, failure)
         for (secret in listOf("alice", "secret", "example.test", "token", "document")) assertFalse(line, line.contains(secret))

@@ -1,8 +1,6 @@
 import { shallow, useTaskStore } from '@mindwtr/core';
 
-// Store reads ProjectsView needs for its own rendering (sidebar, area manager,
-// project/area DnD, creation). Task/section slices the workspace consumes now
-// live in useProjectWorkspaceStore (arch review 2026-07-20 #8).
+
 export const useProjectsViewStore = () =>
     useTaskStore(
         (state) => ({

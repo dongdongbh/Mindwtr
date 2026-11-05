@@ -3,11 +3,7 @@ import AppKit
 import SwiftUI
 import WidgetKit
 
-// Mirrors the visual shape of apps/mobile/widgets-ios/MindwtrTasksWidget.swift
-// for the desktop app's macOS widget (#1054). One deliberate difference from
-// the iOS widget remains: one generous item list (see macos-widget-data.ts)
-// rather than five
-//    per-size UserDefaults payloads; `familyTaskCap` below crops further.
+
 private let mindwtrMacWidgetKind = "MindwtrMacTasksWidget"
 private let mindwtrMacWidgetPayloadFileName = "widget-payload.json"
 private let mindwtrMacWidgetRefreshMinutes = 15
@@ -17,9 +13,8 @@ private let mindwtrMacWidgetCaptureNotification = Notification.Name(
 private let mindwtrMacWidgetHostBundleIdentifier = "tech.dongdongbh.mindwtr"
 private let mindwtrMacWidgetQuickAddArgument = "--quick-add"
 private let mindwtrMacWidgetCaptureArgument = "--widget-quick-add"
-// Placeholder for local/unsigned builds -- must match build.rs's own
-// DEVTEAM fallback so an unsigned dev build's widget (if ever force-installed)
-// fails the same way the Rust write command does: no container, no crash.
+
+
 private let mindwtrMacWidgetDevAppGroup = "DEVTEAM.tech.dongdongbh.mindwtr"
 
 private func mindwtrMacWidgetAppGroupIdentifier() -> String {
@@ -61,10 +56,7 @@ struct MindwtrMacQuickCaptureIntent: AppIntent {
             configuration: configuration
         )
 
-        // Arguments cover a cold launch. An already-running application may
-        // ignore them, so notify its native listener after launch completion.
-        // Keep the message payload-free: the host opens its existing panel and
-        // the normal single-writer store remains the only persistence path.
+
         DistributedNotificationCenter.default().postNotificationName(
             mindwtrMacWidgetCaptureNotification,
             object: mindwtrMacWidgetAppGroupIdentifier(),
@@ -187,10 +179,8 @@ struct MindwtrMacTasksWidgetProvider: TimelineProvider {
     func getTimeline(in _: Context, completion: @escaping (Timeline<MindwtrMacTasksWidgetEntry>) -> Void) {
         let now = Date()
         let entry = MindwtrMacTasksWidgetEntry(date: now, payload: loadPayload())
-        // The desktop app best-effort calls WidgetCenter.reloadAllTimelines()
-        // right after writing a fresh payload, but that in-process reload can't
-        // be guaranteed from every build (#1054 decision 6), so the timeline
-        // itself also refreshes on a short fixed cadence as the fallback.
+
+
         let refresh = Calendar.current.date(byAdding: .minute, value: mindwtrMacWidgetRefreshMinutes, to: now)
             ?? now.addingTimeInterval(TimeInterval(mindwtrMacWidgetRefreshMinutes * 60))
         completion(Timeline(entries: [entry], policy: .after(refresh)))
@@ -237,8 +227,7 @@ private struct MindwtrMacTasksWidgetView: View {
     @Environment(\.widgetFamily) private var widgetFamily
     @Environment(\.colorScheme) private var colorScheme
 
-    // macOS has no systemExtraLarge family, so there is no second column to
-    // account for -- unlike the iOS widget's iPad-only two-column layout.
+
     private var familyTaskCap: Int {
         switch widgetFamily {
         case .systemLarge: return 9
@@ -312,10 +301,7 @@ private struct MindwtrMacTasksWidgetView: View {
         .mindwtrMacWidgetBackground(hexColor(palette.background))
     }
 
-    // The payload's palette is already the resolved light/dark colors (built
-    // by apps/desktop/src/lib/macos-widget-data.ts); Swift's job is to decode
-    // it, not re-classify it. Adaptive modes need Swift's own colorScheme
-    // because the TS side can't observe a later system change ahead of render.
+
     private func resolvePalette(_ payload: MindwtrMacTasksWidgetPayload) -> MindwtrMacWidgetPalette {
         let mode = (payload.themeMode ?? "system")
             .trimmingCharacters(in: .whitespacesAndNewlines)

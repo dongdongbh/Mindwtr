@@ -1,26 +1,9 @@
-// App lock check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-app-lock-device.mjs <adb-serial> [apk]
-//
-// The phone must have no screen lock (no PIN, pattern, password or biometrics). The check never sets or changes the phone's
-// lock; if the device lock prompt opens, the phone has one, and the check closes the prompt and stops (exit 3). Installs the
-// debug APK with `install -r` (existing development data stays) and checks against core's own views on database copies:
-// (a) Settings › General's App lock row shows core's words, off; turning it on shows RN's no-screen-lock line (core's
-// `errors.unavailable`) under the row and stores nothing (core still says off, no generalSetting command ran); (b) with App lock
-// turned on through core's own setGeneralSetting on a host copy (what RN's switch stores after a yes: the per-device
-// `settings.security.mobileAppLockEnabled`), the app opens on RN's lock screen in core's words instead of its tabs, its own
-// prompt answers with the no-screen-lock line, and Unlock keeps it locked; (c) rotation, leaving for the home screen and
-// coming back, and process death keep it locked (the setting survives a restart); (d) App lock turned off through core opens
-// the tabs again, and General's switch reads off. Turning it off from the switch needs an unlocked app with App lock on, which
-// needs a screen lock, so this check cannot reach it. Each database change happens while the app is stopped: core writes a
-// copy, the copy is staged beside the database and size-checked, the old WAL and SHM go, and a rename puts it in place; the
-// untouched pull stays in android/build/app-lock-check/original-<n> for a manual recovery. It puts the setting back as it
-// found it, on failure too, reads core to prove it, goes back to the Inbox tab, and restores rotation; a restore that fails
-// exits 1. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
-import { execFileSync } from 'node:child_process';
+
+
+
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { check, connect, evidenced, fail, inboxCount, inEditor, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
@@ -44,7 +27,7 @@ const ACTIVITY = `${PKG}/${PKG}.MainActivity`;
 const TAG = 'MindwtrNativeDev';
 const UI_FILE = '/data/local/tmp/mindwtr-native-dev-ui.xml';
 const STAGED = '/data/local/tmp/mindwtr-native-dev-app-lock.db';
-const PROPS = ['fail_commit', 'delay_before_ms', 'delay_after_ms', 'language'];
+const PROPS = ['fail_commit', 'delay_before_ms', 'delay_after_ms', 'language', 'app_lock_answer'];
 const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/app-lock-check');
 const coreSrc = resolve(app, '../../packages/core/src');
@@ -55,10 +38,12 @@ const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tap
 const phoneLocale = (sh('getprop persist.sys.locale') || sh('getprop ro.product.locale')).trim();
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
+const entryReads = () => device.logs(pid(), TAG).split('\n').filter((line) => line.includes('native-android-entry-point')).length;
+const queued = () => { try { return runAs('cat no_backup/entries/queue'); } catch { return ''; } };
 const commands = (operation) => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = (name = 'db') => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -67,12 +52,9 @@ const pullDatabase = (name = 'db') => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/**
- * Core on a copy: `set` turns App lock on or off (CHECK_VALUE) through core's setGeneralSetting, as the app's switch sends it, and
- * checkpoints the WAL; every mode prints the stored value, General's App lock row, the More sheet's and Settings' labels the
- * check taps, and the lock screen's words.
- */
-const core = (mode, db = pullDatabase(), on = false) => JSON.parse(execFileSync('bun', ['-e', `
+
+
+const core = (mode, db = pullDatabase(), on = false, delay = null) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
     const db = new Database(process.env.CHECK_DB);
@@ -89,6 +71,7 @@ const core = (mode, db = pullDatabase(), on = false) => JSON.parse(execFileSync(
     const value = (result) => { if (!result.ok) throw new Error(result.error.code + ': ' + result.error.message); return result.value; };
     if (process.env.CHECK_MODE === 'set') {
         value(await host.setGeneralSetting({ requestId: crypto.randomUUID(), edit: { type: 'appLock', value: process.env.CHECK_VALUE === 'true' } }));
+        if (process.env.CHECK_DELAY) value(await host.setGeneralSetting({ requestId: crypto.randomUUID(), edit: { type: 'appLockRelockDelay', value: Number(process.env.CHECK_DELAY) } }));
         await flushPendingSave();
         if (useTaskStore.getState().persistenceFailure) throw new Error('save failed: ' + useTaskStore.getState().persistenceFailure.message);
     }
@@ -97,6 +80,8 @@ const core = (mode, db = pullDatabase(), on = false) => JSON.parse(execFileSync(
     const row = value(host.getGeneralSettings({})).privacy.appLock;
     const out = {
         stored: useTaskStore.getState().settings.security?.mobileAppLockEnabled ?? null,
+        relockMinutes: useTaskStore.getState().settings.security?.mobileAppLockRelockDelayMinutes ?? 0,
+        taskId: useTaskStore.getState().tasks.find((task) => !task.deletedAt && task.status !== 'done' && task.status !== 'archived')?.id ?? null,
         row: { label: row.label, description: row.description, value: row.value, unavailable: row.errors.unavailable },
         settingsTile: [...more.primary, ...more.utilities].find((item) => item.id === 'settings').label,
         generalRow: menu.groups.flat().find((item) => item.id === 'general').accessibilityLabel,
@@ -106,15 +91,15 @@ const core = (mode, db = pullDatabase(), on = false) => JSON.parse(execFileSync(
     db.close();
     console.log(JSON.stringify(out));
     process.exit(0);
-`], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_VALUE: String(on), CHECK_LOCALE: phoneLocale } }).trim().split('\n').pop());
+`], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_VALUE: String(on), CHECK_DELAY: delay === null ? '' : String(delay), CHECK_LOCALE: phoneLocale } }).trim().split('\n').pop());
 
-// ---- UI ----
+
 const locked = (nodes) => Boolean(tagged(nodes, 'app-lock'));
-/** The tabs show: no lock screen, Menu screen (Settings is one), editor or More sheet over them. */
+
 const onTabs = (nodes) => !locked(nodes) && !tagged(nodes, 'menu-screen') && !inEditor(nodes) && !tagged(nodes, 'more-sheet') && Boolean(tab(nodes, en['tab.menu']));
-/** The boot is over: the lock screen, or a screen of the app (the tabs, a Menu screen, the editor). */
+
 const booted = (nodes) => locked(nodes) || Boolean(tab(nodes, en['tab.menu']) || tagged(nodes, 'menu-screen')) || inEditor(nodes);
-/** The device lock prompt is up: the screen shows none of this app's nodes. */
+
 const promptUp = (nodes) => nodes.length > 0 && !nodes.some((node) => node.package === PKG);
 const closePromptAndStop = () => {
     sh('input keyevent KEYCODE_BACK');
@@ -122,12 +107,9 @@ const closePromptAndStop = () => {
 };
 
 let changes = 0;
-/**
- * Stops the app and waits for its process to end; pulls its database untouched (original-<n>, the recovery copy); lets core set
- * App lock on a second copy and checkpoint it into one file; stages that file beside the database, checks its size, removes the
- * old WAL and SHM (the copy holds their content), and renames it over the database, all while the app is stopped; then launches.
- */
-const setLock = async (on) => {
+
+
+const setLock = async (on, delay = null) => {
     await device.stopApp();
     changes += 1;
     const original = pullDatabase(`original-${changes}`);
@@ -135,7 +117,7 @@ const setLock = async (on) => {
     rmSync(dirname(db), { recursive: true, force: true });
     mkdirSync(dirname(db), { recursive: true });
     for (const suffix of ['', '-wal', '-shm']) if (existsSync(`${original}${suffix}`)) copyFileSync(`${original}${suffix}`, `${db}${suffix}`);
-    const result = core('set', db, on);
+    const result = core('set', db, on, delay);
     check(!existsSync(`${db}-wal`) || statSync(`${db}-wal`).size === 0, `App lock ${on ? 'on' : 'off'} through core's setGeneralSetting is in one database file`);
     const next = `files/${DB}.app-lock-new`;
     try {
@@ -150,12 +132,12 @@ const setLock = async (on) => {
         console.error(`the app's database before this change is in ${dirname(original)}: with the app stopped, push it and move it over files/${DB} (and its -wal and -shm) with run-as`);
         throw error;
     } finally {
-        try { sh(`rm -f ${STAGED}`); runAs(`rm -f ${next}`); } catch { /* device gone */ }
+        try { sh(`rm -f ${STAGED}`); runAs(`rm -f ${next}`); } catch {                   }
     }
     device.launch(ACTIVITY);
     return result;
 };
-/** Settings › General from the tabs: the Menu tab's More sheet, Settings, then General. */
+
 const openGeneral = async (seen) => {
     await waitFor('the app', booted, 60_000);
     await toInbox();
@@ -165,7 +147,7 @@ const openGeneral = async (seen) => {
     nodes = await tapExpecting(withDescription(nodes, seen.settingsTile) ?? fail('no Settings in the More sheet'), (current) => Boolean(tagged(current, 'settings-main')), 'Settings');
     return tapExpecting(withDescription(nodes, seen.generalRow) ?? fail('no General row'), (current) => Boolean(withDescription(current, seen.row.label)), 'Settings › General');
 };
-/** The lock screen showing core's title and its no-screen-lock line, and none of the app's tabs. */
+
 const lockScreen = (seen) => (nodes) => {
     if (promptUp(nodes)) closePromptAndStop();
     return locked(nodes) && nodes.some((node) => node.text === seen.strings['appLock.title']) && tagged(nodes, 'app-lock-message')?.text === seen.strings['appLock.unavailable']
@@ -173,9 +155,10 @@ const lockScreen = (seen) => (nodes) => {
 };
 
 let original = null;
+let originalDelay = 0;
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
-/** Back until the tabs show (General, Settings and the More sheet close), then the Inbox tab. */
+
 const toInbox = async () => {
     for (let step = 0; step < 8; step += 1) {
         const nodes = await screen();
@@ -190,14 +173,17 @@ const toInbox = async () => {
     }
     fail('the tabs did not come back');
 };
-/** Puts App lock back as the check found it and proves it from core; with it off, back to the Inbox tab. A failure exits 1. */
+
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     if (original !== null) {
         try {
-            if ((core('read').stored === true) !== original) await setLock(original);
-            const now = core('read').stored === true;
+            const before = core('read');
+            if ((before.stored === true) !== original || before.relockMinutes !== originalDelay) await setLock(original, originalDelay);
+            const after = core('read');
+            const now = after.stored === true;
             if (now !== original) fail(`core says App lock is ${now ? 'on' : 'off'}`);
+            if (after.relockMinutes !== originalDelay) fail(`core says the relock delay is ${after.relockMinutes} minutes, not ${originalDelay}`);
             console.log(`restored - core says App lock is ${original ? 'on' : 'off'}, as the check found it`);
             if (!original) {
                 await waitFor('the app unlocked', (current) => booted(current) && !locked(current), 60_000);
@@ -209,9 +195,9 @@ const restore = async () => {
         }
     }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 try {
@@ -229,12 +215,13 @@ try {
     await waitFor('the app or the lock screen', (nodes) => booted(nodes) || promptUp(nodes), 60_000);
     let seen = core('read');
     original = seen.stored === true;
+    originalDelay = seen.relockMinutes;
     if (original) {
         seen = await setLock(false);
         console.log('note - App lock was on; turned off through core for the check, and turned on again at the end');
     }
 
-    // (a) General's App lock row in core's words, off; turning it on without a screen lock shows core's line and stores nothing.
+
     let nodes = await openGeneral(seen);
     check(!switchOn(nodes, seen.row.label) && nodes.some((node) => node.text === seen.row.description), `(a) General shows "${seen.row.label}" (core's words), off`);
     const saves = commands('generalSetting');
@@ -245,7 +232,7 @@ try {
     seen = core('read');
     check(commands('generalSetting') === saves && seen.stored !== true && seen.row.value === false, '(a) nothing is stored: core still says off, and no generalSetting command ran');
 
-    // (b) App lock on through core (RN's stored value): the app opens on the lock screen; its own prompt answers; Unlock keeps it locked.
+
     seen = await setLock(true);
     check(seen.stored === true && seen.row.value === true, '(b) core\'s setGeneralSetting stores settings.security.mobileAppLockEnabled = true, as RN\'s switch does after a yes');
     nodes = await waitFor('the lock screen with its no-screen-lock line', lockScreen(seen), 60_000);
@@ -257,7 +244,7 @@ try {
     await waitFor('the app still locked after Unlock', lockScreen(seen), 15_000);
     check(true, '(b) Unlock without a screen lock keeps the app locked');
 
-    // (c) Rotation, the home screen and back, and process death keep it locked.
+
     sh('settings put system user_rotation 1');
     await waitFor('the lock screen in landscape', lockScreen(seen), 20_000);
     sh('settings put system user_rotation 0');
@@ -279,10 +266,126 @@ try {
     await waitFor('the lock screen after process death', lockScreen(seen), 60_000);
     check(true, '(c) rotation, the home screen and back, and process death keep the app locked (the setting survives a restart)');
 
-    // (d) App lock off through core: the tabs come back, and General's switch reads off.
+
     seen = await setLock(false);
     nodes = await openGeneral(seen);
     check(seen.stored === false && !switchOn(nodes, seen.row.label), '(d) App lock off through core opens the tabs again, and General\'s switch reads off');
+
+
+    const relockLabel = en['settings.mobile.appLockRelock'];
+    const relockRow = (current, choice) => current.find((node) => node['content-desc'] === `${relockLabel}: ${en[choice]}`);
+    setProp('app_lock_answer', 'yes');
+    await tap(withDescription(nodes, seen.row.label));
+    nodes = await waitFor('the relock delay row', (current) => !locked(current) && switchOn(current, seen.row.label) && Boolean(relockRow(current, 'settings.mobile.appLockRelockImmediately')), 15_000);
+    check(core('read').stored === true, `(e) the switch turns App lock on, and General shows "${relockLabel}: ${en['settings.mobile.appLockRelockImmediately']}" under it`);
+    writeFileSync(resolve(work, 'relock-row.png'), adbRaw('exec-out', 'screencap', '-p'));
+    setProp('app_lock_answer', '');
+
+    const choose = async (from, choice, minutes) => {
+        nodes = await tapExpecting(relockRow(await screen(), from) ?? fail('no relock row'), (current) => Boolean(tagged(current, 'settings-picker')), 'the relock picker');
+        if (from === 'settings.mobile.appLockRelockImmediately') writeFileSync(resolve(work, 'relock-picker.png'), adbRaw('exec-out', 'screencap', '-p'));
+        await tap(withDescription(nodes, en[choice]) ?? fail(`no "${en[choice]}" in the picker`));
+        await waitFor(`"${en[choice]}" on the row`, (current) => Boolean(relockRow(current, choice)), 15_000);
+        await sleep(1500);
+        const stored = core('read').relockMinutes;
+        if (stored !== minutes) fail(`core stored a relock delay of ${stored} minutes, not ${minutes}`);
+    };
+
+    const away = async () => {
+        requireAppFront();
+        sh('input keyevent KEYCODE_HOME');
+        await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
+        await sleep(65_000);
+        device.launch(ACTIVITY);
+    };
+    await choose('settings.mobile.appLockRelockImmediately', 'settings.mobile.appLockRelockAfter5', 5);
+    await away();
+    await waitFor('General open again', (current) => Boolean(relockRow(current, 'settings.mobile.appLockRelockAfter5')), 30_000);
+    await sleep(3000);
+    nodes = await screen();
+    check(!locked(nodes) && Boolean(relockRow(nodes, 'settings.mobile.appLockRelockAfter5')),
+        '(e) with "After 5 minutes", 65 seconds away comes back on General, open, without asking');
+    await choose('settings.mobile.appLockRelockAfter5', 'settings.mobile.appLockRelockAfter1', 1);
+    await away();
+    await waitFor('the lock screen after 65 seconds away', lockScreen(seen), 30_000);
+    check(true, '(e) with "After 1 minute", 65 seconds away comes back on the lock screen');
+    await sleep(1500);
+    const lockReference = resolve(work, 'grace-lock-reference.png');
+    writeFileSync(lockReference, adbRaw('exec-out', 'screencap', '-p'));
+
+
+    setProp('app_lock_answer', 'yes');
+    await tap(tagged(await screen(), 'app-lock-unlock') ?? fail('no Unlock button'));
+    await waitFor('General open again', (current) => !locked(current) && Boolean(relockRow(current, 'settings.mobile.appLockRelockAfter1')), 15_000);
+    await sleep(1500);
+    const openReference = resolve(work, 'grace-open-reference.png');
+    writeFileSync(openReference, adbRaw('exec-out', 'screencap', '-p'));
+    requireAppFront();
+    sh('input keyevent KEYCODE_HOME');
+    await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
+    await sleep(3000);
+    const clip = '/sdcard/mindwtr-app-lock-grace.mp4';
+    sh(`rm -f ${clip}`);
+    const recording = spawn(adbBin, ['-s', serial, 'shell', 'screenrecord', '--time-limit', '6', clip]);
+    const recorded = new Promise((done) => recording.on('exit', done));
+    await sleep(1000);
+    device.launch(ACTIVITY);
+    await recorded;
+    await sleep(1000);
+    const video = resolve(work, 'grace-return.mp4');
+    writeFileSync(video, adbRaw('exec-out', 'cat', clip));
+    sh(`rm -f ${clip}`);
+    const gray = (file) => execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', 'scale=72:160,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 256 << 20 });
+    const lockPixels = gray(lockReference);
+    const openPixels = gray(openReference);
+    const frames = gray(video);
+    const size = lockPixels.length;
+    const distance = (offset, reference) => {
+        let sum = 0;
+        for (let i = 0; i < size; i += 1) sum += Math.abs(frames[offset + i] - reference[i]);
+        return sum / size;
+    };
+    const panelFrames = [];
+    const nearest = [];
+    for (let offset = 0, index = 0; offset + size <= frames.length; offset += size, index += 1) {
+        const toLock = distance(offset, lockPixels);
+        const toOpen = distance(offset, openPixels);
+        nearest.push(`${index}:${toLock.toFixed(1)}/${toOpen.toFixed(1)}`);
+        if (toLock < 12 && toLock < toOpen) panelFrames.push(index);
+    }
+    writeFileSync(resolve(work, 'grace-return-distances.txt'), `${nearest.join('\n')}\n`);
+    console.log(`observed - grace return: ${frames.length / size} frames, unlock panel in frames [${panelFrames.join(', ')}]`);
+    nodes = await screen();
+    check(!locked(nodes) && Boolean(relockRow(nodes, 'settings.mobile.appLockRelockAfter1')) && panelFrames.length === 0,
+        '(g) a return within the relock delay shows General again and never draws the unlock panel on the way (RN 80690c7eb, #1423)');
+    await choose('settings.mobile.appLockRelockAfter1', 'settings.mobile.appLockRelockImmediately', 0);
+    setProp('app_lock_answer', '');
+    const taskId = core('read').taskId ?? fail('no open task in the development data');
+    requireAppFront();
+    sh('input keyevent KEYCODE_HOME');
+    await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
+    await sleep(1000);
+    const linkProcess = pid();
+    const readsBefore = entryReads();
+    sh(`am start -W -a android.intent.action.VIEW -d 'mindwtr-native-dev://open?task=${taskId}' ${PKG}`);
+    await waitFor('the lock screen after the task link', lockScreen(seen), 30_000);
+    for (let sample = 0; sample < 8; sample += 1) {
+        const current = await screen();
+        if (!locked(current) || inEditor(current)) fail(`sample ${sample}: the lock screen did not stay (the app or the editor showed)`);
+        await sleep(500);
+    }
+    check(pid() === linkProcess, '(f) the task link comes back on a steady lock screen for 4 seconds, in the same process');
+    writeFileSync(resolve(work, 'link-held.png'), adbRaw('exec-out', 'screencap', '-p'));
+    const readUnderLock = entryReads() > readsBefore;
+    const heldInQueue = queued().includes(taskId);
+    console.log(`observed - under the lock: core read the entry ${readUnderLock}, the entry still queued ${heldInQueue}`);
+    check(!readUnderLock && heldInQueue, '(f) the task link waits in the entry queue, unread by core, while the lock covers the app (RN b7bccbbc3)');
+    setProp('app_lock_answer', 'yes');
+    await tap(tagged(await screen(), 'app-lock-unlock') ?? fail('no Unlock button'));
+    await waitFor('the task in the editor after the unlock', (current) => !locked(current) && inEditor(current), 30_000);
+    writeFileSync(resolve(work, 'link-opened.png'), adbRaw('exec-out', 'screencap', '-p'));
+    setProp('app_lock_answer', '');
+    check(!queued().includes(taskId), '(f) the unlock opens the task in the editor, and the entry leaves the queue');
     console.log('App lock device check passed');
 } catch (error) {
     evidenced(error);

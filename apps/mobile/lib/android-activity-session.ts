@@ -72,11 +72,7 @@ const observeCurrentActivity = () => {
   return { generation: currentActivityGeneration, session };
 };
 
-/**
- * True only during the old Activity's verified configuration-change teardown.
- * The optional native capability fails closed so ordinary unmounts retain no UI
- * state or attachment ownership.
- */
+
 export function getCurrentAndroidActivityId(): number | null {
   return observeCurrentActivity()?.session.activityId ?? null;
 }
@@ -88,7 +84,7 @@ export function isAndroidActivityChangingConfigurations(activityId?: number | nu
   return session.isChangingConfigurations === true;
 }
 
-/** Keep one process-local snapshot while Android replaces the current Activity. */
+
 export function retainAndroidActivitySession<T>(
   ownerId: string,
   value: T,
@@ -129,10 +125,7 @@ export function retainAndroidActivitySession<T>(
   return true;
 }
 
-/**
- * Consume a snapshot only in a different Activity in the same JS process.
- * Reading never replays within the Activity that captured it.
- */
+
 export function takeAndroidActivitySession<T>(
   ownerId: string,
   validate: (value: unknown) => value is T,
@@ -141,8 +134,7 @@ export function takeAndroidActivitySession<T>(
   const retained = retainedSessions.get(ownerId);
   if (!retained) return null;
 
-  // Every attempted restore is one-shot, including invalid or unavailable
-  // native state, so a rejected snapshot cannot surface on a later mount.
+
   retainedSessions.delete(ownerId);
   const current = observeCurrentActivity();
   if (!current

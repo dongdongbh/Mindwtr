@@ -1,15 +1,12 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { resetForTests, useTaskStore } from '@mindwtr/core';
+import { afterEach, describe, expect, it, setSystemTime } from 'bun:test';
+import { consoleLogger, NO_FOCUS_WIDGET_FILTER, resetForTests, setFocusWidgetFilter, setLogger, useTaskStore, type LogPayload } from '@mindwtr/core';
 import { createWidgetPublisher, type WidgetBridge } from './host-widgets';
 
-// The widget publication on leaving the app (ProcessCoreHost's "background"): RN flushes a refresh still waiting; it does not
-// build the whole payload again when nothing changed. At 5,000 tasks that build held the engine about 300 ms on the S23, right
-// when a leave-time sync starts its read.
 
 const bridge = (stale = false) => {
     const calls = { builds: 0, published: [] as string[] };
     const value: WidgetBridge = {
-        // publish() asks ready() once per build, before it reads the store.
+
         ready: () => { calls.builds += 1; return true; },
         inputs: () => ({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: [], stale }),
         publish: (payload) => { calls.published.push(payload); },
@@ -82,7 +79,7 @@ describe('native Android widget publisher and the widget chooser', () => {
         const widgets = createWidgetPublisher(value);
         widgets.publish();
         const first = JSON.parse(calls.published[0]);
-        // The chooser offers every context by name; the list comes only for a placed choice (core's androidWidgetProjectionOptions).
+
         expect(first.contexts.map((option: { id: string }) => option.id)).toEqual(['context:@desk']);
         expect(first.lists['context:@desk']).toBeUndefined();
 
@@ -90,5 +87,69 @@ describe('native Android widget publisher and the widget chooser', () => {
         expect(widgets.publish()).toBe(true);
         const next = JSON.parse(calls.published[1]);
         expect(next.lists['context:@desk'].items.map((item: { id: string }) => item.id)).toEqual(['t-desk']);
+    });
+});
+
+
+describe('native Android widget publisher with nothing changed', () => {
+    afterEach(() => { setSystemTime(); resetForTests(); });
+
+    it('builds nothing again for the same store, device inputs and minute', () => {
+        resetForTests();
+        setSystemTime(new Date('2026-10-26T10:00:05Z'));
+        const { value, calls } = bridge();
+        const widgets = createWidgetPublisher(value);
+        expect(widgets.publish()).toBe(true);
+        const built = calls.builds;
+
+        expect(widgets.publish()).toBe(false);
+        expect(calls.builds).toBe(built);
+        expect(calls.published).toHaveLength(1);
+    });
+
+    it('builds again in a new minute, when the device inputs change, and when the last one never reached the widgets', () => {
+        resetForTests();
+        setSystemTime(new Date('2026-10-26T10:00:05Z'));
+        const { value, calls } = bridge();
+        const widgets = createWidgetPublisher(value);
+        widgets.publish();
+        setSystemTime(new Date('2026-10-26T10:01:05Z'));
+        widgets.publish();
+        expect(calls.builds).toBe(2);
+        value.inputs = () => ({ systemColorScheme: 'dark', systemLocale: 'en-US', listSelections: [], stale: false });
+        widgets.publish();
+        expect(calls.builds).toBe(3);
+        value.inputs = () => ({ systemColorScheme: 'dark', systemLocale: 'en-US', listSelections: [], stale: true });
+        expect(widgets.publish()).toBe(true);
+        expect(calls.builds).toBe(4);
+    });
+});
+
+
+describe('native Android widget publisher and the Focus widget\'s available actions', () => {
+    afterEach(() => { setLogger(consoleLogger); resetForTests(); });
+
+    it('logs RN\'s v1.3.8/widget-focus-available line only when a placed Focus widget adds the section', () => {
+        resetForTests();
+
+        setFocusWidgetFilter(NO_FOCUS_WIDGET_FILTER);
+        const now = new Date().toISOString();
+        const day = new Date(Date.now() - 2 * 86_400_000);
+        const started = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+        useTaskStore.setState({ _allTasks: [{ id: 't-start', title: 'Started', status: 'next', tags: [], contexts: [], startTime: started,
+            createdAt: now, updatedAt: now }] } as never);
+        const lines: LogPayload[] = [];
+        setLogger((payload) => { lines.push(payload); });
+        const available = () => lines.filter((line) => line.message === 'Focus widget available actions published');
+
+        const plain = bridge();
+        createWidgetPublisher(plain.value).publish();
+        expect(available()).toEqual([]);
+
+        const { value } = bridge();
+        value.inputs = () => ({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: ['focus:available'] });
+        createWidgetPublisher(value).publish();
+        expect(available()).toEqual([expect.objectContaining({ scope: 'widget', force: true,
+            context: { releaseCheck: 'v1.3.8/widget-focus-available', platform: 'android', count: 1, totalItems: 1 } })]);
     });
 });

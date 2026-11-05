@@ -45,7 +45,7 @@ async function open(existing = false) {
     const create = () => createNativeAppleReminderImportOwner({
         readiness: () => ready ? { ok: true, value: null } : { ok: false, error: { code: 'NOT_READY', message: 'Not ready' } },
         save: async () => {
-            try { await flushPendingSave(); } catch { /* The saved store failure is checked below. */ }
+            try { await flushPendingSave(); } catch {                                                 }
             return useTaskStore.getState().persistenceFailure
                 ? { ok: false, error: { code: 'SAVE_FAILED', message: 'Controlled save failed' } }
                 : { ok: true, value: null };
@@ -239,7 +239,7 @@ describe('inactive native Apple Reminders item receipt owner', () => {
         };
         const result = await env.owner.commit(env.envelope);
         env.faults.beforeRun = undefined;
-        try { await env.client.run('ROLLBACK'); } catch { /* A correctly fenced path may have rolled back already. */ }
+        try { await env.client.run('ROLLBACK'); } catch {                                                             }
         expect(commitAttempted).toBe(true);
         expect(result.ok).toBe(false);
         expect((await env.snapshot()).receipts).toHaveLength(0);

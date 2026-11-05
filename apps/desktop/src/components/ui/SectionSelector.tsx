@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { Section } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { useDropdownPosition } from './use-dropdown-position';
 
 interface SectionSelectorProps {
@@ -14,7 +15,9 @@ interface SectionSelectorProps {
     searchPlaceholder?: string;
     noMatchesLabel?: string;
     createSectionLabel?: string;
+    ariaLabel?: string;
     className?: string;
+    controlClassName?: string;
 }
 
 export function SectionSelector({
@@ -27,7 +30,9 @@ export function SectionSelector({
     searchPlaceholder = 'Search sections',
     noMatchesLabel = 'No matches',
     createSectionLabel = 'Create section',
+    ariaLabel,
     className,
+    controlClassName,
 }: SectionSelectorProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -87,6 +92,7 @@ export function SectionSelector({
     };
 
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             closeDropdown();
@@ -115,7 +121,7 @@ export function SectionSelector({
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter') return;
+        if (isImeComposing(event) || event.key !== 'Enter') return;
         const title = query.trim();
         if (!title) return;
 
@@ -144,7 +150,8 @@ export function SectionSelector({
                         closeDropdown();
                     }
                 }}
-                className="w-full flex items-center justify-between text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
+                aria-label={ariaLabel}
+                className={cn('w-full flex items-center justify-between text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground', controlClassName)}
                 aria-haspopup="listbox"
                 aria-expanded={open}
             >

@@ -1,15 +1,6 @@
-// The attachment file installer's policy: argument checks and result parsing around the
-// Android native installer (`AttachmentFileInstallerCore.kt`), and File Sync's publication
-// reservations — the device-local journal that names each private `.mindwtr-install-*` stage
-// before native code creates it. It moved here from React Native's
-// `apps/mobile/lib/attachment-file-installer.ts` so the native app reuses the same Kotlin
-// installer under the same rules; each host binds it to the native module, its key-value store
-// and its log.
-//
-// Data safety: a reservation is written before the stage exists, bound to the stage's identity
-// before publication, and cleared only by the native cleanup of that exact identity. Recovery
-// reads only the reservations this device recorded; the shared folder is never scanned, and a
-// stage is never deleted blindly.
+
+
+
 import { SyncFileGenerationCorruptError } from './sync-service-utils';
 import type { SyncKeyValueStoragePort } from './sync-storage-keys';
 import type { MobileSyncLogPort } from './mobile-sync-service';
@@ -48,8 +39,7 @@ type NativePreparedStageIdentity = NativeOwnedStageIdentity & {
   stagedPath: string;
 };
 
-/** The native installer (Android: `AttachmentFileInstallerCore.kt`). Results are parsed and
- *  checked here, so each method returns the raw native value. */
+
 export type NativeAttachmentFileInstaller = {
   installAsync(
     stagedPath: string,
@@ -283,9 +273,9 @@ const parseNativePublishResult = (value: unknown): ImmutableAttachmentFilePublis
 };
 
 export type MobileAttachmentInstallerHost = {
-  /** Loads the native installer; throws when this build has none. Called once, on first use. */
+
   loadNativeModule(): NativeAttachmentFileInstaller;
-  /** The device key-value store (React Native: AsyncStorage); holds the reservations. */
+
   storage: SyncKeyValueStoragePort;
   log: Pick<MobileSyncLogPort, 'info'>;
 };
@@ -357,8 +347,7 @@ export const createMobileAttachmentInstaller = (host: MobileAttachmentInstallerH
     throw new Error('Attachment file publisher returned an invalid cleanup result');
   };
 
-  /** Recover only exact private publication namespaces previously reserved in
-   * device-local state. The shared folder is deliberately never scanned. */
+
   const recoverFileSyncAttachmentPublications = async (
     attachmentsDirectoryPath: string,
   ): Promise<void> => withReservationLock(async () => {
@@ -388,7 +377,7 @@ export const createMobileAttachmentInstaller = (host: MobileAttachmentInstallerH
     await storeReservationRecords(retained);
   });
 
-  /** Persist exact ownership before native code creates the private stage. */
+
   const reserveFileSyncAttachmentPublication = async (
     targetPath: string,
     expectedStagedSha256: string,
@@ -443,8 +432,7 @@ export const createMobileAttachmentInstaller = (host: MobileAttachmentInstallerH
     return { operationId, stagedPath, targetPath: target };
   });
 
-  /** Bind the durable reservation to the exact fully-written inode before native
-   * publication. Recovery never deletes an unclaimed or replaced pathname. */
+
   const claimFileSyncAttachmentPublication = async (
     reservation: FileSyncAttachmentPublicationReservation,
   ): Promise<void> => withReservationLock(async () => {
@@ -514,8 +502,7 @@ export const createMobileAttachmentInstaller = (host: MobileAttachmentInstallerH
     reservation: FileSyncAttachmentPublicationReservation,
   ): Promise<void> => settleReservation(reservation, 'invalid-target');
 
-  /** Clear bounded-collision history only after the canonical target has been
-   * independently verified as the requested immutable generation. */
+
   const clearFileSyncAttachmentPublicationRecovery = async (
     targetPath: string,
   ): Promise<void> => withReservationLock(async () => {
@@ -568,9 +555,7 @@ export const createMobileAttachmentInstaller = (host: MobileAttachmentInstallerH
     return parsed;
   };
 
-  /** Hash a managed canonical attachment in native code without materializing its
-   * bytes in JS. The native side also binds the digest to a stable size/mtime
-   * snapshot and rejects non-regular or out-of-root paths. */
+
   const hashAttachmentFileGeneration = async (
     path: string,
   ): Promise<AttachmentFileHashSnapshot> => {
@@ -578,9 +563,7 @@ export const createMobileAttachmentInstaller = (host: MobileAttachmentInstallerH
     return parseNativeHashSnapshot(value);
   };
 
-  /** Publish an immutable File Sync generation from a verified same-directory
-   * stage. Native code uses create-no-replace semantics; an existing target is
-   * reported without modifying either path. */
+
   const publishImmutableAttachmentFileGeneration = async (
     stagedPath: string,
     targetPath: string,

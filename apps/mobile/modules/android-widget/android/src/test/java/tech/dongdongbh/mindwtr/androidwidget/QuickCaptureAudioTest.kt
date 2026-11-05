@@ -99,7 +99,7 @@ class QuickCaptureAudioTest {
       PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix", note, "someday", "next")
       fail("Expected JSON publication to fail")
     } catch (_: IOException) {
-      // Expected: the WAV is already durable and remains retryable.
+
     }
 
     val finalAudio = File(File(filesDir, PendingCaptureWriter.AUDIO_DIRECTORY), "${draft.id}.wav")
@@ -150,7 +150,7 @@ class QuickCaptureAudioTest {
       PendingCaptureWriter.publishAudio(filesDir, draft, "Prefix")
       fail("Expected distinct existing queue JSON to be rejected")
     } catch (_: IOException) {
-      // Expected.
+
     }
     assertEquals(distinct, queued.readText())
   }
@@ -170,7 +170,7 @@ class QuickCaptureAudioTest {
       PendingCaptureWriter.publishAudio(filesDir, foreign, "")
       fail("Expected foreign draft to be rejected")
     } catch (_: IOException) {
-      // Expected.
+
     }
 
     assertTrue(outside.isFile)

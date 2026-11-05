@@ -42,8 +42,8 @@ export function parseArgs(argv) {
     if (submissionId) throw new Error('--submission-id is not supported when --action is auto.');
   } else if (submissionId) {
     if (!/^\d+$/.test(submissionId)) throw new Error('--submission-id must be a numeric Store submission ID.');
-    // status alone may omit it and read the current published submission; every
-    // mutation still names its exact target.
+
+
   } else if (action !== 'status') {
     throw new Error('--submission-id is required.');
   }
@@ -111,9 +111,8 @@ function validateIdentity({ app, appId, submissionId, allowPending = false }) {
   if (String(publishedId ?? '') !== submissionId && !(allowPending && pendingId === submissionId)) {
     throw new Error(`Submission ${submissionId} is not the current last published application submission.`);
   }
-  // A pending submission blocks a mutation, not a read: the Windows release job
-  // repairs a leftover draft itself and skips only its own Store publish for one
-  // in certification, so reporting it must not fail a release preflight.
+
+
   if (!allowPending && app.pendingApplicationSubmission?.id) {
     throw new Error(`Application has pending production submission ${app.pendingApplicationSubmission.id}; resolve it before managing rollout ${submissionId}.`);
   }
@@ -130,8 +129,8 @@ function rolloutResult(submissionId, action, rollout) {
     isPackageRollout: rollout.isPackageRollout,
     percentage,
     status: rollout.packageRolloutStatus,
-    // An in-progress rollout blocks the next production submission; a halted or
-    // complete one does not.
+
+
     open: rollout.packageRolloutStatus === IN_PROGRESS,
     fallbackSubmissionId: String(rollout.fallbackSubmissionId ?? ''),
   };
@@ -161,8 +160,8 @@ export async function manageRollout({
   if (submissionId === undefined) {
     submissionId = String(app?.lastPublishedApplicationSubmission?.id ?? '');
     if (!/^\d+$/.test(submissionId)) {
-      // Nothing is published, so nothing can be rolling out. Report it; a first
-      // submission is not something a release preflight should refuse.
+
+
       const empty = {
         submissionId: '',
         action,
@@ -221,8 +220,7 @@ export async function manageRollout({
     actionPath = `${submissionPath}/finalizepackagerollout`;
   }
 
-  // Store rollout POSTs are deliberately attempted once. Retrying after a lost
-  // response could repeat a write whose outcome is unknown.
+
   const updated = rolloutResult(submissionId, action, await request('POST', actionPath));
   log(`Microsoft Store submission ${submissionId}: ${updated.status}, ${updated.percentage}% rollout after ${action}.`);
   return updated;
@@ -360,7 +358,7 @@ export async function runCli({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runCli().catch(error => {
-    // Never print tokens, secrets, request objects, or response bodies.
+
     console.error(error instanceof TypeError || error instanceof SyntaxError
       ? 'Microsoft Store rollout request failed; check connectivity and configuration.'
       : error.message);

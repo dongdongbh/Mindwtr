@@ -18,7 +18,7 @@ export type ExternalCalendarSourceResult = {
     events: ExternalCalendarEvent[];
 };
 
-/** Read-time visibility; stale Area IDs stay stored so sync does not rewrite settings. */
+
 export function calendarMatchesAreaSelection(
     calendar: Pick<ExternalCalendarSubscription, 'areaIds'>,
     selection: AreaFilterSelection,

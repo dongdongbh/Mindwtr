@@ -3,10 +3,7 @@ import WidgetKit
 
 private let mindwtrFocusLockWidgetKind = "MindwtrFocusLockWidget"
 
-// Lock screen (accessory family) widget showing the current focused task (#821).
-// Reuses MindwtrTasksWidgetProvider: accessory families fall through to the
-// default payload key, whose items mirror the app's Today's Focus list.
-// Accessory families are iOS 16+; on iOS 15 the widget offers no families.
+
 struct MindwtrFocusLockWidget: Widget {
     let kind: String = mindwtrFocusLockWidgetKind
 
@@ -39,8 +36,7 @@ private struct MindwtrFocusLockWidgetEntryView: View {
     }
 }
 
-// Lock screen widgets render in the system's monochrome/vibrant style, so the
-// theme palette deliberately does not apply here.
+
 @available(iOSApplicationExtension 16.0, *)
 private struct MindwtrFocusLockView: View {
     let entry: MindwtrTasksWidgetEntry
@@ -63,8 +59,8 @@ private struct MindwtrFocusLockView: View {
             Text(focusedTitle ?? entry.payload.emptyMessage)
 
         case .accessoryCircular:
-            // The star counts starred (Today's Focus) tasks, not the truncated
-            // display list — items.count is capped by the payload's maxItems.
+
+
             ZStack {
                 AccessoryWidgetBackground()
                 VStack(spacing: 0) {
@@ -76,9 +72,8 @@ private struct MindwtrFocusLockView: View {
             }
 
         default:
-            // accessoryRectangular fits ~3 text rows: caption + two task lines.
-            // A single task keeps the two-line title; with more, the top two
-            // starred tasks get one line each (the circular ★N carries the rest).
+
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.payload.headerTitle)
                     .font(.system(size: 12, weight: .medium))

@@ -2,7 +2,7 @@ import type { Task, TaskStatus, TimeEstimate } from './types';
 
 export type TaskShareContent = { title: string | undefined; message: string };
 
-/** The task editor's plain-text Share payload, including its unsaved fields. */
+
 export function buildTaskShare(input: {
     task: Task | null;
     mergedTask: Partial<Task>;

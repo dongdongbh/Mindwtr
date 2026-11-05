@@ -1,14 +1,9 @@
-//! Flatpak credentials use only the Secret portal, never the host Secret Service.
 use fs2::FileExt;
 use oo7::{file::Keyring, Secret};
 use std::{
     collections::HashMap, fs::OpenOptions, os::unix::fs::OpenOptionsExt, path::Path, sync::OnceLock,
 };
 
-// The portal's answer, asked once per process (#1314). Every config read can
-// read or migrate several credentials; asking each time let a portal that never
-// answers stall startup for 30 s per credential, again on every read. A failure
-// is kept too: credentials fall back to plaintext until the next launch.
 static PORTAL_SECRET: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
 
 fn once_per_process(
@@ -64,8 +59,6 @@ fn run(
     account: &str,
     operation: Operation,
 ) -> Result<Option<String>, String> {
-    // These shared credential calls are synchronous, including calls from Tokio.
-    // A separate thread avoids nesting a runtime or blocking its I/O executor.
     std::thread::scope(|scope| {
         scope
             .spawn(move || {
@@ -73,7 +66,7 @@ fn run(
                     .enable_all()
                     .build()
                     .map_err(|_| "Cannot start credential runtime")?;
-                // Asked before the file lock, so a slow portal never holds it.
+
                 let secret = once_per_process(&PORTAL_SECRET, || {
                     runtime.block_on(retrieve_portal_secret())
                 })?;
@@ -116,8 +109,6 @@ async fn execute(
     account: &str,
     operation: Operation,
 ) -> Result<Option<String>, String> {
-    // Load fresh while holding the file lock: other processes must not lose a
-    // credential when this process writes a different account.
     let store = Keyring::load(path, secret.clone())
         .await
         .map_err(|_| "Cannot unlock encrypted credentials".to_owned())?;
@@ -133,8 +124,7 @@ async fn execute(
                 None => store.delete(&attributes).await,
             }
             .map_err(|_| "Cannot save encrypted credentials".to_owned())?;
-            // oo7 syncs the temporary file and renames it. Persist the directory
-            // entry too before callers remove their existing plaintext fallback.
+
             std::fs::File::open(path.parent().ok_or("Credential directory is missing")?)
                 .and_then(|directory| directory.sync_all())
                 .map_err(|_| "Cannot persist encrypted credentials".to_owned())?;

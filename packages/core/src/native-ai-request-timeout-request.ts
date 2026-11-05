@@ -14,7 +14,7 @@ const stamp = (value: unknown): value is string => typeof value === 'string' && 
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const provider = (value: unknown): value is AIRequestTimeoutWitness['provider'] => value === 'openai' || value === 'gemini' || value === 'anthropic';
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-/** Bounded raw CAS only. Credential presence is refused before any credential value access. */
+
 export function nativeAIRequestTimeoutWitness(settings: AppSettings): AIRequestTimeoutWitness | null {
     if (!record(settings)) return null;
     const aiPresent = owns(settings, 'ai'), ai = aiPresent ? settings.ai : undefined;

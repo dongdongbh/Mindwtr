@@ -7,7 +7,7 @@ import { taskEditValuesEqual } from './json-value-equality';
 import { validateAttachmentForUpload } from './attachment-validation';
 import type { Attachment } from './types';
 
-/** Internal projection only. Native durable descriptor proofs grant file authority separately. */
+
 export type NativeAttachmentDraftDependencies = {
     assertEditable(taskID: string): void;
     t(key: string): string;
@@ -31,7 +31,7 @@ export type NativeAttachmentDraftLineageInput = {
     version: 1; taskID: string; initialPayloadJSON: string; beforePayloadJSON: string;
     priorAdditions: readonly NativeAttachmentDraftPrepared[]; managedDirectoryURI: string;
 };
-/** A structural history acknowledgment only; it grants no task or file authority. */
+
 export type NativeAttachmentDraftLineage = NativeAttachmentDraftBegin;
 export type NativeAttachmentDraftPrepareInput = NativeAttachmentDraftLineageInput & {
     requestId: string;
@@ -44,7 +44,7 @@ export type NativeAttachmentDraftRemovePrepared = Readonly<{
     version: 1; kind: 'prepared-file-remove'; taskID: string; requestId: string; attachmentId: string;
     removedAt: string; beforePayloadJSON: string; afterPayloadJSON: string;
 }>;
-/** Selected metadata continuity only; neither a download nor file-retirement permission. */
+
 export type NativeAttachmentDraftAvailabilityInput = Readonly<{
     version: 1; taskID: string; requestId: string; attachmentId: string; identity: string;
     beforePayloadJSON: string; status: 'available' | 'unrecoverable'; resolvedAttachmentJSON: string;
@@ -121,7 +121,7 @@ const exact = (value: unknown, fields: readonly string[], optional: readonly str
     })
 );
 
-// Works on native JS engines without requiring a TextEncoder host capability.
+
 const utf8Bytes = (text: string, limit = Number.MAX_SAFE_INTEGER): number => {
     let bytes = 0;
     for (let index = 0; index < text.length; index++) {
@@ -162,7 +162,7 @@ const same = (left: unknown, right: unknown): boolean => {
 };
 const fileURI = (value: unknown, directory = false): string => {
     const uri = text(value, 16 * 1024, true);
-    // URL parsers may silently discard ASCII whitespace/control units.
+
     for (let index = 0; index < uri.length; index++) {
         if (uri.charCodeAt(index) <= 32 || uri.charCodeAt(index) === 127) invalid();
     }
@@ -210,8 +210,8 @@ const payload = (encoded: unknown, taskID: string): { object: Record<string, unk
     let value: unknown;
     try {
         value = JSON.parse(bounded, (_field, entry: unknown) => {
-            // Overflowing JSON numbers would otherwise stringify as null and
-            // change an unrelated editor field during attachment projection.
+
+
             if (typeof entry === 'number' && !Number.isFinite(entry)) invalid();
             return entry;
         });
@@ -228,7 +228,7 @@ const initialPayload = (encoded: unknown, taskID: string): void => {
     if (!readNativeTaskLinkHalf({ base: before.object.attachmentsBase, value: before.attachments }, false)) invalid();
 };
 
-/** Capture bounded scalar proof fields before parsing payloads or awaiting shared policy. */
+
 const frozenShape = (value: unknown, version: 1 | 2 = 1): FrozenAdd => {
     if (!exact(value, version === 2 ? [...PREPARED_FIELDS, 'sourceSha256'] : PREPARED_FIELDS)) invalid();
     const input = value as Record<string, unknown>;
@@ -259,7 +259,7 @@ const validateFrozen = (value: FrozenAdd): void => {
         || !same(after.object, { ...before.object, attachments: [...before.attachments, value.attachment] })) invalid();
 };
 
-/** Internal structural reader; no current policy, IO or publication authority. */
+
 export function readNativeAttachmentDraftFrozen(input: unknown): NativeAttachmentDraftPrepared {
     const captured = frozenShape(input) as NativeAttachmentDraftPrepared;
     validateFrozen(captured);
@@ -272,7 +272,7 @@ export function readNativeAttachmentDraftFrozenV2(input: unknown): NativeAttachm
     return captured;
 }
 
-/** Internal attachment projection reader. Opaque editor fields remain untouched. */
+
 export function readNativeAttachmentDraftPayload(input: unknown, taskID: string): {
     baselineAttachments: Attachment[]; attachments: Attachment[];
 } {
@@ -290,8 +290,8 @@ const captureLineage = (object: Record<string, unknown>, additionalFields: objec
         initialPayloadJSON: text(object.initialPayloadJSON, PAYLOAD_BYTES, true),
         beforePayloadJSON: text(object.beforePayloadJSON, PAYLOAD_BYTES, true), priorAdditions: [] as NativeAttachmentDraftPrepared[],
         managedDirectoryURI: fileURI(object.managedDirectoryURI, true) };
-    // Bound each record before measuring the aggregate. Prepare supplies its
-    // already bounded new-operation fields so the same 8 MiB total applies.
+
+
     let encodedBytes = jsonBytes({ ...captured, ...additionalFields }, PREPARE_BYTES);
     for (let index = 0; index < additions.length; index++) {
         const descriptor = Object.getOwnPropertyDescriptor(additions, String(index));
@@ -317,9 +317,7 @@ const validateLineage = (captured: CapturedLineage): Set<string> => {
     return ids;
 };
 
-// Only the v2 entry points select projection continuity. Every operation still
-// retains its complete frozen before/after bytes; ordinary editor changes
-// between operations grant neither Save permission nor filesystem authority.
+
 const validateLineageV2 = (captured: CapturedLineage): Set<string> => {
     initialPayload(captured.initialPayloadJSON, captured.taskID);
     const initial = payload(captured.initialPayloadJSON, captured.taskID);
@@ -340,7 +338,7 @@ const validateLineageV2 = (captured: CapturedLineage): Set<string> => {
     return ids;
 };
 
-/** Validate retained Add history, including on Discard of a now-readonly task. */
+
 export function validateNativeAttachmentDraftLineage(input: unknown): NativeAttachmentDraftLineage {
     if (!exact(input, ['version', 'taskID', 'initialPayloadJSON', 'beforePayloadJSON', 'priorAdditions', 'managedDirectoryURI'])) invalid();
     const captured = captureLineage(input as Record<string, unknown>);
@@ -406,7 +404,7 @@ Promise<NativeAttachmentDraftPrepared | NativeAttachmentDraftRefusal> {
     return prepareCapturedAdd(captured, deps) as Promise<NativeAttachmentDraftPrepared | NativeAttachmentDraftRefusal>;
 }
 
-// Both sealed legacy and mixed histories use the same picked-file policy and metadata producer.
+
 async function prepareCapturedAdd(captured: { taskID: string; beforePayloadJSON: string; requestId: string;
     picked: NativeAttachmentDraftPicked; measuredSize: number; managedDirectoryURI: string; sourceSha256?: string },
     deps: NativeAttachmentDraftDependencies): Promise<FrozenAdd | NativeAttachmentDraftRefusal> {
@@ -418,7 +416,7 @@ async function prepareCapturedAdd(captured: { taskID: string; beforePayloadJSON:
         newId: () => captured.requestId, t });
     assertEditable(captured.taskID);
     if (result.kind === 'refused') return result;
-    // RN's optional undefined MIME field is absent in the durable JSON record.
+
     const preparedAttachment = { ...result.attachment };
     if (preparedAttachment.mimeType === undefined) delete preparedAttachment.mimeType;
     const hashed = captured.sourceSha256 !== undefined;
@@ -441,7 +439,7 @@ async function prepareCapturedAdd(captured: { taskID: string; beforePayloadJSON:
     return frozen;
 }
 
-/** Call only after native publication proof. This projection neither copies nor owns bytes. */
+
 export async function completeNativeAttachmentDraftAdd(input: unknown, deps: NativeAttachmentDraftDependencies):
 Promise<NativeAttachmentDraftAdded | NativeAttachmentDraftRefusal> {
     return completeDraftAdd(input, deps, 1) as Promise<NativeAttachmentDraftAdded | NativeAttachmentDraftRefusal>;
@@ -459,8 +457,8 @@ Promise<NativeAttachmentDraftAdded | NativeAttachmentDraftAddedV2 | NativeAttach
     validateFrozen(frozen);
     const { assertEditable, t } = deps;
     assertEditable(frozen.taskID);
-    // Historical additions are structurally preserved; only the current
-    // completion rechecks shared upload policy without generating metadata.
+
+
     const validation = await validateAttachmentForUpload(frozen.prepared.attachment, frozen.measuredSize);
     assertEditable(frozen.taskID);
     if (!validation.valid) invalid();
@@ -478,7 +476,7 @@ const requestIDV3 = (value: unknown): string => {
     return requestID(value);
 };
 const attachmentIDV3 = (value: unknown): string => {
-    // readNativeAttachments bounds IDs by UTF-16 length, not UTF-8 bytes.
+
     if (typeof value !== 'string' || !value || value.length > 500) invalid();
     return value as string;
 };
@@ -487,7 +485,7 @@ const REMOVE_FIELDS = ['version', 'kind', 'taskID', 'requestId', 'attachmentId',
 const LINEAGE_V3_FIELDS = ['version', 'taskID', 'initialPayloadJSON', 'beforePayloadJSON',
     'priorOperations', 'managedDirectoryURI'];
 
-// V3 inspects only parsed JSON: no caller getters, toJSON or custom prototypes can run.
+
 const payloadV3 = (encoded: unknown, taskID: string): ReturnType<typeof payload> => {
     const value = payload(encoded, taskID);
     let nodes = 0;
@@ -503,7 +501,7 @@ const payloadV3 = (encoded: unknown, taskID: string): ReturnType<typeof payload>
     visit(value.object, 0);
     return value;
 };
-// Ordinary links may change at V3 gaps; every file field and its order stay frozen.
+
 const linkOnlyGapV3 = (base: unknown, value: Attachment[]): boolean => {
     const half = readNativeTaskLinkHalf({ base, value }, false);
     return half !== null && same(half.base.filter((item) => item.kind === 'file'),
@@ -531,7 +529,7 @@ const validateRemoveFrozen = (value: NativeAttachmentDraftRemovePrepared): void 
             attachments: softDeleteAttachment(before.attachments, value.attachmentId, value.removedAt) })) invalid();
 };
 
-/** Pure historical projection, not a claim that any file was copied or is owned. */
+
 export function readNativeAttachmentDraftRemoveFrozen(input: unknown): NativeAttachmentDraftRemovePrepared {
     const captured = removeShape(input);
     validateRemoveFrozen(captured);
@@ -627,7 +625,7 @@ function prepareCapturedRemove(captured: MixedLineage & { requestId: string; att
     return frozen;
 }
 
-/** Selected hash-bearing history. Historical V3 and Add1 readers remain sealed. */
+
 export function validateNativeAttachmentDraftBeginV4(input: unknown, deps: NativeAttachmentDraftDependencies): NativeAttachmentDraftLineageV4 {
     const begin = validateNativeAttachmentDraftBeginV3(input, deps);
     return Object.freeze({ ...begin, version: 4 });
@@ -696,12 +694,12 @@ const availabilityAfterPayload = (captured: NativeAttachmentDraftAvailabilityInp
     }
     const patch = captured.status === 'available'
         ? getAttachmentAvailabilityPatch(current, resolved) : getAttachmentUnrecoverablePatch(resolved);
-    // Apply undefined lifecycle fields before JSON encoding; a serialized patch would lose deletions.
+
     const after = JSON.stringify({ ...before.object, attachments: patchAttachment(before.attachments, current.id, patch) });
     return text(after, PAYLOAD_BYTES, true);
 };
 
-/** Pure selected outcome projection. Native must separately prove the resolver and installed generation. */
+
 export function prepareNativeAttachmentDraftAvailability(input: unknown): NativeAttachmentDraftAvailabilityPrepared {
     const captured = availabilityShape(input, false);
     const result = Object.freeze({ ...captured, kind: 'prepared-file-availability' as const,
@@ -710,7 +708,7 @@ export function prepareNativeAttachmentDraftAvailability(input: unknown): Native
     return result;
 }
 
-/** Frozen replay never calls current policy, a clock, UUID creation, filesystem or network. */
+
 export function readNativeAttachmentDraftAvailabilityFrozen(input: unknown): NativeAttachmentDraftAvailabilityPrepared {
     const captured = availabilityShape(input, true);
     const afterPayloadJSON = text((input as Record<string, unknown>).afterPayloadJSON, PAYLOAD_BYTES, true);
@@ -720,7 +718,7 @@ export function readNativeAttachmentDraftAvailabilityFrozen(input: unknown): Nat
     return result;
 }
 
-/** Availability-only selection; historical Add/Remove grammars remain sealed. */
+
 const captureLineageV5 = (value: unknown): NativeAttachmentDraftLineageInputV5 => {
     if (!exact(value, LINEAGE_V3_FIELDS)) invalid();
     const input = value as Record<string, unknown>, operations = input.priorOperations;
@@ -751,7 +749,7 @@ export function validateNativeAttachmentDraftBeginV5(input: unknown, deps: Nativ
     return Object.freeze({ ...begin, version: 5 });
 }
 
-/** Pure metadata lineage; native resolver, installation and retirement authority remain separate. */
+
 export function validateNativeAttachmentDraftLineageV5(input: unknown): NativeAttachmentDraftLineageV5 {
     const captured = captureLineageV5(input), initial = payloadV3(captured.initialPayloadJSON, captured.taskID);
     if (!linkOnlyGapV3(initial.object.attachmentsBase, initial.attachments)) invalid();

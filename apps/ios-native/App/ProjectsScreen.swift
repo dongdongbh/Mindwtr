@@ -339,7 +339,7 @@ struct ProjectsScreen: View {
     }
 
     private func statusColor(_ status: String) -> Color {
-        // RN buildProjectStatusPalette presentation swatches, not task eligibility.
+
         switch status {
         case "active": return palette.tint
         case "waiting": return Color(hex: "F59E0B")
@@ -1191,7 +1191,7 @@ struct ProjectDetailScreen: View {
                             .accessibilityIdentifier("project-retry")
                     }
                     if !model.projectCurrent { statusReadErrorView }
-                    // Keep the same Project's layout during its refresh, with stale controls inert.
+
                     if model.projectCurrent || ((model.busy || model.projectViewReadPending) && !model.projectDetail.isEmpty
                         && model.projectDetail.text("projectId") == model.projectHeader.text("id")) {
                         Group {
@@ -1763,7 +1763,7 @@ struct ProjectDetailScreen: View {
                 .buttonStyle(.plain).disabled(model.busy)
                 .accessibilityIdentifier("project-task-order-retry")
             }
-            // An overlay keeps the order table still while busy toggles.
+
             ProjectTaskOrderTable(model: model, palette: palette)
                 .accessibilityIdentifier("project-task-order-list")
                 .overlay(alignment: .top) { if model.busy { ProgressView().padding(12) } }
@@ -1979,7 +1979,7 @@ struct ProjectDetailScreen: View {
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
                 projectNotesPanel
-                // Bound generic metadata after an observed iOS 17 stack overflow.
+
                 AnyView(projectAttachmentsPanel)
                 ProjectDatesMetadata(model: model, palette: palette, metadata: metadata) {
                     resignProjectNotesInput()
@@ -2886,8 +2886,7 @@ private struct ProjectAttachmentLinkSheet: View {
     }
 }
 
-// Keep this concrete View boundary: expanding Details exceeded the iOS 17
-// main-thread stack while resolving the former nested SwiftUI generic type.
+
 private struct ProjectStatusMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3037,8 +3036,7 @@ private struct ProjectSectionsMetadata: View {
     }
 }
 
-// Keep the three date rows behind concrete View boundaries so expanding Details
-// does not resolve their nested SwiftUI types in the parent body on iOS 17.
+
 private struct ProjectDatesMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3114,7 +3112,7 @@ private struct ProjectDateMetadataRow: View {
     }
 }
 
-// Concrete metadata and sheet boundaries keep Details' iOS 17 View type bounded.
+
 private struct ProjectTagsMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3302,7 +3300,7 @@ private struct ProjectTagsAddForm: View {
     }
 }
 
-// A concrete boundary keeps the Area control out of Details' iOS 17 opaque View type.
+
 private struct ProjectAreaMetadata: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3604,7 +3602,7 @@ private struct ProjectAreaCreateForm: View {
     }
 }
 
-/// UIKit keeps section headings fixed as drag sources while allowing tasks to cross them.
+
 private struct ProjectTaskOrderTable: UIViewRepresentable {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3629,7 +3627,7 @@ private struct ProjectTaskOrderTable: UIViewRepresentable {
         coordinator.parent = self
         table.backgroundColor = UIColor(palette.bg)
         table.isUserInteractionEnabled = model.projectTaskOrderInputEnabled
-        // Keep UIKit's drag preview until the durable result or failure is known.
+
         if !model.busy && (coordinator.revision != model.projectTaskOrderView.text("revision") || coordinator.moving) {
             coordinator.rows = model.projectTaskOrderView.objects("items")
             coordinator.revision = model.projectTaskOrderView.text("revision")
@@ -3698,7 +3696,7 @@ private struct ProjectTaskOrderTable: UIViewRepresentable {
             let insertion = destination.row > source.row ? destination.row + 1 : destination.row
             Task { @MainActor in
                 await model.moveProjectTask(from: IndexSet(integer: source.row), to: insertion)
-                // A rejected/no-op callback may not publish a state change.
+
                 rows = model.projectTaskOrderView.objects("items")
                 revision = model.projectTaskOrderView.text("revision")
                 moving = false

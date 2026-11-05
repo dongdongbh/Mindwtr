@@ -22,7 +22,7 @@ const backendTitle = (backend: ApplePccEvaluationBackend): string => (
   backend === 'on_device' ? 'On-device baseline' : 'Apple Private Cloud Compute'
 );
 
-/** Development-only synthetic evaluation. It never reads or writes the task store. */
+
 export function ApplePccEvaluation() {
   const tc = useThemeColors();
   const [fixtures, setFixtures] = useState<readonly ApplePccEvaluationFixture[]>([]);

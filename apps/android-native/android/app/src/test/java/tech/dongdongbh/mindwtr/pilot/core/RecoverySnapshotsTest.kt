@@ -9,13 +9,13 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.util.Date
 
-/** RN's snapshot file rules (recovery-snapshot.ts, core's recovery-snapshot-names.ts) and pass D1a's protection. */
+
 class RecoverySnapshotsTest {
     @get:Rule val folder = TemporaryFolder()
     private val dir get() = File(folder.root, "snapshots")
     private val noSync: (File) -> Unit = {}
     private fun names() = dir.listFiles().orEmpty().map { it.name }.sorted()
-    private val at = Date(1786278845123L) // 2026-08-09T12:34:05.123Z
+    private val at = Date(1786278845123L)
 
     @Test fun namesAnInstantAsRnDoes() {
         assertEquals("data.2026-08-09T12-34-05.123.snapshot.json", RecoverySnapshots.name(at))
@@ -53,7 +53,7 @@ class RecoverySnapshotsTest {
         val existing = (1..6).map { "data.2026-08-0${it}T00-00-00.000.snapshot.json" }.onEach { File(dir, it).writeText("{}") }
         val failed = runCatching { RecoverySnapshots.write(dir, RecoverySnapshots.name(at), "{}", syncDirectory = { error("disk full") }) }
         assertTrue(failed.isFailure)
-        // The rename landed before the failed folder sync; nothing was pruned and no pending file stays.
+
         assertFalse(File(dir, "data.pending.snapshot.tmp").exists())
         assertTrue(names().containsAll(existing))
     }
@@ -84,7 +84,7 @@ class RecoverySnapshotsTest {
         assertEquals(5, names().size)
     }
 
-    // D1a review P1-1: a capture's write landed while a backup's pending file waited for its rename; the backup's bytes stay its own.
+
     @Test fun twoWritersNeverShareThePendingFile() {
         val name = RecoverySnapshots.name(at)
         var other: Thread? = null
@@ -97,7 +97,7 @@ class RecoverySnapshotsTest {
         assertEquals("capture", File(dir, RecoverySnapshots.name(at, 1)).readText())
     }
 
-    // Pass D1c §3.2: a recovery snapshot written through the channel is renamed only when its bytes are the channel's.
+
     @Test fun aPendingSnapshotThatChangedIsNeverPublished() {
         dir.mkdirs()
         val name = RecoverySnapshots.name(at)

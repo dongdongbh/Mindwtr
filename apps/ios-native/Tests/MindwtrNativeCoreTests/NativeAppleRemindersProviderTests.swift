@@ -29,7 +29,7 @@ final class AppleRemindersTestSDK: NativeAppleRemindersSDK, @unchecked Sendable 
     }
     func cancelFetch(_ token: Any) {
         lock.lock(); cancellations.append(token as! UUID); lock.unlock()
-        // Real EventKit suppresses the completion; deliberately do not call receive.
+
     }
     func remove(list: NativeAppleReminderListIdentity, source: NativeAppleReminderSourceDTO, cancellation: NativeAttachmentCancellation) throws {
         try beforeRemove?()

@@ -20,9 +20,8 @@ public enum MindwtrCanonicalWave {
     static let byteRate: UInt32 = sampleRate * UInt32(bytesPerFrame)
 
     #if canImport(AudioToolbox)
-    /// The client format given to Extended Audio File Services. Keeping this
-    /// next to the header contract makes the resampling/downmixing target part
-    /// of the package-tested compatibility seam.
+
+
     static func clientFormat() -> AudioStreamBasicDescription {
         AudioStreamBasicDescription(
             mSampleRate: Double(sampleRate),
@@ -136,7 +135,7 @@ public enum MindwtrCanonicalWave {
         data.append(contentsOf: "WAVE".utf8)
         data.append(contentsOf: "fmt ".utf8)
         appendLittleEndian(UInt32(16), to: &data)
-        appendLittleEndian(UInt16(1), to: &data) // uncompressed PCM
+        appendLittleEndian(UInt16(1), to: &data)
         appendLittleEndian(channelCount, to: &data)
         appendLittleEndian(sampleRate, to: &data)
         appendLittleEndian(byteRate, to: &data)
@@ -170,8 +169,7 @@ public enum MindwtrCanonicalWave {
         return (fileSize - headerSize).isMultiple(of: Int(bytesPerFrame))
     }
 
-    /// Validates canonical WAV bytes independently of the file's staging or
-    /// public name. Callers enforce any filename contract at publication.
+
     static func validateFile(at url: URL, maximumFileSize: Int) -> Bool {
         guard url.isFileURL,
               let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),

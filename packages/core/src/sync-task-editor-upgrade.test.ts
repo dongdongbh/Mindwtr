@@ -126,7 +126,7 @@ describe('Task Editor Layout upgrade sync', () => {
         ).data;
         let a = upgrade(document(settings({ ...layoutA, defaultsVersion: 4 })));
         let b = upgrade(document(settings({ ...layoutB, defaultsVersion: 4 })));
-        let remote = document({}); // Server created before layouts entered the sync payload.
+        let remote = document({});
         expect(a.settings.syncPreferencesUpdatedAt?.gtd).toBeUndefined();
         expect(b.settings.syncPreferencesUpdatedAt?.gtd).toBeUndefined();
         const cycle = async (local: AppData): Promise<AppData> => {

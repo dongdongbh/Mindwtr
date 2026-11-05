@@ -6,6 +6,7 @@ import { compactPurgedProjectForLocalStorage, compactPurgedProjectSectionTombsto
 import { clearDerivedCache, timestampAtLeastAfter } from './store-settings';
 import { logInfo } from './logger';
 import { settingsWithPurgedParentAttachmentDeletes } from './attachment-cleanup';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 
 type Context = {
     set: (partial: Partial<TaskStore> | ((state: TaskStore) => Partial<TaskStore> | TaskStore)) => void;
@@ -13,12 +14,11 @@ type Context = {
     flushPendingSave: () => Promise<void>;
 };
 
-// R-2: a device that was offline must not purge before it has merged the remote, or a
-// restore made on another device loses to the fresh purge tombstone. Session-scoped on purpose.
+
 let syncCompletedThisSession = false;
 let deferralLogged = false;
 
-/** Called by the shared sync cycle once it has read and merged (or confirmed unchanged) the remote. */
+
 export const markArchiveRetentionSyncCompleted = (): void => { syncCompletedThisSession = true; };
 export const isArchiveRetentionSyncCompleted = (): boolean => syncCompletedThisSession;
 export const resetArchiveRetentionSyncForTests = (): void => {
@@ -83,7 +83,7 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
         let changed = false;
         let deferred = false;
         set((state) => {
-            // Automatic calls before hydration or during an editor/save failure are safe no-ops.
+
             if (!canWrite(state)) {
                 skipped = 'not-ready';
                 return state;
@@ -108,14 +108,18 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
                 && !preview.legacyTaskIds.length && !preview.legacyProjectIds.length) return state;
             const device = ensureDeviceId(state.settings);
             const backfill = backfillArchiveClocks({ tasks: state._allTasks, projects: state._allProjects }, preview, now, device.deviceId);
-            const settings = settingsWithPurgedParentAttachmentDeletes(device.settings,
-                state._allTasks, state._allProjects, taskIds, projectIds);
             const tasks = backfill.tasks.map((task) => taskIds.has(task.id)
                 ? compactPurgedTaskForLocalStorage({ ...task, deletedAt: now, purgedAt: now, updatedAt: now,
                     rev: nextRevision(task.rev), revBy: device.deviceId }) : task);
             const projects = backfill.projects.map((project) => projectIds.has(project.id)
                 ? compactPurgedProjectForLocalStorage({ ...project, deletedAt: now, purgedAt: now, updatedAt: now,
                     rev: nextRevision(project.rev), revBy: device.deviceId }) : project);
+
+            const changedPairs = <T>(before: T[], after: T[]) => after.flatMap((row, index) =>
+                row !== before[index] ? [{ before: before[index], after: row }] : []);
+            const settings = retainTaxonomyEffects(settingsWithPurgedParentAttachmentDeletes(device.settings,
+                state._allTasks, state._allProjects, taskIds, projectIds),
+            changedPairs(state._allTasks, tasks), changedPairs(state._allProjects, projects));
             const sections = state._allSections.map((section) => sectionIds.has(section.id)
                 ? compactPurgedProjectSectionTombstone({ ...section, deletedAt: now, updatedAt: now,
                     rev: nextRevision(section.rev), revBy: device.deviceId }, now) : section);

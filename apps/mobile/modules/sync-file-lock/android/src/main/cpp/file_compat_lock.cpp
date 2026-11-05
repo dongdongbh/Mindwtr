@@ -24,7 +24,7 @@ int set_ofd_lock(int fd, short type) {
   }
   return errno;
 }
-}  // namespace
+}
 
 int mindwtr_try_ofd_write_lock(int fd) {
   return set_ofd_lock(fd, F_WRLCK);

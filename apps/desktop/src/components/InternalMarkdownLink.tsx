@@ -51,9 +51,7 @@ export function createInternalMarkdownLinkContext({
     const projectsById = new Map<string, Project>();
     const deletedProjectsById = new Map<string, Project>();
 
-    // A purged row is the tombstone of a permanent delete and lands in neither
-    // map: the link still reads "(deleted)", but core refuses to restore it, so
-    // offering Restore would only ever fail.
+
     tasks.forEach((task) => {
         if (task.purgedAt) return;
         if (task.deletedAt) {
@@ -104,7 +102,7 @@ export function useInternalMarkdownLinkContext(): InternalMarkdownLinkContext {
 }
 
 function isSafeExternalHref(href: string): boolean {
-    // Desktop retains its existing email message-id support.
+
     return isSafeMarkdownExternalHref(href) || /^mid:[^\s]+$/i.test(href);
 }
 
@@ -130,11 +128,8 @@ export function InternalMarkdownLink({ href, className, children, linkContext }:
         if (!isSafeExternalHref(href)) {
             return <>{children}</>;
         }
-        // No `href` on purpose: an anchor carrying the real URL is what the
-        // engine's speculative preconnect keys on — WebView2 dialed the linked
-        // host's servers on hover/click even though the click handler opens the
-        // URL externally (#913). A button with role="link" keeps the link
-        // semantics and keyboard behavior with nothing left to preconnect to.
+
+
         return (
             <button
                 type="button"

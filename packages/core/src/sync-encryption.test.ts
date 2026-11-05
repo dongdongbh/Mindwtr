@@ -28,8 +28,7 @@ import {
 } from './sync-encryption';
 import { SYNC_CRYPTO_DEFAULT_KDF_PARAMS, encryptSyncArtifact, deriveSyncKeyMaterial } from './sync-crypto';
 
-// Cheap KDF params for fast tests — deliberately not the production default (mirrors the
-// pattern already used by sync-crypto.test.ts fixtures).
+
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
 describe('verified encrypted remote recovery (#1293)', () => {
@@ -149,10 +148,7 @@ const hexToBytesForTest = (hex: string): Uint8Array => Uint8Array.from(
     (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
 );
 
-// Shared with apps/desktop/src-tauri/src/sync_encryption.rs's test module — both languages'
-// name mapping must agree on every case, including compound suffix chains (S1: `.bak.previous`
-// was previously mis-mapped to `data.json.bak.enc.previous`, a name nothing reads, because the
-// old implementation matched only the LAST suffix instead of peeling the full chain).
+
 import artifactNameFixture from './__fixtures__/sync-crypto/artifact-names.json';
 
 describe('sync encryption artifact naming', () => {
@@ -186,8 +182,8 @@ describe('local-only transitions (no configured backend, #1001)', () => {
         expect(localState.value?.state).toBe('enabled');
         expect(localState.value?.discoveredSalt).toHaveLength(32);
         expect(localState.value?.discoveredParams).toEqual(FAST_KDF);
-        // The persisted salt is the derived material's salt — the first sync's writes
-        // must come out under exactly this header.
+
+
         const rederived = await deriveSyncKeyMaterial('correct horse', result.salt, FAST_KDF);
         expect([...rederived.key]).toEqual([...keyCache.current!]);
     });
@@ -430,7 +426,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF);
 
-        // plaintext gone, .enc present, attachment rewritten in place under the same name
+
         expect(remote.store.has('data.json')).toBe(false);
         expect(remote.store.has('data.json.bak')).toBe(false);
         expect(remote.store.has('snapshot-1.json')).toBe(false);
@@ -457,15 +453,12 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const keyCache = createFakeKeyCache();
         const localState = createFakeLocalState();
 
-        // Simulate a crash after .bak migrated but before data.json (the base document,
-        // migrated last by design) — write its .enc counterpart by hand and leave the
-        // plaintext .bak in place, as an interrupted run would.
+
         const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(7), FAST_KDF);
         const sealedBak = await encryptSyncArtifact(remote.store.get('data.json.bak')!, material);
         remote.store.set('data.json.enc.bak', sealedBak);
         remote.kinds.set('data.json.enc.bak', 'document');
-        // plaintext .bak intentionally left in place — this is the "both generations
-        // present" state a crash would leave.
+
 
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF);
 
@@ -474,8 +467,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(remote.store.has('data.json.enc')).toBe(true);
         expect(remote.store.has('data.json.enc.bak')).toBe(true);
 
-        // Re-derived key must match the one already embedded in data.json.enc.bak's
-        // header (same salt) — decrypting data.json.enc with the cached key proves it.
+
         const key = (await keyCache.getKey())!;
         const decrypted = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key);
         expect(text(decrypted)).toBe('{"tasks":[]}');
@@ -633,19 +625,15 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const keyCache = createFakeKeyCache();
         const localState = createFakeLocalState();
 
-        // Simulate: a first enable('correct horse') attempt sealed the attachment under
-        // an abandoned salt, then crashed before touching data.json at all — no `.enc`
-        // document exists yet, so a naive resume would derive a brand-new salt and, on
-        // seeing the attachment already looks like ciphertext, wrongly treat it as
-        // "already migrated" under the wrong key.
+
         const abandonedMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(42), FAST_KDF);
         remote.store.set('attachments/a1.png', await encryptSyncArtifact(utf8('PNGBYTES'), abandonedMaterial));
 
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF);
 
         const key = (await keyCache.getKey())!;
-        // The attachment must be readable under the key this run actually settled on —
-        // not silently left sealed under the abandoned salt.
+
+
         const decryptedAttachment = await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key);
         expect(text(decryptedAttachment)).toBe('PNGBYTES');
         const decryptedData = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key);
@@ -666,7 +654,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
         await expect(runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF)).rejects.toThrow('simulated transport failure');
         expect(calls).toBe(1);
-        expect(remote.store.has('data.json')).toBe(true); // plaintext untouched
+        expect(remote.store.has('data.json')).toBe(true);
         expect(remote.store.has('data.json.enc')).toBe(false);
         expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
     });
@@ -1043,8 +1031,7 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         const localState = createFakeLocalState();
         await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
 
-        // Simulate a first change-passphrase attempt that re-wrapped the attachment under
-        // an abandoned intermediate salt, then crashed before touching data.json.enc.
+
         const abandonedMaterial = await deriveSyncKeyMaterial('new-pw', new Uint8Array(16).fill(99), FAST_KDF);
         remote.store.set('attachments/a1.png', await encryptSyncArtifact(utf8('PNGBYTES'), abandonedMaterial));
 
@@ -1230,7 +1217,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         const localState = createFakeLocalState();
         markRemoteEncryptionDiscovered(localState, { salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
         expect(getSyncEncryptionStatusFromLocalState(localState).state).toBe('remote-encrypted-no-key');
-        // "survives reload" — a fresh read of the same port must see the same state.
+
         expect(localState.read()?.state).toBe('remote-encrypted-no-key');
     });
 
@@ -1242,9 +1229,8 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
     });
 
     it('downgrades an enabled device to no-key when the discovered salt differs (foreign key)', () => {
-        // A passphrase set before the first sync while a peer encrypted the remote, or a
-        // peer's rotation: the cached key provably belongs to another generation, and only
-        // the no-key state surfaces the unlock prompt that re-derives from the remote salt.
+
+
         const localState = createFakeLocalState();
         localState.write({ state: 'enabled', discoveredSalt: '01'.repeat(16), discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
         markRemoteEncryptionDiscovered(localState, { salt: new Uint8Array(16).fill(2), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
@@ -1278,7 +1264,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         const keyCache = createFakeKeyCache();
         const localState = createFakeLocalState();
         await runEnableSyncEncryptionOverRemote('right-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
-        await keyCache.clearKey(); // simulate a fresh device with no cached key
+        await keyCache.clearKey();
         const before = new Map(remote.store);
 
         const result = await runProvideSyncEncryptionPassphraseOverRemote('wrong-pw', 'data.json', remote, keyCache, localState);
@@ -1361,9 +1347,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         expect(localState.value?.state).toBe('enabled');
     });
 
-    // #1138 (5): the stale-lock exit. Without the branch this test hits the
-    // `no encrypted remote artifact found at data.json.enc` throw and the state stays
-    // remote-encrypted-no-key forever.
+
     it('clears a stale no-key state when the location holds no encrypted document', async () => {
         const remote = createFakeRemote({});
         const keyCache = createFakeKeyCache();
@@ -1384,8 +1368,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         expect(remote.store.size).toBe(0);
     });
 
-    // #1138 (5, negative half): a KEYED device finding no `.enc` is remote-plaintext's
-    // business. Dropping its key here would be the silent downgrade decision #5 forbids.
+
     it('still throws for a missing encrypted document while this device holds a key', async () => {
         const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
         const keyCache = createFakeKeyCache();
@@ -1428,17 +1411,17 @@ describe('discovery scope (#1138)', () => {
         });
     });
 
-    // (3) same location: blocked exactly as before this change.
+
     it('blocks a discovery made on the location being synced', () => {
         expect(isSyncEncryptionStateBlocked(noKey('["file","/sync"]'), '["file","/sync"]')).toBe(true);
     });
 
-    // (4) a different backend or folder is a different lock.
+
     it('does not block a discovery made on a different location', () => {
         expect(isSyncEncryptionStateBlocked(noKey('["cloud","dropbox"]'), '["file","/sync"]')).toBe(false);
     });
 
-    // (1)/(2) the 1.2.6 upgrade path: re-check instead of refusing forever.
+
     it('does not block a discovery written before scopes existed', () => {
         expect(isSyncEncryptionStateBlocked(noKey(), '["file","/sync"]')).toBe(false);
         expect(isSyncEncryptionStateBlocked(noKey(), null)).toBe(false);
@@ -1461,17 +1444,17 @@ describe('discovery scope (#1138)', () => {
     });
 
     it('names only the dimensions the active backend addresses', () => {
-        // A stale WebDAV URL left behind by a move to File Sync must not change the folder's identity.
+
         expect(buildSyncLocationScope({ backend: 'file', syncPath: '/sync', webdavUrl: 'https://old.example' }))
             .toBe(buildSyncLocationScope({ backend: 'file', syncPath: '/sync' }));
-        // An activation probe's typed URL and the normalized committed value agree.
+
         expect(buildSyncLocationScope({ backend: 'webdav', webdavUrl: 'https://dav.example.com/mindwtr ', webdavUsername: 'u' }))
             .toBe(buildSyncLocationScope({ backend: 'webdav', webdavUrl: 'https://dav.example.com/mindwtr', webdavUsername: 'u' }));
         expect(buildSyncLocationScope({ backend: 'file', syncPath: '/a' }))
             .not.toBe(buildSyncLocationScope({ backend: 'file', syncPath: '/b' }));
         expect(buildSyncLocationScope({ backend: 'cloud', cloudProvider: 'dropbox' }))
             .not.toBe(buildSyncLocationScope({ backend: 'file', syncPath: '/a' }));
-        // Rust mirrors this exact shape (`sync_location_scope` in sync.rs).
+
         expect(buildSyncLocationScope({ backend: 'file', syncPath: '/sync' })).toBe('["file","/sync"]');
         expect(buildSyncLocationScope({ backend: 'cloud', cloudProvider: 'dropbox' })).toBe('["cloud","dropbox"]');
     });
@@ -1489,9 +1472,7 @@ describe('fail-closed decrypt', () => {
         await expect(decryptRemoteArtifactOrThrow(sealed, wrongKey)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
     });
 
-    // Guard-removed check: without the wrap, the same inputs throw the raw sync-crypto
-    // error class instead — proving this test would fail if decryptRemoteArtifactOrThrow
-    // stopped reclassifying.
+
     it('raw decryptSyncArtifact (no wrapper) throws a different class than the terminal wrapper', async () => {
         const { decryptSyncArtifact, SyncCryptoAuthError } = await import('./sync-crypto');
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16), FAST_KDF);
@@ -1537,10 +1518,8 @@ describe('remote-plaintext discovery (a peer disabled encryption at the sync loc
     });
 
     it('a later foreign-salt ciphertext discovery moves it to no-key (remote re-encrypted anew)', () => {
-        // A peer disabled encryption and then re-enabled it under a new passphrase: this
-        // device's key is provably for a dead generation. The no-key state keeps auto-sync
-        // blocked exactly like remote-plaintext did, and its unlock prompt is the one path
-        // that can heal the device by re-deriving from the remote's new salt.
+
+
         const localState = createFakeLocalState();
         localState.write({ state: 'enabled', discoveredSalt: '01'.repeat(16), discoveredParams: FAST_KDF });
         markRemotePlaintextDiscovered(localState);
@@ -1552,8 +1531,8 @@ describe('remote-plaintext discovery (a peer disabled encryption at the sync loc
 });
 
 describe('unsupported containers in transitions', () => {
-    /** Magic present, header short — `inspectSyncArtifact` reports `unsupported`, and every
-     *  transition must refuse rather than treat it as plaintext to seal or skip. */
+
+
     const truncatedContainer = (): Uint8Array => {
         const bytes = new Uint8Array(20);
         bytes.set(utf8('MWENC1'), 0);
@@ -1563,7 +1542,7 @@ describe('unsupported containers in transitions', () => {
     const unknownVersionContainer = async (): Promise<Uint8Array> => {
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(7), FAST_KDF);
         const sealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), material);
-        sealed[6] = 9; // format_version byte
+        sealed[6] = 9;
         return sealed;
     };
 

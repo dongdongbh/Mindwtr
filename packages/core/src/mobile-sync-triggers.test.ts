@@ -111,7 +111,7 @@ describe('mobile sync triggers', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     triggers.handleAppStateChange('active');
     await flush();
-    // Within 30 s of the last automatic sync: no foreground sync.
+
     expect(ports.performSync).toHaveBeenCalledTimes(afterLeave);
     triggers.dispose();
   });
@@ -144,7 +144,7 @@ describe('mobile sync triggers', () => {
     expect(ports.showSyncIssue).toHaveBeenCalledWith('auth');
     expect(ports.logWarn).toHaveBeenCalledWith('Auto-sync failed', { scope: 'sync', extra: { error: 'HTTP 401' } });
 
-    // The cooldown retry fails the same way within ten minutes: no second warning.
+
     await vi.advanceTimersByTimeAsync(60_000);
     expect(ports.performSync).toHaveBeenCalledTimes(2);
     expect(ports.showSyncIssue).toHaveBeenCalledTimes(1);
@@ -246,7 +246,7 @@ describe('mobile sync triggers', () => {
       triggers.start();
       await flush();
       triggers.requestSync(0);
-      // Observe the actual request rejection; the public trigger owns its quiet catch.
+
       await expect(runs[0]).rejects.toBe(fatal);
       await flush();
 
@@ -289,7 +289,7 @@ describe('mobile sync triggers', () => {
       expect(triggers.handleAppStateChange('active')).toBe('resumed');
       triggers.handleStoreChange({ lastDataChangeAt: 2 }, { lastDataChangeAt: 1 });
       await vi.advanceTimersByTimeAsync(2_000);
-      // All three continuations have a real outstanding cadence port.
+
       expect(ports.readStoredBackend).toHaveBeenCalledTimes(4);
       triggers.requestSync(0);
       await flush();
@@ -393,8 +393,7 @@ describe('mobile sync triggers', () => {
   });
 });
 
-// #1431: the issue's harness on the real triggers, controller and orchestrator. The opening
-// sync takes 1,919 ms and finds no changes; a save changes the fingerprint and lastDataChangeAt.
+
 describe('mobile sync triggers: a local change after a sync (#1431)', () => {
   const OPENING_MS = 1_919;
 
@@ -443,8 +442,8 @@ describe('mobile sync triggers: a local change after a sync (#1431)', () => {
     const { triggers, runs, save, advanceTo } = await replay();
     await save(saveMs);
     await advanceTo(20_000);
-    // The 2 s debounce, never closer than the 5 s minimum gap after the opening sync ended.
-    // Before the fix every save waited until 9 x 1,919 ms after the opening sync: 19,190 ms.
+
+
     expect(runs).toEqual([0, Math.max(saveMs + 2_000, OPENING_MS + 5_000)]);
     triggers.dispose();
   });
@@ -466,7 +465,7 @@ describe('mobile sync triggers: a local change after a sync (#1431)', () => {
     await save(9_000);
     await advanceTo(20_000);
     expect(runs).toEqual([0, 11_000]);
-    // Nothing was stretched, so nothing is logged as skipped.
+
     expect(fake.ports.logInfo).not.toHaveBeenCalled();
     triggers.dispose();
   });
@@ -493,7 +492,7 @@ describe('mobile sync triggers: a local change after a sync (#1431)', () => {
     await save(9_000);
     await advanceTo(14_000);
     expect(runs).toEqual([0, 11_000]);
-    // The upload ended at 13,000 and carried a local change, so the next one waits 9 x 2,000 ms.
+
     await save(14_000);
     await advanceTo(30_999);
     expect(runs).toEqual([0, 11_000]);
@@ -508,7 +507,7 @@ describe('mobile sync triggers: a local change after a sync (#1431)', () => {
     await save(9_000);
     expect(triggers.hasPendingLocalChange()).toBe(true);
     expect(pendingChanges).toEqual([true]);
-    // An edit during the upload is not covered by it.
+
     await save(11_500);
     await advanceTo(12_000);
     expect(runs).toEqual([0, 11_000]);
@@ -534,7 +533,7 @@ describe('mobile sync triggers: a local change after a sync (#1431)', () => {
 
   it('clears pending without a cycle when a write leaves the payload as uploaded', async () => {
     const { triggers, fake, runs, pendingChanges, advanceTo } = await replay();
-    // The opening sync uploaded 'sync-change:1'; this write changes lastDataChangeAt only.
+
     await advanceTo(9_000);
     triggers.handleStoreChange({ lastDataChangeAt: 2 }, { lastDataChangeAt: 1 });
     expect(triggers.hasPendingLocalChange()).toBe(true);
@@ -547,8 +546,7 @@ describe('mobile sync triggers: a local change after a sync (#1431)', () => {
   });
 });
 
-// #1432: iOS suspends the app seconds after it leaves the foreground. A sync running or starting
-// then holds one OS background hold until it and every queued follow-up settle.
+
 describe('mobile sync triggers background hold', () => {
   type SyncResult = { success: boolean; error?: string };
   const deferred = <T>() => {
@@ -655,23 +653,23 @@ describe('mobile sync triggers background hold', () => {
     expect(holds[0].release).toHaveBeenCalledTimes(1);
     expect(holdLines().at(-1)).toEqual(['Background sync hold ended', 'expired']);
 
-    // The lifecycle abort settles as success, but nothing was uploaded.
+
     cycles[0].resolve({ success: true });
     await flush();
     expect(holds[0].release).toHaveBeenCalledTimes(1);
     expect(triggers.hasPendingLocalChange()).toBe(true);
 
-    // No second hold in the same background episode.
+
     triggers.handleCloudKitChange();
     await flush();
     expect(ports.holdBackgroundExecution).toHaveBeenCalledTimes(1);
 
-    // That cycle runs unheld and is cut off too.
+
     cycles[1].resolve({ success: false, error: 'Network offline' });
     await flush();
     expect(triggers.hasPendingLocalChange()).toBe(true);
 
-    // The foreground syncs at once, inside the 30 s foreground interval.
+
     const before = cycles.length;
     triggers.handleAppStateChange('active');
     await flush();
@@ -694,7 +692,7 @@ describe('mobile sync triggers background hold', () => {
     triggers.handleAppStateChange('background');
     await flush();
     expect(holds).toHaveLength(1);
-    // The lifecycle abort reports success; it does not cover the change.
+
     cycles[0].resolve({ success: true });
     await flush();
     expect(triggers.hasPendingLocalChange()).toBe(true);

@@ -375,8 +375,8 @@ describe('Done row status uses the RN status-only update and durable receipts', 
             expect(await raw(sqlite)).toEqual(before);
             expect(value(sqlite.host.doneTaskStatusOutcome(legacy))).toBeNull();
             expect(await sqlite.receiptIds()).toEqual([]);
-            // Reproduce the established V1 receipt engine's exact namespace;
-            // future code cannot newly write an unbound V1 command.
+
+
             const payload = JSON.stringify(['doneTaskStatus', legacy], (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
                 ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
             const priorReceipts = createNativeRequestReceipts({ save: async () => { await flushPendingSave(); return { ok: true, value: null }; } });

@@ -1,15 +1,15 @@
 import { isTaskInActiveProject } from './project-utils';
 import type { Project, Task, TaskEditorFieldId } from './types';
 
-/** Action metadata stays out of Reference presentation, without changing the entity. */
+
 export const REFERENCE_HIDDEN_TASK_FIELDS = [
-    'status', 'startTime', 'dueDate', 'reviewAt', 'recurrence', 'priority',
+    'startTime', 'dueDate', 'reviewAt', 'recurrence', 'priority',
     'energyLevel', 'timeEstimate', 'contexts', 'location',
 ] as const satisfies readonly TaskEditorFieldId[];
 
 const normalizeReferenceText = (value: string): string => value.normalize('NFKC').toLowerCase();
 
-/** Compile once per query; Reference search treats every term as literal text. */
+
 export function createReferenceSearchPredicate(query: string): (task: Pick<Task, 'title' | 'description'>) => boolean {
     const terms = [...new Set(normalizeReferenceText(query).trim().split(/\s+/u).filter(Boolean))];
     if (terms.length === 0) return () => true;
@@ -19,7 +19,7 @@ export function createReferenceSearchPredicate(query: string): (task: Pick<Task,
     };
 }
 
-/** Historical reference material is opt-in; other project visibility rules stay intact. */
+
 export function isReferenceInVisibleProject(
     task: Task,
     projectLookup: Map<string, Project> | Record<string, Project>,

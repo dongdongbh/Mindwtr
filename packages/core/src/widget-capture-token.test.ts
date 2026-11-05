@@ -4,11 +4,6 @@ import { parseQuickAdd } from './quick-add';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData } from './types';
 
-// The Android Tasks widget pre-fills `@context ` / `#tag ` for a single-token list
-// (WidgetListStore.captureText, #1418). It emits a simple token (`@Todd`), a hierarchical
-// one as typed (`@person/todd`), or anything else in quoted form (`@"Two words"`), and
-// skips names containing a quote or backslash, or whitespace before a marker or slash.
-// These pin that each emitted form round-trips through quick-add with no known-token list.
 
 const ID = '33333333-3333-4abc-8def-333333333333';
 
@@ -41,7 +36,7 @@ describe('Android widget capture token pre-fill', () => {
         expect(parsed.title).toBe('Call back');
     });
 
-    // The dialog's Contexts button (QuickCaptureActivity.insertToken) drops the same forms mid-text, spaced on both sides.
+
     it.each([
         ['Call @person/gary back', '@person/gary'],
         ['Call @"Two words" back', '@Two words'],
@@ -70,7 +65,7 @@ describe('Android widget capture token pre-fill', () => {
             settings: {}, error: null, persistenceFailure: null, isLoading: false, editLockCount: 0, lastDataChangeAt: 0,
         } as never);
         await useTaskStore.getState().fetchData({ silent: true });
-        // Exactly what QuickCaptureActivity queues after the user types behind the token.
+
         const files = new Map([[`${ID}.json`, JSON.stringify({
             kind: 'text', id: ID, title: `${token} Call back`, createdAt: '2026-10-21T12:00:00.000Z',
             source: 'android-quick-capture', defaultStatus: 'inbox',

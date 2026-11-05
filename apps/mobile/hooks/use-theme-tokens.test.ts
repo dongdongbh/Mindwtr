@@ -27,9 +27,7 @@ describe('resolveThemeTokens', () => {
     expect(t.state.rippleColor).toBeDefined();
   });
 
-  // Memoized rows compare `tc` by identity (#766), and ThemeProvider hands out a
-  // fresh context object on every render, so equal inputs must yield the same
-  // object — and a real theme change must still yield a different one.
+
   it('returns the same object for equal inputs and a new one when the theme changes', () => {
     const light = { isDark: false, themeStyle: 'default', themePreset: 'default', themeMode: 'system' } as const;
     const first = resolveThemeTokens(light);

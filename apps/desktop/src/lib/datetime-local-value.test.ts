@@ -42,7 +42,7 @@ describe('parseDateTimeLocalDate', () => {
     it('returns the date half as a local Date', () => {
         const parsed = parseDateTimeLocalDate('2026-04-22T09:30');
         expect(parsed?.getFullYear()).toBe(2026);
-        // Month is zero-based; April must not come back as May.
+
         expect(parsed?.getMonth()).toBe(3);
         expect(parsed?.getDate()).toBe(22);
     });

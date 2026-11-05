@@ -3,9 +3,7 @@ import { createSecureSyncConfigStore, type SecureSyncConfigStore } from '@mindwt
 
 import { secureSecretStorage, secureSecretVault } from './secure-secret-store';
 
-// The rules (which keys are secret, keystore first, legacy plaintext migration, in-memory
-// fallback) live in core (sync-secret-storage.ts); this module binds them to AsyncStorage
-// and expo-secure-store.
+
 export { isSecretConfigKey } from '@mindwtr/core/sync-secret-storage';
 
 const secureConfig: SecureSyncConfigStore = createSecureSyncConfigStore({

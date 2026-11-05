@@ -4,13 +4,11 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 
 const MLKIT_ACTIVITY = 'com.google.mlkit.vision.codescanner.internal.GmsBarcodeScanningDelegateActivity';
 const MAIN_ACTIVITY = '.MainActivity';
-// expo-dev-launcher and expo-dev-menu depend on androidx.compose.ui:ui-tooling with `implementation`,
-// so its exported preview launcher (a debug tool that starts any composable by name) reached release
-// APKs (v1.3.6). The app has no Compose previews to run.
+
+
 const COMPOSE_PREVIEW_ACTIVITY = 'androidx.compose.ui.tooling.PreviewActivity';
-// Fully qualified: these classes live in the local context-automation Expo
-// module (apps/mobile/modules/context-automation), not the app's own package,
-// so the manifest-relative `.ClassName` shorthand no longer resolves.
+
+
 const CONTEXT_AUTOMATION_HEADLESS_SERVICE = 'tech.dongdongbh.mindwtr.contextautomation.ContextAutomationHeadlessService';
 const CONTEXT_AUTOMATION_RECEIVER = 'tech.dongdongbh.mindwtr.contextautomation.ContextAutomationReceiver';
 const CONTEXT_INTENT_ACTIONS = [
@@ -112,13 +110,7 @@ const ensureContextAutomationHeadlessService = (application) => {
     service.$['android:exported'] = 'false';
 };
 
-// expo-secure-store ships `<include domain="sharedpref" path="."/>`, which
-// enrols every present and future SharedPreferences file in Google cloud backup
-// and device transfer. Mindwtr owns its rules instead and enrols nothing: sync
-// has its own transport, and an app whose data lives in SQLite has nothing in
-// sharedpref worth shipping to Google. An exhaustive include list naming a path
-// that never exists is how the platform spells "nothing" — an empty rule set
-// means "everything". `android:allowBackup` is untouched.
+
 const BACKUP_RULES_FILE_NAME = 'mindwtr_backup_rules.xml';
 const DATA_EXTRACTION_RULES_FILE_NAME = 'mindwtr_data_extraction_rules.xml';
 const BACKUP_RULES_RESOURCE = '@xml/mindwtr_backup_rules';
@@ -214,8 +206,8 @@ module.exports = function withAndroidManifestFixes(config) {
     setProfileable(application);
     ensureBackupRules(application);
     application.$['android:resizeableActivity'] = 'true';
-    // WebDAV sync allows HTTP only for localhost, private IPs, and local hostnames in app code.
-    // Android still needs cleartext enabled at the manifest level for those private endpoints.
+
+
     application.$['android:usesCleartextTraffic'] = 'true';
 
     const existingSupportsScreens = manifest.manifest['supports-screens']?.[0]?.$ ?? {};
@@ -241,7 +233,7 @@ module.exports = function withAndroidManifestFixes(config) {
     let didUpdateMlkit = false;
     application.activity.forEach((activity) => {
       if (activity.$ && activity.$['android:name'] === MAIN_ACTIVITY) {
-        // Explicitly allow both portrait and landscape on tablets/Chromebooks.
+
         activity.$['android:screenOrientation'] = 'fullUser';
         activity.$['android:resizeableActivity'] = 'true';
         activity.$['android:configChanges'] = ensureConfigChange(
@@ -252,7 +244,7 @@ module.exports = function withAndroidManifestFixes(config) {
         didUpdateMainActivity = true;
       }
       if (activity.$ && activity.$['android:name'] === MLKIT_ACTIVITY) {
-        // Remove forced orientation for large screens.
+
         delete activity.$['android:screenOrientation'];
         activity.$['tools:remove'] = mergeToolsRemove(activity.$['tools:remove'], 'android:screenOrientation');
         didUpdateMlkit = true;

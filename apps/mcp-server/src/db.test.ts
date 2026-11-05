@@ -122,8 +122,8 @@ describe('mcp db bootstrap', () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => undefined);
     let canonicalPathDuringSave: boolean | null = null;
     const saveSpy = spyOn(core.SqliteAdapter.prototype, 'saveData').mockImplementation(async () => {
-      // A SIGKILL or host startup timeout here runs no cleanup at all, so the
-      // canonical path must not hold a schema-only database yet.
+
+
       canonicalPathDuringSave = existsSync(dbPath);
       throw new Error('interrupted mid-bootstrap');
     });

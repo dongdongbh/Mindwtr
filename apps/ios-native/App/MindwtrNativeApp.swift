@@ -6,7 +6,7 @@ import MindwtrNativeCore
 import MindwtrWatchPayloadValidation
 import UserNotifications
 
-/// One immutable process snapshot, shared by startup and future early native response capture.
+
 enum NativeAppLaunch {
     static let arguments = ProcessInfo.processInfo.arguments
     static let reminderRoute = Result { try NativePersonalIntakeRoute.current() }
@@ -1093,7 +1093,7 @@ struct MindwtrNativeApp: App {
     }
 }
 
-/// Device authentication only; the shared core owns the saved setting and its writes.
+
 @MainActor
 final class AppLockController: ObservableObject {
     @Published private(set) var enabled: Bool?
@@ -1110,7 +1110,7 @@ final class AppLockController: ObservableObject {
     private var successfulAuthenticationGeneration: Int?
     private var privacyCovers: [UIView] = []
 #if DEBUG && targetEnvironment(simulator)
-    // Configured only after CoreModel validates an isolated UUID test library.
+
     var testOutcomes: [String] = []
 #endif
     var concealed: Bool { enabled == nil || locked }
@@ -1172,7 +1172,7 @@ final class AppLockController: ObservableObject {
                 self.privacyCovers.removeAll()
             }
         }
-        // The system prompt makes the app inactive. Actual backgrounding cancels it.
+
         if next == .background {
             authenticationGeneration += 1
             context?.invalidate()
@@ -1208,7 +1208,7 @@ final class AppLockController: ObservableObject {
 #if DEBUG && targetEnvironment(simulator)
         if !testOutcomes.isEmpty {
             let outcome = testOutcomes.removeFirst()
-            // Exercise the system-prompt inactive/active exception without invoking biometrics.
+
             sceneChanged(.inactive)
             await Task.yield()
             sceneChanged(.active)
@@ -1258,7 +1258,7 @@ private struct AppLockRoot: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
-    // Match RN AppState: refresh the initial snapshot until a lifecycle event supersedes it.
+
     private var applicationActive: Bool {
         observedApplicationActive ?? (UIApplication.shared.applicationState == .active)
     }

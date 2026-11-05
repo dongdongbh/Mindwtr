@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, CheckCircle, ChevronLeft, ClipboardList, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
 import { INCUBATE_ICON as IncubateIcon, START_LATER_ICON as StartLaterIcon, TASK_STATUS_ICONS } from '../lib/task-status-icons';
 
-// One status, one glyph: these come from the shared map, never picked here (#1256).
+
 const SomedayIcon = TASK_STATUS_ICONS.someday;
 const ReferenceIcon = TASK_STATUS_ICONS.reference;
 const NextIcon = TASK_STATUS_ICONS.next;
@@ -11,6 +11,7 @@ import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedA
 } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 import { useNativeDateInputLocale } from '../hooks/use-native-date-input-locale';
 import { InboxNextActionDrafts } from './InboxNextActionDrafts';
 import {
@@ -35,8 +36,10 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
+import { InboxProcessingSectionField } from './InboxProcessingSectionField';
 import { PriorityFlag } from './Task/PriorityFlag';
 import { InboxSimilarTasks } from './InboxSimilarTasks';
+import { InboxProcessingLinks, type InboxProcessingLinksProps } from './InboxProcessingLinks';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
@@ -47,10 +50,12 @@ export type InboxProcessingWizardProps = {
     processingMode: 'guided' | 'quick';
     onModeChange: (mode: 'guided' | 'quick') => void;
     processingStep: ProcessingStep;
-    /** The task fields being clarified, and the one write path into them. */
+
     draft: TaskDraft;
     setField: TaskDraftSetter;
     similarTasks: readonly Task[];
+    linkAttachments: InboxProcessingLinksProps['attachments'];
+    onAddLinks: InboxProcessingLinksProps['onAddLinks'];
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
     setIsProcessing: (value: boolean) => void;
@@ -62,7 +67,7 @@ export type InboxProcessingWizardProps = {
     handleLater: () => void;
     handleIncubate: () => void;
     handleActionable: () => void;
-    /** This item reached the pass from Someday, not the Inbox (#1089). */
+
     isReturningItem: boolean;
     showDoneNowShortcut: boolean;
     handleProjectCheckNo: () => void;
@@ -82,6 +87,8 @@ export type InboxProcessingWizardProps = {
     handleConfirmSomeday: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
     onCreateSomedaySection: (title: string) => Promise<string | null>;
+
+    onCreateSection: (title: string) => Promise<string | null>;
     customContext: string;
     setCustomContext: (value: string) => void;
     addCustomContext: (value?: string) => void;
@@ -109,7 +116,7 @@ export type InboxProcessingWizardProps = {
     showProjectInRefine: boolean;
     scheduleFields: InboxProcessingScheduleFieldsControls;
     visibleScheduleFieldKeys: InboxProcessingScheduleFieldKey[];
-    /** Only for the AI-enabled switch behind the clarify step's assistant. */
+
     settings?: AppData['settings'];
 };
 
@@ -127,6 +134,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     draft,
     setField,
     similarTasks,
+    linkAttachments,
+    onAddLinks,
     visibility,
     options,
     setIsProcessing,
@@ -157,6 +166,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleConfirmSomeday,
     onCreatePerson,
     onCreateSomedaySection,
+    onCreateSection,
     customContext,
     setCustomContext,
     addCustomContext,
@@ -194,6 +204,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         areas,
         personOptions,
         projects,
+        sections,
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
@@ -210,8 +221,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         showTagsField,
         showTimeEstimateField,
     } = visibility;
-    // The body keeps its own names for the draft fields: one alias block beats
-    // rewriting every reference (and re-growing the prop list to do it).
+
+
     const processingTitle = draft.title;
     const titleInputRef = useProcessingTitleFocus(processingTask?.id, processingStep);
     const processingDescription = draft.description;
@@ -251,9 +262,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         </div>
     );
 
-    // The same clarify action the task editor offers, on the task being
-    // processed (#1022). Copilot stays off: the wizard makes no background AI
-    // calls, only the one the user asks for.
+
     const ai = useTaskItemAi({
         taskId: processingTask?.id ?? '',
         settings,
@@ -274,8 +283,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         copilotEnabled: false,
     });
 
-    // After a long step is submitted the view is left scrolled to the bottom;
-    // bring the panel top (title of the next task) back into view on advance.
+
     const panelRef = useRef<HTMLDivElement | null>(null);
     const [actionableChoice, setActionableChoice] = useState<'initial' | 'not-actionable' | 'later' | 'incubate'>('initial');
     const processingTaskId = processingTask?.id;
@@ -293,6 +301,31 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const currentProject = selectedProjectId
         ? projects.find((project) => project.id === selectedProjectId) ?? null
         : null;
+    const sectionField = (labelClassName?: string, controlClassName?: string) => (showProjectField ? (
+        <InboxProcessingSectionField
+            t={t}
+            project={currentProject}
+            sections={sections}
+            value={draft.sectionId}
+            onChange={(sectionId) => setField('sectionId', sectionId)}
+            onCreateSection={onCreateSection}
+            labelClassName={labelClassName}
+            controlClassName={controlClassName}
+        />
+    ) : null);
+    const projectHasSections = (projectId: string) => sections.some((section) => (
+        section.projectId === projectId && !section.deletedAt
+    ));
+
+
+    const chooseStepProject = (projectId: string) => {
+        if (!projectHasSections(projectId)) {
+            handleSetProject(projectId);
+            return;
+        }
+        setSelectedProjectId(projectId);
+        setSelectedAreaId(null);
+    };
     const laterLabel = tFallback(t, 'process.later', 'Start later');
     const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.');
     const incubateLabel = tFallback(t, 'process.incubate', 'Incubate');
@@ -346,6 +379,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         noProjectLabel={t('process.noProject')}
                         searchPlaceholder={t('projects.search')}
                         noMatchesLabel={t('common.noMatches')}
+                        deferredLabel={t('projects.deferredSection')}
                         emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
                         createProjectLabel={t('projects.create')}
                         controlClassName="bg-card rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
@@ -353,6 +387,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     />
                 </div>
             ) : null}
+            {sectionField()}
         </div>
     ) : null;
 
@@ -375,7 +410,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
 
     return (
         <div ref={panelRef} className="bg-card border border-border rounded-xl animate-in fade-in overflow-visible">
-            {/* Header */}
+            {            }
             <div className="flex items-center justify-between px-5 py-3.5">
                 <div className="flex items-center gap-2.5">
                     {canGoBack && (
@@ -441,9 +476,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
 
             <div className="h-px bg-border" />
 
-            {/* Body */}
+            {          }
             <div className="px-6 py-5 space-y-5">
-                {/* Step indicator */}
+                {                    }
                 <div className="flex items-center justify-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-primary" />
                     <span className="text-xs font-medium text-primary">{stepLabel[processingStep]}</span>
@@ -460,7 +495,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     </div>
                 )}
 
-                {/* Task title */}
+                {                }
                 <p className="text-center font-medium text-base leading-snug">
                     {processingTitle || processingTask.title}
                 </p>
@@ -491,6 +526,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 rows={2}
                             />
                         </div>
+                        <InboxProcessingLinks t={t} attachments={linkAttachments} onAddLinks={onAddLinks} />
                         {showProjectInRefine && showAreaField && !selectedProjectId && (
                             <div className="space-y-1">
                                 <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>
@@ -533,12 +569,17 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     noProjectLabel={t('process.noProject')}
                                     searchPlaceholder={t('projects.search')}
                                     noMatchesLabel={t('common.noMatches')}
+                                    deferredLabel={t('projects.deferredSection')}
                                     emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
                                     createProjectLabel={t('projects.create')}
                                     controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                                     menuClassName="text-sm"
                                 />
                             </div>
+                        )}
+                        {showProjectInRefine && sectionField(
+                            'text-[11px] text-muted-foreground font-medium',
+                            'rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none',
                         )}
                         {ai.aiEnabled && (
                             <div className="flex flex-col gap-2 text-xs">
@@ -618,9 +659,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     <CheckCircle className="h-4 w-4" /> {t('process.doneIt')}
                                 </button>
                             )}
-                            {/* Deferring an action you have already decided on is
-                                an actionable outcome, so it sits on this side of
-                                the question rather than under "No" (#1089). */}
+                            {
+
+                                                                               }
                             <button
                                 type="button"
                                 onClick={() => setActionableChoice('later')}
@@ -685,6 +726,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 t={t}
                                 fields={scheduleFields}
                                 visibleFieldKeys={['start']}
+                                requiredFieldKeys={['start']}
                                 variant="guided"
                             />
                             <button
@@ -1123,6 +1165,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         {t('process.projectDesc')}
                     </p>
 
+                    {!convertToProject && currentProject && sectionField()}
                     {!convertToProject && currentProject && (
                         <button
                             type="button"
@@ -1213,13 +1256,14 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                             value={projectSearch}
                                             onChange={(e) => setProjectSearch(e.target.value)}
                                             onKeyDown={async (e) => {
-                                                if (e.key !== 'Enter') return;
+                                                if (isImeComposing(e) || e.key !== 'Enter') return;
                                                 if (!projectSearch.trim()) return;
                                                 e.preventDefault();
                                                 const title = projectSearch.trim();
                                                 const existing = filteredProjects.find((project) => project.title.toLowerCase() === title.toLowerCase());
                                                 if (existing) {
-                                                    handleSetProject(existing.id);
+                                                    chooseStepProject(existing.id);
+                                                    setProjectSearch('');
                                                     return;
                                                 }
                                                 const created = await addProject(
@@ -1268,7 +1312,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                             {filteredProjects.map(project => (
                                                 <button
                                                     key={project.id}
-                                                    onClick={() => handleSetProject(project.id)}
+                                                    onClick={() => chooseStepProject(project.id)}
                                                     className={cn(
                                                         "w-full flex items-center gap-3 p-3 rounded-lg text-left border",
                                                         selectedProjectId === project.id

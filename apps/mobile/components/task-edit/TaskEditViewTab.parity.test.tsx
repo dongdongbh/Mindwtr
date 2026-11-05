@@ -1,21 +1,6 @@
-/**
- * React Native's task editor View tab, its Markdown renderer, the Form tab's
- * checklist field and the editor's checklist update rules, replayed against the
- * frozen parity fixture (packages/core/src/task-view-parity.fixtures.json) that
- * core's Markdown blocks, task view and checklist models and the native host
- * contract are tested against.
- *
- * To recapture, keep every file under apps/ at HEAD except this one, then run
- *   MINDWTR_CAPTURE_TASK_VIEW=1 TZ=UTC bunx vitest run components/task-edit/TaskEditViewTab.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD,
- * so the provenance always names the React Native code that ran.
- *
- * Each scenario renders the real component, drives it through its own controls,
- * and records the rendered tree (every host element and prop, functions left out)
- * and a neutral reading of it: what a user sees, what each tap does, and what the
- * component asks the editor to store. Styles and theme colors are named markers,
- * so the reading can tell them apart. Every action starts from a fresh render.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -96,8 +81,6 @@ vi.mock('../markdown-reference-autocomplete', () => ({
 }));
 vi.mock('../../lib/app-log', () => ({ logInfo: async () => null }));
 
-// ---------------------------------------------------------------------------
-// Inputs.
 
 const task = (fields: Partial<Task> & Pick<Task, 'id' | 'title' | 'status'>): Task => ({
   tags: [], contexts: [], createdAt: T0, updatedAt: T0, ...fields,
@@ -106,7 +89,7 @@ const project = (id: string, title: string, areaId?: string, extra: Partial<Proj
   id, title, status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: T0, updatedAt: T0, ...(areaId ? { areaId } : {}), ...extra,
 });
 
-/** The store the Markdown references resolve against. */
+
 const STORE = {
   tasks: [
     task({ id: 't-live', title: 'Live task', status: 'next', projectId: 'p-live' }),
@@ -132,7 +115,7 @@ type MarkdownScenario = {
   markdown: string;
   direction?: 'ltr' | 'rtl';
   selectable?: boolean;
-  /** MarkdownInlineText instead of MarkdownText. */
+
   inline?: { numberOfLines?: number };
 };
 
@@ -171,7 +154,7 @@ type ViewTabScenario = {
   timeEstimatesEnabled: boolean;
   showStatusField: boolean;
   readOnly: boolean;
-  /** Which optional callbacks the editor passes. */
+
   handlers: { project: boolean; context: boolean; tag: boolean; status: boolean };
   actions: unknown[][];
 };
@@ -394,7 +377,7 @@ const viewTabScenarios: ViewTabScenario[] = [
 type ChecklistFieldScenario = {
   name: string;
   checklist: Task['checklist'];
-  /** The draft's status; null when the editor has no draft yet. */
+
   draftStatus: Task['status'] | null;
   taskStatus: Task['status'];
   actions: unknown[][];
@@ -467,7 +450,7 @@ type CascadeScenario = {
   name: string;
   taskMode: Task['taskMode'];
   taskStatus: Task['status'];
-  /** The draft's status; null when the editor has no draft yet. */
+
   draftStatus: Task['status'] | null;
   next: NonNullable<Task['checklist']>;
   canMutate: boolean;
@@ -503,8 +486,6 @@ const resetScenarios: ResetScenario[] = [
   { name: 'empty draft checklist', taskMode: 'list', draftStatus: 'done', draftChecklist: [], storeResult: { success: true } },
 ];
 
-// ---------------------------------------------------------------------------
-// Reading a rendered tree.
 
 type Json = ReactTestRendererJSON;
 const tc = new Proxy({}, { get: (_target, key) => (typeof key === 'string' ? `tc.${key}` : undefined) }) as any;
@@ -526,7 +507,7 @@ const text = (node: Json | string | null | undefined): string => {
 const elements = (node: Json): Json[] => (node.children ?? []).filter((child): child is Json => typeof child !== 'string');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value));
 
-/** Runs a tap and returns what it did. */
+
 const press = (handler: (() => unknown) | undefined): unknown[][] => {
   const start = harness.log.length;
   act(() => {
@@ -669,13 +650,11 @@ const readChecklistField = (root: Json): unknown => {
   return out;
 };
 
-// ---------------------------------------------------------------------------
-// Rendering.
 
 const tree = (renderer: { toJSON: () => unknown }) => JSON.stringify(renderer.toJSON());
 const formatDate = (value: string) => formatTaskEditorDate(value, safeFormatDate, translate('common.notSet'));
 const formatDueDate = (value: string) => formatTaskEditorDate(value, safeFormatDate, translate('common.notSet'), { due: true });
-// use-task-edit-attachments' rule, which the editor passes to the View tab.
+
 const isImageAttachment = (attachment: Attachment) => {
   const mime = attachment.mimeType?.toLowerCase();
   if (mime?.startsWith('image/')) return true;
@@ -812,13 +791,26 @@ function renderChecklistField(scenario: ChecklistFieldScenario) {
   return renderer;
 }
 
+
+function withoutChecklistDragAffordance(node: Json): Json {
+  if (String(node.props.testID ?? '').startsWith('mobile-checklist-row-')) {
+    return withoutChecklistDragAffordance(elements(node)[0]);
+  }
+  const props = { ...node.props };
+  if (styleNames(node.props.style).includes('checklistContainer')) delete props.ref;
+  return { ...node, props, children: node.children?.filter((child) => typeof child === 'string'
+    || !String(child.props.testID ?? '').startsWith('mobile-checklist-drag-'))
+    .map((child) => typeof child === 'string' ? child : withoutChecklistDragAffordance(child)) ?? node.children };
+}
+
 function runChecklistField(scenario: ChecklistFieldScenario) {
   const fresh = () => {
     harness.uuid = 0;
     return renderChecklistField(scenario);
   };
   const renderer = fresh();
-  const out: Record<string, unknown> = { tree: tree(renderer), read: readChecklistField(renderer.toJSON() as Json) };
+  const projected = withoutChecklistDragAffordance(renderer.toJSON() as Json);
+  const out: Record<string, unknown> = { tree: JSON.stringify(projected), read: readChecklistField(projected) };
   act(() => renderer.unmount());
   const rows = (current: ReturnType<typeof create>) => current.root.findAll((node) => (
     typeof node.type === 'string' && styleNames(node.props.style).includes('checklistItem')
@@ -831,7 +823,8 @@ function runChecklistField(scenario: ChecklistFieldScenario) {
     const [kind, index, value] = action as [string, number, string];
     let after: unknown = null;
     const row = () => rows(current)[index];
-    const hostChildren = (node: any) => node.children.filter((child: any) => typeof child !== 'string');
+    const hostChildren = (node: any) => node.children.filter((child: any) => typeof child !== 'string'
+      && !String(child.props.testID ?? '').startsWith('mobile-checklist-drag-'));
     if (kind === 'toggle') {
       act(() => { hostChildren(row())[0].props.onPress?.(); });
     } else if (kind === 'change') {
@@ -924,8 +917,6 @@ async function runActions(scenario: Parameters<typeof ActionsHarness>[0]['scenar
   return calls;
 }
 
-// ---------------------------------------------------------------------------
-// The fixture.
 
 const inputs = () => json({
   now: NOW,

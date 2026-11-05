@@ -88,6 +88,23 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.3.8" date="2026-11-04">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.8</url>
+      <description>
+        <p>Separate workspaces, smoother task editing and safer automation.</p>
+        <p xml:lang="de">Getrennte Arbeitsbereiche, flüssigere Aufgabenbearbeitung und sicherere Automatisierung.</p>
+        <ul>
+          <li>Keep independent tasks, attachments and sync settings in each workspace.</li>
+          <li xml:lang="de">Aufgaben, Anhänge und Sync-Einstellungen je Arbeitsbereich getrennt halten.</li>
+          <li>Add Inbox items to checklists with Undo, and choose project sections during processing.</li>
+          <li xml:lang="de">Eingangseinträge mit Rückgängig in Checklisten übernehmen und beim Verarbeiten Projektabschnitte wählen.</li>
+          <li>Improve notes editing, regional formats, saved-search sorting and advance reminders.</li>
+          <li xml:lang="de">Notizen, regionale Formate, Suchsortierung und frühere Erinnerungen verbessern.</li>
+          <li>Preserve missing attachments during sync and protect Local API and MCP task writes.</li>
+          <li xml:lang="de">Fehlende Anhänge beim Sync erhalten und Aufgabenschreibzugriffe über Local API und MCP absichern.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.7" date="2026-10-22">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.7</url>
       <description>

@@ -79,7 +79,7 @@ describe('TaskItemRecurrenceModal', () => {
         rerender(<TaskItemRecurrenceModal {...baseProps} customMode="lastDay" onModeChange={onModeChange} />);
 
         expect(screen.getByRole('button', { name: 'Last day' }).className).toContain('bg-primary');
-        // Only the interval input is left: the day grid belongs to the 'date' choice.
+
         expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
         expect(screen.queryByRole('button', { name: '16', pressed: false })).toBeNull();
     });
@@ -97,7 +97,7 @@ describe('TaskItemRecurrenceModal', () => {
         expect(screen.getByRole('button', { name: '1', pressed: true })).toBeTruthy();
         expect(screen.getByRole('button', { name: '16', pressed: true })).toBeTruthy();
         expect(screen.getByRole('button', { name: '2', pressed: false })).toBeTruthy();
-        // The mode chip reads back the whole list, not just the first day.
+
         expect(screen.getByRole('button', { name: 'Day 1, 16' })).toBeTruthy();
 
         fireEvent.click(screen.getByRole('button', { name: '16', pressed: true }));

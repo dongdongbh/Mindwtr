@@ -78,7 +78,7 @@ export const referenceTasksAddTagScope = (request: TagRequest,
 const tagUpdates = (request: TagRequest, scope: NativeReferenceTasksMoveScope, at: string) =>
     buildBulkTaskTokenUpdates(request.taskIds, buildEntityMap(scope.tasks.map((row) => historyRowLoadProjection(row, at))), 'tags', request.tag.trim(), 'add');
 
-/** Uses the actual RN builder, preflight and batch planner; replay never allocates. */
+
 export const referenceTasksTagEffect = (prepared: Pick<NativeReferenceTasksAddTagPrepared,
     'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates'>, updatesList: ReturnType<typeof buildBulkTaskTokenUpdates>, temporal?: TaskLoadTemporalContext): NativeReferenceTasksAddTagPrepared['effect'] | null => {
     const { scope } = prepared;

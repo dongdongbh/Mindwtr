@@ -1,44 +1,29 @@
-/**
- * macOS CloudKit bridge — C-callable functions for Rust FFI.
- *
- * Ports the Swift CloudKit sync module to Objective-C so it can be compiled by
- * the `cc` crate in build.rs.  Uses the legacy CloudKit completion-block API
- * (macOS 10.12+) for broad SDK compatibility.
- *
- * All functions block on a dispatch semaphore (Tauri invokes them from a Tokio
- * blocking thread) and return heap-allocated JSON strings.
- */
+
+
+
 #import <CloudKit/CloudKit.h>
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
 #include <dispatch/dispatch.h>
 
-// Suppress deprecation warnings for legacy CloudKit completion-block APIs.
-// We use these for broad SDK compatibility (macOS 10.12+).
+
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <stdlib.h>
 #include <string.h>
 
-// ---------------------------------------------------------------------------
-// MARK: - Constants
-// ---------------------------------------------------------------------------
 
 static NSString *const kContainerID    = @"iCloud.tech.dongdongbh.mindwtr";
 static NSString *const kZoneName       = @"MindwtrZone";
 static NSString *const kSubscriptionID = @"MindwtrZoneSubscription";
 static NSString *const kAttachmentNotFoundErrorCode = @"ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND";
 static const NSInteger kBatchSize      = 400;
-// Saves go to an atomic zone: one refused request fails every record in it.
-// Smaller saves keep each request light and let a refused upload resume
-// from the records that already landed (#1278).
+
+
 static const NSInteger kSaveBatchSize  = 100;
 static const NSInteger kMinSaveBatchSize = 25;
 static const double    kMaxInlineRetryWaitSec = 120;
 static const int64_t   kTimeoutSec     = 60;
 
-// ---------------------------------------------------------------------------
-// MARK: - Shared state
-// ---------------------------------------------------------------------------
 
 static CKContainer    *_ckContainer = nil;
 static CKDatabase     *_ckPrivateDB = nil;
@@ -56,9 +41,6 @@ static void mindwtr_ck_ensure_container(void) {
     });
 }
 
-// ---------------------------------------------------------------------------
-// MARK: - JSON helpers
-// ---------------------------------------------------------------------------
 
 static char *ck_copy_json(id object) {
     if (!object || ![NSJSONSerialization isValidJSONObject:object]) {
@@ -73,11 +55,7 @@ static char *ck_copy_json(id object) {
     return utf8 ? strdup(utf8) : strdup("{\"error\":\"json-encode-failed\"}");
 }
 
-// CloudKit reports how long to wait before retrying a throttled or unavailable
-// request in CKErrorRetryAfterKey, and Apple asks callers to wait that long
-// rather than guess one. A partial failure carries the real reason, including
-// that interval, on its per-item errors instead of the top-level one, so look
-// there too. Read whenever CloudKit supplies the key, not for one error code.
+
 static NSNumber *ck_retry_after_seconds_at_depth(NSError *error, NSUInteger depth) {
     if (!error || depth >= 8) return nil;
     id retryAfter = [error userInfo][CKErrorRetryAfterKey];
@@ -106,8 +84,8 @@ static NSNumber *ck_retry_after_seconds(NSError *error) {
 
 static char *ck_error_json(NSError *error) {
     NSString *msg = [error localizedDescription] ?: @"unknown error";
-    // The JS layer only ever sees this string, so carry the interval in the
-    // fixed form it parses (#948).
+
+
     NSNumber *retryAfter = ck_retry_after_seconds(error);
     if (retryAfter) {
         msg = [NSString stringWithFormat:@"%@ [retryAfter=%@]", msg, retryAfter];
@@ -137,17 +115,10 @@ static char *ck_success_json(void) {
     return strdup("{\"ok\":true}");
 }
 
-/// CloudKit server-side error code for queries against a record type that does
-/// not yet exist in the container schema.  Observed in the NSUnderlyingError of
-/// CKErrorServerRejectedRequest when querying a Development-environment
-/// container before any records of that type have been saved.
-/// Apple does not publish this constant; it was determined empirically and is
-/// stable across macOS 13–15 and iOS 16–18.
+
 static const NSInteger kCKServerErrorUnknownRecordType = 2003;
 
-/// Locale-independent check for "unknown record type" inside a
-/// CKErrorServerRejectedRequest.  Inspects the NSUnderlyingError code rather
-/// than localizedDescription so this works on non-English systems.
+
 static BOOL ck_is_unknown_record_type(NSError *error) {
     NSError *underlying = error.userInfo[NSUnderlyingErrorKey];
     if ([underlying isKindOfClass:[NSError class]] &&
@@ -157,9 +128,6 @@ static BOOL ck_is_unknown_record_type(NSError *error) {
     return NO;
 }
 
-// ---------------------------------------------------------------------------
-// MARK: - Field specs (mirrors CloudKitRecordMapper.swift exactly)
-// ---------------------------------------------------------------------------
 
 typedef NS_ENUM(NSInteger, MWFieldKind) {
     MWFieldKindString,
@@ -207,6 +175,8 @@ static const MWFieldSpec kTaskFields[] = {
     {"suppressMindwtrReminders", "suppressMindwtrReminders", MWFieldKindBool},
     {"reminderPolicy", "reminderPolicy", MWFieldKindString},
     {"repeatReminderMinutes", "repeatReminderMinutes", MWFieldKindInt},
+    {"dueReminderLeadMinutes", "dueReminderLeadMinutes", MWFieldKindInt},
+    {"startReminderLeadMinutes", "startReminderLeadMinutes", MWFieldKindInt},
     {"reviewAt",       "reviewAt",        MWFieldKindDate},
     {"completedAt",    "completedAt",     MWFieldKindDate},
     {"cancelledAt",    "cancelledAt",     MWFieldKindDate},
@@ -253,7 +223,7 @@ static const MWFieldSpec kProjectFields[] = {
     {"updatedAt",    "updatedAt",    MWFieldKindDate},
     {"deletedAt",    "deletedAt",    MWFieldKindDate},
     {"purgedAt",     "purgedAt",     MWFieldKindDate},
-    {"startDate",    "startDateText", MWFieldKindDate}, // Production "startDate" is a Date field; strings never fit it
+    {"startDate",    "startDateText", MWFieldKindDate},
 };
 static const size_t kProjectFieldsCount = sizeof(kProjectFields) / sizeof(kProjectFields[0]);
 
@@ -325,9 +295,6 @@ static void ck_get_field_specs(NSString *recordType,
     }
 }
 
-// ---------------------------------------------------------------------------
-// MARK: - Record mapping (JSON ↔ CKRecord)
-// ---------------------------------------------------------------------------
 
 static void ck_set_field(CKRecord *record, NSString *key, id value) {
     id current = record[key];
@@ -414,10 +381,8 @@ static NSDictionary *ck_json_from_record(CKRecord *record) {
                 if ([value isKindOfClass:[NSNumber class]]) result[jsKey] = value;
                 break;
             case MWFieldKindBool:
-                // `@(expr == 1)` boxes via numberWithInt: (C `==` yields int), so
-                // NSJSONSerialization emits 0/1 numbers, not true/false. Force a real
-                // boolean NSNumber (@YES/@NO) so the JSON matches the JS `boolean` type
-                // core's strict `=== true` sync-merge normalizers expect (#902).
+
+
                 if ([value isKindOfClass:[NSNumber class]]) result[jsKey] = ([value longLongValue] == 1) ? @YES : @NO;
                 break;
             case MWFieldKindStringArray:
@@ -440,8 +405,8 @@ static NSDictionary *ck_json_from_record(CKRecord *record) {
 }
 
 #if defined(MINDWTR_NATIVE_MAPPER_FIXTURE_CHECK)
-/// Test-only entry point used by scripts/check-synced-field-parity.ts. It keeps
-/// the fixture harness on the same mapping functions used by production sync.
+
+
 char *mindwtr_cloudkit_round_trip_task_json(const char *json_utf8) {
     @autoreleasepool {
         if (!json_utf8) return NULL;
@@ -465,9 +430,6 @@ char *mindwtr_cloudkit_round_trip_task_json(const char *json_utf8) {
 }
 #endif
 
-// ---------------------------------------------------------------------------
-// MARK: - Change token serialization
-// ---------------------------------------------------------------------------
 
 static NSString *ck_serialize_token(CKServerChangeToken *token) {
     if (!token) return nil;
@@ -497,9 +459,6 @@ static CKServerChangeToken *ck_deserialize_token(NSString *base64) {
     return token;
 }
 
-// ---------------------------------------------------------------------------
-// MARK: - Public C API
-// ---------------------------------------------------------------------------
 
 char *mindwtr_cloudkit_account_status(void) {
     @autoreleasepool {
@@ -563,7 +522,7 @@ char *mindwtr_cloudkit_ensure_subscription(void) {
     @autoreleasepool {
         mindwtr_ck_ensure_container();
 
-        // Check if subscription already exists.
+
         __block BOOL alreadyExists = NO;
         dispatch_semaphore_t fetchSem = dispatch_semaphore_create(0);
         [_ckPrivateDB fetchSubscriptionWithID:kSubscriptionID
@@ -574,7 +533,7 @@ char *mindwtr_cloudkit_ensure_subscription(void) {
         dispatch_semaphore_wait(fetchSem, dispatch_time(DISPATCH_TIME_NOW, kTimeoutSec * NSEC_PER_SEC));
         if (alreadyExists) return ck_success_json();
 
-        // Create the subscription.
+
         CKRecordZoneSubscription *sub =
             [[CKRecordZoneSubscription alloc] initWithZoneID:_ckZoneID
                                               subscriptionID:kSubscriptionID];
@@ -651,13 +610,8 @@ char *mindwtr_cloudkit_fetch_all_records(const char *record_type_cstr) {
                 return ck_copy_json(@{@"error": @"fetch-timeout"});
             }
             if (batchError) {
-                // Record type not yet created in CloudKit schema — treat as empty.
-                // The type is auto-created on first save in the Development environment.
-                // CKErrorUnknownItem: record type unknown to the client framework.
-                // CKErrorServerRejectedRequest: server rejects the query because the
-                //   record type doesn't exist in the schema yet. We check the
-                //   underlying server error code (2003 = "UNKNOWN_RECORD_TYPE") which
-                //   is locale-independent, unlike localizedDescription.
+
+
                 if (batchError.code == CKErrorUnknownItem ||
                     (batchError.code == CKErrorServerRejectedRequest &&
                      ck_is_unknown_record_type(batchError))) {
@@ -764,9 +718,7 @@ char *mindwtr_cloudkit_fetch_changes(const char *change_token_base64_cstr) {
     }
 }
 
-/// Fetch records by their IDs. Returns a mutable dictionary keyed by CKRecordID.
-/// On error, returns nil and sets *outError. unknownItem (record doesn't exist) is
-/// silently skipped — mirrors iOS fetchRecordsByID behaviour.
+
 static NSMutableDictionary<CKRecordID *, CKRecord *> *
 ck_fetch_records_by_id(NSArray<CKRecordID *> *ids, NSError **outError) {
     NSMutableDictionary<CKRecordID *, CKRecord *> *results = [NSMutableDictionary dictionary];
@@ -780,20 +732,20 @@ ck_fetch_records_by_id(NSArray<CKRecordID *> *ids, NSError **outError) {
 
     op.fetchRecordsCompletionBlock = ^(NSDictionary<CKRecordID *, CKRecord *> *recordsByID,
                                        NSError *error) {
-        // Collect successfully fetched records.
+
         if (recordsByID) {
             [results addEntriesFromDictionary:recordsByID];
         }
         if (error) {
             if ([error.domain isEqualToString:CKErrorDomain] &&
                 error.code == CKErrorPartialFailure) {
-                // Inspect per-record errors — suppress unknownItem, collect real errors.
+
                 NSDictionary *partials = error.userInfo[CKPartialErrorsByItemIDKey];
                 for (CKRecordID *failedID in partials) {
                     NSError *perErr = partials[failedID];
                     if ([perErr.domain isEqualToString:CKErrorDomain] &&
                         perErr.code == CKErrorUnknownItem) {
-                        continue; // record doesn't exist yet — skip
+                        continue;
                     }
                     [perRecordErrors addObject:perErr];
                 }
@@ -1005,8 +957,7 @@ static NSNumber *ck_longest_retry_after(NSArray<NSError *> *errors) {
     return longest;
 }
 
-// Waits out CloudKit's retry interval inside the call, bounded per call so a
-// long refusal still returns to the sync cycle's own cooldown (#1278).
+
 static BOOL ck_wait_for_retry(NSNumber *delay, double *waitedSec) {
     if (!delay || delay.doubleValue <= 0) return NO;
     if (*waitedSec + delay.doubleValue > kMaxInlineRetryWaitSec) return NO;
@@ -1015,8 +966,7 @@ static BOOL ck_wait_for_retry(NSNumber *delay, double *waitedSec) {
     return YES;
 }
 
-// Which step was refused and how big it was, so a log tells request size,
-// server budget and the local daemon apart (#1278). No record content.
+
 static NSString *ck_step_detail(NSString *step, NSUInteger batchNumber, NSUInteger batchRecords,
                                 NSUInteger batchBytes, NSUInteger elapsedMs, double waitedSec) {
     return [NSString stringWithFormat:@"[step=%@ batch=%lu records=%lu bytes=%lu ms=%lu waited=%.0f]",
@@ -1052,7 +1002,7 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
             return ck_copy_json(@{@"conflictIDs": @[]});
         }
 
-        // Step 1: Collect record IDs and each record's JSON size (for diagnostics).
+
         NSMutableArray<CKRecordID *> *recordIDs = [NSMutableArray array];
         NSMutableDictionary<NSString *, NSNumber *> *bytesByID = [NSMutableDictionary dictionary];
         for (NSDictionary *json in jsonRecords) {
@@ -1066,12 +1016,7 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
         }
         double waitedSec = 0;
 
-        // Step 2: Fetch existing records in batches.
-        // Mirrors iOS: unknownItem is silently skipped (new records), but real
-        // fetch errors abort the save — otherwise missing records are treated as
-        // brand-new CKRecords, dropping server system fields (changeTag).
-        // Skipped when the caller's full read just found no records of this type:
-        // every lookup would answer unknownItem and only spend request budget.
+
         NSMutableDictionary<CKRecordID *, CKRecord *> *existingByID = [NSMutableDictionary dictionary];
         for (NSUInteger i = 0; !assume_new && i < recordIDs.count; i += kBatchSize) {
             NSUInteger end = MIN(i + kBatchSize, recordIDs.count);
@@ -1098,7 +1043,7 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
             [existingByID addEntriesFromDictionary:fetched];
         }
 
-        // Step 3: Build CKRecords — reuse fetched when they exist.
+
         NSMutableArray<CKRecord *> *recordsToSave = [NSMutableArray array];
         for (NSDictionary *json in jsonRecords) {
             NSString *rid = json[@"id"];
@@ -1120,10 +1065,7 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
 
         if (recordsToSave.count == 0) return ck_copy_json(@{@"conflictIDs": @[], @"savedCount": @0});
 
-        // Step 4: Save in batches, collecting conflicts. A refused batch is
-        // retried once after CloudKit's interval, then halved on each further
-        // refusal down to kMinSaveBatchSize; the call gives up when the bounded
-        // wait runs out, and the next sync resumes from the saved records.
+
         NSMutableArray<NSString *> *conflictIDs = [NSMutableArray array];
         NSMutableArray<NSError *> *nonConflictErrors = [NSMutableArray array];
         NSString *failedStep = nil;
@@ -1154,7 +1096,7 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
                 if (error) {
                     if ([error.domain isEqualToString:CKErrorDomain] &&
                         error.code == CKErrorPartialFailure) {
-                        // Extract per-record errors from the partial failure.
+
                         NSDictionary *partialErrors = error.userInfo[CKPartialErrorsByItemIDKey];
                         for (CKRecordID *failedID in partialErrors) {
                             NSError *perRecordError = partialErrors[failedID];
@@ -1202,8 +1144,7 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
                 continue;
             }
 
-            // Stop at the first batch still refused, as iOS does: sending the
-            // rest while CloudKit asks us to wait only prolongs the refusal.
+
             [conflictIDs addObjectsFromArray:batchConflicts];
             [nonConflictErrors addObjectsFromArray:batchErrors];
             failedStep = ck_step_detail(@"save", batchNumber, batch.count, batchBytes, ms, waitedSec);
@@ -1259,16 +1200,16 @@ char *mindwtr_cloudkit_delete_records(const char *record_type_cstr __unused,
                 if (error) {
                     if ([error.domain isEqualToString:CKErrorDomain] &&
                         error.code == CKErrorPartialFailure) {
-                        // Inspect per-record errors — suppress only unknownItem
-                        // (already deleted). Mirror iOS deleteRecords behaviour.
+
+
                         NSDictionary *partials = error.userInfo[CKPartialErrorsByItemIDKey];
                         for (CKRecordID *failedID in partials) {
                             NSError *perErr = partials[failedID];
                             if ([perErr.domain isEqualToString:CKErrorDomain] &&
                                 perErr.code == CKErrorUnknownItem) {
-                                continue; // already deleted — safe to ignore
+                                continue;
                             }
-                            opError = perErr; // real error — surface it
+                            opError = perErr;
                             break;
                         }
                     } else {

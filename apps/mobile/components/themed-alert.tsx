@@ -190,13 +190,7 @@ type ThemedAlertHostContextValue = {
 
 const ThemedAlertHostContext = createContext<ThemedAlertHostContextValue | null>(null);
 
-/**
- * Renders the themed alert inside an already-presented modal. On iOS the
- * provider's root <Modal> is a second native presentation stacked on the
- * presented one, so it never reaches the screen — every modal surface that can
- * raise an alert mounts this as its last child instead (#940/#941, PR #1005).
- * Renders nothing on Android, and nothing unless it is the topmost host.
- */
+
 export function ThemedAlertHost() {
   const context = useContext(ThemedAlertHostContext);
   const hostId = useRef<ThemedAlertHostId>({}).current;
@@ -259,15 +253,13 @@ export function ThemedAlertProvider({ children }: { children: React.ReactNode })
   }, [showNextRequest]);
 
   const registerHost = useCallback((hostId: ThemedAlertHostId) => {
-    // A host only exists while its modal is mounted (RN <Modal> renders its
-    // children only while visible), so registration order is presentation
-    // order: the last registered host is the topmost surface on screen.
+
+
     setHostStack((prev) => [...prev, hostId]);
     return () => setHostStack((prev) => prev.filter((id) => id !== hostId));
   }, []);
 
-  // Android presents sibling modals fine, so it keeps the root <Modal> path
-  // (and its hardware-back handling) whether or not a host is mounted.
+
   const activeHostId = Platform.OS === 'ios' ? hostStack[hostStack.length - 1] ?? null : null;
 
   const hostContext = useMemo<ThemedAlertHostContextValue>(() => ({

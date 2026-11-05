@@ -18,11 +18,12 @@ const value = <T>(result: { ok: true; value: T } | { ok: false; error: { code: s
 };
 const attachment = (id: string, cloudKey = id): Attachment => ({ id, kind: 'file', title: id,
     uri: `file:///local/${id}`, cloudKey, createdAt: DELETED, updatedAt: DELETED });
+
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({ id, title: id, status: 'next',
-    tags: [], contexts: [], createdAt: DELETED, updatedAt: DELETED, deletedAt: DELETED,
+    tags: ['#Trashed'], contexts: ['@Trashed'], createdAt: DELETED, updatedAt: DELETED, deletedAt: DELETED,
     rev: 3, revBy: 'device-a', ...overrides });
 const project = (id: string, overrides: Partial<Project> = {}): Project => ({ id, title: id,
-    status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: DELETED, updatedAt: DELETED,
+    status: 'active', color: '#94a3b8', order: 0, tagIds: ['#TrashedProject'], createdAt: DELETED, updatedAt: DELETED,
     deletedAt: DELETED, rev: 2, revBy: 'device-a', ...overrides });
 const section = (id: string, overrides: Partial<Section> = {}): Section => ({ id, projectId: 'p', title: id,
     order: 0, createdAt: DELETED, updatedAt: DELETED, rev: 2, revBy: 'device-a', ...overrides });
@@ -42,8 +43,8 @@ const seed = (): Partial<AppData> => ({
 });
 const openSqliteHost: typeof openSqliteHostBase = async (...args) => {
     const sqlite = await openSqliteHostBase(...args);
-    // Normal boot sanitizes live links to deleted parents. Stage the actual saved
-    // legacy/external links afterward so both RN and prepared paths exercise them.
+
+
     const original = new Map((args[0].tasks ?? []).filter((row) => !row.deletedAt).map((row) => [row.id, row]));
     const relink = (row: Task) => original.has(row.id)
         ? { ...row, projectId: original.get(row.id)!.projectId, sectionId: original.get(row.id)!.sectionId } : row;

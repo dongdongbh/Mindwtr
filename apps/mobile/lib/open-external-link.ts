@@ -4,7 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { isSandboxMode, tFallback } from '@mindwtr/core';
 import { logInfo, logWarn } from './app-log';
 
-/** Only explicit user actions call this; retain the exact target for open/copy. */
+
 export async function openExternalLink(
   href: string,
   t: (key: string) => string,

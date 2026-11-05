@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { getProjectChoiceState, type Project } from '@mindwtr/core';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { getProjectChoiceState, groupProjectsForPicker, useTaskStore, type Project } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { ModalPortal } from '../ModalPortal';
 import { useDropdownPosition } from './use-dropdown-position';
 
@@ -17,6 +18,8 @@ interface ProjectSelectorProps {
     noMatchesLabel?: string;
     emptyLabel?: string;
     createProjectLabel?: string;
+
+    deferredLabel?: string;
     leadingOption?: { value: string; label: string };
     noProjectValue?: string;
     ariaLabel?: string;
@@ -39,6 +42,7 @@ export function ProjectSelector({
     noMatchesLabel = 'No matches',
     emptyLabel,
     createProjectLabel = 'Create project',
+    deferredLabel = 'Someday / Waiting',
     leadingOption,
     noProjectValue = '',
     ariaLabel,
@@ -57,6 +61,8 @@ export function ProjectSelector({
     const createPendingRef = useRef(false);
     const mountedRef = useRef(true);
     const [isCreating, setIsCreating] = useState(false);
+    const [searchFocused, setSearchFocused] = useState(false);
+    const optionIdPrefix = useId();
     const projectPool = allProjects ?? projects;
     const selected = projectPool.find((p) => p.id === value);
     const selectedLabel = leadingOption?.value === value
@@ -74,10 +80,14 @@ export function ProjectSelector({
     });
 
     const normalizedQuery = query.trim().toLowerCase();
-    const { filteredProjects: filtered, canCreate } = useMemo(
+    const { filteredProjects, canCreate } = useMemo(
         () => getProjectChoiceState(projects, query, projectPool),
         [projectPool, projects, query],
     );
+    const areas = useTaskStore((state) => state.areas);
+    const groups = useMemo(() => groupProjectsForPicker(filteredProjects, areas), [areas, filteredProjects]);
+
+    const filtered = useMemo(() => [...groups.active, ...groups.deferred], [groups]);
 
     useEffect(() => {
         if (!open) return;
@@ -114,22 +124,16 @@ export function ProjectSelector({
         const options = dropdownRef.current?.querySelectorAll<HTMLButtonElement>('[data-selector-option="true"]');
         if (!options || options.length === 0) return;
         const list = Array.from(options);
-        const active = document.activeElement as HTMLElement | null;
-        let index = list.findIndex((option) => option === active);
-        if (index < 0) {
-            if (normalizedQuery && filtered.length > 0) {
-                const projectOptions = list.filter((option) => option.dataset.selectorOptionKind === 'item');
-                const nextOption = direction > 0 ? projectOptions[0] : projectOptions[projectOptions.length - 1];
-                nextOption?.focus();
-                return;
-            }
-            index = direction > 0 ? -1 : 0;
-        }
-        const nextIndex = (index + direction + list.length) % list.length;
+        const index = list.findIndex((option) => option === document.activeElement);
+
+        const nextIndex = index < 0
+            ? (direction > 0 ? 0 : list.length - 1)
+            : (index + direction + list.length) % list.length;
         list[nextIndex].focus();
     };
 
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
@@ -171,7 +175,7 @@ export function ProjectSelector({
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter') return;
+        if (isImeComposing(event) || event.key !== 'Enter') return;
         const title = query.trim();
         if (!title) return;
 
@@ -190,6 +194,75 @@ export function ProjectSelector({
     };
 
     const emptyStateLabel = normalizedQuery ? noMatchesLabel : (emptyLabel ?? noMatchesLabel);
+    const showCreate = canCreate && Boolean(onCreateProject);
+
+
+    const searching = Boolean(normalizedQuery);
+    const enterTargetId = !searching
+        ? undefined
+        : filtered[0]
+            ? `${optionIdPrefix}-item-${filtered[0].id}`
+            : showCreate ? `${optionIdPrefix}-create` : undefined;
+    const optionClassName = (id: string, selected: boolean) => cn(
+        'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+        selected && 'bg-muted/70',
+        searchFocused && id === enterTargetId && 'bg-primary/10 text-primary',
+    );
+    const leadingId = `${optionIdPrefix}-leading`;
+    const leadingButton = leadingOption && (
+        <button
+            id={leadingId}
+            type="button"
+            data-selector-option="true"
+            data-selector-option-kind="leading"
+            role="option"
+            aria-selected={value === leadingOption.value}
+            disabled={disabled || isCreating}
+            onClick={() => {
+                onChange(leadingOption.value);
+                closeDropdown();
+            }}
+            className={optionClassName(leadingId, value === leadingOption.value)}
+        >
+            {leadingOption.label}
+        </button>
+    );
+    const noneId = `${optionIdPrefix}-none`;
+    const noneButton = (
+        <button
+            id={noneId}
+            type="button"
+            data-selector-option="true"
+            data-selector-option-kind="none"
+            role="option"
+            aria-selected={value === noProjectValue}
+            disabled={disabled || isCreating}
+            onClick={() => {
+                onChange(noProjectValue);
+                closeDropdown();
+            }}
+            className={optionClassName(noneId, value === noProjectValue)}
+        >
+            {noProjectLabel}
+        </button>
+    );
+    const createId = `${optionIdPrefix}-create`;
+    const createButton = showCreate && (
+        <button
+            id={createId}
+            type="button"
+            data-selector-option="true"
+            data-selector-option-kind="create"
+            role="option"
+            aria-selected={false}
+            disabled={disabled || isCreating}
+            onClick={handleCreate}
+            className={cn(optionClassName(createId, false), 'text-primary flex items-center gap-2')}
+        >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            {createProjectLabel} &quot;{query.trim()}&quot;
+        </button>
+    );
 
     return (
         <div ref={containerRef} className={cn('relative', className)} aria-busy={isCreating || undefined}>
@@ -240,91 +313,58 @@ export function ProjectSelector({
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={handleSearchKeyDown}
+                            onFocus={() => setSearchFocused(true)}
+                            onBlur={() => setSearchFocused(false)}
+                            aria-activedescendant={searchFocused ? enterTargetId : undefined}
                             disabled={disabled || isCreating}
                             placeholder={searchPlaceholder}
                             aria-label={searchPlaceholder}
                             className="w-full mb-1 rounded border border-border bg-muted/40 px-2 py-1 text-[inherit]"
                         />
                         <div role="listbox" aria-label={ariaLabel ?? placeholder}>
-                            {leadingOption && (
-                                <button
-                                    type="button"
-                                    data-selector-option="true"
-                                    data-selector-option-kind="leading"
-                                    role="option"
-                                    aria-selected={value === leadingOption.value}
-                                    disabled={disabled || isCreating}
-                                    onClick={() => {
-                                        onChange(leadingOption.value);
-                                        closeDropdown();
-                                    }}
-                                    className={cn(
-                                        'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
-                                        value === leadingOption.value && 'bg-muted/70'
-                                    )}
-                                >
-                                    {leadingOption.label}
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                data-selector-option="true"
-                                data-selector-option-kind="none"
-                                role="option"
-                                aria-selected={value === noProjectValue}
-                                disabled={disabled || isCreating}
-                                onClick={() => {
-                                    onChange(noProjectValue);
-                                    closeDropdown();
-                                }}
-                                className={cn(
-                                    'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
-                                    value === noProjectValue && 'bg-muted/70'
-                                )}
-                            >
-                                {noProjectLabel}
-                            </button>
-                            {canCreate && onCreateProject && (
-                                <button
-                                    type="button"
-                                    data-selector-option="true"
-                                    data-selector-option-kind="create"
-                                    role="option"
-                                    aria-selected={false}
-                                    disabled={disabled || isCreating}
-                                    onClick={handleCreate}
-                                    className="w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-primary flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                                    {createProjectLabel} &quot;{query.trim()}&quot;
-                                </button>
-                            )}
+                            {!searching && leadingButton}
+                            {!searching && noneButton}
                             <div className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
-                                {filtered.map((project) => (
-                                    <button
-                                        key={project.id}
-                                        type="button"
-                                        data-selector-option="true"
-                                        data-selector-option-kind="item"
-                                        role="option"
-                                        aria-selected={project.id === value}
-                                        disabled={disabled || isCreating}
-                                        onClick={() => {
-                                            onChange(project.id);
-                                            closeDropdown();
-                                        }}
-                                        className={cn(
-                                            'w-full text-left px-2 py-1 rounded hover:bg-muted/50 focus:bg-muted/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50',
-                                            project.id === value && 'bg-muted/70'
-                                        )}
-                                    >
-                                        {project.title}
-                                    </button>
-                                ))}
-                                {filtered.length === 0 && (
+                                {filtered.map((project, index) => {
+                                    const id = `${optionIdPrefix}-item-${project.id}`;
+                                    const heading = index === groups.active.length && (
+                                        <div
+                                            role="presentation"
+                                            data-selector-group="deferred"
+                                            className="px-2 pt-2 pb-1 text-[0.7rem] font-semibold uppercase tracking-wide text-muted-foreground"
+                                        >
+                                            {deferredLabel}
+                                        </div>
+                                    );
+                                    return (
+                                        <Fragment key={project.id}>
+                                            {heading}
+                                            <button
+                                                id={id}
+                                                type="button"
+                                                data-selector-option="true"
+                                                data-selector-option-kind="item"
+                                                role="option"
+                                                aria-selected={project.id === value}
+                                                disabled={disabled || isCreating}
+                                                onClick={() => {
+                                                    onChange(project.id);
+                                                    closeDropdown();
+                                                }}
+                                                className={optionClassName(id, project.id === value)}
+                                            >
+                                                {project.title}
+                                            </button>
+                                        </Fragment>
+                                    );
+                                })}
+                                {filtered.length === 0 && !showCreate && (
                                     <div className="px-2 py-1 text-muted-foreground">{emptyStateLabel}</div>
                                 )}
                             </div>
+                            {createButton}
+                            {searching && leadingButton}
+                            {searching && noneButton}
                         </div>
                     </div>
                 </ModalPortal>

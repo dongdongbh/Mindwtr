@@ -125,7 +125,6 @@ describe('native prepared Process Inbox writer', () => {
             }
         };
         await choose('project');
-        await choose('project');
         for (const edit of [{ type: 'set', field: 'nextAction', value: 'First project action' },
             { type: 'setExtraActions', value: ['Second project action', 'Third project action'] }]) {
             view = value(host.getInboxProcessingStep({ sessionId: start.sessionId!, taskId: view.taskId, step: view.step, edit }));
@@ -359,10 +358,11 @@ describe('native prepared Process Inbox writer', () => {
         const state = { ...baseline, _allTasks: tasks, _tasksById: new Map(tasks.map((task) => [task.id, task])) };
         const parseTitle = createProcessInboxTitleParser({ settings: state.settings,
             tasks, people: [], projects: state._allProjects, areas: state._allAreas });
-        const request = { sessionId: 'bounded-archived-session', taskId: source.id, step: 'decisions',
-            decision: { choice: 'next' }, requestId: generateUUID() };
+        const request = { sessionId: 'bounded-archived-session', taskId: source.id, step: 'file',
+            decision: { choice: 'fileIt' }, requestId: generateUUID() };
         const prepared = prepareNativeInboxWrite({ request, source, mode: 'quick',
-            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable' },
+            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable', twoMinute: 'no',
+                execution: 'defer', oneActionAnswered: true },
             draft: createProcessInboxDraft(source), plan: resolveProcessInboxPlan(state.settings),
             committed: 'next', decisionKind: 'next', state, parseTitle });
         expect(prepared.kind).toBe('prepared');
@@ -625,7 +625,7 @@ describe('native prepared Process Inbox writer', () => {
             if (!result.ok) throw new Error(result.error.message);
             return result.value;
         };
-        /** Converts the first Inbox task to a project with two extra actions; returns the prepared envelope. */
+
         const prepareConversion = async (taskReminderDefault: 'send' | 'skip' | undefined) => {
             vi.useFakeTimers({ toFake: ['Date'] });
             vi.setSystemTime(new Date(fixture.now));
@@ -637,11 +637,9 @@ describe('native prepared Process Inbox writer', () => {
             let view = start.view!;
             const prepare = (choice: string) => value(host.inboxCommitPrepare({ sessionId: start.sessionId!, taskId: view.taskId,
                 step: view.step, decision: { choice }, requestId: generateUUID() }));
-            for (const choice of ['project', 'project']) {
-                const flow = prepare(choice);
-                if (flow.kind !== 'flow') throw new Error('Expected a flow step');
-                view = flow.result.view!;
-            }
+            const flow = prepare('project');
+            if (flow.kind !== 'flow') throw new Error('Expected a flow step');
+            view = flow.result.view!;
             for (const edit of [{ type: 'set', field: 'nextAction', value: 'First project action' },
                 { type: 'setExtraActions', value: ['Second project action', 'Third project action'] }]) {
                 view = value(host.getInboxProcessingStep({ sessionId: start.sessionId!, taskId: view.taskId, step: view.step, edit }));

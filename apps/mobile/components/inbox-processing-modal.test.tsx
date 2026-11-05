@@ -120,6 +120,7 @@ const storeState = {
   tasks: [{ ...baseInboxTask }] as any[],
   _allTasks: [{ ...baseInboxTask }] as any[],
   projects: [] as any[],
+  sections: [] as any[],
   areas: [] as any[],
   settings: mockSettings,
   updateTask,
@@ -264,6 +265,9 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     resolveAutoTextDirection: vi.fn(() => 'ltr'),
     safeFormatDate: vi.fn((value: Date | string, formatStr: string) => {
       if (formatStr === 'yyyy-MM-dd') return formatDateOnly(value);
+      if (formatStr === 'HH:mm' && value instanceof Date) {
+        return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+      }
       return 'Jan 1, 2025';
     }),
     safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
@@ -271,8 +275,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
       const translated = t(key);
       return translated && translated !== key ? translated : fallback;
     }),
-    // The real store is selector-based; the controller's shared visible-task
-    // context subscribes field by field, so the mock has to honour selectors.
+
+
     useTaskStore: Object.assign(
       (selector?: (state: typeof storeState) => unknown) => (
         selector ? selector(storeState) : storeState
@@ -280,7 +284,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
       { getState: () => storeState },
     ),
     undoTaskCompletion,
-    // The real one reads core's store; its refusal is tested in core and in process-inbox-parity.test.tsx.
+
     restoreTaskSnapshot: (taskId: string, updates: unknown) => storeState.updateTask(taskId, updates),
     loadAIKey: vi.fn(),
   };
@@ -293,7 +297,8 @@ vi.mock('../contexts/language-context', () => ({
   }),
 }));
 
-vi.mock('../contexts/theme-context', () => ({
+vi.mock('../contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../contexts/theme-context')>(),
   useTheme: () => ({ isDark: false }),
 }));
 
@@ -348,6 +353,15 @@ vi.mock('../lib/app-log', () => ({
 
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
+
+
+const taskEditModalProps = vi.hoisted(() => ({ current: null as any }));
+vi.mock('./task-edit-modal', () => ({
+  TaskEditModal: (props: any) => {
+    taskEditModalProps.current = props;
+    return null;
+  },
 }));
 
 vi.mock('@react-native-community/datetimepicker', () => ({
@@ -468,13 +482,13 @@ describe('InboxProcessingModal', () => {
     });
   };
 
-  /** "Yes, actionable" then "takes longer than two minutes". */
+
   const chooseActionableLonger = (root: ReturnType<typeof create>['root']) => {
     pressStep(root, 'inbox.yes');
     pressStep(root, 'inbox.takesLonger');
   };
 
-  /** Walk to the terminal Next-Action step: actionable → longer → I'll do it → single action. */
+
   const walkToFileStep = (root: ReturnType<typeof create>['root']) => {
     chooseActionableLonger(root);
     pressStep(root, 'inbox.illDoIt');
@@ -483,14 +497,14 @@ describe('InboxProcessingModal', () => {
     }
   };
 
-  /** Walk to the terminal step with "make it a project" chosen instead. */
+
   const walkToProjectConversion = (root: ReturnType<typeof create>['root']) => {
     chooseActionableLonger(root);
     pressStep(root, 'inbox.illDoIt');
     pressStep(root, 'process.moreThanOneStepYes');
   };
 
-  /** The note field rides an explicit affordance on the capture card. */
+
   const openAnchorEditor = (root: ReturnType<typeof create>['root']) => {
     const notesButton = root.findByProps({
       accessibilityLabel: 'taskEdit.descriptionLabel',
@@ -528,7 +542,7 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    // Step 1 is the only question on screen, and nothing can be filed yet.
+
     expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
     expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
     expect(findNodesWithText(root, 'inbox.whoShouldDoIt')).toHaveLength(0);
@@ -553,7 +567,7 @@ describe('InboxProcessingModal', () => {
 
     pressStep(root, 'process.moreThanOneStepNo');
 
-    // Terminal step: Project and Context, with everything else behind More options.
+
     expect(findNodesWithText(root, 'File it').length).toBeGreaterThan(0);
     expect(findPressableWithText(root, 'More options').props.accessibilityState).toEqual({ expanded: false });
     expect(updateTask).not.toHaveBeenCalled();
@@ -574,7 +588,7 @@ describe('InboxProcessingModal', () => {
     }).props.value;
 
     expect(title()).toBe('Anchored capture');
-    // The note preview is plain text, not the raw Markdown.
+
     expect(findNodesWithText(root, 'Heading\nbold note').length).toBeGreaterThan(0);
 
     chooseActionableLonger(root);
@@ -619,6 +633,119 @@ describe('InboxProcessingModal', () => {
     expect(root.findAllByProps({ placeholder: 'taskEdit.descriptionPlaceholder' }).length).toBeGreaterThan(0);
   });
 
+  it('opens the full task editor for the current item, and filing keeps what the editor saved (#1445)', async () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree!.root;
+    const titleInput = () => root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    });
+
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'common.edit', accessibilityRole: 'button' }).props.onPress();
+    });
+    expect(taskEditModalProps.current).toMatchObject({ visible: true, task: { id: 'inbox-1' }, defaultTab: 'task' });
+
+    taskEditModalProps.current.onSave('inbox-1', { title: 'Edited in the editor' });
+    expect(updateTask).toHaveBeenCalledWith('inbox-1', { title: 'Edited in the editor' });
+
+    const edited = { ...baseInboxTask, title: 'Edited in the editor', updatedAt: '2025-01-02T00:00:00.000Z' };
+    storeState.tasks = [edited];
+    storeState._allTasks = storeState.tasks;
+    (storeState as any)._tasksById = new Map([[edited.id, edited]]);
+    try {
+      act(() => {
+        taskEditModalProps.current.onClose();
+      });
+      expect(taskEditModalProps.current).toMatchObject({ visible: false, task: null });
+      expect(titleInput().props.value).toBe('Edited in the editor');
+
+      updateTask.mockClear();
+      walkToFileStep(root);
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        title: 'Edited in the editor',
+      }));
+    } finally {
+      delete (storeState as any)._tasksById;
+    }
+  });
+
+  it('stays on the current step after the full task editor saves (#1445)', async () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree!.root;
+    walkToFileStep(root);
+
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'common.edit', accessibilityRole: 'button' }).props.onPress();
+    });
+    const edited = { ...baseInboxTask, title: 'Edited in the editor', updatedAt: '2025-01-02T00:00:00.000Z' };
+    storeState.tasks = [edited];
+    storeState._allTasks = storeState.tasks;
+    (storeState as any)._tasksById = new Map([[edited.id, edited]]);
+    try {
+      act(() => {
+        taskEditModalProps.current.onClose();
+      });
+      updateTask.mockClear();
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        title: 'Edited in the editor',
+      }));
+    } finally {
+      delete (storeState as any)._tasksById;
+    }
+  });
+
+  it('offers contexts on the Start later step (#1445)', () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    const root = tree!.root;
+    expect(root.findAllByProps({ placeholder: '@home' })).toHaveLength(0);
+    pressStep(root, 'Start later');
+    expect(root.findAllByProps({ placeholder: '@home' }).length).toBeGreaterThan(0);
+  });
+
+  it('moves on to the next item when the editor files the current one out of the Inbox (#1445)', async () => {
+    const second = { ...baseInboxTask, id: 'inbox-2', title: 'Second capture', createdAt: '2025-01-02T00:00:00.000Z' };
+    storeState.tasks = [{ ...baseInboxTask }, second];
+    storeState._allTasks = storeState.tasks;
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree!.root;
+    const title = () => root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value;
+    expect(title()).toBe('Inbox task');
+
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'common.edit', accessibilityRole: 'button' }).props.onPress();
+    });
+    storeState.tasks = [{ ...baseInboxTask, status: 'next', updatedAt: '2025-01-02T00:00:00.000Z' }, second];
+    storeState._allTasks = storeState.tasks;
+    act(() => {
+      taskEditModalProps.current.onClose();
+    });
+    await flushAsyncActions();
+
+    expect(title()).toBe('Second capture');
+  });
+
   it('keeps the title editable on every step of both modes', async () => {
     storeState.tasks = [{ ...baseInboxTask }];
     let tree: ReturnType<typeof create>;
@@ -643,7 +770,7 @@ describe('InboxProcessingModal', () => {
     });
     expect(titleInput().props.value).toBe('Edited at the terminal step');
 
-    // ...and in quick mode.
+
     asyncStorageMock.getItem.mockResolvedValue('quick');
     storeState.tasks = [{ ...baseInboxTask }];
     let quickTree: ReturnType<typeof create>;
@@ -762,6 +889,13 @@ describe('InboxProcessingModal', () => {
       await Promise.resolve();
     });
 
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      findPressableWithText(root, 'File it').props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
     expect(updateTask).toHaveBeenCalledTimes(2);
     expect(updateTask).toHaveBeenLastCalledWith('inbox-b', expect.objectContaining({ status: 'next' }));
   });
@@ -820,7 +954,7 @@ describe('InboxProcessingModal', () => {
     pressStep(root, '‹ Back');
 
     expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
-    // The first step is the start of the flow, so it offers no way further back.
+
     expect(findNodesWithText(root, '‹ Back')).toHaveLength(0);
   });
 
@@ -877,10 +1011,8 @@ describe('InboxProcessingModal', () => {
     });
 
     const modal = tree.root.findByType(Modal);
-    // A non-transparent full-screen Modal window is letterboxed instead of
-    // resized by some OEM Android 15 builds when the keyboard opens, leaving a
-    // black band under the note input. Transparent + own opaque background
-    // matches the app's other sheets and dodges that path entirely.
+
+
     expect(modal.props.transparent).toBe(true);
     expect(modal.props.statusBarTranslucent).toBe(true);
     expect(modal.props.navigationBarTranslucent).toBe(true);
@@ -970,8 +1102,7 @@ describe('InboxProcessingModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  // #1088: mobile clarify never parsed the title at all, so even the date
-  // commands desktop already understood were literal text here.
+
   it.each([
     { token: '/estimate:1h30m', selected: undefined, estimate: 'custom:90' },
     { token: '/duration:45m', selected: '2hr', estimate: '2hr' },
@@ -1010,9 +1141,7 @@ describe('InboxProcessingModal', () => {
     expect(updateTask.mock.calls[0][1].dueDate).toContain('2026-09-01');
   });
 
-  // #1089: incubating parks the item without deciding what it is, and brings it
-  // back to this pass on a date. Someday + a review date, which Daily and
-  // Weekly Review already read as "due to reconsider".
+
   it('incubates a capture as Someday with the return date', async () => {
     let tree: ReturnType<typeof create>;
 
@@ -1116,8 +1245,7 @@ describe('InboxProcessingModal', () => {
 
     revealDeferredOptions(root);
 
-    // The area assigned while the task sat in the inbox starts selected, so the
-    // project picker opens filtered to it (and apply keeps the area).
+
     expect(findNodesWithText(root, 'taskEdit.areaLabel').length).toBeGreaterThan(0);
     expect(findNodesWithText(root, 'Work Project').length).toBeGreaterThan(0);
     expect(findNodesWithText(root, 'Home Project')).toHaveLength(0);
@@ -1153,7 +1281,7 @@ describe('InboxProcessingModal', () => {
     });
 
     expect(findNodesWithText(root, 'Home Project').length).toBeGreaterThan(0);
-    // An existing title anywhere suppresses the create offer, not just in-area ones.
+
     act(() => {
       root.findByProps({ placeholder: 'projects.addPlaceholder' }).props.onChangeText('Home Project');
     });
@@ -1455,7 +1583,7 @@ describe('InboxProcessingModal', () => {
     });
     expect(findActionInputs()).toHaveLength(3);
 
-    // Submit on an empty trailing row must not add another.
+
     act(() => {
       findActionInputs()[2].props.onSubmitEditing();
     });
@@ -1718,7 +1846,7 @@ describe('InboxProcessingModal', () => {
     const root = tree!.root;
 
     expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
-    // The title is editable in place from the first step; the note is one tap away.
+
     expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value)
       .toBe('Inbox task');
     expect(findNodesWithText(root, 'Original description').length).toBeGreaterThan(0);
@@ -1963,6 +2091,115 @@ describe('InboxProcessingModal', () => {
     );
   });
 
+
+  describe('picked times', () => {
+    const pickerWithMode = (root: ReturnType<typeof create>['root'], mode: 'date' | 'time') => {
+      const pickers = root.findAllByType('DateTimePicker' as any).filter((node) => (node.props.mode ?? 'date') === mode);
+      expect(pickers).toHaveLength(1);
+      return pickers[0];
+    };
+
+    const pickLaterStartDate = (root: ReturnType<typeof create>['root']) => {
+      act(() => {
+        findPressableWithText(root, 'Start later').props.onPress();
+      });
+      act(() => {
+        root.findByProps({ children: 'common.notSet' }).parent!.props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'date').props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
+      });
+    };
+
+    it('stores the start time picked after the date', async () => {
+      setPlatform('android');
+      mockSettings.gtd.defaultScheduleTime = '09:00';
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      const root = tree!.root;
+      pickLaterStartDate(root);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.startDateLabel: Add time' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'time').props.onChange({ type: 'set' }, new Date(2026, 2, 23, 14, 30, 0));
+      });
+      expect(root.findAllByType('DateTimePicker' as any)).toHaveLength(0);
+      expect(root.findAllByProps({ accessibilityLabel: 'taskEdit.startDateLabel: 14:30' }).length).toBeGreaterThan(0);
+
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        startTime: '2026-03-23T14:30',
+      }));
+    });
+
+    it('keeps the default time when the time dialog is cancelled', async () => {
+      setPlatform('android');
+      mockSettings.gtd.defaultScheduleTime = '09:00';
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      const root = tree!.root;
+      pickLaterStartDate(root);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.startDateLabel: Add time' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'time').props.onChange({ type: 'dismissed' }, undefined);
+      });
+      expect(root.findAllByType('DateTimePicker' as any)).toHaveLength(0);
+
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        startTime: '2026-03-23T09:00',
+      }));
+    });
+
+    it('stores a picked due time without a default schedule time', async () => {
+      setPlatform('android');
+      mockSettings.gtd.inboxProcessing = { scheduleEnabled: true };
+      mockSettings.gtd.taskEditor = { hidden: [] };
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      const root = tree!.root;
+      walkToFileStep(root);
+      expandMoreOptions(root);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.dueDateLabel', accessibilityRole: 'button' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'date').props.onChange({ type: 'set' }, new Date(2026, 8, 18, 12, 0, 0));
+      });
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.dueDateLabel: Add time' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'time').props.onChange({ type: 'set' }, new Date(2026, 8, 18, 17, 45, 0));
+      });
+
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        dueDate: '2026-09-18T17:45',
+      }));
+    });
+  });
+
   it('requires a start date before filing a Later item', async () => {
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -2066,7 +2303,7 @@ describe('InboxProcessingModal', () => {
       throw new Error('Priority button not found');
     }
 
-    // The chip carries the canonical decorative flag beside its label.
+
     expect(priorityButton.findByProps({ testID: 'priority-flag-high' }).props.color).toBe('#f97316');
     act(() => {
       priorityButton.props.onPress();
@@ -2902,8 +3139,7 @@ describe('InboxProcessingModal', () => {
       });
     };
 
-    // Carries a project and metadata so a comparison is sensitive to the fields
-    // each mode passes along, not just to the status.
+
     const carriedTask = () => ({
       ...baseInboxTask,
       projectId: workProject.id,
@@ -2925,7 +3161,7 @@ describe('InboxProcessingModal', () => {
       expect(asyncStorageMock.setItem).toHaveBeenCalledWith('mindwtr:view:inboxProcessingMode:v1', 'quick');
       expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
       expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
-      // The synced GTD settings document is never touched by a layout choice.
+
       expect(storeState.updateSettings).not.toHaveBeenCalled();
       const guidedAction = root.findByProps({ accessibilityLabel: 'Guided', accessibilityRole: 'button' });
       expect(guidedAction).toBeTruthy();
@@ -2971,6 +3207,8 @@ describe('InboxProcessingModal', () => {
 
       const quick = await openFlow();
       await pressAsync(quick, 'inbox.illDoIt');
+      expect(updateTask).not.toHaveBeenCalled();
+      await pressAsync(quick, 'File it');
 
       expect(updateTask).toHaveBeenCalledTimes(1);
       expect(updateTask.mock.calls[0]).toEqual(guidedCall);
@@ -2999,7 +3237,7 @@ describe('InboxProcessingModal', () => {
 
       pressStep(root, 'inbox.delegate');
 
-      // Straight to the waiting details — no two-minute or one-action question.
+
       expect(root.findByProps({ placeholder: 'process.delegateWhoPlaceholder' })).toBeTruthy();
       expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
       expect(findNodesWithText(root, 'process.moreThanOneStep')).toHaveLength(0);
@@ -3008,6 +3246,45 @@ describe('InboxProcessingModal', () => {
       pressStep(root, '‹ Back');
 
       expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
+    });
+
+    it.each(['guided', 'quick'] as const)('starts replacement steps at the top in %s mode', async (mode) => {
+      asyncStorageMock.getItem.mockResolvedValue(mode);
+      const scrollTo = vi.fn();
+      const scrollToEnd = vi.fn();
+      const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+        callback(0);
+        return 0;
+      });
+      let tree!: ReturnType<typeof create>;
+      try {
+        await act(async () => {
+          tree = create(<InboxProcessingModal visible onClose={vi.fn()} />, {
+            createNodeMock: (element) => element.type === 'ScrollView' ? { scrollTo, scrollToEnd } : null,
+          });
+          await Promise.resolve();
+        });
+        const root = tree.root;
+        scrollTo.mockClear();
+        scrollToEnd.mockClear();
+
+        pressStep(root, 'Start later');
+        expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
+        expect(scrollToEnd).not.toHaveBeenCalled();
+        expect(findNodesWithText(root, 'When should it start?').length).toBeGreaterThan(0);
+
+        scrollTo.mockClear();
+        pressStep(root, '‹ Back');
+        expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
+        if (mode === 'guided') chooseActionableLonger(root);
+        scrollTo.mockClear();
+        pressStep(root, 'inbox.delegate');
+        expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
+        expect(scrollToEnd).not.toHaveBeenCalled();
+      } finally {
+        act(() => tree?.unmount());
+        frame.mockRestore();
+      }
     });
 
     it('files Waiting identically in both modes', async () => {
@@ -3102,8 +3379,8 @@ describe('InboxProcessingModal', () => {
       expect(orderOf(contextFirstRoot)).toEqual(['context', 'project']);
     });
   });
-  // Capability parity: presentation changed, capability did not. Each of these
-  // existed in the one-scroll form and must stay reachable in BOTH modes.
+
+
   describe('capability parity with the old flow', () => {
     const openMode = async (mode: 'guided' | 'quick') => {
       asyncStorageMock.getItem.mockResolvedValue(mode);
@@ -3144,9 +3421,9 @@ describe('InboxProcessingModal', () => {
       addProject.mockResolvedValue({ id: 'new-project', title: 'Plan Launch' });
       const root = await openMode('quick');
 
+
       pressStep(root, 'taskEdit.projectLabel');
-      // Quick reaches the one-action question, so conversion stays available.
-      pressStep(root, 'process.moreThanOneStepYes');
+      expect(findNodesWithText(root, 'process.moreThanOneStep')).toHaveLength(0);
 
       act(() => {
         findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('Plan Launch');
@@ -3216,8 +3493,7 @@ describe('InboxProcessingModal', () => {
         if (mode === 'guided') {
           walkToFileStep(root);
         } else {
-          pressStep(root, 'taskEdit.projectLabel');
-          pressStep(root, 'process.moreThanOneStepNo');
+          pressStep(root, 'inbox.illDoIt');
         }
         expandMoreOptions(root);
 
@@ -3246,8 +3522,7 @@ describe('InboxProcessingModal', () => {
         if (mode === 'guided') {
           walkToFileStep(root);
         } else {
-          pressStep(root, 'taskEdit.projectLabel');
-          pressStep(root, 'process.moreThanOneStepNo');
+          pressStep(root, 'inbox.illDoIt');
         }
 
         expect(root.findByProps({ placeholder: 'projects.addPlaceholder' })).toBeTruthy();
@@ -3369,8 +3644,7 @@ describe('InboxProcessingModal', () => {
 
       expect(progressText()).toBe('0/3 common.tasks');
 
-      // Filing one item removes it from the Inbox, so the queue and the raw
-      // total both shrink; the session counter must still move forward.
+
       storeState.tasks = storeState.tasks.filter((task) => task.id !== 'a');
       await act(async () => {
         findPressableWithText(root, 'inbox.someday').props.onPress();

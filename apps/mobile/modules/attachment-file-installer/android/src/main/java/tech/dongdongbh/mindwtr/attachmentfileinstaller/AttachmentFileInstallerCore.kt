@@ -11,10 +11,6 @@ internal const val INSTALLER_RETIREMENT_SUFFIX = ".retiring"
 internal val SHA256_HEX_PATTERN = Regex("^[a-f0-9]{64}$")
 private val INSTALL_JOURNAL_NAME = Regex("^\\.mindwtr-install-[a-f0-9]{32}\\.journal$")
 
-// Immutable publication protects against crashes and cooperating Mindwtr
-// writers by retaining a private namespace and exact descriptors. A malicious
-// same-UID process that can bypass the private directory is outside the model;
-// ambiguous provider or identity behavior remains fail-closed.
 
 internal enum class InstallerNodeKind {
   MISSING,
@@ -84,7 +80,7 @@ internal interface AttachmentInstallerFileOps {
   fun fileIdentity(file: File): AttachmentFileIdentity
   fun copySnapshot(source: File, destination: File)
   fun sha256(file: File): String
-  /** Move without replacing destination. False means destination already exists. */
+
   fun moveExclusive(source: File, destination: File): Boolean
   fun publishVerifiedImmutable(
     source: File,
@@ -94,20 +90,15 @@ internal interface AttachmentInstallerFileOps {
     expectedDirectoryIdentity: String,
     expectedPrivateDirectoryIdentity: String,
   ): ImmutableAttachmentPublishOutcome
-  /**
-   * Durably retire an empty private directory through a reservation-derived
-   * quarantine. Exact identities still fence every mutation; the stable name
-   * lets recovery resume after a crash before adopted identities reach JS.
-   */
+
+
   fun retireEmptyDirectoryIfIdentity(
     directory: File,
     expectedIdentity: String,
     expectedParentIdentity: String,
   ): ImmutableAttachmentStageCleanupOutcome
-  /**
-   * Retain the current parent once, adopt this reservation's candidate or
-   * retirement namespace beneath that handle, and durably remove its stage.
-   */
+
+
   fun retireReservedPrivateStage(directory: File): ImmutableAttachmentStageCleanupOutcome
   fun delete(file: File)
   fun deleteEmptyDirectory(directory: File) = delete(directory)
@@ -117,10 +108,7 @@ internal interface AttachmentInstallerFileOps {
   fun <T> withExclusiveLock(lockFile: File, action: () -> T): T
 }
 
-/** Recovery for a device-reserved File Sync publication stage. A shared leaf is
- * never deleted in place: it is first displaced create-no-replace into a
- * deterministic private quarantine, then its recorded inode and digest are
- * revalidated before deletion. Any ambiguity preserves bytes and fails closed. */
+
 internal class ImmutableAttachmentStageRecoveryCore(
   targetRoot: File,
   private val ops: AttachmentInstallerFileOps,
@@ -154,9 +142,8 @@ internal class ImmutableAttachmentStageRecoveryCore(
           privateDirectoryIdentity = ops.nodeIdentity(privateDirectory),
         )
       } catch (error: Throwable) {
-        // The durable device-local reservation owns this exact random name.
-        // Persist whichever final namespace state cleanup can safely reach so
-        // recovery never clears the reservation ahead of an unsynced delete.
+
+
         try {
           if (ops.nodeKind(stage) == InstallerNodeKind.MISSING) {
             ops.deleteEmptyDirectory(privateDirectory)
@@ -164,13 +151,13 @@ internal class ImmutableAttachmentStageRecoveryCore(
             ops.syncDirectory(privateDirectory)
           }
         } catch (_: Throwable) {
-          // Recovery retains the reservation and reclassifies the namespace.
+
         }
         try {
           ops.syncDirectory(targetRoot)
         } catch (_: Throwable) {
-          // Preserve the original preparation failure; recovery fsyncs before
-          // reporting a missing namespace or removing an adopted one.
+
+
         }
         throw error
       }
@@ -227,11 +214,8 @@ internal class ImmutableAttachmentStageRecoveryCore(
           ) {
             return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
           }
-          // JS durably reserves this random 128-bit private name before native
-          // prepare. Within the cooperating-writer/private-mode threat model,
-          // that capability owns its candidate and stable retirement names.
-          // Native recovery retains the parent before observing either leaf,
-          // so a provider/root rebind cannot split identity adoption.
+
+
           return@withExclusiveLock ops.retireReservedPrivateStage(privateDirectory)
         }
         val privateDirectoryKind = ops.nodeKind(privateDirectory)
@@ -270,9 +254,8 @@ internal class ImmutableAttachmentStageRecoveryCore(
         ) {
           return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
         }
-        // The inode was create-new inside this reservation's private mode-0700
-        // namespace. It remains invocation-owned even if a crash left a
-        // partial digest, so exact-identity cleanup is safe and bounded.
+
+
         ops.delete(privateStage)
         ops.syncDirectory(privateDirectory)
         return@withExclusiveLock ops.retireEmptyDirectoryIfIdentity(
@@ -369,9 +352,7 @@ internal class ImmutableAttachmentStageRecoveryCore(
   }
 }
 
-/** Stable, streaming hash of one managed canonical attachment. The installer
- * lock prevents our own publication path from moving the name while it is read;
- * the before/after inode identity rejects uncoordinated replacement. */
+
 internal class AttachmentFileHasherCore(
   targetRoot: File,
   private val ops: AttachmentInstallerFileOps,
@@ -430,10 +411,7 @@ internal class AttachmentFileHasherCore(
   }
 }
 
-/** Create-no-replace publication for a File Sync generation already staged in
- * the target directory. Unlike the managed-local installer, this path creates
- * no journal/candidate/quarantine artifacts in the shared sync folder: exact
- * scratch ownership and restart recovery live in device-local JS storage. */
+
 internal class ImmutableAttachmentFilePublisherCore(
   targetRoot: File,
   private val ops: AttachmentInstallerFileOps,
@@ -532,11 +510,7 @@ private data class InstallArtifacts(
   val preservationPrefix: String,
 )
 
-/**
- * One install journal a boot found: `completed` (the interrupted install finished; [preservedFile] holds a displaced generation),
- * `restored` (rolled back to the generation before it), `conflict` (every generation kept; [preservedFile] names one), or `kept`
- * (left on disk as it is: unreadable, or not naming the target its own name derives from; [error] says why).
- */
+
 internal data class InterruptedInstallRecovery(
   val journal: File,
   val outcome: String,
@@ -550,11 +524,7 @@ private sealed class JournalRecovery {
   data class Conflict(val preservedFile: File) : JournalRecovery()
 }
 
-/**
- * Generation-bound install policy shared by the Android Expo bridge and its JVM
- * tests. All input paths originate in synced metadata and are therefore treated
- * as hostile until canonical confinement and node-type checks succeed.
- */
+
 internal class AttachmentFileInstallerCore(
   targetRoot: File,
   sourceRoots: List<File>,
@@ -590,8 +560,8 @@ internal class AttachmentFileInstallerCore(
 
     val lockFile = File(targetRoot, INSTALLER_LOCK_NAME)
     return ops.withExclusiveLock(lockFile) {
-      // Revalidate after locking: another app process may have changed a path
-      // between the initial checks and lock acquisition.
+
+
       requireDirectory(targetRoot, "managed attachment root")
       rejectSymlinkInput(stagedInput.absoluteFile, "staged attachment")
       rejectSymlinkInput(targetInput.absoluteFile, "target attachment")
@@ -632,12 +602,7 @@ internal class AttachmentFileInstallerCore(
     }
   }
 
-  /**
-   * Boot recovery, for a host that recovers before any attachment write (the native app): each install journal under the
-   * managed root is finished or rolled back by the same rules [install] applies to its own target before it starts, under
-   * the same lock. A journal that cannot be read, or that does not name the target its own name derives from, is kept as it
-   * is: never deleted blindly. React Native recovers a target's journal at that target's next install only.
-   */
+
   fun recoverInterruptedInstalls(): List<InterruptedInstallRecovery> {
     if (ops.nodeKind(targetRoot) != InstallerNodeKind.DIRECTORY) return emptyList()
     val journals = targetRoot.listFiles().orEmpty().filter { INSTALL_JOURNAL_NAME.matches(it.name) }.sortedBy { it.name }
@@ -742,8 +707,8 @@ internal class AttachmentFileInstallerCore(
 
     val quarantined = ops.moveExclusive(target, artifacts.quarantine)
     if (!quarantined) {
-      // A quarantine artifact can only appear through an interrupted installer;
-      // leave every generation in place for the next recovery pass.
+
+
       return AttachmentInstallOutcome.Conflict(firstPreservedFile(artifacts.quarantine, staged))
     }
     ops.syncDirectory(targetRoot)
@@ -777,8 +742,8 @@ internal class AttachmentFileInstallerCore(
     }
     ops.syncDirectory(targetRoot)
     if (ops.sha256(target) != candidateSha256) {
-      // Keep the displaced generation and journal. A later invocation can
-      // distinguish the completed candidate from an unexpected peer file.
+
+
       return AttachmentInstallOutcome.Conflict(artifacts.quarantine)
     }
 
@@ -855,9 +820,8 @@ internal class AttachmentFileInstallerCore(
           if (ops.sha256(artifacts.quarantine) != expectedLocal) {
             return JournalRecovery.Conflict(artifacts.quarantine)
           }
-          // Hash equality does not prove both names reference the same inode:
-          // an uncoordinated writer may have replaced either path. Preserve the
-          // active quarantine under a fresh name before restarting.
+
+
           preserveActiveQuarantine(artifacts)
         }
         deleteInternalIfRegular(artifacts.candidate)
@@ -922,8 +886,8 @@ internal class AttachmentFileInstallerCore(
           if (ops.sha256(artifacts.quarantine) != ops.sha256(preserved)) {
             throw AttachmentInstallerFailure("Attachment preservation generations diverged")
           }
-          // Equal bytes are not an inode-identity proof. Retain the active
-          // quarantine independently before clearing its installer-owned name.
+
+
           preserveActiveQuarantine(artifacts)
         }
         preserved
@@ -1148,8 +1112,8 @@ internal class AttachmentFileInstallerCore(
       ops.delete(staged)
       staged.parentFile?.let(ops::syncDirectory)
     } catch (_: Throwable) {
-      // The canonical target is already durable. Leaving a private staged copy
-      // is safer than downgrading a completed install into an ambiguous retry.
+
+
     }
   }
 

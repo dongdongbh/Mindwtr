@@ -109,9 +109,7 @@ describe('prepared native Project Area assignment', () => {
         const tombstone = project('deleted', { areaId: 'b', areaTitle: 'Area B', order: 11, deletedAt: now });
         const initial = { projects: [original, project('other', { areaId: 'b', order: 9 }), tombstone],
             areas: [area('a', 'Area A'), area('b', ' Area B ')], tasks: [task()], sections: [section()],
-            settings: { deviceId: 'area-device', language: 'en', taxonomy: { tags: [
-                { token: '#keep', rev: 1, revBy: 'area-device', updatedAt: now },
-            ] } } };
+            settings: { deviceId: 'area-device', language: 'en' } };
         const { methods, request } = await open(initial);
         const input = request('b');
         const plan = methods.prepareProjectArea(input);

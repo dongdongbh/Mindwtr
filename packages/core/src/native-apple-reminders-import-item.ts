@@ -19,7 +19,7 @@ export type PreparedNativeAppleReminderImportItem = CommonPlan & (
     { mode: 'new'; factory: NativeAppleReminderImportFactory; task: Task }
     | { mode: 'existing' });
 
-// Frozen accepted schema5 row layout; replay must retain these cells and receipt bytes unchanged.
+
 const SCHEMA5_TASK_COLUMNS = [
     'id', 'title', 'status', 'priority', 'energyLevel', 'assignedTo', 'taskMode', 'startTime',
     'relativeStartOffset', 'dueDate', 'recurrence', 'showFutureRecurrence', 'pushCount', 'repeatReminderMinutes', 'tags',
@@ -45,7 +45,7 @@ const identifier = (value: unknown, bytes: number): value is string => text(valu
 const factoryId = (value: unknown): value is string | null => value === null
     || (identifier(value, 500) && value.trim() === value);
 
-/** Only closed item JSON crosses this inactive pure boundary; no storage/provider authority is granted. */
+
 const detach = (value: unknown): unknown => {
     const valid = (part: unknown, depth: number): boolean => {
         if (depth > 24) return false;
@@ -93,16 +93,13 @@ const readFactory = (value: unknown): NativeAppleReminderImportFactory => {
     return value as NativeAppleReminderImportFactory;
 };
 
-/**
- * `taskReminderDefault` is the library default a new row inherits. Validation reads it back from
- * the frozen row's suppression flag, so the plan keeps its version-1 shape.
- */
+
 export function prepareNativeAppleReminderImportItem(input: unknown,
     taskReminderDefault: 'send' | 'skip' = 'send'): PreparedNativeAppleReminderImportItem | null {
     const value = detach(input);
     if (!exact(value, ['request', 'target', 'factory'])) invalid();
     const request = readRequest(value.request);
-    // The run owner handles known-ID skips before admission, not during accepted-plan recovery.
+
     const classified = classifyAppleReminderForImport(request.reminder, request.list.id.trim(), new Set());
     if (classified.kind !== 'candidate') return null;
     const taskId = classified.captureId ?? request.generatedTaskId;
@@ -131,7 +128,7 @@ export function prepareNativeAppleReminderImportItem(input: unknown,
     return detach(plan) as PreparedNativeAppleReminderImportItem;
 }
 
-/** Reconstruct the exact item without mutable registry, provider or storage reads. */
+
 export function validatePreparedNativeAppleReminderImportItem(input: unknown): PreparedNativeAppleReminderImportItem {
     if (!exact(input, ['request', 'prepared'])) invalid();
     const request = readRequest(detach(input.request));

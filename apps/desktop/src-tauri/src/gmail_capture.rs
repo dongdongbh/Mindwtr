@@ -1,4 +1,3 @@
-//! Desktop prototype. Credentials stay in the OS vault; receipts are private device state.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use rusqlite::{params, Connection};
@@ -131,7 +130,6 @@ struct SystemVault {
 }
 impl Vault for SystemVault {
     fn get(&self) -> Result<Option<String>> {
-        // The shared getter treats portable storage as absent; Gmail must fail closed.
         if crate::storage::is_portable_mode() {
             return Err(error("storage"));
         }
@@ -303,7 +301,7 @@ fn receipts(path: &Path) -> Result<Connection> {
             .map_err(|_| error("storage"))?;
         transaction.commit().map_err(|_| error("storage"))?;
     }
-    // An existing receipt file is evidence, even if damaged; never recreate its history.
+
     for (table, expected) in [("receipts", RECEIPTS_SCHEMA), ("control", CONTROL_SCHEMA)] {
         let actual: String = connection
             .query_row(
@@ -340,7 +338,6 @@ impl Context {
         self.current(&mut state, generation).map(|_| ())
     }
     fn set_blocked(&self, state: &mut Runtime, blocked: bool) -> Result<()> {
-        // Runtime stops first even if durable storage is unavailable.
         if blocked {
             state.blocked = true;
         }
@@ -505,7 +502,7 @@ impl Context {
             credentials.enabled = false;
             self.persist(&credentials)?;
             state.credentials = Some(credentials);
-            // A disabled configuration can still verify the selected label.
+
             self.set_blocked(&mut state, false)?;
             generation
         };
@@ -696,7 +693,7 @@ impl Context {
     fn connect(&self, open_browser: impl FnOnce(&str) -> Result<()>) -> Result<GmailStatus> {
         let generation = {
             let mut state = self.lock()?;
-            // Google revocation can revoke the entire grant, including a fresh reconnect.
+
             if state.revoking {
                 return Err(error("network"));
             }
@@ -893,7 +890,7 @@ fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
     if !text.is_empty() {
         return Ok(Some(text.join("\n")));
     }
-    // HTML-only mail is parsed through the existing mail parser's text conversion.
+
     if part.mime_type.eq_ignore_ascii_case("text/html") {
         if part.body.attachment_id.is_some() || (part.body.size > 0 && part.body.data.is_none()) {
             return Err(error("other"));
@@ -1067,14 +1064,18 @@ fn wait_callback(
     Err(error("cancelled"))
 }
 
+fn vault_namespace(identifier: &str, config_path: &std::path::Path) -> String {
+    digest(&format!("{identifier}:{}", config_path.to_string_lossy()))
+}
+
+pub(crate) fn vault_name(identifier: &str, config_path: &std::path::Path) -> String {
+    format!("gmail-capture:{}", vault_namespace(identifier, config_path))
+}
+
 fn context(app: &tauri::AppHandle) -> Result<Arc<Context>> {
     static CONTEXTS: OnceLock<Mutex<HashMap<String, Arc<Context>>>> = OnceLock::new();
     let config_path = crate::get_config_path(app);
-    let namespace = digest(&format!(
-        "{}:{}",
-        app.config().identifier,
-        config_path.to_string_lossy()
-    ));
+    let namespace = vault_namespace(&app.config().identifier, &config_path);
     let mut contexts = CONTEXTS
         .get_or_init(Mutex::default)
         .lock()
@@ -1085,7 +1086,7 @@ fn context(app: &tauri::AppHandle) -> Result<Arc<Context>> {
     let path = config_path.with_file_name("gmail-capture-receipts.sqlite");
     let vault = Arc::new(SystemVault {
         app: app.clone(),
-        name: format!("gmail-capture:{namespace}"),
+        name: vault_name(&app.config().identifier, &config_path),
     });
     let client = client_config();
     let mut state = Runtime::default();
@@ -1521,7 +1522,7 @@ mod tests {
                     .kind,
                 "network"
             );
-            // A second disconnect/cancel cannot release the first request's guard.
+
             context.lock().unwrap().invalidate();
             context.disconnect().unwrap();
             assert!(context.lock().unwrap().revoking);
@@ -1722,8 +1723,17 @@ mod tests {
         let worker = std::thread::spawn(move || {
             wait_callback(listener, "expected", Duration::from_secs(3), || Ok(()))
         });
+        let mut queued = None;
         for state in ["wrong", "expected"] {
             let mut stream = TcpStream::connect(address).unwrap();
+            if state == "expected" {
+                let stream = TcpStream::connect(address).unwrap();
+
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                queued = Some(stream);
+            }
             write!(
                 stream,
                 "GET /oauth2/callback?state={state}&code=one HTTP/1.1\r\nHost: {address}\r\n\r\n"
@@ -1738,7 +1748,12 @@ mod tests {
             }));
         }
         assert_eq!(worker.join().unwrap().unwrap(), "one");
-        assert!(TcpStream::connect(address).is_err());
+        let mut queued = queued.unwrap();
+        assert!(match queued.read(&mut [0; 1]) {
+            Ok(0) => true,
+            Err(err) => err.kind() == std::io::ErrorKind::ConnectionReset,
+            Ok(_) => false,
+        });
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));

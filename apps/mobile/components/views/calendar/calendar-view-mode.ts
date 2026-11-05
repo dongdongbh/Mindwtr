@@ -1,7 +1,6 @@
 import { coerceCalendarWeekVisibleDays, isSameCalendarDate, type CalendarViewMode } from '@mindwtr/core';
 
-// The mode and density rules live in core (calendar-view-model.ts); this file
-// keeps the screen's layout, scrolling and swipe arithmetic.
+
 export {
   CALENDAR_WEEK_VISIBLE_DAYS_DEFAULT,
   CALENDAR_WEEK_VISIBLE_DAYS_MAX,
@@ -110,7 +109,7 @@ export const getCalendarWeekInitialScrollX = ({
   visibleDays,
   weekDays,
 }: {
-  /** The day columns' viewport. Deadline weeks widen columns past the density, so fewer days fit than it names. */
+
   availableWidth?: number;
   columnWidth: number;
   leadingInset?: number;
@@ -127,10 +126,7 @@ export const getCalendarWeekInitialScrollX = ({
   return Math.max(0, leadingInset) + Math.min(dayIndex * width, maxStartX);
 };
 
-/**
- * When the week scrolls itself to its first place: a new week, selected day, density or column width, and a new viewport,
- * since a resize under deadline-wide columns moves the furthest start (the selected day could sit past the right edge).
- */
+
 export const getCalendarWeekAutoScrollKey = ({
   availableWidth,
   columnWidth,
@@ -145,12 +141,7 @@ export const getCalendarWeekAutoScrollKey = ({
   weekDays: Date[];
 }): string => `${weekDays[0]?.getTime() ?? 0}:${selectedDate?.getTime() ?? 0}:${visibleDays}:${columnWidth}:${availableWidth}`;
 
-/**
- * The furthest x the week canvas can scroll to: canvas width (pinned gutter +
- * one column per day) minus the viewport. Density changes resize the columns,
- * and a scroll offset taken under a wider canvas strands the view past the
- * last day unless it is re-clamped against this.
- */
+
 export const getCalendarWeekMaxScrollX = ({
   columnWidth,
   dayCount,
@@ -163,12 +154,7 @@ export const getCalendarWeekMaxScrollX = ({
   viewportWidth: number;
 }): number => Math.max(0, gutterWidth + columnWidth * dayCount - viewportWidth);
 
-/**
- * Returns the corrected horizontal offset after a week canvas resize, or null
- * when the current offset already fits. Callers must store the correction
- * before asking the scroll view to move so repeated content-size callbacks are
- * idempotent while the native scroll event catches up.
- */
+
 export const getCalendarWeekContentClampX = ({
   contentWidth,
   currentX,

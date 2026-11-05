@@ -73,8 +73,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
-  // The Someday section manager's rows and edits, and the Manage screen's texts,
-  // rows and editor writes, are core's own logic.
+
+
   ...(({
     buildSomedaySectionManagerRows, getSomedaySectionManagerText, moveSomedaySection, renameSomedaySection,
     DEFAULT_MANAGE_OPEN_SECTIONS, MANAGE_OPEN_SECTIONS_STORAGE_KEY, buildManagePersonRow, getManageDeleteConfirm,
@@ -90,6 +90,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
   }))(await importOriginal<typeof import('@mindwtr/core')>()),
   AREA_PRESET_COLORS: ['#3b82f6', '#10b981'],
   DEFAULT_AREA_COLOR: '#3b82f6',
+  einkSafeColor: (color: string) => color,
   formatI18nTemplate: (template: string, values: Record<string, string>) => (
     template.replace(/{{(\w+)}}/g, (_match, key: string) => values[key] ?? '')
   ),
@@ -275,7 +276,7 @@ describe('ManageSettingsScreen', () => {
     ]) {
       expect(tree.root.findByProps({ accessibilityLabel: label }).props.accessibilityRole).toBe('button');
     }
-    // A labelled button acts on its own item.
+
     renderer.act(() => {
       tree.root.findByProps({ accessibilityLabel: 'Delete: @office' }).props.onPress();
     });
@@ -432,7 +433,7 @@ describe('ManageSettingsScreen', () => {
     asyncStorageMocks.getItem.mockResolvedValue(JSON.stringify({ somedaySections: true }));
     const alertSpy = vi.spyOn(Alert, 'alert');
     const settings = storeState.settings;
-    // A newer app's entry this build cannot show.
+
     const folder = { kind: 'folder', children: ['books'] };
     const books = { id: 'books', title: 'Books to read', order: 0 };
     const films = { id: 'films', title: 'Films', order: 1 };
@@ -455,7 +456,7 @@ describe('ManageSettingsScreen', () => {
       renderer.act(() => {
         tree.root.findByProps({ accessibilityLabel: 'Delete: Books to read' }).props.onPress();
       });
-      // Sync adds Trips while the confirmation is open: the delete keeps it.
+
       const trips = { id: 'trips', title: 'Trips', order: 2 };
       storeState.settings = { ...settings, gtd: { viewSections: { someday: [films, folder, { ...books }, trips] as any[] } } };
       await renderer.act(async () => {

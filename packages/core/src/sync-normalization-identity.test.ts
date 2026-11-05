@@ -12,19 +12,9 @@ import { SYNC_REPAIR_REV_BY } from './sync-types';
 import { MAX_SYNC_REVISION } from './sync-revision';
 import type { Area, Attachment, Person, Project, Task } from './types';
 
-/**
- * #766 round 3b: the merge-input normalizers return the INPUT object when
- * normalization changes nothing, so an unchanged entity keeps one identity from
- * the store through the merge and the signature caches can hit across cycles.
- *
- * Two things have to stay true, and both are asserted per entity type below:
- * identity-idempotence (an already-normalized entity comes back by reference),
- * and that every repair class still allocates and still repairs the value — an
- * over-eager "same" check would silently stop repairing data.
- */
 
 const NOW = '2026-08-24T12:00:00.000Z';
-// Timezone-proof future/past: isFutureStart compares against local end-of-day.
+
 const FAR_FUTURE = '2099-01-01T09:00:00.000Z';
 
 const baseTask = (overrides: Record<string, unknown> = {}): Task => ({
@@ -75,7 +65,7 @@ const basePerson = (overrides: Record<string, unknown> = {}): Person => ({
     ...overrides,
 } as unknown as Person);
 
-/** The shape an entity has once it has been through a merge — what the store holds. */
+
 const merged = <T extends object>(normalized: T): T => normalizeRevisionMetadata(normalized as never) as T;
 
 describe('identity idempotence — an already-normalized entity comes back by reference', () => {
@@ -186,7 +176,7 @@ describe('repair classes still allocate and still repair', () => {
         expect(normalized.title).toBe('(deleted)');
         expect(normalized.rev).toBe(5);
         expect(normalized.revBy).toBe(SYNC_REPAIR_REV_BY);
-        // Converged: a second pass must not bump again (the #766 rewrite loop).
+
         const twice = normalizeTaskForSyncMerge(normalized, NOW);
         expect(twice.rev).toBe(normalized.rev);
     });
@@ -243,7 +233,7 @@ describe('repair classes still allocate and still repair', () => {
         const normalized = normalizeTaskForSyncMerge(task, NOW);
         expect(normalized).not.toBe(task);
         expect(normalized.tags).toStrictEqual(['#admin']);
-        // The untouched sibling array keeps its identity.
+
         expect(normalized.contexts).toBe(task.contexts);
 
         const project = baseProject({ tagIds: [1, '#admin'] });
@@ -300,11 +290,8 @@ describe('repair classes still allocate and still repair', () => {
 });
 
 describe('composed merge pipeline reaches an identity fixed point', () => {
-    // sync.ts composes normalizeRevisionMetadata AFTER normalizeTaskForSyncMerge.
-    // The two must agree on the emitted key set, or an unchanged task oscillates
-    // between shapes forever and the signature caches never hit (#766 round 3b
-    // review finding: the exhaustive literal materialized rev/revBy as explicit
-    // undefined; normalizeRevisionMetadata deleted them right back).
+
+
     const composed = (task: Task, preserveLocalCleanupMetadata = false): Task =>
         normalizeRevisionMetadata(normalizeTaskForSyncMerge(task, NOW, preserveLocalCleanupMetadata));
 
@@ -313,7 +300,7 @@ describe('composed merge pipeline reaches an identity fixed point', () => {
         delete (bare as Record<string, unknown>).rev;
         delete (bare as Record<string, unknown>).revBy;
         const once = composed(bare);
-        // normalizeTaskForLoad backfills rev to 0; revBy stays absent.
+
         expect(once.rev).toBe(0);
         expect('revBy' in once).toBe(false);
         expect(composed(once)).toBe(once);
@@ -333,7 +320,7 @@ describe('composed merge pipeline reaches an identity fixed point', () => {
 
     it('a rev/revBy repair converges after one pass', () => {
         const once = composed(baseTask({ rev: -1, revBy: '   ' }));
-        // Invalid rev is coerced to 0 by normalizeTaskForLoad; blank revBy is stripped.
+
         expect(once.rev).toBe(0);
         expect('revBy' in once).toBe(false);
         expect(composed(once)).toBe(once);
@@ -353,7 +340,7 @@ describe('composed merge pipeline reaches an identity fixed point', () => {
 
 describe('value parity — a stripped or added key counts as a change', () => {
     it('a key the normalizer adds as explicit undefined is not "unchanged"', () => {
-        // baseTask has no `attachments` key at all; the merge normalizer emits one.
+
         const task = baseTask();
         const normalized = normalizeTaskForSyncMerge(task, NOW);
         expect(normalized).not.toBe(task);

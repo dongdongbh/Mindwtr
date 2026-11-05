@@ -13,62 +13,22 @@ import { logInfo } from './logger';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { stripSensitiveSettings } from './store-helpers';
 import { runStoreCommand } from './store-write-gate';
-import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, parseNativeWatchPomodoroSource, validatePreparedNativePomodoroTransition,
+import { decodeNativePomodoroSession, nativePomodoroOwedCreditCount, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, parseNativeWatchPomodoroSource, validatePreparedNativePomodoroTransition,
     type NativePomodoroSessionRead, type NativePomodoroResult, type PreparedNativePomodoroTransition } from './native-pomodoro-session';
 
-/**
- * Exact-retry bookkeeping for native host writes, shared by every contract write
- * that takes a `requestId`. One request runs its write at most once:
- *
- * - The first call for a request ID reserves it before anything is awaited; a
- *   concurrent call with the same ID and payload waits for that same run.
- * - A later call with the same ID and payload does not write again. It only
- *   finishes the save if the first call's save failed, then returns the first
- *   call's result.
- * - A call with the same ID and another payload is refused (INVALID_INPUT).
- * - A write whose save has not succeeded is never forgotten, so its retry can
- *   always finish it. Only saved requests are evicted to stay under `limit`;
- *   while the bound holds only unsaved requests, new requests are refused
- *   (ACTION_FAILED) until a retry saves them.
- *
- * - A write that landed in memory while its save failed returns SAVE_FAILED
- *   (with settleWrite). It keeps its receipt as an owed save: a retry only
- *   saves, and never runs the write again. A write returns SAVE_FAILED only
- *   when its change landed (runStoreWrite decides).
- *
- * Any other failure means the write did not land: it leaves no receipt, so the
- * same request can run again.
- *
- * The native host keeps receipts on disk too (loadNativeRequestReceipts,
- * NativeReceiptSqliteAdapter): a write's receipt commits in the same SQLite
- * transaction as its data (or, when a save inside the write committed the data
- * first, in a receipt-only commit right after it), and the reply waits for that
- * commit. So the journal's replay after process death answers a landed request
- * from its first reply and runs nothing. One request ID belongs to one action
- * across all the contract's modules. Without that table (other
- * hosts, tests), or for a write whose data a save committed before its receipt
- * existed, a replay runs the write again, so every write must also be safe to run
- * again after a later change:
- *
- * - target-state: a replay of a request that already landed writes nothing;
- * - compare-and-set: a write to existing rows carries the revision the view showed
- *   for each (revisionOf) and refuses rows changed since (refuseStale), so a
- *   replay never undoes a later change;
- * - a create names its row by the request UUID (a second row by requestRowId), so
- *   a replay finds the row it made.
- */
+
 export type NativeRequestReceipts = {
-    /** Check ownership without reserving an ID, writing, or saving. */
+
     checkIdentity(requestId: unknown, payload: string): NativeHostResult<null>;
-    /** Read a settled reply without reserving an ID, retrying a save or invoking a writer. */
+
     saved<T>(requestId: unknown, payload: string): NativeHostResult<T> | null;
     run<T>(requestId: unknown, payload: string, write: () => Promise<NativeHostResult<T> | NativeUnsavedWrite<T>>): Promise<NativeHostResult<T>>;
 };
 
-/** A write whose change landed while the store could not save it; `value` answers the request once a retry saves. */
+
 export type NativeUnsavedWrite<T> = { ok: false; error: { code: 'SAVE_FAILED'; message: string }; value: T };
 
-/** Private native owner proof: this execution attempted no domain mutation. */
+
 export class NativePomodoroTransitionRefusal extends Error {
     constructor(readonly code: 'staleBaseline' | 'notReady', message: string) { super(message); }
 }
@@ -79,12 +39,7 @@ const storeData = () => {
     return [state._allTasks, state._allProjects, state._allSections, state._allAreas, state._allPeople, state.settings];
 };
 
-/**
- * Runs a contract write's store call (one, or several together) and says whether it
- * landed. A refusal that left the store's data as it was did not land
- * (ACTION_FAILED). A refusal after the data changed, while the store could not save
- * it, landed (SAVE_FAILED): the request owes only a save.
- */
+
 export async function runStoreWrite(call: StoreCall): Promise<NativeHostResult<null>> {
     const before = storeData();
     let message = 'The action failed';
@@ -102,84 +57,66 @@ export async function runStoreWrite(call: StoreCall): Promise<NativeHostResult<n
     return { ok: false, error: { code: 'ACTION_FAILED', message } };
 }
 
-/** A write's answer: `value` once it landed, carried by SAVE_FAILED when only its save failed. */
+
 export function settleWrite<T>(written: NativeHostResult<null>, value: T): NativeHostResult<T> | NativeUnsavedWrite<T> {
     if (written.ok) return { ok: true, value };
     if (written.error.code === 'SAVE_FAILED') return { ok: false, error: { code: 'SAVE_FAILED', message: written.error.message }, value };
     return written;
 }
 
-/** A synced row: a task, project, area or person. */
+
 type Revisioned = { rev?: number; revBy?: string; updatedAt: string };
 
-/**
- * A row's revision for a compare-and-set write: it changes with every write to the row,
- * here or synced from another device. A command made on one revision refuses a row
- * that changed since, so a replay after a restart never undoes a later change.
- */
+
 export const revisionOf = (row: Revisioned): string => `${row.rev ?? 0}:${row.revBy ?? ''}:${row.updatedAt}`;
 export const taskRevisionOf = (task: Task): string => revisionOf(task);
 
-/** Each target row's revision as the view showed it, by ID. */
+
 export type NativeRevisions = Record<string, string>;
 
-/**
- * Whether a write must carry its replay tokens: the revisions the view showed and, for
- * saveTaskDraft, a request UUID. A host that journals its writes and replays them after
- * process death (the native Android host, which says so at boot) sets 'required': a write
- * without them is refused (INVALID_INPUT). Any other host ('optional', the default) may
- * leave them out and keeps the rules from before its writes were journaled: a missing
- * revision skips that row's compare-and-set, and a draft save without a request UUID keeps
- * its process-local retry. A token it sends is checked as in 'required'.
- */
+
 export type NativeReplayTokens = 'required' | 'optional';
 let replayTokens: NativeReplayTokens = 'optional';
-/** One mode per JS host: createNativeHostContract sets it, and a journaling host's boot sets 'required'. */
+
 export const setNativeReplayTokens = (mode: NativeReplayTokens) => { replayTokens = mode; };
 export const replayTokensRequired = (): boolean => replayTokens === 'required';
 
-/** A revision as a command carries it: the non-empty text a view gave (or none, while tokens are optional). */
+
 export const isRevision = (value: unknown): value is string => (value === undefined
     ? !replayTokensRequired()
     : typeof value === 'string' && value.length > 0 && value.length <= 200);
 
-/** Whether `value` holds a revision for each of `ids`, and for nothing else (or is left out, while tokens are optional). */
+
 export const isRevisions = (value: unknown, ids: readonly string[]): value is NativeRevisions => (value === undefined
     ? !replayTokensRequired()
     : typeof value === 'object' && value !== null && !Array.isArray(value)
         && Object.keys(value).length === ids.length && ids.every((id) => isRevision((value as Record<string, unknown>)[id])));
 
-/**
- * Compare-and-set for a write about to change these rows: STALE_REVISION when one is
- * gone or no longer at the revision the view showed. Call it inside the receipts'
- * write (a same-host retry of a landed write still answers from its receipt), after
- * the target-state check (a replay whose target already holds writes nothing), for
- * the rows the write changes.
- */
+
 export function refuseStale(
     rows: readonly (Revisioned | undefined)[],
     revisions: readonly (string | undefined)[],
     message = 'It changed since the view showed it; read the view again',
 ): NativeHostResult<never> | null {
-    // While tokens are optional, a row sent without its revision is not compared.
+
     return rows.some((row, index) => (revisions[index] !== undefined || replayTokensRequired()) && (!row || revisionOf(row) !== revisions[index]))
         ? { ok: false, error: { code: 'STALE_REVISION', message } }
         : null;
 }
 
-/** refuseStale for tasks by ID, against `revisions` (a view's `taskRevisions`). */
+
 export function refuseStaleTasks(ids: readonly string[], revisions: NativeRevisions | undefined): NativeHostResult<never> | null {
     const { _tasksById } = useTaskStore.getState();
     return refuseStale(ids.map((id) => _tasksById.get(id)), ids.map((id) => revisions?.[id]), 'A task changed since the view showed it; read the view again');
 }
 
-/** refuseStale for projects by ID, in Trash too. */
+
 export function refuseStaleProjects(ids: readonly string[], revisions: NativeRevisions | undefined): NativeHostResult<never> | null {
     const byId = new Map(useTaskStore.getState()._allProjects.map((project) => [project.id, project]));
     return refuseStale(ids.map((id) => byId.get(id)), ids.map((id) => revisions?.[id]), 'A project changed since the view showed it; read the view again');
 }
 
-/** These tasks' revisions now, by ID: what an Undo carries after its write. */
+
 export const taskRevisionsOf = (ids: readonly string[]): NativeRevisions => {
     const { _tasksById } = useTaskStore.getState();
     return Object.fromEntries(ids.flatMap((id) => {
@@ -188,28 +125,15 @@ export const taskRevisionsOf = (ids: readonly string[]): NativeRevisions => {
     }));
 };
 
-/**
- * A revision for many rows at once (a Select all, a context's carriers): their count and
- * a 128-bit hash of their `id@revision` entries. Deterministic, so a token a view gave
- * before a restart still matches after it while those rows are unchanged.
- */
+
 export const revisionsToken = (entries: readonly string[]): string => `${entries.length}:${hash128Hex(JSON.stringify(entries))}`;
 
 const hash128Hex = (text: string): string => deterministicHash128(text).map((part) => part.toString(16).padStart(8, '0')).join('');
 
-/**
- * The ID of a row a request creates beside its main row (a capture's new project),
- * derived from the request UUID and the row's `role`: a retry finds that row by it.
- */
+
 export const requestRowId = (requestId: string, role: string): string => generateDeterministicUUID(`${requestId.toLowerCase()}:${role}`);
 
-/**
- * The addProject a request hands to a core flow that may make a project. The project takes
- * `idOf(title)` (requestRowId, or the request UUID for a main row), and that ID is looked up
- * first: a retry after a failed later write takes the project the first try made, renamed
- * since or not, and never makes a second one. One deleted or archived since sets `stale` and
- * writes nothing; the request then answers STALE_REVISION.
- */
+
 export const requestProjects = (idOf: (title: string) => string) => {
     const made = { stale: false };
     const addProject = async (title: string, color: string, props?: Partial<Project>): Promise<Project | null> => {
@@ -224,12 +148,7 @@ export const requestProjects = (idOf: (title: string) => string) => {
     return { addProject, made };
 };
 
-/**
- * The projects a request's names are matched against: the project the request made (`id`), when
- * it exists, under `title` (the name the request gives it), in place of every other project of
- * that name. The request's own project wins over one made or renamed since. Null when that
- * project is deleted or archived: the request answers STALE_REVISION.
- */
+
 export const withRequestProject = (projects: readonly Project[], id: string, title: string): Project[] | null => {
     const own = useTaskStore.getState()._allProjects.find((project) => project.id === id);
     if (!own) return [...projects];
@@ -238,20 +157,11 @@ export const withRequestProject = (projects: readonly Project[], id: string, tit
     return [{ ...own, title }, ...projects.filter((project) => project.id !== id && project.title.trim().toLowerCase() !== key)];
 };
 
-/**
- * Commands the native journal never keeps, such as one that carries a secret: a receipt payload's
- * command name (its first element), whose receipts stay in memory and never reach the disk, or a
- * contract command that keeps no request payload at all.
- * calendarFeedAdd: a new calendar subscription, whose URL may carry a password
- * (native-host-contract-settings-calendar.ts addCalendarFeed).
- * setAIKey carries an AI key and setAIEndpoint a URL that may hold a password (NATIVE_AI_UNJOURNALED_COMMANDS).
- * Settings › Sync's screen commands (NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS in native-host-contract-settings-sync.ts,
- * the same names).
- */
-export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'setAIExtraBodyParams', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction']);
+
+export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'setAIExtraBodyParams', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'answerSyncMissingFiles']);
 
 const commandOf = (payload: string): string => /^\["([^"\\]{1,64})"/.exec(payload)?.[1] ?? '';
-/** Bounded non-sensitive domain tuples are exact; established commands keep their compact hash. */
+
 const fingerprintOf = (payload: string): string => {
     if (commandOf(payload) === 'pomodoroTransition') {
         try {
@@ -308,26 +218,20 @@ const validAppLockStoredReceipt = (row: { request_id: string; method: string; re
 export const MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES = 64 * 1024;
 export type NativeDocumentReceiptInput = {
     requestId: string;
-    /** Canonical JSON: ['backupDocument', 'merge' | 'restore' | 'replace' | 'csv' | 'todoist' | 'ticktick' | 'dgt' | 'omnifocus', staged UUID, SHA256]. */
+
     payload: string;
     expectedCurrent: AppData;
     data: AppData;
-    /** Non-null JSON, at most 64 KiB UTF-8. The caller validates its domain shape. */
+
     reply: unknown;
-    /**
-     * The library's SQLite bytes (pages) this write may leave, its receipt included: checked after the receipt insert and
-     * before COMMIT, so a refusal ([UNDO_LIMIT_EXCEEDED]) rolls back the data and the receipt together.
-     */
+
+
     maxLibraryBytes?: number;
-    /**
-     * The library's SQLite bytes this write may leave while its Undo still fits (large-library pass b): past them the write still
-     * commits, and its stored reply gains `undo: false`, so a replay answers the same.
-     */
+
+
     undoLibraryBytes?: number;
-    /**
-     * The caller hands both documents over (core's native backup commit, which parsed them itself and keeps no reference): no
-     * detaching copy is made, and the baseline goes once the stale check has read it.
-     */
+
+
     owned?: true;
 };
 export const UNDO_LIMIT_EXCEEDED = 'Document library exceeds the undo limit';
@@ -354,7 +258,7 @@ const isShareCapturePayload = (payload: unknown): payload is string => {
 };
 const documentReplyJson = (reply: unknown): string => {
     let json: string | undefined;
-    try { json = JSON.stringify(reply); } catch { /* Refuse unserializable input without exposing it. */ }
+    try { json = JSON.stringify(reply); } catch {                                                        }
     if (!json || json === 'null' || json.length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES
         || strToU8(json).length > MAX_NATIVE_DOCUMENT_RECEIPT_REPLY_BYTES) {
         throw new Error('Invalid document receipt reply');
@@ -392,23 +296,23 @@ const pomodoroReceiptPlan = (row: DocumentReceiptRow): PreparedNativePomodoroTra
     } catch { throw new Error('Invalid saved Pomodoro receipt'); }
 };
 
-// Durable receipts: the native host only (loadNativeRequestReceipts turns them on).
+
 type StoredReceipt = { fingerprint: string; reply: unknown; savedAt: string };
 type PendingReceipt = { fingerprint: string; reply: unknown; generation: number };
 let durableReceipts: Map<string, StoredReceipt> | null = null;
-/** null selects Android's existing all-command mode; a set scopes iOS durable replies and writes. */
+
 let durableCommands: Set<string> | null = null;
-/** Whether boot loaded durable receipt ownership for this exact command. */
+
 export const isNativeRequestReceiptDurable = (command: string): boolean => durableReceipts !== null
     && (durableCommands === null || durableCommands.has(command))
     && !NATIVE_UNJOURNALED_COMMANDS.has(command);
-/** Every request ID a receipts instance holds, and its payload: one ID belongs to one action across the contract's modules. */
+
 const requestPayloads = new Map<string, string>();
-/** Landed, not committed yet; `generation` is the store's when it landed (every change it made is saved at or before it). */
+
 const pendingReceipts = new Map<string, PendingReceipt>();
 let receiptedWritesRunning = 0;
-// The existing generation writer must refuse before its callback can mutate memory.
-// Weak ownership follows the active concrete adapter and exposes no latch-clearing API.
+
+
 const pomodoroStoreWriteFences = new WeakSet<SqliteAdapter>();
 
 const RECEIPTS_TABLE = `CREATE TABLE IF NOT EXISTS native_request_receipts (
@@ -423,12 +327,7 @@ const recordPendingReceipt = (requestId: string, payload: string, reply: unknown
     pendingReceipts.set(requestId, { fingerprint: fingerprintOf(payload), reply, generation: getPersistenceStatus().generation });
 };
 
-/**
- * Native host boot, before the journal's replay: creates the receipts table (`method` is the
- * request's fingerprint, fingerprintOf: its command and a hash of its payload; `reply` its first
- * reply as JSON) and loads it. From then on every landed request's receipt is kept on disk,
- * except for NATIVE_UNJOURNALED_COMMANDS.
- */
+
 export async function loadNativeRequestReceipts(client: SqliteClient,
     options?: { durableCommands?: readonly string[] }): Promise<number> {
     await client.run(RECEIPTS_TABLE);
@@ -460,21 +359,21 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
         try {
             logInfo('Native Pomodoro legacy receipts accepted', { scope: 'storage', force: true,
                 context: { releaseCheck: 'v1.3.7/native-pomodoro-legacy-receipt', count: legacyPomodoroReceipts, outcome: 'accepted' } });
-        } catch { /* Diagnostics cannot change successful receipt validation. */ }
+        } catch {                                                                }
     }
     return durableReceipts.size;
 }
 
-/** After the journal's boot replay: drops receipts older than 30 days. */
+
 export async function pruneNativeRequestReceipts(client: SqliteClient, now = new Date(), retention?: {
     readonly retainedRequestIds?: readonly string[];
     readonly retainedCommands?: readonly string[];
 }): Promise<number> {
-    // shortcut: default 30-day expiry, pass explicit retention when unfinished work outlives it.
+
     const cutoff = new Date(now.getTime() - RECEIPT_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const retainedIds = new Set(retention?.retainedRequestIds);
     const retainedCommands = new Set(retention?.retainedCommands);
-    // One receipt proves the timer was established even if its singleton row is later lost.
+
     let latestPomodoro: [string, StoredReceipt] | undefined;
     const watchPomodoroIds = new Set<string>();
     for (const entry of durableReceipts ?? []) {
@@ -502,10 +401,10 @@ export async function pruneNativeRequestReceipts(client: SqliteClient, now = new
     return pruned;
 }
 
-/** A new native host (createNativeHostContract): the request IDs an earlier host held in memory are forgotten. */
+
 export const startNativeRequestSession = () => { requestPayloads.clear(); };
 
-/** Tests only: back to receipts in memory. */
+
 export const resetNativeRequestReceipts = () => {
     durableReceipts = null;
     durableCommands = null;
@@ -517,13 +416,7 @@ export const resetNativeRequestReceipts = () => {
 
 type PomodoroProjectionAcknowledgment = { references: ReturnType<typeof storeData>; frozen: unknown; changedAt: number };
 
-/**
- * The native host's SQLite adapter. A save of a queued snapshot also commits, in the same
- * transaction, every pending receipt whose changes that snapshot holds (landed at its
- * generation or before), and never one whose changes it lacks. While a receipt is pending
- * or a receipted write runs it offers no saveTask, so the store saves whole snapshots and
- * no later change reaches the disk before that receipt.
- */
+
 export class NativeReceiptSqliteAdapter extends SqliteAdapter {
     private readonly receiptClient: SqliteClient;
     private readonly carried = new WeakMap<AppData, { ids: string[]; savedAt: string }>();
@@ -546,8 +439,8 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         const protect = async <T,>(work: () => Promise<T>): Promise<T> => {
             try { return await work(); }
             catch (error) {
-                // The adapter's existing failure logger must not receive driver text containing
-                // the private document or receipt. Ordinary generation saves retain their behavior.
+
+
                 if (isDocumentWrite()) throw new Error('Document receipt storage failed');
                 throw error;
             }
@@ -587,7 +480,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         finally { this.baselineReads -= 1; }
     }
 
-    /** Existing store acknowledgement seam, usable only for this private owned canonical read. */
+
     acknowledgeDataLoad(data: AppData): void {
         const reload = this.pomodoroReload;
         if (!reload || reload.acknowledged || reload.data !== data || getStorageAdapter() !== this || hasPendingDocumentStoreWork()
@@ -618,8 +511,8 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         try {
             await fetch({ silent: true, recoveryLoad: true, throwOnError: true, isResultStillRelevant: relevant });
             const accepted = context.acknowledged;
-            // ACK precedes fetch completion. Its exact adopted projection and fetch
-            // owner must still be current before stale-snapshot writers are unfenced.
+
+
             if (!accepted || getStorageAdapter() !== this || hasPendingDocumentStoreWork()
                 || getPersistenceStatus().generation !== generation || useTaskStore.getState().editLockCount > 0
                 || useTaskStore.getState().fetchData !== fetch || useTaskStore.getState().lastDataChangeAt !== accepted.changedAt
@@ -643,7 +536,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 'SELECT 1 AS present FROM native_request_receipts WHERE method LIKE ? LIMIT 1', ['["pomodoroTransition",%']);
             if (established) {
                 try { logInfo('Native Pomodoro refused missing established session', { scope: 'storage', force: true,
-                    context: { releaseCheck: 'v1.3.5/ios-pomodoro-absence', outcome: 'refused' } }); } catch { /* The refusal is independent of diagnostics. */ }
+                    context: { releaseCheck: 'v1.3.5/ios-pomodoro-absence', outcome: 'refused' } }); } catch {                                                  }
                 throw new Error('Established Pomodoro session is missing');
             }
             return { raw: null, state: null };
@@ -729,6 +622,9 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             this.pomodoroBusy = true; pomodoroStoreWriteFences.add(this); requestPayloads.set(requestId, payload);
             let transaction = false; let commitAttempted = false; let taskAttempted = false; let domainAttempted = false; let proven = false; let replayed = false;
             let result = plan.result;
+
+            const tasks = [...(plan.target ? [{ target: plan.target, taskPatch: plan.taskPatch }] : []), ...(plan.owed ?? [])];
+            const patched = tasks.some((task) => task.taskPatch !== null);
             let refusal: NativePomodoroTransitionRefusal | null = null;
             const stale = (message: string): never => { refusal = new NativePomodoroTransitionRefusal('staleBaseline', message); throw refusal; };
             try {
@@ -743,30 +639,33 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                             if (options?.replayOnly === true) throw new Error('Saved Pomodoro receipt is required');
                             const session = await this.readPomodoroCell();
                             if (session.raw !== plan.sessionBefore) stale('Stale Pomodoro session baseline');
-                            if (plan.target) {
+                            for (const { target } of tasks) {
                                 const rows = await this.receiptClient.all<Record<string, string | number | null>>(
-                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [plan.target.id]);
+                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [target.id]);
                                 const raw = rows.length === 0 ? null : TASK_SQLITE_COLUMNS.map((name) => rows[0][name]);
-                                if (rows.length > 1 || !taskEditValuesEqual(raw, plan.target.row)) stale('Stale Pomodoro task baseline');
+                                if (rows.length > 1 || !taskEditValuesEqual(raw, target.row)) stale('Stale Pomodoro task baseline');
                             }
-                            if (plan.taskPatch) {
+                            if (patched) {
                                 const settings = await this.receiptClient.get<{ data: string }>('SELECT data FROM settings WHERE id = 1');
                                 let device: unknown;
-                                try { device = (JSON.parse(settings?.data ?? '{}') as { deviceId?: unknown }).deviceId; } catch { /* Refuse unreadable identity. */ }
+                                try { device = (JSON.parse(settings?.data ?? '{}') as { deviceId?: unknown }).deviceId; } catch {                                   }
                                 if (device !== plan.deviceId) stale('Pomodoro device identity changed');
                                 taskAttempted = true; domainAttempted = true;
-                                await this.receiptClient.run('UPDATE tasks SET timeSpentMinutes=?, rev=?, revBy=?, updatedAt=? WHERE id=?',
-                                    [plan.taskPatch.timeSpentMinutes, plan.taskPatch.rev, plan.taskPatch.revBy, plan.taskPatch.updatedAt, plan.target!.id]);
+                                for (const { target, taskPatch } of tasks) {
+                                    if (taskPatch) await this.receiptClient.run('UPDATE tasks SET timeSpentMinutes=?, rev=?, revBy=?, updatedAt=? WHERE id=?',
+                                        [taskPatch.timeSpentMinutes, taskPatch.rev, taskPatch.revBy, taskPatch.updatedAt, target.id]);
+                                }
                             }
                             domainAttempted = true;
                             if (plan.sessionBefore === null) await this.receiptClient.run('INSERT INTO native_pomodoro_session (id,state_json) VALUES (1,?)', [plan.sessionAfter]);
                             else await this.receiptClient.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1 AND state_json=?', [plan.sessionAfter, plan.sessionBefore]);
                             if ((await this.readPomodoroCell()).raw !== plan.sessionAfter) throw new Error('Pomodoro session readback changed');
-                            if (plan.taskPatch) {
+                            for (const { target, taskPatch } of tasks) {
+                                if (!taskPatch) continue;
                                 const rows = await this.receiptClient.all<Record<string, string | number | null>>(
-                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [plan.target!.id]);
-                                const expected = [...plan.target!.row!];
-                                for (const [name, value] of Object.entries(plan.taskPatch)) expected[TASK_SQLITE_COLUMNS.indexOf(name)] = value;
+                                    `SELECT ${TASK_SQLITE_COLUMNS.join(', ')} FROM tasks WHERE id = ?`, [target.id]);
+                                const expected = [...target.row!];
+                                for (const [name, value] of Object.entries(taskPatch)) expected[TASK_SQLITE_COLUMNS.indexOf(name)] = value;
                                 if (rows.length !== 1 || !taskEditValuesEqual(TASK_SQLITE_COLUMNS.map((name) => rows[0][name]), expected))
                                     throw new Error('Pomodoro task readback changed');
                             }
@@ -776,23 +675,29 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                         }
                         commitAttempted = true; await this.receiptClient.run('COMMIT'); transaction = false; proven = true;
                         this.pomodoroUncertainRequest = null;
-                        if (plan.taskPatch) {
+                        if (patched) {
                             this.pomodoroReloadRequired = true; this.pomodoroReloadRequest = requestId; this.invalidateWriteBaselineAfterDirectSQL();
                         }
                         durableReceipts?.set(requestId, { fingerprint: payload, reply: result, savedAt: new Date().toISOString() });
                         try { logInfo('Native Pomodoro transition confirmed', { scope: 'storage', force: true,
-                            context: { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' } }); } catch { /* SQL proof survives diagnostic failure. */ }
+                            context: { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' } }); } catch {                                              }
+                        const owedCredits = replayed ? 0 : nativePomodoroOwedCreditCount(plan.request);
+                        if (owedCredits > 0) {
+                            try { logInfo('Native Pomodoro adoption settled owed credits', { scope: 'storage', force: true,
+                                context: { releaseCheck: 'v1.3.8/pomodoro-adopt-owed-credits', count: owedCredits,
+                                    applied: tasks.filter((task) => task.taskPatch !== null).length, outcome: 'confirmed' } }); } catch {                                              }
+                        }
                     } catch (error) {
                         let rolledBack = false;
                         if (transaction) {
-                            try { await this.receiptClient.run('ROLLBACK'); rolledBack = true; } catch { /* The exact receipt remains the only success authority. */ }
+                            try { await this.receiptClient.run('ROLLBACK'); rolledBack = true; } catch {                                                             }
                         }
                         if (taskAttempted && transaction && !rolledBack) {
                             this.pomodoroReloadRequired = true; this.pomodoroReloadRequest = requestId; this.invalidateWriteBaselineAfterDirectSQL();
                         }
                         if (transaction && !rolledBack) this.pomodoroUncertainRequest = requestId;
-                        // A successful rollback proves failed COMMIT did not change projection. A lost
-                        // actual COMMIT reply cannot be mistaken for rollback or receiptless success.
+
+
                         if (refusal !== null && error === refusal && !domainAttempted && !commitAttempted && (!transaction || rolledBack)) throw error;
                         throw new Error('Pomodoro transition could not be proven');
                     }
@@ -808,13 +713,13 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         });
     }
 
-    /** Read-only canonical authority check; does not advance any snapshot or receipt baseline. */
+
     async hasForeignKeyViolations(): Promise<boolean> {
         return this.exclusive('hasForeignKeyViolations', async () =>
             Boolean(await this.receiptClient.get('SELECT 1 AS present FROM pragma_foreign_key_check LIMIT 1')));
     }
 
-    /** Current durable proof for a prerequisite receipt; never updates the session cache. */
+
     async readDurableReceipt(requestId: string, payload: string, options?: { committedOnly: true }): Promise<NativeHostResult<unknown | null>> {
         if (this.pomodoroBusy) return { ok: false, error: { code: 'SAVE_FAILED', message: 'Pomodoro storage is busy' } };
         if (!options?.committedOnly) return this.exclusive('readDurableReceipt', () => this.readCurrentReceipt(requestId, fingerprintOf(payload)));
@@ -826,13 +731,13 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             return await this.exclusive('readDurableReceipt', async () => {
                 let opened = false;
                 try {
-                    // A SELECT inside a failed writer's open transaction is not durable proof.
+
                     await this.receiptClient.run('BEGIN DEFERRED'); opened = true;
                     const result = await this.readCurrentReceipt(requestId, fingerprintOf(payload));
                     await this.receiptClient.run('ROLLBACK'); opened = false;
                     return result;
                 } finally {
-                    if (opened) { try { await this.receiptClient.run('ROLLBACK'); } catch { /* Host recovery must reopen the connection. */ } }
+                    if (opened) { try { await this.receiptClient.run('ROLLBACK'); } catch {                                                 } }
                 }
             });
         } catch { return unavailable(); }
@@ -864,7 +769,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         try { return { ok: true, value: JSON.parse(row.reply) as unknown }; } catch { return changed(); }
     }
 
-    /** Optional prerequisite for one owned command; absent for every existing caller. */
+
     armReceiptPrerequisite(requestId: string, payload: string, originId: string, originPayload: string, reply: unknown): void {
         this.refusePomodoroWriteFence();
         const fingerprint = fingerprintOf(payload);
@@ -978,7 +883,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         this.documentBusy = true;
         requestPayloads.set(requestId, payload);
         let succeeded = false;
-        // One lock hold from the receipt lookup through the commit; inside it only …Now bodies run (no re-entry).
+
         try { return await this.exclusive('saveDocumentWithReceipt', async () => {
             const rows = await this.receiptClient.all<DocumentReceiptRow>(
                 'SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?', [requestId],
@@ -991,13 +896,13 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 succeeded = true;
                 return { reply: JSON.parse(row.reply) as unknown, replayed: true };
             }
-            // Prior success cannot authorize another application after its durable proof disappears.
+
             if (durableReceipts!.has(requestId)) throw new Error('Saved document receipt is missing');
             let current: AppData | null = await this.getDataNow();
-            // A legacy settings.ai.apiKey left in the row is not part of the baseline (native-backup-document.ts never plans it).
+
             const withoutKey = (document: AppData): AppData => ({ ...document, settings: stripSensitiveSettings(document.settings) });
             if (!taskEditValuesEqual(withoutKey(current), withoutKey(expectedCurrent!))) throw new Error('Stale document receipt baseline');
-            // Both baselines are compared: neither is needed while the document is written.
+
             current = null; expectedCurrent = null;
             if (input.owned === true) (input as { expectedCurrent: AppData | null }).expectedCurrent = null;
             if (pendingReceipts.size > 0 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork()) throw new Error('Document receipt write is busy');
@@ -1020,7 +925,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                         operation: (JSON.parse(payload) as unknown[])[1], outcome: 'committed',
                     },
                 });
-            } catch { /* Diagnostics cannot reverse a proven committed outcome. */ }
+            } catch {                                                              }
             return { reply: JSON.parse(replyJson) as unknown, replayed: false };
         }); } finally {
             this.documentReceipt = null;
@@ -1029,7 +934,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         }
     }
 
-    /** The library's bytes as SQLite counts them (pages × page size); inside a write transaction, its new pages too. */
+
     async libraryBytes(): Promise<number> {
         return this.exclusive('libraryBytes', () => this.libraryBytesNow());
     }
@@ -1063,7 +968,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                 || receiptedWritesRunning > 0 || hasPendingDocumentStoreWork())
                 throw new Error('Document receipt write ownership changed');
             try {
-                // Plain INSERT is deliberate: any in-transaction duplicate rolls back the document.
+
                 await this.receiptClient.run(
                     'INSERT INTO native_request_receipts (request_id, method, reply, saved_at) VALUES (?, ?, ?, ?)',
                     [context.requestId, context.payload, context.replyJson, context.savedAt],
@@ -1085,7 +990,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             }
             return;
         }
-        // A single task's save runs only while no receipt is pending (see saveTask above).
+
         if (!('data' in write)) return;
         const generation = getSaveSnapshotGeneration(write.data);
         if (generation === undefined) return;
@@ -1116,15 +1021,14 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         this.carried.set(write.data, { ids, savedAt });
     }
 
-    // The public saves keep only their synchronous busy refusal and the bookkeeping after the commit here; their SQL runs in
-    // the base class's locked body.
+
     override async saveData(data: AppData, options?: Parameters<SqliteAdapter['saveData']>[1]): Promise<void> {
         this.refusePomodoroWriteFence();
         if (this.documentBusy) throw new Error('Document receipt write is busy');
         this.ordinaryWrites += 1;
         try {
             await super.saveData(data, options);
-            // Committed: those receipts are durable. After a rollback they stay pending for the next save.
+
             const carried = this.carried.get(data);
             this.carried.delete(data);
             for (const id of carried?.ids ?? []) {
@@ -1148,7 +1052,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         finally { this.ordinaryWrites -= 1; }
     }
 
-    /** Complete a receipt after its data was already proven saved, without rewriting projected memory. */
+
     async commitReceiptOnly(requestId: string, payload: string): Promise<boolean> {
         this.refusePomodoroWriteFence();
         if (commandOf(payload) === 'pomodoroTransition') throw new Error('Pomodoro requires its atomic receipt transaction');
@@ -1184,7 +1088,7 @@ const REQUEST_ID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
 
 type Receipt = {
     payload: string;
-    /** Set while the first call runs; concurrent duplicates join it. */
+
     running: Promise<NativeHostResult<unknown>> | null;
     written: boolean;
     value: unknown;
@@ -1192,11 +1096,11 @@ type Receipt = {
 };
 
 export function createNativeRequestReceipts(options: {
-    /** Makes every write so far durable: retries a failed save, then flushes. */
+
     save: (requestId: string) => Promise<NativeHostResult<null>>;
-    /** Scoped commands may prove their data saved and commit a receipt without resaving projected memory. */
+
     receiptOnly?: (requestId: string, payload: string) => Promise<boolean>;
-    /** How many requests to remember; default 50. */
+
     limit?: number;
 }): NativeRequestReceipts {
     const limit = options.limit ?? 50;
@@ -1218,17 +1122,15 @@ export function createNativeRequestReceipts(options: {
         return { ok: true, value: null };
     };
 
-    // A receipt's save is a store command for the sync gate (store-write-gate.ts): no sync save and
-    // store publish lands inside it. Its write already ran as store actions, which hold the same gate.
+
     const save = (requestId: string, receipt: Receipt): Promise<NativeHostResult<unknown>> => runStoreCommand(async () => {
-        // A successful save stores the whole snapshot, so every write that landed before it
-        // began is durable too. A write that lands while it runs waits for its own save.
+
+
         const covered = Array.from(receipts.values()).filter((entry) => entry.written);
         const saved = await options.save(requestId);
         if (!saved.ok) return saved;
-        // With durable receipts, the reply waits for a commit that carries its receipt. A write
-        // whose data a save inside it already committed (a store action that flushes by itself),
-        // or that changed nothing, left no snapshot queued: a receipt-only commit follows.
+
+
         if (pendingReceipts.has(requestId)) {
             if (options.receiptOnly && durableFor(receipt.payload)) {
                 try {
@@ -1277,7 +1179,7 @@ export function createNativeRequestReceipts(options: {
                 error: { code: 'ACTION_FAILED', message: 'Pomodoro requires its atomic receipt transaction' } });
             const identity = checkIdentity(requestId, payload);
             if (!identity.ok) return Promise.resolve(identity);
-            // checkIdentity established the UUID shape without reserving it.
+
             const id = requestId as string;
             const known = receipts.get(id);
             if (known) {
@@ -1287,7 +1189,7 @@ export function createNativeRequestReceipts(options: {
                 known.running = finishing;
                 return finishing as Promise<NativeHostResult<T>>;
             }
-            // Landed and saved before a restart (or evicted since): its first reply, and nothing runs.
+
             const stored = durableFor(payload) ? durableReceipts?.get(id) : undefined;
             if (stored) {
                 return Promise.resolve({ ok: true, value: stored.reply as T });
@@ -1312,7 +1214,7 @@ export function createNativeRequestReceipts(options: {
                         outcome = { ok: false, error: { code: 'ACTION_FAILED', message: error instanceof Error ? error.message : String(error) } };
                     }
                     if (!outcome.ok && outcome.error.code === 'SAVE_FAILED') {
-                        // It landed; only its save failed. A retry saves and never writes again.
+
                         receipt.written = true;
                         receipt.value = 'value' in outcome ? outcome.value : undefined;
                         if (durable) recordPendingReceipt(id, payload, receipt.value);
@@ -1325,7 +1227,7 @@ export function createNativeRequestReceipts(options: {
                     }
                     receipt.written = true;
                     receipt.value = outcome.value;
-                    // Pending from here: the save below commits it with the snapshot that holds this write.
+
                     if (durable) recordPendingReceipt(id, payload, receipt.value);
                 } finally {
                     if (durable) receiptedWritesRunning -= 1;

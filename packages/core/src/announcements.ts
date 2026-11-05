@@ -31,7 +31,7 @@ export const DONATION_PROMPT_ANNOUNCEMENT: AppAnnouncement = {
     },
 };
 
-// Maintainers can replace null with one active announcement for a specific release.
+
 export const ACTIVE_APP_ANNOUNCEMENT: AppAnnouncement | null = null;
 
 export function getAnnouncementDismissalStorageKey(id: string): string {

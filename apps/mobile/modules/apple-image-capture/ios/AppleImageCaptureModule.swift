@@ -113,7 +113,7 @@ private enum AppleImageAnalysisEngine {
         guard resource.isRegularFile == true, let inputBytes = resource.fileSize else {
             throw AppleImageCaptureError.invalidImage
         }
-        // Reject an oversized file before asking ImageIO to parse its metadata.
+
         try AppleImageBounds.validateInputBytes(inputBytes)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               CGImageSourceGetCount(source) == 1,

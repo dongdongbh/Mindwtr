@@ -22,15 +22,15 @@ describe('context automation throttling', () => {
   });
 
   it('treats a bare context name and its @ token as one trigger', () => {
-    // The Android receiver hands on the extra as sent; a link always carries the token.
+
     expect(wasContextAutomationRecentlyHandled({ action: 'activate', context: 'home' }, 1_000)).toBe(false);
     expect(wasContextAutomationRecentlyHandled({ action: 'activate', context: '@home' }, 2_000)).toBe(true);
     expect(wasContextAutomationRecentlyHandled({ action: 'activate', context: ' #home ' }, 3_000)).toBe(true);
   });
 
   it('caps total starts per window even when every context differs', () => {
-    // The receiver is exported by design, so varying the context defeats the
-    // per-key dedupe entirely — only a global cap bounds the headless work.
+
+
     const attempts = CONTEXT_AUTOMATION_MAX_STARTS_PER_WINDOW + 5;
     const handled = Array.from({ length: attempts }, (_unused, index) => (
       wasContextAutomationRecentlyHandled({ action: 'activate', context: `@ctx-${index}` }, 1_000 + index)

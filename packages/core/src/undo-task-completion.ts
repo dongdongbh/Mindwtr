@@ -1,5 +1,6 @@
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { formatI18nTemplate, translateWithFallback } from './i18n';
+import { logInfo } from './logger';
 import { useTaskStore } from './store';
 import { logStaleWriteRefused } from './store-latest-updates';
 import { runStoreCommand } from './store-write-gate';
@@ -7,10 +8,7 @@ import type { Task, TaskStatus } from './types';
 
 type TranslateFn = (key: string) => string;
 
-// One copy of the completion/move toast text for every surface that completes a
-// task on either platform: keyboard scopes, the row's own done button, the status
-// chord, mobile search. The copies had already drifted, one of them untranslated.
-// The single/double brace split follows the keys as they already ship.
+
 export function formatTaskMarkedDoneMessage(t: TranslateFn, title: string): string {
     return formatI18nTemplate(translateWithFallback(t, 'task.markedDone', '{title} marked Done'), { title });
 }
@@ -24,10 +22,7 @@ export function formatTaskMovedMessage(t: TranslateFn, title: string, status: Ta
 
 const STALE_RESTORE = 'STALE_REVISION: The task changed on another device after this action; it was not undone';
 
-/**
- * Whether another device wrote [taskId] after this device's last write: a restore of the fields this device saw then
- * would overwrite what sync brought since. SQLite refused that lower-revision write before the store write gate.
- */
+
 const changedElsewhere = (taskId: string): boolean => {
     const state = useTaskStore.getState();
     const task = state._tasksById.get(taskId);
@@ -37,17 +32,14 @@ const changedElsewhere = (taskId: string): boolean => {
     return changed;
 };
 
-/** Undo's restore of a task's saved fields ([restoreUpdates]), refused when another device changed the task since. */
+
 export function restoreTaskSnapshot(taskId: string, restoreUpdates: Partial<Task>) {
     return runStoreCommand(async () => (changedElsewhere(taskId)
         ? { success: false, error: STALE_RESTORE }
         : useTaskStore.getState().updateTask(taskId, restoreUpdates)));
 }
 
-// Completing a task force-clears its Today star (applyTaskUpdates), so
-// undoing a completion must restore the star along with the status. The star
-// only comes back while the focus cap has room — same rule as starring by hand.
-// One store command reads the task and restores it (store-write-gate.ts).
+
 export function undoTaskCompletion(
     taskId: string,
     previousStatus: TaskStatus,
@@ -83,7 +75,15 @@ async function undoTaskCompletionNow(
         ))
         : undefined;
 
-    if (generatedOccurrence) {
+
+    const editedOccurrence = Boolean(generatedOccurrence && generatedOccurrence.updatedAt !== generatedOccurrence.createdAt);
+    if (editedOccurrence) {
+        logInfo('Completion Undo kept an edited next occurrence', {
+            scope: 'undo', force: true, context: { releaseCheck: 'v1.3.8/undo-keeps-edited-occurrence' },
+        });
+    }
+
+    if (generatedOccurrence && !editedOccurrence) {
         const deleteResult = await Promise.resolve(state.deleteTask(generatedOccurrence.id));
         if (!deleteResult.success) {
             throw new Error(deleteResult.error || 'Failed to remove recurring follow-up');
@@ -104,7 +104,7 @@ async function undoTaskCompletionNow(
         }))
         : await Promise.resolve(state.moveTask(taskId, previousStatus));
     if (!moveResult.success) {
-        if (generatedOccurrence) {
+        if (generatedOccurrence && !editedOccurrence) {
             await Promise.resolve(useTaskStore.getState().restoreTask(generatedOccurrence.id));
         }
         throw new Error(moveResult.error || 'Failed to restore task status');

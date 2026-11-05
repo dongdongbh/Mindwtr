@@ -3,16 +3,11 @@ import * as nodeCrypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
 import type { AppData, SyncEncryptionRemotePort, SyncRemoteMutationFenceLease } from '@mindwtr/core';
 
-// ---------------------------------------------------------------------------
-// In-memory filesystem shared by the `./file-system` (legacy + SAF) and
-// `expo-file-system` (modern File/Directory) mocks, so a byte written through
-// one API is visible through the other — exactly the mixed-API ladder
-// storage-file.ts walks on a real device.
-// ---------------------------------------------------------------------------
+
 const fs = vi.hoisted(() => {
   const files = new Map<string, Uint8Array>();
-  /** Providers that refuse to shrink a file: a shorter write leaves the tail behind.
-   *  This is what padForNonTruncatingOverwrite exists for. */
+
+
   const nonTruncating = { enabled: false };
   const toBytes = (content: string, encoding?: string): Uint8Array =>
     new Uint8Array(Buffer.from(content, encoding === 'base64' ? 'base64' : 'utf8'));
@@ -156,15 +151,14 @@ vi.mock('./sync-file-transition-cas', () => ({
     return { uri: target, name };
   }),
 }));
-// SafDocumentsCore.kt's listing and lookup, served from the same in-memory folder through the
-// expo SAF mocks above, so a test that makes expo's listing fail fails this one too. The B4
-// tests below replace them directly: androidx swallowed a provider error that these surface.
+
+
 const displayNameOf = vi.hoisted(() => (uri: string): string => {
   const decoded = decodeURIComponent(uri);
   return decoded.slice(Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf(':')) + 1);
 });
 const safDocumentsFake = vi.hoisted(() => ({
-  /* The display name a path-like provider gives: the decoded tail of the document ID. */
+
   list: async (dir: string) => {
     const { StorageAccessFramework } = await import('./file-system');
     const uris: string[] = await StorageAccessFramework!.readDirectoryAsync!(dir);
@@ -278,8 +272,7 @@ import {
 import { SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_PATH_KEY } from './sync-constants';
 import { readActiveSyncLocationScope } from './sync-location-scope';
 
-// Same node-backed stand-in for react-native-quick-crypto as sync-crypto-native.test.ts
-// (its Node-compatible cipher surface plus quick-crypto's argon2 callback shape).
+
 const nodeQuickCrypto: SyncCryptoNativeModule = {
   argon2: (_algorithm, params, callback) => {
     try {
@@ -300,8 +293,8 @@ const ENC_URI = `${SYNC_DIR}/data.json.enc`;
 const SAF_SYNC_URI = 'content://provider/tree/root/document/root%2Fdata.json';
 const SAF_ENC_URI = 'content://provider/tree/root/document/root%2Fdata.json.enc';
 const PASSPHRASE = 'correct horse battery staple';
-// Cheap Argon2 params keep the suite fast; the real defaults are exercised by the
-// transition tests below, which go through the production code path unchanged.
+
+
 const FAST_PARAMS = { mKib: 64, t: 1, p: 1 };
 
 const appData = (title: string): AppData => ({
@@ -362,8 +355,7 @@ const seedEncrypted = async (data: AppData, key: SyncKeyMaterial = material, uri
   return sealed;
 };
 
-/** The cycle's write: read the document's version, then write against it (every File Sync
- *  write is versioned; an unconditional write is refused). */
+
 const writeVersioned = async (
   uri: string,
   data: AppData,
@@ -465,14 +457,14 @@ describe('File Sync encryption — no-key discovery (decisions #2 and #5)', () =
 
     await expect(readSyncFile(SYNC_URI)).rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
 
-    // Persisted, so it survives a restart.
+
     expect(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)).toBeDefined();
     __resetSyncEncryptionStateForTests();
     await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({
       state: 'remote-encrypted-no-key',
       kdfParams: FAST_PARAMS,
     });
-    // And there is still no key, so nothing downstream can encrypt/decrypt.
+
     await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
   });
 
@@ -484,9 +476,8 @@ describe('File Sync encryption — no-key discovery (decisions #2 and #5)', () =
   });
 
   it('downgrades an enabled state to no-key when the folder is sealed under a foreign salt', async () => {
-    // A passphrase set before the first sync while a peer encrypted the folder (or a peer's
-    // rotation): this device's key is provably for another generation, and only the no-key
-    // state surfaces the unlock prompt that re-derives from the folder's own salt.
+
+
     syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '00'.repeat(16), discoveredParams: FAST_PARAMS });
     await seedEncrypted(appData('secret'));
     await expect(readSyncFile(SYNC_URI)).rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
@@ -495,9 +486,8 @@ describe('File Sync encryption — no-key discovery (decisions #2 and #5)', () =
   });
 
   it('a keyed read of a foreign-salt folder downgrades to no-key instead of a dead-end auth failure', async () => {
-    // The keyed shape of the case above: material resolves (state enabled + cached key), the
-    // .enc artifact exists, but its header salt is not ours. Decrypting could only fail as
-    // Auth, indistinguishable from a wrong passphrase — the read must persist the downgrade.
+
+
     await seedEncrypted(appData('secret'));
     const foreign = await deriveSyncKeyMaterial(
       PASSPHRASE, new Uint8Array(16).fill(9), FAST_PARAMS, mobileSyncCryptoPrimitives,
@@ -621,7 +611,7 @@ describe('SAF provider errors are never an empty folder or an absent file (B4)',
   it('fails a keyed read when the provider cannot list the folder, though androidx would list it empty', async () => {
     await seedEncrypted(appData('peer'), material, SAF_ENC_URI);
     const { StorageAccessFramework } = await import('./file-system');
-    // androidx's TreeDocumentFile.listFiles logs the query error and returns no children.
+
     vi.mocked(StorageAccessFramework!.readDirectoryAsync!).mockResolvedValue([]);
     const safDocuments = await import('./saf-documents');
     vi.mocked(safDocuments.listSafChildren).mockRejectedValue(
@@ -634,7 +624,7 @@ describe('SAF provider errors are never an empty folder or an absent file (B4)',
 
   it('reads an empty encrypted folder as empty, finding the plaintext sibling by listing, not by a lookup of a missing file', async () => {
     const safDocuments = await import('./saf-documents');
-    // A document that does not exist answers no cursor, which SafDocumentsCore reports as an error.
+
     vi.mocked(safDocuments.statSafDocument).mockImplementation(async (uri: string) => {
       if (!fs.files.has(uri)) throw new Error('SAF_DOCUMENT_UNAVAILABLE: the provider gave no answer for the document');
       return { uri, name: uri.slice(uri.lastIndexOf('/') + 1), mime: null, size: fs.files.get(uri)!.length, lastModified: null };
@@ -650,7 +640,7 @@ describe('SAF provider errors are never an empty folder or an absent file (B4)',
     const fileSystem = await import('./file-system');
     vi.mocked(fileSystem.StorageAccessFramework!.readAsStringAsync!).mockRejectedValue(new Error('Permission Denial'));
     vi.mocked(fileSystem.readAsStringAsync).mockRejectedValue(new Error('Permission Denial'));
-    // DocumentFile.exists catches the SecurityException and answers false.
+
     vi.mocked(fileSystem.getInfoAsync).mockResolvedValue({ exists: false } as never);
     const safDocuments = await import('./saf-documents');
     vi.mocked(safDocuments.statSafDocument).mockRejectedValue(
@@ -674,7 +664,7 @@ describe('File Sync never creates data.json before it publishes one (B2)', () =>
 
   it('reads a deleted data.json as absent from the folder listing, not from a lookup that proves nothing', async () => {
     const safDocuments = await import('./saf-documents');
-    // A vanished document's lookup answers no cursor, which SafDocumentsCore reports as an error.
+
     vi.mocked(safDocuments.statSafDocument).mockRejectedValue(
       new Error('SAF_DOCUMENT_UNAVAILABLE: the provider gave no answer for the document'),
     );
@@ -723,7 +713,7 @@ describe('File Sync reads are whole or refused, and an unproven read never repai
   it('refuses a clean short read (32 of 113 declared bytes) instead of repairing from it', async () => {
     fs.files.set(SAF_CANONICAL, full());
     const fileSystem = await import('./file-system');
-    // The provider's stream ends early, as a short EOF; expo's read hands the prefix over as if whole.
+
     const prefix = Buffer.from(full().slice(0, 32));
     vi.mocked(fileSystem.StorageAccessFramework!.readAsStringAsync!).mockImplementation(
       async (_uri: string, options?: { encoding?: string }) => prefix.toString(options?.encoding === 'base64' ? 'base64' : 'utf8'),
@@ -772,7 +762,7 @@ describe('File Sync reads are whole or refused, and an unproven read never repai
 
   it.each([['empty', ''], ['whitespace', '   \n']])(
     'refuses a keyed read when the restored plaintext reads %s with no length proving it whole', async (_label, text) => {
-      // A peer disabled encryption: data.json.enc is gone and the plaintext original is back.
+
       fs.files.set(SAF_CANONICAL, full());
       const safDocuments = await import('./saf-documents');
       vi.mocked(safDocuments.readSafDocument).mockImplementation(async () => ({
@@ -927,8 +917,8 @@ describe('backup rotation never writes into an existing file (B8)', () => {
       const written = await writtenUris();
       const remote = await readSyncFileVersioned(SAF_SYNC_URI, { material });
       await writeSyncFile(SAF_SYNC_URI, appData(title), { material, expectedFingerprint: remote.fingerprint });
-      // A file created in this call may reuse an old path (the canonical is recreated under its
-      // name after the old one moved aside); only a write into a file that existed before counts.
+
+
       const { StorageAccessFramework } = await import('./file-system');
       const created = new Set(await Promise.all(
         vi.mocked(StorageAccessFramework!.createFileAsync!).mock.results.map((result) => result.value as Promise<string>),
@@ -950,8 +940,8 @@ describe('backup rotation never writes into an existing file (B8)', () => {
     );
     const cas = await import('./sync-file-transition-cas');
     const previous = vi.mocked(cas.renameSafTransitionDocument).getMockImplementation()!;
-    // A provider whose rename replaces an existing target; a peer publishes its backup the
-    // moment this device moved the old one aside.
+
+
     vi.mocked(cas.renameSafTransitionDocument).mockImplementation(async (uri: string, name: string) => {
       const target = `${dirOf(uri)}/${name}`;
       const bytes = fs.files.get(uri);
@@ -979,14 +969,14 @@ describe('backup rotation never writes into an existing file (B8)', () => {
     const fileSystem = await import('./file-system');
     const create = vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!);
     const previousCreate = create.getMockImplementation()!;
-    // This provider appends ".bin" to a new backup's name (#1113's decoration).
+
     create.mockImplementation(async (dir: string, name: string, mime: string) => (
       name === 'data.json.enc.bak' ? previousCreate(dir, `${name}.bin`, mime) : previousCreate(dir, name, mime)
     ));
     const cas = await import('./sync-file-transition-cas');
     const rename = vi.mocked(cas.renameSafTransitionDocument);
     const previousRename = rename.getMockImplementation()!;
-    // A replacing rename, and a peer that publishes its backup just before a rename onto that name.
+
     rename.mockImplementation(async (uri: string, name: string) => {
       const target = `${dirOf(uri)}/${name}`;
       if (target === BACKUP) fs.files.set(BACKUP, peerBackup);
@@ -1024,7 +1014,7 @@ describe('backup rotation never writes into an existing file (B8)', () => {
 });
 
 describe('SAF providers with opaque document IDs (B7)', () => {
-  // A provider whose document IDs are numbers: names live only in COLUMN_DISPLAY_NAME.
+
   const ROOT = 'content://op/tree/root/document/root';
   const docs = new Map<string, { name: string; parent: string; bytes: Uint8Array }>();
   let nextId = 7;
@@ -1126,16 +1116,8 @@ describe('non-truncating provider padding (decision #8)', () => {
   });
 
   it('S2: a shrinking PLAINTEXT write on a non-truncating (non-SAF) provider produces the exact new bytes, never a stale ciphertext tail', async () => {
-    // Regression for the original bug: on a non-truncating provider, the disable
-    // transition writes a shorter plaintext attachment over a longer ciphertext one.
-    // The OLD code wrote the plaintext as-is with no shrink strategy, which left [new
-    // plaintext][leftover OLD CIPHERTEXT bytes] on disk — silent, PERMANENT attachment
-    // corruption that a later resume pass then misread as "already disabled" (no MWENC1
-    // magic at offset 0) and skipped rewriting. Padding plaintext the way ciphertext is
-    // padded would just move the corruption from "transient garbage tail" to "permanent
-    // 0x20 tail nothing ever strips" — plaintext has no ciphertext_len field to make that
-    // safe. Delete-then-recreate instead: this file path is not a SAF tree URI, so the
-    // write can freely delete the old (longer) file and create a fresh, exactly-sized one.
+
+
     const uri = `${SYNC_DIR}/attachments/a1.png`;
     fs.files.set(uri, new Uint8Array(80).fill(1));
     fs.nonTruncating.enabled = true;
@@ -1157,10 +1139,10 @@ describe('non-truncating provider padding (decision #8)', () => {
     await writeSyncArtifactBytes(safUri, small);
 
     const readBack = await readSyncArtifactBytes(safUri);
-    expect(readBack!.length).toBe(big.length); // the provider kept the old length
+    expect(readBack!.length).toBe(big.length);
     const inspected = inspectSyncArtifact(readBack!);
     expect(inspected.kind).toBe('encrypted');
-    // The trailing 0x20 padding is past 54 + ciphertext_len and is ignored on read.
+
     const { decryptSyncArtifact } = await import('@mindwtr/core');
     const plaintext = await decryptSyncArtifact(readBack!, material.key, mobileSyncCryptoPrimitives);
     expect(JSON.parse(new TextDecoder().decode(plaintext))).toMatchObject({
@@ -1840,7 +1822,7 @@ describe('File Sync transitions through core orchestration', () => {
 
     expect(inspectSyncArtifact(fs.files.get(ENC_URI)!).kind).toBe('encrypted');
     expect(inspectSyncArtifact(fs.files.get(`${SYNC_DIR}/data.json.enc.bak`)!).kind).toBe('encrypted');
-    // Attachments keep their exact name (cloudKey is identity-keyed) with sealed bytes.
+
     expect(inspectSyncArtifact(fs.files.get(`${SYNC_DIR}/attachments/a1.png`)!).kind).toBe('encrypted');
     expect(fs.files.has(SYNC_URI)).toBe(false);
     expect(fs.files.has(`${SYNC_DIR}/data.json.bak`)).toBe(false);
@@ -2126,7 +2108,7 @@ describe('File Sync transitions through core orchestration', () => {
 
   it('resumes an interrupted enable without re-deriving a second salt', async () => {
     seedPlaintextFolder();
-    // Simulate a crash right after the base document was sealed: both generations exist.
+
     await enableSyncEncryption(PASSPHRASE);
     const firstSalt = (await getMobileSyncEncryptionStatus());
     const encBefore = fs.files.get(ENC_URI)!;
@@ -2137,8 +2119,7 @@ describe('File Sync transitions through core orchestration', () => {
 
     await enableSyncEncryption(PASSPHRASE);
 
-    // Salt/params came from the existing header, so the already-sealed artifact still
-    // opens under the resumed key, and the leftover plaintext is now gone.
+
     expect((await getMobileSyncEncryptionStatus()).kdfParams).toEqual(firstSalt.kdfParams);
     expect(fs.files.has(SYNC_URI)).toBe(false);
     const resumed = await getSyncEncryptionMaterial();
@@ -2166,9 +2147,7 @@ describe('File Sync transitions through core orchestration', () => {
     const previousState = JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!) as Record<string, unknown>;
     expect(previousKey).not.toBeNull();
 
-    // Rotation first persists its retry journal, then commits the new enabled
-    // material. Model the final AsyncStorage write failing after SecureStore has
-    // already accepted the newly derived key.
+
     vi.mocked(AsyncStorage.setItem)
       .mockImplementationOnce(async (key: string, value: string) => {
         asyncStorage.set(key, value);
@@ -2178,8 +2157,7 @@ describe('File Sync transitions through core orchestration', () => {
     await expect(changeSyncEncryptionPassphrase(PASSPHRASE, 'replacement passphrase'))
       .rejects.toThrow('state commit unavailable');
 
-    // A process restart must load the durable journal alongside the OLD key,
-    // never the replacement key paired with the old salt.
+
     __resetSyncEncryptionStateForTests();
     await expect(syncEncryptionKeyCache.getKey()).resolves.toEqual(previousKey);
     expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({
@@ -2205,12 +2183,11 @@ describe('File Sync transitions through core orchestration', () => {
   it('S2: disable succeeds cleanly on a non-truncating provider instead of corrupting a shrinking attachment', async () => {
     seedPlaintextFolder();
     await enableSyncEncryption(PASSPHRASE);
-    fs.nonTruncating.enabled = true; // the encrypted attachment is longer than its plaintext
+    fs.nonTruncating.enabled = true;
 
     await disableSyncEncryption();
 
-    // Delete-then-recreate produces the exact original bytes back — no padding, no
-    // leftover ciphertext tail, and nothing for a resume pass to misclassify.
+
     expect(Array.from(fs.files.get(`${SYNC_DIR}/attachments/a1.png`)!)).toEqual([9, 8, 7, 6]);
     expect(inspectSyncArtifact(fs.files.get(ENC_URI) ?? new Uint8Array(0)).kind).not.toBe('encrypted');
     await expect(getMobileSyncEncryptionStatus()).resolves.toEqual({ state: 'off' });
@@ -2237,27 +2214,20 @@ describe('File Sync transitions through core orchestration', () => {
   it('B2: routes through the shared sync-document queue, so a racing cycle write can never coexist with a half-finished transition', async () => {
     seedPlaintextFolder();
     let cycleFinished = false;
-    // Simulates a real sync cycle: it already resolved `encryptionMaterial = null`
-    // (encryption looked off at that instant), does its normal network round-trip, then
-    // reaches its write step. Enqueued on the SAME shared queue
-    // `apps/mobile/lib/sync-service.ts`'s MobileSyncRun.run() uses.
+
+
     const fakeCycle = runSerializedSyncDocumentOperation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       fs.files.set(SYNC_URI, new TextEncoder().encode(JSON.stringify(appData('cycle-write'), null, 2)));
       cycleFinished = true;
     });
 
-    // Enqueued while the fake cycle is still mid-flight (its timer hasn't fired yet).
-    // Without routing enableSyncEncryption through the same queue, this could run
-    // concurrently, finish (encrypt + delete the plaintext) before the cycle's write
-    // lands, and then the cycle's write would land AFTER — a fresh plaintext data.json
-    // sitting right next to data.json.enc.
+
     const enablePromise = enableSyncEncryption(PASSPHRASE);
 
     await Promise.all([fakeCycle, enablePromise]);
 
-    // FIFO queue: the cycle's write is guaranteed to have completed before enable's work
-    // started, so enable saw and encrypted it — it can never be left as stray plaintext.
+
     expect(cycleFinished).toBe(true);
     expect(fs.files.has(SYNC_URI)).toBe(false);
     expect(inspectSyncArtifact(fs.files.get(ENC_URI)!).kind).toBe('encrypted');
@@ -2269,8 +2239,8 @@ describe('File Sync transitions through core orchestration', () => {
 });
 
 describe('local-state persistence and the remote-plaintext state', () => {
-  /** A store whose write actually takes a tick — the real AsyncStorage shape, and the one a
-   *  fire-and-forget `void persist` silently outruns. */
+
+
   const deferNextStoreWrite = () => {
     vi.mocked(AsyncStorage.setItem).mockImplementationOnce(async (key: string, value: string) => {
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -2326,8 +2296,8 @@ describe('local-state persistence and the remote-plaintext state', () => {
   });
 
   it('File Sync: a keyed device treats a peer-disabled folder as terminal, not as an empty folder', async () => {
-    // The inverse of `discoverEncryptedSyncFolder`: a peer ran the disable transition, so the
-    // `.enc` artifact is gone and the plaintext original is back.
+
+
     syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: 'aabb', discoveredParams: FAST_PARAMS });
     fs.files.set(SYNC_URI, new TextEncoder().encode(JSON.stringify(appData('peer'), null, 2)));
 
@@ -2335,7 +2305,7 @@ describe('local-state persistence and the remote-plaintext state', () => {
 
     await flushSyncEncryptionLocalState();
     expect(syncEncryptionLocalState.read()?.state).toBe('remote-plaintext');
-    // Nothing on the folder is touched on this path.
+
     expect(JSON.parse(new TextDecoder().decode(fs.files.get(SYNC_URI)!))).toMatchObject({ tasks: [{ title: 'peer' }] });
   });
 
@@ -2389,7 +2359,7 @@ describe('local-state persistence and the remote-plaintext state', () => {
       discoveredScope: '["file","/sync"]',
     });
     await flushSyncEncryptionLocalState();
-    __resetSyncEncryptionStateForTests(); // prove it survives a reload, not just the cache
+    __resetSyncEncryptionStateForTests();
 
     await expect(isSyncEncryptionBlocked('["file","/sync"]')).resolves.toBe(true);
     await expect(getSyncEncryptionMaterial()).resolves.toMatchObject({ key: material.key });
@@ -2421,8 +2391,7 @@ describe('SAF transition scratch name decoration (#1113)', () => {
     fs.files.set(canonicalUri, new TextEncoder().encode(JSON.stringify(appData('baseline'))));
     const baseline = await readSyncFileVersioned(configuredUri);
 
-    // A provider that appends a MIME-derived extension to the requested display name
-    // (leonardo's Fastmail-adjacent report: ".mindwtr-et-s-..." came back decorated).
+
     const fileSystem = await import('./file-system');
     vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!).mockImplementationOnce(async (dir: string, name: string) => {
       const uri = `${dir.replace(/\/+$/, '')}/${name}.bin`;
@@ -2459,10 +2428,7 @@ describe('SAF transition scratch name decoration (#1113)', () => {
   });
 });
 
-// #1138: a `remote-encrypted-no-key` state refused EVERY sync on EVERY backend before
-// touching any remote, and the only exit (Unlock) needed an encrypted document at the
-// CURRENT location — so emptying the folder or switching backends wedged the device for
-// good. The lock is now bound to the location it was discovered on.
+
 describe('stale sync-encryption discovery scope (#1138)', () => {
   const FOLDER_SCOPE = `["file","${SYNC_URI}"]`;
 
@@ -2474,7 +2440,7 @@ describe('stale sync-encryption discovery scope (#1138)', () => {
       ...(scope ? { discoveredScope: scope } : {}),
     });
     await flushSyncEncryptionLocalState();
-    __resetSyncEncryptionStateForTests(); // prove it survives a reload, not just the cache
+    __resetSyncEncryptionStateForTests();
   };
 
   it('reads the active location from the persisted configuration', async () => {
@@ -2486,19 +2452,19 @@ describe('stale sync-encryption discovery scope (#1138)', () => {
     await expect(readActiveSyncLocationScope()).resolves.not.toBe(FOLDER_SCOPE);
   });
 
-  // (3) unchanged behaviour for the location the discovery was actually made on.
+
   it('still blocks the location the discovery was made on', async () => {
     await persistNoKey(FOLDER_SCOPE);
     await expect(isSyncEncryptionBlocked(FOLDER_SCOPE)).resolves.toBe(true);
   });
 
-  // (4) the #1138 sequence: the user wiped Dropbox and switched to a plain folder.
+
   it('does not block a different backend or folder', async () => {
     await persistNoKey('["cloud","dropbox"]');
     await expect(isSyncEncryptionBlocked(FOLDER_SCOPE)).resolves.toBe(false);
   });
 
-  // (1)/(2) the 1.2.6 upgrade path — one manual "Sync now" re-checks instead of refusing.
+
   it('does not block a discovery persisted before scopes existed', async () => {
     await persistNoKey();
     await expect(isSyncEncryptionBlocked(FOLDER_SCOPE)).resolves.toBe(false);
@@ -2510,8 +2476,7 @@ describe('stale sync-encryption discovery scope (#1138)', () => {
     await expect(isSyncEncryptionBlocked(null)).resolves.toBe(true);
   });
 
-  // (2) re-check against a still-encrypted folder: re-marked WITH the scope, NoKey thrown,
-  // and no plaintext document created beside the ciphertext.
+
   it('re-discovers a still-encrypted folder and binds the lock to it', async () => {
     await persistNoKey();
     await seedEncrypted(appData('sealed'));
@@ -2527,14 +2492,13 @@ describe('stale sync-encryption discovery scope (#1138)', () => {
     expect(fs.files.has(SYNC_URI)).toBe(false);
   });
 
-  // (1) re-check against an emptied folder: nothing encrypted is found, so the read simply
-  // reports no remote data and the ordinary cycle proceeds.
+
   it('reports no remote data for an emptied folder instead of refusing', async () => {
     await persistNoKey();
     await expect(readSyncFile(SYNC_URI, { locationScope: FOLDER_SCOPE })).resolves.toBeNull();
   });
 
-  // (5) Unlock against a location with no encrypted document clears the stale lock.
+
   it('unlock with nothing encrypted here clears the state and says so', async () => {
     asyncStorage.set(SYNC_BACKEND_KEY, 'file');
     asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
@@ -2556,20 +2520,12 @@ describe('stale sync-encryption discovery scope (#1138)', () => {
   });
 });
 
-// fresh-join-attachment-posture packet -10: closes #1138 result §8 risk 2. A device with NO
-// persisted encryption state at all is exactly as blind as an unscoped discovery — the
-// attachment pre-sync phase must defer for it too, or a fresh join to an already-encrypted
-// location uploads plaintext attachments before the read finds out.
+
 describe('sync-encryption posture unestablished (fresh-join-attachment-posture packet -10)', () => {
   const SCOPE_A = '["webdav","https://sync.example.com/data.json","alice"]';
   const SCOPE_B = '["cloud","dropbox"]';
 
-  // No persisted state is the ONLY shape "off" ever takes (parseLocalState rejects a bare
-  // `{state:'off'}` blob), so this covers both a genuinely fresh device AND an ordinary
-  // long-time non-encryption user — same fact either way: has THIS location ever completed a
-  // fast-sync cycle. A fresh device (false) defers; an established plaintext location (true)
-  // does not, satisfying "no behaviour change for a plaintext location this device has synced
-  // before".
+
   it('defers with no persisted state until a fast-sync cycle has completed against this location', async () => {
     syncEncryptionLocalState.write(null);
     await flushSyncEncryptionLocalState();
@@ -2579,11 +2535,7 @@ describe('sync-encryption posture unestablished (fresh-join-attachment-posture p
     await expect(isSyncEncryptionPostureUnestablished(SCOPE_A, true)).resolves.toBe(false);
   });
 
-  // Review packet -10 finding B1: an `enabled` state never carries a `discoveredScope` in
-  // production (markSyncEncryptionEnabled / the Rust mirror both clear it on purpose — a key
-  // proves this device owns the generation, the discovery scope described the lock it just
-  // left). The fixture below has NO discoveredScope, matching production, and posture must
-  // still be established: material present = encrypted from the first byte, regardless of scope.
+
   it('is established for an enabled device with no discovered scope at all', async () => {
     syncEncryptionLocalState.write({
       state: 'enabled',
@@ -2638,7 +2590,7 @@ describe('sync-encryption posture unestablished (fresh-join-attachment-posture p
 describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
   const FOLDER_SCOPE = `["file","${SYNC_URI}"]`;
 
-  /** Only the `[sync-encryption]` lines, message + extras, as one string to search. */
+
   const capturedTrail = async (): Promise<string> => {
     const { logInfo, logWarn } = await import('./app-log');
     const calls = [
@@ -2657,7 +2609,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
     expect(resolved).not.toBeNull();
 
     const trail = await capturedTrail();
-    // The trail exists at all — otherwise "no secret found" is vacuously true.
+
     expect(trail).toContain('[sync-encryption] transition');
     expect(trail).toContain('"kind":"enable-local-only"');
     expect(trail).toContain('"outcome":"ok"');
@@ -2684,10 +2636,10 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
     expect(trail).toContain('[sync-encryption] state');
     expect(trail).toContain('"state":"remote-encrypted-no-key"');
     expect(trail).toContain('"decision":"blocked-no-key"');
-    // 8 hex characters of the persisted salt, and no more.
+
     expect(trail).toContain('"saltPrefix":"07070707"');
     expect(trail).not.toContain('07'.repeat(16));
-    // The scope string names the sync folder; only `file#<digest>` may be logged.
+
     expect(trail).toContain('"activeScope":"file#');
     expect(trail).not.toContain(SYNC_URI);
   }, 30_000);
@@ -2709,9 +2661,8 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
   }, 30_000);
 
   it('logs one progress line per completed transition phase, with planned and done filled', async () => {
-    // Core reports progress BEFORE it increments its counter, so a `completed >= total` guard
-    // never fires. Driven through the real transition, not a synthetic progress sequence:
-    // the bug this covers was a wrong belief about core's callback order.
+
+
     asyncStorage.set(SYNC_BACKEND_KEY, 'file');
     asyncStorage.set(SYNC_PATH_KEY, SYNC_URI);
     fs.files.set(SYNC_URI, new TextEncoder().encode(JSON.stringify(appData('before'), null, 2)));
@@ -2728,7 +2679,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
       expect(Number(extra.done)).toBeGreaterThan(0);
       expect(Number(extra.done)).toBeLessThanOrEqual(Number(extra.planned));
     }
-    // The last phase's line is emitted after the run returned, so everything planned is done.
+
     expect(phases.at(-1)!.done).toBe(phases.at(-1)!.planned);
   }, 30_000);
 

@@ -422,7 +422,7 @@ describe('saved filters', () => {
     });
 
     it('changes only the deleted entry: every other one stays as stored, in stored order', () => {
-        // A newer app's view and fields, stored after an older filter.
+
         const newer = {
             id: 'filter-newer',
             name: 'Board lane',
@@ -464,11 +464,11 @@ describe('saved filters', () => {
         const stored = [newer, { name: 'No id' }, undated, { ...undated, name: 'Calls again' }, 'not a filter'];
 
         const kept = keepSavedFilters(stored);
-        // Only the id-less entries go; a repeated id keeps its last copy at the first place.
+
         expect(kept).toEqual([newer, { ...undated, name: 'Calls again' }]);
         expect(kept[0]).toBe(newer);
 
-        // Screens: the newer app's view is hidden, an unknown sort is dropped, no timestamp is invented.
+
         expect(normalizeSavedFilters(stored)).toEqual([
             { id: 'filter-undated', name: 'Calls again', view: 'focus', criteria: {}, createdAt: '', updatedAt: '' },
         ]);

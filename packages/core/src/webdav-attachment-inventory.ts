@@ -35,6 +35,7 @@ const parseHref = (rawHref: string, collectionUrl: string): URL => {
     }
 };
 
+
 const comparableOrigin = (url: URL): string => url.origin.toLowerCase()
     .replace(/^(https:\/\/[^/]+):443$|^(http:\/\/[^/]+):80$/, '$1$2');
 
@@ -46,11 +47,7 @@ const decodePath = (pathname: string): string => {
     }
 };
 
-/**
- * Parse and validate the authoritative Depth:1 attachment collection response.
- * Request/auth/timeout handling stays in each platform adapter; all security-sensitive
- * DAV namespace, status, href, confinement, and attachment-name policy lives here.
- */
+
 export const parseWebdavAttachmentInventory = (
     xml: string,
     collectionUrl: string,
@@ -81,6 +78,7 @@ export const parseWebdavAttachmentInventory = (
             throw new Error('WebDAV attachment inventory returned an unmatched href');
         }
         const path = decodePath(href.pathname);
+
         const barePath = path.replace(/\/+$/, '');
         if (seenPaths.has(barePath)) {
             throw new Error('WebDAV attachment inventory returned a duplicate href');
@@ -115,6 +113,7 @@ export const parseWebdavAttachmentInventory = (
                 throw new Error('WebDAV attachment inventory requested collection is ambiguous');
             }
             matchedCollection = true;
+
             if (!path.endsWith('/')) {
                 logInfo('WebDAV attachment inventory matched the folder without a trailing slash', {
                     scope: 'sync',

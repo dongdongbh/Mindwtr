@@ -7,7 +7,7 @@ import { createNativeHostContract } from './native-host-contract';
 import { matchesPickerQuery } from './native-host-contract-menu-views';
 import { taskRevisionOf, setNativeReplayTokens } from './native-request-receipts';
 import type { NativeReviewAction, NativeReviewOverview } from './native-host-contract-review-views';
-import { compareProjectsByPickerOrder } from './project-utils';
+import { sortProjectsForPicker } from './project-utils';
 import { getAdvancedReviewDate } from './review-utils';
 import { createReviewRecorder, loadReviewViewsFixture, seedReviewStore, type ReviewFixturePart, type ReviewScenario } from './review-views-model.replay';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -28,7 +28,7 @@ import { generateUUID } from './uuid';
 const part = loadReviewViewsFixture().weeklyReview;
 const scenario: ReviewScenario = { name: 'contract', settings: 'base', actions: [] };
 const page = { offset: 0, limit: 100 };
-// Due for review: w-alice (a day), n-launch (a time, kept by Review in 1 week) and s-piano; w-parcel is not due yet.
+
 const DATA: ReviewFixturePart = {
     ...part,
     tasks: part.tasks.map((task) => (task.id === 'n-launch' ? { ...task, reviewAt: '2026-09-21T09:30' } : task)),
@@ -54,7 +54,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
         vi.restoreAllMocks();
     });
 
-    // Revisions and review dates read the clock.
+
     const freezeClock = (at = part.now) => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(at));
@@ -79,14 +79,14 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
     const run = (host: Awaited<ReturnType<typeof startHost>>, action: NativeReviewAction, requestId = generateUUID()) => (
         host.runReviewAction({ requestId, action })
     );
-    /** The overview with every area and project open. */
+
     const everything = (host: Awaited<ReturnType<typeof startHost>>, extra: Record<string, unknown> = {}): NativeReviewOverview => {
         const areas = value(host.getReviewOverview({ expansionEdit: { type: 'cycle' }, ...page }));
         return value(host.getReviewOverview({ expandedAreaIds: areas.expandedAreaIds, expansionEdit: { type: 'cycle' }, ...extra, ...page }));
     };
     const taskItems = (view: NativeReviewOverview) => view.items.flatMap((item) => (item.type === 'task' ? [item] : []));
     const task = (id: string) => useTaskStore.getState()._tasksById.get(id)!;
-    /** Every task as stored, less the device stamp. */
+
     const tasksNow = () => JSON.parse(JSON.stringify(useTaskStore.getState()._allTasks.map(({ revBy: _revBy, ...entry }) => entry)));
     const markAction = (id: string, advance: boolean) => ({ type: 'markTaskReviewed' as const, taskId: id, advance, taskRevision: taskRevisionOf(task(id)) });
     const revisions = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, taskRevisionOf(task(id))]));
@@ -117,7 +117,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
                     action: { type: 'markTaskReviewed', taskId: 'w-alice', advance: true, taskRevision: taskRevisionOf(task('w-alice')) },
                 },
             });
-            // Mobile shows them for due rows in the All scope too, and for no other row.
+
             const all = taskItems(everything(host, { scope: 'all' }));
             expect(all.filter((item) => item.review).map((item) => item.row.id).sort()).toEqual(['n-launch', 's-piano', 'w-alice']);
             expect(all.find((item) => item.row.id === 'w-parcel')?.review).toBeNull();
@@ -131,7 +131,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             freezeClock();
             const direct = await openHost();
             const before = task(id);
-            // Mobile's markReviewed(task, advance).
+
             await useTaskStore.getState().updateTask(id, { reviewAt: advance ? getAdvancedReviewDate(before.reviewAt) : undefined });
             const expected = { tasks: tasksNow(), log: [...direct.recorder.log] };
             await flushPendingSave();
@@ -160,7 +160,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(recorder.log).toHaveLength(1);
             const saved = saveData.mock.lastCall?.[0] as { tasks: Task[] };
             expect(saved.tasks.find((entry) => entry.id === 'w-alice')?.reviewAt).toBe('2026-09-30');
-            // A lost reply repeats the request: no write, no save.
+
             const saves = saveData.mock.calls.length;
             expect(value(await host.runReviewAction(input))).toEqual(retried);
             expect(saveData).toHaveBeenCalledTimes(saves);
@@ -176,19 +176,18 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(value(await host.runReviewAction(clear)).changed).toBe(true);
             const writes = recorder.log.length;
             const stored = tasksNow();
-            // A new host has no receipts, as after a restart.
+
             let restarted = await startHost();
             expect(value(await restarted.runReviewAction(advance))).toEqual({ changed: false, toast: null, createdId: null });
             expect(value(await restarted.runReviewAction(clear))).toEqual({ changed: false, toast: null, createdId: null });
             expect(recorder.log).toHaveLength(writes);
             expect(tasksNow()).toEqual(stored);
 
-            // Eight days on, w-alice is due again and s-piano got a new past review date:
-            // a replay finds a review date it never showed and does not move it again.
+
             await useTaskStore.getState().updateTask('s-piano', { reviewAt: '2026-09-28' });
             await flushPendingSave();
             freezeClock('2026-10-01T14:00:00.000Z');
-            // Activating a week on archives old done tasks; the replays below write nothing more.
+
             restarted = await startHost();
             await flushPendingSave();
             const later = tasksNow();
@@ -206,7 +205,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             await useTaskStore.getState().updateTask('w-alice', { reviewAt: '2026-09-21' });
             recorder.log.length = 0;
             expect(await run(host, action)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-            // Not due: mobile shows no link and writes nothing.
+
             expect(value(await run(host, markAction('w-parcel', true)))).toEqual({ changed: false, toast: null, createdId: null });
             expect(recorder.log).toEqual([]);
             expect(task('w-alice').reviewAt).toBe('2026-09-21');
@@ -227,7 +226,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(review.bulk?.organize).toEqual(inbox.organize);
             expect(review.bulk?.picker).toEqual(inbox.picker);
 
-            // Core's dialog model, called as mobile's TaskListBulkOrganizeModal calls it.
+
             const state = useTaskStore.getState();
             const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, ...ORGANIZE, areaChoice: 'a-home' };
             const dialog = buildBulkOrganizeDialogModel({
@@ -235,24 +234,24 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             });
             expect(review.bulk?.organize).toMatchObject({ draft, title: dialog.title, subtitle: dialog.subtitle, canApply: true, project: dialog.project, area: dialog.area });
 
-            // The project picker: Keep, None, then the options matching the search (the Inbox tokens' rule), in mobile's picker order.
-            const projects = [...getBulkOrganizeProjectOptions(state.projects)].sort(compareProjectsByPickerOrder);
+
+            const projects = sortProjectsForPicker(getBulkOrganizeProjectOptions(state.projects), state.areas);
             const all = everything(host, { selectedIds: REVIEW_SELECTION, organize: { draft }, picker: { kind: 'project' } }).bulk!.picker!;
             expect(all.items.map((item) => item.value)).toEqual([BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, ...projects.map((project) => project.id)]);
             expect(review.bulk?.picker?.items.slice(2).map((item) => item.label))
                 .toEqual(projects.filter((project) => matchesPickerQuery(project.title, ' GAR')).map((project) => project.title));
             expect(review.bulk?.picker?.items.find((item) => item.value === 'p-garden')).toMatchObject({ selected: true, edit: { type: 'setProject', value: 'p-garden' } });
-            // The area picker offers Create for a new name, as mobile's does; none while Apply runs.
+
             const area = (query: string, busy = false) => everything(host, { selectedIds: REVIEW_SELECTION, busy, picker: { kind: 'area', query } }).bulk!.picker!;
             expect(area('errands')).toMatchObject({ create: { name: 'errands' }, submit: { create: 'errands' } });
             expect(area(' HOME ')).toMatchObject({ create: null, submit: { edit: { type: 'setArea', value: 'a-home' } } });
             expect(area('errands', true)).toMatchObject({ create: null, submit: null });
-            // Remove tag's picker searches the selection's tags the same way.
+
             const tags = collectBulkTaskTokens(['n-cv', 'n-orphan'], Object.fromEntries(state.tasks.map((entry) => [entry.id, entry])), 'tags');
             const removeTag = everything(host, { selectedIds: ['n-cv', 'n-orphan'], picker: { kind: 'removeTag', query: ' CAR' } }).bulk!.picker!;
             expect(removeTag.items.map((item) => item.value)).toEqual(tags.filter((tag) => matchesPickerQuery(tag, ' CAR')));
             expect(removeTag.items.map((item) => item.value)).toEqual(['#career']);
-            // Without `organize` or `picker`, the bar has neither.
+
             expect(everything(host, { selectedIds: REVIEW_SELECTION }).bulk).toMatchObject({ organize: null, picker: null });
         });
 
@@ -273,7 +272,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
                 changed: true, toast: { tone: 'success', title: t('common.done'), message: formatListItemCount(updates.length, 'task', t), undo: null }, createdId: null,
             });
             expect({ tasks: tasksNow(), log: contract.recorder.log }).toEqual(expected);
-            // One task: mobile's singular count.
+
             expect(value(await run(contract.host, { type: 'organizeTasks', taskIds: ['n-rent'], draft: { tags: 'q4' }, taskRevisions: revisions(['n-rent']) })).toast?.message)
                 .toBe(formatListItemCount(1, 'task', t));
         });
@@ -295,11 +294,11 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(landed).toEqual([['p-garden', 'waiting', 'Alice'], ['p-garden', 'waiting', 'Alice']]);
             const saved = saveData.mock.lastCall?.[0] as { tasks: Task[] };
             expect(saved.tasks.filter((entry) => REVIEW_SELECTION.includes(entry.id)).map((entry) => entry.dueDate)).toEqual(['2026-10-02', '2026-10-02']);
-            // A lost reply repeats the request: no write, no save.
+
             const saves = saveData.mock.calls.length;
             expect(value(await host.runReviewAction(input))).toEqual(retried);
             expect(saveData).toHaveBeenCalledTimes(saves);
-            // A new request with that project is refused now: the dialog no longer offers it.
+
             expect(await run(host, { type: 'organizeTasks', taskIds: ['n-rent'], draft: ORGANIZE, taskRevisions: revisions(['n-rent']) })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         });
 
@@ -311,7 +310,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(value(await host.runReviewAction(apply)).changed).toBe(true);
             const made = value(await host.createBulkOrganizeDestination(create));
             expect(made).toEqual({ id: create.requestId.toLowerCase(), changed: true, draft: { ...EMPTY_BULK_ORGANIZE_DRAFT, areaChoice: made.id } });
-            // The new area is a choice of Review's dialog at once.
+
             expect(everything(host, { selectedIds: REVIEW_SELECTION, organize: { draft: made.draft } }).bulk?.organize?.area.value).toBe('Errands');
             await useTaskStore.getState().updateArea(made.id, { name: 'Chores' });
             await flushPendingSave();
@@ -346,7 +345,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
 
     describe('a replay after a restart, once a target changed since', () => {
         const REVIEW_SELECTION = ['n-bike', 'n-cv'];
-        /** A new host has no receipts, as after a restart. */
+
         const restart = async () => {
             await flushPendingSave();
             return startHost();
@@ -397,7 +396,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             const { host } = await openHost();
             const areas = () => JSON.stringify(useTaskStore.getState()._allAreas);
             const stored = areas();
-            // The picker's Done chooses the exact match: its `submit.edit`, a draft edit, no write.
+
             const picker = everything(host, { selectedIds: REVIEW_SELECTION, picker: { kind: 'area', query: 'Home' } }).bulk!.picker!;
             expect(picker).toMatchObject({ create: null, submit: { edit: { type: 'setArea', value: 'a-home' } } });
             const create = { requestId: generateUUID(), list: 'review' as const, kind: 'area' as const, name: 'Home' };
@@ -407,8 +406,8 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
                     .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             }
             expect(areas()).toBe(stored);
-            // Renamed and restarted, the refused request was never an answer to replay: sent again it
-            // is a new create, and only ever the one row named by its request UUID.
+
+
             await useTaskStore.getState().updateArea('a-home', { name: 'House' });
             const restarted = await restart();
             const made = value(await restarted.createBulkOrganizeDestination(create));
@@ -426,13 +425,13 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(open.bulk).toMatchObject({ selectedIds: [first, second], organize: { draft: EMPTY_BULK_ORGANIZE_DRAFT } });
             const item = taskItems(open).find((entry) => entry.row.id === first)!;
             const expanded = { scope, expandedAreaIds: open.expandedAreaIds, expandedProjectIds: open.expandedProjectIds };
-            // Folding the area or the project of one selected row ends the whole selection, and the sheet.
+
             for (const expansionEdit of [{ type: 'toggleArea' as const, id: item.areaGroupId }, { type: 'toggleProject' as const, id: item.projectGroupId }]) {
                 const folded = value(host.getReviewOverview({ ...expanded, selectedIds: [first, second], expansionEdit, organize: {}, picker: { kind: 'area' }, ...page }));
                 expect(folded.bulk).toBeNull();
                 expect(folded.items.some((entry) => entry.type === 'task' && entry.selected)).toBe(false);
             }
-            // So does a row the scope stops showing: in Due, a task reviewed elsewhere.
+
             if (scope === 'due') {
                 await useTaskStore.getState().updateTask(first, { reviewAt: undefined });
                 expect(value(host.getReviewOverview({ ...expanded, selectedIds: [first, second], ...page })).bulk).toBeNull();
@@ -459,7 +458,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
     it('refuses invalid input without writing', async () => {
         freezeClock();
         const { host, recorder } = await openHost();
-        // As the journaling Android host: each write must carry its replay tokens.
+
         setNativeReplayTokens('required');
         const invalid = { ok: false, error: { code: 'INVALID_INPUT' } };
         const view = (extra: Record<string, unknown>) => host.getReviewOverview({ selectedIds: ['n-bike'], ...extra, ...page } as never);

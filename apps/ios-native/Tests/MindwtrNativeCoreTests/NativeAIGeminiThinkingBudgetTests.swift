@@ -83,7 +83,7 @@ private final class AIGeminiThinkingBudgetNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Actual production bundle/JSC/SQLite. These are authored Apple checks, not Linux or device acceptance.
+
 final class NativeAIGeminiThinkingBudgetTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -299,8 +299,8 @@ final class NativeAIGeminiThinkingBudgetTests: XCTestCase {
 
     func testCancellationAfterJournalAndActualCommitFailureRetainsExactWarmRetryAndRejectsGenericRecovery() async throws {
         try await seed(configured())
-        // Hold only delivery of the first real commit's terminal reply until its caller cancels.
-        // The production route, store action, SQLite COMMIT and raw retry remain unchanged.
+
+
         let suffix = """
         ;(() => {
             const commit = MindwtrHost.iosAIGeminiThinkingBudgetCommit, poll = MindwtrHost.poll, cancel = MindwtrHost.cancel;
@@ -617,7 +617,7 @@ final class NativeAIGeminiThinkingBudgetTests: XCTestCase {
         try XCTUnwrap(retained.fence)()
         XCTAssertTrue(retained.observedEngine)
         XCTAssertNil(retained.facade); XCTAssertNil(retained.engine)
-        guard retained.engine == nil else { return } // Baseline failure never calls an unsafe retained owner.
+        guard retained.engine == nil else { return }
         let owner = try XCTUnwrap(retained.context?.objectForKeyedSubscript("__retainedGeminiOwner"))
         XCTAssertFalse(owner.isUndefined)
         XCTAssertEqual(owner.call(withArguments: [])?.toString(), "!MindwtrNativeError:AI Gemini thinking budget owner is unavailable")

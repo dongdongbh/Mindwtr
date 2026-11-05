@@ -11,9 +11,9 @@ import { getPersistenceStatus, getStorageAdapter } from './store';
 import { gateStoreCommands } from './store-write-gate';
 
 export type DeviceCalendarSettingStorage = {
-    /** Exact setting and private mutation-marker cells from one checked snapshot. */
+
     read(): Promise<[string | null, string | null]>;
-    /** The native owner atomically compares and replaces these two fixed cells. */
+
     compareAndSet(expected: [string | null, string | null], next: [string, string]): Promise<void>;
 };
 export type DeviceCalendarSettingRequest = { requestId: string; edit: NativeDeviceCalendarSettingsEdit };
@@ -66,7 +66,7 @@ const originalResult = (request: DeviceCalendarSettingRequest): NativeCalendarCo
     return planned.ok && planned.value.result.changed ? planned.value.result : null;
 };
 
-/** A same-UUID marker retains the entire original edit, not only a receipt hash. */
+
 const checkMarker = (raw: string | null, request: DeviceCalendarSettingRequest): NativeHostResult<boolean> => {
     let parsed: unknown;
     try { parsed = raw === null ? null : JSON.parse(raw); } catch { return { ok: true, value: false }; }
@@ -78,7 +78,7 @@ const checkMarker = (raw: string | null, request: DeviceCalendarSettingRequest):
     return { ok: true, value: true };
 };
 
-/** Validate the frozen witnesses before activation; this does not read storage or readiness. */
+
 const preparedOf = (input: unknown): PreparedDeviceCalendarSetting | null => {
     if (!isNativeJsonWithinBytes(input, ENVELOPE_BYTES) || !jsonRecord(input) || !exact(input, ['request', 'prepared'])
         || !jsonRecord(input.prepared)) return null;
@@ -94,7 +94,7 @@ const preparedOf = (input: unknown): PreparedDeviceCalendarSetting | null => {
     return clone(raw) as PreparedDeviceCalendarSetting;
 };
 
-/** Prepared device-local choices; native admission owns the journal, atomic cells, and prompts. */
+
 export function createDeviceCalendarSettingsMethods(deps: { readiness: () => NativeHostResult<null>;
     storage: () => DeviceCalendarSettingStorage | null }) {
     type Authorization = { payload: string; adapter: NativeReceiptSqliteAdapter; storage: DeviceCalendarSettingStorage };
@@ -135,7 +135,7 @@ export function createDeviceCalendarSettingsMethods(deps: { readiness: () => Nat
             ? { ok: true, value: cells as [string | null, string | null] }
             : fail('INVALID_INPUT', 'Device calendar storage exceeds the cell bound');
     };
-    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+
     return gateStoreCommands({
         async prepareDeviceCalendarSetting(input: unknown): Promise<NativeHostResult<DeviceCalendarSettingPreparation>> {
             const request = requestOf(input);

@@ -1,4 +1,4 @@
-/** The Projects Area manager's persisted ordering intents. Input order is display order. */
+
 export type AreaOrderIntent = { kind: 'moveUp'; areaId: string }
     | { kind: 'sortName' } | { kind: 'sortColor' };
 

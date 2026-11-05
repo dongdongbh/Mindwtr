@@ -3,7 +3,7 @@ import type { RelativeStartOffset, RelativeStartOffsetUnit, Task } from './types
 
 const RELATIVE_START_OFFSET_UNITS = new Set<RelativeStartOffsetUnit>(['minute', 'hour', 'day', 'week']);
 const RELATIVE_START_OFFSET_MIN_AMOUNT = -10_000;
-// 0 means "start on the due date itself" (#776 follow-up); positive stays invalid.
+
 const RELATIVE_START_OFFSET_MAX_AMOUNT = 0;
 
 const pad2 = (value: number): string => String(value).padStart(2, '0');

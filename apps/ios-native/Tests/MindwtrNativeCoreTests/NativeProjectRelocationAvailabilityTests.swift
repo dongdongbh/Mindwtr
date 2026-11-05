@@ -36,8 +36,7 @@ private final class ProjectRelocationNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Synthetic single-container moves are macOS-only. Actual iPhone reinstall
-/// mapping is root's separate physical acceptance; these never rebase old IO.
+
 final class NativeProjectRelocationAvailabilityTests: XCTestCase {
     private var fixture: URL!, root: URL!, bundle: URL!
     private var hostname: String!, namespace: String!, state: ProjectRelocationState!
@@ -150,8 +149,8 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
         XCTAssertEqual(option["state"] as? String, "none")
         _ = try await setup.call("setAreaFilter", argumentsJSON: json([json(XCTUnwrap(option["next"]))])); await setup.close()
-        // Establish settled raw authority before the operation. Initial loader
-        // preference normalization is historical and is not this command's proof.
+
+
         _ = try sql("UPDATE projects SET attachments=?,tagIds=NULL,viewSectionIds='[]' WHERE id=?", [json([item]), projectID])
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
     }
@@ -271,7 +270,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), currentIdentity)
             XCTAssertEqual(try Data(contentsOf: old), oldBytes); XCTAssertEqual(try inode(old), oldIdentity)
             await cold.close(); XCTAssertEqual(try markers(), 0); XCTAssertEqual(try markers("v1.3.5/ios-selfhosted-file-availability"), 0)
-            // Reset only the mutated synthetic configuration between independent proof windows.
+
             try config.write(to: manifest)
         }
         XCTAssertGreaterThan(state.counts[1], 0, "The changed owner must have captured the native token snapshot")
@@ -313,8 +312,8 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
             case "cap": try Data(count: 8_388_609).write(to: target)
             default: break
             }
-            // Wrong generation metadata must already be in this fresh host's
-            // captured selection, rather than merely disagreeing with memory.
+
+
             let live = try await host(); _ = try await live.start()
             if mode == "null" { try replaceSelected { $0["pendingContentUpload"] = NSNull() } }
             let before = try rows(), request = try await input(live)
@@ -375,7 +374,7 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
             })
             _ = try await live.start(); let request = try await input(live); await refused(live, request: request)
             XCTAssertTrue(changed, mode); XCTAssertFalse(failed, mode); XCTAssertEqual(try markers(), 0); await live.close()
-            // Reset only synthetic setup for the next independent mutation case.
+
             for url in [EditorDraftStore(databaseURL: database).url, NativeAttachmentDraftStore(databaseURL: database).url] where FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
             let names = baseline.keys.filter { $0 != "_rowid" }.sorted(); _ = try sql("UPDATE projects SET " + names.map { "\($0)=?" }.joined(separator: ",") + " WHERE id=?", names.map { baseline[$0]! } + [projectID])
             let savedSettings = try XCTUnwrap((NativeJSON.jsonObject(with: Data(settings.utf8)) as? [[String: Any]])?.first?["data"] as? String)
@@ -399,8 +398,8 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
     }
     func testFailedCommitAcknowledgmentNeverReturnsAvailableOrEmitsRelocationMarker() async throws {
         try await seed(); _ = try relocate(); let faults = HostIOFaults(); var armed = false, acknowledgments = 0
-        // Keep every matching ACK unavailable, as in the existing Project
-        // download fault fixture; a one-shot fault permits a real writer retry.
+
+
         faults.afterSQL = { sql in if armed && sql == "COMMIT", try self.selected()["uri"] as? String == self.target.absoluteString {
             acknowledgments += 1; throw HostFailure("Synthetic lost Project acknowledgment")
         } }
@@ -425,8 +424,8 @@ final class NativeProjectRelocationAvailabilityTests: XCTestCase {
         var entered = false, holdAt = Int.max
         let live = try await host(before: { count in if !entered && count == holdAt { entered = true; reached.fulfill(); release.wait() } })
         _ = try await live.start(); let request = try await input(live), baseline = try rows()
-        // The first work item is the typed baseline proof. The second is the
-        // shared resolver's getInfo, inside its admitted selected-JSC ticket.
+
+
         holdAt = state.counts[3] + (selectedRead ? 2 : 1)
         let operation = Task { try await live.foregroundSync(command: "projectAttachmentDownload", requestJSON: request) }
         await fulfillment(of: [reached], timeout: 10)

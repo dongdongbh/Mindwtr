@@ -147,7 +147,7 @@ describe('unbound shared owned-file Add Save authority', () => {
 
     it.each(['raw', 'checklistBase', 'edited', 'unknown', 'touchedBase'])('refuses extra initial/UI payload %s without writes', async (name) => {
         const input = await request();
-        // Even a structurally coherent lineage cannot authorize losing this extra field.
+
         const insert = (text: string) => JSON.stringify({ ...JSON.parse(text), [name]: {} });
         input.ownedDraft.initialPayloadJSON = insert(input.ownedDraft.initialPayloadJSON);
         input.ownedDraft.beforePayloadJSON = insert(input.ownedDraft.beforePayloadJSON);

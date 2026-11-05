@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Version bump script for Mindwtr monorepo.
-# Usage:
-#   ./scripts/bump-version.sh 0.2.5
-#   ./scripts/bump-version.sh v1.0.5-rc.1
-#   ./scripts/bump-version.sh  (prompts for version or RC tag)
+
 
 set -e
 
@@ -38,7 +34,7 @@ else
     exit 1
 fi
 
-# Bump Android versionCode in apps/mobile/app.json
+
 bump_android_version_code() {
     local app_json="apps/mobile/app.json"
     if [ ! -f "$app_json" ]; then
@@ -80,12 +76,11 @@ NODE
     fi
 }
 
-# Use Node.js script for safe JSON updates
+
 node scripts/update-versions.js "$NEW_VERSION"
 bump_android_version_code
 
-# Record the full release version (including any -rc.N suffix) for builds that
-# cannot receive CI env, e.g. reproducible F-Droid/IzzyOnDroid APKs.
+
 printf '{\n  "releaseVersion": "%s"\n}\n' "${RELEASE_TAG#v}" > apps/mobile/release-version.json
 echo "Updated apps/mobile/release-version.json to ${RELEASE_TAG#v}"
 
@@ -117,7 +112,7 @@ NODE
 
 update_snapcraft
 
-# Regenerate lockfile with new versions
+
 echo ""
 echo "Updating lockfile..."
 bun install

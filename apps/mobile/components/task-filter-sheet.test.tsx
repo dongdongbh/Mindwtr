@@ -79,7 +79,7 @@ const t = (key: string) => ({
 
 let tree: ReactTestRenderer | null = null;
 
-/** Renders the sheet over a real selections hook, as all mobile hosts do. */
+
 function renderSheet({
   view = 'list',
   options,
@@ -130,7 +130,7 @@ const hasText = (text: string): boolean => (
   tree!.root.findAllByType(Text).some((node) => node.props.children === text)
 );
 
-/** Depth-first index of the first node matching, i.e. its place in the sheet. */
+
 const renderOrderIndexOf = (predicate: (node: { type: unknown; props: Record<string, unknown> }) => boolean): number => (
   tree!.root.findAll(() => true).findIndex(predicate as never)
 );
@@ -172,10 +172,10 @@ afterEach(() => {
 describe('TaskFilterSheet', () => {
   it('discloses task dates and clears just the range with Any time', () => {
     const handle = renderSheet();
-    expect(hasText('filters.datePreset.next_7_days')).toBe(false);
+    expect(hasText('filters.datePreset.overdue_next_7_days')).toBe(false);
     openCategory('filters.taskDates');
-    act(() => findButtonByText('filters.datePreset.next_7_days').props.onPress());
-    expect(handle.current.criteria).toEqual({ anyDateRange: { preset: 'next_7_days' } });
+    act(() => findButtonByText('filters.datePreset.overdue_next_7_days').props.onPress());
+    expect(handle.current.criteria).toEqual({ anyDateRange: { preset: 'overdue_next_7_days' } });
     expect(handle.current.activeCount).toBe(1);
     act(() => findButtonByText('filters.anyTime').props.onPress());
     expect(handle.current.criteria).toEqual({});

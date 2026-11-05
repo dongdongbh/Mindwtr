@@ -195,7 +195,7 @@ describe('mobile pomodoro controller', () => {
     await controller.ensureHydrated();
     controller.reconcile();
     controller.reconcile();
-    // The credit goes to its task once the session that owes it is stored.
+
     await controller.flushPersistence();
 
     expect(updateTask).toHaveBeenCalledTimes(1);
@@ -361,7 +361,7 @@ describe('mobile pomodoro controller', () => {
   });
 });
 
-/** A finished focus session's task credit across the two stores it touches (the session on the device, the task in the database). */
+
 describe('Pomodoro task credit', () => {
   const NOW = Date.now();
   const stored = JSON.stringify({
@@ -421,7 +421,7 @@ describe('Pomodoro task credit', () => {
     await second.ensureHydrated();
     await settle(second);
     expect(tasks[0].timeSpentMinutes).toBe(30);
-    // A third start finds nothing owed.
+
     const third = open(device, tasks);
     await third.ensureHydrated();
     await settle(third);
@@ -432,7 +432,7 @@ describe('Pomodoro task credit', () => {
     const tasks = makeTasks();
     const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
     let writes = 0;
-    // The first session write (the credit owed) lands; the next (the credit settled) does not.
+
     const first = open(device, tasks, { failWrites: () => (writes += 1) > 1 });
     await first.ensureHydrated();
     await settle(first);
@@ -444,7 +444,7 @@ describe('Pomodoro task credit', () => {
   });
 
   it('credits once when the app stopped while the task save was still in flight', async () => {
-    // The real store answers updateTask from memory and saves later: the credit counts only once the save is on disk.
+
     const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
     const memory = makeTasks();
     const first = createMobilePomodoroController({
@@ -452,7 +452,7 @@ describe('Pomodoro task credit', () => {
       getTaskStore: () => ({
         tasks: memory,
         updateTask: async (_id, updates) => { Object.assign(memory[0], updates); return { success: true }; },
-        // The app stops before the save lands.
+
         flush: () => new Promise<void>(() => undefined),
       }),
     });
@@ -484,15 +484,15 @@ describe('Pomodoro task credit', () => {
   });
 
   it('keeps a credit owed when the real store gave up on its save, though its flush resolves', async () => {
-    // The default store port: core's flushPendingSave finds nothing queued (the failed save was dropped), but the failure
-    // is still recorded, so the time is not on disk.
+
+
     const tasks = makeTasks();
     const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
     const before = useTaskStore.getState();
     useTaskStore.setState({
       tasks,
       _allTasks: tasks,
-      // The task changes in memory; its save then fails for good, so the store records the failure and drops the save.
+
       updateTask: async (_id: string, updates: Partial<Task>) => {
         Object.assign(tasks[0], updates);
         useTaskStore.setState({ persistenceFailure: { message: 'disk full', at: NOW } } as never);
@@ -526,7 +526,7 @@ describe('Pomodoro task credit', () => {
     });
     await controller.ensureHydrated();
     await settle(controller);
-    // A later change writes the session again: the time is already in memory, so only its save is retried.
+
     controller.setSelectedTaskId(undefined);
     await settle(controller);
     expect(flushes).toBe(2);
@@ -538,11 +538,11 @@ describe('Pomodoro task credit', () => {
     const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
-    // Another device logged time on the task; the sync save publishes it.
+
     const save = runSyncStoreSave(async () => { await held; tasks[0].timeSpentMinutes = 12; });
     const controller = createMobilePomodoroController({
       storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
-      // A store command, as the real updateTask is: it waits for the save.
+
       getTaskStore: () => ({ tasks, updateTask: (_id, updates) => runStoreCommand(async () => { Object.assign(tasks[0], updates); return { success: true }; }) }),
     });
     await controller.ensureHydrated();
@@ -550,7 +550,97 @@ describe('Pomodoro task credit', () => {
     release();
     await save;
     await settle(controller);
+
+    expect(tasks[0].timeSpentMinutes).toBe(37);
+  });
+
+  it('credits the expired focus on top of a task changed since its stored owed credit', async () => {
+
+
+    const tasks = [{ id: 't1', title: 'One', status: 'next', timeSpentMinutes: 12 } as Task];
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, JSON.stringify({ ...JSON.parse(stored), pendingCredits: [{ taskId: 't1', from: 5, to: 30 }] })]]);
+    const controller = open(device, tasks);
+    await controller.ensureHydrated();
+    await settle(controller);
+    await settle(controller);
+    expect(tasks[0].timeSpentMinutes).toBe(37);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!)).not.toHaveProperty('pendingCredits');
+    expect(logInfo).toHaveBeenCalledWith('Pomodoro credit moved onto the task time', {
+      scope: 'pomodoro', extra: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' },
+    });
+  });
+
+  it('stores a moved credit before its task write, so a stop before the save lands credits it at the restart', async () => {
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, JSON.stringify({ ...JSON.parse(stored), pendingCredits: [{ taskId: 't1', from: 5, to: 30 }] })]]);
+    const memory = [{ id: 't1', title: 'One', status: 'next', timeSpentMinutes: 12 } as Task];
+    const first = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks: memory,
+        updateTask: async (_id, updates) => { Object.assign(memory[0], updates); return { success: true }; },
+
+        flush: () => new Promise<void>(() => undefined),
+      }),
+    });
+    await first.ensureHydrated();
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+    expect(memory[0].timeSpentMinutes).toBe(37);
+    const disk = [{ id: 't1', title: 'One', status: 'next', timeSpentMinutes: 12 } as Task];
+    const second = open(device, disk);
+    await second.ensureHydrated();
+    await settle(second);
+    await settle(second);
+    expect(disk[0].timeSpentMinutes).toBe(37);
+  });
+
+  it('stores a moved credit and the credit chained from it before the task changes, so a stop credits each once', async () => {
+
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, JSON.stringify({ ...JSON.parse(stored), pendingCredits: [{ taskId: 't1', from: 5, to: 30 }] })]]);
+    const memory = [{ id: 't1', title: 'One', status: 'next', timeSpentMinutes: 12 } as Task];
+    let nowMs = NOW;
+    const first = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({
+        tasks: memory,
+        updateTask: async (_id, updates) => { Object.assign(memory[0], updates); return { success: true }; },
+
+        flush: () => (memory[0].timeSpentMinutes === 62 ? new Promise<void>(() => undefined) : Promise.resolve()),
+      }),
+      now: () => nowMs,
+    });
+    await first.ensureHydrated({ autoStartFocus: true, autoStartBreaks: true });
+    nowMs += 31 * 60_000;
+    first.reconcile({ autoStartFocus: true, autoStartBreaks: true });
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+    expect(memory[0].timeSpentMinutes).toBe(62);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits)
+      .toEqual([{ taskId: 't1', from: 5, to: 30 }, { taskId: 't1', from: 12, to: 37 }, { taskId: 't1', from: 37, to: 62 }]);
+
+    const disk = [{ id: 't1', title: 'One', status: 'next', timeSpentMinutes: 37 } as Task];
+    const second = open(device, disk);
+    await second.ensureHydrated();
+    await settle(second);
+    expect(disk[0].timeSpentMinutes).toBe(62);
+  });
+
+  it('never moves a credit this run already wrote when the task changes before its save lands', async () => {
+    const tasks = makeTasks();
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    let fail = true;
+    const updateTask = vi.fn(async (_id: string, updates: Partial<Task>) => { Object.assign(tasks[0], updates); return { success: true }; });
+    const controller = createMobilePomodoroController({
+      storage: { getItem: async (key) => device.get(key) ?? null, setItem: async (key, value) => { device.set(key, value); } },
+      getTaskStore: () => ({ tasks, updateTask, flush: async () => { if (fail) throw new Error('disk full'); } }),
+    });
+    await controller.ensureHydrated();
+    await settle(controller);
+    expect(tasks[0].timeSpentMinutes).toBe(30);
+
+    tasks[0].timeSpentMinutes = 12; fail = false;
+    controller.setSelectedTaskId(undefined);
+    await settle(controller);
     expect(tasks[0].timeSpentMinutes).toBe(12);
+    expect(updateTask).toHaveBeenCalledOnce();
   });
 
   it('credits two sessions of one task in a row', async () => {

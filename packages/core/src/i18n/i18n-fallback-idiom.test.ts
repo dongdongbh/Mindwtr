@@ -4,11 +4,7 @@ import { join, resolve } from 'path';
 import * as ts from 'typescript';
 import { en } from './locales/en';
 
-// Ratchet for i18n-fallback-20260730-12: `t()` returns the KEY on a miss (see
-// language-context.tsx on both platforms), so `t('key') || 'literal'` never falls back —
-// it's always truthy. The one correct idiom is `tFallback(t, 'key', 'literal')`
-// (translateWithFallback, exported above). These two tests keep that regression from
-// coming back and keep every key the idiom relies on present in en.ts.
+
 const REPO_ROOT = resolve(import.meta.dirname, '../../../..');
 const APP_ROOTS = [
     join(REPO_ROOT, 'apps/desktop/src'),
@@ -51,9 +47,7 @@ function unwrapParens(node: ts.Expression): ts.Expression {
     return current;
 }
 
-// Matches a call to the i18n translate function: t('some.key'). Deliberately narrow
-// (identifier named exactly `t`, exactly one argument) to match the real language-context
-// signature on both platforms without false-positiving on unrelated single-letter callees.
+
 function asTCall(node: ts.Expression): ts.CallExpression | null {
     const unwrapped = unwrapParens(node);
     if (
@@ -71,8 +65,7 @@ function isOrIdiom(node: ts.Node): node is ts.BinaryExpression {
     return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken;
 }
 
-// `||` is left-associative, so a maximal `a || b || c` chain nests as `(a || b) || c`:
-// only the outermost node (not the `.left` of another `||`) heads the whole chain.
+
 function isChainHead(node: ts.BinaryExpression): boolean {
     const parent = node.parent;
     return !(parent && isOrIdiom(parent) && parent.left === node);
@@ -85,9 +78,8 @@ function flattenOrChain(node: ts.BinaryExpression): ts.Expression[] {
 
 describe('i18n fallback idiom ratchet', () => {
     it('keeps the dead t(key) || fallback idiom out of apps/desktop and apps/mobile source', () => {
-        // Empty by design: every known instance was converted to tFallback() in
-        // i18n-fallback-20260730-12. A new entry here would mean the exact same
-        // dead-code idiom regressed somewhere — fix the call site, don't list it.
+
+
         const EXCLUDED_FILES = new Set<string>();
 
         const violations: string[] = [];
@@ -109,17 +101,13 @@ describe('i18n fallback idiom ratchet', () => {
         }
 
         expect(violations).toEqual([]);
-        // Walking every apps/ source file takes ~9s on slower CI runners, well past
-        // vitest's 5s default.
+
+
     }, 60_000);
 
     it('keeps app-local "what do I show on a miss" policies out of apps/desktop and apps/mobile source', () => {
-        // A function that reaches for both `t()` and `getEnglishI18nValue()` is
-        // re-deciding what to render when a locale lacks a key. That policy has one
-        // home, core's resolveI18nText(). Five hand-written copies existed before
-        // i18n-resolve-20260808, in three different shapes, and one of them
-        // (settings.hooks.ts) word-swapped the English text into nonsense for two
-        // years because no core i18n test could reach an app-level hook.
+
+
         const violations: string[] = [];
         for (const { path, sourceFile } of collectSourceFiles()) {
             const visit = (node: ts.Node) => {
@@ -144,34 +132,14 @@ describe('i18n fallback idiom ratchet', () => {
             visit(sourceFile);
         }
 
-        // Nested functions make the innermost offender report as several enclosing
-        // ones too; the innermost line is the one to fix.
+
         expect(violations).toEqual([]);
-        // Same slow-runner allowance as the idiom scan above.
+
     }, 60_000);
 
     it('keeps hand-rolled locale-dictionary fallbacks out of apps/desktop and apps/mobile source', () => {
-        // Reading getTranslationsSync twice in one module is the signature of a
-        // hand-rolled "locale dictionary, else English dictionary" lookup. Core's
-        // getTranslator() owns that chain and resolveI18nText() owns what to show when
-        // both miss. Five modules spelled it themselves before the seam landed:
-        // sync-service, obsidian-store, and the three mobile trash-restore labels
-        // (notification-service was a fourth long-standing copy in the same family,
-        // but it read the dictionary only once — see below).
-        //
-        // Counted per FILE rather than per function on purpose: sync-service hoisted its
-        // English dictionary into a module-level const, so a per-function scan would have
-        // walked straight past it.
-        //
-        // What this does NOT catch: a single raw read with no fallback at all —
-        // `getTranslationsSync(lang)['digest.focus']`, which is undefined for any key
-        // that locale omits and shipped an "undefined" digest title to Dutch users.
-        // One read is indistinguishable here from a legitimate one, so the fix for that
-        // bug class is the getTranslator seam itself (92e5d9c28), not this predicate.
-        //
-        // One call per file is therefore still allowed, and two app files rely on it:
-        // language-context seeding its English map, and notification-service holding a
-        // dictionary for two Record-typed helpers (the widget payload builder moved to core).
+
+
         const violations: string[] = [];
         for (const { path, sourceFile } of collectSourceFiles()) {
             let calls = 0;
@@ -190,17 +158,14 @@ describe('i18n fallback idiom ratchet', () => {
         }
 
         expect(violations).toEqual([]);
-        // Same slow-runner allowance as the idiom scan above.
+
     }, 60_000);
 
     it('keeps every statically-referenced i18n key present in en.ts', () => {
-        // Static analysis boundary: only literal-string keys are checkable this way.
-        // A dynamic key built from a runtime value (e.g. t(`status.${task.status}`) or
-        // t(someVariable)) can't be resolved without executing the program, so those call
-        // sites are skipped here — they're covered instead by whatever enum/union drives
-        // the interpolated value, not by this scan.
+
+
         const enKeys = new Set(Object.keys(en));
-        const missing = new Map<string, string>(); // key -> first file:line reference
+        const missing = new Map<string, string>();
 
         function staticStringValue(node: ts.Expression): string | null {
             if (ts.isStringLiteralLike(node)) return node.text;
@@ -229,6 +194,6 @@ describe('i18n fallback idiom ratchet', () => {
 
         const report = [...missing.entries()].map(([key, site]) => `${key} (${site})`);
         expect(report).toEqual([]);
-        // Same slow-runner allowance as the idiom scan above.
+
     }, 60_000);
 });

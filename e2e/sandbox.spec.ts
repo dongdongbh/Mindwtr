@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { dismissOnboarding, seedAppData } from './seed';
 
 const switchWorkspace = async (page: Page, click: () => Promise<void>) => {
-    // Each switch reloads the page after pending personal saves finish. Wait for
-    // that reload before checking the new workspace; the old DOM is not proof.
+
+
     await Promise.all([page.waitForEvent('load', { timeout: 30_000 }), click()]);
 };
 
@@ -83,8 +83,8 @@ test('sandbox editing, reset and exit preserve the personal workspace', async ({
 });
 
 test.describe('delayed sandbox boot', () => {
-    // The web service worker serves navigations before Playwright routing;
-    // block it here so the delayed document request is deterministic.
+
+
     test.use({ serviceWorkers: 'block' });
 
     test('waits for the reloaded workspace without changing personal data', async ({ page }) => {

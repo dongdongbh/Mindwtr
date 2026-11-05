@@ -5,7 +5,7 @@ import Darwin
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Actual production bundle/JSC/SQLite. These are authored Apple checks, not Linux or device acceptance.
+
 final class NativeAIProviderDeviceStateTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -97,12 +97,12 @@ final class NativeAIProviderDeviceStateTests: XCTestCase {
         let inspect = try XCTUnwrap(retained.inspect, file: file, line: line)
         let fence = try XCTUnwrap(retained.fence, file: file, line: line)
         XCTAssertTrue(retained.observedEngine, file: file, line: line)
-        // Keep these boxed values/context alive: only ARC ownership of the facade/Engine is tested, not JSC collection.
+
         XCTAssertTrue(owner.context === inspect.context, file: file, line: line)
         fence()
         XCTAssertNil(retained.facade, file: file, line: line)
         XCTAssertNil(retained.engine, file: file, line: line)
-        // Baseline failure must not invoke its unsafe unowned callbacks.
+
         guard retained.facade == nil, retained.engine == nil else { return }
         XCTAssertEqual(owner.call(withArguments: [])?.toString(),
             "!MindwtrNativeError:AI provider device metadata owner is unavailable", file: file, line: line)
@@ -325,7 +325,7 @@ final class NativeAIProviderDeviceStateTests: XCTestCase {
             _ = try await core.start()
             _ = try await core.readAIProviderDeviceState()
         }
-        // Keep only this caller's temporary reference to distinguish awaited close from deinit cleanup.
+
         await failure { _ = try await XCTUnwrap(retained).readAIProviderDeviceState() }
         retained = nil
         XCTAssertNil(released, "The scoped helper must not retain its closed host until XCTest teardown")

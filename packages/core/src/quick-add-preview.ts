@@ -24,21 +24,16 @@ export type QuickAddPreviewEntryKind =
     | 'link';
 
 export interface QuickAddPreviewEntry {
-    /** Stable across keystrokes so a chip is never remounted while typing. */
+
     id: string;
     kind: QuickAddPreviewEntryKind;
-    /** Localized field name; absent where the value speaks for itself (@context, #tag). */
+
     label?: string;
     value: string;
     tone: 'default' | 'warning';
 }
 
-/**
- * What a surface's own pickers will force onto the saved task, mirroring its
- * `CaptureTransactionOptions.transformProps`. A picked value always wins over
- * the parsed one, so the chip has to show the picked value too. Each field is
- * exactly the string the task will store — date-only stays date-only (#797).
- */
+
 export interface QuickAddPreviewOverrides {
     projectId?: string;
     dueDate?: string;
@@ -49,11 +44,11 @@ export interface QuickAddPreviewOptions {
     t: TranslateFn;
     projects?: readonly Project[];
     areas?: readonly Area[];
-    /** The draft as typed; the title chip shows only when parsing changed it. */
+
     rawInput?: string;
-    /** Surfaces without pickers (desktop, capture modal) leave this unset. */
+
     overrides?: QuickAddPreviewOverrides;
-    /** Formats the date chips; defaults to the configured formatting (safeFormatDate). */
+
     formatDate?: DateFormatter;
 }
 
@@ -64,23 +59,12 @@ function truncate(value: string, limit = VALUE_PREVIEW_LIMIT): string {
     return trimmed.length > limit ? `${trimmed.slice(0, limit - 1).trimEnd()}…` : trimmed;
 }
 
-/**
- * Formats a value the parser already resolved. Never re-parses: the string here
- * is exactly what the task will store, date-only stays date-only (#797).
- */
+
 function formatPreviewDate(value: string, formatDate: DateFormatter = safeFormatDate): string {
     return formatDate(value, hasTimeComponent(value) ? 'Pp' : 'P', value);
 }
 
-/**
- * Shape a parsed quick-add draft into the chips a capture surface shows while
- * the user types. Read-only: everything here comes out of the single
- * `parseQuickAdd` result the submit path uses, so the preview cannot disagree
- * with what saving will produce.
- *
- * Returns an empty list when nothing beyond a plain title was recognized, so a
- * surface can render the strip unconditionally and have it stay invisible.
- */
+
 export function buildQuickAddPreviewEntries(
     parsed: QuickAddResult,
     options: QuickAddPreviewOptions,
@@ -99,8 +83,7 @@ export function buildQuickAddPreviewEntries(
         });
     }
 
-    // Same rule as buildCaptureTaskProps: a trailing natural-language date only
-    // becomes the due date when nothing more explicit set one.
+
     const detectedDate = parsed.detectedDate;
     const appliesDetectedDate = Boolean(detectedDate?.date && !props.dueDate && !overrides?.dueDate);
     const dueValue = overrides?.dueDate
@@ -146,8 +129,7 @@ export function buildQuickAddPreviewEntries(
         });
     }
 
-    // A `+Project` naming no existing project is reported as projectTitle: the
-    // capture creates it, so the chip shows the name either way.
+
     const projectId = overrides?.projectId ?? props.projectId;
     const projectName = projectId
         ? projects?.find((project) => project.id === projectId)?.title
@@ -259,6 +241,6 @@ export function buildQuickAddPreviewEntries(
         });
     });
 
-    // A cleaned title on its own is not feedback that anything was recognized.
+
     return entries.some((entry) => entry.kind !== 'title') ? entries : [];
 }

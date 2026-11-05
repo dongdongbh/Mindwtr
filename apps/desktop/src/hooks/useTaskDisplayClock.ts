@@ -20,7 +20,7 @@ function refresh() {
 function schedule() {
     stopTimer();
     if (document.hidden || !listeners.size) return;
-    // Core treats a timed due date as overdue strictly after its instant.
+
     timer = setTimeout(() => {
         refresh();
         schedule();

@@ -1,40 +1,32 @@
 import { parsePastedChecklistItems } from './markdown';
 import type { ChecklistItem, Task, TaskStatus } from './types';
 
-/**
- * The task editor's checklist, as the React Native editor edits it: the Form
- * tab's checklist field and the View tab's ticks and add input. Every edit
- * changes the editor's unsaved checklist; the editor saves it with the rest of
- * the task. Item IDs stay as they are; new items get a new ID.
- */
 
 export type TaskChecklistEdit =
-    /** The Form tab's checkbox and the View tab's tick: the item at this position (item IDs can repeat). */
+
     | { kind: 'toggle'; index: number }
-    /** An item's text as typed. Text with line breaks becomes one item per line (a paste). */
+
     | { kind: 'rename'; index: number; text: string }
-    /**
-     * Return on an item: an empty item after it. On an empty item it only ends editing.
-     * `text`: the item's text as typed, when the input is ahead of the checklist.
-     */
+
+
     | { kind: 'insertAfter'; index: number; text?: string }
     | { kind: 'remove'; index: number }
-    /** "+ Add item": an empty item at the end, unless an item is empty already. */
+
     | { kind: 'add' }
-    /** Reorder mode's Move up (to = from - 1) and Move down (to = from + 1). */
+
     | { kind: 'move'; from: number; to: number }
-    /** The View tab's add input on submit. Blank text only ends editing. */
+
     | { kind: 'append'; title: string }
-    /** After Reset checklist has reset the saved task: every item open. */
+
     | { kind: 'uncheckAll' };
 
 export type TaskChecklistEditResult = {
     checklist: ChecklistItem[];
-    /** The new empty item, to focus. */
+
     focusId: string | null;
 };
 
-/** The React Native editor's reorder: the item at `fromIndex` moves to `toIndex`; out of range changes nothing. */
+
 export function reorderChecklistItems(checklist: Task['checklist'], fromIndex: number, toIndex: number): ChecklistItem[] {
     const items = checklist || [];
     if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) return items;
@@ -45,11 +37,7 @@ export function reorderChecklistItems(checklist: Task['checklist'], fromIndex: n
     return next;
 }
 
-/**
- * The checklist after one edit, as the React Native editor makes it; null when it
- * makes no change (it then ends editing, or does nothing). A Reference list edits
- * like a checklist: pasted `- [x]` lines stay checked.
- */
+
 export function applyTaskChecklistEdit(
     checklist: Task['checklist'],
     edit: TaskChecklistEdit,
@@ -65,7 +53,7 @@ export function applyTaskChecklistEdit(
             if (!/[\r\n]/.test(edit.text)) {
                 return done(list.map((entry, index) => (index === edit.index ? { ...entry, title: edit.text } : entry)));
             }
-            // A paste: the first line renames this item, the rest follow it.
+
             const [first, ...rest] = parsePastedChecklistItems(edit.text);
             const current = list[edit.index];
             if (!current) return null;
@@ -105,12 +93,7 @@ export function applyTaskChecklistEdit(
     }
 }
 
-/**
- * The draft status after a checklist edit. A list task (taskMode 'list') is Done
- * once every item is; an open item takes a Done list task back to Next. Other
- * tasks keep their status, and so does a Reference: its items tick like a
- * checklist, but the reference itself never completes (#1416).
- */
+
 export function getChecklistEditStatus(input: {
     taskMode: Task['taskMode'];
     status: TaskStatus;
@@ -126,13 +109,13 @@ export type TaskChecklistFieldItem = {
     id: string;
     title: string;
     completed: boolean;
-    /** A completed item is struck and muted (a reference list too). */
+
     struck: boolean;
-    /** The checkbox's name: the title, or the placeholder when blank. */
+
     checkboxLabel: string;
-    /** The text input's name: "Checklist 2". */
+
     inputLabel: string;
-    /** Reorder mode's row text and its buttons' names. */
+
     orderTitle: string;
     moveUpLabel: string;
     moveDownLabel: string;
@@ -141,19 +124,19 @@ export type TaskChecklistFieldItem = {
 };
 
 export type TaskChecklistFieldModel = {
-    /** "Checklist", or "List" for a reference. */
+
     label: string;
-    /** The Reorder toggle shows with two items or more. */
+
     canReorder: boolean;
-    /** "+ Add item" adds nothing while an item is empty. */
+
     canAdd: boolean;
-    /** Reset checklist shows under a list with items (a reference list too). */
+
     canReset: boolean;
-    labels: { reorder: string; done: string; add: string; reset: string; placeholder: string };
+    labels: { reorder: string; done: string; add: string; reset: string; placeholder: string; drag: string; actions: string; moveTop: string; moveBottom: string; addBelow: string };
     items: TaskChecklistFieldItem[];
 };
 
-/** The Form tab's checklist field for the editor's checklist. */
+
 export function buildTaskChecklistFieldModel(input: {
     checklist: Task['checklist'];
     isReference: boolean;
@@ -174,6 +157,11 @@ export function buildTaskChecklistFieldModel(input: {
             add: t('taskEdit.addItem'),
             reset: t('taskEdit.resetChecklist'),
             placeholder,
+            drag: t('taskEdit.dragChecklistItem'),
+            actions: t('taskEdit.checklistItemActions'),
+            moveTop: t('taskEdit.moveChecklistTop'),
+            moveBottom: t('taskEdit.moveChecklistBottom'),
+            addBelow: t('taskEdit.addChecklistBelow'),
         },
         items: items.map((item, index) => {
             const orderTitle = item.title.trim() || placeholder;

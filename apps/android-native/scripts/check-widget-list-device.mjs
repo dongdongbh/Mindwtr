@@ -1,16 +1,6 @@
-// Widget list screen check (pass P3, W1b, #1213) for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-widget-list-device.mjs <adb-serial> [apk]
-//
-// A Tasks widget showing Next Actions or a saved filter links its header to `mindwtr:///widget-list/<id>` (core's openUri; the
-// development build's scheme is mindwtr-native-dev). The check never touches a placed widget: it sends the widget's link with
-// `am start -d`. Installs the debug APK with `install -r` (development data stays) and writes nothing: (a) `next` opens RN's widget
-// list screen titled with core's title (Next Actions) and core's first rows in core's order, not the Inbox; a row's swipe shows
-// RN's action (not run) and its tap opens the editor; Back returns to the list, and Back again leaves it; (b) the device's first
-// saved filter core opens as a list, when it has one, opens with core's title and rows; (c) a saved filter that is gone (URI-encoded id) shows core's
-// "No results" title and empty line, with no row. Screenshots of (a) and (c) go to the harness folder (MINDWTR_HARNESS_DIR) for
-// the side-by-side with RN. It touches only the development package (it refuses any other APK), never launches over another
-// app, leaves the app on its Inbox tab and restores rotation on exit. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -47,7 +37,7 @@ const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, screen, waitFor, tapExpecting } = device;
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 
-/** Core's widget list screens on a copy of the app's database: each id's found, title, total, first rows' titles and empty line. */
+
 const core = (ids) => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -80,11 +70,11 @@ const core = (ids) => {
         .trim().split('\n').pop());
 };
 
-// ---- UI (core's English) ----
+
 const onInbox = (nodes) => !tagged(nodes, 'menu-screen') && tabSelected(nodes, en['tab.inbox']);
 const header = (nodes, title) => tagged(nodes, 'menu-screen') && nodes.some((node) => node.text === title && node.class !== 'android.widget.EditText');
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => node.text);
-/** The widget's link for [id], as core's openUri builds it (encodeURIComponent), sent to this app only, from the app or home. */
+
 const openLink = (id) => {
     const current = front();
     if (!current.includes(`${PKG}/`) && !current.includes(`${home}/`)) throw new Stopped(`another app is in front: ${current.trim()}`);
@@ -96,7 +86,7 @@ const shot = (name) => {
     writeFileSync(file, adbRaw('exec-out', 'screencap', '-p'));
     console.log(`screenshot ${file}`);
 };
-/** The list for [id]: its header title and core's first rows in core's order (as many as the screen shows), and no Inbox. */
+
 const expectList = async (id, view, label) => {
     openLink(id);
     const nodes = await waitFor(`${label}: the widget list "${view.title}"`, (current) => header(current, view.title)
@@ -125,11 +115,11 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await device.tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -146,14 +136,13 @@ try {
     await waitFor('the Inbox', onInbox, 60_000);
     const gone = `filter:gone-${run}`;
     let seen = core(['next', gone]);
-    // The first saved filter core opens as a widget list (one for another view, or a hidden one, opens nothing, as on RN).
+
     if (seen.filters.length > 0) seen = core(['next', gone, ...seen.filters.map((id) => `filter:${id}`)]);
     const filterId = seen.filters.map((id) => `filter:${id}`).find((id) => seen.views[id]?.found) ?? null;
     const next = seen.views.next;
     check(next.found && next.title === (en['nav.next'] ?? 'Next Actions') && next.total > 0, `core's Next Actions list holds ${next.total} tasks`);
 
-    // (a) Next Actions, from the home screen as a widget's tap: core's title and rows; a row's swipe shows RN's action; its tap
-    // opens the editor; Back, Back.
+
     sh('input keyevent KEYCODE_HOME');
     await waitFor('the home screen', () => front().includes(`${home}/`), 10_000);
     let nodes = await expectList('next', next, 'a');
@@ -161,20 +150,20 @@ try {
     shot('next');
     const [first] = rowTitles(nodes);
     const action = await device.revealAction(nodes, first);
-    // The action's label is its child text, inside its bounds.
+
     const [al, at, ar, ab] = box(action);
     const label = (await screen()).find((node) => node.text && (() => { const [l, t, r, b] = box(node); return l >= al && t >= at && r <= ar && b <= ab; })())?.text;
     check(Boolean(label), `(a) a row's swipe shows RN's action "${label}" (not run)`);
-    // Dragging back left closes the action without running it.
+
     {
         const row = taskRows(await screen()).find((node) => node.text === first) ?? fail(`no row ${first}`);
         const [x1, y1, x2, y2] = box(row);
         const y = Math.round((y1 + y2) / 2);
         requireAppFront();
-        // From the row's middle, never its right edge: an edge swipe is the system Back gesture.
+
         const from = Math.round((x1 + x2) / 2);
         sh(`input swipe ${from} ${y} ${Math.max(from - 440, 160)} ${y} 300`);
-        await waitFor('the action to close', (current) => !current.some((node) => (node['resource-id'] ?? '').endsWith('swipe-action')), 8_000);
+        await waitFor('the tray to close', (current) => !current.some((node) => /swipe-\w+$/.test(node['resource-id'] ?? '')), 8_000);
     }
     nodes = await tapExpecting(taskRows(await screen()).find((node) => node.text === first) ?? fail(`no row ${first}`), inEditor, `the editor for ${first}`);
     check(nodes.some((node) => node.text === first), `(a) the row's tap opens the editor on ${first}`);
@@ -183,7 +172,7 @@ try {
     await backTo(onInbox, 'the tabs');
     check(true, '(a) Back leaves the widget list');
 
-    // (b) The device's first saved filter, by its id.
+
     if (filterId) {
         const view = seen.views[filterId];
         check(view.found, `core finds the saved filter ${filterId} ("${view.title}", ${view.total} tasks)`);
@@ -193,7 +182,7 @@ try {
         console.log(`skip - (b) none of the device's ${seen.filters.length} saved filters opens as a widget list`);
     }
 
-    // (c) A saved filter that is gone: core's "No results" title and empty line, no row.
+
     const missing = seen.views[gone];
     check(!missing.found && missing.title === en['search.noResults'] && missing.empty === en['search.noResults'], 'core answers a gone filter with "No results"');
     nodes = await expectList(gone, missing, 'c');

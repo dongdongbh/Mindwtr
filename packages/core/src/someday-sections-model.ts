@@ -1,9 +1,6 @@
-/**
- * Someday's sections as decisions: creating, renaming, reordering and removing a
- * section definition, moving tasks between sections (with Undo), and adding a
- * task to a section. Mobile's Someday screen, section manager and move hook
- * call these; the native host writes the same results.
- */
+
+
+
 import { isTaskVisibleInArea, type AreaFilterSelection } from './area-filter';
 import { formatI18nTemplate, tFallback } from './i18n';
 import { logInfo } from './logger';
@@ -17,10 +14,7 @@ function makeSomedaySectionId(now = Date.now(), random: () => number = Math.rand
     return `someday-${now.toString(36)}-${random().toString(36).slice(2, 8)}`;
 }
 
-/**
- * The settings update that stores Someday's definitions and keeps every other GTD setting.
- * Every section write goes through here; the edits below keep the entries they do not edit.
- */
+
 export function buildSomedaySectionsSettingsUpdate(
     settings: AppSettings | undefined,
     someday: ViewSectionDefinition[],
@@ -47,7 +41,7 @@ export function buildSomedaySectionsSettingsUpdate(
 
 export type SomedaySectionCreatePlan =
     | { kind: 'blank' }
-    /** A section with this title exists (any case); nothing is written. */
+
     | { kind: 'existing'; id: string }
     | { kind: 'create'; id: string; sections: ViewSectionDefinition[] };
 
@@ -69,11 +63,7 @@ export function planSomedaySectionCreate(
     return { kind: 'create', id, sections: [...(stored ?? []), { id, title: trimmed, order: maxOrder + 1 }] };
 }
 
-// Each edit below changes only the section it edits. Every other stored entry,
-// including one this build cannot show (a newer app's shape), is kept as it is,
-// in stored order: the list is synced settings.
 
-/** The definitions after a rename, or null for a blank title (the manager keeps editing). */
 export function renameSomedaySection(
     stored: readonly ViewSectionDefinition[] | undefined,
     id: string,
@@ -84,10 +74,7 @@ export function renameSomedaySection(
     return (stored ?? []).map((section) => section?.id === id ? { ...section, title: trimmed } : section);
 }
 
-/**
- * The definitions with the shown sections in this order (each shown id once),
- * numbered from 0. Only a section whose number changes is rewritten.
- */
+
 export function orderSomedaySections(
     stored: readonly ViewSectionDefinition[] | undefined,
     ids: readonly string[],
@@ -100,7 +87,7 @@ export function orderSomedaySections(
     });
 }
 
-/** The definitions after moving one up (-1) or down (1), renumbered; null at either end. */
+
 export function moveSomedaySection(
     stored: readonly ViewSectionDefinition[] | undefined,
     id: string,
@@ -114,18 +101,14 @@ export function moveSomedaySection(
     return orderSomedaySections(stored, ids);
 }
 
-/**
- * The definitions without one section. Tasks and parked projects keep their
- * stored assignment and show under "No section" until they move; nothing about
- * them is deleted.
- */
+
 export function removeSomedaySection(stored: readonly ViewSectionDefinition[] | undefined, id: string): ViewSectionDefinition[] {
     return (stored ?? []).filter((section) => section?.id !== id);
 }
 
 const resolveText = (t: Translate, key: string, fallback: string) => tFallback(t, key, fallback);
 
-/** The Manage screen's section rows: each row's controls and the delete confirmation it asks for. */
+
 export function buildSomedaySectionManagerRows(stored: readonly ViewSectionDefinition[] | undefined, t: Translate) {
     const sorted = sortViewSectionDefinitions(stored);
     return sorted.map((section, index) => ({
@@ -159,17 +142,12 @@ export function getSomedaySectionManagerText(t: Translate) {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Moving tasks between sections
 
 export type SomedaySectionAssignment = { id: string; sectionId?: string };
 
-/**
- * The tasks a move may touch, read from the store at the moment of the write:
- * every id must still be a Someday task visible in the selected areas.
- */
+
 export function getSomedaySectionMoveTasks(input: {
-    /** Store tasks (state.tasks). */
+
     tasks: readonly Task[];
     projects: readonly Project[];
     areas: readonly Area[];
@@ -190,14 +168,10 @@ export function getSomedaySectionMoveTasks(input: {
 const sameIds = (left: readonly string[], right: readonly string[]) =>
     left.length === right.length && left.every((id, index) => id === right[index]);
 
-/**
- * The writes for a move and what Undo restores. A retry of the same move after
- * its save failed finds the tasks already moved; it keeps the first attempt's
- * `previous` so Undo still restores the original sections.
- */
+
 export function planSomedaySectionMove(input: {
     ids: readonly string[];
-    /** getSomedaySectionMoveTasks's result for the same ids. */
+
     tasks: readonly Task[];
     destination?: string;
     pending?: { ids: readonly string[]; destination?: string; previous: readonly SomedaySectionAssignment[] } | null;
@@ -216,7 +190,7 @@ export function planSomedaySectionMove(input: {
     return { updates, previous: [...previousById.values()], resumed: Boolean(resume) };
 }
 
-/** What the move dialog preselects for these tasks. */
+
 export function getSomedaySectionMoveSelection(
     tasks: readonly (Task | undefined)[],
     sections: readonly ViewSectionDefinition[],
@@ -230,7 +204,7 @@ export function getSomedaySectionMoveSelection(
     };
 }
 
-/** The move dialog: its title and the choices with "No section" first. */
+
 export function buildSomedaySectionMoveDialog(
     tasks: readonly (Task | undefined)[],
     stored: readonly ViewSectionDefinition[] | undefined,
@@ -256,7 +230,7 @@ export function getSomedaySectionMoveText(t: Translate) {
     };
 }
 
-/** "Moved to Ideas (2)"; no section title means "No section". */
+
 export function formatSomedaySectionMoved(t: Translate, count: number, sectionTitle?: string): string {
     return formatI18nTemplate(tFallback(t, 'viewSections.moved', 'Moved to {section} ({count})'), {
         count,
@@ -264,18 +238,16 @@ export function formatSomedaySectionMoved(t: Translate, count: number, sectionTi
     });
 }
 
-// ---------------------------------------------------------------------------
-// Adding a task to a section
 
 export type SomedaySectionTaskPlan =
     | { kind: 'blank' }
-    /** The section was removed meanwhile; mobile shows the add failure. */
+
     | { kind: 'missing-section' }
     | { kind: 'add'; title: string; props: Partial<Task> };
 
 export function planSomedaySectionTaskAdd(input: {
     title: string;
-    /** Undefined for "No section". */
+
     sectionId?: string;
     stored: readonly ViewSectionDefinition[] | undefined;
 }): SomedaySectionTaskPlan {

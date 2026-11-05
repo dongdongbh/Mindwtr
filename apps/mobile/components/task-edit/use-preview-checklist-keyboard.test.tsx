@@ -108,15 +108,15 @@ describe('preview checklist keyboard visibility', () => {
       listeners.get('keyboardDidShow')?.({ endCoordinates: { screenY: 500, height: 300 } });
     });
     settle();
-    // Visible area is 400px, so the clearance is 18% of it.
+
     expect(api.bottomInset).toBe(250);
     expect(api.contentBottomPadding).toBeCloseTo(250 + 400 * 0.18);
     expect(inputTop - offset + 40).toBeCloseTo(500 - 400 * 0.18);
   });
 
   it('pads enough for a last-content input to clear the keyboard', () => {
-    // The input is the last thing in the preview, so the scroll can only reach
-    // what the hook's own bottom padding makes scrollable.
+
+
     scrollTo.mockImplementation(({ y }: { y: number }) => {
       const inputBottomInContent = inputTop - 100 + 40;
       const maxOffset = Math.max(0, inputBottomInContent + api.contentBottomPadding - viewportHeight);
@@ -131,8 +131,8 @@ describe('preview checklist keyboard visibility', () => {
   });
 
   it('clears the iOS predictive bar when it joins the keyboard after the first frame', () => {
-    // iOS reports the keyboard before its animation, and the 44pt QuickType bar
-    // can arrive in a later frame that makes the keyboard taller.
+
+
     const withoutBar = 520;
     const withBar = withoutBar - 44;
     scrollTo.mockImplementation(({ y }: { y: number }) => {
@@ -150,7 +150,7 @@ describe('preview checklist keyboard visibility', () => {
     const clearance = (withBar - 100) * 0.18;
     expect(api.bottomInset).toBe(100 + viewportHeight - withBar);
     expect(inputTop - offset + 40).toBeCloseTo(withBar - clearance);
-    // The whole predictive bar plus a margin stays free below the typed line.
+
     expect(withBar - (inputTop - offset + 40)).toBeGreaterThan(44);
   });
 
@@ -160,7 +160,7 @@ describe('preview checklist keyboard visibility', () => {
       listeners.get('keyboardDidShow')?.({ endCoordinates: { screenY: 400, height: 400 } });
     });
     settle();
-    // 18% of the 300px visible area is 54px, below the 56px floor.
+
     expect(api.bottomInset).toBe(350);
     expect(api.contentBottomPadding).toBe(350 + 56);
     expect(inputTop - offset + 40).toBe(400 - 56);
@@ -183,11 +183,11 @@ describe('preview checklist keyboard visibility', () => {
     });
     settle();
     expect(api.bottomInset).toBe(250);
-    // A later frame without the predictive bar must not pull the input back down.
+
     renderer.act(() => listeners.get('keyboardDidChangeFrame')?.({ endCoordinates: { screenY: 560, height: 240 } }));
     settle();
     expect(api.bottomInset).toBe(250);
-    // A taller keyboard still grows the space and re-reveals the input.
+
     renderer.act(() => listeners.get('keyboardDidChangeFrame')?.({ endCoordinates: { screenY: 460, height: 340 } }));
     settle();
     expect(api.bottomInset).toBe(290);

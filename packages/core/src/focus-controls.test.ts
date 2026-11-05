@@ -1,8 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
     applyFocusControlEdit,
+    buildFocusNextItems,
+    buildFocusScheduleItems,
     canReorderFocusTasks,
     DEFAULT_FOCUS_CONTROL_STATE,
+    getFocusEmptyState,
     getFocusFilterTokens,
     getFocusGroupByOptions,
     getFocusReorderPositionLabel,
@@ -23,7 +26,7 @@ import {
 import { loadTranslations } from './i18n/i18n-loader';
 import { EMPTY_LIST_FILTER_STATE } from './list-filter-state';
 import { flushPendingSave, resetForTests } from './store';
-import type { SavedFilter } from './types';
+import type { SavedFilter, Task } from './types';
 
 const fixture = loadFocusControlsFixture();
 
@@ -70,6 +73,24 @@ describe('Focus controls', () => {
         ] as never)).toEqual(['@home', '@work', '@work/calls', '#deep', '#ops', '#ops/night']);
     });
 
+    it('keeps folded Focus headings and counts while removing only their task occurrences', () => {
+        const both: Task = { id: 'both', title: 'Both', status: 'next', contexts: ['@home', '@work'], tags: [], createdAt: 'x', updatedAt: 'x' };
+        const input = { groupBy: 'context' as const, tasks: [both], projects: [], areas: [], t };
+        const folded = buildFocusNextItems({ ...input, collapsedGroupIds: new Set(['context:@home']) });
+        expect(folded).toMatchObject([
+            { type: 'groupHeader', id: 'context:@home', count: 1, collapsed: true },
+            { type: 'groupHeader', id: 'context:@work', count: 1, collapsed: false },
+            { type: 'task', task: { id: 'both' }, groupId: 'context:@work' },
+        ]);
+        expect(buildFocusNextItems({ ...input, collapsedGroupIds: new Set() }).filter((item) => item.type === 'task')).toHaveLength(2);
+        expect(buildFocusNextItems(input).filter((item) => item.type === 'groupHeader').every((item) => !('collapsed' in item))).toBe(true);
+
+        expect(buildFocusScheduleItems({ ready: [both], laterToday: [both] }, t, new Set(['focus:schedule:later-today']))).toMatchObject([
+            { type: 'task', task: { id: 'both' } },
+            { type: 'groupHeader', id: 'focus:schedule:later-today', count: 1, collapsed: true },
+        ]);
+    });
+
     it('offers and honours priority sort and grouping only while Priorities is on', () => {
         expect(getFocusSortOptions(true)).toContain('priority');
         expect(getFocusSortOptions(false)).not.toContain('priority');
@@ -83,7 +104,7 @@ describe('Focus controls', () => {
         expect(applied).toEqual({ filters: { ...EMPTY_LIST_FILTER_STATE, tokens: ['@a'] }, savedFilterId: 's', sortBy: 'due' });
         const resolved = { state: applied, activeSavedFilter: saved, effectiveSortBy: 'due' as const };
         expect(applyFocusControlEdit(resolved, { type: 'filter', edit: { type: 'toggleToken', value: '@b' } }, [saved])?.savedFilterId).toBeNull();
-        // The same sort as the saved filter's still detaches it.
+
         expect(applyFocusControlEdit(resolved, { type: 'sort', sortBy: 'due' }, [saved])).toEqual({ ...applied, savedFilterId: null });
         expect(applyFocusControlEdit({ ...resolved, activeSavedFilter: null, state: { ...applied, savedFilterId: null } }, { type: 'sort', sortBy: 'due' }, [saved]))
             .toEqual({ ...applied, savedFilterId: null });
@@ -120,7 +141,7 @@ describe('Focus controls', () => {
     });
 
     it('removes an advanced criterion from the stored filter, keeping what this build does not know', () => {
-        // A newer app's field and criterion on a Focus filter this build can show.
+
         const stored = {
             id: 's', name: 'S', view: 'focus', color: 'red',
             criteria: { areas: [' area ', 'other'], futureCriterion: 'keep' },
@@ -153,5 +174,14 @@ describe('Focus controls', () => {
         expect(moveFocusReorderTask([a, b, c], 'b', -1)?.map(({ id }) => id)).toEqual(['b', 'a', 'c']);
         expect(moveFocusReorderTask([a, b, c], 'a', -1)).toBeNull();
         expect(moveFocusReorderTask([a, b, c], 'c', 1)).toBeNull();
+    });
+});
+
+describe('the empty Focus screen', () => {
+    const t = (key: string) => key;
+
+    it('says how to start when the library has no tasks, and that nothing is due when it has some', () => {
+        expect(getFocusEmptyState({ hasActiveFilters: false, hasAnyTasks: false, t })).toEqual({ title: 'agenda.allClear', subtitle: 'agenda.emptyStart' });
+        expect(getFocusEmptyState({ hasActiveFilters: false, hasAnyTasks: true, t })).toEqual({ title: 'agenda.allClear', subtitle: 'agenda.noTasks' });
     });
 });

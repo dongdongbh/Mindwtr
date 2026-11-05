@@ -30,7 +30,7 @@ type RendererActivityDetails = {
     sequentialResultCount?: number;
 };
 
-/** Effect/callback owner only: no store inventory snapshot or render-time logging. */
+
 export function beginRendererActivity(activity: RendererActivity) {
     if (!isLoggingEnabled()) return null;
     return { activity, sequence: ++activitySequence, navigationSequence, startedAt: performance.now(), entries: 0, closed: false };
@@ -40,7 +40,7 @@ export function recordRendererActivity(trace: ReturnType<typeof beginRendererAct
     if (!trace || trace.closed) return;
     if (stage === 'cleanup') trace.closed = true;
     if (!isLoggingEnabled()) return;
-    // Reserve the twelfth and final breadcrumb for aggregate cleanup.
+
     if (stage !== 'cleanup' && trace.entries >= 11) return;
     trace.entries++;
     void logInfo('Renderer view work phase', {
@@ -118,7 +118,7 @@ function write(trace: RendererNavigationTrace, stage: string, actualView?: strin
     });
 }
 
-/** Called before the transition; logging never delays navigation or awaits disk. */
+
 export function beginRendererNavigation(view: string): RendererNavigationTrace {
     const trace = {
         sequence: ++navigationSequence, previousView: committedView, nextView: safeView(view),
@@ -128,7 +128,7 @@ export function beginRendererNavigation(view: string): RendererNavigationTrace {
     return trace;
 }
 
-/** Only called by content committed inside Suspense, never by its fallback. */
+
 export function commitRendererNavigation(view: string, trace: RendererNavigationTrace | null): () => void {
     committedView = safeView(view) === 'other' ? 'inbox' : safeView(view);
     if (!trace?.enabled || !isLoggingEnabled()) return () => {};
@@ -142,7 +142,7 @@ export function commitRendererNavigation(view: string, trace: RendererNavigation
     const frame = requestAnimationFrame(() => {
         if (cancelled || trace.sequence !== navigationSequence || trace.frameLogged) return;
         trace.frameLogged = true;
-        // A callback is evidence of renderer progress, not proof of a successful paint.
+
         write(trace, 'animation-frame', actualView, state);
     });
     return () => { cancelled = true; cancelAnimationFrame(frame); };

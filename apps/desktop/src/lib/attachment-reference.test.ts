@@ -13,12 +13,12 @@ describe('isBareFileReference', () => {
             { kind: 'file', uri: 'file:///D:/docs/report.pdf' },
             managedDirPrefix,
         )).toBe(true);
-        // Another app's data dir is not ours.
+
         expect(isBareFileReference(
             { kind: 'file', uri: 'C:\\Users\\me\\AppData\\Roaming\\OtherApp\\export.pdf' },
             managedDirPrefix,
         )).toBe(true);
-        // Prefix match must not bleed into sibling directories.
+
         expect(isBareFileReference(
             { kind: 'file', uri: 'C:\\Users\\me\\AppData\\Roaming\\mindwtr\\attachments-old\\id.pdf' },
             managedDirPrefix,

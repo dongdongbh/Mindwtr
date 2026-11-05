@@ -48,7 +48,7 @@ describe('React Native selection mode parity', () => {
         });
     }
 
-    // The contract serves the five lists the native app shows; the project workspace is core-only here.
+
     for (const scenario of fixture.scenarios.filter((entry) => entry.list !== 'project')) {
         it(`the contract replays "${scenario.name}"`, async () => {
             freezeClock();

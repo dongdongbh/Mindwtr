@@ -15,8 +15,7 @@ import {
   type Task,
 } from '@mindwtr/core';
 
-// Field shape of the 2026-09-23 phone repro (upgrade harness scenario 4): the
-// JSON startup snapshot lags SQLite by one task, and a capture is queued.
+
 const QUEUE_DIR = 'file:///docs/pending-captures';
 const CAPTURE_FILE = `${QUEUE_DIR}/17.json`;
 
@@ -115,11 +114,11 @@ const capturedTasks = (tasks: Task[]) => tasks.filter(({ title }) => title === '
 const readiness = {
   dataReady: false,
   canonicalDataReady: false,
-  // The store's tasks at the moment canonical readiness first turned true.
+
   tasksWhenCanonical: null as Task[] | null,
 };
 
-// The same wiring as app/_layout.tsx: the drain is gated on canonical data.
+
 function RootLayoutStartupHarness() {
   const { dataReady, canonicalDataReady } = useRootLayoutStartup({
     analyticsHeartbeatUrl: '',
@@ -141,7 +140,7 @@ function RootLayoutStartupHarness() {
 }
 
 describe('startup store writes wait for the canonical SQLite load', () => {
-  // A small SQLite stand-in: rows by id, and per-row upserts like the real adapter.
+
   let sqliteRows: Map<string, Task>;
   let firstRead!: { release: () => void; fail: (error: Error) => void };
   let storage: StorageAdapter & {
@@ -172,8 +171,8 @@ describe('startup store writes wait for the canonical SQLite load', () => {
     sqliteRows = new Map([task('11'), task('18')].map((row) => [row.id, row]));
     const firstReadGate = new Promise<void>((release, fail) => { firstRead = { release, fail }; });
     storage = {
-      // The first read takes its rows, then waits, so the snapshot paints first
-      // and a write can land meanwhile. Re-reads answer at once.
+
+
       getData: vi.fn(async () => {
         const rows = [...sqliteRows.values()].map((row) => structuredClone(row));
         if (storage.getData.mock.calls.length === 1) await firstReadGate;
@@ -200,7 +199,7 @@ describe('startup store writes wait for the canonical SQLite load', () => {
     await act(async () => {
       tree = create(<RootLayoutStartupHarness />);
     });
-    // The snapshot paints first while SQLite is still loading.
+
     await vi.waitFor(() => expect(readiness.dataReady).toBe(true));
     expect(readiness.canonicalDataReady).toBe(false);
     expect(taskIds()).toEqual(['11']);
@@ -213,19 +212,19 @@ describe('startup store writes wait for the canonical SQLite load', () => {
 
   it('keeps the SQLite-only task and ingests the queued capture exactly once', async () => {
     await startApp();
-    // Nothing may write on top of the snapshot: the capture waits on disk.
+
     expect(mocks.files.has(CAPTURE_FILE)).toBe(true);
     expect(capturedTasks(useTaskStore.getState()._allTasks)).toHaveLength(0);
 
     await finishFirstRead();
     await vi.waitFor(() => expect(mocks.files.has(CAPTURE_FILE)).toBe(false));
 
-    // The canonical load was applied, not discarded: task 18 exists only in SQLite.
+
     expect(storage.getData).toHaveBeenCalledOnce();
     expect(readiness.tasksWhenCanonical?.map(({ id }) => id)).toEqual(expect.arrayContaining(['11', '18']));
     expect(taskIds()).toEqual(expect.arrayContaining(['11', '18']));
     expect(capturedTasks(useTaskStore.getState()._allTasks)).toHaveLength(1);
-    // The rewritten document keeps both, so the next JSON backup is not stale.
+
     const saved = storage.saveData.mock.calls.at(-1)?.[0] as AppData;
     expect(saved.tasks.map(({ id }) => id)).toEqual(expect.arrayContaining(['11', '18']));
     expect(capturedTasks(saved.tasks)).toHaveLength(1);
@@ -242,7 +241,7 @@ describe('startup store writes wait for the canonical SQLite load', () => {
       firstRead.fail(new Error('SQLite unavailable'));
     });
     await vi.waitFor(() => expect(useTaskStore.getState().error).toBeTruthy());
-    // Let any late effect or microtask run before checking nothing was written.
+
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 
     expect(readiness.canonicalDataReady).toBe(false);
@@ -252,8 +251,7 @@ describe('startup store writes wait for the canonical SQLite load', () => {
     expect(storage.saveTask).not.toHaveBeenCalled();
   });
 
-  // A tap on a snapshot row during the load makes core skip the SQLite result.
-  // Startup saves the edit, reads SQLite again, and only then reports ready.
+
   it('re-fetches after a snapshot-window edit and keeps the edit and the SQLite-only task', async () => {
     await startApp();
     await act(async () => {
@@ -272,15 +270,13 @@ describe('startup store writes wait for the canonical SQLite load', () => {
       scope: 'startup',
       extra: { releaseCheck: RELEASE_CHECK, retryCount: 1, outcome: 'applied' },
     });
-    // The queued capture still lands once, on top of canonical data.
+
     await vi.waitFor(() => expect(mocks.files.has(CAPTURE_FILE)).toBe(false));
     expect(capturedTasks(useTaskStore.getState()._allTasks)).toHaveLength(1);
     expect(storedTask('18')).toBeDefined();
   });
 
-  // The Focus screen's Pomodoro panel hydrates on mount, which can happen on
-  // the snapshot. Crediting a session that ended while the app was closed is a
-  // store write (updateTask), so it takes the same re-fetch path.
+
   it('re-fetches after the Pomodoro panel credits a session on the snapshot', async () => {
     await startApp();
     const controller = createMobilePomodoroController({
@@ -314,8 +310,8 @@ describe('startup store writes wait for the canonical SQLite load', () => {
 });
 
 describe('root layout wiring', () => {
-  // The hook tests prove each writer honors its gate; this proves the layout
-  // hands every one of them canonical readiness, not the snapshot's.
+
+
   it('gates every startup store writer on canonical data', () => {
     const layout = readFileSync(new URL('../app/_layout.tsx', import.meta.url), 'utf8');
     for (const hook of [

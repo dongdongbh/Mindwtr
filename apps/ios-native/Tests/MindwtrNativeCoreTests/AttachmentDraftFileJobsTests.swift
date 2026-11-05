@@ -18,7 +18,7 @@ final class AttachmentDraftFileJobsTests: XCTestCase {
     private let fillFields: Set<String> = ["sha256", "size", "identity"]
 
     override func setUpWithError() throws {
-        // Streaming fixtures stay on the checkout's disk, never Darwin /tmp.
+
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let fixture = checkout.appendingPathComponent(".build/task223-fixtures/\(UUID().uuidString)", isDirectory: true)
@@ -272,7 +272,7 @@ final class AttachmentDraftFileJobsTests: XCTestCase {
         XCTAssertGreaterThan(jobs.counters.bytes, 64 * 1024)
         XCTAssertEqual(try takeDraft(id)["error"] as? String, "Attachment file operation was cancelled")
         XCTAssertEqual(try Data(contentsOf: source), bytes)
-        // Cancellation does not roll back an in-place fill; the inode remains owned.
+
         XCTAssertEqual(try Data(contentsOf: stageFile), bytes)
         XCTAssertEqual(try identity(stageFile), stage.stagedIdentity)
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
@@ -427,8 +427,8 @@ final class AttachmentDraftFileJobsTests: XCTestCase {
                 XCTAssertTrue(error is NativeAttachmentFilesError || error is NativeAttachmentInstallerError)
             }
         }
-        // Each URI fits its own bound, but JSON escaping pushes the full proof
-        // over 64 KiB. Count the encoded frame rather than unescaped strings.
+
+
         let escaped = String(repeating: "\"", count: 16 * 1024)
         let encodedSource = SourceProof(sourceURI: escaped, sha256: sha, size: 0,
                                        identity: "1:2", cacheRootIdentity: "1:3", parentIdentity: "1:3")
@@ -500,8 +500,8 @@ final class AttachmentDraftFileJobsTests: XCTestCase {
         XCTAssertEqual(jobs.next(), "")
         XCTAssertEqual(jobs.counters.jobs, 2)
         XCTAssertEqual(jobs.counters.bytes, retainedBytes)
-        // Typed delivery is by exact requested ID, independent of delivery of
-        // other typed answers, while the worker itself remains one FIFO.
+
+
         XCTAssertEqual(try takeDraft(typedError)["error"] as? String, "ENOENT: no such file or directory")
         XCTAssertEqual(jobs.counters.jobs, 1)
         _ = try value(typed, fields: sourceFields)
@@ -525,7 +525,7 @@ final class AttachmentDraftFileJobsTests: XCTestCase {
         XCTAssertEqual(jobs.takeDraft(last), "")
         XCTAssertEqual(jobs.counters.jobs, 3)
         XCTAssertEqual(jobs.counters.bytes, reserved)
-        let firstAnswer = try object(jobs.next()) // Do not drain a held worker.
+        let firstAnswer = try object(jobs.next())
         XCTAssertEqual(firstAnswer["id"] as? String, first)
         XCTAssertEqual(jobs.next(), "")
         XCTAssertEqual(jobs.counters.jobs, 2)

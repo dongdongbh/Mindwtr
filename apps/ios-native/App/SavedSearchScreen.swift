@@ -52,7 +52,7 @@ struct SavedSearchScreen: View {
                             .disabled(model.busy || model.retryNeeded)
                             .accessibilityIdentifier("saved-search-retry")
                     }
-                    // Keep the published rows mounted while a new read is staged.
+
                     let rows = model.savedSearch.objects("rows")
                     ForEach(rows.map(SavedSearchTaskRow.init)) { entry in
                         let row = entry.row

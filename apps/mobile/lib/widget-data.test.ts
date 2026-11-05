@@ -74,7 +74,7 @@ describe('widget-data', () => {
         expect(payload.headerTitle).toBeTruthy();
         expect(payload.items).toHaveLength(3);
         expect(payload.items.map((item) => item.title)).toEqual(['Focused 1', 'Focused 2', 'Focused 3']);
-        // Widget rows open the task itself (Android row tap, #1173 seam).
+
         expect(payload.items.map((item) => item.openUri)).toEqual(['mindwtr://open?task=1', 'mindwtr://open?task=2', 'mindwtr://open?task=3']);
         expect(payload.items[0].completionToken).toBe(JSON.stringify(['1', 0, now, 'next']));
         expect(payload.completeLabel).toBe('Mark Done');
@@ -274,7 +274,7 @@ describe('widget-data', () => {
         expect(detailed.startLabel).toBe('Today 9:00 AM');
         expect(detailed.priorityLabel).toBe('High');
 
-        // A task with none of it adds no keys at all: these ride every row.
+
         const bare = payload.items.find((item) => item.title === 'Bare')!;
         expect(Object.keys(bare)).not.toContain('description');
         expect(Object.keys(bare)).not.toContain('contexts');
@@ -292,14 +292,18 @@ describe('widget-data', () => {
             ],
             settings: { filters: { areaIds: ['area-1'] } } as AppData['settings'],
             tasks: [
-                { id: '1', title: 'Work task', status: 'inbox', areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
-                { id: '2', title: 'Home task', status: 'inbox', areaId: 'area-2', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '1', title: 'Work task', status: 'next', areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '2', title: 'Home task', status: 'next', areaId: 'area-2', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '3', title: 'Work capture', status: 'inbox', areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '4', title: 'Home capture', status: 'inbox', areaId: 'area-2', tags: [], contexts: [], createdAt: now, updatedAt: now },
             ],
         };
 
-        const payload = buildWidgetPayload(data, 'en', { maxItems: 5, listIds: ['inbox'] });
-        expect(payload.lists.inbox.items.map((item) => item.title)).toEqual(['Work task']);
-        expect(payload.inboxCount).toBe(1);
+        const payload = buildWidgetPayload(data, 'en', { maxItems: 5, listIds: ['next', 'inbox'] });
+        expect(payload.lists.next.items.map((item) => item.title)).toEqual(['Work task']);
+
+        expect(payload.lists.inbox.items.map((item) => item.title)).toEqual(['Work capture', 'Home capture']);
+        expect(payload.inboxCount).toBe(2);
     });
 
     it('builds a saved-filter list with the app\'s own predicate and offers it to the chooser (#1173)', () => {
@@ -323,7 +327,7 @@ describe('widget-data', () => {
         expect(payload.lists['filter:f/1 ?'].title).toBe('Errands');
         expect(payload.lists['filter:f/1 ?'].items.map((item) => item.title)).toEqual(['Alpha errand', 'Zebra errand']);
         expect(payload.lists['filter:f/1 ?'].openUri).toBe('mindwtr:///widget-list/filter%3Af%2F1%20%3F');
-        // A filter that no longer exists builds no list; the widget falls back to Focus.
+
         expect(payload.lists['filter:gone']).toBeUndefined();
     });
 
@@ -358,7 +362,7 @@ describe('widget-data', () => {
         expect(starred.priorityColor).toBe('#dc2626');
         expect(starred.contextLabel).toBe('Launch');
         expect(starred.identityColor).toBe('#8b5cf6');
-        // Under the dated Today header the row's own date is redundant; a due time shows instead.
+
         expect(scheduleByTitle.get('Due today')).toMatchObject({ dueTone: 'today', dueEmphasis: true, identityColor: null });
         expect(scheduleByTitle.get('Due today')?.dueLabel).toMatch(/\d/);
         expect(scheduleByTitle.get('Due today')?.dueLabel).not.toBe('Today');
@@ -369,7 +373,7 @@ describe('widget-data', () => {
         expect(scheduleByTitle.get('Due today')?.contextLabel).toBe('Home');
         expect(payload.items.map((item) => item.id)).toEqual(payload.sections.flatMap((section) => section.items.map((item) => item.id)));
         expect(new Set(payload.items.map((item) => item.id)).size).toBe(payload.items.length);
-        // Priorities off: the colour is gated with the feature.
+
         const gated = buildWidgetPayload({ ...data, settings: { features: { priorities: false } } as AppData['settings'] }, 'en', { maxItems: 5 });
         expect(gated.sections[0].items[0].priorityColor).toBeNull();
     });
@@ -552,9 +556,7 @@ describe('widget-data', () => {
         expect(payload.palette.accent).toBe('#956735');
     });
 
-    // These preset themes all classify as "dark" or "light" under
-    // resolveThemeColorScheme, but the widget must render their real preset
-    // colors, not the generic dark/light fallback (the Android/iOS parity bug).
+
     it('keeps the widget palette aligned with Nord theme settings', () => {
         const payload = buildWidgetPayload({ ...baseData, settings: { theme: 'nord' } }, 'en');
         expect(payload.palette.background).toBe('#3B4252');
@@ -763,8 +765,8 @@ describe('widget-data', () => {
     });
 
     it('gives the sequential project slot to the later step that is due today', () => {
-        // The widget must name the same next action the Focus screen does
-        // (#1090). Selecting by chain order alone showed 'step-1' here.
+
+
         const now = new Date().toISOString();
         const dueToday = daysFromNow(0);
         dueToday.setHours(17, 0, 0, 0);
@@ -990,12 +992,12 @@ describe('widget-data', () => {
 
         it('labels an overdue task with a compact numeric date and emphasis', () => {
             const item = buildDueItem('2000-01-05');
-            // Default (System) resolves month-first in this test locale.
+
             expect(item.dueLabel).toBe('1/5');
             expect(item.dueEmphasis).toBe(true);
         });
 
-        // #1242: the widget must follow the app's date format, not the UI language.
+
         it('orders the compact date by the date-format setting', () => {
             expect(buildDueItem('2000-01-05', 'en', { dateFormat: 'dmy' }).dueLabel).toBe('5/1');
             expect(buildDueItem('2000-01-05', 'en', { dateFormat: 'mdy' }).dueLabel).toBe('1/5');
@@ -1004,21 +1006,18 @@ describe('widget-data', () => {
             expect(resolveWidgetDayFirst('nonsense')).toBe(resolveWidgetDayFirst('system'));
         });
 
-        // A headless background sync rewrites the widget without ever mounting
-        // the app, so core's date formatting is still unconfigured there. The
-        // System setting must read the device locale instead.
+
         it('orders the System compact date by the device locale', () => {
             expect(resolveWidgetDayFirst('system', 'en-GB')).toBe(true);
             expect(resolveWidgetDayFirst('system', 'en-US')).toBe(false);
             expect(resolveWidgetDayFirst('system', 'not a locale')).toBe(false);
-            // The widget must answer exactly as the app does, so it asks core,
-            // whose region table calls en-ZA day-first even though CLDR (and
-            // therefore a raw Intl check) calls it month-first.
+
+
             expect(resolveWidgetDayFirst('system', 'en-ZA')).toBe(isLocaleDateDayFirst('en-ZA'));
             expect(resolveWidgetDayFirst('system', 'en-ZA')).toBe(true);
             expect(buildDueItem('2000-01-05', 'en', {}, { systemLocale: 'en-GB' }).dueLabel).toBe('5/1');
             expect(buildDueItem('2000-01-05', 'en', {}, { systemLocale: 'en-US' }).dueLabel).toBe('1/5');
-            // An explicit setting still wins over the device locale.
+
             expect(buildDueItem('2000-01-05', 'en', { dateFormat: 'mdy' }, { systemLocale: 'en-GB' }).dueLabel).toBe('1/5');
         });
 
@@ -1145,9 +1144,8 @@ describe('widget-data', () => {
             expect(item.startDate).toBe('2026-08-01');
             expect(item.deepLink).toBe('mindwtr://open?task=t1');
             expect(snapshot.projects[0].coverage).toEqual({ eligible: 1, published: 1, omitted: 0 });
-            // The archived project's task is neither an active-project group
-            // nor, on its own, excluded from list buckets by project status --
-            // but only active projects get a group at all.
+
+
             expect(snapshot.projects.some((group) => group.id === 'p2')).toBe(false);
         });
 
@@ -1162,7 +1160,7 @@ describe('widget-data', () => {
                     task({ id: 't1', projectId: 'p1' }),
                     task({ id: 't2', projectId: 'p2' }),
                     task({ id: 't3', projectId: 'p1' }),
-                    task({ id: 't4' }), // no project at all
+                    task({ id: 't4' }),
                 ],
             };
 
@@ -1180,8 +1178,8 @@ describe('widget-data', () => {
                 title: `Project ${index}`,
                 status: 'active' as const,
                 color: '#000',
-                // Reverse order so the survivors (lowest order) are NOT simply
-                // "first in the array" -- proves the cap sorts by order.
+
+
                 order: SHORTCUTS_SNAPSHOT_PROJECT_CAP + 10 - index,
                 tagIds: [],
                 createdAt: now,
@@ -1194,8 +1192,8 @@ describe('widget-data', () => {
             const snapshot = buildShortcutsSnapshot({ ...baseData, projects: manyProjects, tasks: tasksOnePerProject });
 
             expect(snapshot.projects).toHaveLength(SHORTCUTS_SNAPSHOT_PROJECT_CAP);
-            // The lowest `order` values are the last projects in the array
-            // (reversed order above), so they must be the ones that survive.
+
+
             const survivingIds = new Set(snapshot.projects.map((group) => group.id));
             for (let index = manyProjects.length - SHORTCUTS_SNAPSHOT_PROJECT_CAP; index < manyProjects.length; index += 1) {
                 expect(survivingIds.has(manyProjects[index].id)).toBe(true);

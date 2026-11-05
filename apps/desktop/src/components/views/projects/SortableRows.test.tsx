@@ -103,8 +103,7 @@ it.each(['active', 'deferred', 'archived'] as const)('highlights a hovered %s pr
     expect(screen.getByTestId('task-drop-highlight')).toHaveTextContent(String(section !== 'archived'));
 });
 
-// The actions strip is `shrink-0`; inline, it starves the title in a container
-// as narrow as a section column. These pin the escape hatch, not the styling.
+
 describe.each([
     ['SortableProjectTaskRow', SortableProjectTaskRow],
     ['DraggableProjectTaskRow', DraggableProjectTaskRow],

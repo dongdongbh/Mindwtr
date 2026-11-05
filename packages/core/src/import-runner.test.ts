@@ -18,11 +18,6 @@ import {
 import type { ParsedTodoistProject } from './todoist-import';
 import type { AppData } from './types';
 
-// import-runner.ts had zero test coverage before this task despite dispatching five
-// different importers through one shared table. These tests exercise the dispatch/log/error
-// plumbing itself (each importer's own business logic is covered by its own *-import.test.ts)
-// and, just as importantly, prove the type-level refactor (keying IMPORT_DESCRIPTORS off
-// ImportTypeMap instead of `unknown`) didn't change runtime behaviour.
 
 const buildBoundaries = (currentData: AppData) => {
     const persisted: AppData[] = [];
@@ -117,9 +112,8 @@ describe('runImport', () => {
         const { result } = await runImport('todoist', parsed, boundaries, log);
 
         expect(result.importedTaskCount).toBe(0);
-        // Proves countExtra reads the todoist result's own fields, not another source's
-        // (e.g. ticktick's `areas` or omnifocus's `standaloneTasks`) — the class of mistake
-        // that was invisible to the compiler when every descriptor entry took `unknown`.
+
+
         expect(infoCalls[1]?.context?.extra).toMatchObject({
             operation: 'importTodoist',
             tasks: '0',
@@ -129,11 +123,7 @@ describe('runImport', () => {
         });
     });
 
-    // Restore and merge read the same backup file through the same descriptor table, so the
-    // only thing keeping them apart is which apply() each one runs. These two tests pin both
-    // sides of that line: a merge must never resurrect what this device deleted, and restore
-    // must keep doing exactly that (#939) — checking only the new behaviour would let the old
-    // one shrink unnoticed.
+
     const buildDivergedData = () => {
         const local = mockAppData([
             createMockTask('local-only', '2026-01-05T00:00:00.000Z'),
@@ -162,16 +152,15 @@ describe('runImport', () => {
         expect(byId.get('backup-only')).toBeDefined();
         expect(byId.get('shared')?.title).toBe('From backup');
         expect(byId.get('newer-local')?.title).toBe('Task newer-local');
-        // The whole point of additive merge mode: a task this device deleted stays deleted
-        // even when the backup holds a newer live copy of it.
+
+
         expect(byId.get('deleted-locally')?.deletedAt).toBe('2026-01-10T00:00:00.000Z');
-        // Merge must not re-stamp revisions the way restore does, or every merged record would
-        // outrank other devices' tombstones on the next sync.
+
+
         expect(persisted[0].tasks.some((task) => task.revBy === SYNC_BACKUP_RESTORE_REV_BY)).toBe(false);
         expect(byId.get('local-only')?.updatedAt).toBe('2026-01-05T00:00:00.000Z');
 
-        // resolvedUsingIncoming counts backup-only records too, so the summary has to subtract
-        // them or every added task would also be reported as updated.
+
         expect(result.stats.tasks.resolvedUsingIncoming).toBe(2);
         expect(summarizeBackupMerge(result)).toEqual({ added: 1, updated: 1 });
         expect(infoCalls.map((call) => call.message)).toEqual(['Backup merge started', 'Backup merge complete']);

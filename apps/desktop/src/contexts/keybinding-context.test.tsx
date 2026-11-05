@@ -125,8 +125,7 @@ const scopedTask = (id: string): Task => ({
     updatedAt: '2026-01-01T00:00:00.000Z',
 } as Task);
 
-// Stands in for any view that registers the shared scope over its own ordered
-// visible-task array (Focus, Board, Projects, Search, Contexts, Review).
+
 const ScopedTaskList = ({
     tasks,
     onEdit,
@@ -169,8 +168,7 @@ const ScopedTaskList = ({
     );
 };
 
-// A registered list scope that exposes focusSelected the way useListSelection
-// does: entering the list focuses the selected task's title toggle (#890).
+
 const ListWithFocusSelected = () => {
     const { registerTaskListScope } = useKeybindings();
     const [selectedIndex, setSelectedIndex] = useState(0);
@@ -290,12 +288,15 @@ const ProjectAndTaskScopes = ({
         <div>
             <button type="button" data-sidebar-item data-view="projects">Projects</button>
             <div data-main-content tabIndex={-1}>Main content</div>
+            <nav data-sidebar-nav>
             <div data-project-navigation-root>
                 <div role="button" tabIndex={0} data-project-navigation-item data-project-id="project-1">
                     Project 1
                     <button type="button" data-project-selection-ignore="true">Drag</button>
                 </div>
             </div>
+            <button type="button" data-sidebar-section-toggle>More</button>
+            </nav>
             <div data-project-workspace tabIndex={-1}>
                 <div data-task-id="task-1">
                     <button type="button" data-task-view-toggle>Task 1</button>
@@ -470,6 +471,9 @@ describe('KeybindingProvider (vim)', () => {
     });
 
     it('triggers quick add with Ctrl+Alt+M', () => {
+        useTaskStore.setState((state) => ({
+            settings: { ...state.settings, globalQuickAddShortcut: GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT },
+        }));
         const quickAddListener = vi.fn();
         window.addEventListener('mindwtr:quick-add', quickAddListener);
 
@@ -630,8 +634,7 @@ describe('KeybindingProvider (vim)', () => {
         expect(onNavigate).toHaveBeenCalledWith('settings');
     });
 
-    // Trash can be hidden from the sidebar (#1115) and global search never
-    // returns views, so the go-to chord is its only keyboard route back.
+
     it.each([
         {
             style: 'vim' as const,
@@ -936,11 +939,10 @@ describe('KeybindingProvider (vim)', () => {
         );
 
         fireEvent.keyDown(window, { key: 'A', shiftKey: false });
-        // Quick add firing on the 'A' itself proves the chord was not armed.
+
         expect(quickAddListener).toHaveBeenCalledTimes(1);
 
-        // The follow-up digit is picked up by the bare-digit area shortcut
-        // (in the real app the open quick-add dialog gates it out).
+
         fireEvent.keyDown(window, { key: '1', code: 'Digit1' });
         await waitFor(() => {
             expect(useTaskStore.getState().settings?.filters?.areaId).toBe('area-home');
@@ -1059,7 +1061,7 @@ describe('KeybindingProvider (vim)', () => {
                 });
                 return () => registerTaskListScope(null);
             }, [registerTaskListScope]);
-            // Same shape as the global search / quick add overlays.
+
             return <div role="dialog" aria-modal="true" />;
         };
 
@@ -1071,9 +1073,7 @@ describe('KeybindingProvider (vim)', () => {
             </LanguageProvider>
         );
 
-        // Focus is nowhere interactive (e.g. after clicking a non-focusable
-        // element inside the dialog) — the exact state that used to let Enter
-        // and action keys reach the task list behind the dialog.
+
         (document.activeElement as HTMLElement | null)?.blur?.();
         fireEvent.keyDown(window, { key: 'ArrowDown' });
         fireEvent.keyDown(window, { key: 'Enter' });
@@ -1178,7 +1178,7 @@ describe('KeybindingProvider (vim)', () => {
         expect(document.activeElement).toBe(document.querySelector('[data-project-id="project-1"]'));
     });
 
-    it('routes arrows, j/k, gg, and G to a focused project list, then Right enters its task workspace', () => {
+    it('routes arrows, j/k, gg, and G to projects inside the shared sidebar, then Right enters its task workspace', () => {
         const projectSpies = createProjectScopeSpies();
         const taskSpies = createTaskActionSpies();
         render(
@@ -1281,12 +1281,11 @@ describe('KeybindingProvider (vim)', () => {
 
         const toggles = document.querySelectorAll('[data-task-view-toggle]');
 
-        // Entering the list highlights/focuses the FIRST task — not the
-        // container, and not off-by-one to the second row.
+
         fireEvent.keyDown(window, { key: 'ArrowRight' });
         expect(document.activeElement).toBe(toggles[0]);
 
-        // The first ArrowDown then moves exactly one row.
+
         fireEvent.keyDown(window, { key: 'ArrowDown' });
         expect(document.activeElement).toBe(toggles[1]);
     });

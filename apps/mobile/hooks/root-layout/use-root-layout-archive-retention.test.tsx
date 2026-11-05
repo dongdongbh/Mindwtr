@@ -102,7 +102,7 @@ describe('useRootLayoutArchiveRetention', () => {
         harness.selectedBackend.mockResolvedValue('off');
         await act(async () => { listener?.('active'); });
         expect(harness.run).toHaveBeenLastCalledWith({ syncConfigured: false });
-        // An unreadable sync configuration must not count as "sync is off".
+
         harness.selectedBackend.mockRejectedValue(new Error('config unavailable'));
         await act(async () => { listener?.('active'); });
         expect(harness.run).toHaveBeenLastCalledWith({ syncConfigured: true });

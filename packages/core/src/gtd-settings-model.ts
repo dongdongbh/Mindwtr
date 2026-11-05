@@ -1,16 +1,6 @@
-/**
- * The mobile Settings › GTD screens as data: the hub and its six sub-screens
- * (Pomodoro, Capture, Review, Inbox, Auto-archive, Task editor layout). Every
- * row's text, current value and options, which rows show, and the exact
- * settings write each control makes. Shared by the React Native screen
- * (components/settings/gtd-settings-screen.tsx) and the native host contract
- * (native-host-contract-settings.ts).
- *
- * The screen reads three things from the device, not from settings: the task
- * open mode (a device-local choice, passed in) and, on Android, whether exact
- * alarms are allowed (the caller checks it for the Pomodoro alert's notice) and
- * whether the capture intent is on (passed in).
- */
+
+
+
 import { compareAreasByOrder } from './task-utils';
 import { getDefaultTaskAreaMode, resolveDefaultNewTaskAreaId } from './area-utils';
 import { normalizeClockTimeInput } from './date';
@@ -36,9 +26,6 @@ type Translate = (key: string) => string;
 
 export type GtdSettingsScreenId = 'gtd' | 'gtd-archive' | 'gtd-capture' | 'gtd-inbox' | 'gtd-pomodoro' | 'gtd-review' | 'gtd-task-editor';
 
-// ---------------------------------------------------------------------------
-// Task editor presets (moved verbatim from mobile's task-edit-modal.utils.ts,
-// which now re-exports these for the sandbox screen).
 
 export type TaskEditorPresetId = 'simple' | 'standard' | 'full' | 'custom';
 
@@ -156,21 +143,19 @@ export const resolveTaskEditorPresetId = ({
     return 'custom';
 };
 
-// ---------------------------------------------------------------------------
-// Device-local and fixed choices.
 
 export type GtdTaskOpenMode = 'automatic' | 'preview' | 'edit';
 export const GTD_TASK_OPEN_MODES: readonly GtdTaskOpenMode[] = ['automatic', 'preview', 'edit'];
-/** lib/view-state/task-open-mode.ts: the mode as text, on this device only. */
+
 export const MOBILE_TASK_OPEN_MODE_STORAGE_KEY = 'mindwtr:view:taskOpenMode:v1';
-/** The stored text's mode; anything else reads as automatic. */
+
 export const readGtdTaskOpenMode = (raw: unknown): GtdTaskOpenMode => (
     GTD_TASK_OPEN_MODES.includes(raw as GtdTaskOpenMode) ? raw as GtdTaskOpenMode : 'automatic'
 );
 
 export type TaskOpenTab = 'task' | 'view';
 
-/** Shared by RN and native: a read-only task wins even over an explicit Edit route. */
+
 export function resolveTaskOpenTab({
     mode,
     automaticTab,
@@ -190,11 +175,9 @@ export function resolveTaskOpenTab({
 }
 
 export const GTD_AUTO_ARCHIVE_DAY_OPTIONS: readonly number[] = [0, 1, 3, 7, 14, 30, 60];
-/** The default-area choice "the current area filter"; '' is no area. */
+
 export const GTD_DEFAULT_AREA_ACTIVE_OPTION = '__active-area__';
 
-// ---------------------------------------------------------------------------
-// Edits: one control change, and the settings write it makes.
 
 type GtdTaskEditorPreset = Exclude<TaskEditorPresetId, 'custom'>;
 export type GtdOpenableSection = Exclude<TaskEditorSectionId, 'basic'>;
@@ -209,21 +192,21 @@ export type GtdSettingsEdit =
             | 'focusIncludeStartDates';
         value: boolean;
     }
-    /** '' clears it; otherwise HH:MM, as normalizeClockTimeInput returns it. */
+
     | { type: 'defaultScheduleTime'; value: string }
     | { type: 'focusTaskLimit'; value: number }
     | { type: 'defaultProjectFlowMode'; value: DefaultProjectFlowMode }
     | { type: 'autoArchiveDays'; value: number }
-    /** The two minute fields' text as typed (resolveGtdPomodoroDurations reads it). */
+
     | { type: 'pomodoroDurations'; focusMinutes: string; breakMinutes: string }
     | { type: 'captureMethod'; value: 'text' | 'audio' }
-    /** '' for no area, GTD_DEFAULT_AREA_ACTIVE_OPTION, or an area id. */
+
     | { type: 'defaultArea'; value: string }
-    /** Device-local only: nothing is written to settings. */
+
     | { type: 'taskOpenMode'; value: GtdTaskOpenMode }
     | { type: 'taskEditorPreset'; value: GtdTaskEditorPreset }
     | { type: 'taskEditorFieldVisible'; field: TaskEditorFieldId; value: boolean }
-    /** The whole field order after a move. */
+
     | { type: 'taskEditorOrder'; value: TaskEditorFieldId[] }
     | { type: 'taskEditorFieldSection'; field: TaskEditorFieldId; value: TaskEditorSectionId }
     | { type: 'taskEditorSectionOpen'; section: GtdOpenableSection; value: boolean }
@@ -242,7 +225,7 @@ const INBOX_KEYS = {
     inboxSchedule: 'scheduleEnabled',
 } as const;
 
-/** The task editor layout the screen shows, from settings and the feature flags. */
+
 function resolveTaskEditorLayout(settings: AppSettings) {
     const { priorities, timeEstimates } = resolveFeatureFlags(settings);
     const featureHiddenFields = new Set<TaskEditorFieldId>();
@@ -259,7 +242,7 @@ function resolveTaskEditorLayout(settings: AppSettings) {
     return { featureHiddenFields, defaultHidden, order, hidden };
 }
 
-/** The durations the Pomodoro minute fields save: a field that is not a number keeps its value. */
+
 export function resolveGtdPomodoroDurations(settings: AppSettings, focusText: string, breakText: string): PomodoroDurations {
     const current = sanitizePomodoroDurations(settings.gtd?.pomodoro?.customDurations);
     const focusValue = Number.parseInt(focusText, 10);
@@ -270,11 +253,7 @@ export function resolveGtdPomodoroDurations(settings: AppSettings, focusText: st
     });
 }
 
-/**
- * The settings update an edit makes: only the keys it changes. A nested group
- * (gtd, features, the gtd sub-objects) is written whole with its other stored
- * keys kept, as the screen always has. null for a device-local edit.
- */
+
 export function buildGtdSettingsUpdate(settings: AppSettings, edit: GtdSettingsEdit): Partial<AppSettings> | null {
     const gtd = settings.gtd ?? {};
     const withGtd = (partial: NonNullable<AppSettings['gtd']>): Partial<AppSettings> => ({ gtd: { ...gtd, ...partial } });
@@ -336,7 +315,7 @@ export function buildGtdSettingsUpdate(settings: AppSettings, edit: GtdSettingsE
             const nextHidden = new Set(hidden);
             if (edit.value) nextHidden.delete(edit.field);
             else nextHidden.add(edit.field);
-            // Priority and time estimate are features: showing the field turns the feature on.
+
             const features = { ...(settings.features ?? {}) };
             if (edit.field === 'priority') features.priorities = !nextHidden.has('priority');
             if (edit.field === 'timeEstimate') features.timeEstimates = !nextHidden.has('timeEstimate');
@@ -367,14 +346,10 @@ export function buildGtdSettingsUpdate(settings: AppSettings, edit: GtdSettingsE
     }
 }
 
-// The store's own change test (store-settings.ts settingsValueChanged).
+
 const sameStored = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
-/**
- * Whether the edit changes nothing (a repeat writes nothing): every key its
- * update writes already holds that value. The two text fields compare with
- * what they show, so leaving one unchanged writes nothing.
- */
+
 export function isGtdSettingStored(settings: AppSettings, edit: GtdSettingsEdit): boolean {
     if (edit.type === 'defaultScheduleTime') return edit.value === (normalizeClockTimeInput(settings.gtd?.defaultScheduleTime) || '');
     if (edit.type === 'pomodoroDurations') {
@@ -386,37 +361,35 @@ export function isGtdSettingStored(settings: AppSettings, edit: GtdSettingsEdit)
     return !update || Object.entries(update).every(([key, value]) => sameStored(settings[key as keyof AppSettings], value));
 }
 
-/** A device-local write: store `value` under `key` (the same shape as General's). */
+
 export function getGtdSettingsDeviceWrites(edit: GtdSettingsEdit): { key: string; value: string | null }[] {
     return edit.type === 'taskOpenMode' ? [{ key: MOBILE_TASK_OPEN_MODE_STORAGE_KEY, value: edit.value }] : [];
 }
 
-// ---------------------------------------------------------------------------
-// The model.
 
 export type GtdSettingsToggle = { label: string; description: string | null; value: boolean; edit: GtdSettingsEdit };
 export type GtdSettingsOption<T> = { value: T; label: string; selected: boolean; edit: GtdSettingsEdit };
-/** A row that opens a sub-screen. */
+
 export type GtdSettingsLink = { title: string; description: string | null; screen: GtdSettingsScreenId };
 type Labelled = { label: string; description: string };
-/** A move button in the field sheet; `edit` is null while it is disabled. */
+
 export type GtdTaskEditorMove = { label: string; disabled: boolean; edit: GtdSettingsEdit | null };
 
 export type GtdTaskEditorField = {
     id: TaskEditorFieldId;
     label: string;
     visible: boolean;
-    /** The row's second line: Shown or Hidden. */
+
     status: string;
-    /** The eye badge before the row. */
+
     visibility: { accessibilityLabel: string; edit: GtdSettingsEdit };
-    /** The sheet the row body opens. */
+
     sheet: {
         title: string;
-        /** The field's group title. */
+
         section: string | null;
         visible: GtdSettingsToggle;
-        /** Only for a field that can change section. */
+
         sections: { label: string; options: GtdSettingsOption<TaskEditorSectionId>[] } | null;
         order: { label: string; moveUp: GtdTaskEditorMove; moveDown: GtdTaskEditorMove };
         doneLabel: string;
@@ -427,7 +400,7 @@ export type GtdTaskEditorGroup = {
     id: TaskEditorSectionId;
     title: string;
     count: number;
-    /** Every group but Basic, shown first while the group is open. */
+
     defaultOpen: GtdSettingsToggle | null;
     fields: GtdTaskEditorField[];
 };
@@ -436,17 +409,17 @@ export type GtdSettingsModel = {
     hub: {
         title: string;
         description: string;
-        /** First card: the features heading, the Pomodoro switch, and (while on) its settings row. */
+
         features: Labelled;
         pomodoro: GtdSettingsToggle;
         pomodoroSettings: GtdSettingsLink | null;
-        /** Second card. Commit the text on blur: see the contract's setGtdSetting. */
+
         defaultScheduleTime: Labelled & { value: string; placeholder: string; invalidMessage: string };
         focusTaskLimit: Labelled & { options: GtdSettingsOption<number>[] };
         focusIncludeStartDates: GtdSettingsToggle;
         defaultProjectFlowMode: Labelled & { options: GtdSettingsOption<DefaultProjectFlowMode>[] };
         autoArchive: GtdSettingsLink;
-        /** Third card: task editor, capture. Fourth card: review, inbox. */
+
         taskEditor: GtdSettingsLink;
         capture: GtdSettingsLink;
         review: GtdSettingsLink;
@@ -455,19 +428,19 @@ export type GtdSettingsModel = {
     pomodoro: {
         title: string;
         description: string;
-        /** While Pomodoro is off the screen shows only this button. */
+
         enable: { label: string; edit: GtdSettingsEdit } | null;
-        /** The minute fields' starting text; blur commits both as one pomodoroDurations edit. */
+
         minutes: { focus: string; break: string };
-        /** While Pomodoro is on. */
+
         controls: {
             customPreset: Labelled & { focusLabel: string; breakLabel: string };
             linkTask: GtdSettingsToggle;
-            /** Turning an auto-start on shows `autoStartNotice` once per visit, after the write. */
+
             autoStartBreaks: GtdSettingsToggle;
             autoStartFocus: GtdSettingsToggle;
             completionAlert: GtdSettingsToggle;
-            /** Under the alert while it is on, only when Android denies exact alarms. */
+
             alarmNotice: { label: string; description: string; actionLabel: string } | null;
         } | null;
         autoStartNotice: string;
@@ -477,28 +450,22 @@ export type GtdSettingsModel = {
         description: string;
         method: Labelled & { options: (GtdSettingsOption<'text' | 'audio'> & { icon: 'text-outline' | 'mic-outline' })[] };
         defaultArea: Labelled & { value: string; accessibilityLabel: string; pickerTitle: string; options: GtdSettingsOption<string>[] };
-        /** Only while audio is the default. */
+
         saveAudio: GtdSettingsToggle | null;
         quickAddAutoClean: GtdSettingsToggle;
         naturalLanguageDates: GtdSettingsToggle;
         markdownEditorAssist: GtdSettingsToggle;
-        /**
-         * Android's automation capture card under the Capture card (React Native's
-         * AndroidCaptureIntentSection); null where the device has no capture intent.
-         * The switch turns the stored capture token on or off: on keeps a token
-         * already stored, off deletes it, so off then on makes a new token. While
-         * on, the token row shows the host's stored token, selectable, with a copy
-         * button. The token never passes through core.
-         */
+
+
         captureIntent: {
             label: string;
             description: string;
-            /** On while the stored config holds a token. */
+
             value: boolean;
-            /** While the stored config is unread or unreadable; the host also disables it while its write runs. */
+
             disabled: boolean;
             token: { label: string; copyLabel: string } | null;
-            /** Toasts: `copied` as info; `copyFailed`, `loadFailed` (the config cannot be read) and `updateFailed` (the switch's write failed) as errors. */
+
             messages: { copied: string; copyFailed: string; loadFailed: string; updateFailed: string };
         } | null;
     };
@@ -523,17 +490,15 @@ export type GtdSettingsModel = {
         title: string;
         description: string;
         helper: string;
-        /** Device-local. */
+
         openMode: Labelled & { options: GtdSettingsOption<GtdTaskOpenMode>[] };
         presets: { label: string; options: GtdSettingsOption<GtdTaskEditorPreset>[]; custom: string | null };
-        /** The groups with fields, in screen order. */
+
         groups: GtdTaskEditorGroup[];
-        /** Which groups are open, by section (a group can gain fields while the screen is open). */
+
         initiallyExpanded: Record<TaskEditorSectionId, boolean>;
-        /**
-         * React Native opens the groups as `initiallyExpanded` says, and closes the
-         * field sheet, on entering the screen and whenever this key changes.
-         */
+
+
         expandedResetKey: string;
         reset: { label: string; edit: GtdSettingsEdit };
     };
@@ -541,17 +506,17 @@ export type GtdSettingsModel = {
 
 export function buildGtdSettingsModel(input: {
     settings: AppSettings;
-    /** The store's areas; deleted ones are skipped. */
+
     areas: readonly Area[];
     taskOpenMode: GtdTaskOpenMode;
-    /** Android's stored capture intent config; `enabled` is null while it is unread or unreadable. Absent where the device has none. */
+
     captureIntent?: { enabled: boolean | null };
     t: Translate;
 }): GtdSettingsModel {
     const { settings, t } = input;
     const gtd = settings.gtd;
     const tr = (key: string) => resolveI18nText(t, key);
-    // The key's text, or the other key's when it has none.
+
     const keyOr = (key: string, other: string) => {
         const raw = t(key);
         return raw === key ? tr(other) : raw;
@@ -569,7 +534,7 @@ export function buildGtdSettingsModel(input: {
     const reviewDescription = tr('settings.gtdMobile.chooseWhichOptionalStepsAppearInDailyAndWeeklyReview');
     const inboxTitle = tFallback(t, 'settings.inboxProcessing', tr('settings.inboxProcessing'));
 
-    // Hub.
+
     const focusTaskLimit = normalizeFocusTaskLimit(gtd?.focusTaskLimit);
     const flowMode: DefaultProjectFlowMode = gtd?.defaultProjectFlowMode === 'sequential' ? 'sequential' : 'parallel';
     const hub: GtdSettingsModel['hub'] = {
@@ -613,12 +578,12 @@ export function buildGtdSettingsModel(input: {
         inbox: { title: inboxTitle, description: t('settings.inboxProcessingDesc'), screen: 'gtd-inbox' },
     };
 
-    // Pomodoro.
+
     const durations = sanitizePomodoroDurations(gtd?.pomodoro?.customDurations);
     const linkTask = gtd?.pomodoro?.linkTask === true;
     const autoStartBreaks = gtd?.pomodoro?.autoStartBreaks === true;
     const autoStartFocus = gtd?.pomodoro?.autoStartFocus === true;
-    // Defaults on: the alert is the point of the timer (#528).
+
     const completionAlert = gtd?.pomodoro?.completionAlert !== false;
     const pomodoro: GtdSettingsModel['pomodoro'] = {
         title: pomodoroSettingsLabel,
@@ -665,7 +630,7 @@ export function buildGtdSettingsModel(input: {
         autoStartNotice: tr('settings.gtdMobile.pomodoroWillNowAdvancePhasesAutomatically'),
     };
 
-    // Capture.
+
     const captureMethod = gtd?.defaultCaptureMethod ?? 'text';
     const sortedAreas = [...input.areas].filter((area) => !area.deletedAt).sort(compareAreasByOrder);
     const areaPickerValue = getDefaultTaskAreaMode(settings) === 'active'
@@ -725,7 +690,7 @@ export function buildGtdSettingsModel(input: {
         } : null,
     };
 
-    // Review and Inbox.
+
     const dailyFocusStep = gtd?.dailyReview?.includeFocusStep !== false;
     const weeklyContextStep = gtd?.weeklyReview?.includeContextStep !== false;
     const review: GtdSettingsModel['review'] = {
@@ -747,7 +712,7 @@ export function buildGtdSettingsModel(input: {
         schedule: inboxToggle('inboxSchedule', 'settings.inboxScheduleEnabled', inboxProcessing.scheduleEnabled === true),
     };
 
-    // Auto-archive.
+
     const archiveDays = Number.isFinite(gtd?.autoArchiveDays) ? Math.max(0, Math.floor(gtd?.autoArchiveDays as number)) : 7;
     const archive: GtdSettingsModel['archive'] = {
         title: t('settings.autoArchive'),
@@ -868,8 +833,8 @@ function buildTaskEditor(
             fields: group.fields.map(field),
         })),
         initiallyExpanded: sectionOpen,
-        // React Native watches the three stored values themselves, so a stored
-        // value replaced by its default also counts as a change.
+
+
         expandedResetKey: JSON.stringify([rawSectionOpen?.scheduling, rawSectionOpen?.organization, rawSectionOpen?.details]),
         reset: { label: t('settings.resetToDefault'), edit: { type: 'taskEditorReset' } },
     };

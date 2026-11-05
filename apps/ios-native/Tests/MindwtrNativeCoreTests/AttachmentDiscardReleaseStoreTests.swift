@@ -4,7 +4,7 @@ import Darwin
 import CryptoKit
 @testable import MindwtrNativeCore
 
-/// Structural private-record binding/removal only; no file cleanup authority.
+
 final class AttachmentDiscardReleaseStoreTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private typealias StoreError = NativeAttachmentDraftStoreError
@@ -164,7 +164,7 @@ final class AttachmentDiscardReleaseStoreTests: XCTestCase {
             operations: detached.operations, discard: detached.discard)))
         for value in [active, decided, advance] {
             try encoded(value).write(to: store.url)
-            XCTAssertNotNil(try store.read()) // Existing reader's accepted models stay unchanged.
+            XCTAssertNotNil(try store.read())
             XCTAssertThrowsError(try Store.ownedDiscardFingerprint(value))
             try retained { try store.releaseDiscardedAddsMatching(fingerprint: fingerprint) }
         }
@@ -285,7 +285,7 @@ final class AttachmentDiscardReleaseStoreTests: XCTestCase {
         ]
         for edits in equivalent {
             let value = try changed(base, edits)
-            XCTAssertEqual(value, base) // Swift's synthesized equality normalizes Unicode.
+            XCTAssertEqual(value, base)
             XCTAssertNotEqual(try Store.ownedDiscardFingerprint(value), fingerprint)
             try encoded(value).write(to: store.url)
             try retained { try store.releaseDiscardedAddsMatching(fingerprint: fingerprint) }

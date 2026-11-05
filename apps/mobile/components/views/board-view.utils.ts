@@ -17,7 +17,7 @@ const withTokenList = (
     return next;
 };
 
-/** Toggle a context (`@`) or tag (`#`) token in a board filter criteria, routed by prefix. */
+
 export const toggleCriteriaToken = (criteria: FilterCriteria, token: string): FilterCriteria => {
     const key: 'contexts' | 'tags' = token.trim().startsWith('#') ? 'tags' : 'contexts';
     const current = criteria[key] ?? [];
@@ -123,11 +123,7 @@ type ResolveBoardColumnDropTargetArgs = {
     columnTasks: ColumnTaskLayout[];
 };
 
-/**
- * Where a same-column drop lands: the column's measured cards top to bottom and
- * the card the dragged one lands after (null: first). Core's planBoardDrop turns
- * it into the write. Null when inputs are invalid.
- */
+
 export const resolveBoardColumnDropTarget = ({
     taskId,
     dragCenterY,

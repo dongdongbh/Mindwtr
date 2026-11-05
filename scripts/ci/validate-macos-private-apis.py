@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject the known private ICU imports from the 1.3.4 App Store rejection.
+COMMAND_DESCRIPTION = """Reject the known private ICU imports from the 1.3.4 App Store rejection.
 
 This checks undefined Mach-O symbols, not strings or every possible private API.
 """
@@ -49,8 +49,8 @@ def validate(app, nm=None):
             if result.returncode or result.stderr.strip():
                 raise ValueError(f'nm scan failed for {binary}: {result.stderr.strip() or result.returncode}')
             scanned += 1
-            # nm -u prints a bare symbol (Apple) or "U symbol" (LLVM), with
-            # architecture/file headings for universal binaries.
+
+
             imports = {line.split()[-1] for line in result.stdout.splitlines() if line.split()}
             forbidden = sorted(imports & rejected)
             if forbidden:
@@ -63,7 +63,7 @@ def validate(app, nm=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=COMMAND_DESCRIPTION)
     parser.add_argument('app', type=Path)
     parser.add_argument('--nm', help='nm executable (Apple nm on macOS, llvm-nm elsewhere)')
     args = parser.parse_args()

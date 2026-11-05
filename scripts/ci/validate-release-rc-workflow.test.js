@@ -93,7 +93,7 @@ test('stable Watch release keeps the existing iOS recovery selection gate', () =
   };
   expect(selected({ event_name: 'push' }, {}, needs)).toBe(true);
   expect(selected({ event_name: 'workflow_dispatch' }, {}, needs)).toBe(false);
-  // Immediate mode and forks skip the rollout preflight, which must not skip the build.
+
   expect(selected({ event_name: 'push' }, {}, { ...needs, 'rollout-preflight': { result: 'skipped' } })).toBe(true);
   const iosOnly = { run_ios_appstore: true };
   const skipped = {
@@ -379,8 +379,8 @@ test("tag-accepting release workflows queue by effective tag or shared Store fli
 test("Windows release jobs never reacquire the workflow lock and serialize Store flights", () => {
   const windows = parse(readFileSync(".github/workflows/release-windows.yml", "utf8"));
   const flight = parse(readFileSync(".github/workflows/release-msstore-flight.yml", "utf8"));
-  // These expressions use only boolean operators and format; evaluate the real
-  // YAML so equivalent spellings cannot hide a workflow/job lock collision.
+
+
   const resolve = (group, inputs, github) => group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) =>
     new Function("inputs", "github", "format", `return (${expression})`)(
       inputs,
@@ -616,7 +616,7 @@ test("Android release centralizes Google Play edit transactions", () => {
   );
 });
 
-// RCs publish testing tracks without production locale notes.
+
 const playNotesTest = JSON.parse(readFileSync("apps/mobile/release-version.json", "utf8")).releaseVersion.includes("-") ? test.skip : test;
 playNotesTest.each([false, true])("Google Play release notes extract the current version with blank separators=%p", (blankSeparators) => {
   const workflow = parse(readFileSync(".github/workflows/release-android.yml", "utf8"));
@@ -844,14 +844,7 @@ test("Windows release signs and publishes exactly the current NSIS installer", (
   );
 });
 
-// T5: the two SignPath submissions are scheduled to change (migration to two
-// single-file submissions). Pin both artifact-configuration slugs and the full
-// outcome chain so an edit to either can't silently start signing/uploading the
-// wrong artifact, or run a downstream step whose staging step never succeeded.
-// There are two chains, not one: the app-exe chain gates on stage-unsigned-exe;
-// the installer chain gates on stage-unsigned-installer, which itself only
-// stages once stage-unsigned-exe succeeded — that link is what actually
-// prevents the installer from signing/uploading when the app binary wasn't.
+
 test("Windows release retries a failed Bun install with isolated package caches", () => {
   const windows = parse(
     readFileSync(".github/workflows/release-windows.yml", "utf8"),
@@ -952,11 +945,11 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   const rc = parse(rcText);
   const beta = parse(betaText);
 
-  // Direct publishers need the SSH credential; nothing here force-pushes AUR.
+
   expect(stableText).toContain("AUR_SSH_PRIVATE_KEY");
   expect(betaText).toContain("AUR_SSH_PRIVATE_KEY");
 
-  // Host key must be pinned to the known AUR fingerprint, not TOFU-trusted.
+
   const pinnedFingerprint = "SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4";
   expect(stableText).toContain(pinnedFingerprint);
   expect(betaText).toContain(pinnedFingerprint);
@@ -995,7 +988,7 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   expect(rc.jobs["aur-beta"].name).toContain("Update AUR Beta");
   expect(rc.jobs["aur-beta"].secrets).toBe("inherit");
 
-  // Beta is dispatchable standalone, not gated behind the reviewed environment.
+
   expect(beta.on.workflow_dispatch.inputs.tag.required).toBe(true);
   expect(beta.jobs["update-aur-beta"].environment).toBeUndefined();
   expect(betaText).toContain("mindwtr-beta-bin");
@@ -1039,4 +1032,22 @@ test("update-aur and update-aur-beta publish directly with a pre-push ownership 
   const aurDocs = readFileSync("aur/README.md", "utf8");
   expect(aurDocs).toContain("pacman -R mindwtr-bin-beta");
   expect(aurDocs).toContain("AUR helpers do not reliably migrate package identities");
+});
+
+
+test('Linux desktop template keeps its conditional comment directive intact', () => {
+  const template = readFileSync('apps/desktop/src-tauri/linux/mindwtr.desktop.template', 'utf8');
+  const directives = [...template.matchAll(/{{([\s\S]*?)}}/g)].map((match) => match[1]);
+  expect(directives).toEqual(['categories', '#if comment', 'comment', '/if', 'exec', 'exec', 'icon', 'name']);
+});
+
+test('Android AAB clears unused hosted toolchains before the local EAS build', () => {
+  const workflow = parse(readFileSync('.github/workflows/release-android.yml', 'utf8'));
+  const steps = workflow.jobs['build-aab'].steps;
+  const cleanup = steps.findIndex((step) => step.name === 'Free Android build disk space');
+  const build = steps.findIndex((step) => step.name === 'Build Android AAB (local EAS)');
+  expect(cleanup).toBeGreaterThan(0);
+  expect(cleanup).toBeLessThan(build);
+  expect(steps[cleanup].run).toContain('sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL');
+  expect(steps[cleanup].run).not.toContain('/usr/local/lib/android');
 });

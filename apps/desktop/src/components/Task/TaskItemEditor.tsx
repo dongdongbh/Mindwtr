@@ -21,6 +21,7 @@ import { SectionSelector } from '../ui/SectionSelector';
 import { SomedaySectionSelector } from '../ui/SomedaySectionSelector';
 import { TaskInput, type TaskInputAcceptedSuggestion } from './TaskInput';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import {
     QUICK_ADD_FIELD_TOKENS,
     QuickAddTokenBadge,
@@ -39,8 +40,8 @@ interface TaskItemEditorProps {
     setField: TaskDraftSetter;
     autoFocusTitle?: boolean;
     isModalEditor?: boolean;
-    // One seam for the whole AI feature: the editor forwards it to the menu
-    // and panel components and otherwise knows nothing about AI.
+
+
     ai: ReturnType<typeof useTaskItemAi>;
     timeEstimatesEnabled: boolean;
     projects: Project[];
@@ -66,7 +67,7 @@ interface TaskItemEditorProps {
     renderField: (fieldId: TaskEditorFieldId) => ReactNode;
     language: string;
     inputContexts: string[];
-    /** Known people for the title's %Person suggestions; without it `%` offers nothing (#1255). */
+
     inputPeople?: string[];
     onAcceptTitleSuggestion?: (suggestion: TaskInputAcceptedSuggestion) => boolean | Promise<boolean>;
     isDoneActionActive?: boolean;
@@ -82,6 +83,7 @@ interface TaskItemEditorProps {
     onConvertToSection?: () => void;
     onCancel: () => void;
     onSubmit: (e: FormEvent) => void;
+    isImportingFiles?: boolean;
     onFilesDropped?: (files: File[]) => void;
 }
 
@@ -142,10 +144,11 @@ export function TaskItemEditor({
     onConvertToSection,
     onCancel,
     onSubmit,
+    isImportingFiles = false,
     onFilesDropped,
 }: TaskItemEditorProps) {
-    // Draft values and setField bindings, under the names the form below was
-    // written against.
+
+
     const {
         title: editTitle,
         contexts: editContexts,
@@ -189,9 +192,7 @@ export function TaskItemEditor({
     const [organizationOpen, setOrganizationOpen] = useState(() => sectionOpenDefaults.organization || sectionCounts.organization > 0);
     const [detailsOpen, setDetailsOpen] = useState(() => sectionOpenDefaults.details || sectionCounts.details > 0);
 
-    // Attachments can live in any of the three collapsible sections (user
-    // configurable layout); a dropped file needs to expand whichever one
-    // holds it and scroll it into view so the drop isn't invisible feedback.
+
     const attachmentsSection = findAttachmentsSection(schedulingFields, organizationFields, detailsFields);
     const attachmentsFieldRef = useRef<HTMLDivElement | null>(null);
     const [isFileDragOver, setIsFileDragOver] = useState(false);
@@ -205,8 +206,7 @@ export function TaskItemEditor({
         setIsFileDragOver(true);
     };
 
-    // dragleave also fires when the pointer crosses into a child element, which
-    // would flicker the ring off for the whole drag if not guarded.
+
     const handleFormDragLeave = (event: DragEvent<HTMLFormElement>) => {
         const next = event.relatedTarget;
         if (next instanceof Node && event.currentTarget.contains(next)) return;
@@ -227,9 +227,7 @@ export function TaskItemEditor({
         if (attachmentsSection) setRevealAttachmentsToken((prev) => prev + 1);
     };
 
-    // Expanding a section and scrolling to it in the same tick scrolls to a
-    // node that isn't laid out yet; wait a frame after the open-state update
-    // has painted before scrolling.
+
     useEffect(() => {
         if (revealAttachmentsToken === 0) return;
         const raf = requestAnimationFrame(() => {
@@ -298,8 +296,12 @@ export function TaskItemEditor({
 
     return (
         <form
-            onSubmit={onSubmit}
+            onSubmit={(event) => {
+                if (isImportingFiles) { event.preventDefault(); return; }
+                onSubmit(event);
+            }}
             onKeyDown={(event) => {
+                if (isImeComposing(event)) return;
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     event.stopPropagation();
@@ -313,7 +315,7 @@ export function TaskItemEditor({
                     if (typeof form.requestSubmit === 'function') {
                         form.requestSubmit();
                     } else {
-                        onSubmit(event as unknown as FormEvent);
+                        if (!isImportingFiles) onSubmit(event as unknown as FormEvent);
                     }
                 }
             }}
@@ -435,6 +437,7 @@ export function TaskItemEditor({
                                         destinationLabel={t('task.destination')}
                                         projectsLabel={t('projects.title')}
                             areasLabel={t('areas.manage')}
+                                        deferredLabel={t('projects.deferredSection')}
                                         noneLabel={t('common.none')}
                                         searchPlaceholder={t('common.search')}
                                         noMatchesLabel={t('common.noMatches')}
@@ -598,6 +601,7 @@ export function TaskItemEditor({
                 )}
                 <div className="flex flex-wrap gap-2 ml-auto">
                     <button
+                        disabled={isImportingFiles}
                         type="submit"
                         className={cn(
                             'bg-primary text-primary-foreground hover:bg-primary/90',

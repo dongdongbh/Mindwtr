@@ -1,13 +1,6 @@
-/**
- * Core's Settings › Notifications model replayed against React Native's frozen screen
- * (notifications-settings-parity.fixtures.json, captured at dba1097c7 by
- * apps/mobile/components/settings/notifications-settings-screen.parity.test.tsx).
- * Each scenario seeds the same store, draws the model the way RN's screen lays it
- * out, and drives the same controls: every text and its dimming, every switch and
- * row with its disabled flag, the pickers, and each write and device call must
- * match what RN's screen did before core held its policy. Colors are RN's theme,
- * not the model's, so they are left out.
- */
+
+
+
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadTranslations } from './i18n/i18n-loader';
 import { tFallback } from './i18n';
@@ -46,13 +39,13 @@ const strings: Record<string, Record<string, string>> = {};
 
 type Toggle = NotificationsSettingsModel['reminders']['enable'];
 type TimeRow = NotificationsSettingsModel['weeklyReview']['time'];
-/** What the screen has open: the day picker, or a time picker (iOS keeps a draft). */
+
 type Ui = { dayPicker: boolean; time: { row: TimeRow; draft: string } | null };
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const hhmm = (row: TimeRow) => `${pad(row.hour)}:${pad(row.minute)}`;
 
-/** The model laid out as RN's screen draws it; texts as [words, opacity]. */
+
 function draw(model: NotificationsSettingsModel, device: Device, ui: Ui) {
     const { reminders, weeklyReview, dailyDigest } = model;
     const ios = device.platform === 'ios';
@@ -111,7 +104,7 @@ describe('core\'s Settings › Notifications model against RN\'s frozen screen',
         const granted = device.permissionGranted ?? true;
         let capture = device.persistentCapture ?? false;
 
-        // The same store RN's harness seeded: its first-run migration shapes the settings.
+
         await flushPendingSave();
         resetForTests();
         const data = JSON.parse(JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: fixture.settings[scenario.settings] }));

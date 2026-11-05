@@ -18,17 +18,13 @@ import { flushSyncEncryptionLocalState, logSyncEncryptionEvent, syncEncryptionLo
 import { renameSafTransitionDocument } from './sync-file-transition-cas';
 import { readBookmarkedSyncFileText, supportsBookmarkedSyncFileIO } from './sync-path-bookmarks';
 
-// File Sync's rules live in core (mobile-file-sync.ts, mobile-file-sync-remote.ts). This binds
-// their host to expo-file-system (legacy SAF and file APIs, and the modern File API), to
-// SafDocumentsCore (saf-documents.ts) and to the transition rename, with expo's write and read
-// ladders kept here, exactly as lib/storage-file*.ts called them before the move.
 
 const StorageAccessFramework = FileSystem.StorageAccessFramework;
 
 const isReadOnlyError = (error: unknown): boolean =>
     /isn't writable|not writable|read-only|read only|permission denied|EACCES/i.test(String(error));
 
-/** Expo's write of exact bytes to a plain file: the modern File API, then the legacy Base64 write. */
+
 const writePathBytes = async (uri: string, payload: Uint8Array): Promise<void> => {
     try {
         const file = new ExpoFile(uri);
@@ -59,9 +55,8 @@ const mobileFileSyncHost: MobileFileSyncFullHost = {
                 });
                 return;
             } catch (error) {
-                // Load-bearing ladder: expo's legacy SAF write refuses whenever the provider
-                // omits FLAG_SUPPORTS_WRITE (RSAF/rclone always does), and the modern File API
-                // writes straight through openOutputStream with no writability pre-check.
+
+
                 if (!isReadOnlyError(error)) throw error;
                 try {
                     new ExpoFile(uri).write(payload);
@@ -94,8 +89,8 @@ const mobileFileSyncHost: MobileFileSyncFullHost = {
                 if (!file.exists) return null;
                 return await file.bytes();
             } catch (error) {
-                // The modern File API is unavailable on some legacy paths; the legacy Base64
-                // read is the same fallback ladder the text read uses.
+
+
                 try {
                     const info = await FileSystem.getInfoAsync(uri);
                     if (!info.exists) return null;
@@ -113,7 +108,7 @@ const mobileFileSyncHost: MobileFileSyncFullHost = {
                     if (!file.exists) return null;
                     return await file.text();
                 } catch {
-                    // Fall back to legacy API for compatibility with older paths.
+
                 }
             }
             const fileInfo = await FileSystem.getInfoAsync(uri);
@@ -158,7 +153,7 @@ const mobileFileSyncHost: MobileFileSyncFullHost = {
 
 let instance: MobileFileSync | null = null;
 
-/** React Native's File Sync (core's, on this host); made on first use. */
+
 export const mobileFileSync = (): MobileFileSync => {
     instance ??= createMobileFileSync(mobileFileSyncHost);
     return instance;

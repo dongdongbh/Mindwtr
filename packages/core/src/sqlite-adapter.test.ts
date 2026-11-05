@@ -103,9 +103,7 @@ const loadDatabaseCtor = (): DatabaseCtor | null => {
 const RuntimeDatabase = loadDatabaseCtor();
 const describeSqlite = RuntimeDatabase ? describe : describe.skip;
 
-// `describe.skip` above passes silently if no sqlite runtime is found - this bare
-// top-level check fails loudly instead, so the persistence-adapter suite can't
-// vanish unnoticed on a runtime that lacks both bun:sqlite and node:sqlite.
+
 it('has a sqlite runtime available to run the adapter suite', () => {
     expect(RuntimeDatabase).not.toBeNull();
 });
@@ -469,7 +467,7 @@ describeSqlite('SqliteAdapter', () => {
         expect(task.checklist?.[0]?.title).toBe('Outline');
         expect(task.attachments?.[0]?.title).toBe('spec.pdf');
         expect(task.attachments?.[0]?.localStatus).toBe('available');
-        // #1057: content-tracking fields (SQLite -> AppData round trip).
+
         expect(task.attachments?.[0]?.cloudKey).toBe('attachments/a1.pdf');
         expect(task.attachments?.[0]?.fileHash).toBe('abc123');
         expect(task.attachments?.[0]?.contentRev).toBe(3);
@@ -519,7 +517,7 @@ describeSqlite('SqliteAdapter', () => {
         const archivedAt = '2026-09-01T12:00:00.000Z';
         const previousCompletion = '2026-08-31T12:00:00.000Z';
         const restoredAt = '2026-09-05T13:00:00.000Z';
-        // The sync merge reads the real clock, and the 90-day tombstone purge would drop these fixed-date sections.
+
         vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
         vi.setSystemTime(new Date(restoredAt));
         onTestFinished(() => { vi.useRealTimers(); });
@@ -1362,7 +1360,7 @@ describeSqlite('SqliteAdapter', () => {
                     revBy: 'device-a',
                 },
                 {
-                    // A tombstone: omission may prune only tombstones.
+
                     id: 'task-remove',
                     title: 'Original',
                     status: 'next',
@@ -1633,7 +1631,7 @@ describeSqlite('SqliteAdapter', () => {
         expect(loaded.projects[0]?.areaId).toBe('area-linked-1');
         expect(loaded.sections[0]?.projectId).toBe('proj-linked-1');
 
-        // Tombstone the linked rows first: omission prunes only tombstones.
+
         await adapter.saveData({
             ...linkedData,
             tasks: linkedData.tasks.map((task) => ({ ...task, deletedAt: now })),
@@ -1641,8 +1639,7 @@ describeSqlite('SqliteAdapter', () => {
             sections: linkedData.sections.map((section) => ({ ...section, deletedAt: now })),
         });
 
-        // Delete every linked row in one save (the area survives so the save
-        // is not an all-empty snapshot, which the #852 backstop refuses).
+
         await expect(adapter.saveData({
             tasks: [],
             projects: [],
@@ -1877,7 +1874,7 @@ describeSqlite('SqliteAdapter', () => {
 
         expect(await search('report -draft')).toEqual(['a']);
         expect(await search('-draft')).toEqual(['a']);
-        // Full-text search ANDs every word, so its hits for an OR query are already a subset of the local result.
+
         expect(await search('report OR memo')).toEqual(['a', 'b', 'c']);
     });
 
@@ -1977,11 +1974,11 @@ describeSqlite('SqliteAdapter', () => {
         const results = await lightweightAdapter.searchAll('anything');
 
         expect(results).toEqual({ tasks: [], projects: [] });
-        // A syntax-class failure must not retry via a rebuild: one attempt, two
-        // parallel queries (tasks + projects), no second runSearch() pass.
+
+
         expect(allMock).toHaveBeenCalledTimes(2);
 
-        // A second syntax-class failure behaves the same way — still no retry.
+
         const secondResults = await lightweightAdapter.searchAll('anything else');
         expect(secondResults).toEqual({ tasks: [], projects: [] });
         expect(allMock).toHaveBeenCalledTimes(4);
@@ -2329,9 +2326,8 @@ describeSqlite('SqliteAdapter', () => {
     });
 
     it('restores a dropped FTS trigger even when schema_migrations already records the current version', async () => {
-        // Simulates the gap this item closes: ensureFtsSchema's DROPs run outside
-        // ensureFtsTriggers' BEGIN IMMEDIATE, so a crash or SQLITE_BUSY between them
-        // can leave a trigger missing while the migration marker still says applied.
+
+
         db.exec(SQLITE_BASE_SCHEMA);
         db.exec(SQLITE_FTS_SCHEMA);
         db.exec('DROP TRIGGER tasks_au');
@@ -2357,10 +2353,8 @@ describeSqlite('SqliteAdapter', () => {
     });
 
     it('forces a trigger re-migration via ensureFtsTriggers itself when sqlite_master disagrees with the marker', async () => {
-        // Calls the private method directly (not ensureSchema()): ensureSchemaInternal
-        // always execs SQLITE_FTS_SCHEMA's blanket CREATE TRIGGER IF NOT EXISTS first,
-        // which would coincidentally restore a dropped trigger and mask a broken
-        // sqlite_master check. Isolating ensureFtsTriggers proves its own guard works.
+
+
         db.exec(SQLITE_BASE_SCHEMA);
         db.exec(SQLITE_FTS_SCHEMA);
         db.exec('DROP TRIGGER tasks_au');
@@ -2780,9 +2774,7 @@ describeSqlite('SqliteAdapter incremental saveData', () => {
         await adapter.saveData(data);
         expect(adapter.getLastSaveDataStats().rewriteDiagnostics).toBeUndefined();
 
-        // Flip one column on 150 pre-existing rows (120 purged + 30 live) —
-        // the rc.2 sync-loop shape. The diagnostic must name the column and
-        // count the tombstones.
+
         await adapter.saveData({
             ...data,
             tasks: manyTasks.map((task, i) => (i < 150 ? { ...task, pushCount: 1 } : task)),
@@ -2797,7 +2789,7 @@ describeSqlite('SqliteAdapter incremental saveData', () => {
             purgedChangedRows: 120,
         });
 
-        // A handful of changed rows stays below the threshold: no diagnostic.
+
         await adapter.saveData({
             ...data,
             tasks: manyTasks.map((task, i) => (i < 150 ? { ...task, pushCount: 2 } : { ...task, title: `Renamed ${i}` })),
@@ -2827,7 +2819,7 @@ describeSqlite('SqliteAdapter incremental saveData', () => {
 
     it('removes dropped rows only when their observed database version still matches', async () => {
         const base = baseData();
-        // task-2 is a tombstone at the same version: omission prunes only tombstones.
+
         const data = { ...base, tasks: [base.tasks[0], { ...base.tasks[1], deletedAt: '2026-07-01T08:00:00.000Z' }] };
         await adapter.saveData(data);
         statements = [];
@@ -2994,7 +2986,7 @@ describe('SqliteAdapter empty-snapshot backstop (#852)', () => {
 
         await expect(adapter.saveData(emptyData)).rejects.toThrow(/empty snapshot/);
 
-        // The proof happens under the writer lock, then rolls back before data writes.
+
         expect(run.mock.calls.map(([sql]) => String(sql))).toEqual(['BEGIN IMMEDIATE', 'ROLLBACK']);
     });
 
@@ -3024,8 +3016,8 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
     const taskRow = (id: string) => getSql(db, 'SELECT * FROM tasks WHERE id = ?', [id]);
     const taskIds = () => allSql<{ id: string }>(db, 'SELECT id FROM tasks ORDER BY id').map((row) => row.id);
     const keptLiveLogs = () => logs.filter((entry) => entry.message === KEPT_LIVE_MESSAGE);
-    // Another process (or the canonical load path) wrote these rows; this adapter
-    // only learns about them through getData.
+
+
     const seed = async (data: AppData) => new SqliteAdapter(createClient(db)).saveData(data);
 
     beforeEach(() => {
@@ -3042,14 +3034,14 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
     });
 
     it('keeps a live row a stale snapshot omits and logs it once (startup snapshot race)', async () => {
-        // SQLite holds X; the AsyncStorage startup snapshot predates it.
+
         await seed(doc([task('w'), task('x')]));
         const startupSnapshot = doc([task('w')]);
-        // The canonical load observes X, then core discards its result.
+
         expect((await adapter.getData()).tasks.map((item) => item.id)).toEqual(['w', 'x']);
         const storedX = taskRow('x');
 
-        // A quick-add builds its full save from the snapshot state.
+
         await adapter.saveData({ ...startupSnapshot, tasks: [...startupSnapshot.tasks, task('y')] });
 
         expect(taskIds()).toEqual(['w', 'x', 'y']);
@@ -3079,8 +3071,8 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
     });
 
     it('keeps a row another writer tombstoned after the read, then prunes it once observed', async () => {
-        // Decision: CAS as today. The row changed since the read, so omission
-        // leaves it; it is a tombstone now, so the kept-live line does not fire.
+
+
         await seed(doc([task('w'), task('x')]));
         await adapter.getData();
         await new SqliteAdapter(createClient(db)).saveTask(
@@ -3090,7 +3082,7 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
         await adapter.saveData(doc([task('w')]));
         expect(taskRow('x')).toMatchObject({ deletedAt: '2026-09-20T09:00:00.000Z', rev: 2 });
         expect(keptLiveLogs()).toEqual([]);
-        // removedRows counts the DELETE's real changes, not the omitted candidates.
+
         expect(adapter.getLastSaveDataStats()).toMatchObject({ removedRows: 0 });
 
         await adapter.getData();
@@ -3148,7 +3140,7 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
         await adapter.getData();
         const staleList = doc([task('w')], { savedFilters: [filter('a')] });
 
-        // Two stale saves before any reload: B survives both, the tombstone prunes.
+
         await adapter.saveData(staleList);
         await adapter.saveData(staleList);
 
@@ -3174,7 +3166,7 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
 
         await adapter.saveData(doc([task('w')]));
 
-        // No list is not an omission: the stored list and its table copy stay.
+
         expect((await adapter.getData()).settings.savedFilters).toEqual([filter]);
         expect(allSql<{ id: string }>(db, 'SELECT id FROM saved_filters').map((row) => row.id)).toEqual(['a']);
         expect(keptLiveLogs()).toEqual([]);
@@ -3200,8 +3192,8 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
             const foreignKeys = ['tasks', 'projects', 'sections', 'areas', 'people', 'saved_filters'].flatMap((table) =>
                 allSql<{ table: string; from: string }>(db, `PRAGMA foreign_key_list(${table})`)
                     .map((key) => `${table}.${key.from} -> ${key.table}`));
-            // A new foreign key must also go into ENTITY_FOREIGN_KEY_CHILDREN (sync-tombstones.ts),
-            // which both the purge and the adapter's prune read.
+
+
             const guarded = Object.entries(ENTITY_FOREIGN_KEY_CHILDREN).flatMap(([parent, children]) =>
                 children.map(([child, column]) => `${child}.${column} -> ${parent}`));
             expect(foreignKeys.sort()).toEqual(guarded.sort());
@@ -3228,12 +3220,12 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
                 sections: [section({ deletedAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' })],
             });
             const loaded = await adapter.getData();
-            // The purge keeps the referenced project (same rule as the adapter).
+
             const cleaned = purgeExpiredTombstones(loaded, '2026-09-20T00:00:00.000Z').data;
             expect(cleaned.projects.map((item) => item.id)).toEqual(['project-1']);
             expect(cleaned.sections.map((item) => item.id)).toEqual(['section-1']);
 
-            // A document that still omits it (a <=1.3.2 purge) cannot delete it either.
+
             await adapter.saveData({ ...cleaned, projects: [] });
             expect(ids('projects')).toEqual(['project-1']);
             expect(ids('sections')).toEqual(['section-1']);
@@ -3291,7 +3283,7 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
         });
 
         it('prunes a tombstoned parent chain only after its last child is gone', async () => {
-            // Covers tasks.projectId, tasks.sectionId and projects.areaId.
+
             const child = task('child', { projectId: 'project-1', sectionId: 'section-1' });
             await seed({
                 ...doc([task('w'), child]),
@@ -3321,8 +3313,7 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
         await adapter.saveData(first);
         expect(await adapter.getData()).toEqual(first);
 
-        // Stale document: X survives unchanged, and once the caller reloads the
-        // next cycle converges with no further kept rows.
+
         await adapter.saveData(doc([task('w')]));
         const afterStale = await adapter.getData();
         expect(afterStale.tasks.find((item) => item.id === 'x')).toEqual(first.tasks.find((item) => item.id === 'x'));
@@ -3333,8 +3324,8 @@ describeSqlite('SqliteAdapter omission never deletes a live row', () => {
 });
 
 describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
-    // A newer app's filter (a view, a field and a sort this build does not
-    // know), an undated filter, and a user order that is not createdAt order.
+
+
     const newer = {
         id: 'filter-newer', name: 'Calendar lane', view: 'calendar', color: '#ff0000', sortBy: 'somethingNew',
         criteria: { contexts: ['@desk'] }, createdAt: '2026-09-02T00:00:00.000Z', updatedAt: '2026-09-02T00:00:00.000Z',
@@ -3359,6 +3350,22 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
         db.close();
     });
 
+    it('round-trips Context project exclusions and multiple statuses through JSON and table recovery', async () => {
+        const filters: NonNullable<AppData['settings']['savedFilters']> = [{ ...older, view: 'contexts',
+            criteria: { contexts: ['@person/emma'], excludedProjects: ['project-excluded'], statuses: ['next', 'someday'] } }];
+        const adapter = new SqliteAdapter(createClient(db));
+        await adapter.saveData(JSON.parse(JSON.stringify(doc(filters))));
+        const first = await new SqliteAdapter(createClient(db)).getData();
+        expect(first.settings.savedFilters).toEqual(filters);
+        const row = JSON.parse(getSql<{ data: string }>(db, 'SELECT data FROM settings WHERE id = 1')!.data);
+        delete row.savedFilters;
+        runSql(db, 'UPDATE settings SET data = ? WHERE id = 1', [JSON.stringify(row)]);
+        const recovered = await new SqliteAdapter(createClient(db)).getData();
+        expect(recovered.settings.savedFilters).toEqual(filters);
+        await adapter.saveData(recovered);
+        expect((await adapter.getData()).settings.savedFilters).toEqual(filters);
+    });
+
     it('retains Contexts statuses and excluded projects through settings JSON and saved-filter table recovery', async () => {
         const filters = [{ ...older, view: 'contexts' as const, criteria: { statuses: ['someday' as const, 'waiting' as const],
             excludedProjects: ['project'], futureCriterion: { retained: true } } }];
@@ -3375,7 +3382,7 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
     });
 
     it('retains rolling task date criteria through settings JSON, table recovery, and a second save', async () => {
-        const filters = ['today', 'next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
+        const filters = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'].map((preset) => ({
             ...older, id: `date-${preset}`, criteria: { anyDateRange: { preset } },
         })) as NonNullable<AppData['settings']['savedFilters']>;
         const adapter = new SqliteAdapter(createClient(db));
@@ -3400,7 +3407,7 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
         expect(selectFocusSavedFilters(first.settings.savedFilters).map((filter) => filter.id))
             .toEqual(['filter-undated', 'filter-older']);
 
-        // A filter with no createdAt loads twice with identical bytes.
+
         const second = await new SqliteAdapter(createClient(db)).getData();
         expect(JSON.stringify(second.settings.savedFilters)).toBe(JSON.stringify(first.settings.savedFilters));
 
@@ -3422,7 +3429,7 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
         expect(loaded?.find((filter) => filter.id === 'filter-newer')).toMatchObject({ view: 'calendar', sortBy: 'somethingNew' });
         expect(selectFocusSavedFilters(loaded).map((filter) => filter.id)).toEqual(['filter-undated', 'filter-older']);
 
-        // With no stored list, a live filter a stale list omits comes back from the table.
+
         await adapter.saveData(doc([older] as unknown as NonNullable<AppData['settings']['savedFilters']>));
         const recovered = (await adapter.getData()).settings.savedFilters;
         expect(recovered?.map((filter) => filter.id).sort()).toEqual(['filter-newer', 'filter-older', 'filter-undated']);
@@ -3435,7 +3442,7 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
         await adapter.saveData(doc([newer, older] as unknown as NonNullable<AppData['settings']['savedFilters']>));
         await adapter.getData();
 
-        // A stale snapshot holds only the older filter, plus one created since.
+
         await adapter.saveData(doc([older, created] as unknown as NonNullable<AppData['settings']['savedFilters']>));
 
         const expected = [newer, older, created];

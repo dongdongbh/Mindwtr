@@ -319,11 +319,7 @@ describe('HTTP MCP transport (integration, real listening server)', () => {
   });
 });
 
-// BUG-15: readRequestBody used to never settle on a client abort (no 'end'/'error' fires, only
-// 'close'), and handleMcpPost registered its res.on('close', cleanup) AFTER awaiting the body
-// read - so an abort mid-upload left the McpServer/transport pair leaked with nothing left that
-// would ever close them. This drives a real abort over a live socket and confirms the server
-// created for that request actually gets closed.
+
 describe('HTTP MCP transport: aborting mid-upload still closes the transport/server (BUG-15)', () => {
   let baseUrl = '';
   let httpServer: Server;
@@ -374,13 +370,13 @@ describe('HTTP MCP transport: aborting mid-upload still closes the transport/ser
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
           Authorization: `Bearer ${VALID_TOKEN}`,
-          // Declares far more than gets written, so the server is still mid-read when destroyed.
+
           'Content-Length': '1000000',
         },
       });
       req.on('error', () => resolveReq());
-      // Bun's node:http client buffers a plain write() and never actually sends it without
-      // flushHeaders() (or .end()) - without this the server never even sees the request.
+
+
       req.flushHeaders();
       req.write('{"jsonrpc":"2.0"');
       setTimeout(() => {
@@ -410,7 +406,7 @@ describe('isAllowedOrigin', () => {
 
   test('rejects a foreign Origin, including one that only looks local', () => {
     expect(isAllowedOrigin('http://evil.example', '127.0.0.1')).toBe(false);
-    // DNS rebinding: resolves to 127.0.0.1 but its Origin is not the bound host.
+
     expect(isAllowedOrigin('http://127.0.0.1.evil.example', '127.0.0.1')).toBe(false);
     expect(isAllowedOrigin('http://localhost', '127.0.0.1')).toBe(false);
   });
@@ -479,8 +475,7 @@ describe('MCP HTTP auth-failure throttling and Origin checks', () => {
     expect(Number(throttled.headers.get('retry-after')) > 0).toBe(true);
     expect((await throttled.json() as { error: string }).error).toBe('rate_limit_exceeded');
 
-    // Only failures are counted (cloud consults its limiter solely from unauthorizedResponse),
-    // so a client holding the real token is never locked out by someone else guessing.
+
     expect((await post({ Authorization: `Bearer ${VALID_TOKEN}` })).status).toBe(200);
   });
 });

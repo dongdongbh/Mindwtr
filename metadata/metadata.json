@@ -30,7 +30,7 @@
           "列表、日历与看板视图，支持提醒与重复任务",
           "免费开源、无广告"
         ],
-        "ReleaseNotes": "项目新增「按分区」流程模式。可设置默认任务提醒、勾选参考清单、按优先级排序、为项目设置颜色，并新增 Gruvbox 主题。单击情境即可切换，Ctrl 单击可组合；嵌套情境按组显示。弹出式编辑器空间更大，任务子菜单悬停即开，时间线行可重新排序。可按任务日期筛选。MCP 可分别授权编辑、归档和删除，可设置端口并复制 Codex 配置。同步期间编辑会保留其他设备的更改。",
+        "ReleaseNotes": "新增独立工作区、可选应用锁、提前提醒和搜索独立排序。收件箱条目可加入清单并撤销。改进项目分区和每周回顾。笔记编辑更流畅，日期时间遵循系统区域格式，同步及本地 API、MCP 写入更安全。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "List, calendar, and kanban views with reminders and repeating tasks",
           "Free and open source, no ads"
         ],
-        "ReleaseNotes": "Projects get a Per section flow mode. Set default task reminders, tick Reference checklists, sort by Priority, give projects a color and try Gruvbox themes. Click a context to switch to it, Ctrl-click to combine; nested contexts show as groups. The pop-up editor has more room, task submenus open on hover, and Timeline rows can be reordered. Filter by task dates. MCP gets separate edit, archive and delete permissions, a port setting and Copy for Codex. Editing during a sync keeps other devices' changes.",
+        "ReleaseNotes": "Separate workspaces; optional app lock; advance reminders; saved-search sorting; Inbox-to-checklist with Undo; project sections and Weekly Review improvements. Faster notes editing, regional date/time formats, safer sync and Local API/MCP task writes.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -131,7 +131,7 @@
           "Listen-, Kalender- und Kanban-Ansichten mit Erinnerungen und Wiederholungen",
           "Kostenlos und Open Source, ohne Werbung"
         ],
-        "ReleaseNotes": "Projekte erhalten den Ablauf „Pro Abschnitt“. Standard-Erinnerungen, abhakbare Referenzlisten, Sortierung nach Priorität, Projektfarben und Gruvbox-Designs. Klick wechselt den Kontext, Strg-Klick kombiniert; verschachtelte Kontexte erscheinen als Gruppen. Größerer Pop-up-Editor, Untermenüs per Hover und Sortieren in Timeline. Filter nach Aufgabendaten. MCP mit getrennten Rechten für Bearbeiten, Archivieren und Löschen, Port-Einstellung und Kopieren für Codex. Bearbeiten während der Synchronisierung behält Änderungen anderer Geräte.",
+        "ReleaseNotes": "Getrennte Arbeitsbereiche, optionale App-Sperre, frühere Erinnerungen und eigene Suchsortierung. Eingangseinträge mit Rückgängig in Checklisten übernehmen. Verbesserte Projektabschnitte und Wochenrückblicke. Schnellere Notizen, regionale Datumsformate, sichererer Sync und Local-API-/MCP-Schreibzugriffe.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -161,7 +161,7 @@
           "Vues liste, calendrier et kanban, rappels et tâches répétées",
           "Gratuit et open source, sans publicité"
         ],
-        "ReleaseNotes": "Les projets ont le flux Par section. Rappels par défaut, listes Référence à cocher, tri par Priorité, couleurs de projet et thèmes Gruvbox. Cliquez sur un contexte pour changer, Ctrl+clic pour combiner ; les contextes imbriqués sont groupés. Éditeur contextuel plus spacieux, sous-menus au survol et lignes réordonnables dans Timeline. Filtre par dates. MCP avec droits séparés pour modifier, archiver et supprimer, port réglable et Copier pour Codex. Modifier pendant une synchro garde les changements des autres appareils.",
+        "ReleaseNotes": "Espaces de travail séparés, verrouillage facultatif, rappels anticipés et tri par recherche. Ajout aux listes avec Annuler. Sections et revue hebdomadaire améliorées. Notes plus réactives, formats régionaux, synchronisation et écritures via API locale et MCP plus sûres.",
         "Images": [],
         "RecommendedHardware": [],
         "MinimumHardware": [],
@@ -190,7 +190,7 @@
           "Vistas de lista, calendario y kanban, con recordatorios y tareas repetidas",
           "Gratis y de código abierto, sin anuncios"
         ],
-        "ReleaseNotes": "Los proyectos tienen el flujo Por sección. Recordatorios por defecto, listas de Referencia marcables, orden por Prioridad, colores de proyecto y temas Gruvbox. Haz clic en un contexto para cambiar y Ctrl+clic para combinar; los contextos anidados se agrupan. Editor emergente más amplio, submenús al pasar el ratón y filas reordenables en Timeline. Filtra por fechas. MCP con permisos separados para editar, archivar y eliminar, puerto configurable y Copiar para Codex. Editar durante la sincronización conserva cambios de otros dispositivos.",
+        "ReleaseNotes": "Espacios de trabajo separados, bloqueo opcional, avisos anticipados y orden por búsqueda. Añade entradas a listas con Deshacer. Mejoras en secciones y revisión semanal. Notas más rápidas, formatos regionales y escrituras más seguras mediante sincronización, API local y MCP.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

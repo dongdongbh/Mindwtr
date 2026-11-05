@@ -1,8 +1,6 @@
 import type { TaskStatus } from '@mindwtr/core';
 
-// Status tints from the same theme-aware `--status-*` variables the Board
-// columns use, so a status wears one color everywhere. Full literal strings:
-// Tailwind's scanner cannot see composed arbitrary values.
+
 export const STATUS_PILL_CLASSES: Record<TaskStatus, string> = {
     inbox: 'bg-[hsl(var(--status-inbox)/0.14)] text-[hsl(var(--status-inbox))]',
     next: 'bg-[hsl(var(--status-next)/0.14)] text-[hsl(var(--status-next))]',

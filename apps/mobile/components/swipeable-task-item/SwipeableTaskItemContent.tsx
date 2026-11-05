@@ -3,10 +3,11 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 import { AlignLeft, Check, CircleDot, History, Hourglass, ListChecks, Paperclip, Repeat, UserRound } from 'lucide-react-native';
 import { useThemeTokens } from '../../hooks/use-theme-tokens';
 import { useStatusColors } from '../../hooks/use-status-colors';
+import { usePriorityColors } from '../../hooks/use-priority-colors';
+import { useEinkSafeColor } from '../../hooks/use-eink-safe-color';
 import {
     formatI18nTemplate,
     tFallback,
-    TASK_PRIORITY_COLORS,
 } from '@mindwtr/core';
 import type { ProjectSequenceTaskCue, Task, TaskRowMeta, TaskRowMetaPart } from '@mindwtr/core';
 import type { ThemeColors } from '../../hooks/use-theme-colors';
@@ -20,12 +21,12 @@ interface SwipeableTaskItemContentProps {
     accessibilityActions: { label: string; name: string }[];
     accessibilityHint: string;
     canShowFocusToggle: boolean;
-    /** When set, the star renders disabled with this as its label. */
+
     focusToggleDisabledLabel?: string;
     hideStatusBadge: boolean;
-    /** Title-only row: suppress the description preview, task age and detail meta parts. */
+
     hideDetails: boolean;
-    /** Render the status control as a compact icon button (no status-name label) for single-status lists */
+
     statusBadgeAsIcon: boolean;
     isDark: boolean;
     isHighlighted: boolean;
@@ -34,7 +35,7 @@ interface SwipeableTaskItemContentProps {
     localChecklist: Task['checklist'];
     interactionDisabled?: boolean;
     allowInspectionWhenDisabled?: boolean;
-    /** The row's labels and meta line, computed by core. */
+
     meta: TaskRowMeta;
     onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => void;
     onAddChecklistItem: (title: string) => void;
@@ -94,19 +95,19 @@ export function SwipeableTaskItemContent({
     tc,
 }: SwipeableTaskItemContentProps) {
     const isReference = task.status === 'reference';
+    const einkSafe = useEinkSafeColor();
 
-    // Draft text lives here, not in useSwipeableChecklist: it must never reach the
-    // pending-checklist flush, so an unsubmitted line is discarded with the row.
+
     const [checklistDraft, setChecklistDraft] = useState('');
     const checklistDraftRef = useRef<TextInput>(null);
 
     const textDirection = meta.textDirection;
     const textAlign = textDirection === 'rtl' ? 'right' : 'left';
-    // Age is detail: the Focus "hide details" toggle drops it with the rest.
+
     const ageLabel = hideDetails ? null : meta.ageLabel;
     const descriptionPreview = hideDetails ? null : meta.descriptionPreview;
     const compactRecurrence = hideDetails && meta.parts.some((part) => part.kind === 'recurrence');
-    // Hidden details keep one cue that the task has more to read (#1287).
+
     const compactDescription = hideDetails && Boolean(meta.descriptionPreview);
     const statusColors = useStatusColors()[task.status];
     const isAvailableNextAction = sequenceCue === 'available';
@@ -149,8 +150,7 @@ export function SwipeableTaskItemContent({
         );
     };
 
-    // Items are separated by the row's gap alone. A "·" between them used to be
-    // its own node, so a wrapped line could start with a lone dot (#1161).
+
     const renderMetaPart = (part: TaskRowMetaPart): ReactNode => {
         switch (part.kind) {
             case 'project':
@@ -163,7 +163,7 @@ export function SwipeableTaskItemContent({
                     ),
                     children: (
                         <>
-                            <View style={[styles.projectDot, { backgroundColor: part.dotColor || tc.tint }]} />
+                            <View style={[styles.projectDot, { backgroundColor: einkSafe(part.dotColor || tc.tint) }]} />
                             <CompactText
                                 style={[styles.metaText, { color: tc.secondaryText }]}
                                 numberOfLines={2}
@@ -176,7 +176,7 @@ export function SwipeableTaskItemContent({
             case 'area':
                 return (
                     <View key="area" style={styles.inlineMetaItem}>
-                        <View style={[styles.projectDot, { backgroundColor: part.dotColor || tc.tint }]} />
+                        <View style={[styles.projectDot, { backgroundColor: einkSafe(part.dotColor || tc.tint) }]} />
                         <CompactText
                             style={[styles.metaText, { color: tc.secondaryText }]}
                             numberOfLines={2}
@@ -229,7 +229,7 @@ export function SwipeableTaskItemContent({
                     children: (
                         <>
                             <UserRound size={12} color={tc.secondaryText} strokeWidth={2} />
-                            {/* The person is what a Waiting row is read for, so the name stands out (#1282). */}
+                            {                                                                                   }
                             <CompactText
                                 style={[styles.metaText, { color: tc.text, fontWeight: '600' }]}
                                 numberOfLines={2}
@@ -363,6 +363,7 @@ export function SwipeableTaskItemContent({
     };
 
     const { isMaterial, shape } = useThemeTokens();
+    const priorityColors = usePriorityColors();
     const visibleMetaParts = (hideDetails ? meta.parts.filter((part) => !part.detail) : meta.parts).map(renderMetaPart);
 
     return (
@@ -398,7 +399,7 @@ export function SwipeableTaskItemContent({
         >
             {meta.priority && (
                 <View
-                    style={[styles.priorityStrip, { backgroundColor: TASK_PRIORITY_COLORS[meta.priority] }]}
+                    style={[styles.priorityStrip, { backgroundColor: priorityColors[meta.priority] }]}
                     testID="task-priority-strip"
                     pointerEvents="none"
                 />

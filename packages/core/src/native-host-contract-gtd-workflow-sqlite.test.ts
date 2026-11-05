@@ -414,8 +414,8 @@ describe('GTD Capture parser and audio scalar SQLite recovery', () => {
         const dir = mkdtempSync(join(tempRoot, 'gtd-capture-parse-')); directories.push(dir);
         const path = join(dir, 'library.db');
         const first = await open(path, true);
-        // Store migrations normalize this legacy sibling on load. Stage the
-        // saved raw row after bootstrap to prove the writer itself preserves it.
+
+
         const raw = await first.adapter.getData();
         raw.settings.gtd = { ...raw.settings.gtd, pomodoro: 'malformed-unrelated' as never,
             ...(edit.type === 'saveAudioAttachments' ? { defaultCaptureMethod: 'text', saveAudioAttachments: !edit.value } : {}) };
@@ -1032,8 +1032,8 @@ describe('Pomodoro Settings SQLite durability', () => {
         const cold = await open(path);
         expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
         const disabled = await cold.adapter.getData(); disabled.settings.features!.pomodoro = false;
-        // A feature edit is not this selected leaf's receipt; it cannot block
-        // settlement of an already durable exact leaf/stamp/device receipt.
+
+
         await cold.adapter.saveData(disabled); const after = nineTables(cold.db);
         expect(await cold.host.commitPreparedGtdWorkflow(envelope)).toEqual({ ok: true, value: envelope.prepared.result });
         expect(nineTables(cold.db)).toEqual(after);

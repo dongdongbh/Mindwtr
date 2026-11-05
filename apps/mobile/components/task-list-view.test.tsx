@@ -288,9 +288,7 @@ describe('TaskListView', () => {
     expect((selection as any).toggleMultiSelect).toHaveBeenCalledWith('b', { visibleTaskIds: ['a', 'b'] });
   });
 
-  // The row memo boundary (#766) only holds if a selection change leaves the
-  // untouched rows' props alone. `visibleTaskIds` and the toggle callback used
-  // to be per-row props, so one checkbox tap invalidated every mounted row.
+
   it('keeps the row action object stable when the selection changes', () => {
     const tasks = [makeTask('a'), makeTask('b')];
     const baseProps: TaskListViewProps = {
@@ -313,7 +311,7 @@ describe('TaskListView', () => {
     const before = rowB().props;
     expect(before.isMultiSelected).toBe(false);
 
-    // A checkbox tap: a replaced Set, fresh handler props, same task objects.
+
     act(() => {
       renderer.update(React.createElement(TaskListView, {
         ...baseProps,
@@ -350,10 +348,7 @@ describe('TaskListView', () => {
     expect(texts.some((node) => node.props.children === 'Nothing here')).toBe(true);
   });
 
-  // Pinned literals, not a read of TASK_LIST_WINDOWING_PROPS: these numbers are
-  // #766 device tuning, and a test that echoes the constant would follow it down
-  // if an entry were dropped. Changing them is a perf decision — re-check
-  // docs/performance/budgets.md on hardware, not here.
+
   it('applies the shared list windowing tuning', () => {
     const renderer = renderView();
     const list = renderer.root.findByType('FlatList' as never);

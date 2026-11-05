@@ -53,8 +53,8 @@ import {
 import { LIST_END_GAP } from "./list/list-toolbar";
 import { SettingsUpdateModal } from "./settings/SettingsUpdateModal";
 import { SettingsSidebar } from "./settings/SettingsSidebar";
-// The default page travels with this already-lazy route. A second lazy
-// boundary here delays the first useful Settings content after the shell loads.
+
+
 import { SettingsMainPage } from "./settings/SettingsMainPage";
 import { useAiSettings } from "./settings/useAiSettings";
 import { useCalendarSettings } from "./settings/useCalendarSettings";
@@ -155,10 +155,7 @@ const SettingsAboutPage = lazy(
   ),
 );
 
-// 'en' plus every locale in the LOCALES table (@mindwtr/core, from i18n/i18n-locales.ts) —
-// see that module's header comment for why English isn't a table entry. `label` used to carry the
-// English display name here too, but nothing reads it (SettingsMainPage's LanguageOption
-// only has `native`), so it isn't reintroduced.
+
 const LANGUAGES: { id: Language; native: string }[] = [
   { id: "en", native: "English" },
   ...Object.entries(LOCALES).map(([id, descriptor]) => ({ id: id as Language, native: descriptor.native })),
@@ -174,13 +171,13 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   const perf = usePerformanceMonitor("SettingsView");
   const [page, setPage] = useState<SettingsPage>(initialPage ?? "main");
   const [isPagePending, startPageTransition] = useTransition();
-  // Keep the current page usable while the next lazy chunk resolves. Urgent
-  // switches replace it with a fallback and can pay Suspense's reveal delay.
+
+
   const selectPage = useCallback((next: SettingsPage) => {
     startPageTransition(() => setPage(next));
   }, [startPageTransition]);
-  // Defer section-specific IO, not hook ownership: once visited, keep state
-  // alive so navigating away and back cannot reload over an unfinished draft.
+
+
   const [visitedPages, setVisitedPages] = useState(() => new Set<SettingsPage>([initialPage ?? "main"]));
   useEffect(() => {
     setVisitedPages((visited) => visited.has(page) ? visited : new Set([...visited, page]));
@@ -245,7 +242,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   const { requestConfirmation, confirmModal } = useConfirmDialog();
 
   const showSaved = useCallback(() => {
-    // Visible settings update immediately; successful saves stay silent.
+
   }, []);
 
   useEffect(() => {
@@ -278,9 +275,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   );
   const [revealSetting, setRevealSetting] = useState<SettingsSearchResult | null>(null);
 
-  // Take the user to the setting they picked: switch pages, open the
-  // disclosure it hides inside, then scroll it into view and mark it. The page
-  // chunk loads lazily, so retry across a few frames before giving up.
+
   useEffect(() => {
     if (!revealSetting) return;
     let cancelled = false;
@@ -313,8 +308,8 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   const handleSelectSearchResult = useCallback((result: SettingsSearchResult) => {
     startPageTransition(() => {
       setPage(result.pageId as SettingsPage);
-      // Reveal only after the requested page commits, including a slow chunk.
-      // Fresh object so picking the same result twice re-runs the reveal effect.
+
+
       setRevealSetting({ ...result });
     });
   }, [startPageTransition]);
@@ -322,11 +317,11 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
   const advancedPageProps = useSettingsAdvancedPage({ loadEnabled: advancedLoadEnabled, isTauri, showSaved, t });
 
   const requestSettingsConfirmation = useCallback(
-    ({ title, message }: { title: string; message: string }) =>
+    ({ title, message, confirmLabel }: { title: string; message: string; confirmLabel?: string }) =>
       requestConfirmation({
         title,
         description: message,
-        confirmLabel: "Continue",
+        confirmLabel: confirmLabel ?? "Continue",
         cancelLabel,
       }),
     [cancelLabel, requestConfirmation],
@@ -563,7 +558,7 @@ export function SettingsView({ initialPage, onboardingHintPage, onResumeOnboardi
       scanSuccess: t.obsidianScanSuccess,
     },
   });
-  // Keep integrations state at SettingsView scope so the page does not remount and flicker on parent rerenders.
+
   const calendarPageProps = useCalendarSettings({
     loadEnabled: integrationsLoadEnabled,
     showSaved,

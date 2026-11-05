@@ -161,30 +161,33 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    swipeActionLeft: {
-        backgroundColor: '#10B981',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 90,
-        borderRadius: 14,
+
+    swipeTrayLeft: {
+        flexDirection: 'row',
         marginBottom: 6,
         marginRight: 8,
-        gap: 4,
+        gap: 6,
     },
-    swipeActionRight: {
-        backgroundColor: '#EF4444',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 90,
-        borderRadius: 14,
+    swipeTrayRight: {
+        flexDirection: 'row',
         marginBottom: 6,
         marginLeft: 8,
+        gap: 6,
+    },
+    swipeTrayButton: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 76,
+        minHeight: 48,
+        borderRadius: 14,
+        paddingHorizontal: 4,
         gap: 4,
     },
     swipeActionText: {
         color: '#FFFFFF',
         fontWeight: '600',
         fontSize: 12,
+        textAlign: 'center',
     },
     modalOverlay: {
         flex: 1,
@@ -275,8 +278,8 @@ export const styles = StyleSheet.create({
     },
     nextActionActions: {
         flexDirection: 'row',
-        // Three buttons don't fit a 375pt screen (or long locales) on one
-        // line; without wrap the primary button renders past the card edge.
+
+
         flexWrap: 'wrap',
         gap: 10,
         justifyContent: 'flex-end',
@@ -290,7 +293,7 @@ export const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     nextActionCompleteButton: {
-        // Secondary "escape hatch" pushed to the left, away from Skip/Add.
+
         marginRight: 'auto',
         minHeight: 44,
         paddingHorizontal: 8,
@@ -330,6 +333,11 @@ export const styles = StyleSheet.create({
     menuMoveActions: {
         marginTop: 16,
         gap: 8,
+    },
+    menuSectionTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     menuMoveItem: {
         minHeight: 44,

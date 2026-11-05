@@ -1,20 +1,6 @@
-/**
- * The Focus screen's controls as plain logic, for React Native's Focus screen
- * (`app/(drawer)/(tabs)/focus.tsx`) and for hosts that cannot run its hooks
- * (native-host-contract-focus-controls.ts): the filter sheet's options, the
- * sort and group choices, saved Focus filters (apply, save, update, delete) as
- * decision-to-write plans, the list items the sections draw, and the Today's
- * Focus reorder gate.
- *
- * The rows themselves always come from buildFocusPools and deriveFocusTaskLists
- * (focus-sections.ts); nothing here sorts, buckets or narrows a task.
- *
- * Mobile keeps the filter selections, the active saved filter and the sort in
- * React state (useTaskFilterSelections plus the screen's own sort state), so
- * they last as long as the screen is mounted. `FocusControlState` is that state
- * as plain data, and `resolveFocusFilterState` / `applyFocusControlEdit` mirror
- * the hook for a host that keeps it itself.
- */
+
+
+
 import { isTaskVisibleInArea, projectMatchesAreaFilterSelection, resolveAreaFilterSelection, taskMatchesAreaFilterSelection } from './area-filter';
 import { TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { hasTimeComponent, safeParseDueDate } from './date';
@@ -69,12 +55,12 @@ export function normalizeFocusGroupBy(value: unknown): FocusGroupBy {
     return FOCUS_GROUP_BY_OPTIONS.includes(value as FocusGroupBy) ? value as FocusGroupBy : 'none';
 }
 
-/** View options' Sort row: 'priority' is offered only while Priorities is on. */
+
 export function getFocusSortOptions(prioritiesEnabled: boolean): readonly SortField[] {
     return prioritiesEnabled ? FOCUS_SORT_OPTIONS : FOCUS_SORT_OPTIONS.filter((option) => option !== 'priority');
 }
 
-/** View options' Group by row: 'priority' is offered only while Priorities is on. */
+
 export function getFocusGroupByOptions(prioritiesEnabled: boolean): readonly FocusGroupBy[] {
     return prioritiesEnabled ? FOCUS_GROUP_BY_OPTIONS : FOCUS_GROUP_BY_OPTIONS.filter((option) => option !== 'priority');
 }
@@ -106,26 +92,17 @@ export function getFocusGroupByLabel(groupBy: FocusGroupBy, t: Translate): strin
     }
 }
 
-/**
- * The saved filters Focus offers: its own, not deleted, in stored order, read
- * through normalizeSavedFilters (a view this build does not know is hidden).
- */
+
 export function selectFocusSavedFilters(savedFilters: readonly SavedFilter[] | undefined): SavedFilter[] {
     return normalizeSavedFilters(savedFilters).filter((filter) => filter.view === 'focus' && !filter.deletedAt);
 }
 
-/**
- * The filter sheet's context and tag chips: tokens on the tasks Focus can show
- * now (visible, actionable, started by the minute).
- */
+
 export function getFocusFilterTokens(activeTasks: Task[]): string[] {
     return getUsedTaskTokens(activeTasks, (task) => [...(task.contexts ?? []), ...(task.tags ?? [])], { includeAncestors: true });
 }
 
-/**
- * The filter sheet's project chips: "No project" when an active task has none,
- * then each visible project with an active task, by project order then title.
- */
+
 export function getFocusProjectFilterOptions(
     activeTasks: readonly Task[],
     visibleProjects: readonly Project[],
@@ -148,18 +125,14 @@ export function getFocusProjectFilterOptions(
     ];
 }
 
-/** A selected project's chip label; a project that no longer exists gets no chip. */
+
 export function getFocusProjectFilterLabel(projectId: string, projectById: ReadonlyMap<string, Project>, t: Translate): string | undefined {
     return projectId === SAVED_FILTER_NO_PROJECT_ID
         ? tFallback(t, 'taskEdit.noProjectOption', 'No project')
         : projectById.get(projectId)?.title;
 }
 
-/**
- * The sort and grouping in effect. An applied saved filter's own sort and
- * grouping win over the screen's; a 'priority' sort or grouping stops taking
- * effect while Priorities is off (the stored choice survives for re-enable).
- */
+
 export function resolveFocusPerspective(input: {
     activeSavedFilter: SavedFilter | null;
     sortBy: SortField;
@@ -178,16 +151,13 @@ export function resolveFocusPerspective(input: {
     });
 }
 
-/** A Sort chip: null when it changes nothing; otherwise it detaches any saved filter. */
+
 export function planFocusSortChange(next: SortField, current: { effectiveSortBy: SortField; hasActiveSavedFilter: boolean }): { sortBy: SortField } | null {
     if (next === current.effectiveSortBy && !current.hasActiveSavedFilter) return null;
     return { sortBy: next };
 }
 
-/**
- * A Group by chip: null when it changes nothing; otherwise it detaches any
- * saved filter and writes the synced `settings.gtd.focusGroupBy`.
- */
+
 export function planFocusGroupChange(
     next: FocusGroupBy,
     current: { effectiveGroupBy: FocusGroupBy; hasActiveSavedFilter: boolean; settings: AppSettings | undefined },
@@ -196,16 +166,12 @@ export function planFocusGroupChange(
     return { settingsUpdate: { gtd: { ...(current.settings?.gtd ?? {}), focusGroupBy: next } } };
 }
 
-/** The save dialog's starting name: the first three active chips, else `fallback` (savedFilters.defaultName, "Focus filter"). */
+
 export function getFocusSaveFilterName(chipLabels: readonly string[], fallback: string): string {
     return chipLabels.slice(0, 3).join(' + ') || fallback;
 }
 
-/**
- * Save the current Focus filter: the picker's criteria plus a non-default sort
- * and grouping, appended to the synced saved filters. Null when there is
- * nothing to save or no name.
- */
+
 export function planFocusFilterSave(input: {
     name: string;
     canSave: boolean;
@@ -231,13 +197,7 @@ export function planFocusFilterSave(input: {
     return { filter, savedFilters: [...(input.savedFilters ?? []), filter] };
 }
 
-/**
- * Remove one criterion that no picker can express (an area, a date range…)
- * from the applied saved filter. Null when there is no applied filter or the
- * criterion is not on it. The applied filter (as read) says which criterion
- * is shown; it is removed from the stored filter's own criteria, so the
- * criteria and fields this build does not know stay.
- */
+
 export function planFocusFilterCriterionRemoval(input: {
     activeSavedFilter: SavedFilter | null;
     criterionId: string;
@@ -256,24 +216,20 @@ export function planFocusFilterCriterionRemoval(input: {
     };
 }
 
-/** Delete a saved filter: saved filters are synced, so it is marked deleted, never dropped. */
+
 export function planFocusFilterDelete(savedFilters: readonly SavedFilter[] | undefined, id: string, deletedAt?: string): { savedFilters: SavedFilter[] } {
     return { savedFilters: markSavedFilterDeleted(savedFilters, id, deletedAt) };
 }
 
 export type FocusAdvancedFilterChip = {
-    /** `advanced:` + the criterion id. */
+
     id: string;
-    /** What planFocusFilterCriterionRemoval removes. */
+
     criterionId: string;
     label: string;
 };
 
-/**
- * An applied saved filter's criteria that no picker can express. They are
- * removed from the saved filter itself, not from the selections. Empty without
- * an applied saved filter.
- */
+
 export function buildFocusAdvancedFilterChips(input: {
     activeSavedFilter: SavedFilter | null;
     criteria: FilterCriteria;
@@ -286,18 +242,15 @@ export function buildFocusAdvancedFilterChips(input: {
         getAreaLabel: (areaId) => input.areaById.get(areaId)?.name,
         resolveText: (key, fallback) => tFallback(input.t, key, fallback),
         ...(input.formatDate ? { formatDate: input.formatDate } : {}),
-    }).filter((chip) => chip.id !== 'anyDateRange').map((chip) => ({ id: `advanced:${chip.id}`, criterionId: chip.id, label: chip.label }));
+    }).filter((chip) => chip.id !== 'anyDateRange' && !chip.id.startsWith('excluded-project:')).map((chip) => ({ id: `advanced:${chip.id}`, criterionId: chip.id, label: chip.label }));
 }
 
-/**
- * Manual order needs the default sort, no criteria filter, and a visible star.
- * The writer preserves hidden areas' slots when an area subset is reordered.
- */
+
 export function canReorderFocusTasks(input: { effectiveSortBy: SortField; hasActiveFilters: boolean; focusedCount: number }): boolean {
     return input.effectiveSortBy === DEFAULT_FOCUS_SORT_BY && !input.hasActiveFilters && input.focusedCount > 0;
 }
 
-/** Replace only the shown slots in the global order; hidden rows keep their positions. */
+
 export function mergeFocusReorderIds(currentIds: readonly string[], orderedIds: readonly string[]): string[] {
     const current = new Set(currentIds);
     const shown = [...new Set(orderedIds)].filter((id) => current.has(id));
@@ -312,7 +265,7 @@ export function getFocusHiddenByAreaLabel(selection: FocusSelection, t: Translat
         : null;
 }
 
-/** The dragged order kept against the live list: gone tasks drop out, new ones join at the end. */
+
 export function reconcileFocusReorderOrder<T extends { id: string }>(draft: readonly T[], live: readonly T[]): T[] {
     const byId = new Map(live.map((task) => [task.id, task] as const));
     const kept = draft.filter((task) => byId.has(task.id)).map((task) => byId.get(task.id) as T);
@@ -320,7 +273,7 @@ export function reconcileFocusReorderOrder<T extends { id: string }>(draft: read
     return [...kept, ...live.filter((task) => !keptIds.has(task.id))];
 }
 
-/** Move up / Move down in reorder mode; null at either end. */
+
 export function moveFocusReorderTask<T extends { id: string }>(order: readonly T[], taskId: string, offset: -1 | 1): T[] | null {
     const from = order.findIndex((task) => task.id === taskId);
     const to = from + offset;
@@ -332,7 +285,7 @@ export function moveFocusReorderTask<T extends { id: string }>(order: readonly T
     return next;
 }
 
-/** A reorder row's spoken label: "{{title}}. Position {{position}} of {{count}}". */
+
 export function getFocusReorderPositionLabel(t: Translate, title: string, index: number, count: number): string {
     return formatI18nTemplate(tFallback(t, 'focus.reorderPosition', '{{title}}. Position {{position}} of {{count}}'), {
         title,
@@ -341,7 +294,7 @@ export function getFocusReorderPositionLabel(t: Translate, title: string, index:
     });
 }
 
-/** A reorder row's second line: the project, then the due date. */
+
 export function getFocusReorderSecondaryLabel(task: Task, projectById: ReadonlyMap<string, Project>, formatDate: FormatDate): string {
     const details: string[] = [];
     const project = task.projectId ? projectById.get(task.projectId) : undefined;
@@ -351,17 +304,18 @@ export function getFocusReorderSecondaryLabel(task: Task, projectById: ReadonlyM
     return details.join(' · ');
 }
 
-/** `groupId` is the Next group heading the row sits under: grouping by context or tag can show a task under several. */
+
 export type FocusListTaskItem = { type: 'task'; task: Task; grouped: boolean; groupId?: string };
-export type FocusListGroupHeader = { type: 'groupHeader'; id: string; title: string; count: number; muted?: boolean; dotColor?: string };
+export type FocusListGroupHeader = { type: 'groupHeader'; id: string; title: string; count: number; muted?: boolean; dotColor?: string; collapsed?: boolean };
 export type FocusListItem = FocusListTaskItem | FocusListGroupHeader;
 
 const taskItems = (tasks: readonly Task[], grouped = false, groupId?: string): FocusListTaskItem[] => (
     tasks.map((task) => ({ type: 'task' as const, task, grouped, ...(groupId === undefined ? {} : { groupId }) }))
 );
 
-/** Today's rows: ready ones, then a muted "Later today" heading over the timed starts still to come. */
-export function buildFocusScheduleItems(split: { ready: Task[]; laterToday: Task[] }, t: Translate): FocusListItem[] {
+
+export function buildFocusScheduleItems(split: { ready: Task[]; laterToday: Task[] }, t: Translate, collapsedGroupIds?: ReadonlySet<string>): FocusListItem[] {
+    const collapsed = collapsedGroupIds?.has('focus:schedule:later-today') === true;
     return [
         ...taskItems(split.ready),
         ...(split.laterToday.length > 0
@@ -372,14 +326,15 @@ export function buildFocusScheduleItems(split: { ready: Task[]; laterToday: Task
                     title: tFallback(t, 'agenda.laterToday', 'Later today'),
                     count: split.laterToday.length,
                     muted: true,
+                    ...(collapsedGroupIds ? { collapsed } : {}),
                 },
-                ...taskItems(split.laterToday, true),
+                ...(collapsed ? [] : taskItems(split.laterToday, true)),
             ]
             : []),
     ];
 }
 
-/** Next actions' rows under the grouping in effect ('none' keeps them flat). */
+
 export function buildFocusNextItems(input: {
     groupBy: FocusGroupBy;
     tasks: Task[];
@@ -387,6 +342,7 @@ export function buildFocusNextItems(input: {
     areas: Area[];
     t: Translate;
     theme?: string;
+    collapsedGroupIds?: ReadonlySet<string>;
 }): FocusListItem[] {
     if (input.groupBy === 'none') return taskItems(input.tasks);
     const groups: FocusTaskGroup[] = buildFocusTaskGroups({
@@ -405,12 +361,13 @@ export function buildFocusNextItems(input: {
             count: group.tasks.length,
             muted: group.muted,
             dotColor: group.dotColor,
+            ...(input.collapsedGroupIds ? { collapsed: input.collapsedGroupIds.has(group.key) } : {}),
         },
-        ...taskItems(group.tasks, true, group.key),
+        ...(input.collapsedGroupIds?.has(group.key) ? [] : taskItems(group.tasks, true, group.key)),
     ]);
 }
 
-/** The empty Focus screen's two lines. */
+
 export function getFocusEmptyState(input: { hasActiveFilters: boolean; hasAnyTasks: boolean; t: Translate }): { title: string; subtitle: string } {
     const { t } = input;
     return input.hasActiveFilters
@@ -418,17 +375,15 @@ export function getFocusEmptyState(input: { hasActiveFilters: boolean; hasAnyTas
         : { title: t('agenda.allClear'), subtitle: input.hasAnyTasks ? t('agenda.noTasks') : t('agenda.emptyStart') };
 }
 
-// ---------------------------------------------------------------------------
-// The control state as plain data, for hosts that cannot run the hooks.
 
 export type FocusControlState = {
-    /** The filter picker's selections (searchQuery stays '': Focus has no search box). */
+
     filters: ListFilterState;
-    /** The applied saved filter; picker changes, sort and grouping detach it. */
+
     savedFilterId: string | null;
-    /** Advanced criteria retained when a task-date edit detaches a saved filter. */
+
     preservedCriteria?: FilterCriteria;
-    /** The screen's own sort; an applied saved filter's sort wins while applied. */
+
     sortBy: SortField;
 };
 
@@ -439,24 +394,24 @@ export const DEFAULT_FOCUS_CONTROL_STATE: FocusControlState = {
 };
 
 export type ResolvedFocusFilter = {
-    /** The state after the hook's effects: dropped selections gone, a missing saved filter detached. */
+
     state: FocusControlState;
     activeSavedFilter: SavedFilter | null;
-    /** What narrows the sections: the saved filter's own criteria while one is applied. */
+
     criteria: FilterCriteria;
-    /** What the picker selects; what Save writes. */
+
     currentCriteria: FilterCriteria;
     activeCount: number;
     hasActive: boolean;
     hasCurrentCriteria: boolean;
     canSave: boolean;
-    /** The picker's chips. A saved filter owns its location, so no location chip while one is applied. */
+
     chips: ListFilterChip[];
     showContextMatchMode: boolean;
     showTagMatchMode: boolean;
 };
 
-/** useTaskFilterSelections's derived values for a plain state (Focus: no search box). */
+
 export function resolveFocusFilterState(
     input: FocusControlState,
     options: {
@@ -476,7 +431,8 @@ export function resolveFocusFilterState(
         tokens: state.tokens,
         excludedTokens: state.excludedTokens,
         projects: state.projects,
-        excludedProjects: state.excludedProjects, statuses: state.statuses,
+        excludedProjects: state.excludedProjects,
+        statuses: state.statuses,
         locations: visibility.location && state.location.trim() ? [state.location.trim()] : [],
         priorities: visibility.priority ? state.priorities : [],
         energyLevels: visibility.energyLevel ? state.energyLevels : [],
@@ -485,8 +441,8 @@ export function resolveFocusFilterState(
         tagMatchMode: state.tagMatchMode,
         anyDateRange: state.anyDateRange,
     }), ...input.preservedCriteria };
-    // An applied saved filter can carry criteria no picker can express, so it
-    // filters from its own criteria, still gated by what this view can show.
+
+
     const criteria: FilterCriteria = {
         ...(activeSavedFilter?.criteria ?? currentCriteria),
         ...(visibility.priority ? {} : { priority: undefined }),
@@ -506,33 +462,34 @@ export function resolveFocusFilterState(
         hasActive: activeCount > 0,
         hasCurrentCriteria,
         canSave: savedFilterId === null && hasCurrentCriteria,
-        chips: activeSavedFilter ? resolved.chips.filter((chip) => chip.id !== 'location') : resolved.chips,
+        chips: resolved.chips.filter((chip) => !chip.id.startsWith('status:') && (!activeSavedFilter || chip.id !== 'location')),
         showContextMatchMode: resolved.showContextMatchMode,
         showTagMatchMode: resolved.showTagMatchMode,
     };
 }
 
-/** One Focus control's change that writes nothing. */
+
 export type FocusControlEdit =
-    /** A filter sheet or chip change; `clear` also resets the sort (the All chip, Clear, a selected saved filter). */
+
     | { type: 'filter'; edit: ListFilterEdit }
-    /** A View options Sort chip. */
+
     | { type: 'sort'; sortBy: SortField }
-    /** An unselected saved filter chip. */
+
     | { type: 'applySavedFilter'; id: string }
     | { type: 'removePreservedCriterion'; criterionId: string };
 
-/** Applying a saved filter: its criteria become the selections, its sort the screen's sort. */
+
 export function applyFocusSavedFilter(state: FocusControlState, filter: SavedFilter): FocusControlState {
     const selections = selectionsFromCriteria(filter.criteria);
-    const { anyDateRange: _previousDate, ...filters } = state.filters;
+    const { anyDateRange: _previousDate, excludedProjects: _previousExcludedProjects, statuses: _previousStatuses, ...filters } = state.filters;
     return {
         filters: {
             ...filters,
             tokens: selections.tokens,
             excludedTokens: selections.excludedTokens,
             projects: selections.projects,
-            ...(filter.view === 'contexts' ? { excludedProjects: selections.excludedProjects ?? [], statuses: selections.statuses ?? [] } : {}),
+            ...(selections.excludedProjects ? { excludedProjects: selections.excludedProjects } : {}),
+            ...(selections.statuses ? { statuses: selections.statuses } : {}),
             priorities: selections.priorities,
             energyLevels: selections.energyLevels,
             timeEstimates: selections.timeEstimates,
@@ -546,11 +503,7 @@ export function applyFocusSavedFilter(state: FocusControlState, filter: SavedFil
     };
 }
 
-/**
- * The state after one edit, as the hook and the screen apply it. `resolved` is
- * the current state's resolution (the edit reads the sort in effect); null for
- * a saved filter Focus does not offer.
- */
+
 export function applyFocusControlEdit(
     resolved: Pick<ResolvedFocusFilter, 'state' | 'activeSavedFilter'> & { effectiveSortBy: SortField },
     edit: FocusControlEdit,
@@ -561,7 +514,7 @@ export function applyFocusControlEdit(
     switch (edit.type) {
         case 'filter': {
             if (edit.edit.type === 'clear') return DEFAULT_FOCUS_CONTROL_STATE;
-            const preserved = { ...(edit.edit.type === 'setAnyDateRange' && resolved.activeSavedFilter
+            const preserved = { ...(resolved.activeSavedFilter
                 ? rawSavedFilters.find((filter) => filter.id === resolved.activeSavedFilter!.id)?.criteria ?? resolved.activeSavedFilter.criteria
                 : state.preservedCriteria) };
             const forget = (...fields: (keyof FilterCriteria)[]) => { fields.forEach((field) => { delete preserved[field]; }); };
@@ -583,7 +536,7 @@ export function applyFocusControlEdit(
                 ...state,
                 filters: applyListFilterEdit(state.filters, edit.edit),
                 savedFilterId: edit.edit.type === 'setSearch' ? state.savedFilterId : null,
-                ...(state.preservedCriteria || (edit.edit.type === 'setAnyDateRange' && resolved.activeSavedFilter)
+                ...(state.preservedCriteria || resolved.activeSavedFilter
                     ? { preservedCriteria: preserved } : {}),
             };
         }
@@ -604,6 +557,7 @@ export function applyFocusControlEdit(
                 case 'projects': delete preservedCriteria.projects; filters.projects = []; break;
                 default:
                     if (edit.criterionId.startsWith('location:')) filters.location = '';
+                    if (edit.criterionId.startsWith('status:')) filters.statuses = filters.statuses?.filter((status) => status !== edit.criterionId.slice('status:'.length));
                     return { ...state, filters, preservedCriteria: removeAdvancedFilterCriteriaChip(preservedCriteria, edit.criterionId) };
             }
             return { ...state, filters, preservedCriteria };
@@ -628,23 +582,18 @@ export type FocusControlsModel = {
     reviewProjects: Project[];
     advancedChips: FocusAdvancedFilterChip[];
     canReorder: boolean;
-    /** Any section (Projects to review included) has something to show. */
+
     hasTasks: boolean;
-    /** The empty screen's lines when no section has anything. */
+
     empty: { title: string; subtitle: string } | null;
     areaById: Map<string, Area>;
     projectById: Map<string, Project>;
 };
 
-/**
- * Everything the Focus screen derives from the store and the control state, in
- * one pass, the way the screen derives it: the area-visible actionable tasks,
- * the filter sheet's options, the resolved selections, the sort and grouping in
- * effect, and the sections through buildFocusPools and deriveFocusTaskLists.
- */
+
 export function buildFocusControlsModel(input: {
     state: FocusControlState;
-    /** The store's live tasks (`state.tasks`). */
+
     tasks: Task[];
     projects: Project[];
     areas: Area[];

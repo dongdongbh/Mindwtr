@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 import UserNotifications
 
-/// A callback-queue snapshot only; durable acceptance and replay belong to the response inbox.
+
 public struct NativeReminderResponse: Codable, Equatable, Sendable {
     public enum Action: String, Codable, Sendable {
         case open, complete, snooze, dismiss
@@ -172,7 +172,7 @@ public struct NativeReminderResponse: Codable, Equatable, Sendable {
             "mindwtr-native-response-v1", namespace, identifier, publication, deliveredAtBits, action.rawValue,
         ]) else { return nil }
         var bytes = Array(SHA256.hash(data: encoded).prefix(16))
-        bytes[6] = (bytes[6] & 0x0f) | 0x80 // UUID v8 denotes this custom SHA256 identity.
+        bytes[6] = (bytes[6] & 0x0f) | 0x80
         bytes[8] = (bytes[8] & 0x3f) | 0x80
         return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
                            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15])).uuidString.lowercased()

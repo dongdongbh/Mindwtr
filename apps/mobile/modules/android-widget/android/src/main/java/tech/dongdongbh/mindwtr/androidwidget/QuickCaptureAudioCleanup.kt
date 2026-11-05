@@ -4,19 +4,11 @@ import java.io.File
 import java.io.IOException
 import java.util.Locale
 
-/**
- * Conservatively expires audio files that were never acknowledged by a queue
- * publication. The caller must run this off the main thread on the same
- * serialized executor used by recording/publication.
- */
+
 internal object QuickCaptureAudioCleanup {
   const val STALE_AFTER_MS: Long = 7L * 24 * 60 * 60 * 1_000
 
-  /**
-   * Deletes only stale, direct regular-file children of the owned audio
-   * directory. A matching queue JSON/temp marker or active recorder id always
-   * wins over age. Returns the number of files actually deleted.
-   */
+
   fun sweep(
     filesDir: File,
     activeIds: Set<String> = emptySet(),
@@ -69,10 +61,7 @@ internal object QuickCaptureAudioCleanup {
     return id.takeIf(PendingCaptureWriter::isSafeAudioId)
   }
 
-  /**
-   * Allows an aliased Context filesDir (for example /data/user/0 -> /data/data)
-   * but rejects a direct symlink or a child whose canonical parent is foreign.
-   */
+
   private fun ownedDirectory(filesDir: File, name: String): File? {
     return try {
       val canonicalRoot = filesDir.canonicalFile

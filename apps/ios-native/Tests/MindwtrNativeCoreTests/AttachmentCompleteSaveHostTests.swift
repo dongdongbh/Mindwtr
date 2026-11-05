@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC, SQLite and native V3 producers. Full editor requests
-/// remain frozen through the existing mixed Save/cleanup owner.
+
 final class AttachmentCompleteSaveHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -42,7 +41,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         let db = try SQLiteBridge(url: database); defer { db.close() }
         return try db.execute(statement, parametersJSON: json(args))
     }
-    // Only outer SQL object ordering is canonicalized; opaque cell strings stay exact.
+
     private func rows() throws -> String { try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks ORDER BY id").utf8))) }
     private func inode(_ url: URL) throws -> String {
         var value = stat(); guard lstat(url.path, &value) == 0 else { throw HostFailure("Fixture identity unavailable") }
@@ -539,8 +538,8 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         let sourceFiles = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(source["attachments"] as? String).utf8)) as? [[String: Any]])
         let childFiles = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(child["attachments"] as? String).utf8)) as? [[String: Any]])
         XCTAssertTrue(sourceFiles.contains { $0["id"] as? String == added.requestId && $0["deletedAt"] == nil })
-        // Completion projects the original recurring source, preserving its
-        // baseline file. Skip below uses the edited source instead.
+
+
         XCTAssertTrue(childFiles.contains { $0["uri"] as? String == target().absoluteString && $0["deletedAt"] == nil })
         XCTAssertFalse(childFiles.contains { $0["id"] as? String == added.requestId })
         XCTAssertTrue(FileManager.default.fileExists(atPath: target().path), "Child reference fences baseline retirement")
@@ -590,7 +589,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         let exposedID = try XCTUnwrap(recovered["requestId"] as? String)
         let recoveredUndo = try json([json(["requestId": UUID().uuidString.lowercased(), "cancelRequestId": exposedID])])
         let cancelled = try task(); XCTAssertEqual(cancelled["status"] as? String, "archived")
-        // After terminal release, unrelated later file metadata remains exact.
+
         let live = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(cancelled["attachments"] as? String).utf8)) as? [[String: Any]])
         var later = live; var foreign = baseline(9); foreign["uri"] = "content://later/file"; later.append(foreign)
         _ = try sql("UPDATE tasks SET attachments=?,rev=rev+1 WHERE id=?", [json(later), taskID])
@@ -714,9 +713,8 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
 
     func testSelectedUndoReservesEscapedFutureTerminalBeforeWritingValidNearLimitIntent() async throws {
         let schema = core(); _ = try await schema.start(); await schema.close()
-        // Inject only inert witness settings after actual preparation, and let
-        // the unchanged shared validator complete successfully before returning
-        // that proof to native. This does not grant commit/storage authority.
+
+
         try probe("""
         const prepare=MindwtrHost.taskCancellationUndoPrepare,validate=MindwtrHost.taskCancellationUndoValidate,poll=MindwtrHost.poll;
         let ticket=null,validationTicket=null,completed=null,envelope=null;
@@ -738,9 +736,8 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
           validationTicket=validate(envelope);completed=result;return null;
         };
         """)
-        // The initial schema-only owner must release the lock before seeding.
-        // addTeardown handles its closed lifetime just like every other fixture.
-        // Seed uses the probe bundle for its actual cancellation/Undo owner.
+
+
         let faults = HostIOFaults(), host = try await seed(faults); try await remove(host)
         let cancelID = UUID().uuidString.lowercased(); _ = try await save(host, raw: request(intent: "cancel", requestID: cancelID))
         _ = try sql("CREATE TABLE fixture_trace(envelope TEXT NOT NULL)")
@@ -785,7 +782,7 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
                 _ = try sql("UPDATE tasks SET projectId='protected',rev=rev+1 WHERE id=?", [taskID])
             }
             let fresh = core(); _ = try await fresh.start()
-            let rowsBefore = try rows() // Existing startup archive repair precedes this Save refusal baseline.
+            let rowsBefore = try rows()
             await refused({ _ = try await self.save(fresh) }, saved: false)
             XCTAssertEqual(try latest(), snapshot); XCTAssertNil(try editor.read()?.attempt)
             XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try Data(contentsOf: store.url), sidecar)

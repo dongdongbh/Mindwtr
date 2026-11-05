@@ -23,6 +23,7 @@ vi.mock('@/modules/notification-open-intents', () => ({
     peekPendingNotificationCompletions: async () => [...h.receipts],
     acknowledgeNotificationCompletion: h.ack,
 }));
+vi.mock('@/lib/widget-service', () => ({ updateMobileWidgetFromStore: vi.fn(async () => true) }));
 vi.mock('@/lib/app-log', () => ({ logInfo: h.log, logWarn: h.log }));
 
 const router = { push: vi.fn() };
@@ -42,7 +43,7 @@ const mount = async (ready = true) => {
 
 describe('Android durable Done replay', () => {
     beforeEach(() => {
-        h.receipts = []; h.tasks.clear(); h.log.mockReset();
+        h.receipts = []; h.tasks.clear(); h.log.mockReset().mockResolvedValue(undefined);
         h.flush.mockReset().mockResolvedValue(undefined);
         h.snapshot.mockReset().mockResolvedValue(undefined);
         h.update.mockReset().mockImplementation(async (id: string) => { h.tasks.get(id).status = 'done'; return { success: true }; });

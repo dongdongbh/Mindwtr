@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Pure trusted-input selection. No host, notification center, authentication, or permission request.
+
 final class NativeLaunchSelectionTests: XCTestCase {
     private let support = URL(fileURLWithPath: "/synthetic448/Application Support", isDirectory: true)
     private let home = URL(fileURLWithPath: "/synthetic448/Native Home", isDirectory: true)
@@ -47,7 +47,7 @@ final class NativeLaunchSelectionTests: XCTestCase {
         for mode in [NativeLaunchSelection.BuildMode.simulatorDebug, .deviceTest] {
             assertIsolated(try resolve(["MindwtrNative", libraryFlag, identifier, "--native-about-lookup-unavailable"], mode: mode))
         }
-        // Simulator isolated selection never substitutes the installed bundle namespace.
+
         assertIsolated(try resolve([libraryFlag, identifier], bundleIdentifier: "tech.dongdongbh.mindwtr"))
         assertIsolated(try resolve([libraryFlag, identifier], bundleIdentifier: nil))
     }
@@ -61,7 +61,7 @@ final class NativeLaunchSelectionTests: XCTestCase {
         XCTAssertEqual(databaseURL.path, "/synthetic448/Application Support/NativeRNRehearsal/Documents/SQLite/mindwtr.db")
         XCTAssertEqual(bundleIdentifier, "tech.dongdongbh.mindwtr")
         XCTAssertNotEqual(containerURL, home)
-        // Repeated rehearsal flag alone retains the previous contains-based selection policy.
+
         guard case .rehearsal = try resolve([rehearsalFlag, rehearsalFlag]) else { return XCTFail("Expected staged rehearsal") }
     }
 
@@ -183,7 +183,7 @@ final class NativeLaunchSelectionTests: XCTestCase {
         let paths = ["/synthetic448/é 🧭", "/synthetic448/e\u{301} 🧭"]
         var selectedPaths: [Data] = []
         for path in paths {
-            // File-path initialization normalizes Unicode on macOS before selection sees it.
+
             let encodedPath = try XCTUnwrap(path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed))
             let supportURL = try XCTUnwrap(URL(string: "file://" + encodedPath + "/"))
             let homeURL = try XCTUnwrap(URL(string: "file://" + encodedPath + "/Home/"))

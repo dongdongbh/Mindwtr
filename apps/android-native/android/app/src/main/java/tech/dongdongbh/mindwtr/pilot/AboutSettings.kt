@@ -7,7 +7,6 @@ import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -83,20 +82,7 @@ import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/*
- * RN's Settings › About (about-settings-screen.tsx) and its feedback modal (feedback-settings-modal.tsx) on core's About contract
- * (native-host-contract-about.ts): every row, word, check, alert, toast and request is core's. Kotlin keeps the screen state RN
- * keeps in React state (the open alert, the modal's draft), asks Google Play what RN's modules ask (PlayServices: the Play
- * channel's, none on FOSS) and opens the links.
- */
 
-/**
- * The build as About, feedback and the heartbeat report it (host-about.ts's NativeAppInfo): RN's app.json version, build number
- * and package, the release tag, this channel, and the endpoints it was built with. A development build (RN's __DEV__) never
- * sends a heartbeat, and only a release build sends feedback ([aboutFeedbackEndpoint]). Debug builds only:
- * `debug.mindwtr.native.about_stub=<port>` points the feedback endpoint, the heartbeat and GitHub's release API at
- * check-about-device.mjs's stub on 127.0.0.1:<port> (adb reverse) and lets the heartbeat send there.
- */
 fun aboutAppInfo(): String {
     val stub = aboutStub(debugProperty("about_stub"))
     return JSONObject()
@@ -117,59 +103,45 @@ fun aboutAppInfo(): String {
         .toString()
 }
 
-/** check-about-device.mjs's stub on 127.0.0.1:<[port]> (adb reverse), or null when [port] is not one. */
+
 internal fun aboutStub(port: String): String? = port.trim().toIntOrNull()?.takeIf { it in 1..65535 }?.let { "http://127.0.0.1:$it" }
 
-/**
- * Where feedback goes: a release build to the endpoint it was built with; every other build (debug, the upgrade check, the
- * benchmarks) only to a check's [stub], else nowhere (the modal says feedback is not configured), so a test build never sends
- * real feedback.
- */
+
 internal fun aboutFeedbackEndpoint(buildType: String, builtEndpoint: String, stub: String?): String = when {
     buildType == "release" -> builtEndpoint
     else -> stub?.let { "$it/feedback" } ?: ""
 }
 
-/**
- * Google Play's update answer for core's update check (its `play` input): asked only on a Play (or unknown) install and only after
- * core's preflight said the check is [due]; a device check's stub ([stubbed]) answers a failure instead of calling Play. Null:
- * Play not asked.
- */
+
 internal fun aboutPlayAnswer(source: String, due: Boolean, stubbed: Boolean, askPlay: () -> JSONObject?): JSONObject? = when {
     source == "sideload" || !due -> null
     stubbed -> JSONObject().put("error", "Google Play is stubbed in a device check")
     else -> askPlay()
 }
 
-/** Settings › About's state and requests: the screen, its update checks, the alert, Rate, the links and the feedback modal. */
+
 class AboutSettingsModel(private val menu: MenuModel) {
     private companion object {
-        /** The modal's checks in the order typed, so an older answer never lands after a newer one. */
+
         val checks: ExecutorService = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-about-check") }
     }
     private val shell get() = menu.shell
     private val app get() = shell.getApplication<Application>()
 
-    /**
-     * How the app was installed (RN's androidInstallerSource), read once per process: core's getAboutInstallerSource from Google
-     * Play's install referrer and the installing package (a FOSS build is a sideload).
-     */
+
     @Volatile private var installer: String? = null
-    /**
-     * A device check's stub (debug builds, `about_stub`): Google Play is never called. The referrer and the installing package
-     * come from `debug.mindwtr.native.about_referrer` and `about_installer` (both empty by default: a sideload), and Play's
-     * update answer is a failure.
-     */
+
+
     private val stubbed by lazy { aboutStub(debugProperty("about_stub")) != null }
-    /** The silent check ran for this visit (RN's effect runs when the screen mounts). */
+
     @Volatile private var silentRan = false
-    /** Check for updates is running (RN's spinner on its row). */
+
     var checking by mutableStateOf(false); private set
-    /** RN's Alert for an update: core's title, message and buttons. */
+
     var alert by mutableStateOf<JSONObject?>(null); private set
-    /** The feedback modal's draft and state (RN's React state), while open or kept for its next opening; see [Feedback]. */
+
     var feedback by mutableStateOf(Feedback()); private set
-    /** Core's check of the draft as typed (Send on or off, the error line, the message limit), for [Feedback.message] and the rest. */
+
     var feedbackCheck by mutableStateOf<JSONObject?>(null); private set
 
     data class Feedback(
@@ -179,31 +151,31 @@ class AboutSettingsModel(private val menu: MenuModel) {
         val email: String = "",
         val location: String = "",
         val includeDiagnostics: Boolean = false,
-        /** idle, sending, sent or error. */
+
         val status: String = "idle",
         val error: String? = null,
-        /** Each opening is its own visit: a send from an earlier one that ends later changes nothing. */
+
         val visit: Int = 0,
     )
 
-    private fun installerSource(runtime: CoreHost): String = installer ?: run {
+    internal fun installerSource(runtime: CoreHost): String = installer ?: run {
         val referrer = if (stubbed) debugProperty("about_referrer") else PlayServices.installReferrer(app)
         val installing = if (stubbed) debugProperty("about_installer").ifEmpty { null } else installingPackage()
         runtime.menuRead("aboutInstallerSource", JSONObject().put("referrer", referrer ?: JSONObject.NULL)
             .put("installerPackageName", installing ?: JSONObject.NULL).toString()).getString("source")
     }.also { installer = it }
 
-    /** PackageManager's installing package (com.android.vending for every Google Play install), or null. */
+
     private fun installingPackage(): String? = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) app.packageManager.getInstallSourceInfo(app.packageName).installingPackageName
         else @Suppress("DEPRECATION") app.packageManager.getInstallerPackageName(app.packageName)
     }.getOrNull()
 
-    /** Settings' read of this screen: core's view for the install. */
+
     fun read(runtime: CoreHost): JSONObject =
         runtime.menuRead("aboutSettings", JSONObject().put("installerSource", installerSource(runtime)).toString())
 
-    /** The screen on show: the silent check, once per visit. */
+
     fun follow(view: JSONObject) {
         if (silentRan) return
         silentRan = true
@@ -216,17 +188,14 @@ class AboutSettingsModel(private val menu: MenuModel) {
         if (feedback.open) closeFeedback()
     }
 
-    /**
-     * Core's update check with Google Play's answer on a Play install when core says the check is due (none on FOSS, a sideload,
-     * or a silent check within the day), and whether market links open.
-     */
+
     private fun updateCheck(mode: String) {
         val runtime = shell.coreHost() ?: return
         if (mode == "manual") checking = true
         Thread({
             val answer = runCatching {
                 val source = installerSource(runtime)
-                // Core's preflight first; when it fails the check does not run (no Play, no GitHub, nothing stored).
+
                 val due = runtime.aboutRequest("isAboutUpdateCheckDue", JSONObject().put("mode", mode).toString()).getBoolean("due")
                 val play = aboutPlayAnswer(source, due, stubbed) { PlayServices.updateInfo(app) }
                 val market = Intent(Intent.ACTION_VIEW, "market://details?id=${BuildConfig.RN_PACKAGE}".toUri()).resolveActivity(app.packageManager) != null
@@ -248,18 +217,18 @@ class AboutSettingsModel(private val menu: MenuModel) {
 
     fun dismissAlert() { alert = null }
 
-    /** An alert button: its link (RN's Linking.openURL), then the alert closes. */
+
     fun pressAlert(button: JSONObject, context: Context) {
         alert = null
         button.menuText("url")?.let { open(context, it) }
     }
 
-    /** RN's Linking.openURL: true when something opened it. */
+
     fun open(context: Context, url: String): Boolean = runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
     }.getOrElse { Log.w(CoreHost.TAG, "About link not opened ${it.javaClass.simpleName}"); false }
 
-    /** Rate our app: core's links in order (the market link, else the web page); none opens: core's toast. */
+
     fun rate(context: Context, view: JSONObject) {
         val rate = view.getJSONObject("rate")
         if (rate.getJSONArray("urls").let { urls -> (0 until urls.length()).none { open(context, urls.getString(it)) } }) {
@@ -268,7 +237,6 @@ class AboutSettingsModel(private val menu: MenuModel) {
         }
     }
 
-    // ---- The feedback modal ----
 
     fun openFeedback() {
         feedback = feedback.copy(open = true, status = "idle", error = null, visit = feedback.visit + 1)
@@ -277,7 +245,7 @@ class AboutSettingsModel(private val menu: MenuModel) {
 
     fun closeFeedback() { feedback = feedback.copy(open = false, visit = feedback.visit + 1) }
 
-    /** A draft edit, as RN's setters: a typed field or a place clears the error; a category other than bug drops its place and diagnostics. */
+
     fun edit(change: Feedback.() -> Feedback) {
         val before = feedback
         var next = before.change()
@@ -287,7 +255,7 @@ class AboutSettingsModel(private val menu: MenuModel) {
         check()
     }
 
-    /** Core's checkAboutFeedback for the draft as shown; an answer counts only while the draft is still the one it checked. */
+
     private fun check() {
         val runtime = shell.coreHost() ?: return
         val draft = feedback
@@ -301,7 +269,7 @@ class AboutSettingsModel(private val menu: MenuModel) {
         }
     }
 
-    /** Send: core refuses (the error line), sends (Sent, the draft cleared) or fails (RN's line, the draft kept). */
+
     fun send() {
         val runtime = shell.coreHost() ?: return
         val draft = feedback.copy(status = "sending", error = null)
@@ -328,16 +296,14 @@ class AboutSettingsModel(private val menu: MenuModel) {
     }
 }
 
-// ---- The screen ----
 
-/** RN's About card: the header (icon, name, version), then core's rows; a link row opens its link or its action. */
 @Composable
 internal fun AboutSettings(model: InboxViewModel, view: JSONObject) {
     val about = model.menu.settings.about
     val c = LocalTheme.current.colors
     val context = LocalContext.current
     Card(top = 0) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 196.dp).hairline(c.border, top = false).padding(horizontal = 24.dp, vertical = 28.dp),
+        Column(Modifier.fillMaxWidth().heightIn(min = 196.dp).rnBorderBottom(c.border).padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Image(painterResource(R.drawable.about_app_icon), null, contentScale = ContentScale.Crop,
                 modifier = Modifier.padding(bottom = 16.dp).size(84.dp).clip(RoundedCornerShape(20.dp)))
@@ -360,9 +326,9 @@ internal fun AboutSettings(model: InboxViewModel, view: JSONObject) {
                     else -> row.menuText("url")?.let { about.open(context, it) }
                 }
             }
-            // RN's settingRow: the label left, the value or link at the right (wrapping under it at large text), a hairline above
-            // every row but Check for updates.
-            FlowRow(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (id != "checkForUpdates") Modifier.hairline(c.border, top = true) else Modifier)
+
+
+            FlowRow(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (id != "checkForUpdates") Modifier.rnBorderTop(c.border) else Modifier)
                 .then(if (link) Modifier.clearAndSetSemantics {
                     contentDescription = "$label, $value"; role = Role.Button; testTag = "about-$id"
                     if (!spinning) onClick { press(); true } else disabled()
@@ -377,7 +343,6 @@ internal fun AboutSettings(model: InboxViewModel, view: JSONObject) {
 }
 
 
-/** The About screen's alert and feedback modal, over the settings screen. */
 @Composable
 internal fun AboutOverlays(model: InboxViewModel, view: JSONObject) {
     val about = model.menu.settings.about
@@ -387,7 +352,7 @@ internal fun AboutOverlays(model: InboxViewModel, view: JSONObject) {
         val buttons = alert.menuObjects("buttons")
         val cancel = buttons.firstOrNull { it.optString("style") == "cancel" }
         val action = buttons.firstOrNull { it.optString("style") != "cancel" }
-        // RN's Alert.alert on Android: the title, the message, the cancel button at the left of the action.
+
         AlertDialog(
             onDismissRequest = { about.dismissAlert() },
             title = { Text(alert.getString("title")) },
@@ -398,13 +363,7 @@ internal fun AboutOverlays(model: InboxViewModel, view: JSONObject) {
     }
 }
 
-/**
- * RN's FeedbackSettingsModal (feedback-settings-modal.tsx, settings.styles.ts feedback*): RN's Modal is a window over the whole
- * screen, the status bar and the top bar included, so this is a dialog whose own 42% black backdrop (no platform dim) holds the
- * card, centered on the screen. In it: the title with core's GitHub line and its link, the category buttons, a bug's places, the
- * message, the reply email, a bug's diagnostics switch, core's notices, Cancel and Send; after a send, core's thanks and Close.
- * Texts without a line height keep RN's Android font padding ([padded]).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
@@ -433,9 +392,9 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
             .pointerInput(Unit) { detectTapGestures { about.closeFeedback() } }.imePadding().padding(18.dp), contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(18.dp)
             Column(Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.88f).clip(shape).background(c.cardBg)
-                .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
-                // The header: the title, core's GitHub line (not after a send), and the close X.
-                Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 14.dp),
+                .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
+
+                Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text(text.getString("title"), style = padded(rnText(17, 700)), color = c.text, modifier = Modifier.semantics { heading() })
@@ -473,7 +432,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                             val tone = if (on) c.tint else c.secondaryText
                             val buttonShape = RoundedCornerShape(12.dp)
                             Row(Modifier.weight(1f).heightIn(min = 42.dp).clip(buttonShape).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg)
-                                .border(1.dp, if (on) c.tint else c.border, buttonShape)
+                                .rnBorder(1.dp, if (on) c.tint else c.border, buttonShape)
                                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-category-$category"; onClick { about.edit { copy(category = category) }; true } }
                                 .clickable { about.edit { copy(category = category) } }.padding(horizontal = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
@@ -489,7 +448,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                                 val on = place == draft.location
                                 val label = text.getJSONObject("locations").getString(place)
                                 val chip = RoundedCornerShape(18.dp)
-                                Box(Modifier.heightIn(min = 36.dp).clip(chip).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg).border(1.dp, if (on) c.tint else c.border, chip)
+                                Box(Modifier.heightIn(min = 36.dp).clip(chip).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg).rnBorder(1.dp, if (on) c.tint else c.border, chip)
                                     .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-place-$place"
                                         onClick { about.edit { copy(location = if (on) "" else place) }; true } }
                                     .clickable { about.edit { copy(location = if (on) "" else place) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
@@ -508,7 +467,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                     }
                     if (draft.category == "bug") {
                         val rowShape = RoundedCornerShape(12.dp)
-                        Row(Modifier.fillMaxWidth().clip(rowShape).background(c.bg).border(1.dp, c.border, rowShape).padding(12.dp),
+                        Row(Modifier.fillMaxWidth().clip(rowShape).background(c.bg).rnBorder(1.dp, c.border, rowShape).padding(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(text.getString("includeDiagnostics"), style = padded(rnText(14, 700)), color = c.text)
@@ -523,10 +482,10 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                     if (!configured) Notice(text.getString("unavailable"), text.getString("unavailableDescription"), c.danger, wash = 0x18)
                     check?.menuText("visibleError")?.let { Notice(it, null, c.danger, wash = 0x18) }
                 }
-                Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+                Row(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
                     val secondary = RoundedCornerShape(12.dp)
                     val cancel = text.getString("cancel")
-                    Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).border(1.dp, c.border, secondary)
+                    Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).rnBorder(1.dp, c.border, secondary)
                         .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; onClick { about.closeFeedback(); true } }
                         .clickable { about.closeFeedback() }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                         Text(cancel, style = padded(rnText(14, 700)), color = c.secondaryText)
@@ -541,29 +500,25 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
     }
 }
 
-/** RN's Android Text keeps its font padding (includeFontPadding) when it has no line height: the same heights as RN's. */
+
 @Suppress("DEPRECATION")
 private fun padded(style: TextStyle) = style.copy(platformStyle = PlatformTextStyle(includeFontPadding = true))
 
 @Composable
 private fun FieldLabel(label: String) = Text(label.uppercase(), style = padded(rnText(12, 700)), color = LocalTheme.current.colors.secondaryText)
 
-/** RN's feedbackNotice: [color] text on its wash (`${color}${wash}`) inside a `${color}55` border. */
+
 @Composable
 private fun Notice(title: String, description: String?, color: Color, wash: Int) {
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(color.copy(alpha = wash / 255f)).border(1.dp, color.copy(alpha = 0x55 / 255f), shape)
+    Column(Modifier.fillMaxWidth().clip(shape).background(color.copy(alpha = wash / 255f)).rnBorder(1.dp, color.copy(alpha = 0x55 / 255f), shape)
         .padding(horizontal = 12.dp, vertical = 10.dp)) {
         Text(title, style = rnText(13, 600, 18), color = color)
         description?.let { Text(it, style = rnText(12, 400, 18), color = color, modifier = Modifier.padding(top = 4.dp)) }
     }
 }
 
-/**
- * RN's feedbackPrimaryButton in the filled-button colors (useFilledButtonColors), half faded while off, with RN's spinner while
- * sending. RN's Android opacity fades the fill and the label each on its own (no offscreen layer: needsOffscreenAlphaCompositing
- * is off), so the label shows through its faded fill; one faded layer would draw it darker.
- */
+
 @Composable
 private fun PrimaryButton(label: String, enabled: Boolean, spinning: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val theme = LocalTheme.current
@@ -578,7 +533,7 @@ private fun PrimaryButton(label: String, enabled: Boolean, spinning: Boolean, mo
     }
 }
 
-/** RN's feedbackTextArea (126 tall, multiline) and feedbackInput (44, an email keyboard): the screen color, a 12 radius border. */
+
 @Composable
 private fun FeedbackField(value: String, label: String, placeholder: String, multiline: Boolean, tag: String, change: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -586,21 +541,18 @@ private fun FeedbackField(value: String, label: String, placeholder: String, mul
     BasicTextField(value, change, singleLine = !multiline, cursorBrush = SolidColor(c.tint),
         textStyle = (if (multiline) rnText(14, 400, 20) else rnText(14, 400)).copy(color = c.text),
         keyboardOptions = if (multiline) KeyboardOptions.Default else KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
-        modifier = Modifier.fillMaxWidth().heightIn(min = if (multiline) 126.dp else 44.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape)
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (multiline) 126.dp else 44.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape)
             .semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = if (multiline) 10.dp else 12.dp), contentAlignment = if (multiline) Alignment.TopStart else Alignment.CenterStart) {
-                // RN's Android placeholder takes no line height (only typed text does) and keeps the font padding.
+
                 if (value.isEmpty()) Text(placeholder, style = padded(rnText(14, 400)), color = c.secondaryText)
                 inner()
             }
         })
 }
 
-/**
- * After a finished Weekly Review (RN's handleFinish): 650 ms later, core's store review gate; when it says so, Google Play's
- * review flow over [activity] (none on FOSS). A failure only logs, as RN's.
- */
+
 fun requestStoreReviewAfterWeeklyReview(shell: InboxViewModel, activity: android.app.Activity?) {
     val runtime = shell.coreHost() ?: return
     if (activity == null) return

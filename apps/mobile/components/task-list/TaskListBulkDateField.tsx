@@ -25,11 +25,11 @@ export function TaskListBulkDateField({
 }: Props) {
   const [editing, setEditing] = React.useState(false);
   const selectedDate = safeParseDate(value);
-  // Display value, labels and the stored day come from core, as the native host shows them.
+
   const field = buildBulkOrganizeDateFieldModel({ label, value, now: new Date(), t });
   const selectDate = (date: Date | null) => {
     if (disabled) return;
-    // Bulk dates are date-only: never introduce a time or convert through UTC.
+
     onChange(toBulkOrganizeDateValue(date));
   };
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { NotFoundError, ValidationError } from './errors.js';
+import { getMindwtrToolErrorCode, NotFoundError, ValidationError } from './errors.js';
 import { createLocalApiService, LOCAL_API_UNSUPPORTED_PROJECT_FIELDS, validateLocalApiUrl } from './local-api-service.js';
 import type { AddTaskInput, Project, Task, UpdateTaskInput } from './queries.js';
 import type { AddProjectInput, UpdateProjectInput } from './service.js';
@@ -11,6 +11,7 @@ import { TASK_CREATE_FIELD_NAMES, TASK_PATCH_FIELD_NAMES } from './task-write-fi
 const origin = 'http://127.0.0.1:3000';
 const secret = 'private-test-token';
 const iso = '2026-01-01T00:00:00.000Z';
+const version = `sha256-${'a'.repeat(64)}`;
 const task = (id = 'task-1', props: Partial<Task> = {}): Task => ({
   id, title: 'Call mom', status: 'next', tags: ['#family'], contexts: ['@home'],
   createdAt: iso, updatedAt: iso, ...props,
@@ -20,6 +21,7 @@ const project = (id = 'project-1', props: Partial<Project> = {}): Project => ({
   tagIds: [], isSequential: false, createdAt: iso, updatedAt: iso, ...props,
 });
 const jsonResponse = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
+const versionedResponse = (value = task(), token = version): Response => new Response(JSON.stringify({ task: value, version: token }), { headers: { ETag: `"${token}"` } });
 type CapturedRequest = { url: string; method: string; headers: Headers; body: Record<string, unknown> | undefined; init: RequestInit };
 const fixture = (reply: (call: CapturedRequest, index: number) => Response | Promise<Response>, timeoutMs?: number) => {
   const calls: CapturedRequest[] = [];
@@ -134,9 +136,7 @@ describe('desktop Local API task reads', () => {
     expect((await service.listTasks({ projectId: 'project-1' })).map((row) => row.id)).toEqual(['next']);
   });
 
-  // The native filter (local_api.rs filter_tasks) runs before the Node filter, so it may only ever drop tasks the
-  // Node filter drops too. Same queries, same data: a server that ignores the parameters (the old full fetch) and
-  // one that applies them the way Rust does must give identical results.
+
   test('server-side filtering returns exactly what the full fetch returned', async () => {
     const rows = [...tasks, task('blank-deleted', { deletedAt: '' }), task('focused-done', { status: 'done', isFocusedToday: true }),
       task('focused-deleted', { isFocusedToday: true, deletedAt: iso }), task('numeric-focus', { isFocusedToday: 1 as unknown as boolean })];
@@ -237,10 +237,10 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
   });
 
   test('all current generated fields are transmitted without silent omission', async () => {
-    const generated: Record<string, unknown> = { cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
+    const generated: Record<string, unknown> = { viewSectionIds: { someday: 'books' }, cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
       showFutureRecurrence: true, pushCount: 2, checklist: [{ id: 'check-1', title: 'Step', isCompleted: false }],
       textDirection: 'rtl', location: 'Office', areaId: 'area-1', isFocusedToday: true,
-      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, reviewAt: '2026-01-02',
+      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15, reviewAt: '2026-01-02',
       order: 2, boardOrder: 3, focusOrder: 4 };
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     const createFields = Object.fromEntries(TASK_CREATE_FIELD_NAMES.map((name) => [name, generated[name]]));
@@ -256,11 +256,11 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
   test('task patch is flat and clears nullable tokens with arrays, other fields with null', async () => {
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     await service.updateTask({ id: 'task-1', title: 'Rename', status: 'waiting', projectId: null, sectionId: null,
-      tags: null, contexts: null, recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null });
+      tags: null, contexts: null, recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: null, startReminderLeadMinutes: null });
     expect(calls[0].method).toBe('PATCH');
     expect(calls[0].url).toBe(`${origin}/tasks/task-1`);
     expect(calls[0].body).toEqual({ title: 'Rename', status: 'waiting', projectId: null, sectionId: null,
-      tags: [], contexts: [], recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null });
+      tags: [], contexts: [], recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 });
   });
 
   test('completion and restore use dedicated endpoints and deletion reads the actual persisted tombstone', async () => {
@@ -433,5 +433,94 @@ describe('desktop Local API failure safety', () => {
     const { service, calls } = fixture((_call, index) => index === 0 ? jsonResponse({ ok: true }) : jsonResponse({ error: secret }, 404));
     await expect(service.deleteTask('task-1')).rejects.toThrow('deletion succeeded');
     expect(calls.map((call) => call.method)).toEqual(['DELETE', 'GET']);
+  });
+});
+
+describe('desktop Local API reliable task writes', () => {
+  test('reads version and sends conditional PATCH headers without persisting transport fields', async () => {
+    const { service, calls } = fixture(() => versionedResponse());
+    expect(await service.getTask({ id: 'task-1' })).toEqual({ ...task(), version });
+    expect(await service.updateTask({ id: 'task-1', title: 'Changed', expectedVersion: version })).toEqual({ ...task(), version });
+    expect(calls[0].url).toBe(`${origin}/tasks/task-1`);
+    expect(calls[1].url).toBe(`${origin}/v1/tasks/task-1`);
+    expect(calls[1].headers.get('If-Match')).toBe(`"${version}"`);
+    expect(calls[1].body).toEqual({ title: 'Changed' });
+  });
+
+  test('keyed creates resend identical payloads including unstamped normalized links', async () => {
+    const { service, calls } = fixture(() => versionedResponse());
+    const input = { title: '  Capture  ', idempotencyKey: 'capture-123', attachments: [
+      { uri: ' https://example.com/reference ' },
+      { id: '  link-1  ', title: ' Reference ', uri: ' obsidian://open?file=note ' },
+    ] };
+    const created = await service.addTask(input);
+    const replayed = await service.addTask(input);
+    expect(created).toEqual(replayed);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].init.body).toBe(calls[1].init.body);
+    for (const call of calls) {
+      expect(call.url).toBe(`${origin}/v1/tasks`);
+      expect(call.headers.get('Idempotency-Key')).toBe('capture-123');
+      expect(call.body).toEqual({ title: 'Capture', props: { attachments: [
+        { kind: 'link', title: 'reference', uri: 'https://example.com/reference' },
+        { id: 'link-1', kind: 'link', title: 'Reference', uri: 'obsidian://open?file=note' },
+      ] } });
+    }
+  });
+
+  test('malformed safety inputs and keyed network links fail before a request', async () => {
+    const { service, calls } = fixture(() => versionedResponse());
+    for (const idempotencyKey of ['', 'x'.repeat(129), 'space key', '\t', '\x7f', 'é']) {
+      await expect(service.addTask({ title: 'Capture', idempotencyKey })).rejects.toThrow(ValidationError);
+    }
+    for (const expectedVersion of ['', '1', `"${version}"`, `W/"${version}"`, '*', `${version},${version}`, `sha256-${'A'.repeat(64)}`]) {
+      await expect(service.updateTask({ id: 'task-1', title: 'Changed', expectedVersion })).rejects.toThrow(ValidationError);
+    }
+    await expect(service.addTask({ title: 'Capture', idempotencyKey: 'capture', attachments: [{ uri: 'file://remote/share' }] })).rejects.toThrow(ValidationError);
+    expect(calls).toHaveLength(0);
+  });
+
+  test('old servers cannot receive unprotected fallback writes', async () => {
+    const { service, calls } = fixture((call) => call.url.includes('/v1/') ? jsonResponse({}, 404) : jsonResponse({ task: task() }));
+    expect(await service.getTask({ id: 'task-1' })).toEqual(task());
+    await expect(service.addTask({ title: 'Capture', idempotencyKey: 'capture' })).rejects.toThrow(NotFoundError);
+    await expect(service.updateTask({ id: 'task-1', title: 'Changed', expectedVersion: version })).rejects.toThrow(NotFoundError);
+    expect(calls.map((call) => [call.method, call.url])).toEqual([
+      ['GET', `${origin}/tasks/task-1`], ['POST', `${origin}/v1/tasks`], ['PATCH', `${origin}/v1/tasks/task-1`],
+    ]);
+  });
+
+  test('requires matching strong validators on versioned and protected responses', async () => {
+    const replies = [
+      () => new Response(JSON.stringify({ task: task(), version })),
+      () => new Response(JSON.stringify({ task: task(), version }), { headers: { ETag: `W/"${version}"` } }),
+      () => new Response(JSON.stringify({ task: task(), version }), { headers: { ETag: `"sha256-${'b'.repeat(64)}"` } }),
+      () => new Response(JSON.stringify({ task: task(), version: 'bad' }), { headers: { ETag: '"bad"' } }),
+    ];
+    for (const reply of replies) {
+      const { service, calls } = fixture(reply);
+      await expect(service.getTask({ id: 'task-1' })).rejects.toThrow('invalid response');
+      await expect(service.updateTask({ id: 'task-1', title: 'Changed', expectedVersion: version })).rejects.toThrow('write outcome is unknown');
+      expect(calls).toHaveLength(2);
+    }
+    const { service, calls } = fixture(() => jsonResponse({ task: task() }));
+    await expect(service.addTask({ title: 'Capture', idempotencyKey: 'capture' })).rejects.toThrow('write outcome is unknown');
+    await expect(service.updateTask({ id: 'task-1', title: 'Changed', expectedVersion: version })).rejects.toThrow('write outcome is unknown');
+    expect(calls).toHaveLength(2);
+  });
+
+  test('preserves safe structured conflicts and never retries them', async () => {
+    for (const [status, code] of [[412, 'task_version_conflict'], [409, 'idempotency_conflict'], [409, 'idempotency_capacity']] as const) {
+      const { service, calls } = fixture(() => jsonResponse({ code, error: `${secret} ${origin}` }, status));
+      try {
+        await service.addTask({ title: 'Capture', idempotencyKey: 'capture' });
+        throw new Error('Expected a conflict');
+      } catch (error) {
+        expect(getMindwtrToolErrorCode(error)).toBe(code);
+        expect(String(error)).not.toContain(secret);
+        expect(String(error)).not.toContain(origin);
+      }
+      expect(calls).toHaveLength(1);
+    }
   });
 });

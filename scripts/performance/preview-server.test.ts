@@ -14,7 +14,7 @@ it('serves the built artifact without parsing console output and refuses an occu
     expect(await (await fetch(server.url)).text()).toContain('Benchmark fixture');
     const port = Number(new URL(server.url).port);
     await expect(startPreview(directory, port)).rejects.toThrow(/already in use/);
-    // Failure must not close or adopt the other listener.
+
     expect((await fetch(server.url)).ok).toBe(true);
   } finally {
     await server?.close();

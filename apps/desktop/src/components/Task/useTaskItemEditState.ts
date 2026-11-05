@@ -24,18 +24,13 @@ export type TaskItemEditState = {
 
 const hasPreviewableDescription = (task: Task) => Boolean(task.description?.trim());
 
-/**
- * React adapter over the TaskDraft module: one draft object in state, one
- * setter. Initialization, reset, dirty-checking, field cascades, and the
- * update patch all live in core task-draft.ts — this hook only binds the
- * draft to React.
- */
+
 export function useTaskItemEditState({
     task,
     resetAttachmentState,
 }: UseTaskItemEditStateOptions): TaskItemEditState {
-    // This advances only when an edit session resets. Keeping it separate from
-    // the live task prop lets submit distinguish user edits from later updates.
+
+
     const [baselineTask, setBaselineTask] = useState(task);
     const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(task));
     const [showDescriptionPreview, setShowDescriptionPreview] = useState(() => hasPreviewableDescription(task));

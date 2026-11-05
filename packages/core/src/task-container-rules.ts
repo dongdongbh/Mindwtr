@@ -87,12 +87,7 @@ export type TaskMoveDestination =
     | { kind: 'project'; id: string }
     | { kind: 'area'; id: string };
 
-/**
- * The fields to send when a task moves to a destination. All three keys are always
- * present; undefined means "clear" (an absent key means "leave alone" to the store).
- * `section` is a section the caller wants to keep and the project that owns it; it
- * survives only a move into that same project.
- */
+
 export const buildTaskMovePatch = (
     destination: TaskMoveDestination,
     section?: { projectId?: string; sectionId?: string },
@@ -126,7 +121,7 @@ export const resolveTaskContainerAssignment = ({
     allProjects: AppData['projects'];
     allSections: AppData['sections'];
     allAreas: AppData['areas'];
-    /** Task-scoped preview for a section owned by the selected archived parent. */
+
     isReactivatingProjectSection?: (section: Readonly<Section>) => boolean;
 }): TaskContainerResolution => {
     const projectValidation = validateExistingTaskProjectId(projectId, allProjects);
@@ -229,7 +224,7 @@ export const buildTaskContainerMovePatch = ({
     allProjects: AppData['projects'];
     allSections: AppData['sections'];
     allAreas: AppData['areas'];
-    /** Task-scoped preview for a section owned by the selected archived parent. */
+
     isReactivatingProjectSection?: (section: Readonly<Section>) => boolean;
     reserveProjectOrder?: boolean;
     projectOrderReserver?: TaskContainerOrderReserver;

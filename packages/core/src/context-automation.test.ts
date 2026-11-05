@@ -7,10 +7,6 @@ import {
 } from './context-automation';
 import type { Task } from './types';
 
-// React Native's tests (apps/mobile/lib/context-automation*.test.ts and
-// tests/use-root-layout-context-automation.test.tsx) replay the parse, selection,
-// copy and throttle rules through React Native's files; these cover what the
-// handler moved: the notification an activation posts and the throttle object.
 
 const task = (id: string, props: Partial<Task> = {}): Task => ({
     id,
@@ -41,8 +37,8 @@ describe('buildContextAutomationNotification', () => {
     });
 
     it('opens the context as a token when the receiver sent the bare name', () => {
-        // Android's ACTIVATE_CONTEXT broadcast hands on `context=home` as sent; the
-        // Contexts screen matches '@home' only, so a bare 'home' opened an empty list.
+
+
         const notification = buildContextAutomationNotification({ action: 'activate', context: 'home' }, {
             tasks: [task('a', { title: 'Water plants' })],
             projects: [],

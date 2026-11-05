@@ -15,6 +15,7 @@ import {
     WEBDAV_URL_KEY,
     WEBDAV_USERNAME_KEY,
 } from '@/lib/sync-constants';
+import { Alert } from 'react-native';
 import { pickAndParseSyncFolder } from '@/lib/storage-file';
 import { useSyncSettingsTransportActions } from './use-sync-settings-transport-actions';
 
@@ -84,10 +85,7 @@ vi.mock('@/lib/secure-config', () => ({
     setSecureConfigValue: mocked.setSecureConfigValue,
 }));
 
-// The sync-configuration commit protocol is the behaviour these storage
-// assertions are about, so it is pulled in for real rather than stubbed. The
-// barrel itself stays mocked: loading it here would drag in LOCALES and the
-// settings-search tables at module-load time.
+
 vi.mock('@mindwtr/core', async () => ({
     ...(await vi.importActual<typeof import('../../../../packages/core/src/sync-configuration-transaction')>(
         '../../../../packages/core/src/sync-configuration-transaction',
@@ -98,6 +96,9 @@ vi.mock('@mindwtr/core', async () => ({
     ...(await vi.importActual<typeof import('../../../../packages/core/src/sync-client-helpers')>(
         '../../../../packages/core/src/sync-client-helpers',
     )),
+    ...(await vi.importActual<typeof import('../../../../packages/core/src/unreachable-attachments')>(
+        '../../../../packages/core/src/unreachable-attachments',
+    )),
     addBreadcrumb: mocked.addBreadcrumb,
     probeWebdavSyncCompatibility: mocked.probeWebdavSyncCompatibility,
     CLOCK_SKEW_THRESHOLD_MS: 60_000,
@@ -107,9 +108,8 @@ vi.mock('@mindwtr/core', async () => ({
         String(error ?? '').includes('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE')
     ),
     isValidCloudSyncToken: mocked.isValidCloudSyncToken,
-    // ./settings.constants imports isValidHttpUrl (a value, not type-only) from this module
-    // and builds LANGUAGES from LOCALES at module load time; this test doesn't exercise
-    // language selection, so an empty table is enough to satisfy that load.
+
+
     LOCALES: {},
     normalizeCloudUrl: mocked.normalizeCloudUrl,
     normalizeWebdavUrl: mocked.normalizeWebdavUrl,
@@ -118,8 +118,8 @@ vi.mock('@mindwtr/core', async () => ({
             super(`SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: ${target} has no safe backend version`);
         }
     },
-    // ./settings.constants also derives SETTINGS_MENU_KEYWORD_KEYS from these at module load
-    // time; this test doesn't exercise settings search, so empty/pass-through stubs are enough.
+
+
     getSettingsSearchEntries: () => [],
     getSettingsSearchEntryKeys: () => [],
     resolveSettingsSearchI18nKey: (key: string) => `settings.${key}`,
@@ -169,9 +169,8 @@ vi.mock('@/lib/background-sync-task', () => ({
 }));
 
 vi.mock('@/lib/sync-service-utils', () => ({
-    // Mirrors the real classifier's encryption arm closely enough for the
-    // encrypted-remote activation tests: the production messages all mention
-    // the passphrase or encryption.
+
+
     classifySyncFailure: (error: unknown) => (
         /SYNC_FILE_GENERATION_CORRUPT|generation remains corrupt after bounded retries/i.test(String(error ?? ''))
             ? 'fileGenerationCorrupt'
@@ -407,8 +406,8 @@ describe('useSyncSettingsTransportActions', () => {
     });
 
     it('activates a selected cloud provider whose target is already complete', async () => {
-        // Choosing iCloud used to only stage the switch inside the page, so
-        // leaving Settings silently lost it and the old backend kept syncing.
+
+
         await renderHarness({ supportsNativeICloudSync: true });
 
         mocked.asyncStorage.setItem.mockClear();
@@ -435,7 +434,7 @@ describe('useSyncSettingsTransportActions', () => {
             latestHookResult?.handleSelectSyncBackend('cloud');
         });
 
-        // Already proven: re-selecting the same backend must not re-activate.
+
         expect(latestHookResult?.syncBackend).toBe('cloudkit');
         expect(mocked.addBreadcrumb).toHaveBeenCalledWith('settings:syncBackend:cloudkit');
         expect(mocked.performMobileSync).not.toHaveBeenCalled();
@@ -481,8 +480,7 @@ describe('useSyncSettingsTransportActions', () => {
             latestHookResult?.handleSelectSyncBackend('webdav');
         });
 
-        // No URL yet: the user still has a form to fill, so nothing runs and
-        // nothing warns.
+
         expect(latestHookResult?.syncBackend).toBe('webdav');
         expect(mocked.performMobileSync).not.toHaveBeenCalled();
         expect(mocked.showSettingsWarning).not.toHaveBeenCalled();
@@ -543,6 +541,46 @@ describe('useSyncSettingsTransportActions', () => {
             [SYNC_PATH_KEY, 'file:///picked-folder/data.json'],
             [SYNC_PATH_BOOKMARK_KEY, 'picked-bookmark'],
         ]);
+    });
+
+    it.each([
+        ['Continue without these files', true],
+        ['Cancel', false],
+    ] as const)('asks before activating without missing attachment files: %s', async (_label, accept) => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.asyncStorage.multiSet.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            error: 'Candidate attachment proof failed',
+            activationMissingAttachments: [{ id: 'a1', ownerType: 'task', ownerId: 't1', title: 'scan.pdf', ownerTitle: 'Tax return' }],
+        });
+        const alert = vi.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+            const button = buttons?.find((item) => (accept ? item.style !== 'cancel' : item.style === 'cancel'));
+            button?.onPress?.();
+        });
+        vi.mocked(pickAndParseSyncFolder).mockResolvedValue({ __fileUri: 'file:///picked/data.json' } as never);
+
+        await act(async () => {
+            await latestHookResult?.handleSetSyncPath();
+        });
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        expect(alert).toHaveBeenCalledWith('settings.syncMissingFilesTitle', expect.any(String), [
+            expect.objectContaining({ text: 'common.cancel', style: 'cancel' }),
+            expect.objectContaining({ text: 'settings.syncMissingFilesContinue' }),
+        ], expect.any(Object));
+        const probe = { activationProbe: true, manual: true, configOverride: { backend: 'file', syncPath: 'file:///picked/data.json', syncPathBookmark: null } };
+        if (accept) {
+            expect(mocked.performMobileSync).toHaveBeenNthCalledWith(2, 'file:///picked/data.json', { ...probe, acceptMissingAttachmentIds: ['a1'] });
+            expect(mocked.asyncStorage.multiSet).toHaveBeenCalled();
+        } else {
+            expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+            expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
+        }
+        alert.mockRestore();
     });
 
     it('keeps Dropbox selection in session state until its first sync succeeds', async () => {
@@ -683,11 +721,7 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
-    // This is the activation PROBE path (a candidate backend is being proven
-    // before commit), not the plain Sync-now path: a deferred write there is
-    // correctly inconclusive, not proof the new backend works, so it must
-    // still refuse to commit (mirrors desktop's 'preserves the proven
-    // backend on ... deferred write').
+
     it('reports a deferred remote write as an error even though performMobileSync succeeded', async () => {
         mocked.performMobileSync.mockResolvedValue({
             success: true,
@@ -942,10 +976,8 @@ describe('useSyncSettingsTransportActions', () => {
     });
 
     it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {
-        // The probe DID reach the sync location — refusing to activate would
-        // deadlock joining an encrypted remote: unlock requires a durable
-        // backend, and the backend could only become durable through a sync
-        // that needs the key.
+
+
         await renderHarness();
         mocked.performMobileSync.mockClear();
         mocked.performMobileSync.mockResolvedValueOnce({
@@ -967,9 +999,9 @@ describe('useSyncSettingsTransportActions', () => {
             });
         });
 
-        // Committed: backend activated despite the failed probe.
+
         expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
-        // No follow-up sync — it would only fail with the same no-key error.
+
         expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
         expect(mocked.showSettingsWarning).toHaveBeenCalled();
     });
@@ -1141,8 +1173,8 @@ describe('useSyncSettingsTransportActions', () => {
     };
 
     it("runs one normal sync when a panel's Sync now carries the saved settings", async () => {
-        // Every backend panel's Sync now passes its form, so an unchanged form must not
-        // re-prove and re-commit the backend (a second round trip and a config write per tap).
+
+
         seedSavedWebdav();
         await renderHarness();
         const { logInfo } = await import('@/lib/app-log');
@@ -1298,9 +1330,7 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
-    // A deferred document write is a healthy outcome, not a failure — it
-    // still wins over the (also non-failure) attachment-size guidance, but
-    // with the new informational notice rather than the old error toast.
+
     it("prioritizes a 'deferred' document sync result over attachment guidance", async () => {
         seedStorage([
             [SYNC_BACKEND_KEY, 'webdav'],
@@ -1378,9 +1408,7 @@ describe('useSyncSettingsTransportActions', () => {
         }
     });
 
-    // A merged-but-deferred cycle (another device holds the remote write; a
-    // retry is already scheduled) is a healthy outcome, not a failure — it
-    // must never throw 'Unknown error' or otherwise report as one (plan 067).
+
     it.each([
         ['remoteWriteDeferred', { success: true, remoteWriteDeferred: true }],
         ['pendingRemoteWriteBackoff', { success: true, skipped: 'pendingRemoteWriteBackoff', remoteWriteDeferred: true }],
@@ -1443,8 +1471,8 @@ describe('useSyncSettingsTransportActions', () => {
         expect(latestHookResult?.cloudUrl).toBe('https://cloud.example.com');
         expect(mocked.setSecureConfigValue).not.toHaveBeenCalled();
         expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
-        // Save returned silently, so sync stayed off with no explanation.
-        // Desktop's equivalent case toasts settings.sync.readyToVerify.
+
+
         expect(mocked.showToast).toHaveBeenCalledWith({
             title: 'common.notice',
             message: 'settings.sync.readyToVerify',
@@ -1484,9 +1512,8 @@ describe('useSyncSettingsTransportActions', () => {
     });
 
     it('activates Dropbox sync on connect without a manual Sync now tap', async () => {
-        // #1033: Android's OAuth redirect deep link can unmount the settings
-        // screen, so connect itself must probe and commit — a fresh install
-        // must end up with a persisted, enabled Dropbox backend.
+
+
         await renderHarness({ dropboxConfigured: true });
 
         await act(async () => {
@@ -1658,8 +1685,8 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.clearMobileSyncConfigCache.mock.invocationCallOrder[0]).toBeLessThan(
             mocked.disconnectDropbox.mock.invocationCallOrder[0],
         );
-        // Connect promoted the staged tokens into the durable bundle, so the
-        // staged-revoke path is empty; disconnectDropbox owns revocation.
+
+
         expect(mocked.revokeDropboxTokens).not.toHaveBeenCalled();
         expect(mocked.disconnectDropbox).toHaveBeenCalledWith('dropbox-app-key');
         expect(latestHookResult?.syncBackend).toBe('off');

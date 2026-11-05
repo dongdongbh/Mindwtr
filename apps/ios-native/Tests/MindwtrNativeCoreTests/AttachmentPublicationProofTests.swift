@@ -130,8 +130,8 @@ final class AttachmentPublicationProofTests: XCTestCase {
         let retained = managed.appendingPathExtension("retained")
         try FileManager.default.moveItem(at: managed, to: retained)
         try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: false)
-        // Move the exact published inode into a different directory: identity
-        // and bytes match but its recorded directory ownership does not.
+
+
         try FileManager.default.moveItem(at: retained.appendingPathComponent(target.lastPathComponent), to: target)
         files = try NativeAttachmentFiles(libraryRoot: root)
         refused { _ = try prove() }

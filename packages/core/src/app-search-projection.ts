@@ -1,32 +1,19 @@
 import type { Area, Project, Task } from './types';
 import { isTaskVisible } from './store-helpers';
 
-/**
- * Pure projection logic for the Android AppSearch secondary index (#1017).
- *
- * AppSearch is a disposable read-only mirror of the local database: it must
- * never carry more than a minimal, non-sensitive slice of an entity (title
- * plus status/due/project-area context), and it must be trivial to rebuild
- * from scratch. Keeping this file free of native/store imports makes the
- * mapping and diffing rules unit-testable without a device.
- *
- * Moved from React Native's lib/app-search-projection.ts (pass O2c) so the native Android app indexes the same way. A
- * result opens [scheme]://open?…: 'mindwtr' unless a build passes its own (the native dev build's scheme, so its results
- * open that build, not the React Native app).
- */
 
 export type AppSearchDocKind = 'task' | 'project' | 'area';
 
 export type AppSearchDoc = {
-    /** AppSearch document id; namespaced by kind so a task and a project can never collide. */
+
     id: string;
     kind: AppSearchDocKind;
     title: string;
     status?: string;
     dueDate?: string;
-    /** The owning project or area id, when the entity has one. */
+
     parentId?: string;
-    /** mindwtr:// (or the build's scheme) URL opened when the system-search result is tapped. */
+
     deepLink: string;
 };
 
@@ -34,16 +21,12 @@ export function appSearchDocId(kind: AppSearchDocKind, entityId: string): string
     return `${kind}:${entityId}`;
 }
 
-// A task counts as "active" for indexing once it clears the store's own
-// visibility gate (not deleted, not archived) and is also not done — the
-// store's visible-tasks selector keeps done tasks around for done-list views,
-// but a completed task has no business surfacing in system search.
+
 export function isTaskIndexable(task: Task): boolean {
     return isTaskVisible(task) && task.status !== 'done';
 }
 
-// The store's visible-projects selector filters deletedAt only, not archived
-// status, so that check lives here.
+
 export function isProjectIndexable(project: Project): boolean {
     return !project.deletedAt && project.status !== 'archived';
 }
@@ -109,10 +92,7 @@ export function buildFullAppSearchIndex(params: {
     return docs;
 }
 
-// Reference-equality diff: the store only mints a new object for an entity
-// that actually changed, so an id present in both arrays under the same
-// object reference did not change. This keeps a mutation-triggered reindex
-// down to O(changed entities) instead of rebuilding the whole index.
+
 function diffEntitiesById<T extends { id: string }>(
     prev: T[],
     next: T[],
@@ -136,13 +116,7 @@ export type AppSearchDelta = {
     removeIds: string[];
 };
 
-/**
- * Diffs the previous and next visible collections and returns only the writes
- * AppSearch actually needs: a changed entity that is still indexable becomes
- * an upsert, a changed entity that is no longer indexable (completed,
- * archived) or that disappeared from the visible collection (deleted)
- * becomes a removal.
- */
+
 export function buildAppSearchDelta(params: {
     prevTasks: Task[];
     nextTasks: Task[];

@@ -12,7 +12,7 @@ const sourceExtension = /\.(?:[cm]?[jt]sx?|rs|swift|kt|kts|java)$/;
 
 async function collectSources(directory) {
   const sources = [];
-  // Ignore generated bundles: stale local assets must not satisfy source log coverage.
+
   const filenames = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."],
     { cwd: directory, encoding: "utf8" }).split("\0").filter(Boolean).sort();
   for (const filename of filenames) {
@@ -41,7 +41,7 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
     const slug = match[2] ?? constants.get(match[3]);
     if (slug !== undefined) sites.push({ file, slug });
   }
-  // Conditional chains emit each literal arm, including Project/Inbox/Reference diagnostics.
+
   for (const match of source.matchAll(
     /\breleaseCheck\s*:\s*([^,{};]+\?[^,{};]+)/g,
   )) {
@@ -49,12 +49,12 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
       sites.push({ file, slug: arm[2] });
     }
   }
-  // Native Rust diagnostics put the field inside a log message rather than
-  // a JavaScript object. Only count log macros, not unused string constants.
+
+
   if (file.endsWith(".rs")) {
     const messages = [
       ...Array.from(source.matchAll(/\blog::(?:info|warn)!\(\s*"((?:\\[\s\S]|[^"\\])*)"/g), (match) => match[1]),
-      // A formatted message immediately logged, then reused for the Diagnostics file.
+
       ...Array.from(source.matchAll(/\blet\s+(\w+)\s*=\s*format!\(\s*"((?:\\[\s\S]|[^"\\])*)"\s*\);\s*log::(?:info|warn)!\(\s*"\{\1\}"\s*\)/g), (match) => match[2]),
     ];
     for (const message of messages) {
@@ -63,9 +63,8 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
       }
     }
   }
-  // Native Android diagnostics likewise put the field in the first string of
-  // an android.util.Log info/warn call, or of CoreHost.logLine (core's log, so
-  // Settings > Diagnostics); unused string constants do not count.
+
+
   if (file.endsWith(".kt")) {
     for (const message of source.matchAll(/(?:\bLog\.(?:i|w)\([^,()]+,|\.logLine\()\s*"((?:\\[\s\S]|[^"\\])*)"/g)) {
       for (const match of message[1].matchAll(/\breleaseCheck=([\w./-]+)/g)) {
@@ -73,8 +72,8 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
       }
     }
   }
-  // Native Swift diagnostics use NSLog or forward a literal JSON context to
-  // the shared Diagnostics logLine bridge; unused string constants do not count.
+
+
   if (file.endsWith(".swift")) {
     for (const message of source.matchAll(/\bNSLog\(\s*"((?:\\[\s\S]|[^"\\])*)"/g)) {
       for (const match of message[1].matchAll(/\breleaseCheck=([\w./-]+)/g)) {
@@ -87,7 +86,7 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
       try {
         const context = JSON.parse(call[2]);
         if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
-      } catch { /* Invalid JSON cannot supply a Diagnostics context. */ }
+      } catch {                                                         }
     }
     // Engine-local calls pass the literal context directly, as raw or escaped JSON.
     for (const call of source.matchAll(
@@ -122,16 +121,16 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
         try {
           const context = JSON.parse(raw);
           if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
-        } catch { /* Invalid JSON cannot supply a Diagnostics context. */ }
+        } catch {                                                         }
       }
     }
-    // Dynamic scalar fields use a flat Swift dictionary encoded at the call site.
+
     for (const call of source.matchAll(
       /\bcall\(\s*"logLine"\s*,\s*argumentsJSON:\s*(?:self\.)?json\(\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*try\s+(?:self\.)?json\(\s*\[((?:"(?:\\[\s\S]|[^"\\])*"|[^"[\]])*)\]\s*\)\s*,?\s*\]\s*\)\s*\)/g,
     )) {
       for (const field of call[1].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
         try { sites.push({ file, slug: JSON.parse(field[1]) }); }
-        catch { /* Interpolated or unsupported Swift strings are not resolved literals. */ }
+        catch {                                                                            }
       }
     }
     for (const call of source.matchAll(
@@ -148,7 +147,7 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
     )) {
       for (const field of call[2].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
         try { sites.push({ file, slug: JSON.parse(field[1]) }); }
-        catch { /* Interpolated or unsupported Swift strings are not resolved literals. */ }
+        catch {                                                                            }
       }
     }
   }

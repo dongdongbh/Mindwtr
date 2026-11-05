@@ -53,7 +53,7 @@ vi.mock('@/contexts/theme-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -88,6 +88,7 @@ vi.mock('@/components/swipeable-task-item', () => ({
 }));
 
 vi.mock('lucide-react-native', () => ({
+  ArrowUpDown: (props: any) => React.createElement('ArrowUpDown', props),
   Trash2: (props: any) => React.createElement('Trash2', props),
 }));
 
@@ -116,8 +117,8 @@ vi.mock('react-native', async (importOriginal) => {
 import SavedSearchScreen from './[id]';
 
 describe('SavedSearchScreen', () => {
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
+
   it('hands rows stable prop references across a re-render', async () => {
     storeState.tasks = [makeTask('task-1', 'loose one'), makeTask('task-2', 'loose two')];
 
@@ -157,8 +158,7 @@ describe('SavedSearchScreen', () => {
     expect(deleteButton.props.accessibilityLabel).toBeTruthy();
   });
 
-  // The confirmation may stay open while another device or screen changes the
-  // saved searches: Delete removes this one from the list as it is then.
+
   it('deletes against the current saved searches, not the list from render', async () => {
     const core = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     const added = { id: 'search-2', name: 'Added meanwhile', query: 'meanwhile' };
@@ -182,5 +182,38 @@ describe('SavedSearchScreen', () => {
     await act(async () => { await confirm.onPress?.(); });
 
     expect(updateSettings).toHaveBeenCalledWith({ savedSearches: [added] });
+  });
+
+
+  it('sorts by the saved search sort and writes only a user choice', async () => {
+    const core = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+    const own = { id: 'search-1', name: 'Loose ends', query: 'loose', sort: 'title' };
+    const other = { id: 'search-2', name: 'Other', query: 'other' };
+    const updateSettings = vi.fn(async () => undefined);
+    const previousSettings = storeState.settings;
+    storeState.settings = { savedSearches: [own, other], taskSortBy: 'default' } as never;
+    storeState.tasks = [makeTask('task-b', 'loose b'), makeTask('task-a', 'loose a')];
+    core.useTaskStore.setState({ settings: storeState.settings, updateSettings } as never);
+
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<SavedSearchScreen />);
+    });
+    const rowIds = () => tree.root
+      .findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')
+      .map((node) => node.props.task.id);
+    expect(rowIds()).toEqual(['task-a', 'task-b']);
+
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    const option = (testID: string) => tree.root.find((node) => node.props.testID === testID && node.props.onPress);
+    const label = (testID: string) => option(testID).findAll((node) => (node.type as unknown) === 'Text')[0]?.props.children;
+    expect(label('sort-option-inherit')).toContain('Use global setting');
+    await act(async () => { option('sort-option-start').props.onPress(); });
+    expect(updateSettings).toHaveBeenLastCalledWith({ savedSearches: [{ ...own, sort: 'start' }, other] });
+
+    await act(async () => { option('sort-option-inherit').props.onPress(); });
+    expect(updateSettings).toHaveBeenLastCalledWith({ savedSearches: [{ id: 'search-1', name: 'Loose ends', query: 'loose' }, other] });
+    storeState.settings = previousSettings;
   });
 });

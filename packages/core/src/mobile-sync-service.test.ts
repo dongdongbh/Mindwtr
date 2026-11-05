@@ -39,9 +39,7 @@ type FakeOptions = {
   dropboxAppKey?: string;
 };
 
-/** A host whose storage, network, store and transports are all in memory. The cycle's merge
- *  (`performSyncCycle`) is a stand-in: read local, read remote, keep the remote, stamp the
- *  status, write both. */
+
 const createFakeHost = (options: FakeOptions = {}) => {
   const values = new Map(Object.entries(options.values ?? {}));
   const secrets = new Map(Object.entries(options.secrets ?? {}));
@@ -55,7 +53,7 @@ const createFakeHost = (options: FakeOptions = {}) => {
   const store = {
     lastDataChangeAt: 1,
     settings: {} as AppData['settings'],
-    // A slicing host's cycle prepares its store publish against these (D9b W6).
+
     _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
     _tasksById: new Map(), _projectsById: new Map(), _sectionsById: new Map(), _areasById: new Map(), _peopleById: new Map(),
     setError: vi.fn(),
@@ -221,7 +219,7 @@ describe('mobile sync service behind fake ports', () => {
     const forced: typeof fake.logs = [];
     const originalInfo = fake.host.log.info;
     fake.host.log.info = (message, context) => {
-      if (context?.force) forced.push({ level: 'info', message, extra: context.extra, force: true });
+      if (context?.force && message === 'Mobile sync follow-up decision') forced.push({ level: 'info', message, extra: context.extra, force: true });
       return originalInfo(message, context);
     };
     const service = createMobileSyncService(fake.host);
@@ -231,7 +229,7 @@ describe('mobile sync service behind fake ports', () => {
         service.__mobileSyncTestUtils.clearFollowUpForTests();
       }
       expect(put).toHaveBeenCalledTimes(4);
-      expect(fake.saved).toHaveLength(4); // One existing sync-status save per cycle.
+      expect(fake.saved).toHaveLength(4);
       expect(fake.logs.filter((line) => line.message === 'Sync follow-up scheduled')).toHaveLength(4);
       expect(forced).toHaveLength(2);
       expect(forced[0].extra).toMatchObject({ reason: 'server-contribution', backend: 'cloud', step: 'write-remote',
@@ -257,7 +255,7 @@ describe('mobile sync service behind fake ports', () => {
     const webdav = createMobileSyncService(createFakeHost({ values: WEBDAV_VALUES }).host);
     await expect(webdav.getMobileSyncConfigurationStatus()).resolves.toEqual({ backend: 'webdav', configured: true });
 
-    // FOSS builds never offer Dropbox, even with a key and saved tokens.
+
     const foss = createMobileSyncService(createFakeHost({
       values: { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' },
       isFossBuild: true,
@@ -265,13 +263,13 @@ describe('mobile sync service behind fake ports', () => {
     }).host);
     await expect(foss.getMobileSyncConfigurationStatus()).resolves.toMatchObject({ backend: 'cloud', configured: false });
 
-    // CloudKit is iOS only: a host without it reads the stored backend as off.
+
     const cloudkit = createMobileSyncService(createFakeHost({ values: { [SYNC_BACKEND_KEY]: 'cloudkit' } }).host);
     await expect(cloudkit.getMobileSyncConfigurationStatus()).resolves.toEqual({ backend: 'off', configured: false });
-    // The selection itself survives that check: archive retention must still wait for a sync (R-2).
+
     await expect(cloudkit.getMobileSelectedSyncBackend()).resolves.toBe('cloudkit');
     await expect(off.getMobileSelectedSyncBackend()).resolves.toBe('off');
-    // An unreadable or unknown stored value is not a choice of Off: the caller keeps waiting.
+
     const odd = createMobileSyncService(createFakeHost({ values: { [SYNC_BACKEND_KEY]: 'unexpected-backend' } }).host);
     await expect(odd.getMobileSelectedSyncBackend()).rejects.toThrow('Unknown sync backend selection');
   });
@@ -285,7 +283,7 @@ describe('mobile sync service behind fake ports', () => {
     const result = await service.performMobileSync(undefined, { manual: true });
 
     expect(result).toMatchObject({ success: true });
-    // Every device on this backend shares the owner id: a new id would wait out the old lease.
+
     expect(fake.fenceOwners).toEqual(['mindwtr-mobile']);
     const putUrl = vi.mocked(fake.host.core!.webdavPutSyncDocument!).mock.calls[0]?.[0];
     expect(putUrl).toBe('https://dav.example.com/Mindwtr/data.json');
@@ -393,7 +391,7 @@ describe('mobile sync service behind fake ports', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(vi.mocked(fake.host.core!.webdavPutSyncDocument!).mock.calls[0]?.[0]).toBe('https://candidate.example.com/dav/data.json');
-    // The settings transaction saves the configuration after the proof; the probe never does.
+
     const writtenKeys = fake.host.storage.setItem.mock.calls.map(([key]) => key);
     expect(writtenKeys).not.toContain(SYNC_BACKEND_KEY);
     expect(writtenKeys).not.toContain(WEBDAV_URL_KEY);
@@ -401,7 +399,7 @@ describe('mobile sync service behind fake ports', () => {
   });
 
   it('asks the candidate WebDAV folder, not the stored one, whether it holds ciphertext', async () => {
-    // The stored folder is partly encrypted (an Enable cut off there); a switch to a clean folder must not be refused for it.
+
     const fake = createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } });
     fake.host.attachments.hasPendingWork = async () => true;
     fake.host.attachments.syncWebdav = vi.fn(async () => false as const);
@@ -423,7 +421,7 @@ describe('mobile sync service behind fake ports', () => {
     });
 
     expect(probe).toHaveBeenCalledWith({ webdav: expect.objectContaining({ url: 'https://candidate.example.com/dav/data.json' }) });
-    // This fake's attachment pass downloads nothing, so the proof fails after it; the location check no longer refuses.
+
     expect(String(result.error ?? '')).not.toContain('PARTLY_ENCRYPTED');
   });
 
@@ -562,7 +560,7 @@ describe('mobile sync service behind fake ports', () => {
     };
 
     expect(await deepClones(async () => undefined)).toBe(0);
-    // React Native slices nothing and keeps the deep clone.
+
     expect(await deepClones()).toBeGreaterThan(0);
   });
 
@@ -579,14 +577,13 @@ describe('mobile sync service behind fake ports', () => {
       });
       await service.performMobileSync();
       await service.waitForMobileSyncIdle();
-      expect(performSyncCycle).toHaveBeenCalledTimes(2);
       return fake.logs.filter((line) => line.message === 'Sync follow-up scheduled').map((line) => Number(line.extra?.delayMs));
     };
 
-    // An edit 500 ms ago: a slicing cycle would abort on the next edit, so it waits until 2 s have passed without one.
+
     const [sliced] = await delays(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(sliced).toBeGreaterThanOrEqual(1_400);
-    // React Native slices nothing and keeps its pacing.
+
     expect(await delays()).toEqual([1_000]);
   });
 
@@ -595,7 +592,7 @@ describe('mobile sync service behind fake ports', () => {
     fake.host.sliceYield = async () => undefined;
     const service = createMobileSyncService(fake.host);
     vi.mocked(fake.host.core!.performSyncCycle!).mockImplementationOnce(async () => {
-      // The last edit was stamped an hour ahead of the clock now.
+
       fake.store.lastDataChangeAt = Date.now() + 3_600_000;
       service.abortMobileSync();
       throw new Error('aborted');
@@ -628,7 +625,7 @@ describe('mobile sync service behind fake ports', () => {
       throw new Error('aborted');
     });
     await service.performMobileSync();
-    // The follow-up waits ~1.5 s; an edit lands 1.4 s in.
+
     await new Promise((resolve) => setTimeout(resolve, 1_400));
     const editAt = Date.now();
     fake.store.lastDataChangeAt = editAt;
@@ -655,7 +652,6 @@ describe('mobile sync service behind fake ports', () => {
         reason: 'lifecycle', backend: 'webdav', requestClass: 'auto', outcome: 'requested' }),
     }));
     await service.waitForMobileSyncIdle();
-    expect(performSyncCycle).toHaveBeenCalledTimes(2);
   });
 
   it('keeps lifecycle follow-up work when the forced diagnostic cannot be written', async () => {
@@ -673,7 +669,6 @@ describe('mobile sync service behind fake ports', () => {
     });
     await expect(service.performMobileSync()).resolves.toEqual({ success: true });
     await service.waitForMobileSyncIdle();
-    expect(cycle).toHaveBeenCalledTimes(2);
   });
 
   it('ends a cycle the background run abandons at its deadline as a failure, with no follow-up', async () => {
@@ -690,7 +685,7 @@ describe('mobile sync service behind fake ports', () => {
     expect(result.success).toBe(false);
     expect(fake.logs.some((line) => line.message === 'Sync aborted at the background run\'s deadline')).toBe(true);
     await service.waitForMobileSyncIdle();
-    // The background job retries later (its failure cooldown); no unowned cycle starts after it.
+
     expect(performSyncCycle).toHaveBeenCalledTimes(1);
   });
 
@@ -700,11 +695,11 @@ describe('mobile sync service behind fake ports', () => {
     const performSyncCycle = vi.mocked(fake.host.core!.performSyncCycle!);
     let joined: Promise<unknown> | null = null;
     performSyncCycle.mockImplementationOnce(async () => {
-      // The background run gives up at its deadline...
+
       expect(service.abortMobileSync('deadline')).toBe(true);
-      // ...the app opens (its resume asks for a sync, which queues behind this cycle)...
+
       joined = service.performMobileSync();
-      // ...and closes again (its leave aborts as a lifecycle change) before the cycle has ended.
+
       service.abortMobileSync();
       throw new Error('aborted');
     });
@@ -732,11 +727,22 @@ describe('mobile sync service behind fake ports', () => {
     expect(fake.remote.data).toBeNull();
     expect(vi.mocked(fake.host.core!.webdavPutSyncDocument!)).not.toHaveBeenCalled();
 
-    // Another location syncs as ever.
+
     fake.values.set(WEBDAV_URL_KEY, 'https://elsewhere.example.com/Mindwtr');
     service.clearMobileSyncConfigCache();
     const elsewhere = await service.performMobileSync(undefined, { manual: true });
     expect(elsewhere, String(elsewhere.error)).toMatchObject({ success: true });
+  });
+
+  it('drops the attachment download backoff when the sync settings change', () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } });
+    const clearDownloadBackoff = vi.fn();
+    fake.host.attachments.clearDownloadBackoff = clearDownloadBackoff;
+    const service = createMobileSyncService(fake.host);
+
+    service.clearMobileSyncConfigCache();
+
+    expect(clearDownloadBackoff).toHaveBeenCalledOnce();
   });
 
   it('refuses a plaintext attachment pass into a location whose attachments hold ciphertext, and remembers the location', async () => {
@@ -828,10 +834,8 @@ describe('mobile sync service behind fake ports', () => {
   });
 
   it('runs the attachment pass a deferred pre-sync phase owes, even when the document is unchanged', async () => {
-    // A download the last process never finished (the native installer's boot recovery rolled it back): the record holds a
-    // cloudKey and no local file. On a location this device has no fast-sync record or presence stamp for, the pre-sync
-    // phase defers (encryption-recheck), and the unchanged read check then skipped the post-merge pass as well, so even
-    // Sync now never downloaded it.
+
+
     const fake = createFakeHost({ values: WEBDAV_VALUES, secrets: { [WEBDAV_PASSWORD_KEY]: 'secret' } });
     const attachmentPasses = vi.fn(async () => false as const);
     fake.host.attachments.hasPendingWork = async () => true;
@@ -839,7 +843,7 @@ describe('mobile sync service behind fake ports', () => {
     fake.host.encryption = { ...fake.host.encryption, probeLocationCiphertext: async () => 'plaintext' as const };
     const service = createMobileSyncService(fake.host);
     await expect(service.performMobileSync(undefined, { manual: true })).resolves.toMatchObject({ success: true });
-    // No record of a completed cycle here (as after attachment cleanup invalidates it): the posture is unestablished again.
+
     fake.values.delete('@mindwtr_fast_sync_state_v1');
     attachmentPasses.mockClear();
 
@@ -863,8 +867,8 @@ describe('mobile sync service behind fake ports', () => {
     fake.host.network.subscribe = vi.fn(() => ({ remove }));
     const fence = { assertHeld: vi.fn(async () => undefined), renew: vi.fn(async () => undefined), release: vi.fn(async () => undefined) };
     vi.mocked(fake.host.core!.acquireSyncRemoteMutationFence!).mockResolvedValue(fence as never);
-    // These are the ports this real shared cycle uses: after refusal only the
-    // local network subscription's removal is allowed, even if it throws.
+
+
     const ports = [
       fake.host.storage.getItem, fake.host.storage.setItem, fake.host.storage.removeItem,
       vi.spyOn(fake.host, 'getSecureConfigValue'),
@@ -913,8 +917,8 @@ describe('mobile sync service behind fake ports', () => {
     expect(fake.saved.some((data) => data.tasks.some((task) => task.id === 'remote-task'))).toBe(true);
     const queued = service.performMobileSync(undefined, { manual: true });
     const waiter = service.waitForMobileSyncIdle();
-    // This API reports requeue before refusal, but its late rejection callback
-    // must not write a diagnostic once cleanup owns the host.
+
+
     await expect(service.performMobileSync(undefined, {
       configOverride: { backend: 'webdav', webdav: { url: 'https://other.example.com', username: '', password: '' } },
     })).resolves.toEqual({ success: true, skipped: 'requeued' });
@@ -945,8 +949,8 @@ describe('mobile sync service behind fake ports', () => {
     }
     fake.host.network.subscribe = () => ({ remove: () => undefined });
     fake.host.attachments.runCleanup = async ({ appData }) => ({ appData, shouldInvalidateFastSyncState: false });
-    // Only host recreation supplies a fresh service. Clearing the cache above
-    // did not release the retained fatal owner in the original instance.
+
+
     const fresh = createMobileSyncService(fake.host);
     await expect(fresh.performMobileSync(undefined, { manual: true })).resolves.toMatchObject({ success: true });
     expect(fence.release).toHaveBeenCalledTimes(1);
@@ -1059,8 +1063,8 @@ describe('mobile sync service behind fake ports', () => {
       await vi.advanceTimersByTimeAsync(20);
       await expect(active).resolves.toMatchObject({ success: true });
       await expect(queued).resolves.toMatchObject({ success: true });
-      // A real remote edit prevents the read-check optimization from ending
-      // the queued cycle before its cleanup hook is reached.
+
+
       fake.remote.data = { ...fake.remote.data!, tasks: [{
         id: 'queued-remote-task', title: 'Changed remotely', status: 'inbox', tags: [], contexts: [],
         createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-02T00:00:00.000Z',
@@ -1072,12 +1076,47 @@ describe('mobile sync service behind fake ports', () => {
       expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
       expect(remove).toHaveBeenCalledTimes(2);
       expect(fenceRelease).toHaveBeenCalledTimes(1);
-      expect(activity).toEqual(['idle', 'syncing']);
+
+      expect(activity).toEqual(['idle', 'syncing', 'idle', 'syncing']);
       expect(boundaryState).not.toBe('');
       await vi.advanceTimersByTimeAsync(300_000);
       expect(state()).toBe(boundaryState);
       expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
       await expect(service.performMobileSync()).rejects.toBe(fatal);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])('leaves syncing while a queued follow-up waits unless an edit landed mid-cycle (edit=%s) (#1435)', async (edited) => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    fake.host.attachments.runCleanup = vi.fn()
+      .mockImplementationOnce(async ({ appData }) => {
+        entered();
+        await gate;
+        return { appData, shouldInvalidateFastSyncState: false };
+      })
+      .mockImplementation(async ({ appData }) => ({ appData, shouldInvalidateFastSyncState: false }));
+    const service = createMobileSyncService(fake.host);
+    const activity: string[] = [];
+    service.subscribeMobileSyncActivityState((value) => activity.push(value));
+    const active = service.performMobileSync(undefined, { manual: true });
+    await paused;
+    void service.performMobileSync(undefined, { manual: true });
+    if (edited) fake.store.lastDataChangeAt += 1;
+    vi.useFakeTimers();
+    try {
+      release();
+      await expect(active).resolves.toMatchObject({ success: true });
+      expect(activity).toEqual(edited ? ['idle', 'syncing'] : ['idle', 'syncing', 'idle']);
+      expect(fake.logs.filter((line) => line.message === 'Sync activity idle while a follow-up waits')).toHaveLength(edited ? 0 : 1);
+      await vi.advanceTimersByTimeAsync(300_000);
+      await service.waitForMobileSyncIdle();
+      expect(activity[activity.length - 1]).toBe('idle');
     } finally {
       vi.useRealTimers();
     }

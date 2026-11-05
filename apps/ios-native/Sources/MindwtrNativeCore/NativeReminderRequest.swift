@@ -2,12 +2,12 @@ import CoreFoundation
 import Foundation
 import UserNotifications
 
-/// Converts the shared alarm value only. Applying requests and admitting their owners are separate operations.
+
 enum NativeReminderRequest {
     private static let invalid = "Native reminder alarm is invalid"
     private static let snoozeBase = 1_073_741_824
 
-    /// Ownership is the closed native metadata and exact namespace/ID, never a prefix alone.
+
     static func ownedID(identifier: String, metadata: Any?, namespace: String) -> Int? {
         guard validNamespace(namespace), let value = metadata as? [String: Any],
               Set(value.keys) == Set(["version", "namespace", "id"]),
@@ -39,7 +39,7 @@ enum NativeReminderRequest {
         }
 
         if key.hasPrefix("snooze:") {
-            // Shared Snooze receipts retain the original alarm's payload for owner withdrawal and tap routing.
+
             guard key.range(of: #"\Asnooze:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z"#,
                             options: .regularExpression) != nil,
                   id >= snoozeBase, repeatKind == "once", !ownerKey.hasPrefix("snooze:") else {
@@ -49,7 +49,7 @@ enum NativeReminderRequest {
             guard id < snoozeBase, ownerKey == key else { throw HostFailure(invalid) }
         }
 
-        // Validate the instant even for repeats; their original wall-clock slot, rather than this first fire, is used below.
+
         let absolute = try absoluteComponents(milliseconds)
         let trigger: UNCalendarNotificationTrigger
         switch repeatKind {
@@ -68,7 +68,7 @@ enum NativeReminderRequest {
                 guard let weekday = integer(slot["weekday"], within: 0...6) else { throw HostFailure(invalid) }
                 components.weekday = weekday + 1
             }
-            // Leaving calendar and timeZone unset preserves the configured local slot after zone and DST changes.
+
             trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         default:
             throw HostFailure(invalid)
@@ -81,7 +81,7 @@ enum NativeReminderRequest {
             "data": data,
             "mindwtrNativeReminder": ["version": 1, "namespace": namespace, "id": id] as [String: Any],
         ]
-        // Snapshot the original Foundation object: Swift dictionary bridging can merge distinct Unicode keys.
+
         if let original = alarm["details"] as? NSDictionary, JSONSerialization.isValidJSONObject(original),
            let encoded = try? JSONSerialization.data(withJSONObject: original), encoded.count <= 60_000,
            let json = String(data: encoded, encoding: .utf8) {

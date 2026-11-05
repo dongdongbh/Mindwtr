@@ -3,6 +3,9 @@ import { Text, TextInput, TouchableOpacity } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
+import { Folder } from 'lucide-react-native';
+
+import { FieldHeading } from './FieldHeading';
 import { TaskEditOrganizationField } from './TaskEditOrganizationField';
 
 const styles = {
@@ -13,9 +16,6 @@ const styles = {
     flex1: {},
     clearDateBtn: {},
     clearDateText: {},
-    compactFieldRow: {},
-    compactFieldLabel: {},
-    compactFieldValue: {},
     statusContainer: {},
     statusContainerCompact: {},
     statusChip: {},
@@ -136,7 +136,7 @@ describe('TaskEditOrganizationField', () => {
         expect(requestStatusChange).not.toHaveBeenCalled();
     });
 
-    it('renders an unset project as a compact picker row', () => {
+    it('renders Destination as a field heading above a value box (#1449)', () => {
         const setShowProjectPicker = vi.fn();
 
         let tree!: renderer.ReactTestRenderer;
@@ -150,11 +150,15 @@ describe('TaskEditOrganizationField', () => {
             );
         });
 
-        const compactButton = tree.root.findByProps({ accessibilityLabel: 'Destination: None' });
-        expect(compactButton.props.accessibilityRole).toBe('button');
+        const heading = tree.root.findByType(FieldHeading);
+        expect(heading.props.label).toBe('Destination');
+        expect(heading.props.icon).toBe(Folder);
+        const valueBox = tree.root.findByProps({ accessibilityLabel: 'Destination: None' });
+        expect(valueBox.props.accessibilityRole).toBe('button');
+        expect(valueBox.findByType(Text).props.children).toBe('None');
 
         act(() => {
-            compactButton.props.onPress();
+            valueBox.props.onPress();
         });
 
         expect(setShowProjectPicker).toHaveBeenCalledWith(true);
@@ -346,8 +350,8 @@ describe('TaskEditOrganizationField', () => {
     });
 
     it('renders the canonical priority flag beside each non-empty priority chip, but not None', () => {
-        // baseProps is a deliberate partial fixture; the full renderer contract is
-        // irrelevant to the priority chips under test here.
+
+
         const props = {
             ...baseProps,
             fieldId: 'priority' as const,
@@ -363,7 +367,7 @@ describe('TaskEditOrganizationField', () => {
         expect(flag('medium').props.color).toBe('#ca8a04');
         expect(flag('high').props.color).toBe('#f97316');
         expect(flag('urgent').props.color).toBe('#dc2626');
-        // All flags render at 12pt.
+
         for (const priority of ['low', 'medium', 'high', 'urgent']) {
             expect(flag(priority).props.size).toBe(12);
         }
@@ -384,7 +388,7 @@ describe('TaskEditOrganizationField', () => {
 
         const noneChip = tree.root.findByProps({ accessibilityLabel: 'None' });
         expect(noneChip.props.accessibilityRole).toBe('button');
-        // Icon-only: the previous "None" text is gone but the label survives.
+
         expect(noneChip.findAllByType(Text)).toHaveLength(0);
         expect(noneChip.findAll((node) => node.props?.size === 16).length).toBeGreaterThan(0);
 
@@ -407,7 +411,7 @@ describe('TaskEditOrganizationField', () => {
         });
 
         const chip = (label: string) => tree.root.findByProps({ accessibilityLabel: label });
-        // Every status chip carries a 14px leading icon and keeps its text label.
+
         expect(chip('Status: Next').findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
         expect(chip('Status: Done').findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
         expect(chip('Status: Done').findAllByType(Text).some((node) => node.props.children === 'Done')).toBe(true);
@@ -430,7 +434,7 @@ describe('TaskEditOrganizationField', () => {
             && node.findAllByType(Text).some((textNode) => textNode.props.children === label)
         ))[0];
 
-        // Energy level chips keep readable text labels and gain a 14px leading icon.
+
         expect(chipWithText('Low')?.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
         expect(chipWithText('High')?.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
     });

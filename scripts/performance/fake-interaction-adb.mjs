@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Synthetic runner protocol fixture; never connects to Android.
+
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-const args = process.argv.slice(4); // node script -s serial <command>
+const args = process.argv.slice(4);
 appendFileSync(process.env.FAKE_ADB_LOG, `${args.join(' ')}\n`);
 const command = args.join(' ');
 const measured = readFileSync(process.env.FAKE_ADB_LOG, 'utf8').includes('MindwtrBenchmark#');

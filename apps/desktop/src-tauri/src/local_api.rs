@@ -1,8 +1,8 @@
 use crate::storage::{
     ensure_data_file, load_data_snapshot, mutate_project_rows_with_retries,
-    mutate_task_rows_with_retries, ProjectMutationReadScope, ProjectMutationRows,
-    TaskMutationReadScope, PROJECT_MUTATION_NEXT_ORDER_KEY, TASK_MUTATION_FOCUSED_COUNT_KEY,
-    TASK_MUTATION_PROJECT_NEXT_ORDERS_KEY,
+    mutate_task_rows_with_receipt_retries, mutate_task_rows_with_retries, ProjectMutationReadScope,
+    ProjectMutationRows, TaskCreateReceipt, TaskMutationReadScope, PROJECT_MUTATION_NEXT_ORDER_KEY,
+    TASK_MUTATION_FOCUSED_COUNT_KEY, TASK_MUTATION_PROJECT_NEXT_ORDERS_KEY,
 };
 use crate::{
     get_config_path, get_secrets_path, lock_config_read_modify_write, read_config,
@@ -28,13 +28,9 @@ const MIN_LOCAL_API_PORT: u16 = 1024;
 const MAX_LOCAL_API_PORT: u16 = u16::MAX;
 const REQUEST_HEADER_LIMIT_BYTES: usize = 16 * 1024;
 const REQUEST_BODY_LIMIT_BYTES: usize = 1_000_000;
-// Generous for one desktop user's local integrations (a few concurrent
-// MCP/automation clients), small enough that an unbounded slow-drip flood
-// can't pin the whole thread pool (R-04).
+
 const MAX_LOCAL_API_CONNECTIONS: usize = 32;
-// Bounds total per-request wall time across every read, not just a single
-// read() syscall the way set_read_timeout does - closes the slow-drip gap
-// where a peer sends a few bytes just under that timeout, forever (R-04).
+
 const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
 const LOCAL_API_TOKEN_BYTES: usize = 32;
 const LOCAL_API_REV_BY: &str = "desktop-local-api";
@@ -97,9 +93,6 @@ impl Drop for LocalApiHandle {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
         if let Some(join) = self.join.take() {
-            // The accept loop is nonblocking; a rejected peer's response has a
-            // five-second write timeout. Never let optional-server cleanup
-            // prevent the desktop from exiting even if the loop panics/stalls.
             let deadline = Instant::now() + Duration::from_secs(6);
             while !join.is_finished() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
@@ -138,8 +131,7 @@ impl LocalApiAccess {
         write_lock: &'a Mutex<()>,
     ) -> Result<std::sync::MutexGuard<'a, ()>, String> {
         let guard = lock_recovering(write_lock);
-        // A request may have queued before stop/rotation. Re-check after it
-        // acquires the shared mutation lock, immediately before storage.
+
         self.ensure_write()?;
         Ok(guard)
     }
@@ -157,10 +149,6 @@ pub(crate) struct LocalApiServerState {
     write_lock: Arc<Mutex<()>>,
 }
 
-/// Poison-recovering lock. A panic in one request thread must not permanently 500 every
-/// future write while reads keep working: the write lock is a `Mutex<()>` (no state a panic
-/// could half-mutate) and the runtime holds two `Option`s that are only ever replaced
-/// wholesale. Same shape as `config.rs`'s `lock_dropbox_credential_state`.
 fn lock_recovering<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
@@ -271,13 +259,6 @@ fn read_local_api_config(app: &tauri::AppHandle) -> LocalApiConfig {
     }
 }
 
-// Sole chokepoint for local-API config writes (ensure_local_api_token and
-// set_local_api_server_config both route through here) — one held lock
-// across the whole read+mutate+write closes the race now that callers run
-// off the main thread (B2): two concurrent writers here (or in
-// clear_sync_path/set_desktop_rendering_config, which share the lock) could
-// otherwise each read the same base config and the second write clobbers the
-// first's unrelated field changes.
 fn write_local_api_config(app: &tauri::AppHandle, next: LocalApiConfig) -> Result<(), String> {
     let _config_guard = lock_config_read_modify_write()?;
     let mut config: AppConfigToml = read_config(app);
@@ -538,9 +519,6 @@ pub(crate) fn set_local_api_server_config(
     Ok(status_from_runtime(config, &runtime))
 }
 
-// Decrements the shared counter on drop, so a panic inside handle_connection
-// (unwinding through this guard) can't leak a permit the way a plain
-// fetch_sub call at the end of the function would (R-04).
 struct ConnectionSlotGuard(Arc<AtomicUsize>);
 
 impl Drop for ConnectionSlotGuard {
@@ -549,13 +527,6 @@ impl Drop for ConnectionSlotGuard {
     }
 }
 
-// Lifted out of the accept loop so the cap can be exercised with a real
-// loopback socket in tests, without a tauri::AppHandle (R-04, same pattern as
-// apply_task_action). The accept loop is the only incrementer (this function
-// only ever runs on that one thread), so a plain load-then-add has no TOCTOU
-// window that could let the count exceed the cap - a concurrent decrement
-// from a finishing handler can only make a borderline request wait, never
-// let the count overshoot.
 fn accept_or_reject(
     mut stream: TcpStream,
     active_connections: &Arc<AtomicUsize>,
@@ -577,6 +548,13 @@ fn handle_connection(
     handler: &impl Fn(&LocalApiAccess, u16, ApiRequest) -> ApiResponse,
     mut stream: TcpStream,
 ) {
+    if let Err(error) = stream.set_nonblocking(false) {
+        log::warn!(
+            "Local HTTP connection setup failed stage=blocking errorKind={:?}",
+            error.kind()
+        );
+        return;
+    }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let deadline = Instant::now() + REQUEST_DEADLINE;
     let response = match read_request(&mut stream, deadline) {
@@ -587,9 +565,6 @@ fn handle_connection(
     let _ = write_response(&mut stream, response);
 }
 
-// Generic over Read (R-05) so tests can drive it with an in-memory reader
-// instead of a real socket - TcpStream: Read, so the one call site in
-// handle_connection is unchanged.
 fn read_request(stream: &mut impl Read, deadline: Instant) -> Result<Option<ApiRequest>, String> {
     let mut buffer: Vec<u8> = Vec::new();
     let mut temp = [0_u8; 1024];
@@ -708,16 +683,22 @@ fn parse_request_target(target: &str) -> (String, HashMap<String, String>) {
 }
 
 fn write_response(stream: &mut TcpStream, response: ApiResponse) -> Result<(), String> {
-    // Without this, write_all against a client that never reads its socket
-    // buffer (or a peer that vanished) blocks forever once the buffer fills.
-    // The shared write path for both handle_connection's real response and
-    // accept_or_reject's 503 rejection - that second one runs synchronously
-    // on the accept loop's own thread, so an unbounded block there would
-    // stop the server from accepting any connection at all, not just pin one
-    // of the capped slots (I3).
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let raw = http_response(&response);
-    stream.write_all(raw.as_bytes()).map_err(|e| e.to_string())
+    stream.write_all(raw.as_bytes()).map_err(|error| {
+        log::warn!(
+            "Local HTTP response write failed errorKind={:?}",
+            error.kind()
+        );
+        error.to_string()
+    })?;
+    if raw.len() >= 256 * 1024 {
+        log::info!(
+            "Local HTTP large response completed extra.releaseCheck=v1.3.8/local-api-large-response outcome=complete bytes={}",
+            raw.len()
+        );
+    }
+    Ok(())
 }
 
 fn http_response(response: &ApiResponse) -> String {
@@ -734,6 +715,7 @@ fn http_response(response: &ApiResponse) -> String {
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        412 => "Precondition Failed",
         413 => "Payload Too Large",
         500 => "Internal Server Error",
         _ => "OK",
@@ -743,8 +725,15 @@ fn http_response(response: &ApiResponse) -> String {
     } else {
         serde_json::to_string_pretty(&response.body).unwrap_or_else(|_| "{}".to_string())
     };
+    let etag = response
+        .body
+        .get("version")
+        .and_then(Value::as_str)
+        .filter(|version| valid_task_version(version))
+        .map(|version| format!("ETag: \"{version}\"\r\n"))
+        .unwrap_or_default();
     format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{etag}Content-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         status_text,
         body.len(),
@@ -774,7 +763,9 @@ fn handle_api_operation(
         return response;
     }
 
-    match route_api_operation(request, execute) {
+    match route_api_operation(request, |operation| {
+        execute(operation.bind_credential(token))
+    }) {
         Ok(response) => response,
         Err(error) => api_error_response(error),
     }
@@ -802,11 +793,6 @@ fn authorize_api_request(
     None
 }
 
-// Constant-time over fixed-length digests rather than the raw header value:
-// loopback-only with a random token keeps the real-world severity low, but a
-// bare `==` still leaks the token length and a byte-by-byte early-out, so hash
-// both sides first (like apps/cloud/src/server-auth.ts's timingSafeEqual over
-// SHA-256 digests) and compare with no short-circuit.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -837,6 +823,23 @@ pub(crate) fn is_request_authorized(request: &ApiRequest, token: &str) -> bool {
 }
 
 pub(crate) fn api_error_response(error: String) -> ApiResponse {
+    if let Some((status, message)) = match error.as_str() {
+        "task_version_conflict" => Some((412, "Task version does not match")),
+        "idempotency_conflict" => Some((
+            409,
+            "Idempotency token was already used with a different request",
+        )),
+        "idempotency_capacity" => Some((
+            409,
+            "Idempotency receipt capacity reached; retry after receipts expire",
+        )),
+        _ => None,
+    } {
+        return ApiResponse {
+            status,
+            body: json!({"error": message, "code": error}),
+        };
+    }
     if error == RECURRENCE_REQUIRES_APP {
         return recurrence_completion_refusal_response();
     }
@@ -870,8 +873,135 @@ pub(crate) fn api_error_response(error: String) -> ApiResponse {
     ApiResponse::error(500, error)
 }
 
-/// Validated transport adapters invoke these operations directly. Both endpoints
-/// retain the same storage transactions, mutation lock, and durable responses.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TaskMatchCondition {
+    Exists,
+    Versions(Vec<String>),
+}
+
+fn canonical_json(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut fields = object.iter().collect::<Vec<_>>();
+            fields.sort_unstable_by(|left, right| left.0.cmp(right.0));
+            Value::Object(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| (name.clone(), canonical_json(value)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical_json).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn json_digest(value: &Value) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(canonical_json(value).to_string().as_bytes())
+    )
+}
+
+pub(crate) fn task_version(task: &Value) -> String {
+    format!("sha256-{}", json_digest(task))
+}
+
+pub(crate) fn valid_task_version(version: &str) -> bool {
+    version.strip_prefix("sha256-").is_some_and(|digest| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
+}
+
+pub(crate) fn task_response(task: Value) -> Value {
+    json!({"version": task_version(&task), "task": task})
+}
+
+pub(crate) fn valid_task_response(response: &Value) -> bool {
+    let Some(task) = response.get("task").filter(|task| task.is_object()) else {
+        return false;
+    };
+    ["id", "title", "status", "createdAt", "updatedAt", "revBy"]
+        .iter()
+        .all(|field| {
+            task.get(*field)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+        })
+        && task
+            .get("rev")
+            .and_then(Value::as_i64)
+            .is_some_and(|rev| rev > 0)
+        && response.get("version").and_then(Value::as_str) == Some(task_version(task).as_str())
+}
+
+pub(crate) fn create_receipt(token: &str, payload: &Value) -> Result<TaskCreateReceipt, String> {
+    if token.is_empty()
+        || token.len() > 128
+        || !token.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    {
+        return Err("Invalid Idempotency-Key; expected 1..128 visible ASCII characters".into());
+    }
+    Ok(TaskCreateReceipt {
+        credential_digest: None,
+        request_token: token.into(),
+        fingerprint: json_digest(payload),
+    })
+}
+
+fn parse_if_match(header: &str) -> Result<TaskMatchCondition, String> {
+    let invalid = || "Invalid If-Match header".to_string();
+    let header = header.trim_matches([' ', '\t']);
+    if header == "*" {
+        return Ok(TaskMatchCondition::Exists);
+    }
+    let mut remaining = header;
+    let mut versions = Vec::new();
+    loop {
+        let weak = remaining.starts_with("W/");
+        if weak {
+            remaining = &remaining[2..];
+        }
+        remaining = remaining.strip_prefix('"').ok_or_else(invalid)?;
+        let end = remaining.find('"').ok_or_else(invalid)?;
+        let opaque = &remaining[..end];
+        if !opaque
+            .bytes()
+            .all(|byte| byte == 0x21 || (0x23..=0x7e).contains(&byte))
+        {
+            return Err(invalid());
+        }
+        if !weak {
+            versions.push(opaque.to_string());
+        }
+        remaining = remaining[end + 1..].trim_start_matches([' ', '\t']);
+        if remaining.is_empty() {
+            break;
+        }
+        remaining = remaining
+            .strip_prefix(',')
+            .ok_or_else(invalid)?
+            .trim_start_matches([' ', '\t']);
+    }
+    Ok(TaskMatchCondition::Versions(versions))
+}
+
+fn ensure_task_version(
+    data: &Value,
+    id: &str,
+    condition: &TaskMatchCondition,
+) -> Result<(), String> {
+    let task = find_task(data, id).ok_or("task_version_conflict")?;
+    if matches!(condition, TaskMatchCondition::Versions(versions) if !versions.contains(&task_version(&task)))
+    {
+        return Err("task_version_conflict".into());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalOperation {
     Health,
@@ -897,6 +1027,15 @@ pub(crate) enum LocalOperation {
     Search(String),
     GetTask(String),
     CreateTask(Map<String, Value>),
+    CreateTaskWithReceipt {
+        body: Map<String, Value>,
+        receipt: TaskCreateReceipt,
+    },
+    ConditionalPatchTask {
+        id: String,
+        body: Map<String, Value>,
+        condition: TaskMatchCondition,
+    },
     PatchTask {
         id: String,
         body: Map<String, Value>,
@@ -909,6 +1048,14 @@ pub(crate) enum LocalOperation {
 }
 
 impl LocalOperation {
+    pub(crate) fn bind_credential(mut self, credential: &str) -> Self {
+        if let Self::CreateTaskWithReceipt { receipt, .. } = &mut self {
+            receipt.credential_digest =
+                Some(format!("{:x}", Sha256::digest(credential.as_bytes())));
+        }
+        self
+    }
+
     pub(crate) fn writes(&self) -> bool {
         matches!(
             self,
@@ -917,6 +1064,8 @@ impl LocalOperation {
                 | Self::PatchArea { .. }
                 | Self::ProjectLifecycle { .. }
                 | Self::CreateTask(_)
+                | Self::CreateTaskWithReceipt { .. }
+                | Self::ConditionalPatchTask { .. }
                 | Self::PatchTask { .. }
                 | Self::DeleteTask(_)
                 | Self::TaskAction { .. }
@@ -927,10 +1076,16 @@ impl LocalOperation {
 pub(crate) fn operation_from_api_request(
     request: &ApiRequest,
 ) -> Result<Option<LocalOperation>, String> {
-    let segments = path_segments(&request.path);
+    let path = request
+        .path
+        .strip_prefix("/v1/tasks")
+        .filter(|suffix| suffix.is_empty() || suffix.starts_with('/'))
+        .map(|suffix| format!("/tasks{suffix}"))
+        .unwrap_or_else(|| request.path.clone());
+    let segments = path_segments(&path);
     let id = || segments[1].clone();
     let body = || parse_body_object(&request.body);
-    let operation = match (request.method.as_str(), request.path.as_str()) {
+    let operation = match (request.method.as_str(), path.as_str()) {
         ("GET", "/health") => LocalOperation::Health,
         ("GET", "/tasks") => LocalOperation::ListTasks(request.query.clone()),
         ("GET", "/projects") => LocalOperation::ListProjects,
@@ -938,7 +1093,16 @@ pub(crate) fn operation_from_api_request(
         ("GET", "/search") => {
             LocalOperation::Search(request.query.get("query").cloned().unwrap_or_default())
         }
-        ("POST", "/tasks") => LocalOperation::CreateTask(body()?),
+        ("POST", "/tasks") => {
+            let body = body()?;
+            match request.headers.get("idempotency-key") {
+                Some(token) => LocalOperation::CreateTaskWithReceipt {
+                    receipt: create_receipt(token, &Value::Object(body.clone()))?,
+                    body,
+                },
+                None => LocalOperation::CreateTask(body),
+            }
+        }
         ("POST", "/projects") => LocalOperation::CreateProject(body()?),
         (method, _) if segments.len() == 2 && segments[0] == "areas" => match method {
             "GET" => LocalOperation::GetArea(id()),
@@ -950,9 +1114,16 @@ pub(crate) fn operation_from_api_request(
         },
         (method, _) if segments.len() == 2 && segments[0] == "tasks" => match method {
             "GET" => LocalOperation::GetTask(id()),
-            "PATCH" => LocalOperation::PatchTask {
-                id: id(),
-                body: body()?,
+            "PATCH" => match request.headers.get("if-match") {
+                Some(header) => LocalOperation::ConditionalPatchTask {
+                    id: id(),
+                    body: body()?,
+                    condition: parse_if_match(header)?,
+                },
+                None => LocalOperation::PatchTask {
+                    id: id(),
+                    body: body()?,
+                },
             },
             "DELETE" => LocalOperation::DeleteTask(id()),
             _ => return Ok(None),
@@ -1001,7 +1172,9 @@ fn route_api_operation(
     };
     let created = matches!(
         operation,
-        LocalOperation::CreateTask(_) | LocalOperation::CreateProject(_)
+        LocalOperation::CreateTask(_)
+            | LocalOperation::CreateTaskWithReceipt { .. }
+            | LocalOperation::CreateProject(_)
     );
     let deleted = matches!(
         operation,
@@ -1153,9 +1326,15 @@ pub(crate) fn execute_operation(
         LocalOperation::GetTask(id) => {
             let data = load_data_snapshot(app)?;
             let task = find_task(&data, &id).ok_or_else(|| "Task not found".to_string())?;
-            return Ok(json!({ "task": task }));
+            return Ok(task_response(task));
         }
-        LocalOperation::CreateTask(body) => {
+        operation @ (LocalOperation::CreateTask(_)
+        | LocalOperation::CreateTaskWithReceipt { .. }) => {
+            let (body, receipt) = match operation {
+                LocalOperation::CreateTask(body) => (body, None),
+                LocalOperation::CreateTaskWithReceipt { body, receipt } => (body, Some(receipt)),
+                _ => unreachable!(),
+            };
             let _guard = access.lock_write(write_lock)?;
             let props = body.get("props").and_then(Value::as_object);
             let scope = TaskMutationReadScope::create(
@@ -1174,12 +1353,23 @@ pub(crate) fn execute_operation(
                     == Some(true),
             );
             let operation = LocalOperation::CreateTask(body);
-            let (task_id, persisted) = mutate_task_rows_with_retries(app, scope, |data| {
-                mutate_task_operation(data, &operation)
-            })?;
-            let task = persisted_task(&persisted, &task_id)?;
+            let (response, persisted) =
+                mutate_task_rows_with_receipt_retries(app, scope, receipt.as_ref(), |data| {
+                    let (task_id, changed) = mutate_task_operation(data, &operation)?;
+                    Ok((task_response(persisted_task(data, &task_id)?), changed))
+                })?;
+            let response = if receipt.is_some() || persisted.is_null() {
+                response
+            } else {
+                let id = response["task"]["id"]
+                    .as_str()
+                    .ok_or("Task not found after persistence")?;
+                task_response(persisted_task(&persisted, id)?)
+            };
+            let task = response["task"].clone();
             let now = OffsetDateTime::now_utc();
-            if task.get("isFocusedToday").and_then(Value::as_bool) == Some(true)
+            if !persisted.is_null()
+                && task.get("isFocusedToday").and_then(Value::as_bool) == Some(true)
                 && task.as_object().is_some_and(|task| {
                     local_api_task_is_future_start(task, now, &crate::local_query::local_wall)
                 })
@@ -1190,25 +1380,51 @@ pub(crate) fn execute_operation(
                 "Desktop Local API scheduled Focus queued extra.releaseCheck=v1.3.3/local-api-scheduled-focus operation=create outcome=queued count={count}"
             );
             }
-            return Ok(json!({ "task": task }));
+            return Ok(response);
         }
-        LocalOperation::PatchTask { id, body } => {
+        operation @ (LocalOperation::PatchTask { .. }
+        | LocalOperation::ConditionalPatchTask { .. }) => {
+            let (id, body, condition) = match operation {
+                LocalOperation::PatchTask { id, body } => (id, body, None),
+                LocalOperation::ConditionalPatchTask {
+                    id,
+                    body,
+                    condition,
+                } => (id, body, Some(condition)),
+                _ => unreachable!(),
+            };
             let _guard = access.lock_write(write_lock)?;
             let is_triage = body.contains_key("status");
             let scope = task_patch_read_scope(&id, &body);
-            let operation = LocalOperation::PatchTask {
-                id: id.clone(),
-                body,
+            let operation = match &condition {
+                Some(condition) => LocalOperation::ConditionalPatchTask {
+                    id: id.clone(),
+                    body,
+                    condition: condition.clone(),
+                },
+                None => LocalOperation::PatchTask {
+                    id: id.clone(),
+                    body,
+                },
             };
-            let (_, persisted) = mutate_task_rows_with_retries(app, scope, |data| {
-                mutate_task_operation(data, &operation)
+            let (changed, persisted) = mutate_task_rows_with_retries(app, scope, |data| {
+                let (_, changed) = mutate_task_operation(data, &operation)?;
+                Ok((!changed.is_empty(), changed))
             })?;
-            if is_triage {
+            if condition.is_some() || !changed {
+                let outcome = if changed {
+                    "conditional-write"
+                } else {
+                    "unchanged"
+                };
+                log::info!("Desktop Local API reliability completed extra.releaseCheck=v1.3.8/local-api-reliability outcome={outcome}");
+            }
+            if is_triage && changed {
                 log::info!(
                 "Desktop Local API task triage persisted extra.releaseCheck=v1.3.1/local-api-task-triage"
             );
             }
-            return Ok(json!({ "task": persisted_task(&persisted, &id)? }));
+            return Ok(task_response(persisted_task(&persisted, &id)?));
         }
         LocalOperation::DeleteTask(id) => {
             let _guard = access.lock_write(write_lock)?;
@@ -1265,9 +1481,25 @@ fn mutate_task_operation(
             ensure_array_mut(data, "tasks")?.push(task.clone());
             Ok((task_id, vec![task]))
         }
+        LocalOperation::ConditionalPatchTask {
+            id,
+            body,
+            condition,
+        } => {
+            ensure_task_version(data, id, condition)?;
+            mutate_task_operation(
+                data,
+                &LocalOperation::PatchTask {
+                    id: id.clone(),
+                    body: body.clone(),
+                },
+            )
+        }
         LocalOperation::PatchTask { id, body } => {
-            let task = patch_task_in_data(data, &id, &body)?;
-            Ok((id.clone(), vec![task]))
+            let before = find_task(data, id).ok_or("Task not found")?;
+            let task = patch_task_in_data(data, id, body)?;
+            let changed = if task == before { vec![] } else { vec![task] };
+            Ok((id.clone(), changed))
         }
         LocalOperation::DeleteTask(id) => {
             let device_id = device_id_from_data(data);
@@ -1513,7 +1745,6 @@ fn live_project_area<'a>(data: &'a Value, area_id: &str) -> Option<&'a Value> {
 }
 
 fn trim_area_name(name: &str) -> &str {
-    // Match JavaScript trim, including BOM and excluding NEXT LINE.
     name.trim_matches(|character| {
         matches!(character,
         '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' |
@@ -2286,9 +2517,6 @@ pub(crate) fn patch_project_in_data(
     Ok((Value::Object(project), changed_tasks, changed_sections))
 }
 
-/// Mirrors core project delete/restore: delete detaches live tasks instead of
-/// deleting them; restore only revives children from the same legacy cascade.
-/// Called on fresh transaction-scoped rows, never a stale whole-app snapshot.
 pub(crate) fn apply_project_delete_or_restore(
     data: &mut Value,
     project_id: &str,
@@ -2299,10 +2527,6 @@ pub(crate) fn apply_project_delete_or_restore(
     apply_project_delete_or_restore_at(data, project_id, restore, &now, &device_id)
 }
 
-/// The clock and device id are parameters so the shared core/Rust fixture
-/// (`packages/core/src/recurrence-local-api-parity.fixtures.json`, kind
-/// `project-action`) can pin both engines against the same frozen `now`, the
-/// way `apply_task_action` already is.
 fn apply_project_delete_or_restore_at(
     data: &mut Value,
     project_id: &str,
@@ -2431,12 +2655,6 @@ fn apply_project_delete_or_restore_at(
     Ok(changed)
 }
 
-/// Refuses `POST /tasks/{id}/complete` outright when the task's recurrence
-/// carries selectors this engine cannot compute (byDay/byMonthDay/rrule —
-/// see `recurrence_needs_core_engine`). A vanished recurring series is worse
-/// than a rejected request: nothing is read here except to decide, and the
-/// caller must not proceed to `update_task_in_data` when this returns `Some`,
-/// so the task is left completely untouched on disk.
 fn recurrence_completion_refusal(
     data: &Value,
     task_id: &str,
@@ -2486,11 +2704,6 @@ where
     Ok(Value::Object(task_object.clone()))
 }
 
-/// Live (non-deleted, non-purged) project/section/area ids, snapshotted from
-/// the data file before a restore mutates it. A section only counts as live
-/// when its own owning project is also live, mirroring
-/// `sanitizeRestoredTaskContainerReferences`'s `sectionProjectId` check
-/// (store-tasks.ts) exactly.
 #[derive(Default)]
 struct LiveContainers {
     project_ids: std::collections::HashSet<String>,
@@ -2648,9 +2861,6 @@ fn finite_order_number(value: f64) -> Option<serde_json::Number> {
     serde_json::Number::from_f64(value)
 }
 
-/// Direct Rust port of `resolveTaskContainerHierarchy` (task-container-rules.ts):
-/// a section wins the project it lives under (or gets dropped if its project
-/// isn't live/doesn't match), and an area only survives when no project is set.
 struct ResolvedContainers {
     project_id: Option<String>,
     section_id: Option<String>,
@@ -2965,7 +3175,7 @@ fn patch_task_in_data_at(
         let queued = candidate.get("status").and_then(Value::as_str) == Some("next")
             && has_non_empty_string(&candidate, "startTime")
             && future_start;
-        // Match core normalizeTaskUpdate: only a schedule/status edit clears a deferred star.
+
         if future_start
             && !queued
             && ["startTime", "dueDate", "reviewAt", "recurrence", "status"]
@@ -2985,15 +3195,28 @@ fn patch_task_in_data_at(
             return Err(format!("Focus limit of {n} reached"));
         }
     }
+    let mut meaningful_current = current.as_object().ok_or("Task is invalid")?.clone();
+    let mut meaningful_candidate = candidate.clone();
+    for field in ["rev", "revBy", "updatedAt"] {
+        meaningful_current.remove(field);
+        meaningful_candidate.remove(field);
+    }
+    for content in [&mut meaningful_current, &mut meaningful_candidate] {
+        if content.get("showFutureRecurrence").and_then(Value::as_bool) != Some(true)
+            || !content.contains_key("recurrence")
+        {
+            content.remove("showFutureRecurrence");
+        }
+    }
+    if meaningful_current == meaningful_candidate {
+        return Ok(current);
+    }
     update_task_in_data(data, task_id, |task| {
         *task = candidate;
         Ok(())
     })
 }
 
-/// Direct Rust port of `sanitizeRestoredTaskContainerReferences`
-/// (store-tasks.ts): a restored task never keeps a reference to a
-/// project/section/area that no longer exists.
 fn sanitize_restored_task_container_references(
     task: &mut Map<String, Value>,
     live: &LiveContainers,
@@ -3032,18 +3255,12 @@ fn sanitize_restored_task_container_references(
     set_or_remove_string(task, "areaId", resolved_area_id);
 }
 
-/// A completedAt value counts as set only if it's a non-empty string -
-/// mirrors core's `oldTask.completedAt || now` falsy fallback
-/// (applyTaskUpdates in store-helpers.ts) so complete's archived-correction
-/// branch and archive's own completedAt fallback use the same rule.
 fn has_non_empty_string(task: &Map<String, Value>, key: &str) -> bool {
     task.get(key)
         .and_then(Value::as_str)
         .is_some_and(|value| !value.is_empty())
 }
 
-// Cancellation is an archived outcome, never a completed occurrence. Keep this
-// boundary aligned with core's normalizeTaskLifecycleFields for native writes.
 fn normalize_local_task_lifecycle(
     task: &mut Map<String, Value>,
     now: &str,
@@ -3079,18 +3296,6 @@ fn normalize_local_task_lifecycle(
     }
 }
 
-/// The complete/archive/restore mutation lifted out of `route_api_request`'s
-/// closure (previously untestable without a `tauri::AppHandle`). Mirrors
-/// core's write-invariant home for tasks: `applyTaskUpdates` for
-/// complete/archive (composed after `normalizeTaskUpdate`'s boardOrder
-/// clearing, per the store's own `updateTask`), `sanitizeRestoredTaskContainerReferences`
-/// for restore. Returns the recurring follow-up task to insert alongside
-/// `task`, if the action spawns one; `task` is mutated in place with
-/// `updatedAt`/`rev`/`revBy` stamped, matching every write path in core
-/// (`mutateTasks`/`updateTask`) - except when the status isn't actually
-/// changing (complete on an already-done task, archive on an already-archived
-/// one), which is a full no-op: core's `statusChanged` gate means nothing in
-/// `applyTaskUpdates` would touch the task, so nothing here should either.
 fn apply_task_action(
     task: &mut Map<String, Value>,
     action: &str,
@@ -3115,21 +3320,14 @@ fn apply_task_action(
             let previous_task = task.clone();
             task.remove("cancelledAt");
             task.remove("archivedAt");
-            // archived -> done is a lifecycle correction, not a new
-            // completion: keep the existing completedAt (falling back to
-            // `now` only if it is somehow missing) instead of overwriting it,
-            // and never spawn a follow-up occurrence.
+
             let is_archive_correction = previous_status == "archived";
             task.insert("status".to_string(), Value::String("done".to_string()));
             if !is_archive_correction || !has_non_empty_string(task, "completedAt") {
                 task.insert("completedAt".to_string(), Value::String(now.to_string()));
             }
             task.insert("isFocusedToday".to_string(), Value::Bool(false));
-            // A manual Focus position only means something while starred;
-            // completing always unstars, so it must take focusOrder with it.
-            // boardOrder also resets on a status change unless the same
-            // patch sets it itself, which the server-triggered complete/
-            // archive actions never do (normalizeTaskUpdate's rule).
+
             task.remove("focusOrder");
             task.remove("boardOrder");
             if should_create_recurring_follow_up(action, previous_status) {
@@ -3152,9 +3350,6 @@ fn apply_task_action(
             task.remove("boardOrder");
         }
         "restore" => {
-            // Mirrors core's `restoreTask`: a purged task is the compacted
-            // tombstone of a permanent delete, so reviving it would resurrect
-            // an emptied row and sync it back to every device.
             if has_non_empty_string(task, "purgedAt") {
                 return Err("Task status conflict: purged task cannot be restored".to_string());
             }
@@ -3209,13 +3404,6 @@ fn bump_task_revision(task: &mut Map<String, Value>, device_id: &str) {
     task.insert("revBy".to_string(), Value::String(device_id.to_string()));
 }
 
-/// True when the recurrence carries selectors this fixed interval/anchor-day
-/// engine cannot compute: explicit weekdays, explicit month days, a raw
-/// RFC 5545 fragment (which may itself encode BYSETPOS or other selectors
-/// this engine never parses), or a `relativeStartOffset` (which core's
-/// `createNextRecurringTask` recomputes onto the follow-up's startTime -
-/// this engine doesn't carry it at all). Only `packages/core/src/recurrence.ts`
-/// understands these — the local API must refuse rather than guess a date.
 fn recurrence_needs_core_engine(task: &Map<String, Value>) -> bool {
     if task
         .get("relativeStartOffset")
@@ -3241,7 +3429,6 @@ fn recurrence_needs_core_engine(task: &Map<String, Value>) -> bool {
     has_by_day || has_by_month_day || has_rrule
 }
 
-// Catchup belongs to core; refuse before changing the source when one step is stale.
 fn recurrence_start_needs_catchup(task: &Map<String, Value>, completed_at: &str) -> bool {
     if recurrence_strategy(task) == "fluid"
         || has_non_empty_string(task, "dueDate")
@@ -3314,15 +3501,6 @@ fn create_next_recurring_task_for_local_api(
 ) -> Option<Map<String, Value>> {
     let rule = recurrence_rule(task)?;
     if recurrence_needs_core_engine(task) || recurrence_start_needs_catchup(task, completed_at) {
-        // Refuse what this engine cannot model instead of guessing a wrong
-        // date (e.g. an every-Mon/Wed/Fri task otherwise gets a follow-up 7
-        // days out because `next_recurring_iso` below only knows fixed
-        // day/week/month steps). The HTTP complete handler already refuses
-        // this case via `recurrence_completion_refusal` before this function
-        // is ever reached, so the task is never marked done without its
-        // follow-up — a vanished recurring series would be worse than a
-        // rejected request. This `None` is a defensive backstop for any
-        // other caller (tests call this function directly).
         return None;
     }
     let interval = recurrence_interval(task);
@@ -3385,8 +3563,6 @@ fn create_next_recurring_task_for_local_api(
         });
 
     if next_start_time.is_none() && next_due_date.is_none() && next_review_at.is_none() {
-        // Date-only deferral: an unscheduled task must not inherit the completion's
-        // time of day. Mirrors the core TypeScript behavior (ISO date prefix).
         let completed_at_date = completed_at.get(..10).unwrap_or(completed_at);
         next_start_time = next_recurring_iso(
             completed_at,
@@ -3441,6 +3617,8 @@ fn create_next_recurring_task_for_local_api(
             "areaId",
             "timeEstimate",
             "repeatReminderMinutes",
+            "dueReminderLeadMinutes",
+            "startReminderLeadMinutes",
             "reminderPolicy",
         ],
     );
@@ -3511,14 +3689,6 @@ fn create_next_recurring_task_for_local_api(
 }
 
 fn should_create_recurring_follow_up(action: &str, previous_status: &str) -> bool {
-    // Completing a task that was already archived is a lifecycle correction
-    // (archived -> done), not a new completion event: core never spawns a
-    // follow-up occurrence for it (store-helpers.ts's applyTaskUpdates treats
-    // `isReturningFromArchive` as `nextRecurringTask = null` regardless of
-    // recurrence), and this is also the sole gate the 409 refusal check
-    // (`recurrence_completion_refusal`) uses to decide whether to even look at
-    // the recurrence rule — so an archived-source completion is never refused
-    // either, even when its recurrence is one this engine cannot compute.
     action == "complete" && previous_status != "done" && previous_status != "archived"
 }
 
@@ -3611,12 +3781,6 @@ fn iso_day(value: &str) -> Option<u32> {
     parse_iso_prefix(value).map(|(_, _, day, _)| day)
 }
 
-// The legacy single `anchorDay` is credited ONLY to the field it was derived
-// from (dueDate, else startTime, else reviewAt — the order that writes it).
-// Letting it anchor the other fields advanced a start of the 14th as a day-15
-// rule, so "start 14th / due 15th, monthly" came back starting Aug 15 instead
-// of Sep 14. Mirrors resolveRecurrenceFieldAnchorDays in core's recurrence.ts;
-// the shared parity fixtures pin both sides.
 fn recurrence_anchor_owner_field(task: &Map<String, Value>) -> Option<&'static str> {
     ["dueDate", "startTime", "reviewAt"]
         .into_iter()
@@ -3879,8 +4043,7 @@ fn duplicate_attachment_value(value: Option<&Value>, timestamp: &str) -> Option<
                 Value::String(timestamp.to_string()),
             );
             attachment.remove("deletedAt");
-            // A duplicate is a distinct attachment record; sharing the original's
-            // cloud identity would point two records at one cloud blob (A4).
+
             attachment.remove("cloudKey");
             attachment.remove("fileHash");
             attachment.remove("localStatus");
@@ -3900,6 +4063,12 @@ fn duplicate_attachment_value(value: Option<&Value>, timestamp: &str) -> Option<
 }
 
 fn normalize_created_reference_task(task: &mut Map<String, Value>) {
+    let had_advance_reminder = task
+        .get("dueReminderLeadMinutes")
+        .is_some_and(|value| !value.is_null());
+    let had_start_advance_reminder = task
+        .get("startReminderLeadMinutes")
+        .is_some_and(|value| !value.is_null());
     for key in [
         "startTime",
         "dueDate",
@@ -3910,11 +4079,19 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
         "timeEstimate",
         "suppressMindwtrReminders",
         "repeatReminderMinutes",
+        "dueReminderLeadMinutes",
+        "startReminderLeadMinutes",
         "showFutureRecurrence",
         "focusOrder",
         "boardOrder",
     ] {
         task.remove(key);
+    }
+    if had_advance_reminder {
+        task.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
+    if had_start_advance_reminder {
+        task.insert("startReminderLeadMinutes".to_string(), json!(0));
     }
     task.insert("isFocusedToday".to_string(), Value::Bool(false));
     task.insert("pushCount".to_string(), Value::Number(0.into()));
@@ -4119,8 +4296,7 @@ fn local_api_focus_candidate_is_sequential_first(
     };
     let candidate_section = candidate.get("sectionId").and_then(Value::as_str);
     let project_sequential = project.get("isSequential").and_then(Value::as_bool) == Some(true);
-    // Per section Flow mode (#1429), same rule as core getTaskSequenceKey: only a live
-    // Sequential section of this project is a sequence; everything else is parallel.
+
     let in_sequential_section = !project_sequential
         && project.get("perSectionFlow").and_then(Value::as_bool) == Some(true)
         && candidate_section.is_some_and(|section_id| {
@@ -4283,6 +4459,18 @@ fn create_task_from_body(
     };
     if task.contains_key("title") {
         return Err("Unsupported task props: title".to_string());
+    }
+    if let Some(attachments) = task.get_mut("attachments") {
+        if attachments.as_array().is_some_and(|items| {
+            items.iter().all(|item| {
+                item.as_object().is_some_and(|item| {
+                    item.keys()
+                        .all(|field| matches!(field.as_str(), "id" | "kind" | "title" | "uri"))
+                })
+            })
+        }) {
+            *attachments = crate::mcp_tools::normalize_links(attachments)?;
+        }
     }
     sanitize_task_patch_map(&mut task)?;
     task.retain(|_, value| !value.is_null());
@@ -4515,6 +4703,20 @@ fn normalize_task_triage_patch(
     }
 
     if final_status == "reference" {
+        let clear_advance = previous_status != "reference"
+            || task
+                .get("dueReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null())
+            || sanitized
+                .get("dueReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null());
+        let clear_start_advance = previous_status != "reference"
+            || task
+                .get("startReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null())
+            || sanitized
+                .get("startReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null());
         for field in [
             "startTime",
             "dueDate",
@@ -4525,11 +4727,19 @@ fn normalize_task_triage_patch(
             "timeEstimate",
             "suppressMindwtrReminders",
             "repeatReminderMinutes",
+            "dueReminderLeadMinutes",
+            "startReminderLeadMinutes",
             "showFutureRecurrence",
             "focusOrder",
             "boardOrder",
         ] {
             sanitized.insert(field.to_string(), Value::Null);
+        }
+        if clear_advance {
+            sanitized.insert("dueReminderLeadMinutes".to_string(), json!(0));
+        }
+        if clear_start_advance {
+            sanitized.insert("startReminderLeadMinutes".to_string(), json!(0));
         }
         sanitized.insert("isFocusedToday".to_string(), Value::Bool(false));
         sanitized.insert("pushCount".to_string(), Value::Number(0.into()));
@@ -4545,6 +4755,15 @@ fn normalize_task_triage_patch(
 }
 
 fn normalize_task_reminder_patch(patch: &mut Map<String, Value>, default_skip: bool) {
+    if patch.get("dueReminderLeadMinutes").is_some_and(Value::is_null) {
+        patch.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
+    if patch
+        .get("startReminderLeadMinutes")
+        .is_some_and(Value::is_null)
+    {
+        patch.insert("startReminderLeadMinutes".to_string(), json!(0));
+    }
     if let Some(policy) = patch.get("reminderPolicy").and_then(Value::as_str) {
         let skip = policy == "skip" || (policy == "inherit" && default_skip);
         patch.insert("suppressMindwtrReminders".to_string(), Value::Bool(skip));
@@ -4645,6 +4864,15 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             "pushCount" | "timeSpentMinutes" => {
                 value.is_null() || value.as_i64().is_some_and(|number| number >= 0)
             }
+            "dueReminderLeadMinutes" => {
+                value.is_null() || value.as_i64().is_some_and(|minutes| (0..=10080).contains(&minutes))
+            }
+            "startReminderLeadMinutes" => {
+                value.is_null()
+                    || value
+                        .as_i64()
+                        .is_some_and(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60))
+            }
             "repeatReminderMinutes" => {
                 value.is_null()
                     || value
@@ -4658,9 +4886,7 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             "attachments" => value.is_null() || valid_attachments(value),
             "relativeStartOffset" => value.is_null() || valid_relative_start_offset(value),
             "recurrence" => value.is_null() || valid_recurrence(value),
-            // Presentational grouping per view (#1090). Keys are view scopes and
-            // values are section ids from the settings catalogue; this engine
-            // never resolves them, so it only checks the shape.
+
             "viewSectionIds" => value.is_null() || valid_view_section_ids(value),
             _ => return Err(format!("Unsupported task field: {key}")),
         };
@@ -4975,14 +5201,10 @@ fn valid_recurrence(value: &Value) -> bool {
         }),
         "byMonthDay" => value.as_array().is_some_and(|items| {
             items.len() <= 31
-                && items
-                    .iter()
-                    // -1 = RFC 5545 "last day of the month", the one negative
-                    // ordinal the core engine supports.
-                    .all(|item| {
-                        item.as_i64()
-                            .is_some_and(|day| (1..=31).contains(&day) || day == -1)
-                    })
+                && items.iter().all(|item| {
+                    item.as_i64()
+                        .is_some_and(|day| (1..=31).contains(&day) || day == -1)
+                })
         }),
         "weekStart" => value.as_str().is_some_and(valid_recurrence_weekday),
         "count" => value.as_i64().is_some_and(|count| count > 0),
@@ -5172,8 +5394,7 @@ fn parse_supported_rrule(value: &str) -> Option<RecurrenceSchedule> {
                     .split(',')
                     .map(|token| token.trim().parse::<i64>().ok())
                     .collect::<Option<Vec<_>>>()?;
-                // -1 = RFC 5545 "last day of the month"; other values keep the
-                // positive 1..=31 contract.
+
                 if days.iter().any(|day| !(1..=31).contains(day) && *day != -1) {
                     return None;
                 }
@@ -5290,10 +5511,6 @@ fn valid_checklist(value: &Value) -> bool {
     })
 }
 
-/// Mirrors `ATTACHMENT_CLOUD_KEY_PATTERN` in packages/core/src/sync-normalization.ts. The local
-/// HTTP API is a second write path into the same attachments, so a cloudKey accepted here must be
-/// one the sync merge would accept too — the pattern is what rules out separators, traversal
-/// segments and NUL bytes reaching a filesystem or remote path.
 fn valid_attachment_cloud_key(value: &str) -> bool {
     fn valid_name(name: &str) -> bool {
         let mut chars = name.chars();
@@ -5342,7 +5559,7 @@ fn valid_attachments(value: &Value) -> bool {
                     .as_str()
                     .is_some_and(|kind| matches!(kind, "file" | "link")),
                 "mimeType" | "deletedAt" | "fileHash" | "staleContentHash" => value.is_string(),
-                // Device-local sync state a GET returns, so a GET-edit-PATCH round trip carries it back unchanged.
+
                 "pendingContentUpload" => value.is_boolean(),
                 "cloudKey" => value.as_str().is_some_and(valid_attachment_cloud_key),
                 "size" | "contentRev" | "contentMtimeMs" | "contentSize" => {
@@ -5401,6 +5618,619 @@ fn hex_value(value: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    fn reliability_create(
+        conn: &rusqlite::Connection,
+        token: &str,
+        credential: &str,
+        body: &Value,
+        now: i64,
+    ) -> Result<(Value, bool), String> {
+        let operation = LocalOperation::CreateTaskWithReceipt {
+            body: body.as_object().unwrap().clone(),
+            receipt: create_receipt(token, body)?,
+        }
+        .bind_credential(credential);
+        let LocalOperation::CreateTaskWithReceipt { body, receipt } = operation else {
+            unreachable!()
+        };
+        let operation = LocalOperation::CreateTask(body);
+        let (response, _, changed) = crate::storage::local_receipt_operation_test_commit(
+            conn,
+            TaskMutationReadScope::create(None, None, None, false),
+            Some(&receipt),
+            now,
+            |data| {
+                let (id, rows) = mutate_task_operation(data, &operation)?;
+                Ok((task_response(persisted_task(data, &id)?), rows))
+            },
+        )?;
+        Ok((response, changed))
+    }
+
+    #[test]
+    fn reliability_receipt_reopens_replays_original_without_resurrection_and_isolates_scope() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("receipts.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let payload = json!({"title":"Original", "props":{"attachments":[{"uri":"https://example.com/note"}]}});
+        let (first, changed) =
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 100).unwrap();
+        assert!(changed);
+        assert!(valid_task_response(&first));
+        let id = first["task"]["id"].as_str().unwrap();
+        let canonical = crate::storage::read_sqlite_data(&conn).unwrap();
+        assert_eq!(first, task_response(find_task(&canonical, id).unwrap()));
+        drop(conn);
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        for mutation in [
+            json!({"description":"Later edit"}),
+            json!({"title":"Changed"}),
+        ] {
+            let operation = LocalOperation::PatchTask {
+                id: id.into(),
+                body: mutation.as_object().unwrap().clone(),
+            };
+            crate::storage::local_operation_test_commit(
+                &conn,
+                task_patch_read_scope(id, mutation.as_object().unwrap()),
+                |data| mutate_task_operation(data, &operation),
+            )
+            .unwrap();
+            let (replayed, changed) =
+                reliability_create(&conn, "operation-1", "credential-a", &payload, 101).unwrap();
+            assert_eq!(replayed, first);
+            assert!(!changed);
+        }
+        conn.execute("UPDATE tasks SET deletedAt = '2026-11-01T00:00:00Z', purgedAt = '2026-11-01T00:00:00Z' WHERE id = ?1", [id]).unwrap();
+        assert_eq!(
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 102).unwrap(),
+            (first.clone(), false)
+        );
+        conn.execute("DELETE FROM tasks WHERE id = ?1", [id])
+            .unwrap();
+        assert_eq!(
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 103).unwrap(),
+            (first.clone(), false)
+        );
+        assert_eq!(
+            crate::storage::read_sqlite_data(&conn).unwrap()["tasks"],
+            json!([])
+        );
+        assert_eq!(
+            reliability_create(
+                &conn,
+                "operation-1",
+                "credential-a",
+                &json!({"title":"Different"}),
+                103
+            )
+            .unwrap_err(),
+            "idempotency_conflict"
+        );
+        let (other, changed) =
+            reliability_create(&conn, "operation-1", "credential-b", &payload, 103).unwrap();
+        assert!(changed);
+        assert_ne!(first["task"]["id"], other["task"]["id"]);
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        assert_eq!(
+            reliability_create(&conn, "operation-1", "credential-a", &payload, 104).unwrap(),
+            (first.clone(), false)
+        );
+        let mut workspace = rusqlite::Connection::open_in_memory().unwrap();
+        crate::storage::local_operation_test_seed(&mut workspace, &empty_local_api_data()).unwrap();
+        let (isolated, changed) =
+            reliability_create(&workspace, "operation-1", "credential-a", &payload, 100).unwrap();
+        assert!(changed);
+        assert_ne!(first["task"]["id"], isolated["task"]["id"]);
+        assert!(canonical.get("local_api_create_receipts").is_none());
+    }
+
+    #[test]
+    fn reliability_receipt_rollback_expiry_capacity_and_corruption_fail_closed() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let payload = json!({"title":"Original"});
+        conn.execute_batch("CREATE TRIGGER fail_receipt BEFORE INSERT ON local_api_create_receipts BEGIN SELECT RAISE(FAIL, 'receipt failure'); END;").unwrap();
+        assert!(reliability_create(&conn, "retry", "credential", &payload, 100).is_err());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        conn.execute_batch("DROP TRIGGER fail_receipt;").unwrap();
+        assert!(
+            reliability_create(&conn, "invalid", "credential", &json!({"title":""}), 100).is_err()
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        let (first, _) = reliability_create(&conn, "retry", "credential", &payload, 100).unwrap();
+        assert_eq!(
+            reliability_create(&conn, "retry", "credential", &payload, 604899).unwrap(),
+            (first.clone(), false)
+        );
+        let (expired, changed) =
+            reliability_create(&conn, "retry", "credential", &payload, 604900).unwrap();
+        assert!(changed);
+        assert_ne!(first["task"]["id"], expired["task"]["id"]);
+        conn.execute(
+            "UPDATE local_api_create_receipts SET result_json = 'null'",
+            [],
+        )
+        .unwrap();
+        assert!(
+            reliability_create(&conn, "retry", "credential", &payload, 604901)
+                .unwrap_err()
+                .starts_with("Invalid local API receipt")
+        );
+        conn.execute(
+            "UPDATE local_api_create_receipts SET result_json = ?1",
+            [expired.to_string()],
+        )
+        .unwrap();
+        conn.execute_batch("WITH RECURSIVE items(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM items WHERE n < 9999) INSERT INTO local_api_create_receipts SELECT 'capacity', 'create_task', CAST(n AS TEXT), 'fingerprint', '{}', 700000 FROM items;").unwrap();
+        assert_eq!(
+            reliability_create(&conn, "retry", "credential", &payload, 604901).unwrap(),
+            (expired, false)
+        );
+        assert_eq!(
+            reliability_create(&conn, "new", "credential", &payload, 604901).unwrap_err(),
+            "idempotency_capacity"
+        );
+        assert!(
+            reliability_create(&conn, "new", "credential", &payload, 700000)
+                .unwrap()
+                .1
+        );
+        assert!(reliability_create(&conn, "overflow", "credential", &payload, i64::MAX).is_err());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn reliability_conditional_patch_rechecks_authoritative_content_and_noop_skips_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("conditional.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let (first, _) = reliability_create(
+            &conn,
+            "create",
+            "credential",
+            &json!({"title":"Original","props":{"tags":["tag"]}}),
+            100,
+        )
+        .unwrap();
+        let id = first["task"]["id"].as_str().unwrap();
+        let version = first["version"].as_str().unwrap();
+        let operation = LocalOperation::ConditionalPatchTask {
+            id: id.into(),
+            body: json!({"title":"Original","tags":[" tag "],"showFutureRecurrence":false})
+                .as_object()
+                .unwrap()
+                .clone(),
+            condition: TaskMatchCondition::Versions(vec![version.into()]),
+        };
+        conn.execute_batch("CREATE TRIGGER fail_task_update BEFORE INSERT ON tasks BEGIN SELECT RAISE(FAIL, 'unexpected task write'); END;").unwrap();
+        let (result, _, changed) = crate::storage::local_receipt_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            None,
+            100,
+            |data| {
+                let (_, rows) = mutate_task_operation(data, &operation)?;
+                Ok((task_response(find_task(data, id).unwrap()), rows))
+            },
+        )
+        .unwrap();
+        assert!(!changed, "before={first} after={result}");
+        assert_eq!(result, first);
+        let true_without_recurrence = LocalOperation::PatchTask {
+            id: id.into(),
+            body: json!({"showFutureRecurrence":true})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+        crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| mutate_task_operation(data, &true_without_recurrence),
+        )
+        .unwrap();
+        conn.execute_batch("DROP TRIGGER fail_task_update;")
+            .unwrap();
+        let retry_error = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| {
+                mutate_task_operation(data, &operation)?;
+                Err("database is locked".into())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(retry_error, "database is locked");
+        let other = rusqlite::Connection::open(&path).unwrap();
+        other
+            .execute(
+                "UPDATE tasks SET title = 'Concurrent same revision edit' WHERE id = ?1",
+                [id],
+            )
+            .unwrap();
+        let error = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| mutate_task_operation(data, &operation),
+        )
+        .unwrap_err();
+        assert_eq!(error, "task_version_conflict");
+        assert_eq!(api_error_response(error).status, 412);
+        let unconditional = LocalOperation::PatchTask {
+            id: id.into(),
+            body: json!({"description":"Unconditional remains supported"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+        let persisted = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(id, false),
+            |data| mutate_task_operation(data, &unconditional),
+        )
+        .unwrap();
+        assert_eq!(find_task(&persisted, id).unwrap()["rev"], 2);
+        let mut repaired = persisted.clone();
+        repaired["tasks"][0]["completedAt"] = json!("2026-11-01T00:00:00Z");
+        let (_, rows) = mutate_task_operation(
+            &mut repaired,
+            &LocalOperation::PatchTask {
+                id: id.into(),
+                body: Map::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].get("completedAt").is_none());
+        assert_eq!(rows[0]["rev"], 3);
+    }
+
+    #[test]
+    fn reliability_http_dispatch_persists_versions_and_rejects_stale_patch() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let access = LocalApiAccess {
+            allow_write: true,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        let dispatch = |method: &str, path: &str, headers: Vec<(&str, String)>, body: Value| {
+            let mut headers = headers
+                .into_iter()
+                .map(|(name, value)| (name.into(), value))
+                .collect::<HashMap<_, _>>();
+            headers.insert("authorization".into(), "Bearer credential".into());
+            handle_api_operation(
+                "credential",
+                &access,
+                ApiRequest {
+                    method: method.into(),
+                    path: path.into(),
+                    query: HashMap::new(),
+                    headers,
+                    body: serde_json::to_vec(&body).unwrap(),
+                },
+                |operation| match operation {
+                    LocalOperation::CreateTaskWithReceipt { body, receipt } => {
+                        let operation = LocalOperation::CreateTask(body);
+                        let (response, _, _) = crate::storage::local_receipt_operation_test_commit(
+                            &conn,
+                            TaskMutationReadScope::create(None, None, None, false),
+                            Some(&receipt),
+                            100,
+                            |data| {
+                                let (id, rows) = mutate_task_operation(data, &operation)?;
+                                Ok((task_response(find_task(data, &id).unwrap()), rows))
+                            },
+                        )?;
+                        Ok(response)
+                    }
+                    operation @ (LocalOperation::PatchTask { .. }
+                    | LocalOperation::ConditionalPatchTask { .. }) => {
+                        let id = match &operation {
+                            LocalOperation::PatchTask { id, .. }
+                            | LocalOperation::ConditionalPatchTask { id, .. } => id.clone(),
+                            _ => unreachable!(),
+                        };
+                        let canonical = crate::storage::local_operation_test_commit(
+                            &conn,
+                            TaskMutationReadScope::existing(&id, false),
+                            |data| mutate_task_operation(data, &operation),
+                        )?;
+                        Ok(task_response(find_task(&canonical, &id).unwrap()))
+                    }
+                    _ => panic!(),
+                },
+            )
+        };
+        let first = dispatch(
+            "POST",
+            "/v1/tasks",
+            vec![("idempotency-key", "receipt".into())],
+            json!({"title":"Original"}),
+        );
+        assert_eq!(first.status, 201);
+        let version = first.body["version"].as_str().unwrap();
+        assert!(http_response(&first).contains(&format!("ETag: \"{version}\"\r\n")));
+        let id = first.body["task"]["id"].as_str().unwrap();
+        let path = format!("/v1/tasks/{id}");
+        let noop = dispatch(
+            "PATCH",
+            &path,
+            vec![("if-match", format!("\"{version}\""))],
+            json!({}),
+        );
+        assert_eq!(noop.body, first.body);
+        let changed = dispatch(
+            "PATCH",
+            &path,
+            vec![("if-match", format!("\"{version}\""))],
+            json!({"description":"Changed"}),
+        );
+        assert_eq!(changed.status, 200);
+        assert_ne!(changed.body["version"], first.body["version"]);
+        let stale = dispatch(
+            "PATCH",
+            &path,
+            vec![("if-match", format!("\"{version}\""))],
+            json!({"description":"Stale"}),
+        );
+        assert_eq!(stale.status, 412);
+        assert_eq!(stale.body["code"], "task_version_conflict");
+        let replay = dispatch(
+            "POST",
+            "/v1/tasks",
+            vec![("idempotency-key", "receipt".into())],
+            json!({"title":"Original"}),
+        );
+        assert_eq!(replay.body, first.body);
+        assert_eq!(
+            crate::storage::read_sqlite_data(&conn).unwrap()["tasks"][0]["description"],
+            "Changed"
+        );
+    }
+
+    #[test]
+    fn reliability_concurrent_create_admission_replays_one_committed_task() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("concurrent.db");
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let workers = (0..2)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let conn = rusqlite::Connection::open(path).unwrap();
+                    conn.busy_timeout(Duration::from_secs(5)).unwrap();
+                    barrier.wait();
+                    reliability_create(
+                        &conn,
+                        "retry",
+                        "credential",
+                        &json!({"title":"Original"}),
+                        100,
+                    )
+                    .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(results[0].0, results[1].0);
+        assert_ne!(results[0].1, results[1].1);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM local_api_create_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn reliability_http_headers_conditions_aliases_and_auth_are_bounded() {
+        let task = json!({"id":"task", "title":"Task", "rev":1});
+        let version = task_version(&task);
+        assert_ne!(
+            version,
+            task_version(&json!({"id":"task", "title":"Different", "rev":1}))
+        );
+        assert_eq!(
+            version,
+            task_version(
+                &serde_json::from_str::<Value>("{\"rev\":1,\"title\":\"Task\",\"id\":\"task\"}")
+                    .unwrap()
+            )
+        );
+        let header = format!("W/\"{version}\", \"other\", \"{version}\"");
+        assert_eq!(
+            parse_if_match(&header).unwrap(),
+            TaskMatchCondition::Versions(vec!["other".into(), version.clone()])
+        );
+        assert_eq!(parse_if_match(" * ").unwrap(), TaskMatchCondition::Exists);
+        for header in [
+            "",
+            "token",
+            "*, \"token\"",
+            "\"token\",",
+            "w/\"token\"",
+            "\"unterminated",
+            "\"bad\nvalue\"",
+        ] {
+            assert!(parse_if_match(header).is_err(), "{header:?}");
+        }
+        let data = json!({"tasks":[task]});
+        assert!(ensure_task_version(
+            &data,
+            "task",
+            &parse_if_match(&format!("W/\"{version}\"")).unwrap()
+        )
+        .is_err());
+        assert!(ensure_task_version(&data, "missing", &TaskMatchCondition::Exists).is_err());
+        let response = ApiResponse::ok(task_response(data["tasks"][0].clone()));
+        assert!(http_response(&response).contains(&format!("ETag: \"{version}\"\r\n")));
+        assert!(
+            http_response(&api_error_response("task_version_conflict".into()))
+                .starts_with("HTTP/1.1 412 Precondition Failed")
+        );
+        for token in ["", "space token", "new\nline", "é"] {
+            assert!(create_receipt(token, &json!({})).is_err());
+        }
+        assert!(create_receipt(&"a".repeat(128), &json!({})).is_ok());
+        assert!(create_receipt(&"a".repeat(129), &json!({})).is_err());
+        let mut request = ApiRequest {
+            method: "POST".into(),
+            path: "/v1/tasks".into(),
+            query: HashMap::new(),
+            headers: HashMap::from([
+                ("authorization".into(), "Bearer secret".into()),
+                ("idempotency-key".into(), "token".into()),
+            ]),
+            body: serde_json::to_vec(&json!({"title":"Task"})).unwrap(),
+        };
+        assert!(matches!(
+            operation_from_api_request(&request).unwrap(),
+            Some(LocalOperation::CreateTaskWithReceipt { .. })
+        ));
+        let access = LocalApiAccess {
+            allow_write: true,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        let response = handle_api_operation("secret", &access, request, |operation| {
+            let LocalOperation::CreateTaskWithReceipt { receipt, .. } = operation else {
+                panic!()
+            };
+            assert_eq!(
+                receipt.credential_digest,
+                Some(format!("{:x}", Sha256::digest(b"secret")))
+            );
+            Ok(json!({}))
+        });
+        assert_eq!(response.status, 201);
+        request = ApiRequest {
+            method: "PATCH".into(),
+            path: "/v1/tasks/task".into(),
+            query: HashMap::new(),
+            headers: HashMap::from([("if-match".into(), format!("\"{version}\""))]),
+            body: b"{}".to_vec(),
+        };
+        assert!(matches!(
+            operation_from_api_request(&request).unwrap(),
+            Some(LocalOperation::ConditionalPatchTask { .. })
+        ));
+        assert_eq!(
+            handle_api_operation("secret", &access, request, |_| panic!()).status,
+            401
+        );
+        let readonly = LocalApiAccess {
+            allow_write: false,
+            ..access
+        };
+        let request = ApiRequest {
+            method: "POST".into(),
+            path: "/tasks".into(),
+            query: HashMap::new(),
+            headers: HashMap::from([
+                ("authorization".into(), "Bearer secret".into()),
+                ("idempotency-key".into(), "token".into()),
+            ]),
+            body: b"{}".to_vec(),
+        };
+        assert_eq!(
+            handle_api_operation("secret", &readonly, request, |_| panic!()).status,
+            403
+        );
+    }
+
+    #[test]
+    fn advance_reminder_patch_validation_and_clear() {
+        for minutes in [json!(0), json!(1), json!(1440), json!(10080), Value::Null] {
+            let mut patch = json!({"dueReminderLeadMinutes": minutes}).as_object().unwrap().clone();
+            super::sanitize_task_patch_map(&mut patch).unwrap();
+            super::normalize_task_reminder_patch(&mut patch, false);
+            assert_eq!(patch["dueReminderLeadMinutes"], if minutes.is_null() { json!(0) } else { minutes });
+        }
+        for minutes in [json!(-1), json!(1.5), json!(10081), json!("15"), json!(true)] {
+            let mut patch = json!({"dueReminderLeadMinutes": minutes}).as_object().unwrap().clone();
+            assert!(super::sanitize_task_patch_map(&mut patch).is_err());
+        }
+    }
+
+    #[test]
+    fn start_advance_reminder_patch_validation_and_clear() {
+        for minutes in [
+            json!(0),
+            json!(5),
+            json!(15),
+            json!(30),
+            json!(60),
+            Value::Null,
+        ] {
+            let mut patch = json!({"startReminderLeadMinutes": minutes})
+                .as_object()
+                .unwrap()
+                .clone();
+            super::sanitize_task_patch_map(&mut patch).unwrap();
+            super::normalize_task_reminder_patch(&mut patch, false);
+            assert_eq!(
+                patch["startReminderLeadMinutes"],
+                if minutes.is_null() { json!(0) } else { minutes }
+            );
+        }
+        for minutes in [
+            json!(-1),
+            json!(1),
+            json!(1.5),
+            json!(61),
+            json!("15"),
+            json!(true),
+        ] {
+            let mut patch = json!({"startReminderLeadMinutes": minutes})
+                .as_object()
+                .unwrap()
+                .clone();
+            assert!(super::sanitize_task_patch_map(&mut patch).is_err());
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -5693,10 +6523,6 @@ mod tests {
         }
     }
 
-    /// Core's Focus admission table (focus-admission-cases.test.ts runs the
-    /// same cases against resolveTaskFocusUpdate). A case's patch is the
-    /// before -> after difference; refused-limit maps to the exact error,
-    /// focused/queued to a saved star, unchanged to a successful patch.
     #[test]
     fn local_api_patch_focus_matches_core_admission_cases() {
         let fixture: Value = serde_json::from_str(include_str!(
@@ -5752,7 +6578,7 @@ mod tests {
                 "unchanged" => result.is_ok(),
                 other => panic!("{name}: unknown outcome {other}"),
             };
-            // A listed divergence that starts matching must leave the list.
+
             if matches == divergences.contains(&name) {
                 mismatches.push(format!("{name}: {result:?}"));
             }
@@ -6051,8 +6877,7 @@ mod tests {
         let reopened = read_sqlite_data(&conn).unwrap();
         assert_eq!(find_task(&reopened, &id).unwrap()["title"], "Shared task");
         assert_eq!(find_task(&reopened, &id).unwrap()["rev"], 1);
-        // Another writer changes the row between requests; the common transaction
-        // reloads it before the next REST/MCP patch and preserves that edit.
+
         let intervening = LocalOperation::PatchTask {
             id: id.clone(),
             body: json!({"description":"Intervening edit"})
@@ -6247,7 +7072,7 @@ mod tests {
                 403
             );
         }
-        // The public Local API token is deliberately unrelated.
+
         request.method = "GET".into();
         assert_eq!(
             authorize_api_request(&request, "external-token", &access)
@@ -6287,10 +7112,6 @@ mod tests {
         );
     }
 
-    /// Every write route serializes on the same `Mutex<()>`, and requests run on their own
-    /// threads. One panic in a handler used to poison it for the life of the process: reads
-    /// kept working while every POST/PATCH/DELETE answered 500 until restart. A `Mutex<()>`
-    /// protects no state a panic could half-mutate, so recover instead of failing.
     #[test]
     fn a_poisoned_write_lock_still_hands_out_a_guard() {
         let write_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
@@ -6562,7 +7383,7 @@ mod tests {
         } else {
             body.to_string()
         };
-        // HTTP framing completes the response without waiting for a clean socket EOF.
+
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .retry(reqwest::retry::never())
@@ -6817,11 +7638,6 @@ mod tests {
         assert_eq!(query.get("status").map(String::as_str), Some("next"));
     }
 
-    // R-04: without the deadline check, a client that sends a partial
-    // request and then goes silent would block read_request on read()
-    // forever (nothing here ever closes the socket or sends more data). An
-    // already-expired deadline must be caught at the top of the loop before
-    // that blocking read is attempted at all.
     #[test]
     fn read_request_aborts_a_slow_drip_connection_once_the_deadline_passes() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -6841,14 +7657,6 @@ mod tests {
         );
     }
 
-    // I3: without a write timeout, write_all against a peer that never drains
-    // its socket buffer blocks forever - and since accept_or_reject's 503
-    // rejection runs synchronously on the accept loop's own thread, that
-    // would stop the server from accepting any connection at all, not just
-    // pin one of the capped slots. TcpStream::write_timeout() reads back
-    // what's actually configured on the socket, so this checks the real
-    // write_response wiring directly and fast, instead of filling a send
-    // buffer with a non-reading peer to force an actual multi-second block.
     #[test]
     fn write_response_sets_a_write_timeout_so_a_non_reading_peer_cannot_block_it_forever() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -6864,9 +7672,70 @@ mod tests {
         );
     }
 
-    // Feeds fixed byte chunks to read_request one read() call at a time, so
-    // a test can force "split across multiple reads" deterministically and
-    // instantly - no real sockets or sleeps needed (R-05).
+    #[test]
+    fn handle_connection_completes_large_utf8_response_from_nonblocking_accepted_socket() {
+        let listener = TcpListener::bind((LOCAL_API_HOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        client.write_all(b"GET /tasks HTTP/1.1\r\n\r\n").unwrap();
+        let (stream, _) = listener.accept().unwrap();
+
+        stream.set_nonblocking(true).unwrap();
+        let body = json!({ "payload": "任務".repeat(1_000_000) });
+        let expected_body = serde_json::to_vec_pretty(&body).unwrap();
+        let (finished, completion) = std::sync::mpsc::channel();
+        let server = thread::spawn(move || {
+            let access = LocalApiAccess {
+                allow_write: false,
+                shutdown: Arc::new(AtomicBool::new(false)),
+            };
+            handle_connection(
+                &access,
+                address.port(),
+                &move |_, _, request| {
+                    assert_eq!(request.path, "/tasks");
+                    ApiResponse::ok(body.clone())
+                },
+                stream,
+            );
+            finished.send(()).unwrap();
+        });
+
+        assert_eq!(client.peek(&mut [0_u8; 1]).unwrap(), 1);
+
+        let _ = completion.recv_timeout(Duration::from_millis(100));
+        let mut received = Vec::new();
+        client.read_to_end(&mut received).unwrap();
+        server.join().unwrap();
+
+        let header_end = find_header_end(&received).expect("HTTP response headers");
+        let headers = std::str::from_utf8(&received[..header_end]).unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        let content_length = headers
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        let received_body = &received[header_end + 4..];
+        assert_eq!(content_length, expected_body.len());
+        assert_eq!(
+            received_body.len(),
+            content_length,
+            "large response must contain every advertised UTF-8 byte"
+        );
+        assert_eq!(received_body, expected_body);
+        let decoded: Value = serde_json::from_slice(received_body).unwrap();
+        assert_eq!(
+            decoded["payload"].as_str().unwrap().chars().count(),
+            2_000_000
+        );
+    }
+
     struct ChunkedReader {
         chunks: std::collections::VecDeque<Vec<u8>>,
     }
@@ -6972,8 +7841,6 @@ mod tests {
         );
     }
 
-    // R-04: the 33rd concurrent connection (cap already at 32) gets a 503
-    // instead of a thread.
     #[test]
     fn accept_or_reject_serves_503_once_the_connection_cap_is_reached() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -7062,13 +7929,6 @@ mod tests {
         }
     }
 
-    /// Mirrors `packages/core/src/task-query.test.ts` against the SAME
-    /// (tasks, query) -> expected ids fixture table. `filter_tasks`'s query
-    /// param shape can't express every case the JS/SQL sides cover
-    /// (`excludeStatuses` lists, `projectId`, or "hide archived but keep
-    /// done" independently of `done`) - those cases carry `rustQuery: null`
-    /// and are skipped here; the TS test is the one asserting the full
-    /// fixture-name roster hasn't shrunk.
     #[test]
     fn local_api_filter_tasks_matches_task_query_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -7116,8 +7976,6 @@ mod tests {
             ran += 1;
         }
 
-        // Sanity check on the check itself: if every case ever became
-        // `rustQuery: null`, the loop above would pass vacuously.
         assert!(
             ran > 0,
             "expected at least one Rust-expressible fixture case"
@@ -7616,8 +8474,6 @@ mod tests {
 
     #[test]
     fn local_api_valid_attachments_accepts_content_identity_fields() {
-        // #370b74f09 added contentRev/contentMtimeMs/contentSize; a GET-edit-PUT
-        // round trip of a task with a synced file attachment must not be rejected.
         let round_trip = json!([{
             "id": "attachment-1",
             "kind": "file",
@@ -7670,9 +8526,6 @@ mod tests {
 
     #[test]
     fn local_api_valid_attachments_enforces_cloud_key_shape() {
-        // SEC-08: the local HTTP API is a second write path into the same attachments, so a
-        // cloudKey it accepts must be one the sync merge would accept too
-        // (ATTACHMENT_CLOUD_KEY_PATTERN in packages/core/src/sync-normalization.ts).
         let with_cloud_key = |cloud_key: &str| {
             json!([{
                 "id": "attachment-1",
@@ -7717,9 +8570,6 @@ mod tests {
 
     #[test]
     fn local_api_duplicate_attachment_resets_content_identity_fields() {
-        // Mirrors core's duplicateProjectAttachmentCopy semantics: a duplicated
-        // attachment must not share cloudKey/fileHash/content-identity with the
-        // original, or two records point at one cloud blob.
         let original = json!([{
             "id": "attachment-1",
             "kind": "file",
@@ -7961,6 +8811,38 @@ mod tests {
     }
 
     #[test]
+    fn reference_advance_clear_preserves_absence_and_explicit_conversion() {
+        let mut absent = json!({"status":"reference"}).as_object().unwrap().clone();
+        normalize_created_reference_task(&mut absent);
+        assert!(!absent.contains_key("dueReminderLeadMinutes"));
+        let mut configured = json!({"status":"reference","dueReminderLeadMinutes":15})
+            .as_object()
+            .unwrap()
+            .clone();
+        normalize_created_reference_task(&mut configured);
+        assert_eq!(configured["dueReminderLeadMinutes"], 0);
+        for (before, expected) in [("reference", Value::Null), ("next", json!(0))] {
+            let mut task =
+                json!({"id":"task", "status":before, "title":"Task", "tags":[], "contexts":[]})
+                    .as_object()
+                    .unwrap()
+                    .clone();
+            apply_task_patch(
+                &mut task,
+                json!({"status":"reference","tags":["#changed"]})
+                    .as_object()
+                    .unwrap(),
+                "device",
+            )
+            .unwrap();
+            assert_eq!(
+                task.get("dueReminderLeadMinutes").unwrap_or(&Value::Null),
+                &expected
+            );
+        }
+    }
+
+    #[test]
     fn local_api_create_canonicalizes_reference_tasks() {
         let data = empty_local_api_data();
         let task = create_task_from_body(
@@ -7994,6 +8876,7 @@ mod tests {
         assert_eq!(task["status"], "reference");
         assert_eq!(task["isFocusedToday"], false);
         assert_eq!(task["pushCount"], 0);
+        assert!(task.get("dueReminderLeadMinutes").is_none());
         for field in [
             "startTime",
             "dueDate",
@@ -8250,12 +9133,8 @@ mod tests {
         );
     }
 
-    /// Companion to the task parity test below. Without it, adding a cloud-writable project
-    /// field to the schema silently leaves the local API answering 400 for it. Every
-    /// cloud-writable field must be either accepted or listed here with a reason.
     #[test]
     fn local_api_project_allowlist_matches_project_sync_schema() {
-        // Owned by the merge engine / tombstone lifecycle — never a client write.
         const DELIBERATELY_DENIED: [&str; 5] = [
             "deletedAt",
             "purgedAt",
@@ -8263,9 +9142,7 @@ mod tests {
             "attachments",
             "areaTitle",
         ];
-        // Cloud-writable in the schema, but the local API project routes do not implement them
-        // yet. This is a known gap, not a decision: adding one to the allowlist is a deliberate
-        // change and must move the name out of this list.
+
         const NOT_IMPLEMENTED: [&str; 8] = [
             "tagIds",
             "taskSortBy",
@@ -8366,7 +9243,6 @@ mod tests {
         assert!(!task.contains_key("boardOrder"));
         assert_eq!(task["rev"], 4);
 
-        // A later notes edit must not turn cancellation into completion.
         apply_task_patch(
             &mut task,
             json!({"description": "Reason added"}).as_object().unwrap(),
@@ -8377,8 +9253,6 @@ mod tests {
         assert!(task.contains_key("cancelledAt"));
         assert_eq!(task["archivedAt"], archived_at);
 
-        // Correcting the outcome to Completed clears cancellation and does not
-        // create another recurring occurrence from an already archived item.
         let follow_up = apply_task_action(
             &mut task,
             "complete",
@@ -8549,13 +9423,6 @@ mod tests {
         assert_eq!(api_error_response(error).status, 409);
     }
 
-    /// The project counterpart to
-    /// `local_api_apply_task_action_matches_core_write_path_fixture`: drives
-    /// `apply_project_delete_or_restore_at` against the shared fixture's
-    /// `kind: "project-action"` cases, whose `expected` rows are independently
-    /// pinned against core's real `deleteProject`/`restoreProject` in
-    /// packages/core/src/local-api-project-action-parity.test.ts (which also
-    /// owns the case roster).
     #[test]
     fn local_api_project_delete_or_restore_matches_core_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -8632,11 +9499,7 @@ mod tests {
         let Some(mut task) = task else {
             return Value::Null;
         };
-        // `id` is a fresh random UUID minted independently by each engine
-        // (TS's createNextRecurringTask and this Rust port each call their own
-        // uuid generator) - the one legitimately platform/run-variant field,
-        // so it is excluded rather than compared. Every other key is real
-        // full-task equality against the fixture's `expected`/`localApiExpected`.
+
         task.remove("id");
         Value::Object(task)
     }
@@ -8650,11 +9513,6 @@ mod tests {
         let cases = cases.as_array().expect("fixture array");
 
         for test_case in cases {
-            // The same fixture file also carries `kind: "action"` and
-            // `kind: "project-action"` cases (task and project write-path
-            // parity), asserted by their own tests - this test only owns the
-            // recurrence-only cases, which predate the `kind` field, so its
-            // absence means "recurrence". Mirrors recurrence.test.ts's filter.
             if test_case
                 .get("kind")
                 .and_then(Value::as_str)
@@ -8678,12 +9536,7 @@ mod tests {
                 .get("previousStatus")
                 .and_then(|value| value.as_str())
                 .unwrap_or_else(|| panic!("missing previousStatus for {name}"));
-            // `localApiExpected` is an optional, Rust-only override: recurrence.ts
-            // (the correct engine) and this local API deliberately diverge on
-            // byDay/byMonthDay/rrule cases — core computes the real next date,
-            // this engine refuses (None) rather than guess. `expected` still
-            // pins core's real answer via recurrence.test.ts unchanged;
-            // `localApiExpected`, when present, is what this engine must produce.
+
             let expected = test_case
                 .get("localApiExpected")
                 .or_else(|| test_case.get("expected"))
@@ -8738,7 +9591,7 @@ mod tests {
                 "{start}"
             );
         }
-        // A one-step date-only candidate on local today remains supported.
+
         let (year, month, day, _) = parse_iso_prefix(&local_day).unwrap();
         let (year, month, day) = add_days(year, month, day, -1);
         let mut task = base.as_object().unwrap().clone();
@@ -8875,8 +9728,7 @@ mod tests {
     #[test]
     fn local_api_complete_does_not_repeat_done_recurring_tasks() {
         assert!(should_create_recurring_follow_up("complete", "next"));
-        // archived -> done is a lifecycle correction (mirrors core's
-        // `isReturningFromArchive` in applyTaskUpdates): no new occurrence.
+
         assert!(!should_create_recurring_follow_up("complete", "archived"));
         assert!(!should_create_recurring_follow_up("complete", "done"));
         assert!(!should_create_recurring_follow_up("archive", "next"));
@@ -8904,9 +9756,6 @@ mod tests {
 
     #[test]
     fn local_api_complete_does_not_refuse_archived_correction_even_with_complex_recurrence() {
-        // archived -> done never spawns a follow-up (it's a correction, not a
-        // completion), so it must never be refused either, even for a
-        // recurrence this engine could not otherwise compute a next date for.
         let data = json!({
             "tasks": [{
                 "id": "byday-archived",
@@ -8922,12 +9771,6 @@ mod tests {
         );
     }
 
-    /// Consolidation-law pin: a test that only iterates `kind: "action"`
-    /// cases can't catch the fixture shrinking - deleting a case would
-    /// silently narrow the loop right along with the bug it stopped
-    /// covering. This roster mirrors the independent, hand-written list in
-    /// packages/core/src/local-api-action-parity.test.ts; removing a case
-    /// from the JSON without removing it in both places fails here.
     #[test]
     fn local_api_action_fixture_matches_pinned_case_roster() {
         const PINNED_ACTION_CASE_NAMES: &[&str] = &[
@@ -8966,12 +9809,6 @@ mod tests {
         assert_eq!(actual_names, expected_names);
     }
 
-    /// The write-path counterpart to `local_api_recurring_task_matches_core_golden_fixture`:
-    /// exercises `apply_task_action` (complete/archive/restore, plus the 409
-    /// refusal) against the same shared fixture's `kind: "action"` cases,
-    /// whose `expectedTask`/`expectedFollowUp` are independently pinned
-    /// against core's real `applyTaskUpdates`/`nextRevision` in
-    /// packages/core/src/local-api-action-parity.test.ts.
     #[test]
     fn local_api_apply_task_action_matches_core_write_path_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -9059,8 +9896,6 @@ mod tests {
 
             match follow_up {
                 Some(mut next_task) => {
-                    // `id` is a fresh random uuid - the one legitimately
-                    // platform/run-variant field.
                     next_task.remove("id");
                     assert_eq!(
                         Value::Object(next_task),
@@ -9481,6 +10316,7 @@ mod tests {
         )
         .expect("reference transition");
         assert_eq!(reference["status"], "reference");
+        assert_eq!(reference["dueReminderLeadMinutes"], 0);
         for field in [
             "startTime",
             "dueDate",

@@ -22,13 +22,13 @@ android {
 }
 
 dependencies {
-  // QuickCaptureActivity is an AppCompat DayNight dialog; same artifact the app already ships.
+
   implementation 'androidx.appcompat:appcompat:1.7.0'
-  // CaptureSyncHeadlessService extends HeadlessJsTaskService; expo-modules-core does not expose
-  // react-android transitively (same reason as modules/context-automation).
+
+
   implementation 'com.facebook.react:react-android'
   testImplementation 'junit:junit:4.13.2'
-  // android.jar's org.json is a stub on the JVM; the real one runs the payload and writer tests.
+
   testImplementation 'org.json:json:20240303'
   testImplementation 'androidx.test:core:1.6.1'
   testImplementation 'org.robolectric:robolectric:4.14.1'

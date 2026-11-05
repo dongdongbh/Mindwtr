@@ -6,8 +6,9 @@ import { InternalMarkdownLink, type InternalMarkdownLinkContext, useInternalMark
 
 const TASK_LIST_RE = /^(\s*)(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
 const BULLET_LIST_RE = /^(\s*)[-*+]\s+(.+)$/;
-// Two spaces (or one tab) per level, the same width the core Tab indent helper and
-// the mobile renderer use, so a nested item previews at the same depth everywhere.
+const ORDERED_LIST_RE = /^(\s*)(\d+)([.)])\s+(.+)$/;
+
+
 const LIST_DEPTH_INDENT_PX = 14;
 const getListIndentDepth = (indent: string): number => (
     Math.max(0, Math.floor(indent.replace(/\t/g, '    ').length / 2))
@@ -23,6 +24,7 @@ function isBlockBoundary(line: string): boolean {
     if (HORIZONTAL_RULE_RE.test(trimmed)) return true;
     if (TASK_LIST_RE.test(line)) return true;
     if (BULLET_LIST_RE.test(line)) return true;
+    if (ORDERED_LIST_RE.test(line)) return true;
     return false;
 }
 
@@ -192,6 +194,29 @@ export function Markdown({ markdown, className }: { markdown: string; className?
                         </li>
                     ))}
                 </ul>
+            );
+            continue;
+        }
+
+        const orderedListMatch = ORDERED_LIST_RE.exec(line);
+        if (orderedListMatch) {
+            const items: { depth: number; marker: string; text: string }[] = [];
+            const start = i;
+            while (i < lines.length) {
+                const m = ORDERED_LIST_RE.exec(lines[i]);
+                if (!m) break;
+                items.push({ depth: getListIndentDepth(m[1]), marker: `${m[2]}${m[3]}`, text: m[4] });
+                i += 1;
+            }
+            blocks.push(
+                <ol key={`ol-${start}`} className="space-y-1 pl-1">
+                    {items.map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2" style={item.depth ? { marginLeft: item.depth * LIST_DEPTH_INDENT_PX } : undefined}>
+                            <span className="shrink-0">{item.marker}</span>
+                            <span>{renderInline(item.text, { linkContext })}</span>
+                        </li>
+                    ))}
+                </ol>
             );
             continue;
         }

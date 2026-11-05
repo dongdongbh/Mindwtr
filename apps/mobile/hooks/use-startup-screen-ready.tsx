@@ -9,7 +9,7 @@ export type StartupScreen = 'focus' | 'inbox' | 'projects';
 export const StartupReadinessContext = createContext<{ canonicalDataReady: boolean; pathname: string } | null>(null);
 let initialScreenReported = false;
 
-/** Only the active, laid-out screen may report readiness; locks do not mount it. */
+
 export function useStartupScreenReady(screen: StartupScreen) {
     const context = useContext(StartupReadinessContext);
     const hasContext = context !== null;
@@ -40,7 +40,7 @@ export function useStartupScreenReady(screen: StartupScreen) {
         }
         return afterPaint(() => {
             if (!activeRef.current || AppState.currentState !== 'active') return;
-            // Native reporting is idempotent per Activity, including recreation.
+
             void reportFullyDrawn();
             if (!initialScreenReported) {
                 initialScreenReported = true;

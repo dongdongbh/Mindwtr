@@ -401,7 +401,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         }
     }
 
-    // MARK: - WCSessionDelegate
 
     public func session(
         _ session: WCSession,
@@ -477,7 +476,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         }
     }
 
-    // MARK: - Durable receive journal
 
     @discardableResult
     private func receivePayloadLocked(_ raw: [String: Any]) throws -> String {
@@ -568,9 +566,8 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
                 break
             }
         } else {
-            // This journal entry is durable before the temporary WCSession file is
-            // touched. If the process dies while copying, a redelivery with the
-            // same id safely resumes instead of creating a second operation.
+
+
             try writeReceiptLocked(
                 id: validated.id,
                 kind: .audio,
@@ -654,8 +651,8 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
                 sendDeliveryReceiptLocked(id: receipt.id)
             }
         } catch {
-            // A retained audio original or prepared receipt stays durable for a
-            // later launch/redelivery retry. Never delete it on a failed recovery.
+
+
         }
     }
 
@@ -750,9 +747,8 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
                 receipt: receipt,
                 requireAudioFile: receipt.kind == .audio
             )
-            // Stage and destination share a directory. The missing stage is the
-            // durable publication marker used after a crash, even when JS has
-            // already consumed and removed the destination queue file.
+
+
             guard Darwin.rename(stageURL.path, queueURL.path) == 0 else {
                 throw MindwtrWatchConnectivityError.fileOperationFailed
             }
@@ -787,8 +783,7 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
             try? syncDirectory(originalURL.deletingLastPathComponent())
         }
 
-        // Compact published receipts deliberately omit title, task id, and paths.
-        // The UUID and kind are enough for stable redelivery dedupe after relaunch.
+
         try writeReceiptLocked(
             id: receipt.id,
             kind: receipt.kind,
@@ -884,7 +879,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         }
     }
 
-    // MARK: - Receipt serialization
 
     private func loadReceiptLocked(id: String) throws -> MindwtrWatchReceipt? {
         let url = try receiptDirectory().appendingPathComponent("\(id).json")
@@ -959,7 +953,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         )
     }
 
-    // MARK: - Audio retention and conversion
 
     private func validateIncomingAudioURL(_ url: URL) throws {
         guard url.isFileURL, url.pathExtension.lowercased() == "m4a" else {
@@ -1066,7 +1059,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         return MindwtrCanonicalWave.validateFile(at: url, maximumFileSize: Self.maxWaveBytes)
     }
 
-    // MARK: - Filesystem primitives
 
     private func documentsDirectory() throws -> URL {
         guard let directory = FileManager.default.urls(

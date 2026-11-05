@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// Explicit Settings permission only. The accepted system callback is not cancellable; its owner drains it.
+
 final class NativeNotificationAuthorization: @unchecked Sendable {
     typealias Requester = @Sendable () async throws -> Void
     private let lock = NSLock()

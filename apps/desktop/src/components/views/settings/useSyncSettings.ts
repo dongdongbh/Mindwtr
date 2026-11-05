@@ -9,7 +9,7 @@ import { useUiStore } from '../../../store/ui-store';
 import { showSyncErrorToast } from '../../../lib/sync-error-toast';
 import { logError, logInfo } from '../../../lib/app-log';
 
-// Activation probes requeue when local data changes mid-probe; retry a few times before giving up.
+
 const ACTIVATION_PROBE_ATTEMPTS = 3;
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
 import { useLanguage } from '../../../contexts/language-context';
@@ -18,6 +18,7 @@ import {
     addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
     createImportDiagnostics,
+    formatActivationMissingAttachments,
     formatImportDiagnostic,
     getBackupSourceFileDiagnostic,
     getInMemoryAppDataSnapshot,
@@ -97,8 +98,7 @@ const IMPORT_DIAGNOSTIC_FALLBACKS: Record<string, string> = {
     'settings.importDiagnostics.unsupportedRecurrence': '{{count}} unsupported repeat rule(s) were kept as notes.',
 };
 
-// Restore and merge read the same file and preview it identically; only the sentence about
-// what the action does to local data differs.
+
 const buildBackupConfirmation = (
     validation: NonNullable<Awaited<ReturnType<typeof inspectDesktopBackup>>>,
     effect: string,
@@ -143,7 +143,7 @@ type UseSyncSettingsOptions = {
     showSaved: () => void;
     selectSyncFolderTitle: string;
     lastSyncNeverLabel: string;
-    requestConfirmation: (options: { title: string; message: string }) => Promise<boolean>;
+    requestConfirmation: (options: { title: string; message: string; confirmLabel?: string }) => Promise<boolean>;
 };
 
 export const useSyncSettings = ({
@@ -155,9 +155,8 @@ export const useSyncSettings = ({
     lastSyncNeverLabel,
     requestConfirmation,
 }: UseSyncSettingsOptions) => {
-    // Seed from the last durable read so the backend control does not show
-    // "Off" for the seconds the serialized configuration read takes and then
-    // jump to the real backend; the snapshot below still corrects it.
+
+
     const [lastKnownSelection] = useState(() => SyncService.getLastKnownSyncSelection());
     const seed = lastKnownSelection.configuration;
     const [syncPath, setSyncPath] = useState(seed?.syncPath ?? '');
@@ -183,11 +182,11 @@ export const useSyncSettings = ({
     const [cloudProvider, setCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const [persistedCloudProvider, setPersistedCloudProvider] = useState<CloudProvider>(lastKnownSelection.cloudProvider ?? 'selfhosted');
     const hasPendingSyncConfiguration = useRef(false);
-    // Backend chosen from the control whose target may already be complete
-    // (connected Dropbox, saved WebDAV); activated after the page re-renders.
+
+
     const activateSelectedBackend = useRef<SyncBackend | null>(null);
-    // Save handlers are declared before `handleSync`; this ref lets them run the
-    // activation-aware sync without reordering the hook.
+
+
     const handleSyncRef = useRef<() => Promise<void>>(async () => undefined);
     const syncConfigurationGeneration = useRef(0);
     const dropboxOperationGeneration = useRef(0);
@@ -299,8 +298,7 @@ export const useSyncSettings = ({
         return true;
     }, [isManualInsecureOverride, resolveText, showToast]);
 
-    // An empty token field means "unchanged, use keyring" (#899) and must never be
-    // validated or blocked; only a non-empty token that fails the shape check is rejected.
+
     const validateCloudToken = useCallback((token: string): boolean => {
         if (!token) return true;
         if (!isValidCloudSyncToken(token)) {
@@ -361,9 +359,8 @@ export const useSyncSettings = ({
             () => SyncService.getPersistedSyncConfigurationSnapshot(),
         )
             .then((configuration) => {
-                // Baselines always describe the durable configuration. Editor
-                // values are only initialized if the user has not changed them
-                // while this queue-serialized snapshot was waiting.
+
+
                 setPersistedSyncBackend(configuration.backend);
                 setPersistedCloudProvider(configuration.cloudProvider);
                 if (syncConfigurationGeneration.current !== configurationLoadGeneration) return;
@@ -379,9 +376,8 @@ export const useSyncSettings = ({
                 setCloudRememberToken(configuration.cloud.rememberToken === true);
                 setCloudAllowInsecureHttp(configuration.cloud.allowInsecureHttp === true);
                 setCloudProvider(configuration.cloudProvider);
-                // Self-hosted web deployments preseed the Cloud URL (#1125): a
-                // prefill of the editor field only, never persisted here, and
-                // never over a configured value or a user's in-flight edit.
+
+
                 if (!isTauri && !configuration.cloud.url && !(configuration.cloud.token ?? '')) {
                     void getWebDefaultCloudUrl().then((defaultUrl) => {
                         if (!defaultUrl) return;
@@ -425,11 +421,8 @@ export const useSyncSettings = ({
                 return;
             }
             const appKey = dropboxAppKey.trim();
-            // Only probe while the Dropbox panel is in play. The probe runs
-            // native credential recovery, and on keyring-less systems its
-            // failure toasts a Dropbox error to users who never chose
-            // Dropbox (#1084); the same relevance gate as auto-sync
-            // eligibility keeps real Dropbox breakage loud.
+
+
             const dropboxSelected = syncBackend === 'cloud' && cloudProvider === 'dropbox';
             if (!appKey || !dropboxSelected) {
                 if (!cancelled) {
@@ -477,13 +470,13 @@ export const useSyncSettings = ({
         if (credentialHandle) {
             void SyncService.resolvePendingDropboxCredentialForSession(credentialHandle)
                 .then(() => {
-                    // The service owns lifecycle serialization; the explicit
-                    // forget remains idempotent for mocked adapters.
+
+
                     SyncService.forgetPendingDropboxCredentialHandleForSession(credentialHandle);
                 })
                 .catch((error) => {
-                    // Keep the session-owned handle on uncertain double failure
-                    // so a remounted settings view can retry recovery.
+
+
                     void logError(error, { scope: 'sync', step: 'resolveDropboxCredentialOnUnmount' });
                 });
         }
@@ -493,9 +486,7 @@ export const useSyncSettings = ({
         setWebdavTestState('idle');
     }, [webdavUrl, webdavUsername, webdavPassword]);
 
-    // Only the self-hosted server publishes a feed, so this stays off the wire
-    // for every other backend. It reads the saved config (not the typed URL), so
-    // it must not re-run per keystroke — handleSaveCloud refreshes it instead.
+
     useEffect(() => {
         if (!loadEnabled) return;
         if (
@@ -513,8 +504,8 @@ export const useSyncSettings = ({
                 if (!cancelled) setCalendarFeedUrl(result.url);
             })
             .catch((error) => {
-                // An unreachable or pre-feed server just means "nothing published yet";
-                // the explicit Generate action is where a real failure surfaces.
+
+
                 if (!cancelled) setCalendarFeedUrl(null);
                 void logError(error, { scope: 'sync', step: 'loadCalendarFeed' });
             });
@@ -562,7 +553,7 @@ export const useSyncSettings = ({
         hasPendingSyncConfiguration.current = true;
         setSyncPath(syncPath.trim());
         setSyncError(null);
-        // Same as WebDAV: saving activates through the verification sync.
+
         void logInfo('File Sync folder saved; running the verification sync to activate it', { scope: 'sync' });
         await handleSyncRef.current();
     }, [advanceSyncConfigurationGeneration, syncPath]);
@@ -595,7 +586,7 @@ export const useSyncSettings = ({
         try {
             if (!isTauri) return;
 
-            const { open } = await import('@tauri-apps/plugin-dialog');
+            const { open } = await import('../../../lib/native-dialog');
             const selected = await open({
                 directory: true,
                 multiple: false,
@@ -605,8 +596,8 @@ export const useSyncSettings = ({
             if (selected && typeof selected === 'string') {
                 advanceSyncConfigurationGeneration();
                 hasPendingSyncConfiguration.current = true;
-                // A chosen folder is a complete target; the activation effect
-                // runs the verification sync once the page holds the new path.
+
+
                 activateSelectedBackend.current = 'file';
                 setSyncPath(selected);
                 setSyncError(null);
@@ -752,10 +743,8 @@ export const useSyncSettings = ({
         } finally {
             setIsSavingWebDav(false);
         }
-        // "Save" used to stop here with a toast asking for Sync now; users read
-        // "saved" as durable, left the page, and found the previous backend
-        // still selected because only the verification sync commits a switch.
-        // Run that verification right away, so saved means saved (or says why not).
+
+
         void logInfo('WebDAV settings saved; running the verification sync to activate them', { scope: 'sync' });
         await handleSyncRef.current();
     }, [
@@ -811,9 +800,7 @@ export const useSyncSettings = ({
         }
     }, [resolveText, showToast, validateSyncHttpUrl, webdavAllowInsecureHttp, webdavHasPassword, webdavPassword, webdavUrl, webdavUsername]);
 
-    // Dropbox, WebDAV and the sync folder each have a Test handler; without this
-    // one a wrong self-hosted URL or token only showed up in the verification
-    // sync that Save runs.
+
     const handleTestCloudConnection = useCallback(async () => {
         const trimmedUrl = cloudUrl.trim();
         if (!trimmedUrl) {
@@ -859,7 +846,7 @@ export const useSyncSettings = ({
             showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
             return;
         }
-        // Same as WebDAV: saving activates through the verification sync.
+
         void logInfo('Self-hosted cloud settings saved; running the verification sync to activate them', { scope: 'sync' });
         await handleSyncRef.current();
     }, [
@@ -928,9 +915,8 @@ export const useSyncSettings = ({
             setDropboxConnected(true);
             setDropboxTestState('idle');
             hasPendingSyncConfiguration.current = true;
-            // The verification sync proves the new credential and commits the
-            // switch; before, it waited for a manual Sync now that users
-            // skipped, and leaving the page discarded the credential.
+
+
             activateSelectedBackend.current = 'cloud';
             setSyncError(null);
         } catch (error) {
@@ -980,9 +966,8 @@ export const useSyncSettings = ({
             if (syncConfigurationGeneration.current !== disconnectGeneration) return;
             await SyncService.disconnectDropbox(appKey);
             const persisted = await SyncService.getPersistedSyncConfigurationSnapshot();
-            // Baselines always follow durable state, even if a newer editor
-            // intent arrived while disconnect was queued. Only the editor/UI
-            // projection is generation guarded.
+
+
             setPersistedSyncBackend(persisted.backend);
             setPersistedCloudProvider(persisted.cloudProvider);
             if (syncConfigurationGeneration.current !== disconnectGeneration) return;
@@ -1071,8 +1056,8 @@ export const useSyncSettings = ({
         if (config.dropboxCredentialHandle && commitResult?.handleFinalized !== false) {
             clearLocalDropboxCredentialHandle(config.dropboxCredentialHandle);
         }
-        // These fields describe durable state, even when a newer editor change
-        // arrived while the transaction was in flight.
+
+
         setPersistedSyncBackend(config.backend);
         if (config.backend === 'cloud') {
             setPersistedCloudProvider(config.cloudProvider ?? 'selfhosted');
@@ -1096,9 +1081,8 @@ export const useSyncSettings = ({
         const activationGeneration = syncConfigurationGeneration.current;
         const activationCredentialHandle = dropboxCredentialHandleRef.current;
         let activationCleanupDeferred: 'remote' | 'file' | null = null;
-        // Once the proven configuration is committed the switch has already
-        // landed, so a later non-success must not claim the previous settings
-        // are still active.
+
+
         let committedNewSyncConfiguration = false;
         const resolveCapturedCredential = async () => {
             if (!activationCredentialHandle) return;
@@ -1225,25 +1209,52 @@ export const useSyncSettings = ({
                 if (configOverride.backend === 'webdav' && configOverride.webdav) {
                     await SyncService.testWebDavConnection(configOverride.webdav);
                 }
-                // A store write landing mid-probe requeues the probe; retrying a
-                // couple of times absorbs the ordinary case (an auto sync or an
-                // editor save racing the verification) instead of dropping the
-                // switch behind an info toast the user reads as "saved".
-                let probeResult = await SyncService.performSync({
+
+
+                let acceptMissingAttachmentIds: string[] | undefined;
+                const runActivationProbe = () => SyncService.performSync({
                     activationProbe: true,
                     configOverride,
                     manual: true,
+                    ...(acceptMissingAttachmentIds ? { acceptMissingAttachmentIds } : {}),
                 });
-                for (let attempt = 1; probeResult.skipped === 'requeued' && attempt < ACTIVATION_PROBE_ATTEMPTS; attempt += 1) {
-                    void logInfo('Sync activation probe requeued; retrying', {
-                        scope: 'sync',
-                        extra: { attempt: String(attempt + 1), backend: configOverride.backend },
+                const runActivationProbeWithRetries = async () => {
+                    let result = await runActivationProbe();
+                    for (let attempt = 1; result.skipped === 'requeued' && attempt < ACTIVATION_PROBE_ATTEMPTS; attempt += 1) {
+                        void logInfo('Sync activation probe requeued; retrying', {
+                            scope: 'sync',
+                            extra: { attempt: String(attempt + 1), backend: configOverride.backend },
+                        });
+                        result = await runActivationProbe();
+                    }
+                    return result;
+                };
+                let probeResult = await runActivationProbeWithRetries();
+                const missingAttachments = probeResult.success ? undefined : probeResult.activationMissingAttachments;
+                if (missingAttachments?.length) {
+
+
+                    const confirmed = await requestConfirmation({
+                        title: resolveText('settings.syncMissingFilesTitle', 'Some attachment files are missing'),
+                        message: formatText(
+                            'settings.syncMissingFilesBody',
+                            'These attachment files are not on this device and not at the new sync location:\n\n{files}\n\nYou can continue without them. The attachments stay in your tasks and projects and show as missing. The files stay where they were and are not deleted.',
+                            {
+                                files: formatActivationMissingAttachments(missingAttachments, (count) => formatText(
+                                    'settings.syncMissingFilesMore',
+                                    'and {count} more',
+                                    { count },
+                                )),
+                            },
+                        ),
+                        confirmLabel: resolveText('settings.syncMissingFilesContinue', 'Continue without these files'),
                     });
-                    probeResult = await SyncService.performSync({
-                        activationProbe: true,
-                        configOverride,
-                        manual: true,
-                    });
+                    if (!confirmed || syncConfigurationGeneration.current !== activationGeneration) {
+                        await resolveCapturedCredential();
+                        return;
+                    }
+                    acceptMissingAttachmentIds = missingAttachments.map((attachment) => attachment.id);
+                    probeResult = await runActivationProbeWithRetries();
                 }
                 if (probeResult.skipped === 'requeued') {
                     if (configOverride.dropboxCredentialHandle) {
@@ -1300,13 +1311,8 @@ export const useSyncSettings = ({
                     && classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key'
                     && (await SyncService.getSyncEncryptionStatus()).state === 'remote-encrypted-no-key'
                 ) {
-                    // An encrypted remote is transport PROOF, not a failed probe: the
-                    // read reached the sync location and found a valid Mindwtr document
-                    // this device has no key for (the discovery just persisted the
-                    // no-key state). Refusing to activate here would deadlock joining
-                    // an already-encrypted location — unlock requires a durable
-                    // backend, and the backend could only become durable through a
-                    // sync that needs the key (#1001).
+
+
                     if (syncConfigurationGeneration.current !== activationGeneration) {
                         await resolveCapturedCredential();
                         return;
@@ -1334,15 +1340,16 @@ export const useSyncSettings = ({
                     if (configOverride.dropboxCredentialHandle) {
                         await resolveCapturedCredential();
                     }
-                    if (probeResult.error) {
+
+                    if (probeResult.error && !probeResult.activationMissingAttachments) {
                         void logError(new Error(probeResult.error), { scope: 'sync', step: 'activationProbe' });
                     }
                     const verificationMessage = resolveText(
                         'settings.sync.verificationFailed',
                         'Sync setup could not be verified. Your previous sync settings are still active.',
                     );
-                    // Without the underlying reason the toast reads as "saving is
-                    // broken" when the target simply refused one sync (#1001).
+
+
                     const probeReason = probeResult.error?.trim().slice(0, 200);
                     const verificationToast = probeReason
                         ? [verificationMessage, probeReason].join('\n')
@@ -1450,10 +1457,8 @@ export const useSyncSettings = ({
                 result.success
                 && (result.remoteWriteDeferred || result.skipped === 'pendingRemoteWriteBackoff')
             ) {
-                // Healthy outcome: merged and saved locally, upload already
-                // scheduled. Right after a backend switch the fact that matters
-                // is that the switch landed, so keep B4's wording there, just
-                // not as an error.
+
+
                 showToast(committedNewSyncConfiguration
                     ? resolveText(
                         'settings.sync.incompleteAfterSwitch',
@@ -1514,6 +1519,7 @@ export const useSyncSettings = ({
         isTauri,
         persistedCloudProvider,
         persistedSyncBackend,
+        requestConfirmation,
         resolveText,
         showToast,
         syncBackend,
@@ -1592,9 +1598,7 @@ export const useSyncSettings = ({
         }
     }, [resolveText, showToast]);
 
-    // Undo rides the result toast itself, so the affordance dies with the message —
-    // no persistent roll-back button anywhere. Restore is destructive, so this goes
-    // behind a confirmation of the same weight as a manual snapshot restore.
+
     const buildUndoAction = useCallback((snapshotName?: string | null) => {
         if (!snapshotName) return undefined;
         return {
@@ -2045,7 +2049,7 @@ export const useSyncSettings = ({
     const syncPreferences = settings?.syncPreferences ?? {};
     const handleUpdateSyncPreferences = useCallback(
         (updates: Partial<SyncPreferences>) => {
-            // Built on the preferences as stored when the write is admitted, so another device's change stays.
+
             updateSettingsFromLatest((latest) => ({ syncPreferences: { ...(latest.syncPreferences ?? {}), ...updates } }))
                 .then(showSaved)
                 .catch((error) => reportSettingsFailure(
@@ -2063,8 +2067,7 @@ export const useSyncSettings = ({
         ? safeFormatDate(lastSyncAt, 'PPpp', lastSyncAt)
         : lastSyncNeverLabel;
 
-    // Target validity used to live in SettingsSyncPage; it belongs next to the
-    // state it validates so the page stays pure layout.
+
     const isMacOS = typeof navigator !== 'undefined'
         && /mac/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
     const webdavUrlError = webdavUrl.trim() ? !isValidHttpUrl(webdavUrl.trim()) : false;
@@ -2101,18 +2104,12 @@ export const useSyncSettings = ({
                             : dropboxConfigured && !!dropboxAppKey.trim() && dropboxConnected)
                         : false;
 
-    // Choosing a backend whose target is already complete (a connected Dropbox
-    // account, a saved WebDAV or cloud server, a chosen folder) activates it
-    // through the verification sync, the same as Save. Before, the choice only
-    // stayed in the page and was lost on leaving it. An incomplete target
-    // waits for the user to fill the form and Save.
+
     useEffect(() => {
         if (activateSelectedBackend.current !== syncBackend) return;
         if (syncBackend === 'cloud' && cloudProvider === 'dropbox' && !dropboxConnected && !dropboxCredentialHandleRef.current) {
-            // The Dropbox connection probe only runs while Dropbox is selected,
-            // so right after the chip is chosen it has not answered yet. Stay
-            // armed; this effect re-runs when the probe flips dropboxConnected
-            // (device test: Off -> Dropbox never activated, config stayed off).
+
+
             return;
         }
         activateSelectedBackend.current = null;

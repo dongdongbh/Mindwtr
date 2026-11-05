@@ -1,6 +1,19 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
+import kotlin.math.abs
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -13,12 +26,12 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -68,28 +81,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** What a list shows at a row's right edge, as RN's lists do: nothing, the status glyph (one-status lists), or the status badge. */
+
 enum class RowStatus { Hidden, Icon, Badge }
 
-/** RN's Focus star: none or shown. A shown star is disabled with core's reason when its section sends one (Upcoming). */
+
 enum class RowStar { Hidden, Shown }
 
-/** RN's status menu order (QUICK_STATUS_OPTIONS). */
+
 private val MENU_STATUSES = listOf("inbox", "next", "waiting", "someday", "done", "reference")
 
-/**
- * One row on any list, as RN's task row (SwipeableTaskItemContent) draws it: a card with core's
- * priority strip, the title, [RowStar] beside it, and core's meta line; [RowStatus] at the right
- * edge. Every word and date is core's text. A tap opens the editor. A swipe right completes
- * (RN's swipe reveals its action; here the swipe itself runs it), and TalkBack has the same
- * Done as a custom action. An Upcoming row also shows core's reveal date, and a project row
- * core's sequence cue as [note]; [available] marks core's available next action. A read-only
- * project's rows are not [completable]. [focusHighlight] outlines a starred row, as RN does
- * outside Today's Focus. [starBlocked] is core's reason the star can only refuse (the section's
- * focusBlockedLabel): an unstarred row's star is then drawn disabled with that label, as RN does.
- * [details] shows core's detail parts too, where RN's list does (Waiting, and Someday's Details toggle).
- * [actions] is a list whose own contract writes its rows (Contexts, Review, the Weekly and Daily Review): see [RowActions].
- */
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun TaskRowItem(
@@ -100,55 +101,70 @@ fun TaskRowItem(
     val theme = LocalTheme.current
     val c = theme.colors
     val meta = task.meta
-    // Core's swipe action (meta.swipe): the status it sets, its label, and its icon.
-    val target = meta.swipe.target
-    val swipeLabel = meta.swipe.label
+
     val canComplete = writable && !busy &&
         (failedAction == null || failedAction == completeAction(task.id, task.taskRevision))
     val canEdit = writable && !busy && failedAction == null
-    // Done keeps its own command (core's completeTask); Restore and Next are RN's status change, with its exact retry.
-    // A list whose contract writes its rows sends that list's own status action instead; a selecting list has no swipe.
-    val canMove = writable && !busy && (failedAction == null || failedAction == statusAction(task, target))
     val selecting = actions?.selecting == true
     val listed = actions?.status
-    val swipeOn = !selecting && if (listed != null) canEdit else completable && (if (target == "done") canComplete else canMove)
-    val onSwipe = listed?.let { status -> { status(target) } } ?: { if (target == "done") complete(task.id, task.taskRevision) else changeStatus(task, target) }
-    val onDelete = actions?.delete?.takeIf { canEdit && !selecting }
+    val tray = SwipeTrays.of(task.status, task.isFocusedToday)?.takeIf { completable && !selecting }
+    val trayEnabled = { action: TrayAction ->
+        when (action.id) {
+            "done" -> canComplete
+            "restore", "next" -> if (listed != null) canEdit else writable && !busy && (failedAction == null || failedAction == statusAction(task, action.status.orEmpty()))
+            else -> canEdit
+        }
+    }
+    val runTray = { action: TrayAction ->
+        when (action.id) {
+            "done" -> complete(task.id, task.taskRevision, askNext = true)
+            "focus" -> swipeFocus(task)
+            "organize" -> showStatusMenu(task)
+            "dates" -> openDates(task)
+            "delete" -> actions?.delete?.invoke() ?: editorMenu.deleteRow(task.id, task.taskRevision)
+            else -> action.status?.let { target -> listed?.invoke(target) ?: changeStatus(task, target) }
+        }
+        Unit
+    }
+    val trayActions = tray?.let { it.swipeRight + it.swipeLeft }.orEmpty().filter(trayEnabled)
+    val onLongDone = if (task.status != "done" && canComplete) { { completedAt.open(task, "complete") } } else null
+
+    val editCompleted = if (canEdit && !selecting && meta.parts.any { it.kind == "completed" }) { { completedAt.open(task, "edit") } } else null
     val onTap = { if (selecting) actions?.select?.invoke() else openEditor(task.id) }
     val shape = RoundedCornerShape(theme.rowRadius)
     val strip = theme.priority(meta.priority)
     val showStar = star != RowStar.Hidden && meta.canFocus
-    val showStatus = status != RowStatus.Hidden && meta.statusLabel != null
-    // RN outlines a starred row outside Today's Focus, and a task opened from search on the task list it opened on (not on Contexts
-    // or the Review screens, whose rows RN draws without it), both in the tint.
+    val showStatus = status != RowStatus.Hidden && meta.statusControl != null
+
+
     val highlighted = (focusHighlight && showStar && task.isFocusedToday || listed == null && isHighlighted(task.id)) && !selecting
     val picked = selecting && actions?.selected == true
     Box(Modifier.padding(bottom = 6.dp)) {
-        SwipeAction(enabled = swipeOn, swipe = meta.swipe, shape = shape, onSwipe = onSwipe, onMenu = { showStatusMenu(task) }, onDelete = onDelete) {
+        SwipeTray(tray, enabled = trayActions.isNotEmpty(), shape = shape, isEnabled = trayEnabled, run = runTray, onLongDone = onLongDone) {
             Row(
                 Modifier.fillMaxWidth().clip(shape).background(c.bg).background(if (available && !selecting) theme.availableBg else c.taskItemBg)
-                    .border(if (highlighted || selecting) 2.dp else 1.dp,
+                    .rnBorder(if (highlighted || selecting) 2.dp else 1.dp,
                         if (highlighted || picked) c.tint else if (available && !selecting) theme.availableBorder else c.border, shape)
-                    // RN's long-press on a list with selection selects the row (and starts selecting).
+
                     .pointerInput(canEdit, selecting) {
                         detectTapGestures(onLongPress = actions?.select?.let { select -> { _: Offset -> if (canEdit) select() } }) { if (canEdit) onTap() }
                     }
                     .drawBehind {
-                        // RN's priority strip: 3 wide, 6 in from the start, 8 from the top and the bottom.
+
                         if (strip != null) drawRoundRect(strip, Offset(6.dp.toPx(), 8.dp.toPx()),
                             Size(3.dp.toPx(), size.height - 16.dp.toPx()), CornerRadius(2.dp.toPx()))
                     }
                     .padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = if (showStatus || showStar) 4.dp else 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // RN's selection circle: tint ring, filled with a check when the row is selected.
-                if (selecting) Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).border(1.5.dp, c.tint, CircleShape)
+
+                if (selecting) Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).rnBorder(1.5.dp, c.tint, CircleShape)
                     .background(if (picked) c.tint else c.taskItemBg), contentAlignment = Alignment.Center) {
                     if (picked) Icon(Lucide.CheckBold, null, tint = theme.onAction, modifier = Modifier.size(12.dp))
                 }
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // The title carries the row for TalkBack: core's label, Edit, and the swipe's action as a custom action.
+
                         Text(task.title, style = rnText(15, 500, 20).copy(textDirection = if (meta.rtl) TextDirection.Rtl else TextDirection.Ltr),
                             color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
                             textAlign = if (meta.rtl) TextAlign.Right else TextAlign.Left,
@@ -158,28 +174,28 @@ fun TaskRowItem(
                                 .semantics {
                                     contentDescription = meta.accessibilityLabel
                                     if (selecting) selected = picked
-                                    // RN's accessibility actions: the swipe's action, and the status menu its long-press opens.
-                                    if (swipeOn) customActions = listOf(CustomAccessibilityAction(swipeLabel) { onSwipe(); true },
-                                        CustomAccessibilityAction(t("taskStatus.changeStatus")) { showStatusMenu(task); true }) +
-                                        listOfNotNull(onDelete?.let { delete -> CustomAccessibilityAction(t("common.delete")) { delete(); true } })
+
+                                    val all = trayActions.map { action -> CustomAccessibilityAction(action.label) { runTray(action); true } } +
+                                        listOfNotNull(editCompleted?.let { edit -> CustomAccessibilityAction(t("task.editCompletedAt")) { edit(); true } })
+                                    if (all.isNotEmpty()) customActions = all
                                 })
                         if (meta.parts.any { it.kind == "recurrence" }) {
                             Icon(Lucide.Repeat, null, tint = c.secondaryText,
                                 modifier = Modifier.padding(start = 4.dp).size(12.dp))
                         }
-                        // Hidden details keep one cue that the task has more to read (#1287).
+
                         if (!details && meta.hasDescription) {
                             Icon(Lucide.AlignLeft, null, tint = c.secondaryText,
                                 modifier = Modifier.padding(start = 4.dp).size(12.dp))
                         }
                         if (showStar) StarButton(model, task, starBlocked?.takeIf { !task.isFocusedToday })
                     }
-                    // TalkBack hears the line in core's label above, so it is not read twice.
+
                     val parts = if (details) meta.parts else meta.parts.filter { !it.detail }
                     if (parts.isNotEmpty()) {
                         FlowRow(Modifier.padding(top = 2.dp).clearAndSetSemantics { }, horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-                            for (part in parts) MetaPartView(part)
+                            for (part in parts) MetaPartView(part, if (part.kind == "completed") editCompleted else null)
                         }
                     }
                     note?.let { MetaText(it, if (available) c.tint else c.secondaryText, 600, Modifier.padding(top = 2.dp)) }
@@ -192,22 +208,15 @@ fun TaskRowItem(
     }
 }
 
-/**
- * A list whose contract writes its rows (Contexts, Review, the Weekly and Daily Review), as RN's rowActions there: the swipe and
- * the status menu send [status] (core's setTaskStatus for that list), RN's swipe left reveals Delete ([delete], core's trashTask
- * with its Undo), and a long-press selects the row ([select]) where the list offers bulk actions; while [selecting], a tap
- * toggles the row and the swipes rest. [footer] sits under the meta line (the Daily Review's Follow up today). Without
- * [status] (the lists with core's bulk contract: Inbox, Waiting, Someday, Reference, Done) the row keeps its own swipe and
- * status menu, and only selection comes from here.
- */
+
 class RowActions(
     val status: ((String) -> Unit)? = null, val delete: (() -> Unit)? = null, val selecting: Boolean = false, val selected: Boolean = false,
     val select: (() -> Unit)? = null, val footer: (@Composable () -> Unit)? = null,
 )
 
-/** One meta part as RN's renderMetaPart draws it: its icon, color, and weight; core's text as is. */
+
 @Composable
-private fun MetaPartView(part: MetaPart) {
+private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null) {
     val theme = LocalTheme.current
     val c = theme.colors
     when (part.kind) {
@@ -222,7 +231,7 @@ private fun MetaPartView(part: MetaPart) {
         }
         "due" -> MetaText(part.text, when (part.tone) { "overdue" -> c.danger; "dueSoon" -> c.warning; else -> c.secondaryText }, 600)
         "checklist" -> MetaIcon(Lucide.ListChecks, "${part.done}/${part.of}", 13)
-        // The person is what a Waiting row is read for, so the name stands out, as on RN (#1282).
+
         "assignedTo" -> Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Lucide.UserRound, null, tint = c.secondaryText, modifier = Modifier.size(12.dp))
             MetaText(part.text, c.text, 600, Modifier.padding(start = 4.dp))
@@ -230,7 +239,9 @@ private fun MetaPartView(part: MetaPart) {
         "recurrence" -> MetaIcon(Lucide.Repeat, part.text)
         "timeSpent" -> MetaIcon(Lucide.History, part.text)
         "attachments" -> MetaIcon(Lucide.Paperclip, part.text)
-        else -> MetaText(part.text, c.secondaryText, 500) // start, estimate, completed, cancelled
+
+        "completed" -> MetaText(part.text, c.secondaryText, 500, if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick).testTag("row-completed-at") else Modifier)
+        else -> MetaText(part.text, c.secondaryText, 500)
     }
 }
 
@@ -245,12 +256,7 @@ private fun MetaIcon(icon: ImageVector, text: String, size: Int = 12) = Row(vert
 fun MetaText(text: String, color: Color, weight: Int, modifier: Modifier = Modifier, maxLines: Int = 2) =
     Text(text, style = rnText(12, weight, 16), color = color, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = modifier)
 
-/**
- * RN's FocusStarIcon in its 44 x 44 button: amber and filled when starred, else the secondary
- * text color at 60%. With core's [blocked] reason it is drawn at 30%, disabled, and TalkBack hears
- * that reason (RN's focusToggleDisabledLabel). A tap asks core for the other state; while a
- * failed star's retry is owed, only that exact star works.
- */
+
 @Composable
 private fun StarButton(model: InboxViewModel, task: TaskRow, blocked: String?) = with(model) {
     val disabled = blocked != null
@@ -262,7 +268,7 @@ private fun StarButton(model: InboxViewModel, task: TaskRow, blocked: String?) =
         .semantics { contentDescription = label; if (disabled) disabled() })
 }
 
-/** RN's FocusStarIcon: amber and filled when [focused], else the secondary text color at 60% (30% when [disabled]). */
+
 @Composable
 fun FocusStar(focused: Boolean, disabled: Boolean, size: Int, modifier: Modifier) {
     val theme = LocalTheme.current
@@ -272,16 +278,12 @@ fun FocusStar(focused: Boolean, disabled: Boolean, size: Int, modifier: Modifier
     }
 }
 
-/**
- * RN's status control: the CircleDot glyph on a one-status list (Inbox), else the status badge
- * with core's label, both in core's status colors. A tap opens RN's status menu. A read-only
- * row shows it disabled, as RN does.
- */
+
 @Composable
 private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, editable: Boolean) = with(model) {
     val theme = LocalTheme.current
     val colors = theme.status(task.status)
-    val label = task.meta.statusLabel ?: return
+    val label = task.meta.statusControl ?: return
     val owed = failedAction
     val enabled = editable && writable && !busy && (owed == null || (owed.kind == "update" && owed.id == task.id && owed.base == mapOf("status" to task.status)))
     val spoken = t("task.aria.changeStatus").replace("{{status}}", label)
@@ -293,22 +295,20 @@ private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, e
         }
     } else {
         val shape = RoundedCornerShape(8.dp)
-        Box(Modifier.padding(start = 12.dp, end = 12.dp).heightIn(min = 44.dp).clip(shape).background(colors.bg).border(1.dp, colors.border, shape)
+
+        Box(Modifier.padding(start = 12.dp, end = 12.dp).heightIn(min = 44.dp).clip(shape).background(colors.bg)
             .then(tap).padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
             Text(label.replaceFirstChar { it.uppercase() }, style = rnText(10, 600), color = colors.text)
         }
     }
 }
 
-/**
- * RN's status menu: a centered card over a dimmed screen, "Change Status", and the six statuses
- * with core's labels and colors. A choice runs core's updateTask with the status the row was
- * loaded with. On Someday's rows RN adds Move to section… (core's move dialog, MenuModel.openMove);
- * RN's Move to… needs a contract call this app lacks.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusMenu(model: InboxViewModel) = with(model) {
+    DestinationPicker(model)
+    DatesSheet(model)
     val task = statusMenu ?: return
     val theme = LocalTheme.current
     val c = theme.colors
@@ -324,11 +324,15 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                 for (status in MENU_STATUSES) {
                     val colors = theme.status(status)
                     val current = status == task.status
-                    val enabled = writable && !busy && (failedAction == null || failedAction == statusAction(task, status))
+                    val enabled = writable && !busy && (failedAction == null
+                        || failedAction == if (status == "done") completeAction(task.id, task.taskRevision) else statusAction(task, status))
+
+                    val backdate = if (status == "done" && task.status != "done" && failedAction == null) { { showStatusMenu(null); completedAt.open(task, "complete") } } else null
                     Row(
                         Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth(0.42f).clip(RoundedCornerShape(20.dp)).then(if (current) Modifier.background(colors.bg) else Modifier)
-                            .border(1.dp, colors.text, RoundedCornerShape(20.dp))
-                            .clickable(enabled = enabled, role = Role.Button) { if (!menu.rowStatus(task, status)) changeStatus(task, status) }
+                            .rnBorder(1.dp, colors.text, RoundedCornerShape(20.dp))
+                            .combinedClickable(enabled = enabled, role = Role.Button, onLongClickLabel = backdate?.let { t("task.completeBackdateHintMobile") },
+                                onLongClick = backdate) { chooseStatus(task, status) }
                             .semantics { selected = current }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -339,23 +343,118 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                     }
                 }
             }
-            // RN's Move to section… pill, full width under the statuses (its text capitalized per word, as RN's menuText).
-            menu.moveLabel(task)?.let { label ->
-                val enabled = writable && !busy && failedAction == null
-                Row(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().clip(RoundedCornerShape(20.dp)).border(1.dp, c.border, RoundedCornerShape(20.dp))
-                    .clickable(enabled = enabled, role = Role.Button) { showStatusMenu(null); menu.openMove(listOf(task.id), JSONObject().put(task.id, task.taskRevision)) }
-                    .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text(label.split(' ').joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }, style = rnText(14, 500), color = c.text)
+            val idle = writable && !busy && failedAction == null
+
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t("task.destination"), style = rnText(13, 600), color = c.secondaryText, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().semantics { heading() })
+                StatusMenuAction(t("task.moveToProjectOrArea"), idle) { openDestination(task) }
+                menu.moveLabel(task)?.let { moveLabel ->
+                    StatusMenuAction(moveLabel, idle) { showStatusMenu(null); menu.openMove(listOf(task.id), JSONObject().put(task.id, task.taskRevision)) }
+                }
+            }
+
+            val context = LocalContext.current
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusMenuAction(t("task.copyTaskLink"), true) { showStatusMenu(null); copyTaskReference(context, task.id, link = true) }
+                StatusMenuAction(t("task.copyTaskId"), true) { showStatusMenu(null); copyTaskReference(context, task.id, link = false) }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun DestinationPicker(model: InboxViewModel) = with(model) {
+    destinationFor ?: return
+    val picker = destinationPicker
+    val c = LocalTheme.current.colors
+    PickerDialog(picker?.getString("title") ?: t("task.destination"), { closeDestination() }, search = {
+        ModalInput(destinationQuery, t("common.search"), picker?.getString("title") ?: t("task.destination"), Modifier.testTag("destination-search")) { searchDestination(it) }
+    }) {
+        picker ?: return@PickerDialog
+        val enabled = writable && !busy && failedAction == null
+        val row: @Composable (JSONObject, String?) -> Unit = { choice, description ->
+            PickerItem(choice.getString("title"), description = description, selected = choice.getBoolean("selected")) {
+                if (enabled) moveToDestination(choice.getJSONObject("destination"))
+            }
+        }
+        row(picker.getJSONObject("none"), null)
+        for (group in picker.menuObjects("projectGroups")) {
+            PickerHeading(group.getString("title"))
+            for (project in group.menuObjects("rows")) row(project, project.getString("accessibilityLabel"))
+        }
+        val areas = picker.getJSONObject("areas")
+        PickerHeading(areas.getString("title"))
+        for (area in areas.menuObjects("rows")) row(area, area.getString("accessibilityLabel"))
+        picker.menuText("noMatches")?.let { Text(it, style = rnText(16, 400), color = c.secondaryText,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
+    }
+}
+
+
+@Composable
+private fun DatesSheet(model: InboxViewModel) = with(model) {
+    val sheet = datesSheet ?: return
+    val theme = LocalTheme.current
+    val c = theme.colors
+    BackHandler { closeDates() }
+    Box(Modifier.fillMaxSize().background(theme.menuScrim).pointerInput(Unit) { detectTapGestures { closeDates() } }
+        .padding(20.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().shadow(5.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
+            .background(c.cardBg).pointerInput(Unit) { detectTapGestures { } }.padding(20.dp).testTag("dates-sheet")) {
+            Text(sheet.getString("title"), style = rnText(18, 600), color = c.text, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).semantics { heading() })
+            Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.6f).dp).verticalScroll(rememberScrollState())) {
+                for (part in sheet.menuObjects("fields")) {
+                    val field = part.getString("field")
+                    val label = part.getString("label")
+                    val value = part.getString("value")
+                    Text(label.replaceFirstChar { it.uppercase() }, style = rnText(14, 500), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
+                    val pill = RoundedCornerShape(20.dp)
+                    Box(Modifier.padding(top = 6.dp).fillMaxWidth().heightIn(min = 48.dp).clip(pill).rnBorder(1.dp, c.border, pill)
+                        .clickable(role = Role.Button) { datesPicker = field }.semantics { contentDescription = "$label, $value" }
+                        .testTag("dates-$field").padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(value, style = rnText(14, 500), color = c.text, textAlign = TextAlign.Center)
+                    }
+                    val chips = part.menuObjects("quickDates").map { QuickDate(it.getString("label"), it.getBoolean("selected"), it.getString("value")) }
+                    QuickDateChips(label, chips, enabled = true, minHeight = 48) { datesPicker = null; editDates(field, it) }
+                    if (datesPicker == field) DayPickerDialog(part.getString("pickerStart"), { datesPicker = null }) { day -> pickDatesDay(field, day) }
+                }
+                sheet.menuText("issue")?.takeIf { it.isNotEmpty() }?.let { Text(it, style = rnText(14, 400), color = c.warning, modifier = Modifier.padding(top = 8.dp)) }
+            }
+            val canSave = writable && !busy && failedAction == null
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val pill = RoundedCornerShape(20.dp)
+                Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(pill).rnBorder(1.dp, c.border, pill).clickable(role = Role.Button) { closeDates() }
+                    .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(sheet.getString("cancel"), style = rnText(14, 500), color = c.text)
+                }
+                Box(Modifier.weight(1f).fade(if (canSave) 1f else 0.5f).heightIn(min = 48.dp).clip(pill).background(c.tint).rnBorder(1.dp, c.tint, pill)
+                    .clickable(enabled = canSave, role = Role.Button) { saveDates() }.testTag("dates-save")
+                    .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(sheet.getString("save"), style = rnText(14, 500), color = c.onTint)
                 }
             }
         }
     }
 }
 
-/** RN's toast: an optional title, the message, its tone (warning, error, success, or info), and an optional action (RN's Undo). */
+@Composable
+private fun StatusMenuAction(label: String, enabled: Boolean, onClick: () -> Unit) {
+    val c = LocalTheme.current.colors
+    val shape = RoundedCornerShape(20.dp)
+    Box(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
+        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }
+        .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = rnText(14, 500), color = c.text, textAlign = TextAlign.Center)
+    }
+}
+
+
 data class Toast(val title: String?, val message: String, val tone: String, val action: String? = null, val onAction: () -> Unit = {})
 
-/** RN's toast, above the tab bar: a card with the tone's accent bar, core's title, core's message, and its action in the accent. */
+
 @Composable
 fun ToastCard(model: InboxViewModel, modifier: Modifier) {
     val (title, message, tone, action, onAction) = model.toast ?: return
@@ -364,12 +463,12 @@ fun ToastCard(model: InboxViewModel, modifier: Modifier) {
     val shape = RoundedCornerShape(18.dp)
     Row(
         modifier.padding(horizontal = 16.dp).widthIn(max = 520.dp).fillMaxWidth().heightIn(min = 56.dp)
-            .shadow(10.dp, shape).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            .shadow(10.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clickable { model.dismissToast() }.semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // RN's accent: warning (a refused star, a Process Inbox notice), error, success, else the tint (info).
+
         val accent = when (tone) { "warning" -> c.warning; "error" -> c.danger; "success" -> c.success; else -> c.tint }
         Box(Modifier.size(width = 4.dp, height = 36.dp).clip(CircleShape).background(accent))
         Spacer(Modifier.size(12.dp))
@@ -387,52 +486,125 @@ fun ToastCard(model: InboxViewModel, modifier: Modifier) {
     }
 }
 
-/**
- * RN's swipe right (swipeable-task-item.tsx): the row slides open over RN's labelled action button, 90 wide,
- * in the target status's color with core's icon and label (restore: RotateCcw, done: Check, next: ArrowRight).
- * A tap on the button runs the action; a long-press opens the status menu (#1275). Both close the row.
- * A drag past half the button's width opens it; less springs back. The row's own long-press stays free.
- * With [onDelete], a swipe left reveals RN's red Delete (Trash2) the same way.
- */
+
+internal const val TRAY_FRICTION = 1.25f
+internal const val TRAY_OPEN_THRESHOLD_DP = 72f
+internal const val TRAY_DRAG_OFFSET_DP = 28f
+private const val TRAY_BUTTON_DP = 76
+private const val TRAY_GAP_DP = 6
+private const val TRAY_MARGIN_DP = 8
+internal const val TRAY_LABEL_MAX_FONT_SCALE = 1.2f
+private const val TRAY_DRAG_TOSS = 0.05f
+
+internal fun trayWidthDp(buttons: Int): Int = if (buttons == 0) 0 else buttons * TRAY_BUTTON_DP + (buttons - 1) * TRAY_GAP_DP + TRAY_MARGIN_DP
+
+internal fun trayDragOffset(start: Float, dragged: Float, dragOffset: Float, left: Float, right: Float): Float =
+    if (abs(dragged) < dragOffset) start else (start + dragged / TRAY_FRICTION).coerceIn(-right, left)
+
+internal fun settleTray(start: Float, offset: Float, velocity: Float, threshold: Float, left: Float, right: Float): Float {
+    val moved = offset - start + TRAY_DRAG_TOSS * velocity / TRAY_FRICTION
+    return when {
+        start > 0f -> if (moved > -threshold) left else 0f
+        start < 0f -> if (moved < threshold) -right else 0f
+        moved > threshold && left > 0f -> left
+        moved < -threshold && right > 0f -> -right
+        else -> 0f
+    }
+}
+
+internal fun releaseTray(start: Float, dragged: Float, velocity: Float, dragOffset: Float, threshold: Float, left: Float, right: Float): Float =
+    if (abs(dragged) < dragOffset) start else settleTray(start, trayDragOffset(start, dragged, dragOffset, left, right), velocity, threshold, left, right)
+
+private fun Tray?.buttonIds() = this?.let { listOf(it.swipeRight.map(TrayAction::id), it.swipeLeft.map(TrayAction::id)) }
+
+internal fun trayOffsetAfterChange(offset: Float, before: Tray?, after: Tray?): Float = if (before.buttonIds() == after.buttonIds()) offset else 0f
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwipeAction(enabled: Boolean, swipe: RowSwipe, shape: RoundedCornerShape, onSwipe: () -> Unit, onMenu: () -> Unit,
-                        onDelete: (() -> Unit)? = null, content: @Composable () -> Unit) {
-    val theme = LocalTheme.current
+private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, isEnabled: (TrayAction) -> Boolean, run: (TrayAction) -> Unit,
+                      onLongDone: (() -> Unit)?, content: @Composable () -> Unit) {
     val density = LocalDensity.current
-    val open = with(density) { 98.dp.toPx() } // the 90 button and RN's 8 gap
-    val left = if (onDelete != null) -open else 0f
+    val left = with(density) { trayWidthDp(tray?.swipeRight?.size ?: 0).dp.toPx() }
+    val right = with(density) { trayWidthDp(tray?.swipeLeft?.size ?: 0).dp.toPx() }
+    val threshold = with(density) { TRAY_OPEN_THRESHOLD_DP.dp.toPx() }
+    val dragOffset = with(density) { TRAY_DRAG_OFFSET_DP.dp.toPx() }
+    val labels = density.fontScale <= TRAY_LABEL_MAX_FONT_SCALE
     val offset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
+    var start by remember { mutableFloatStateOf(0f) }
+    var dragged by remember { mutableFloatStateOf(0f) }
     val settle = { to: Float -> scope.launch { offset.animateTo(to) }; Unit }
-    // A row that can no longer act (a retry owed elsewhere, a read-only project) closes.
+    val view = LocalView.current
+    val press = { action: TrayAction ->
+        settle(0f)
+        if (action.id in setOf("done", "restore", "next")) view.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
+        if (action.id == "delete" && Build.VERSION.SDK_INT >= 30) view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+        run(action)
+    }
     LaunchedEffect(enabled) { if (!enabled) offset.snapTo(0f) }
+    var shownTray by remember { mutableStateOf(tray) }
+    LaunchedEffect(tray) {
+        val kept = trayOffsetAfterChange(offset.targetValue, shownTray, tray)
+        shownTray = tray
+        if (kept != offset.targetValue) offset.snapTo(kept)
+    }
     Box {
-        if (offset.value < 0f && onDelete != null) {
-            val delete = t("task.aria.delete")
-            Column(Modifier.matchParentSize().padding(start = 8.dp).wrapContentWidth(Alignment.End).width(90.dp).clip(shape)
-                .background(theme.deleteAction).clickable(role = Role.Button) { settle(0f); onDelete() }.semantics { contentDescription = delete },
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(Lucide.Trash2, null, tint = theme.onAction, modifier = Modifier.size(20.dp))
-                Text(t("common.delete"), style = rnText(12, 600), color = theme.onAction, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-        if (offset.value > 0f) {
-            val spoken = t("task.aria.action").replace("{{action}}", swipe.label)
-            Column(Modifier.matchParentSize().padding(end = 8.dp).wrapContentWidth(Alignment.Start).width(90.dp).clip(shape)
-                .background(theme.status(swipe.target).text).testTag("swipe-action")
-                .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = { settle(0f); onMenu() }) { settle(0f); onSwipe() }
-                .semantics { contentDescription = spoken },
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Icon(when (swipe.icon) { "restore" -> Lucide.RotateCcw; "done" -> Lucide.Check; else -> Lucide.ArrowRight }, null,
-                    tint = theme.onAction, modifier = Modifier.size(20.dp))
-                Text(swipe.label, style = rnText(12, 600), color = theme.onAction, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
+        if (tray != null && offset.value > 0f) TrayButtons(tray.swipeRight, Alignment.Start, shape, labels, isEnabled, press,
+            onLongDone?.let { long -> { settle(0f); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); long() } })
+        if (tray != null && offset.value < 0f) TrayButtons(tray.swipeLeft, Alignment.End, shape, labels, isEnabled, press, null)
         Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.draggable(
-            state = rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceIn(left, open)) } },
+            state = rememberDraggableState { delta ->
+                dragged += delta
+                val to = trayDragOffset(start, dragged, dragOffset, left, right)
+                scope.launch { offset.snapTo(to) }
+            },
             orientation = Orientation.Horizontal, enabled = enabled,
-            onDragStopped = { settle(if (offset.value > open / 2) open else if (offset.value < left / 2) left else 0f) },
-        )) { content() }
+            onDragStarted = { start = offset.targetValue; dragged = 0f },
+            onDragStopped = { velocity -> settle(releaseTray(start, dragged, velocity, dragOffset, threshold, left, right)) },
+        )) {
+            content()
+            if (offset.targetValue != 0f) Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures(onLongPress = { }) { settle(0f) } })
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BoxScope.TrayButtons(actions: List<TrayAction>, side: Alignment.Horizontal, shape: RoundedCornerShape, labels: Boolean,
+                                 isEnabled: (TrayAction) -> Boolean, press: (TrayAction) -> Unit, onLongDone: (() -> Unit)?) {
+    val theme = LocalTheme.current
+    Row(Modifier.matchParentSize().wrapContentWidth(side), horizontalArrangement = Arrangement.spacedBy(TRAY_GAP_DP.dp)) {
+        for (action in actions) {
+            val enabled = isEnabled(action)
+            val long = onLongDone?.takeIf { action.id == "done" && enabled }
+            val spoken = if (action.id == "delete") t("task.aria.delete") else t("task.aria.action").replace("{{action}}", action.label)
+            val color = when (action.id) {
+                "done" -> theme.status("done").text
+                "focus" -> theme.star
+                "organize", "next" -> theme.status("next").text
+                "dates" -> theme.status("someday").text
+                "restore" -> theme.status("inbox").text
+                else -> theme.deleteAction
+            }
+            Column(Modifier.fade(if (enabled) 1f else 0.5f).width(TRAY_BUTTON_DP.dp).fillMaxHeight().heightIn(min = 48.dp).clip(shape).background(color)
+                .testTag("swipe-${action.id}")
+                .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = long,
+                    onLongClickLabel = long?.let { t("task.completeBackdateHintMobile") }) { press(action) }
+                .semantics { contentDescription = spoken }.padding(horizontal = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
+                val icon = when (action.id) {
+                    "done" -> Lucide.Circle
+                    "focus" -> if (action.focused) Lucide.StarFilled else Lucide.Star
+                    "organize" -> Lucide.FolderOpen
+                    "dates" -> Lucide.CalendarDays
+                    "restore" -> Lucide.RotateCcw
+                    "next" -> Lucide.ArrowRight
+                    else -> Lucide.Trash2
+                }
+                Icon(icon, null, tint = theme.onAction, modifier = Modifier.size(20.dp))
+                if (labels) Text(action.label, style = rnText(12, 600), color = theme.onAction, textAlign = TextAlign.Center, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }

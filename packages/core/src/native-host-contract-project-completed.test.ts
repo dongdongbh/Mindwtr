@@ -80,6 +80,28 @@ describe('native Project completed view', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it.each([
+        ['default', ['done-z', 'done-a']],
+        ['title', ['done-a', 'done-z']],
+        ['due', ['done-a', 'done-z']],
+    ] as const)('uses the saved project %s sort for expanded completed rows without writes', async (taskSortBy, expected) => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        useTaskStore.setState({
+            _allProjects: [project('parallel', { taskSortBy })],
+            _allTasks: [
+                task('done-z', 'parallel', 'done', { title: 'Zulu', completedAt: '2026-09-03', dueDate: '2026-09-05' }),
+                task('done-a', 'parallel', 'archived', { title: 'Alpha', completedAt: '2026-09-02', dueDate: '2026-09-04' }),
+            ],
+        });
+        saveData.mockClear();
+        const result = host.getProjectDetailView({ projectId: 'parallel', offset: 0, limit: NATIVE_HOST_MAX_WINDOW,
+            showCompleted: true, completedCollapsed: false });
+        if (!result.ok) throw new Error(result.error.code);
+        expect(result.value.items.flatMap((item) => item.type === 'task' ? [item.row.id] : [])).toEqual(expected);
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
     it('binds paging to the exact project and controls while preserving the legacy detail shape', async () => {
         const host = createNativeHostContract();
         expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
@@ -177,5 +199,24 @@ describe('native Project completed view', () => {
         expect(host.getProjectDetailView({ ...valid, projectId: 'missing' }))
             .toMatchObject({ ok: false, error: { code: 'TASK_NOT_FOUND' } });
         expect(saveData).not.toHaveBeenCalled();
+    });
+
+
+    it('labels each section header with its flow in a Per section project only', async () => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        const section = (id: string, projectId: string, order: number, extra: Partial<Section> = {}): Section =>
+            ({ id, projectId, title: id, order, createdAt: stamp, updatedAt: stamp, ...extra });
+        useTaskStore.setState({ _allProjects: [project('flow', { perSectionFlow: true }), project('plain')],
+            _allSections: [section('steps', 'flow', 0, { isSequential: true }), section('ideas', 'flow', 1), section('plain-s', 'plain', 0)],
+            _allTasks: [task('a', 'flow', 'next', { sectionId: 'steps' }), task('b', 'flow', 'next', { sectionId: 'ideas' }),
+                task('c', 'plain', 'next', { sectionId: 'plain-s' })] });
+        const headers = (projectId: string) => {
+            const result = host.getProjectDetailView({ projectId, offset: 0, limit: 50, showCompleted: false, completedCollapsed: false });
+            if (!result.ok) throw new Error(result.error.code);
+            return result.value.items.filter((item) => item.type === 'section').map((item) => [item.id, (item as { flowLabel?: string }).flowLabel]);
+        };
+        expect(headers('flow')).toEqual([['steps', 'Sequential'], ['ideas', 'Parallel']]);
+        expect(headers('plain')).toEqual([['plain-s', undefined]]);
     });
 });

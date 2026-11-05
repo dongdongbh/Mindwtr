@@ -17,8 +17,7 @@ enum NativeAttachmentFilesError: LocalizedError, Equatable {
     }
 }
 
-/// Platform IO only. The library owner serializes calls and same-turn deletion;
-/// shared core continues to own attachment persistence, cleanup and sync policy.
+
 final class NativeAttachmentFiles {
     struct Reply { let value: Any?; let bytes: Data? }
     struct CalendarFileSelection: Sendable {
@@ -91,7 +90,7 @@ final class NativeAttachmentFiles {
     enum BaselineAttachmentRetirementOutcome: String, Sendable, Equatable {
         case removed, absent, generationChanged, unsafeEntry
     }
-    /// Current eligible managed generation, separate from Add publication proof.
+
     struct BaselineAttachmentProof: Sendable, Equatable {
         let targetURI: String
         let sha256: String
@@ -103,8 +102,8 @@ final class NativeAttachmentFiles {
         case leafAbsent(directoryIdentity: String)
         case managedDirectoryAbsent(documentsIdentity: String)
     }
-    /// No case grants deletion or domain authority. In particular an absent
-    /// observation must never adopt a generation which appears afterward.
+
+
     enum BaselineAttachmentObservation: Sendable, Equatable {
         case present(BaselineAttachmentProof)
         case noOwnedGeneration(targetURI: String, absence: BaselineAttachmentAbsence)
@@ -133,7 +132,7 @@ final class NativeAttachmentFiles {
     var isRNCandidate: Bool { layout == .rnCandidate }
     var sourceRoots: [URL] { [documents, cache] }
     var directoriesJSON: String {
-        // URLs are native-owned strings; JSON serialization cannot fail.
+
         let object = ["document": documents.absoluteString, "cache": cache.absoluteString]
         return String(decoding: try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
     }
@@ -300,18 +299,15 @@ final class NativeAttachmentFiles {
         return Reply(value: nil, bytes: nil)
     }
 
-    /// Only one named regular file or symlink entry; folder durability is a
-    /// separate file-thread syncParent call after the core ownership decision.
+
     func deleteNow(_ uri: String) throws { try remove(reference(uri), directories: false, sync: false) }
 
-    // Matches readNativeAttachments' nonempty 500-character ID bound. Swift's
-    // UTF-16 count preserves JS string-length semantics without a UUID grammar.
+
     static func validBaselineAttachmentID(_ value: String) -> Bool {
         !value.isEmpty && value.utf16.count <= 500 && !value.utf8.contains(0)
     }
 
-    /// Captures a shared-selected baseline candidate's current local generation.
-    /// This never creates directories, reads unmanaged targets, or retires bytes.
+
     func snapshotBaselineAttachment(attachmentID: String, targetURI: String, maximumReadBytes: Int? = nil,
                                     publishedGeneration: stat? = nil,
                                     checkCancellation: () throws -> Void = {}) throws -> BaselineAttachmentObservation {
@@ -325,8 +321,8 @@ final class NativeAttachmentFiles {
             return value
         }
         try checkCancellation()
-        // Cross-platform provider/remote records carry no native file authority.
-        // Preserve the URI without attempting resolution or any target IO.
+
+
         guard scheme.lowercased() == "file" else { return observed(.unmanaged(targetURI: targetURI)) }
         guard let leaf = try baselineLeaf(attachmentID: attachmentID, targetURI: targetURI) else {
             return observed(.unmanaged(targetURI: targetURI))
@@ -391,8 +387,8 @@ final class NativeAttachmentFiles {
                 throw NativeAttachmentFilesError.unavailable
             }
         }
-        // Cancellation callbacks can mutate bytes and any ancestor. Compare
-        // retained descriptors with the named tree on both sides of each call.
+
+
         func check() throws { try validatePresent(); try checkCancellation(); try validatePresent() }
         try check()
         let content = try hashContents(fd, maximumReadBytes: maximumReadBytes, checkCancellation: check)
@@ -405,15 +401,13 @@ final class NativeAttachmentFiles {
     private func baselineLeaf(attachmentID: String, targetURI: String) throws -> String? {
         let pathBytes = Array(try Self.filePath(targetURI).utf8), prefix = Array((managedRoot.path + "/").utf8)
         let leafBytes = Array(pathBytes.dropFirst(prefix.count))
-        // Empty components cannot expand RN's exact flat ID-name admission.
+
         guard pathBytes.starts(with: prefix), !leafBytes.isEmpty, !leafBytes.contains(47),
               leafBytes == Array(attachmentID.utf8) || leafBytes.starts(with: Array((attachmentID + ".").utf8)) else { return nil }
         return String(decoding: leafBytes, as: UTF8.self)
     }
 
-    /// Native-only evidence for a future durable copy intent, not editor ownership.
-    /// Native Project Add captures the descriptor used by the actual directory
-    /// creation; later pathname observations cannot substitute a replacement.
+
     func ensureManagedDirectoryProof(checkCancellation: () throws -> Void) throws -> String {
         try checkCancellation()
         let path = try reference(managedRoot.absoluteString)
@@ -451,16 +445,16 @@ final class NativeAttachmentFiles {
               proof.sha256 == receipt.proof.sha256, proof.size == receipt.size else { throw NativeAttachmentFilesError.unavailable }
         return proof
     }
-    /// One imported snapshot. A returned final belongs to this library for its
-    /// lifetime, including after its subscription is removed or restored.
+
+
     func copyCalendarProviderSource(_ selectedURL: URL, checkCancellation: () throws -> Void) throws -> CalendarFileSelection {
         let receipt: ProviderCacheCopyReceipt
         do {
             receipt = try copyProviderSource(selectedURL, photo: nil,
                 maximumProviderBytes: Int64(Self.maximumPlaintextSourceBytes), checkCancellation: checkCancellation)
         } catch NativeAttachmentFilesError.providerTooLarge { throw NativeAttachmentFilesError.tooLarge }
-        // This synchronous helper has finished all consumers before retiring its
-        // borrowed cache generation; uncertain/replaced generations are retained.
+
+
         defer { _ = try? retireProviderSource(receipt, checkCancellation: {}) }
         let leaf = UUID().uuidString.lowercased() + "-" + receipt.proof.sha256 + ".ics"
         let target = Reference(cache: false, components: ["calendar-files", leaf])
@@ -491,8 +485,7 @@ final class NativeAttachmentFiles {
         return CalendarFileSelection(uri: uri, fileName: receipt.fileName)
     }
 
-    /// URI metadata grants only the fixed owned family, never an old/provider
-    /// path. Shared Calendar admission still owns current saved source authority.
+
     func readCalendarFile(_ uri: String, checkCancellation: () throws -> Void) throws -> Data {
         try checkCancellation()
         let (leaf, expectedHash) = try calendarLeaf(uri)
@@ -536,8 +529,8 @@ final class NativeAttachmentFiles {
     }
 
     private func discardUnreturnedCalendarFile(_ path: Reference, generation: stat) {
-        // Only an exact unreturned inode/generation can be removed. No orphan
-        // sweep or cleanup of returned final snapshots is authorized here.
+
+
         guard let directory = try? openCalendarDirectory(create: false) else { return }
         defer { Darwin.close(directory) }
         guard let leaf = path.components.last else { return }
@@ -579,8 +572,8 @@ final class NativeAttachmentFiles {
             .split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard old.count == current.count else { throw NativeAttachmentFilesError.invalidRequest }
         if !zip(old, current).allSatisfy({ Self.equalName($0.0, $0.1) }) {
-            // Match the established native attachment policy: only one actual
-            // Application/<UUID>/Library anchor may change its container UUID.
+
+
             func containerUUID(_ value: String) -> Bool {
                 value.utf8.count == 36 && UUID(uuidString: value)?.uuidString.lowercased() == value.lowercased()
             }
@@ -608,9 +601,8 @@ final class NativeAttachmentFiles {
         try checkCancellation()
         let accessed = selectedURL.startAccessingSecurityScopedResource()
         defer { if accessed { selectedURL.stopAccessingSecurityScopedResource() } }
-        // Coordination can block on special files before its accessor runs.
-        // Regular provider placeholders remain eligible for coordinated hydration;
-        // the accessor still validates the opened generation after coordination.
+
+
         var selected = stat()
         guard Darwin.lstat(selectedPath, &selected) == 0 else { throw Self.failure() }
         guard selected.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), selected.st_nlink == 1 else {
@@ -642,8 +634,8 @@ final class NativeAttachmentFiles {
         let sourcePath = try Self.filePath(url.absoluteString)
         let sourceURL = URL(fileURLWithPath: sourcePath)
         let sourceParentPath = sourceURL.deletingLastPathComponent().path
-        // Provider scope can grant this file without parent-directory reads.
-        // Parent metadata stays mandatory; every file open refuses all symlinks.
+
+
         func sourceParentIdentity() throws -> Identity {
             var value = stat()
             guard Darwin.lstat(sourceParentPath, &value) == 0 else { throw Self.failure() }
@@ -720,8 +712,7 @@ final class NativeAttachmentFiles {
         }
     }
 
-    /// Bounded native creation provenance, separate from any publication or
-    /// durable draft authority. No caller pathname, metadata or digest is used.
+
     func createPlaintextDownloadSource(bytes: Data, checkCancellation: () throws -> Void) throws
         -> (receipt: ProviderCacheCopyReceipt, source: CacheSourceProof) {
         guard bytes.count <= Self.maximumPlaintextSourceBytes else { throw NativeAttachmentFilesError.tooLarge }
@@ -742,8 +733,8 @@ final class NativeAttachmentFiles {
             guard written == Int64(bytes.count) else { throw NativeAttachmentFilesError.unavailable }
             return AttachmentStageContent(sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(), size: written)
         }
-        // Return the actual minted receipt even if cancellation arrives after
-        // completion; the caller must retain it before fencing late delivery.
+
+
         return (receipt, receipt.proof)
     }
 
@@ -876,8 +867,8 @@ final class NativeAttachmentFiles {
         var promoted = false, complete = false, outputFrozen = false
         defer {
             if !complete {
-                // A pathname is insufficient even in a failure defer: ancestors
-                // and the exact created single-link inode must still match.
+
+
                 let cleanupPath = promoted ? path : partialPath
                 let named = Parent(fd: parent.fd, leaf: promoted ? leaf : partial)
                 if (try? verify(named, path: cleanupPath)) != nil,
@@ -898,8 +889,8 @@ final class NativeAttachmentFiles {
             try beforeProviderOutputNamedStat?(outputFrozen)
             #endif
             let current = try Self.named(named)
-            // Creation authority owns this output while it is being filled.
-            // After sync/capture, every generation check includes ctime again.
+
+
             let sameGeneration = outputFrozen ? Self.unchanged(retained, current)
                 : Identity(retained) == Identity(current) && retained.st_size == current.st_size
                     && retained.st_mode == current.st_mode
@@ -960,8 +951,7 @@ final class NativeAttachmentFiles {
         return ProviderCacheCopyReceipt(proof: observed, generation: try Self.regular(output), fileName: name, mimeType: mimeType)
     }
 
-    /// A cheap immutable-generation fence for the existing Add owner checks.
-    /// Content was hashed at minting; same-inode writes change the bound ctime.
+
     func requireProviderSource(_ receipt: ProviderCacheCopyReceipt) throws {
         let proof = receipt.proof, path = try reference(proof.sourceURI)
         guard path.cache, path.components.count == 1, proof.cacheRootIdentity == Self.token(cacheIdentity),
@@ -981,7 +971,7 @@ final class NativeAttachmentFiles {
         }
     }
 
-    /// Caller must first settle/drain all consumers in the same library turn.
+
     func retireProviderSource(_ receipt: ProviderCacheCopyReceipt,
                               checkCancellation: () throws -> Void) throws -> BaselineAttachmentRetirementOutcome {
         let proof = receipt.proof, path = try reference(proof.sourceURI)
@@ -992,8 +982,7 @@ final class NativeAttachmentFiles {
              retainDifferent: true, checkCancellation: checkCancellation)
     }
 
-    /// Swift's exact durable Project download journal grants this adopted-source
-    /// authority. A borrowed proof or JSON file call must never reach this method.
+
     func retireAdoptedProjectDownloadSource(_ proof: CacheSourceProof,
                                            requireOwner: () throws -> Void) throws -> BaselineAttachmentRetirementOutcome {
         try requireOwner()
@@ -1028,8 +1017,7 @@ final class NativeAttachmentFiles {
                                 parentIdentity: try Self.token(Self.identity(parent.fd)))
     }
 
-    /// Fills only a recorded exclusive immutable stage. Failure retains its inode
-    /// and partial bytes; the caller must persist intent/proof before invoking.
+
     func fillReservedAttachmentStage(sourceProof: CacheSourceProof, stageProof: ReservedAttachmentStageProof,
                                      checkCancellation: () throws -> Void = {}) throws -> AttachmentStageContent {
         guard Self.validDigest(sourceProof.sha256), sourceProof.size >= 0, sourceProof.size <= 9_007_199_254_740_991,
@@ -1072,8 +1060,8 @@ final class NativeAttachmentFiles {
                   Self.unchanged(outputInfo, namedStage), outputInfo.st_nlink == 1, namedStage.st_nlink == 1,
                   Identity(before) != Identity(outputInfo) else { throw NativeAttachmentFilesError.unavailable }
         }
-        // Cancellation callbacks can mutate paths too. Always validate after them,
-        // including before each write to avoid using a newly hard-linked stage.
+
+
         func checkedCancellation() throws { try checkCancellation(); try validate() }
         try checkedCancellation()
         guard Darwin.ftruncate(output, 0) == 0, Darwin.lseek(output, 0, SEEK_SET) == 0 else {
@@ -1092,8 +1080,8 @@ final class NativeAttachmentFiles {
               try Self.unchanged(written, Self.named(stage)), Darwin.lseek(output, 0, SEEK_SET) == 0 else {
             throw NativeAttachmentFilesError.unavailable
         }
-        // The source digest proves what was read, not what is still in the stage:
-        // a cancellation callback may have rewritten an earlier copied chunk.
+
+
         let stagedContent = try hashContents(output, checkCancellation: checkedCancellation)
         guard stagedContent == content, try Self.unchanged(written, Self.regular(output)),
               try Self.unchanged(written, Self.named(stage)), Darwin.fsync(output) == 0,
@@ -1106,9 +1094,7 @@ final class NativeAttachmentFiles {
         return content
     }
 
-    /// Positive present-stage observation only; this does not prove that
-    /// publication was never attempted or grant cleanup authority. Refusal is
-    /// unclassified, and this path never opens a source or public target.
+
     func observeFilledAttachmentStage(stageProof: ReservedAttachmentStageProof, sha256: String, size: Int64,
                                       checkCancellation: () throws -> Void = {}) throws -> AttachmentStageContent {
         guard Self.validDigest(sha256), size >= 0, size <= 9_007_199_254_740_991,
@@ -1138,8 +1124,8 @@ final class NativeAttachmentFiles {
                 throw NativeAttachmentFilesError.unavailable
             }
         }
-        // Cancellation predicates may mutate content and any ancestor. Retain
-        // descriptors and compare the named tree again after every callback.
+
+
         func check() throws { try checkCancellation(); try validate() }
         try check()
         let content = try hashContents(fd, checkCancellation: check)
@@ -1150,9 +1136,7 @@ final class NativeAttachmentFiles {
         return content
     }
 
-    /// Re-proves a lost publication acknowledgment from the recorded stage inode.
-    /// Equal content alone is never ownership. This reads/flushes and retains every
-    /// uncertain file/namespace for the future durable draft owner.
+
     func verifyPublishedAttachment(targetURI: String, stageProof: ReservedAttachmentStageProof,
                                    sha256: String, size: Int64,
                                    checkCancellation: () throws -> Void = {}) throws -> PublishedAttachmentProof {
@@ -1176,9 +1160,8 @@ final class NativeAttachmentFiles {
                   try Self.token(Self.identity(parent.fd)) == stageProof.directoryIdentity else {
                 throw NativeAttachmentFilesError.unavailable
             }
-            // A completed publication removes its private directory. If a crash
-            // retained it, only that exact directory with an absent stage agrees
-            // with rename publication. Never remove it here.
+
+
             var namespace = stat()
             let name = stagePath.components[1]
             if Darwin.fstatat(parent.fd, name, &namespace, AT_SYMLINK_NOFOLLOW) != 0 {
@@ -1220,10 +1203,7 @@ final class NativeAttachmentFiles {
                                         identity: stageProof.stagedIdentity, directoryIdentity: stageProof.directoryIdentity)
     }
 
-    /// Native-only retirement of one recorded publication. The caller must
-    /// separately own the durable retirement decision and latest shared keep
-    /// check, and serialize this whole operation under the same library owner.
-    /// A failure after unlink is uncertain; an exact missing retry still syncs.
+
     func retirePublishedAttachment(targetURI: String, proof: PublishedAttachmentProof,
                                    checkCancellation: () throws -> Void = {}) throws -> PublishedAttachmentRetirementOutcome {
         guard Self.validDigest(proof.sha256), proof.size >= 0, proof.size <= 9_007_199_254_740_991,
@@ -1240,8 +1220,7 @@ final class NativeAttachmentFiles {
         }
     }
 
-    /// Only a separately journaled candidate and latest shared keep decision
-    /// may call this typed facade. An observation of absence is not a proof.
+
     func retireBaselineAttachment(attachmentID: String, proof: BaselineAttachmentProof,
                                   checkCancellation: () throws -> Void = {},
                                   checkOwnership: () throws -> Void = {}) throws -> BaselineAttachmentRetirementOutcome {
@@ -1262,8 +1241,7 @@ final class NativeAttachmentFiles {
         return outcome
     }
 
-    // One descriptor-bound retirement engine. Legacy publication mode retains
-    // its refusal/hook order; only baseline mode can positively keep a generation.
+
     private func retireGeneration(path: Reference, proof: PublishedAttachmentProof, retainDifferent: Bool,
                                   checkCancellation: () throws -> Void,
                                   checkOwnership: () throws -> Void = {}) throws -> BaselineAttachmentRetirementOutcome {
@@ -1351,8 +1329,8 @@ final class NativeAttachmentFiles {
         try checkOwnership()
         try beforeRetirementUnlink?()
         #endif
-        // The final cancellation/identity check and unlink have no intervening
-        // await. Once unlink starts, a late cancellation cannot undo its effect.
+
+
         try check()
         guard Darwin.unlinkat(parent.fd, parent.leaf, 0) == 0 else { throw NativeAttachmentFilesError.unavailable }
         do {
@@ -1411,8 +1389,8 @@ final class NativeAttachmentFiles {
               let path = url.percentEncodedPath.removingPercentEncoding,
               path.hasPrefix("/"), !path.utf8.contains(0),
               !parts(path).contains("."), !parts(path).contains("..") else { throw NativeAttachmentFilesError.invalidRequest }
-        // Only Apple's fixed system alias is normalized. User paths are never
-        // resolved through symlinks to gain authorization.
+
+
         if parts(path).first == "var", let target = try? FileManager.default.destinationOfSymbolicLink(atPath: "/var"),
            ["private/var", "/private/var"].contains(target) { return "/private" + path }
         return path
@@ -1431,7 +1409,7 @@ final class NativeAttachmentFiles {
     private static func decodeBytes(_ value: Any?) throws -> Data {
         guard let text = value as? String else { throw NativeAttachmentFilesError.invalidRequest }
         guard text.utf8.count <= ((maximumBytes + 2) / 3) * 4 else { throw NativeAttachmentFilesError.tooLarge }
-        // Bound decoded size before allocation, including the padded boundary.
+
         let padding = text.hasSuffix("==") ? 2 : text.hasSuffix("=") ? 1 : 0
         guard text.utf8.count / 4 * 3 - padding <= maximumBytes else { throw NativeAttachmentFilesError.tooLarge }
         guard let bytes = Data(base64Encoded: text), bytes.count <= maximumBytes,
@@ -1446,8 +1424,8 @@ final class NativeAttachmentFiles {
     }
     private static func failure() -> NativeAttachmentFilesError { errno == ENOENT ? .missing : .unavailable }
     private static func openAbsoluteDirectory(_ path: String) throws -> Int32 {
-        // iOS permits the owned directory but can deny reading its ancestors.
-        // The kernel still refuses every symlink in the complete path.
+
+
         let directory = Darwin.open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
         guard directory >= 0 else { throw failure() }
         return directory
@@ -1756,8 +1734,8 @@ final class NativeAttachmentFiles {
                 .appendingPathComponent(parent.leaf).absoluteString)
         }
         #endif
-        // A caller-supplied check may itself observe or change native state.
-        // Run it before the complete publication proof, never after that proof.
+
+
         try checkCancellation()
         try verify(parent, path: path)
         if calendar || exclusive {
@@ -1765,7 +1743,7 @@ final class NativeAttachmentFiles {
             catch NativeAttachmentFilesError.missing { }
         } else { try validTarget(parent) }
         try beforePromotionValidation()
-        // The exclusive stage must still be the inode this operation wrote.
+
         var staged = stat()
         guard Darwin.fstatat(parent.fd, pending, &staged, AT_SYMLINK_NOFOLLOW) == 0,
               try Self.unchanged(written, Self.regular(output)), Self.unchanged(written, staged) else {

@@ -3,7 +3,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// Independent callback acceptance only. Domain admission and receipt protection belong to the dispatcher.
+
 public actor NativeReminderInbox {
     public enum Stage: String, Sendable { case captured, admitting }
     public struct Item: Equatable, Sendable {
@@ -59,7 +59,7 @@ public actor NativeReminderInbox {
     }
     static func deliveryForPersonalIntake(_ bits: String) throws -> Double { try ReminderInboxState.delivery(bits) }
 
-    /// The selected container must already exist; only its selected library descendants may be created.
+
     public init(selection: NativeLaunchSelection) throws {
         do { files = try ReminderInboxFiles(selection: selection) }
         catch { throw ReminderInboxFiles.failure }
@@ -199,7 +199,7 @@ public actor NativeReminderInbox {
                 try ReminderInboxState.delivery($0.deliveredAtBits) < ReminderInboxState.delivery($1.deliveredAtBits)
             }
             let floor = ordered[next.tombstones.count - 16_384 - 1].deliveredAtBits
-            // shortcut: deliveries at or below the terminal-capacity floor refuse, raise the bound if late callbacks need longer retention.
+
             next.retiredThrough = floor
             next.tombstones = try next.tombstones.filter {
                 try ReminderInboxState.delivery($0.deliveredAtBits) > ReminderInboxState.delivery(floor)
@@ -397,7 +397,7 @@ private struct ReminderInboxState {
     }
 
     func encode(namespace: String) throws -> Data {
-        // Bound the outer JSON's escaping before materializing its entire encoded file.
+
         func quotedBound(_ text: String) -> Int {
             text.unicodeScalars.reduce(2) { size, scalar in
                 size + ([8, 9, 10, 12, 13].contains(scalar.value) ? 2 : scalar.value < 32 ? 6 : scalar.value == 34 || scalar.value == 92 ? 2
@@ -424,7 +424,7 @@ private struct ReminderInboxState {
     }
 }
 
-/// Synchronous FD ownership keeps actor operations free of suspension during a disk transaction.
+
 private final class ReminderInboxFiles {
     static let byteLimit = 24 * 1024 * 1024
     static var failure: HostFailure { HostFailure("Native reminder response storage is unavailable") }
@@ -596,7 +596,7 @@ private final class ReminderInboxFiles {
             #if DEBUG
             try beforePublication?()
             #endif
-            // Recheck after the seam and immediately before writing through the pinned directory.
+
             try verifyNamespace()
             guard Self.matches(try read(), pending.before) else { poisoned = true; throw Self.failure }
             pending.release()

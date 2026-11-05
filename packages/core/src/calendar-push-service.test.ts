@@ -17,11 +17,7 @@ import type { CalendarSyncEntry } from './sqlite-adapter';
 import type { Task } from './types';
 import { deterministicHash128Hex } from './uuid';
 
-/**
- * The push's device side as a native host binds it. React Native's own suite
- * (apps/mobile/tests/calendar-push-sync.test.ts) runs the same code through its
- * binding.
- */
+
 const google = { name: 'alex@gmail.com', type: 'com.google', isLocalAccount: false };
 const PRIMARY: DeviceCalendar = { id: 'primary', title: 'alex@gmail.com', ownerAccount: 'alex@gmail.com', accessLevel: 'owner', allowsModifications: true, source: google };
 
@@ -29,11 +25,11 @@ const task = (id: string, extra: Partial<Task> = {}): Task => ({
     id, title: `Task ${id}`, status: 'next', tags: [], contexts: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', ...extra,
 } as Task);
 
-/** The process died before a write: the write did not happen, and nothing after it runs. */
+
 class Death extends Error {}
 
 function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: Record<string, string>; entries?: CalendarSyncEntry[]; tasks?: Task[] } = {}) {
-    // Every device write first ticks: at `dieAt` the process dies, and every later write fails too.
+
     const life = { step: 0, dieAt: Infinity, died: false, failDelete: false, failUpdate: false, failList: false, lostCreateResponse: false };
     const tick = () => {
         life.step += 1;
@@ -134,11 +130,7 @@ function device(options: { os?: string; calendars?: DeviceCalendar[]; storage?: 
 
 type Phone = ReturnType<typeof device>;
 
-/**
- * A death between each pair of steps: runs `operation` on a device that dies before its
- * first write, then before its second, and so on, until a run finishes. After each death a
- * new service over the same device (a restart) runs `retry`; `check` sees every outcome.
- */
+
 async function everyDeath(
     setup: () => Phone,
     operation: (service: ReturnType<typeof createCalendarPushService>) => Promise<unknown>,
@@ -169,11 +161,11 @@ describe('calendar push behind the host ports', () => {
         const first = createCalendarPushService(phone.host);
         expect(await first.ensureMindwtrCalendar()).toBe('created-1');
         expect(phone.writes).toEqual([['createCalendar', 'Mindwtr', 'alex@gmail.com']]);
-        // A restart: a new service over the same device.
+
         const restarted = createCalendarPushService(phone.host);
         expect(await restarted.ensureMindwtrCalendar()).toBe('created-1');
         expect(phone.writes).toHaveLength(1);
-        // Deleted outside the app: made again, once.
+
         phone.calendars.splice(phone.calendars.findIndex((calendar) => calendar.id === 'created-1'), 1);
         expect(await restarted.ensureMindwtrCalendar()).toBe('created-2');
         expect(phone.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('created-2');
@@ -183,7 +175,7 @@ describe('calendar push behind the host ports', () => {
         const phone = device({
             calendars: [
                 PRIMARY,
-                { id: 'saved', title: 'Anything', ownerAccount: 'alex@gmail.com', accessLevel: 'owner', source: google },
+                { id: 'saved', title: 'Anything', name: 'mindwtr', ownerAccount: 'alex@gmail.com', accessLevel: 'owner', source: google },
                 { id: 'app-made', title: 'Mindwtr', name: 'mindwtr', accessLevel: 'owner', source: google },
                 { id: 'users-own', title: 'Mindwtr', name: 'alex@gmail.com', accessLevel: 'owner', source: google },
             ],
@@ -197,7 +189,7 @@ describe('calendar push behind the host ports', () => {
         expect(phone.writes).toEqual([['deleteCalendar', 'saved'], ['deleteSyncEntry', 't1']]);
         expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'app-made', 'users-own']);
         expect(phone.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
-        // The chosen calendar was not the one deleted: it stays chosen.
+
         expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('app-made');
         expect([...phone.entries.keys()]).toEqual(['t2']);
     });
@@ -208,7 +200,7 @@ describe('calendar push behind the host ports', () => {
     ])('keeps an unrelated selected target during owned-calendar deletion: $os/$availability', async ({ os, availability }) => {
         const phone = device({
             os,
-            calendars: [PRIMARY, { ...PRIMARY, id: 'saved', title: 'Mindwtr' },
+            calendars: [PRIMARY, { ...PRIMARY, id: 'saved', title: 'Mindwtr', name: 'mindwtr' },
                 ...(availability === 'read-only' ? [{ id: 'selected', title: 'Personal', allowsModifications: false }] : [])],
             storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'selected' },
             entries: [
@@ -553,7 +545,7 @@ describe('calendar push behind the host ports', () => {
             }),
             (service) => service.updateMindwtrCalendarColor('#059669'),
             (phone, dieAt) => {
-                // The next push run makes the calendar if the change stopped between its delete and its create.
+
                 const stored = phone.storage.get(CALENDAR_PUSH_COLOR_KEY);
                 const own = phone.calendars.filter((calendar) => calendar.title === 'Mindwtr');
                 expect({ dieAt, stored, own: own.length <= 1 }).toEqual({ dieAt, stored: '#059669', own: true });
@@ -562,7 +554,7 @@ describe('calendar push behind the host ports', () => {
                         .toEqual({ dieAt, color: '#059669', saved: own[0].id });
                 }
             },
-            // A retry is what a caller sends: React Native's re-pick and the contract's replay skip a color already stored.
+
             async (service) => {
                 if (planCalendarPushColor(await service.getCalendarPushColor(), '#059669')) await service.updateMindwtrCalendarColor('#059669');
             },
@@ -613,11 +605,11 @@ describe('calendar push behind the host ports', () => {
     it('clears nothing when the device cannot list its calendars', async () => {
         const marker = '11111111-1111-4111-8111-111111111111';
         const setups = [
-            // A creation cut short: the marked calendar exists.
+
             { calendars: [PRIMARY, { id: 'made', title: 'Mindwtr', name: `mindwtr:${marker}`, accessLevel: 'owner', source: google }], storage: { [CALENDAR_PUSH_PENDING_KEY]: marker } },
-            // Nothing saved, a chosen calendar.
+
             { calendars: [PRIMARY], storage: { [CALENDAR_PUSH_TARGET_ID_KEY]: 'primary' } },
-            // A saved calendar.
+
             { calendars: [PRIMARY, { id: 'saved', title: 'Mindwtr', accessLevel: 'owner', source: google }], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'saved' } },
         ];
         for (const setup of setups) {
@@ -658,7 +650,7 @@ describe('calendar push behind the host ports', () => {
         expect(phone.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('saved');
         expect(phone.storage.get(CALENDAR_PUSH_TARGET_ID_KEY)).toBe('saved');
         expect([...phone.entries.keys()]).toEqual(['t1']);
-        // A retry that succeeds finishes it.
+
         phone.life.failDelete = false;
         await createCalendarPushService(phone.host).deleteMindwtrCalendar();
         expect(phone.calendars.map((calendar) => calendar.id)).toEqual(['primary']);
@@ -686,6 +678,88 @@ describe('calendar push behind the host ports', () => {
         expect(writes).toBeGreaterThan(3);
     });
 
+    it.each(['reused', 'gone'])('on Android forgets the rows of a saved calendar it does not keep (%s), and touches no event by them', async (how) => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const dated = (id: string) => task(id, { dueDate: '2026-09-10' });
+        const phone = device({
+            calendars: how === 'reused' ? [PRIMARY, reused] : [PRIMARY],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' },
+            tasks: [dated('t1'), dated('t2'), task('t3', { dueDate: '2026-09-10', status: 'done' })],
+            entries: [
+                { taskId: 't1', calendarEventId: 'e70', calendarId: 'saved', platform: 'android', lastSyncedAt: '' },
+                { taskId: 't3', calendarEventId: 'e71', calendarId: 'saved', platform: 'android', lastSyncedAt: '' },
+                { taskId: 't2', calendarEventId: 'e9', calendarId: 'primary', platform: 'android', lastSyncedAt: '' },
+            ],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        const touched = phone.writes.filter(([name]) => name === 'updateEvent' || name === 'deleteEvent').map(([, id]) => id);
+        expect(touched).not.toContain('e70');
+        expect(touched).not.toContain('e71');
+        expect(phone.entries.get('t1')?.calendarId).toBe('created-1');
+        expect(phone.entries.has('t3')).toBe(false);
+    });
+
+    it('on Android forgets the rows of a saved calendar now held by another calendar even while pushing into another chosen calendar', async () => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const personal = { id: 'personal', title: 'Personal', name: 'alex@gmail.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const phone = device({
+            calendars: [PRIMARY, personal, reused],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'personal' },
+            tasks: [task('t1', { dueDate: '2026-09-10' })],
+            entries: [{ taskId: 't1', calendarEventId: 'e70', calendarId: 'saved', platform: 'android', lastSyncedAt: '' }],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.writes.filter(([name, id]) => (name === 'updateEvent' || name === 'deleteEvent') && id === 'e70')).toEqual([]);
+        expect(phone.entries.get('t1')?.calendarId).toBe('personal');
+    });
+
+    it('on Android a chosen calendar that is the saved ID now held by another calendar is not pushed into', async () => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const phone = device({
+            calendars: [PRIMARY, reused],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'saved' },
+            tasks: [task('t1', { dueDate: '2026-09-10' })],
+            entries: [{ taskId: 't1', calendarEventId: 'e70', calendarId: 'saved', platform: 'android', lastSyncedAt: '' }],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.writes.filter(([name, id]) => (name === 'updateEvent' || name === 'deleteEvent') && id === 'e70')).toEqual([]);
+        expect(phone.writes.filter(([name, id]) => name === 'createEvent' && id === 'saved')).toEqual([]);
+        expect(phone.storage.has(CALENDAR_PUSH_TARGET_ID_KEY)).toBe(false);
+        expect(phone.entries.get('t1')?.calendarId).toBe('created-1');
+        const listed = await createCalendarPushService(device({ calendars: [PRIMARY, reused], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' } }).host)
+            .getCalendarPushTargetCalendars();
+        expect(listed.find((entry) => entry.id === 'saved')?.isMindwtrManaged).toBe(false);
+    });
+
+    it('on Android a saved ID now held by a calendar without Mindwtr\'s internal name is not its own', async () => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', color: '#0B8043', accessLevel: 'owner', allowsModifications: true, source: google };
+        const setup = () => device({
+            calendars: [PRIMARY, reused],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_COLOR_KEY]: '#3B82F6' },
+            entries: [{ taskId: 't1', calendarEventId: 'e1', calendarId: 'saved', platform: 'android', lastSyncedAt: '' }],
+        });
+        const pushing = setup();
+        const warned: unknown[] = [];
+        pushing.host.log.warn = (message, context) => { warned.push([message, context.extra]); };
+        expect(await createCalendarPushService(pushing.host).ensureMindwtrCalendar()).toBe('created-1');
+        expect(warned).toEqual([['Saved Mindwtr calendar ID now names another calendar',
+            { releaseCheck: 'v1.3.8/calendar-push-reused-id', outcome: 'skipped' }]]);
+        expect(pushing.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('created-1');
+        const deleting = setup();
+        await createCalendarPushService(deleting.host).deleteMindwtrCalendar();
+        expect(deleting.writes.filter((write) => write[0] === 'deleteCalendar')).toEqual([]);
+        expect(deleting.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'saved']);
+        expect(deleting.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
+        const recoloring = setup();
+        expect(await createCalendarPushService(recoloring.host).updateMindwtrCalendarColor('#059669')).toBe(false);
+        expect(recoloring.writes).toEqual([]);
+        expect(recoloring.calendars.find((calendar) => calendar.id === 'saved')).toEqual(reused);
+        for (const name of ['mindwtr', 'mindwtr:11111111-1111-4111-8111-111111111111']) {
+            const phone = device({ calendars: [PRIMARY, { ...reused, name }], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' } });
+            expect(await createCalendarPushService(phone.host).ensureMindwtrCalendar()).toBe('saved');
+        }
+    });
+
     it('recolors only the calendar it saved', async () => {
         const phone = device({
             calendars: [PRIMARY, { id: 'other-install', title: 'Mindwtr', name: 'mindwtr', color: '#3B82F6', accessLevel: 'owner', allowsModifications: true, source: google }],
@@ -703,7 +777,7 @@ describe('calendar push behind the host ports', () => {
                 { id: 'frozen', title: 'Frozen', allowsModifications: false, source: google },
                 { id: 'named', title: 'Mindwtr', accessLevel: 'owner', source: { name: 'local account', type: 'LOCAL' } },
                 { id: 'alpha', title: 'Alpha', accessLevel: 'owner', source: google },
-                { id: 'managed', title: 'Tasks', accessLevel: 'owner', source: google },
+                { id: 'managed', title: 'Tasks', name: 'mindwtr:11111111-1111-4111-8111-111111111111', accessLevel: 'owner', source: google },
             ],
             storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'managed' },
         });

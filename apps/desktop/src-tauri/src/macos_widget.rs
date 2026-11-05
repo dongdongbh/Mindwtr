@@ -3,13 +3,6 @@ use crate::*;
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 
-// Team-ID-prefixed, not "group.*": macOS Sequoia shows a user-facing
-// authorization prompt for "group.*" application groups in Developer-ID-signed
-// apps, but stays silent for the team-prefixed form (#1054 decision 4). Baked
-// in at compile time by build.rs from the same APPLE_TEAM_ID the release
-// workflow already signs with; a build without it (local dev) gets a
-// placeholder that simply never resolves a container, so this command no-ops
-// instead of crashing.
 #[cfg(target_os = "macos")]
 const MACOS_WIDGET_APP_GROUP: &str = env!("MINDWTR_MACOS_APP_GROUP");
 #[cfg(target_os = "macos")]
@@ -38,9 +31,6 @@ extern "C" fn handle_macos_widget_capture_request() {
         return;
     };
 
-    // Payload-free by design: this proves only that the widget reached the
-    // host. The panel's existing React/store path remains responsible for the
-    // user's text and durable task creation.
     log::info!(
         "macOS widget capture request delivered to host \
          extra.releaseCheck=v1.3.0/macos-widget-capture"
@@ -48,9 +38,6 @@ extern "C" fn handle_macos_widget_capture_request() {
     crate::ui::show_macos_widget_quick_add_window(app);
 }
 
-/// Keeps the process-external widget entry point native and payload-free. The
-/// Objective-C bridge filters by both notification name and this build's App
-/// Group identifier, then invokes the callback on AppKit's main queue.
 pub(crate) fn install_macos_widget_capture_listener(app: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     {
@@ -88,8 +75,7 @@ fn macos_widget_container_dir() -> Option<PathBuf> {
     if raw.is_null() {
         return None;
     }
-    // SAFETY: `raw` is non-null; the bridge allocates via `strdup()`, so the
-    // pointer stays valid until we free it. Copy immediately, then free.
+
     let path = unsafe { CStr::from_ptr(raw) }
         .to_string_lossy()
         .into_owned();
@@ -97,14 +83,6 @@ fn macos_widget_container_dir() -> Option<PathBuf> {
     Some(PathBuf::from(path))
 }
 
-/// Writes the macOS widget's JSON payload to the App Group container and asks
-/// WidgetKit to reload timelines (#1054). Never errors: the App Group
-/// container being unavailable (unsigned dev build, missing entitlement) or
-/// any I/O failure along the way is logged and swallowed, since a widget that
-/// stays stale for a cycle is not worth interrupting the caller over.
-// Off the UI thread: the renderer republishes the whole serialized store on
-// every edit, so an edit burst runs a create_dir_all + write + rename per
-// keystroke-sized change against the App Group container.
 #[tauri::command(async)]
 pub(crate) fn write_macos_widget_payload(payload_json: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -123,8 +101,7 @@ pub(crate) fn write_macos_widget_payload(payload_json: String) -> Result<(), Str
             log::warn!("macOS widget: failed to write payload: {error}");
             return Ok(());
         }
-        // Rename rather than write-in-place so a concurrent widget timeline
-        // read never observes a partially written file.
+
         if let Err(error) = fs::rename(&tmp_path, &final_path) {
             log::warn!("macOS widget: failed to publish payload: {error}");
             return Ok(());

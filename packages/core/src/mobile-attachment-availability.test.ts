@@ -271,7 +271,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     expect(mutations(ports.memory.calls)).toEqual([]);
     expect(preparePlaintextDownload).not.toHaveBeenCalled();
     expect(ports.lines).toContainEqual(expect.objectContaining({
-      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }),
+      level: 'warn', extra: expect.objectContaining({ releaseCheck: expect.stringMatching(/^v1\.3\.4\/(webdav|cloud|dropbox)-download-not-found$/) }),
     }));
     expect(await ports.availability.prepareAttachmentAvailableDetailed!(requested)).toMatchObject({ status: 'prepared', sourceToken: SOURCE_TOKEN });
     expect(ports[fetcher]).toHaveBeenCalledTimes(2);
@@ -374,7 +374,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     try {
       await vi.waitFor(() => expect(webdavGetFile).toHaveBeenCalledTimes(2));
       await vi.waitFor(() => expect(secondSettled).toBe(true));
-      // Adapter arrival order is independent of invocation order (including awaited hashes).
+
       await expect(second).resolves.toMatchObject({ status: 'prepared', sourceToken: SECOND_SOURCE_TOKEN });
       expect(firstSettled).toBe(false);
       expect(preparePlaintextDownload).toHaveBeenCalledTimes(1);
@@ -469,7 +469,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     });
     expect(webdavGetFile).toHaveBeenCalledWith('https://dav.example/Mindwtr/attachments/att-1.txt', expect.anything());
     expect(preparePlaintextDownload).toHaveBeenCalledOnce();
-    // Current-owner freshness is separately checked by the future native353 lease.
+
     expect(requested.title).toBe('Later title.txt');
   });
 });
@@ -655,7 +655,7 @@ describe('mobile attachment availability', () => {
     expect(requested).toEqual(before);
     expect(deletesOutsideScratch(ports.memory.calls)).toEqual([]);
     expect(ports.lines).toContainEqual(expect.objectContaining({
-      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }),
+      level: 'warn', extra: expect.objectContaining({ releaseCheck: expect.stringMatching(/^v1\.3\.4\/(webdav|cloud|dropbox)-download-not-found$/) }),
     }));
     const recovered = await ports.availability.ensureAttachmentAvailableDetailed(requested);
     expect(recovered).toMatchObject({ status: 'available', attachment: { ...requested, uri: `${MANAGED}att-1.txt`, localStatus: 'available' } });
@@ -686,8 +686,8 @@ describe('mobile attachment availability', () => {
     expect(requested).toEqual(before);
     expect([...ports.values.entries()]).toEqual(configBefore);
     expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
-    // Ordinary availability may create the managed directory before requesting
-    // bytes. A refused response must never create or install a file generation.
+
+
     expect(ports.memory.calls.filter((call) => /^(writeBytes|copy|move|delete) /.test(call))).toEqual([]);
     expect(ports.memory.files.size).toBe(0);
   });
@@ -752,7 +752,7 @@ describe('mobile attachment availability', () => {
     expect(await availability.ensureAttachmentAvailableDetailed(requested)).toEqual({ status: 'unavailable' });
     expect(requested).toEqual(before);
     expect(lines).toContainEqual(expect.objectContaining({
-      level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.8/attachment-not-found-kept' }),
+      level: 'warn', message: 'CloudKit attachment att-1 is no longer available',
     }));
   });
 

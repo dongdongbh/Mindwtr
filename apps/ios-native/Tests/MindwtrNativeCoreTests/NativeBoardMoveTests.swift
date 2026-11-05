@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Production JSC/SQLite Board commands in the existing physical XCTest target.
+
 final class NativeBoardMoveTests: XCTestCase {
     private var directory: URL!, bundle: URL!, service: String!, namespace: String!
     private var database: URL { directory.appendingPathComponent("core.sqlite") }
@@ -131,7 +131,7 @@ final class NativeBoardMoveTests: XCTestCase {
         _ = try sqlite.execute("INSERT INTO tasks (id, title, status, projectId, tags, contexts, isFocusedToday, showFutureRecurrence, suppressMindwtrReminders, pushCount, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             parametersJSON: json([id + "-protected", "Protected destination", "reference", "destination-project-archived", "[]", "[]", 0, 0, 0, 0, at, at, 1]))
         sqlite.close()
-        // Reuse actual core serialization before comparing protected raw cells.
+
         let canonicalizer = host()
         _ = try await canonicalizer.start()
         _ = try await canonicalizer.call("captureSubmit", argumentsJSON: capture(canonicalizer,
@@ -220,7 +220,7 @@ final class NativeBoardMoveTests: XCTestCase {
         XCTAssertEqual(try json(object(XCTUnwrap(reply))), try json(XCTUnwrap(prepared["result"])))
         XCTAssertEqual(try storedTask(id)["status"] as? String, "waiting"); XCTAssertEqual(diagnostics, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-        // A displayed pre-move revision is not authority for a later request.
+
         let submitted = try XCTUnwrap(NativeJSON.jsonObject(with: Data(request.utf8)) as? [String])
         var stale = try object(XCTUnwrap(submitted.first))
         stale["requestId"] = UUID().uuidString.lowercased()
@@ -299,7 +299,6 @@ final class NativeBoardMoveTests: XCTestCase {
     }
 
 
-    // Completion fixtures reuse the wired runner/private bundle/service boundaries above.
     private func seedBoardCompletionFixture() async throws -> String {
         let id = try await seedBoardActionFixture(), sqlite = try SQLiteBridge(url: database)
         defer { sqlite.close() }
@@ -585,8 +584,8 @@ final class NativeBoardMoveTests: XCTestCase {
         command["terminal"] = ["success": ["_0": try json(XCTUnwrap(prepared["result"]))]]
         let bytes = try JSONSerialization.data(withJSONObject: command, options: [.sortedKeys])
         try bytes.write(to: journal)
-        // Cold boot repeats this idempotent schema insert before receipt probing.
-        // Prove its row already exists so the only admitted DML attempt is a no-op.
+
+
         do {
             let sqlite = try SQLiteBridge(url: database); defer { sqlite.close() }
             let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sqlite.execute(
@@ -633,7 +632,6 @@ final class NativeBoardMoveTests: XCTestCase {
             XCTAssertEqual(boardMarkers, 0); await cold.close()
         }
     }
-
 
 
     private func seedBoardReactivationFixture() async throws -> String {
@@ -926,7 +924,7 @@ final class NativeBoardMoveTests: XCTestCase {
         XCTAssertEqual(recovery["method"] as? String, "boardCommit")
         XCTAssertEqual(writes, 0); XCTAssertEqual(markers, 1); XCTAssertEqual(try boardOrderRows(ids), landed)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); await replay.close()
-        // A saved receipt alone cannot retire an old terminal after any affected row was edited.
+
         let prepared = try XCTUnwrap(frozen.envelope["prepared"] as? [String: Any]), effect = try XCTUnwrap(prepared["effect"] as? [String: Any])
         let changed = try XCTUnwrap(effect["tasks"] as? [[String: Any]])
         let editedID = try XCTUnwrap((changed.first?["after"] as? [String: Any])?["id"] as? String)
@@ -995,7 +993,7 @@ final class NativeBoardMoveTests: XCTestCase {
         let excess = Data(repeating: 0x20, count: NativeBoardOrderJournalBudget.maximumBytes + 1)
         XCTAssertNoThrow(try NativeBoardOrderJournalBudget.require(exact, acknowledged: exact))
         XCTAssertThrowsError(try NativeBoardOrderJournalBudget.require(excess, acknowledged: exact))
-        // Preflight the real success-terminal encoding before journaling, avoiding an unretirable accepted save.
+
         XCTAssertThrowsError(try NativeBoardOrderJournalBudget.require(exact, acknowledged: excess))
     }
 
@@ -1011,7 +1009,7 @@ final class NativeBoardMoveTests: XCTestCase {
         let sqlite = try SQLiteBridge(url: database)
         defer { sqlite.close() }
         func snapshot(_ sql: String) throws -> String {
-            // Preserve raw cell values while ignoring dictionary key order in the bridge's JSON envelope.
+
             try json(NativeJSON.jsonObject(with: Data(sqlite.execute(sql).utf8)))
         }
         let before = try snapshot("SELECT * FROM settings ORDER BY id")
@@ -1595,8 +1593,6 @@ extension NativeBoardMoveTests {
 }
 
 
-// Task740 public method coverage belongs in the physical project target too.
-// These are real JSC/SQLite calls, not the generic runBulkAction writer.
 extension NativeBoardMoveTests {
     private func inboxMove740Request(_ core: CoreHost, ids: [String], status: String) async throws -> [String: Any] {
         let params: [String: Any] = ["groupBy": "none", "collapsedGroupIds": [String](), "filters": [String: Any]()]
@@ -1617,7 +1613,7 @@ extension NativeBoardMoveTests {
             let unrelated = UUID().uuidString.lowercased()
             _ = try await core.call("captureSubmit", argumentsJSON: capture(core, title: "Task740 unrelated", id: unrelated))
             await core.close()
-            // Seed only this owned fixture, before a new production hydration.
+
             let sql = try SQLiteBridge(url: database)
             _ = try sql.execute("UPDATE tasks SET startTime='2070-10-10',dueDate='2070-10-11',isFocusedToday=1,focusOrder=7,pushCount=3 WHERE id=?", parametersJSON: json([fixture.ids[0]]))
             _ = try sql.execute("UPDATE tasks SET recurrence=? WHERE id=?", parametersJSON: json([json(["rule": "weekly", "strategy": "after-completion", "seriesId": fixture.ids[1], "rrule": "FREQ=WEEKLY;COUNT=3;X-MINDWTR-SERIES-ID=\(fixture.ids[1])"]), fixture.ids[1]]))
@@ -1666,7 +1662,7 @@ extension NativeBoardMoveTests {
         XCTAssertEqual(envelope.command["method"] as? String, "inboxTasksMoveCommit"); XCTAssertEqual(try json(XCTUnwrap(envelope.envelope["request"])), try json(request))
         await expectFailure("SAVE_FAILED") { _ = try await writer.retryPending() }
         let retried = try object(String(contentsOf: journal, encoding: .utf8))
-        // Match the existing recovery contract: outer JSON content and embedded request bytes both remain exact.
+
         XCTAssertEqual(try json(retried), try json(object(String(decoding: original, as: UTF8.self))))
         XCTAssertEqual(Data(try XCTUnwrap(retried["argumentsJSON"] as? String).utf8), Data(envelope.encoded.utf8))
         XCTAssertEqual(try inboxBulk739Snapshot(), before)
@@ -1682,7 +1678,7 @@ extension NativeBoardMoveTests {
     }
 }
 
-// Task741 public Inbox Add-tag: mixed changes, no-op, exact original journal recovery.
+
 extension NativeBoardMoveTests {
     private func inboxTag741Request(_ core: CoreHost, ids: [String], tag: String) async throws -> [String: Any] {
         var request = try await inboxMove740Request(core, ids: ids, status: "next")
@@ -1750,7 +1746,7 @@ extension NativeBoardMoveTests {
     }
 }
 
-// Task742 public Inbox Remove-tag: union paging, mixed changes, no-op and exact journal recovery.
+
 extension NativeBoardMoveTests {
     private func inboxRemove742Request(_ core: CoreHost, ids: [String], tags: [String]) async throws -> [String: Any] {
         var request = try await inboxMove740Request(core, ids: ids, status: "next")

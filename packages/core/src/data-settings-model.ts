@@ -1,11 +1,6 @@
-/**
- * Settings › Data's Diagnostics card as React Native draws it (apps/mobile/components/settings/
- * sync-settings-sections.tsx SyncDiagnosticsCard; its actions in use-sync-settings-backup-actions.ts):
- * the analytics opt-out (builds with the heartbeat only), the Debug logging switch, then, while
- * logging is on, Share log and Clear log. Its Encryption block comes with sync and is not here yet. The Backup and Import folds
- * (SyncBackupSection) use RN's own keys: `tr('settings.syncMobile.…')` for Restore and the imports, `settings.saveToSyncFolder`
- * under Export backup, and RN's import guide link.
- */
+
+
+
 import { getArchiveRetentionPreview, isArchiveRetentionDays } from './archive-retention';
 import { isDiagnosticsLoggingEnabled } from './diagnostics-log';
 import { getDocsGuideUrl } from './docs-guidance';
@@ -15,13 +10,10 @@ import type { AppSettings, Project, Section, Task } from './types';
 
 type Translate = (key: string) => string;
 
-/** RN's result toast durations (use-sync-settings-backup-actions.ts), by the operation core's backup reply names. */
+
 export const DATA_TRANSFER_TOAST_MS = { replace: 5000, merge: 5600, todoist: 5600, ticktick: 6200, dgt: 6200, omnifocus: 6200, csv: 6200 } as const;
 
-/**
- * RN's document picker types per importer (mobile lib/data-transfer.ts IMPORT_PICKER_DESCRIPTORS, moved byte-identical): the
- * system picker offers these files. Native Android reads them from the Data model.
- */
+
 export const IMPORT_PICKER_MIME_TYPES: Readonly<Record<ImportPickerSourceId, readonly string[]>> = {
     todoist: [
         'text/csv',
@@ -60,7 +52,7 @@ export const IMPORT_PICKER_MIME_TYPES: Readonly<Record<ImportPickerSourceId, rea
     ],
 };
 
-/** An Import fold row: RN's order, its busy action (`import:<key>`), core's backup document mode, and its picker types. */
+
 export type DataImportRow = {
     key: ImportPickerSourceId; mode: 'todoist' | 'ticktick' | 'dgt' | 'omnifocus' | 'csv';
     label: string; description: string; mimeTypes: readonly string[];
@@ -69,7 +61,6 @@ export type DataImportRow = {
 export type DataSettingsEdit = { type: 'debugLogging'; value: boolean } | { type: 'analyticsOptOut'; value: boolean }
     | { type: 'archiveRetentionDays'; value: number };
 
-/** RN's Archive retention card, read separately to preserve existing Data settings payloads. */
 export type ArchiveRetentionCard = {
     title: string; description: string; safety: string; current: string; days: number; daysLabel: string; invalid: string;
     save: string; never: { label: string; edit: DataSettingsEdit }; saveFailed: string;
@@ -78,9 +69,9 @@ export type ArchiveRetentionCard = {
 export type DataSettingsModel = {
     title: string;
     backup: {
-        /** RN's folded card heading: `title` over `foldDescription`, chevron up while open. */
+
         title: string; foldDescription: string; exportLabel: string; description: string; failed: string;
-        /** The failure toast's title RN shows for every export failure. */
+
         errorTitle: string;
         csvLabel: string; csvDescription: string; csvFailed: string;
         csvImportLabel: string; csvImportDescription: string;
@@ -91,22 +82,21 @@ export type DataSettingsModel = {
         omnifocusImportLabel: string; omnifocusImportDescription: string;
         tasknotesLabel: string; tasknotesDescription: string; tasknotesFailed: string;
         mergeLabel: string; mergeDescription: string; mergeFailed: string; snapshotsLabel: string; restoreLabel: string;
-        /** RN's toast titles when Restore backup or a snapshot restore fails. */
+
         restoreFailed: string;
-        /**
-         * RN's Getting Started row, last in the fold, and its three toasts. `language` is the app language the seed is frozen in
-         * at the tap (RN passes useLanguage()).
-         */
+
+
         gettingStarted: { label: string; description: string; language: string; ready: string; notCreated: string; failed: string; open: string };
     };
-    /** RN's second folded card: the import guide link, then one row per importer; `failed` titles an import's failure toast. */
+
+
+    archiveRetention: ArchiveRetentionCard;
+
     importData: { title: string; description: string; guide: { title: string; description: string; url: string }; failed: string; rows: DataImportRow[] };
     diagnostics: {
         title: string;
-        /**
-         * RN's analytics switch, on while the user opted out of the heartbeat; null in a build without one. Turning it on asks
-         * `confirm` first (its cancel keeps the heartbeat).
-         */
+
+
         analytics: {
             label: string; description: string; value: boolean; edit: DataSettingsEdit;
             confirm: { title: string; message: string; keepLabel: string; disableLabel: string };
@@ -114,7 +104,7 @@ export type DataSettingsModel = {
         debugLogging: { label: string; description: string; value: boolean; edit: DataSettingsEdit };
         shareLog: { label: string; description: string } | null;
         clearLog: { label: string } | null;
-        /** RN's toasts after Share and Clear, each titled `toastTitle`. */
+
         toastTitle: string;
         logMissing: string;
         shareUnavailable: string;
@@ -123,8 +113,20 @@ export type DataSettingsModel = {
     };
 };
 
-/** `analyticsAvailable`: the build sends the heartbeat (isMobileAnalyticsHeartbeatConfigured). */
-/** The stored Archive retention days, or 0 for Never and invalid legacy settings. */
+
+export function buildGettingStartedRow(t: Translate, language: string) {
+    return {
+        label: t('settings.gettingStartedContentAction'),
+        description: t('settings.gettingStartedContentDesc'),
+        language,
+        ready: t('onboarding.toastReady'),
+        notCreated: t('onboarding.toastNotCreated'),
+        failed: t('onboarding.toastFailed'),
+        open: t('common.open'),
+    };
+}
+
+
 export const archiveRetentionDaysOf = (settings: AppSettings): number => {
     const days = settings.gtd?.archiveRetentionDays;
     return isArchiveRetentionDays(days) ? days : 0;
@@ -148,12 +150,13 @@ export function buildArchiveRetentionCard(settings: AppSettings, t: Translate): 
     };
 }
 
+
 export type ArchiveRetentionReview = {
     days: number; title: string; description: string; counts: string; legacy: string; heading: string; lines: string[];
     cancel: string; confirm: string; edit: DataSettingsEdit;
 };
 
-/** RN reviews enabling retention or shortening it; a longer period and Never save directly. Titles stay on screen. */
+
 export function buildArchiveRetentionReview(
     data: { tasks: Task[]; projects: Project[]; sections: Section[]; settings: AppSettings },
     nextDays: number,
@@ -225,16 +228,9 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate, anal
             snapshotsLabel: t('settings.recoverySnapshots'),
             restoreLabel: t('settings.recoverySnapshotsRestore'),
             restoreFailed: t('settings.backupMobile.restoreFailed'),
-            gettingStarted: {
-                label: t('settings.gettingStartedContentAction'),
-                description: t('settings.gettingStartedContentDesc'),
-                language,
-                ready: t('onboarding.toastReady'),
-                notCreated: t('onboarding.toastNotCreated'),
-                failed: t('onboarding.toastFailed'),
-                open: t('common.open'),
-            },
+            gettingStarted: buildGettingStartedRow(t, language),
         },
+        archiveRetention: buildArchiveRetentionCard(settings, t),
         importData: {
             title: t('settings.importData'),
             description: t('settings.importDataDesc'),
@@ -279,20 +275,17 @@ export function buildDataSettingsModel(settings: AppSettings, t: Translate, anal
     };
 }
 
-/** RN's: the heartbeat is on unless the user turned it off. */
+
 export const isAnalyticsHeartbeatEnabled = (settings: AppSettings): boolean => settings.analytics?.heartbeatEnabled !== false;
 
 export const isDataSettingStored = (settings: AppSettings, edit: DataSettingsEdit): boolean => (
     edit.type === 'archiveRetentionDays' ? archiveRetentionDaysOf(settings) === edit.value
         : edit.type === 'analyticsOptOut'
-        ? !isAnalyticsHeartbeatEnabled(settings) === edit.value
-        : isDiagnosticsLoggingEnabled(settings) === edit.value
+            ? !isAnalyticsHeartbeatEnabled(settings) === edit.value
+            : isDiagnosticsLoggingEnabled(settings) === edit.value
 );
 
-/**
- * RN's toggleDebugLogging (the switch's value, the other diagnostics fields kept) and its analytics switch (heartbeatEnabled
- * set to the opposite of the opt-out, the other analytics fields kept).
- */
+
 export const buildDataSettingsUpdate = (settings: AppSettings, edit: Exclude<DataSettingsEdit, { type: 'archiveRetentionDays' }>): Partial<AppSettings> => (
     edit.type === 'analyticsOptOut'
         ? { analytics: { ...(settings.analytics ?? {}), heartbeatEnabled: !edit.value } }

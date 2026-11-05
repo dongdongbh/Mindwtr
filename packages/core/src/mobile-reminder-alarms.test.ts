@@ -45,10 +45,10 @@ type Fixture = {
 const fixture = JSON.parse(readFileSync(new URL('./reminder-alarms-parity.fixtures.json', import.meta.url), 'utf8')) as Fixture;
 const ALARM_MAP_KEY = 'mindwtr:local:alarms:v1';
 const LIBRARY_CALLS = new Set(['scheduleAlarm', 'deleteAlarm', 'deleteRepeatingAlarm', 'removeFiredNotification']);
-// The log lines the applier writes; the rest of a cycle's log stays React Native's.
+
 const APPLIER_LOG = /^\[Local Notifications\] (Alarm scheduled|Alarm canceled|Failed to delete alarm|Scheduled alarm returned invalid id|Failed to schedule alarm)/;
 
-/** React Native's alarm library as the fixture scripted it, recording calls the way the harness did. */
+
 function recordingPort(answers: Answer[], ids: { next: number }) {
     const calls: unknown[][] = [];
     const port: ReminderAlarmPort = {
@@ -180,7 +180,7 @@ describe('mobile reminder alarms', () => {
         await scheduleReminderAlarms(sent, alarms, port);
         expect(plan({ tasks, alarms, settings: { taskReminderDefault: 'send' } }).schedule).toEqual([]);
         expect(tasks[0].repeatReminderMinutes).toBe(30);
-        // An already due alarm shifted by the OS is withdrawn too, rather than carried forward.
+
         const shifted = new Map([['task:a', { id: 1, signature: first.oneShot[0].signature, fireAtMs: Date.parse('2026-09-28T11:01:00.000Z') }]]);
         expect(plan({ tasks, alarms: shifted, now: new Date('2026-09-28T11:00:30.000Z'), settings: { taskReminderDefault: 'skip' } }))
             .toMatchObject({ shifted: [], cancel: ['task:a'], reasons: { 'task:a': 'withdrawn' } });
@@ -226,10 +226,10 @@ describe('mobile reminder alarms', () => {
         expect(after([{ ...live, dueDate: '2026-09-28' }])).toEqual({ 'task:a': 'withdrawn' });
         expect(after([live], { dueDateNotificationsEnabled: false })).toEqual({ 'task:a': 'withdrawn' });
         expect(after([live], { notificationsEnabled: false, weeklyReviewEnabled: true })).toEqual({ 'task:a': 'withdrawn' });
-        // The start reminder fired; the same key moves on to the due reminder.
+
         const both = task('b', { startTime: due, dueDate: '2026-09-28T12:00:00.000Z' });
         expect(fired([both])([both])).toEqual({ 'task:b': 'expired' });
-        // A project review whose project was archived.
+
         const project: Project = { id: 'p', title: 'P', status: 'active', color: '#000', order: 0, tagIds: [], reviewAt: due, createdAt: '', updatedAt: '' };
         const alarms = new Map<string, ReminderAlarmEntry>([['project:p', { id: 9, signature: JSON.stringify({ fireAt: due }) }], ['legacy', { id: 8 }]]);
         expect(plan({ alarms, projects: [project] }).reasons).toEqual({ 'project:p': 'expired', legacy: 'withdrawn' });
@@ -262,12 +262,12 @@ describe('mobile reminder alarms', () => {
         expect(result.oneShot.map((request) => request.key)).toEqual(['task:t0', 'task:t1', 'task:t2']);
         expect(result.topUpDelayMs).toBe(65_000);
         expect(result.diagnostics?.oneShotReminderCount).toBe(5);
-        // A reminder due in two days waits at most a day for the next top-up.
+
         expect(plan({ tasks: [task('far', { dueDate: '2026-09-30T10:00:00.000Z' })] }).topUpDelayMs).toBe(24 * 60 * 60 * 1000);
     });
 
     it('keeps a reminder moved past a taken minute armed until it rings, across a top-up', async () => {
-        // Android's library refuses a second alarm in a minute it already holds.
+
         const taken = new Set<string>();
         const { port, calls } = recordingPort([], { next: 1 });
         const recordedSchedule = port.scheduleAlarm;
@@ -279,7 +279,7 @@ describe('mobile reminder alarms', () => {
         };
         const tasks = [
             task('a', { dueDate: '2026-09-28T11:00:00.000Z' }),
-            // Its key moves on to the due reminder once the start time passes.
+
             task('b', { startTime: '2026-09-28T11:00:00.000Z', dueDate: '2026-09-28T12:00:00.000Z' }),
             task('c', { dueDate: '2026-09-28T11:00:00.000Z' }),
         ];
@@ -295,18 +295,18 @@ describe('mobile reminder alarms', () => {
         expect(Array.from(taken).sort()).toEqual(['2026-09-28T11:00', '2026-09-28T11:01', '2026-09-28T11:02']);
 
         calls.length = 0;
-        // The top-up 5 s after the 11:00 alarm rang.
+
         const topUp = await cycle('2026-09-28T11:00:05.000Z');
         const deleted = calls.filter(([kind]) => kind === 'deleteAlarm').map(([, id]) => id);
         expect(deleted).toEqual([armed['task:a']]);
         expect(alarms.get('task:b')?.id).toBe(armed['task:b']);
         expect(alarms.get('task:c')?.id).toBe(armed['task:c']);
-        // The next cycle runs 5 s after the moved 11:01 alarm rings.
+
         expect(topUp.topUpDelayMs).toBe(60_000);
 
         calls.length = 0;
         await cycle('2026-09-28T11:01:05.000Z');
-        // b rang at 11:01; its due reminder is armed now. c still waits for 11:02.
+
         expect(calls.filter(([kind]) => kind === 'deleteAlarm').map(([, id]) => id)).toEqual([armed['task:b']]);
         expect(alarms.get('task:c')?.id).toBe(armed['task:c']);
         expect(alarms.get('task:b')?.signature).toContain('2026-09-28T12:00:00.000Z');
@@ -316,7 +316,7 @@ describe('mobile reminder alarms', () => {
         const cap = getMaxPendingOneShotReminderAlarms('ios');
         const shiftedTask = task('s', { dueDate: '2026-09-28T10:00:00.000Z' });
         const [held] = plan({ tasks: [shiftedTask], now: new Date('2026-09-28T09:00:00.000Z') }).oneShot;
-        // Its 10:00 minute was taken, so it rings at 10:01; this cycle runs at 10:00:05.
+
         const alarms = new Map<string, ReminderAlarmEntry>([['task:s', { id: 1, signature: held.signature, fireAtMs: Date.parse('2026-09-28T10:01:00.000Z') }]]);
         const tasks = [shiftedTask, ...Array.from({ length: cap }, (_, index) => task(`t${index}`, {
             dueDate: new Date(NOW.getTime() + (index + 1) * 60 * 60_000).toISOString(),
@@ -325,7 +325,7 @@ describe('mobile reminder alarms', () => {
         expect(result.shifted).toEqual(['task:s']);
         const pending = new Set([...result.oneShot.map((request) => request.key), ...result.shifted]);
         expect(pending.size).toBeLessThanOrEqual(cap);
-        // The latest-firing new reminder waits for a later top-up.
+
         expect(result.oneShot.map((request) => request.key)).not.toContain(`task:t${cap - 1}`);
         expect(result.oneShot).toHaveLength(cap - 1);
     });
@@ -395,7 +395,7 @@ describe('mobile reminder alarms', () => {
 
     it('keeps the Pomodoro alarm rules', () => {
         expect(isPomodoroAlarmScheduleSuperseded({ order: 2, requestedAtMs: 5, reason: 'paused' }, 1, 10)).toBe(true);
-        // A timer that stopped on its own after the deadline keeps the due alarm.
+
         expect(isPomodoroAlarmScheduleSuperseded({ order: 2, requestedAtMs: 20, reason: 'timer-not-running' }, 1, 10)).toBe(false);
         expect(isPomodoroAlarmUnchanged({ fireAtMs: 10 }, 10, 'break')).toBe(true);
         expect(isPomodoroAlarmUnchanged({ fireAtMs: 10, phase: 'focus' }, 10, 'break')).toBe(false);
@@ -418,8 +418,8 @@ describe('mobile reminder alarms', () => {
     });
 
     it('lists the Android rows the alarm map lost and nothing still wants, sparing a live snooze', () => {
-        // Synthetic shape from feedback f488a81a: old start reminders for finished tasks.
-        // The reporter's reboot trigger and exact orphan path remain unproved.
+
+
         const at = (date: Date, id: number, alarmKey: string, scheduleType = 'once') => ({
             id, scheduleType, data: `kind==>task-reminder;;alarmKey==>${alarmKey};;`,
             year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(),
@@ -430,20 +430,20 @@ describe('mobile reminder alarms', () => {
         const justLate = new Date(NOW.getTime() - 60 * 1000);
         const tooLate = new Date(NOW.getTime() - 25 * 60 * 60 * 1000);
         const rows = [
-            at(soon, 1, 'task:live'), // tracked
-            at(soon, 2, 'task:done'), // lost id, task done before its start
-            at(past, 3, 'task:gone'), // lost id, task deleted
-            at(soon, 4, 'task:live'), // pending snooze of a live task
-            at(past, 5, 'task:live:r1'), // fired snooze or lost repeat of a live task
-            at(soon, 6, 'digest:morning', 'repeat'), // lost digest copy
+            at(soon, 1, 'task:live'),
+            at(soon, 2, 'task:done'),
+            at(past, 3, 'task:gone'),
+            at(soon, 4, 'task:live'),
+            at(past, 5, 'task:live:r1'),
+            at(soon, 6, 'digest:morning', 'repeat'),
             at(soon, 7, 'project:archived'),
             { ...at(past, 8, 'task:done'), data: 'kind==>pomodoro;;taskId==>done;;' },
             { id: 'bad' },
             { ...at(past, 7.5, 'task:done') },
             { ...at(past, 0, 'task:done'), id: null },
             { ...at(past, 0, 'task:done'), id: '' },
-            at(justLate, 9, 'task:live'), // Android may deliver this pending snooze late
-            at(tooLate, 10, 'task:live'), // past the native grace window
+            at(justLate, 9, 'task:live'),
+            at(tooLate, 10, 'task:live'),
         ];
         expect(findStaleNativeReminderAlarms({
             rows,

@@ -6,9 +6,6 @@ import { buildGtdSettingsModel, getTranslator } from '@mindwtr/core';
 
 import { AndroidCaptureIntentSection } from './android-capture-intent-section';
 
-// Live parity: React Native's automation capture card, with the real English words,
-// against core's GTD model card (capture.captureIntent) that the native app draws.
-// React Native's card is not rewired to core, so both sides run as shipped.
 
 const nativeMocks = vi.hoisted(() => ({
     getCaptureIntentConfig: vi.fn(),
@@ -60,7 +57,7 @@ async function render() {
     return tree;
 }
 
-/** React Native's card as core's model would draw it, with the host's token in the token row. */
+
 function drawn(tree: renderer.ReactTestRenderer) {
     const toggle = tree.root.findByProps({ testID: 'android-capture-intent-switch' }).props;
     return { texts: texts(tree.toJSON()), value: toggle.value, disabled: toggle.disabled };

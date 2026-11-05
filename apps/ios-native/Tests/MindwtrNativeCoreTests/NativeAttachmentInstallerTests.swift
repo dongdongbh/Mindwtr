@@ -112,8 +112,8 @@ final class NativeAttachmentInstallerTests: XCTestCase {
     }
 
     func testAbsentManagedRootBindsAfterOrdinaryCreationAcrossPreparePublishHashAndRetire() throws {
-        // The owner creates this directory later; the adapter must neither
-        // create it at construction nor retain its missing-path canonical URL.
+
+
         let lateManaged = root.appendingPathComponent("late-managed", isDirectory: false)
         XCTAssertFalse(lateManaged.hasDirectoryPath)
         XCTAssertFalse(FileManager.default.fileExists(atPath: lateManaged.path))
@@ -133,8 +133,7 @@ final class NativeAttachmentInstallerTests: XCTestCase {
         let hashed = try request(["op": "hash", "path": target.absoluteString], on: adapter)
         XCTAssertEqual(hashed["sha256"] as? String, sha(text)); XCTAssertEqual(hashed["size"] as? Int, bytes.count)
 
-        // Exercise the other fixed Apple spelling when the existing fixture is
-        // beneath /var. Every returned proof retains its caller's exact URI.
+
         var nextManaged = lateManaged
         if lateManaged.path.hasPrefix("/private/var/") {
             nextManaged = URL(fileURLWithPath: String(lateManaged.path.dropFirst("/private".count)), isDirectory: true)
@@ -153,8 +152,7 @@ final class NativeAttachmentInstallerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: nextStage.deletingLastPathComponent().path))
         XCTAssertEqual(try recreated.retirePrivateStage(stage: next, targetURI: nextTarget.absoluteString, operationID: nextID), "missing")
 
-        // Replay also confirms the owed namespace cleanup when only its stage
-        // file is absent, keeping the original caller URI and identity tokens.
+
         let missingTarget = nextManaged.appendingPathComponent("stage-missing.txt"), missingID = String(repeating: "3", count: 32)
         let missing = try adapter.prepareStage(targetURI: missingTarget.absoluteString, operationID: missingID)
         XCTAssertEqual(missing.stageURI, missingTarget.deletingLastPathComponent().absoluteString + ".mindwtr-install-" + missingID + ".candidate/stage")

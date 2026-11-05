@@ -19,9 +19,7 @@ export const TASK_STATUS_ORDER: Record<TaskStatus, number> = {
     archived: 6,
 };
 
-// Cancellation is an event timestamp rather than a date-only scheduling field.
-// Require an explicit timezone so two writers cannot interpret the same value in
-// different local zones. Keep the original valid string to avoid sync churn.
+
 const ISO_DATETIME_WITH_TIMEZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
 export function normalizeCancellationTimestamp(value: unknown): string | undefined {
@@ -53,18 +51,13 @@ export function normalizeCancellationTimestamp(value: unknown): string | undefin
     return Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
-/**
- * A task is "finished" once it is done or archived — the two statuses a
- * completed task can settle into (#968: a gate checking only 'done' misses
- * archived rows). Accepts either a task-like object or a bare status so
- * callers can pass whichever they already have in hand.
- */
+
 export function isTaskFinished(taskOrStatus: { status?: TaskStatus } | TaskStatus | undefined): boolean {
     const status = typeof taskOrStatus === 'string' ? taskOrStatus : taskOrStatus?.status;
     return status === 'done' || status === 'archived';
 }
 
-/** A cancelled task is archived with a valid cancellation event timestamp. */
+
 export function isTaskCancelled(
     task: Pick<Task, 'status' | 'cancelledAt'> | undefined,
 ): boolean {
@@ -72,10 +65,7 @@ export function isTaskCancelled(
         && normalizeCancellationTimestamp(task.cancelledAt) !== undefined;
 }
 
-/**
- * Completed work includes Done and ordinary historical Archive rows. Cancellation
- * is terminal for sequencing, but is deliberately excluded from completion data.
- */
+
 export function isTaskCompleted(
     task: Pick<Task, 'status' | 'cancelledAt'> | undefined,
 ): boolean {
@@ -84,10 +74,7 @@ export function isTaskCompleted(
         && !isTaskCancelled(task);
 }
 
-/**
- * A task is "actionable" unless it is done, archived, or reference — the
- * three statuses that take a task out of active GTD workflow lists.
- */
+
 export function isTaskActionable(taskOrStatus: { status?: TaskStatus } | TaskStatus | undefined): boolean {
     const status = typeof taskOrStatus === 'string' ? taskOrStatus : taskOrStatus?.status;
     return status !== 'done' && status !== 'archived' && status !== 'reference';
@@ -100,7 +87,7 @@ const LEGACY_STATUS_MAP: Record<string, TaskStatus> = {
     doing: 'next',
 };
 
-/** Original native preparation's parse and end-of-day boundary, never a live fallback. */
+
 export type TaskLoadTemporalContext = { futureBoundary: string;
     dates: ReadonlyMap<string, Pick<FocusDateProjection, 'parsedAt'>> };
 const isFutureStart = (task: Pick<Task, 'startTime'>, now: Date, temporal?: TaskLoadTemporalContext): boolean => {
@@ -131,26 +118,25 @@ export function normalizeTaskStatus(value: unknown): TaskStatus {
     return 'inbox';
 }
 
-/**
- * Canonical status/timestamp/focus shape shared by loaders and every write path.
- * The fallback for legacy completed archives is stable entity data, never the
- * current clock, so loading an already-normalized task is idempotent.
- */
+
+function lifecycleFields(status: TaskStatus, cancelledAt: unknown, completedAt: string | undefined, updatedAt: string, createdAt: string) {
+    const cancelled = status === 'archived' ? normalizeCancellationTimestamp(cancelledAt) : undefined;
+    const terminal = isTaskFinished(status);
+    return {
+        cancelledAt: cancelled,
+        completedAt: cancelled ? undefined : terminal ? (completedAt || updatedAt || createdAt) : undefined,
+        focus: terminal ? { isFocusedToday: false, focusOrder: undefined } : {},
+    };
+}
+
+
 export function normalizeTaskLifecycleFields(task: Task): Task {
-    const cancelledAt = task.status === 'archived'
-        ? normalizeCancellationTimestamp(task.cancelledAt)
-        : undefined;
-    const completedAt = cancelledAt
-        ? undefined
-        : isTaskFinished(task.status)
-            ? (task.completedAt || task.updatedAt || task.createdAt)
-            : undefined;
-    const isTerminal = isTaskFinished(task.status);
+    const { cancelledAt, completedAt, focus } = lifecycleFields(task.status, task.cancelledAt, task.completedAt, task.updatedAt, task.createdAt);
     const next: Task = {
         ...task,
         cancelledAt,
         completedAt,
-        ...(isTerminal ? { isFocusedToday: false, focusOrder: undefined } : {}),
+        ...focus,
     };
     return sameShallowRecord(task, next) ? task : next;
 }
@@ -160,13 +146,14 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const { rev: _legacyRev, revBy: _legacyRevBy, ...rest } = task as Task & { rev?: unknown; revBy?: unknown };
 
     let createdAtIso = typeof task.createdAt === 'string' ? task.createdAt : nowIso;
-    const createdAtMs = Date.parse(createdAtIso);
+    let createdAtMs = Date.parse(createdAtIso);
     if (!Number.isFinite(createdAtMs)) {
         createdAtIso = nowIso;
+        createdAtMs = Date.parse(createdAtIso);
     }
     let updatedAtIso = typeof task.updatedAt === 'string' ? task.updatedAt : createdAtIso;
     const updatedAtMs = Date.parse(updatedAtIso);
-    if (!Number.isFinite(updatedAtMs) || updatedAtMs < Date.parse(createdAtIso)) {
+    if (!Number.isFinite(updatedAtMs) || updatedAtMs < createdAtMs) {
         updatedAtIso = createdAtIso;
     }
 
@@ -203,6 +190,9 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const relativeStartOffset = task.dueDate
         ? preserveShallowIdentity(task.relativeStartOffset, normalizeRelativeStartOffset(task.relativeStartOffset))
         : undefined;
+    const lifecycle = lifecycleFields(normalizedStatus, rest.cancelledAt, rest.completedAt, updatedAtIso, createdAtIso);
+
+
     const next: Task = {
         ...rest,
         createdAt: createdAtIso,
@@ -221,27 +211,20 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         rev,
         ...(revBy ? { revBy } : {}),
         ...(textDirection ? { textDirection } : {}),
-        // Purged tombstones stay in their compacted shape: backfilling
-        // pushCount: 0 here while the merge normalizers strip it again made
-        // every loaded tombstone differ from its merged twin, so each sync
-        // cycle rewrote every purged row and requeued itself (#766 — the
-        // content-oscillation sibling of the rev-bump loop fixed earlier;
-        // stats.tombstoneRepairs stayed 0 because rev never changed).
+
+
         ...(hasValidPushCount || task.purgedAt ? {} : { pushCount: 0 }),
+        cancelledAt: lifecycle.cancelledAt,
+        completedAt: lifecycle.completedAt,
+        ...lifecycle.focus,
     };
 
-    const lifecycleNormalized = normalizeTaskLifecycleFields(next);
 
-    // A future-start Next action keeps its queued star across load and sync.
-    // focusOrder only applies once it has reached Today's Focus.
-    if (lifecycleNormalized.isFocusedToday && isFutureStart(lifecycleNormalized, new Date(nowIso), temporal)) {
-        if (lifecycleNormalized.status !== 'next') lifecycleNormalized.isFocusedToday = false;
-        lifecycleNormalized.focusOrder = undefined;
+    if (next.isFocusedToday && isFutureStart(next, new Date(nowIso), temporal)) {
+        if (next.status !== 'next') next.isFocusedToday = false;
+        next.focusOrder = undefined;
     }
 
-    // Hand back the input when nothing actually changed, so an already-normalized
-    // task keeps its identity through the merge normalizers (#766 — see
-    // shallow-identity.ts). The time-dependent branches above naturally produce a
-    // differing object on the cycle they fire, so this stays a pure no-change check.
-    return sameShallowRecord(task, lifecycleNormalized) ? task : lifecycleNormalized;
+
+    return sameShallowRecord(task, next) ? task : next;
 }

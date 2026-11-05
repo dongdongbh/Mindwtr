@@ -134,8 +134,7 @@ export type TickTickImportPreview = {
 
 export type TickTickImportParseResult = ImportParseResult<ParsedTickTickImportData, TickTickImportPreview>;
 
-// TickTick doesn't surface importedStandaloneTaskCount even though applyImport() (called by
-// applyTickTickImport below) always computes it — same trade-off as DGT.
+
 export type TickTickImportExecutionResult = Omit<ImportExecutionResult, 'importedStandaloneTaskCount'>;
 
 const createWarningCounters = (): TickTickWarningCounters => ({
@@ -264,7 +263,7 @@ const formatDateInTimeZone = (date: Date, timeZone: string): string => {
         const day = parts.find((part) => part.type === 'day')?.value;
         if (year && month && day) return `${year}-${month}-${day}`;
     } catch {
-        // Fall back to UTC below when the runtime lacks this IANA timezone.
+
     }
     return date.toISOString().slice(0, 10);
 };
@@ -565,7 +564,7 @@ const mergeParsedData = (target: ParsedTickTickImportData, source: ParsedTickTic
         projectKeys.add(project.sourceKey);
         target.projects.push(project);
     });
-    // One push per task: QuickJS (native Android) refuses a call with more than 65535 arguments.
+
     source.tasks.forEach((task) => target.tasks.push(task));
 };
 
@@ -654,8 +653,7 @@ export const parseTickTickImportSource = (input: TickTickFileInput): TickTickImp
     };
 };
 
-// TickTick's raw CSV timestamps aren't ISO — normalize before handing them to applyImport's
-// shared resolveTimestamp, which only validates-and-falls-back (see import-apply.ts).
+
 const normalizeParsedTimestamp = (value: string | undefined): string | undefined => {
     const parsed = safeParseDate(value);
     return parsed ? parsed.toISOString() : undefined;
@@ -665,8 +663,7 @@ const resolveImportedTaskStatus = (status: TaskStatus, projectId: string | undef
     status === 'inbox' && projectId ? 'next' : status
 );
 
-// TickTick derives stable ids from source keys (namespaced UUIDv5-style hash), so re-importing
-// the same export is idempotent: existing areas/projects/tasks are matched by id and skipped.
+
 export const applyTickTickImport = (
     currentData: AppData,
     parsedData: ParsedTickTickImportData,

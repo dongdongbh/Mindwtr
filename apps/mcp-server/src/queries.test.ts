@@ -101,8 +101,8 @@ const createMockDb = (
                     return options.hasTasksFts ? [{ name: 'tasks_fts' }] : [];
                 }
                 if (options.projects && sql.includes('FROM projects')) return options.projects;
-                // Honor LIMIT/OFFSET: without this the mock hands back every row regardless of
-                // pagination, which hid the view filter reading a capped base set (D2).
+
+
                 if (/LIMIT \? OFFSET \?/.test(sql)) {
                     const [limit, offset] = params.slice(-2) as number[];
                     return rows.slice(offset, offset + limit);
@@ -147,15 +147,12 @@ describe('mcp queries', () => {
             { id: 't2', title: 'anything at all', status: 'inbox', createdAt: now, updatedAt: now, isFocusedToday: 0 },
         ]);
 
-        // Under LIKE these were wildcards needing escaping; core matches them literally.
+
         expect(listTasks(db, { search: '100%_done\\now', includeDeleted: false }).map((t) => t.id)).toEqual(['t1']);
         expect(listTasks(db, { search: '%', includeDeleted: false }).map((t) => t.id)).toEqual(['t1']);
     });
 
 
-    // scripts/mindwtr-automation-core.ts (the CLI's list/search path) resolves the same
-    // operator query with core's filterTasksBySearch. Same fixture, same query, same task set:
-    // the two automation surfaces answer identically.
     test('answers the same operator queries as the CLI automation service', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const fixture = [
@@ -178,8 +175,7 @@ describe('mcp queries', () => {
         }
     });
 
-    // core's filterTasksBySearch drops deletedAt unconditionally, so a search silently wins
-    // over includeDeleted. Documented in the tool schema; pinned here.
+
     test('listTasks search excludes deleted tasks even with includeDeleted', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const { db } = createMockDb([
@@ -191,9 +187,7 @@ describe('mcp queries', () => {
         expect(listTasks(db, { includeDeleted: true, search: 'Report' }).map((t) => t.id)).toEqual(['live']);
     });
 
-    // V2 guard: the sequential-chain scan is O(all), so deriving it inside the filter made the
-    // view O(matched x all) — 10s at 10k tasks. Coarse on purpose: a wall-clock budget would be
-    // flaky, but a quadratic reintroduction shows up as a ~4x jump when the library doubles.
+
     test('listTasks view cost grows about linearly with the library', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const build = (count: number) => createMockDb(
@@ -217,17 +211,15 @@ describe('mcp queries', () => {
             return performance.now() - started;
         };
 
-        time(500); // warm up, so JIT does not inflate the first real sample
+        time(500);
         const small = time(1000);
         const large = time(2000);
 
-        // Linear would be ~2x; quadratic ~4x. 3x leaves room for noise on a loaded machine.
+
         expect(large < Math.max(small, 1) * 3).toBe(true);
     });
 
-    // D2: eligibility depends on the whole library, so the base set must not be a page.
-    // Step 1 sits past the 200-row default limit; if the view path reads a capped set it
-    // cannot see it, designates step 2 as first, and reports a blocked task as available.
+
     test('listTasks view sees sequential step 1 beyond the pagination default', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const filler = Array.from({ length: 250 }, (_unused, index) => ({
@@ -239,8 +231,8 @@ describe('mcp queries', () => {
             updatedAt: now,
             isFocusedToday: 0,
         }));
-        // Both steps sit PAST the 200-row default so a capped base set sees neither, and the
-        // mock returns rows in array order (it does not honor ORDER BY).
+
+
         const { db } = createMockDb([
             ...filler,
             { id: 'step1', title: 'Step one', status: 'next', projectId: 'p-seq', orderNum: 1, createdAt: now, updatedAt: now, isFocusedToday: 0 },
@@ -251,8 +243,7 @@ describe('mcp queries', () => {
         expect(listTasks(db, { view: 'blocked' }).map((t) => t.id)).toEqual(['step2']);
     });
 
-    // The GTD availability question ("what can I actually do now") — deferral and sequential
-    // blocking come from core's getTaskFocusEligibility, not re-derived here.
+
     test('listTasks view splits available, deferred and blocked', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const future = '2099-01-01T00:00:00.000Z';
@@ -266,7 +257,7 @@ describe('mcp queries', () => {
         expect(listTasks(db, { view: 'available' }).map((t) => t.id).sort()).toEqual(['ready', 'step1']);
         expect(listTasks(db, { view: 'deferred' }).map((t) => t.id)).toEqual(['later']);
         expect(listTasks(db, { view: 'blocked' }).map((t) => t.id)).toEqual(['step2']);
-        // Without a view the deferred and blocked tasks are still listed.
+
         expect(listTasks(db, {}).map((t) => t.id).sort()).toEqual(['later', 'ready', 'step1', 'step2']);
     });
 
@@ -278,10 +269,8 @@ describe('mcp queries', () => {
 
         listTasks(db, { isFocusedToday: false, includeDeleted: false });
         const queryCall = calls.find((call) => call.sql.startsWith('SELECT') && call.sql.includes('FROM tasks '));
-        // isFocusedToday reaches existing databases via ALTER TABLE ADD COLUMN
-        // (TASK_SQLITE_MIGRATION_COLUMNS), and SQLite backfills already-stored rows with
-        // NULL rather than 0. A bare `isFocusedToday = 0` therefore returns nothing for
-        // every task written before the column existed, so pin the NULL-safe form.
+
+
         expect(queryCall?.sql.includes('COALESCE(isFocusedToday, 0) = ?')).toBe(true);
         expect(queryCall?.sql.includes('WHERE isFocusedToday = ?')).toBe(false);
         expect(queryCall?.params).toContain(0);
@@ -292,8 +281,8 @@ describe('mcp queries', () => {
         const { db, calls } = createMockDb([
             { id: 't1', title: 'Task', status: 'inbox', createdAt: now, updatedAt: now },
         ]);
-        // A database old enough to predate the migration has no such column at all;
-        // referencing it would throw and take the whole tool down.
+
+
         const originalPrepare = db.prepare.bind(db);
         db.prepare = (sql: string) => {
             if (sql.startsWith('PRAGMA table_info(tasks)')) {
@@ -321,8 +310,8 @@ describe('mcp queries', () => {
         const tasks = listTasks(db, { search: 'report', includeDeleted: false });
 
         expect(tasks.map((task) => task.id)).toEqual(['t1']);
-        // No FTS MATCH and no LIKE: the operator language cannot be expressed in SQL, so the
-        // query runs in core over the rows the other filters selected.
+
+
         const queryCall = calls.find((call) => call.sql.startsWith('SELECT') && call.sql.includes('FROM tasks '));
         expect(queryCall?.sql.includes('tasks_fts MATCH ?')).toBe(false);
         expect(queryCall?.sql.includes('LIKE ?')).toBe(false);
@@ -342,9 +331,7 @@ describe('mcp queries', () => {
         expect(listTasks(db, { search: '"Call bank"' }).map((t) => t.id)).toEqual(['t2']);
     });
 
-    // searchAll caps results at SEARCH_RESULT_LIMIT (200) BEFORE any caller paginates, so
-    // routing through it would strand every match past the 200th. listTasks uses the uncapped
-    // predicate: limit/offset page the FULL match set.
+
     test('listTasks paginates the whole search match set, past 200', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const rows = Array.from({ length: 250 }, (_unused, index) => ({

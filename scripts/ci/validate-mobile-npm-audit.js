@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { validateNpmAuditReport } from "./validate-npm-audit.js";
 
-// Preserve the existing entry point while all profiles share fail-closed validation.
+
 export const validateMobileAuditReport = (report, lockfile = JSON.parse(readFileSync("apps/mobile/package-lock.json", "utf8"))) => {
   validateNpmAuditReport(report, "mobile", lockfile);
 };

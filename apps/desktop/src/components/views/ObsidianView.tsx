@@ -21,6 +21,7 @@ import { DEFAULT_TASKNOTES_FOLDER, safeFormatDate, translateWithFallback, useTas
 import { ObsidianService } from '../../lib/obsidian-service';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { LIST_END_GAP } from './list/list-toolbar';
 import { useLanguage } from '../../contexts/language-context';
 import { useObsidianStore } from '../../store/obsidian-store';
@@ -593,7 +594,7 @@ export function ObsidianView() {
                                     value={newTaskText}
                                     onChange={(event) => setNewTaskText(event.target.value)}
                                     onKeyDown={(event) => {
-                                        if (event.key === 'Enter') {
+                                        if (!isImeComposing(event) && event.key === 'Enter') {
                                             event.preventDefault();
                                             void handleCreateTask();
                                         }

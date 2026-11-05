@@ -233,7 +233,7 @@ describe('sync encryption card', () => {
         await card.submitEnable();
         expect(card.getState()).toMatchObject({ state: 'off', flow: 'enable', error: 'backend-incompatible', busy: false });
         expect(getSyncEncryptionCardMessages(card.getState(), (key) => key).errorMessage).toBe('settings.syncEncryptionErrorBackendIncompatible');
-        // A version lost mid-transition still reads as an incomplete change, as before.
+
         const midway = setup({ enable: async () => { throw new SyncEncryptionRemoteVersionUnavailableError('data.json.enc'); } });
         await midway.card.refresh().done;
         midway.card.openFlow('enable');

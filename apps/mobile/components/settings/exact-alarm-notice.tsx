@@ -11,16 +11,7 @@ import {
 import { SettingRow } from './setting-row';
 import { styles } from './settings.styles';
 
-/**
- * Tracks whether the OS will let this app set exact alarms, for the settings
- * screens that own a feature which depends on them.
- *
- * Only runs while `enabled` is true — the user has the reminder or pomodoro
- * alert switched on and is looking at the screen that offers the fix. No
- * polling and no background work: the state can only change on the system
- * screen we send them to, so re-reading it when the app comes back to the
- * foreground is enough.
- */
+
 export function useExactAlarmPermission(enabled: boolean): { showNotice: boolean } {
     const [allowed, setAllowed] = useState(true);
 
@@ -48,16 +39,16 @@ export function useExactAlarmPermission(enabled: boolean): { showNotice: boolean
 }
 
 export interface ExactAlarmNoticeRowProps {
-    /** Already-translated title, description and button label. */
+
     label: string;
     description: string;
     actionLabel: string;
     divider?: boolean;
-    /** Supporting permission help belonging to the toggle immediately above. */
+
     inline?: boolean;
 }
 
-/** The one row both reminder and pomodoro settings show while exact alarms are denied. */
+
 export function ExactAlarmNoticeRow({ label, description, actionLabel, divider, inline = false }: ExactAlarmNoticeRowProps) {
     const tc = useThemeColors();
     const onPress = useCallback(() => {

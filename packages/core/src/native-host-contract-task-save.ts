@@ -47,11 +47,11 @@ export type NativeTaskDraftSaveRequest = {
     base: SaveFields;
     patch: SaveFields;
     scheduleBase: NativeTaskScheduleBase;
-    /** Required exactly when the complete recurrence draft tuple is supplied. */
+
     recurrenceBase?: NativeTaskRecurrenceBase;
     attachments?: { base: Attachment[]; value: Attachment[] };
 };
-/** Private journal payload. The host persists this exact result before commit. */
+
 export type NativePreparedTaskDraftSave = PreparedTaskEdit & { version: 1; request: NativeTaskDraftSaveRequest };
 type ProjectEligibilityWitness = { id: string; status: Project['status']; deletedAt: string | null;
     purgedAt: string | null; rev: number | null; revBy: string | null; updatedAt: string };
@@ -71,7 +71,7 @@ export type NativePreparedTaskDraftSaveV2 = {
     effect: { task: { before: Task; after: Task } };
 };
 export type NativePreparedTaskDraftSaveAny = NativePreparedTaskDraftSave | NativePreparedTaskDraftSaveV2;
-/** Private selected-file authority only; legacy prepared V2 remains change-only. */
+
 export type NativeOwnedTaskDraftNoopDecision = {
     kind: 'noop'; preparedAt: string; deviceIdBefore: string | null;
     scope: NativePreparedTaskDraftSaveV2['scope'];
@@ -110,8 +110,7 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
 const keys = (value: Record<string, unknown>, expected: readonly string[]) => Object.keys(value).length === expected.length && expected.every((field) => own(value, field));
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'TASK_NOT_FOUND' | 'SAVE_FAILED', message: string): NativeHostResult<never> => ({ ok: false, error: { code, message } });
 
-// Strict JSON, including explicit null clears. Do not silently lose undefined,
-// non-finite numbers, prototypes, or cyclic/oversized journal content.
+
 const detach = (value: unknown, limit: number): unknown => {
     const check = (item: unknown, depth: number): boolean => {
         if (depth > 30) return false;
@@ -127,7 +126,7 @@ const detach = (value: unknown, limit: number): unknown => {
     return text.length <= limit ? JSON.parse(text) : null;
 };
 
-/** Raw saved representation, detached from the task. Retain the opening model's baseline. */
+
 export const getNativeTaskScheduleBase = (task: Task): NativeTaskScheduleBase => JSON.parse(JSON.stringify({
     startTime: task.startTime ?? null, dueDate: task.dueDate ?? null,
     relativeStartOffset: task.relativeStartOffset ?? null, reviewAt: task.reviewAt ?? null,
@@ -185,9 +184,8 @@ export const serializeNativeTaskDraftDirect = (before: Task, request: NativeTask
 export const validNativeTaskDraftBases = (before: Task, request: NativeTaskDraftSaveRequest,
     savedRaw = false): boolean => {
     if (!taskEditValuesEqual(getNativeTaskScheduleBase(before), request.scheduleBase)) return false;
-    // Native opens the editor from the load projection. The v2 authority is
-    // raw saved SQLite, so compare the frozen visible recurrence baseline to
-    // that same projection while retaining the raw row for the write receipt.
+
+
     const displayed = savedRaw ? { ...before, timeSpentMinutes: normalizeTimeSpentMinutes(before.timeSpentMinutes) } : before;
     const projected = savedRaw ? { ...displayed, recurrence: normalizeRecurrenceForLoad(before.recurrence) } : before;
     const openingTask = savedRaw && request.recurrenceBase
@@ -203,7 +201,6 @@ export const validNativeTaskDraftBases = (before: Task, request: NativeTaskDraft
 };
 
 
-/** Bind direct dates and frozen linked-start shape without reparsing in a new zone. */
 export const validNativeTaskDraftScheduleEffect = (before: Task, request: NativeTaskDraftSaveRequest, after: Task,
     validateField: (field: TaskDraftField, value: unknown) => boolean): boolean => {
     for (const field of ['dueDate', 'reviewAt'] as const) {
@@ -219,13 +216,13 @@ export const validNativeTaskDraftScheduleEffect = (before: Task, request: Native
     } else {
         if (mustClearOffset && after.relativeStartOffset != null) return false;
         if (after.relativeStartOffset != null && !taskEditValuesEqual(after.relativeStartOffset, offset)) return false;
-        // A due-only edit retains a usable existing link. Only an explicit
-        // start edit can break it without one of the deterministic clears.
+
+
         const retainsOffset = own(request.patch, 'relativeStartOffset') || !own(request.patch, 'startTime');
         if (!mustClearOffset && retainsOffset && offset && !taskEditValuesEqual(after.relativeStartOffset, offset)) return false;
         if (after.relativeStartOffset) {
-            // Frozen derived output: validate shape/representation, not a
-            // second calculation in the recovery process's timezone.
+
+
             if (!after.startTime || !validateField('startTime', after.startTime)
                 || hasTimeComponent(after.startTime) !== hasTimeComponent(after.dueDate)
                 || (/Z$|[+-]\d{2}:?\d{2}$/.test(after.startTime) !== /Z$|[+-]\d{2}:?\d{2}$/.test(after.dueDate!))) return false;
@@ -305,7 +302,7 @@ const draftSaveScope = (before: Task, request: NativeTaskDraftSaveRequest,
     };
 };
 
-/** Project/Area/Section stubs contain exactly the policy inputs frozen in scope. */
+
 const scopeRows = (scope: NativePreparedTaskDraftSaveV2['scope']) => ({
     projects: [...new Map([scope.sourceProject, scope.targetProject].filter((value): value is ProjectEligibilityWitness => !!value)
         .map((value) => [value.id, { ...value, deletedAt: value.deletedAt ?? undefined,
@@ -334,9 +331,8 @@ const draftSaveEffect = (before: Task, request: NativeTaskDraftSaveRequest,
     for (const field of SCHEDULE) {
         if (own(request.patch, field)) Object.assign(updates, { [field]: draft[field] || undefined });
     }
-    // The editor helper also tidies legacy checklist rows and inconsistent
-    // containers. This writer owns only the requested fields and their shared
-    // schedule/recurrence effects, not that unrelated cleanup.
+
+
     const requested = new Set<string>(Object.keys(request.patch));
     if (request.attachments) requested.add('attachments');
     if (SCHEDULE.some((field) => own(request.patch, field))) SCHEDULE.forEach((field) => requested.add(field));
@@ -387,23 +383,22 @@ type TaskDraftAttachmentStrategy = {
     detachPrepared: (input: unknown) => unknown;
 };
 
-// Only factory code selects this strategy. Legacy contract entry points never
-// accept a strategy, a caller permission flag, or a file-aware journal version.
+
 function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strategy?: TaskDraftAttachmentStrategy) {
     const mergeAttachments = strategy?.mergeAttachments ?? mergeNativeTaskLinkHalf;
     const patchValues = nativeTaskDraftPatchValues;
     const readRequest = (input: unknown, allowPlain = false, allowAttachments = false) => {
         if (strategy) return strategy.readRequest(input);
         const request = readNativeTaskDraftSaveRequest(input, deps.validateField, false, allowPlain, allowAttachments);
-        // V1 was sealed before Location and Assigned To were offered. Checklist
-        // has its own parser, but old prepared journal grammar must not widen.
+
+
         return request && (!allowPlain && (own(request.patch, 'location') || own(request.patch, 'assignedTo')) ? null : request);
     };
     const serializedDirect = serializeNativeTaskDraftDirect;
     const validBases = validNativeTaskDraftBases;
     const saves = createAreaSaveGuard(deps.save);
 
-    /** Check semantic authority without rerunning calendar or clock-dependent effects. */
+
     const validPrepared = (prepared: NativePreparedTaskDraftSave, preserveRaw = false, allowAttachments = false): boolean => {
         const { before, changes, request } = prepared;
         if (before.id !== request.id || typeof before.title !== 'string' || typeof before.createdAt !== 'string'
@@ -424,7 +419,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             if (attachments === null || !taskEditValuesEqual(after.attachments ?? [], attachments ?? [])) return false;
         }
         for (const field of FIELDS) {
-            if (field === 'status') continue; // The older date route may induce status promotion, but cannot request it.
+            if (field === 'status') continue;
             if ((SCHEDULE as readonly string[]).includes(field) || (ASSOCIATIONS as readonly string[]).includes(field)
                 || (RECURRENCE as readonly string[]).includes(field)) continue;
             if (own(changes, field) && !own(request.patch, field)) return false;
@@ -494,8 +489,8 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
         try {
             return validPrepared(prepared) ? prepared : null;
         } catch {
-            // A journal is untrusted JSON; typed draft helpers may reject a
-            // malformed raw before value by throwing. Refuse it without writes.
+
+
             return null;
         }
     };
@@ -591,7 +586,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             if (before.deletedAt || before.purgedAt || before.status === 'reference' && !referenceEditable(request)
                 || !rawTaskEqual(before, noop.effect.task.after)
                 || !taskEditValuesEqual(draftSaveScope(before, request, { tasks: [before], ...scopeRows(noop.scope) }), noop.scope)) return null;
-            // This transient calculation value never becomes a device witness or a write.
+
             const after = draftSaveEffect(before, request, noop.scope, noop.preparedAt,
                 noop.deviceIdBefore ?? 'native-noop-calculation', mergeAttachments);
             return after && rawTaskEqual(before, after) ? noop : null;
@@ -720,7 +715,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
     };
 
     const methods = {
-        /** Legacy v1 date/recurrence preparation remains strict for old callers and journals. */
+
         prepareTaskDraftSave(input: NativeTaskDraftSaveRequest): NativeHostResult<NativePreparedTaskDraftSave> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -805,13 +800,13 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
                         outcome: result.outcome,
                     },
                 });
-            } catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            } catch {                                                               }
             return { ok: true, value: { id: request.id, draft: createTaskDraft(task) } };
         },
     };
     const publicMethods = {
         ...methods,
-        /** Reuse the exact Task Draft V2 journal for one Review row's saved Task action. */
+
         async prepareReviewTaskWrite(input: NativeReviewTaskWriteInput): Promise<NativeHostResult<
             { kind: 'noop'; result: { id: string; draft: TaskDraft } }
             | { kind: 'prepared'; prepared: NativePreparedTaskDraftSaveV2 }>> {
@@ -867,7 +862,7 @@ export function createTaskDraftSaveMethods(deps: NativeTaskDraftSaveDependencies
     return createTaskDraftSaveFactory(deps).publicMethods;
 }
 
-/** Internal factory seam: no legacy contract method can select file authority. */
+
 export function createOwnedFileTaskDraftSaveAuthority(deps: NativeTaskDraftSaveDependencies, strategy: TaskDraftAttachmentStrategy) {
     return createTaskDraftSaveFactory(deps, strategy).authority;
 }

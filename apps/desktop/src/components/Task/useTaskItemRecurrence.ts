@@ -42,7 +42,7 @@ export function useTaskItemRecurrence({
     const toggleCustomMonthDay = useCallback((day: number) => {
         setCustomMonthDays((current) => {
             if (!current.includes(day)) return [...current, day].sort((a, b) => a - b);
-            // The rule needs at least one day, so ignore the tap that would empty it.
+
             return current.length > 1 ? current.filter((value) => value !== day) : current;
         });
     }, []);
@@ -87,7 +87,7 @@ export function useTaskItemRecurrence({
         const parsed = parseRRuleString(editRecurrenceRRule);
         const intervalValue = Number(customInterval);
         const safeInterval = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 1;
-        // buildRRuleString clamps, dedupes and sorts the list.
+
         const safeMonthDays = customMonthDays.length > 0 ? customMonthDays : [1];
         const rrule = customMode === 'nth'
             ? buildRRuleString('monthly', customWeekday === 'WEEKDAY'

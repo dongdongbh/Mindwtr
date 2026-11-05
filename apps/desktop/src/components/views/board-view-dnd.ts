@@ -10,15 +10,15 @@ export type BoardDragEndArgs = {
     activeId: string;
     overId: string;
     columnIds: TaskStatus[];
-    /** Status of the dragged task as currently stored */
+
     activeStatus: TaskStatus | undefined;
-    /** Status of the card the drag ended over, when it ended over a card */
+
     overStatus: TaskStatus | undefined;
-    /** Rendered task ids of the dragged task's column, top to bottom */
+
     columnTaskIds: string[];
-    /** Rendered task ids of the column the drag ended over, top to bottom (for cross-column placement) */
+
     overColumnTaskIds?: string[];
-    /** Manual reordering only applies while the default sort is active */
+
     canReorder: boolean;
 };
 
@@ -42,8 +42,8 @@ export function resolveBoardDragEnd({
 
     if (!overStatus) return { type: 'none' };
     if (overStatus !== activeStatus) {
-        // Dropped on a card in another column: keep the chosen position when we know the
-        // target column order and manual ordering is active, otherwise fall back to the bottom.
+
+
         if (canReorder && overColumnTaskIds) {
             const toIndex = overColumnTaskIds.indexOf(overId);
             if (toIndex >= 0) {

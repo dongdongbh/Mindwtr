@@ -14,7 +14,7 @@ export function compareVersions(left, right) {
   };
   const a = parse(left);
   const b = parse(right);
-  // Ignore the Store-owned revision when comparing uploaded package identities.
+
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return Math.sign(a[i] - b[i]);
   return 0;
 }
@@ -27,8 +27,7 @@ export function assertStatus(submission) {
   return status;
 }
 
-// All submission writes are constructed beneath this flight's URL. There is no
-// production-submission fallback and no automatic deletion of existing drafts.
+
 export async function publishFlight({ appId, flightId, tag, fileName, archive, request, sleep = pause, log = console.log }) {
   if (!/^[A-Z0-9]+$/.test(appId)) throw new Error('Invalid Store app ID.');
   if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(flightId)) {
@@ -74,7 +73,7 @@ export async function publishFlight({ appId, flightId, tag, fileName, archive, r
   }
 
   if (!submission) {
-    // POST is intentionally not retried: a lost response may still create a draft.
+
     submission = await request('POST', `${root}/submissions`);
   }
   if (!submission.id || submission.flightId !== flightId) throw new Error('Microsoft returned an invalid flight submission.');
@@ -160,7 +159,7 @@ export async function main(env = process.env) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(error => {
-    // Do not print request objects, response bodies, tokens, or SAS query strings.
+
     console.error(error instanceof TypeError || error instanceof SyntaxError ? 'Store request failed; check connectivity and configuration.' : error.message);
     process.exitCode = 1;
   });

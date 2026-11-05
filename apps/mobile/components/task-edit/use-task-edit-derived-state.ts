@@ -47,7 +47,7 @@ type UseTaskEditDerivedStateArgs = {
     t: (key: string) => string;
 };
 
-/** React wiring around core's task editor model (task-editor-model.ts). */
+
 export function useTaskEditDerivedState({
     task,
     checklist,

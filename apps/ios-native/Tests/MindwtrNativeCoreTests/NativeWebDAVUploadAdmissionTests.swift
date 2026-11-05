@@ -275,7 +275,7 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
     func testEncryptedWireCapAuthenticatesExactUploadAndRefusesEightMiBSourceBeforeBytesAcrossColdPhases() async throws {
         try await seed(false)
         let bytes = Data([0, 255, 128, 1, 10, 13, 42, 7, 9]); try bytes.write(to: source)
-        // MWENC1 has a maintained 54-byte authenticated header and a 16-byte tag.
+
         let wireCap = bytes.count + 70
         let originalInode = try inode(source), originalHash = try digest(source)
         let exact = try host(plans: [plan(cap: wireCap - 1, phase: "post-merge", pending: false, encrypted: true),
@@ -311,8 +311,7 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), beforeCache)
         XCTAssertEqual(result["kv"] as? String, "undefined"); await exact.close()
 
-        // An 8 MiB plaintext source fits the old source cap but its sealed bytes
-        // exceed the unchanged native 8 MiB wire cap. Use a real sparse file.
+
         let hostWireCap = 8 * 1024 * 1024
         let fd = Darwin.open(source.path, O_WRONLY | O_TRUNC | O_CLOEXEC)
         guard fd >= 0 else { throw HostFailure("Synthetic encrypted upload source creation failed") }
@@ -379,8 +378,7 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path), beforeCache)
         XCTAssertEqual(result["kv"] as? String, "undefined"); await exact.close()
 
-        // The source fits native file reads but exceeds the unchanged 8 MiB HTTP
-        // wire cap. Pending generations are excluded from remote presence HEADs.
+
         let hostWireCap = 8 * 1024 * 1024
         let fd = Darwin.open(source.path, O_WRONLY | O_TRUNC | O_CLOEXEC)
         guard fd >= 0 else { throw HostFailure("Synthetic cloud upload source creation failed") }

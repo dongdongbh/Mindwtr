@@ -10,10 +10,11 @@ import {
     type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Folder, Pencil, Tag, Trash2 } from 'lucide-react';
+import { Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Folder, ListChecks, Pencil, Tag, Trash2 } from 'lucide-react';
 import {
     buildTaskMovePatch,
     getAdvancedReviewDate,
+    getChecklistMoveTargets,
     isDueForReview,
     normalizeBulkTaskTokenInput,
     safeParseDate,
@@ -32,6 +33,7 @@ import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 import { reportError } from '../../lib/report-error';
 import { copyTaskReference, copyTaskTitles } from '../../lib/task-clipboard';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { Button } from '../ui/Button';
 import { DestinationSelector } from '../ui/DestinationSelector';
@@ -47,7 +49,9 @@ const PANEL_GAP_PX = 8;
 const MENU_WIDTH_PX = 224;
 const HOVER_OPEN_DELAY_MS = 250;
 
-type QuickPanelId = 'dates' | 'startTime' | 'dueDate' | 'reviewAt' | 'destination' | 'contexts' | 'priority' | null;
+type QuickPanelId = 'dates' | 'startTime' | 'dueDate' | 'reviewAt' | 'destination' | 'contexts' | 'priority' | 'checklist' | null;
+
+const isDateEditorPanel = (panel: QuickPanelId) => panel === 'startTime' || panel === 'dueDate' || panel === 'reviewAt';
 
 export interface TaskQuickActionMenuProps {
     task: Task;
@@ -70,26 +74,25 @@ export interface TaskQuickActionMenuProps {
         title: string;
         onToggle: () => void;
     };
-    /**
-     * `restoreFocus: false` marks a dismissal where focus should follow the
-     * pointer (outside click/right-click, scroll) instead of returning to the
-     * row's trigger — a deferred focus-return there lands after whatever the
-     * pointer opened next and paints the old row's focus ring (#999).
-     */
+
+
     onClose: (options?: { restoreFocus?: boolean }) => void;
     onRename?: () => void;
-    /** @deprecated Conversion actions now live in the task editor. */
+
     onPromoteToProject?: () => void;
-    /** @deprecated Conversion actions now live in the task editor. */
+
     onConvertToSection?: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onCreateArea: (name: string) => Promise<string | null>;
     onCreateProject: (title: string) => Promise<string | null>;
-    /** With [base] (the task an edit panel opened on), the updates merge onto the latest row field by field. */
+
     onUpdateTask: (updates: Partial<Task>, base?: Task) => Promise<StoreActionResult>;
-    /** Extra entries rendered above Delete. Generic by design — the menu does not interpret them. */
+
+
+    checklistMove?: { tasks: Task[]; onSelect: (targetId: string) => void };
+
     extraActions?: Array<{
         id: string;
         label: string;
@@ -102,11 +105,7 @@ const clamp = (value: number, min: number, max: number) => {
     return Math.min(Math.max(value, min), max);
 };
 
-// The mousedown that dismisses the menu (an "outside" click) must not also
-// activate whatever control is underneath it — closing unmounts the menu
-// synchronously, so a listener scoped to its own effect would already be
-// gone by the time the matching `click` event arrives. Registered directly
-// on window, independent of any component's lifecycle, so it survives.
+
 const suppressDismissClick = () => {
     const cleanup = () => {
         window.removeEventListener('click', swallow, true);
@@ -118,22 +117,14 @@ const suppressDismissClick = () => {
         event.stopPropagation();
         cleanup();
     }
-    // The swallower must last exactly one gesture: long enough to eat that
-    // gesture's click, and no longer. Both bounds have bitten:
-    // - A timer started at mousedown fires while the button is still held, since
-    //   `click` only arrives after `mouseup` — the swallower is gone before the
-    //   click it exists for.
-    // - Removing it only on the click leaks when no click ever comes, and the
-    //   stale listener then eats an unrelated later one.
-    // mouseup is the end of the press, and the click that belongs to it is
-    // dispatched immediately afterwards in the same task, so cleaning up in a
-    // task scheduled from mouseup always runs after the click was swallowed.
+
+
     function endGesture() {
         window.setTimeout(cleanup, 0);
     }
     window.addEventListener('click', swallow, { capture: true, once: true });
     window.addEventListener('mouseup', endGesture, { capture: true, once: true });
-    // A press that becomes a drag produces neither mouseup nor click.
+
     window.addEventListener('dragstart', cleanup, { capture: true, once: true });
 };
 
@@ -145,9 +136,32 @@ const parseTokenInput = (value: string) => Array.from(new Set(
 ));
 
 const preserveFocusedDatePanelLayout = (event: ReactMouseEvent<HTMLDivElement>) => {
-    // Keep focus on the date input while Save/Cancel is pressed so DateField's
-    // blur teardown does not run mid-click.
+
+
     event.preventDefault();
+};
+
+
+const getPanelPosition = (anchor: HTMLElement | null, panel: HTMLElement | null) => {
+    if (!anchor || !panel) return null;
+    const anchorRect = anchor.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const preferredLeft = anchorRect.right + PANEL_GAP_PX;
+    const fallbackLeft = anchorRect.left - panelRect.width - PANEL_GAP_PX;
+    const shouldOpenLeft = preferredLeft + panelRect.width > window.innerWidth - VIEWPORT_MARGIN_PX
+        && fallbackLeft >= VIEWPORT_MARGIN_PX;
+    return {
+        left: clamp(
+            shouldOpenLeft ? fallbackLeft : preferredLeft,
+            VIEWPORT_MARGIN_PX,
+            window.innerWidth - panelRect.width - VIEWPORT_MARGIN_PX,
+        ),
+        top: clamp(
+            anchorRect.top,
+            VIEWPORT_MARGIN_PX,
+            window.innerHeight - panelRect.height - VIEWPORT_MARGIN_PX,
+        ),
+    };
 };
 
 const focusPanelControl = (panel: HTMLElement | null) => {
@@ -181,9 +195,12 @@ export function TaskQuickActionMenu({
     onCreateArea,
     onCreateProject,
     onUpdateTask,
+    checklistMove,
     extraActions = [],
 }: TaskQuickActionMenuProps) {
     const menuRef = useRef<HTMLDivElement | null>(null);
+
+    const datesMenuRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const focusedPanelRef = useRef<QuickPanelId>(null);
     const hoverTimerRef = useRef<number | null>(null);
@@ -193,7 +210,14 @@ export function TaskQuickActionMenu({
     const destinationButtonRef = useRef<HTMLButtonElement | null>(null);
     const contextsButtonRef = useRef<HTMLButtonElement | null>(null);
     const priorityButtonRef = useRef<HTMLButtonElement | null>(null);
+    const checklistButtonRef = useRef<HTMLButtonElement | null>(null);
+    const [checklistQuery, setChecklistQuery] = useState('');
+    const startItemRef = useRef<HTMLButtonElement | null>(null);
+    const dueItemRef = useRef<HTMLButtonElement | null>(null);
+    const reviewItemRef = useRef<HTMLButtonElement | null>(null);
     const [activePanel, setActivePanel] = useState<QuickPanelId>(null);
+    const datesMenuOpen = activePanel === 'dates' || isDateEditorPanel(activePanel);
+    const [datesMenuPosition, setDatesMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
     const [menuSize, setMenuSize] = useState({ width: MENU_WIDTH_PX, height: 1 });
     const initialStartDraft = splitDateTime(task.startTime);
@@ -215,7 +239,7 @@ export function TaskQuickActionMenu({
     const [destinationDraft, setDestinationDraft] = useState<TaskMoveDestination>(initialDestinationDraft);
     const [sectionDraft, setSectionDraft] = useState(initialSectionDraft);
     const [contextsDraft, setContextsDraft] = useState(initialContextsDraft);
-    // The task the contexts draft was last reset from: the save merges against it.
+
     const contextsBaseRef = useRef(task);
     const [savingPanel, setSavingPanel] = useState<Exclude<QuickPanelId, null> | null>(null);
     const startLabel = tFallback(t, 'taskEdit.startDateLabel', 'Start Date');
@@ -251,9 +275,17 @@ export function TaskQuickActionMenu({
     const noSectionLabel = tFallback(t, 'taskEdit.noSectionOption', 'No Section');
     const createSectionLabel = tFallback(t, 'projects.addSection', 'Add section');
     const noMatchesLabel = tFallback(t, 'common.noMatches', 'No matches');
+    const addToChecklistLabel = tFallback(t, 'task.addToChecklist', 'Add to checklist…');
+    const checklistTargets = activePanel === 'checklist' && checklistMove
+        ? getChecklistMoveTargets(checklistMove.tasks, task.id, checklistQuery)
+        : [];
+    const chooseChecklistTarget = (targetId: string) => {
+        checklistMove?.onSelect(targetId);
+        onClose();
+    };
     const createAreaLabel = tFallback(t, 'areas.new', 'New area');
     const canMarkReviewed = isDueForReview(task.reviewAt);
-    // Keep the stored baseline so an explicit Save can repair legacy bare tokens.
+
     const normalizedInitialContexts = parseTokenInput(initialContextsDraft);
     const normalizedDraftContexts = Array.from(new Set(
         parseTokenInput(contextsDraft)
@@ -301,9 +333,7 @@ export function TaskQuickActionMenu({
         contextsBaseRef.current = task;
     }, [task.areaId, task.contexts, task.dueDate, task.id, task.projectId, task.reviewAt, task.startTime]);
 
-    // Focus the menu container, not the first item — like native context menus,
-    // nothing is highlighted until the first arrow press, and key events still
-    // land inside the menu so the app-wide shortcuts stay suppressed.
+
     useEffect(() => {
         menuRef.current?.focus();
     }, []);
@@ -318,25 +348,26 @@ export function TaskQuickActionMenu({
     useEffect(() => {
         const isInsideMenuSurface = (event: Event) => event.composedPath().some((target) => {
             if (!(target instanceof Node)) return false;
-            if (menuRef.current?.contains(target) || panelRef.current?.contains(target)) return true;
+            if (
+                menuRef.current?.contains(target)
+                || datesMenuRef.current?.contains(target)
+                || panelRef.current?.contains(target)
+            ) return true;
             const targetElement = target instanceof Element ? target : target.parentElement;
             return Boolean(targetElement?.closest('[data-selector-dropdown="true"]'));
         });
         const handlePointer = (event: Event) => {
             if (isInsideMenuSurface(event)) return;
-            // Only mousedown has a click that could follow it in the same
-            // gesture — contextmenu (a right-click elsewhere) never fires one.
+
+
             if (event.type === 'mousedown') suppressDismissClick();
             onClose({ restoreFocus: false });
         };
         const handleScrollOrResize = (event: Event) => {
             if (event.type === 'scroll') {
                 if (!initialLayoutScrollSettledRef.current) return;
-                // A scroll from the menu's own surface must not dismiss it: its
-                // panels and dropdowns scroll, and focusing a partially clipped
-                // item on mousedown scrolls it into view — closing here killed
-                // the click before mouseup, a menu tap that silently did
-                // nothing. The list scrolling behind the menu still closes it.
+
+
                 if (isInsideMenuSurface(event)) return;
             }
             onClose({ restoreFocus: false });
@@ -360,7 +391,9 @@ export function TaskQuickActionMenu({
                     ? destinationButtonRef.current
                     : panelId === 'priority'
                         ? priorityButtonRef.current
-                        : contextsButtonRef.current
+                        : panelId === 'checklist'
+                            ? checklistButtonRef.current
+                            : contextsButtonRef.current
         );
         const closeActivePanel = () => {
             if (!activePanel) return;
@@ -368,18 +401,18 @@ export function TaskQuickActionMenu({
             setActivePanel(null);
             anchor?.focus();
         };
-        // Runs in the capture phase so the app-wide shortcut handler never sees
-        // keys the open menu consumes (arrows would otherwise move the list
-        // selection behind the menu and close it via the scroll listener).
+
+
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (isImeComposing(event)) return;
             cancelHoverOpen();
             const target = event.target instanceof Node ? event.target : null;
             const inSelectorDropdown = Boolean(
                 target instanceof Element && target.closest('[data-selector-dropdown="true"]'),
             );
             if (event.key === 'Escape') {
-                // An open selector dropdown is one layer deeper — it closes
-                // itself on Escape; the panel takes the next press.
+
+
                 if (inSelectorDropdown) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -392,12 +425,11 @@ export function TaskQuickActionMenu({
             }
             const inPanelSurface = inSelectorDropdown
                 || Boolean(target && panelRef.current?.contains(target));
-            // The "Dates…" panel is a menu of its own, so its items walk with the
-            // same keys. The form panels still bail out — their date inputs need
-            // the arrows.
-            const inDatesSubmenu = activePanel === 'dates' && inPanelSurface && !inSelectorDropdown;
-            if (inPanelSurface && !inDatesSubmenu) return;
-            const surface = inDatesSubmenu ? panelRef.current : menuRef.current;
+
+
+            if (inPanelSurface) return;
+            const inDatesSubmenu = Boolean(target && datesMenuRef.current?.contains(target));
+            const surface = inDatesSubmenu ? datesMenuRef.current : menuRef.current;
 
             switch (event.key) {
                 case 'ArrowDown':
@@ -422,7 +454,7 @@ export function TaskQuickActionMenu({
                         && active.getAttribute('aria-haspopup') === 'dialog'
                     ) {
                         if (active.getAttribute('aria-expanded') === 'true') {
-                            focusPanelControl(panelRef.current);
+                            focusPanelControl(active === datesButtonRef.current ? datesMenuRef.current : panelRef.current);
                         } else {
                             active.click();
                         }
@@ -483,56 +515,51 @@ export function TaskQuickActionMenu({
     }, [readOnly]);
 
     useLayoutEffect(() => {
-        if (!activePanel) {
+        if (!datesMenuOpen) {
+            setDatesMenuPosition(null);
+            return;
+        }
+        const position = getPanelPosition(datesButtonRef.current, datesMenuRef.current);
+        if (position) setDatesMenuPosition(position);
+    }, [datesMenuOpen, menuPosition.left, menuPosition.top]);
+
+    useLayoutEffect(() => {
+        if (!activePanel || activePanel === 'dates') {
             setPanelPosition(null);
             return;
         }
-        const anchor = activePanel === 'dates'
-            || activePanel === 'startTime'
-            || activePanel === 'dueDate'
-            || activePanel === 'reviewAt'
-            ? datesButtonRef.current
-            : activePanel === 'destination'
-                ? destinationButtonRef.current
-                : activePanel === 'priority'
-                    ? priorityButtonRef.current
-                    : contextsButtonRef.current;
-        const panel = panelRef.current;
-        if (!anchor || !panel) return;
-        const anchorRect = anchor.getBoundingClientRect();
-        const panelRect = panel.getBoundingClientRect();
-        const preferredLeft = anchorRect.right + PANEL_GAP_PX;
-        const fallbackLeft = anchorRect.left - panelRect.width - PANEL_GAP_PX;
-        const shouldOpenLeft = preferredLeft + panelRect.width > window.innerWidth - VIEWPORT_MARGIN_PX
-            && fallbackLeft >= VIEWPORT_MARGIN_PX;
-
-        setPanelPosition({
-            left: clamp(
-                shouldOpenLeft ? fallbackLeft : preferredLeft,
-                VIEWPORT_MARGIN_PX,
-                window.innerWidth - panelRect.width - VIEWPORT_MARGIN_PX,
-            ),
-            top: clamp(
-                anchorRect.top,
-                VIEWPORT_MARGIN_PX,
-                window.innerHeight - panelRect.height - VIEWPORT_MARGIN_PX,
-            ),
-        });
-    }, [activePanel, menuPosition.left, menuPosition.top]);
+        const anchor = activePanel === 'startTime'
+            ? startItemRef.current
+            : activePanel === 'dueDate'
+                ? dueItemRef.current
+                : activePanel === 'reviewAt'
+                    ? reviewItemRef.current
+                    : activePanel === 'destination'
+                        ? destinationButtonRef.current
+                        : activePanel === 'priority'
+                            ? priorityButtonRef.current
+                            : contextsButtonRef.current;
+        const position = getPanelPosition(anchor, panelRef.current);
+        if (position) setPanelPosition(position);
+    }, [activePanel, datesMenuPosition, menuPosition.left, menuPosition.top]);
 
     useEffect(() => {
-        if (!activePanel || !panelPosition) {
+        const surface = activePanel === 'dates' ? datesMenuRef.current : panelRef.current;
+        if (!activePanel || !(activePanel === 'dates' ? datesMenuPosition : panelPosition)) {
             if (!activePanel) focusedPanelRef.current = null;
             return;
         }
         if (focusedPanelRef.current === activePanel) return;
         focusedPanelRef.current = activePanel;
-        if (panelOpenedByHoverRef.current) return;
-        const control = focusPanelControl(panelRef.current);
-        if (activePanel === 'startTime' || activePanel === 'dueDate' || activePanel === 'reviewAt') {
-            control?.click();
+        if (panelOpenedByHoverRef.current) {
+
+
+            if (isDateEditorPanel(activePanel)) surface?.querySelector<HTMLElement>('input')?.click();
+            return;
         }
-    }, [activePanel, panelPosition]);
+        const control = focusPanelControl(surface);
+        if (isDateEditorPanel(activePanel)) control?.click();
+    }, [activePanel, datesMenuPosition, panelPosition]);
 
     if (typeof document === 'undefined') return null;
 
@@ -545,8 +572,16 @@ export function TaskQuickActionMenu({
         )) return;
         if (panelId === activePanel) {
             if (fromHover) return;
+
+            if (panelOpenedByHoverRef.current) {
+                panelOpenedByHoverRef.current = false;
+                const control = focusPanelControl(panelId === 'dates' ? datesMenuRef.current : panelRef.current);
+                if (isDateEditorPanel(panelId)) control?.click();
+                return;
+            }
             setPanelPosition(null);
-            setActivePanel(null);
+
+            setActivePanel(isDateEditorPanel(panelId) ? 'dates' : null);
             return;
         }
         panelOpenedByHoverRef.current = fromHover;
@@ -570,8 +605,8 @@ export function TaskQuickActionMenu({
                     ? { kind: 'area', id: task.areaId }
                     : { kind: 'none' });
             setSectionDraft(task.projectId ? task.sectionId || '' : '');
-        } else if (panelId === 'priority') {
-            // The priority panel applies immediately from task state; no draft to reset.
+        } else if (panelId === 'checklist') {
+            setChecklistQuery('');
         } else if (panelId === 'contexts') {
             setContextsDraft(task.contexts?.join(', ') || '');
             contextsBaseRef.current = task;
@@ -692,7 +727,7 @@ export function TaskQuickActionMenu({
     const handleContextsSave = async () => {
         setSavingPanel('contexts');
         try {
-            // Merged by token onto the latest row: a context another device added since the panel opened stays.
+
             const result = await onUpdateTask({ contexts: normalizedDraftContexts }, contextsBaseRef.current);
             if (!result.success) {
                 throw new Error(result.error || 'Failed to update task contexts');
@@ -720,12 +755,9 @@ export function TaskQuickActionMenu({
         }
     };
 
-    // Enter in a panel field confirms like the Save button (#992). Buttons act
-    // on Enter natively, and an open selector dropdown / suggestion list
-    // consumes it one layer deeper (arriving here already default-prevented or
-    // not at all), so both are left alone.
+
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-        if (event.key !== 'Enter' || event.defaultPrevented || !activePanel) return;
+        if (event.key !== 'Enter' || event.defaultPrevented || isImeComposing(event) || !activePanel) return;
         const target = event.target instanceof HTMLElement ? event.target : null;
         if (target?.closest('button, [data-selector-dropdown="true"]')) return;
         event.preventDefault();
@@ -743,6 +775,8 @@ export function TaskQuickActionMenu({
         } else if (activePanel === 'destination') {
             if (destinationDraftChanged || sectionDraftChanged) void handleDestinationSave();
             else onClose();
+        } else if (activePanel === 'checklist') {
+            if (checklistTargets[0]) chooseChecklistTarget(checklistTargets[0].id);
         } else if (contextsDraftChanged) {
             void handleContextsSave();
         } else {
@@ -791,9 +825,8 @@ export function TaskQuickActionMenu({
             onPointerLeave={cancelHoverOpen}
             onPointerDown={cancelHoverOpen}
             className={cn(
-                // Plain focus: styles, not focus-visible: — keyboard traversal
-                // moves focus programmatically, and WebKit does not always mark
-                // that focus-visible, which left the focused item unhighlighted.
+
+
                 'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:bg-muted focus-visible:ring-2 focus-visible:ring-primary/40',
                 disabled
                     ? 'cursor-not-allowed text-muted-foreground/50'
@@ -854,10 +887,7 @@ export function TaskQuickActionMenu({
                     ref: datesButtonRef,
                     icon: <Calendar className="h-4 w-4" />,
                     label: datesLabel,
-                    active: activePanel === 'dates'
-                        || activePanel === 'startTime'
-                        || activePanel === 'dueDate'
-                        || activePanel === 'reviewAt',
+                    active: datesMenuOpen,
                     onClick: () => openPanel('dates'),
                     hoverPanel: 'dates',
                     showChevron: true,
@@ -889,6 +919,15 @@ export function TaskQuickActionMenu({
                     hoverPanel: 'priority',
                     showChevron: true,
                 })}
+                {!readOnly && checklistMove && renderMenuAction({
+                    ref: checklistButtonRef,
+                    icon: <ListChecks className="h-4 w-4" />,
+                    label: addToChecklistLabel,
+                    active: activePanel === 'checklist',
+                    onClick: () => openPanel('checklist'),
+                    hoverPanel: 'checklist',
+                    showChevron: true,
+                })}
                 {!readOnly ? <div className="my-1 h-px bg-border/70" role="separator" /> : null}
                 {renderMenuAction({
                     icon: <Copy className="h-4 w-4" />,
@@ -904,7 +943,7 @@ export function TaskQuickActionMenu({
                     key: `copy-${kind}`,
                     icon: <Copy className="h-4 w-4" />,
                     label: kind === 'link'
-                        ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                        ? tFallback(t, 'task.copyTaskLink', 'Copy Mindwtr link')
                         : tFallback(t, 'task.copyTaskId', 'Copy task ID'),
                     onClick: (event) => {
                         void copyTaskReference(task.id, kind, t, {
@@ -947,14 +986,71 @@ export function TaskQuickActionMenu({
                 })}
             </div>
 
-            {activePanel && (
+            {datesMenuOpen && (
+                <div
+                    ref={datesMenuRef}
+                    role="dialog"
+                    aria-label={datesLabel}
+                    className="fixed z-50 w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+                    style={{
+                        top: datesMenuPosition?.top ?? menuPosition.top,
+                        left: datesMenuPosition?.left ?? (menuPosition.left + 188),
+                        visibility: datesMenuPosition ? 'visible' : 'hidden',
+                    }}
+                    onContextMenu={(event) => event.preventDefault()}
+                    onPointerEnter={cancelHoverOpen}
+                >
+                    <div className="space-y-1" role="menu" aria-label={datesLabel}>
+                        {renderMenuAction({
+                            icon: <Calendar className="h-4 w-4" />,
+                            ref: startItemRef,
+                            label: `${startLabel}…`,
+                            active: activePanel === 'startTime',
+                            onClick: () => openPanel('startTime'),
+                            hoverPanel: 'startTime',
+                            showChevron: true,
+                        })}
+                        {renderMenuAction({
+                            icon: <Calendar className="h-4 w-4" />,
+                            ref: dueItemRef,
+                            label: `${dueLabel}…`,
+                            active: activePanel === 'dueDate',
+                            onClick: () => openPanel('dueDate'),
+                            hoverPanel: 'dueDate',
+                            showChevron: true,
+                        })}
+                        {renderMenuAction({
+                            icon: <CalendarClock className="h-4 w-4" />,
+                            ref: reviewItemRef,
+                            label: `${reviewLabel}…`,
+                            active: activePanel === 'reviewAt',
+                            onClick: () => openPanel('reviewAt'),
+                            hoverPanel: 'reviewAt',
+                            showChevron: true,
+                        })}
+                        {canMarkReviewed && (
+                            <div className="my-1 h-px bg-border/70" role="separator" />
+                        )}
+                        {canMarkReviewed && renderMenuAction({
+                            icon: <CalendarClock className="h-4 w-4" />,
+                            label: markReviewedLabel,
+                            onClick: () => { void handleMarkReviewed(); },
+                        })}
+                        {canMarkReviewed && renderMenuAction({
+                            icon: <CalendarClock className="h-4 w-4" />,
+                            label: advanceReviewLabel,
+                            onClick: () => { void handleAdvanceReview(); },
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {activePanel && activePanel !== 'dates' && (
                 <div
                     ref={panelRef}
                     role="dialog"
                     aria-label={
-                        activePanel === 'dates'
-                            ? datesLabel
-                            : activePanel === 'startTime'
+                        activePanel === 'startTime'
                             ? startLabel
                             : activePanel === 'dueDate'
                                 ? dueLabel
@@ -964,7 +1060,9 @@ export function TaskQuickActionMenu({
                                         ? destinationLabel
                                             : activePanel === 'priority'
                                                 ? priorityLabel
-                                                : contextsLabel
+                                                : activePanel === 'checklist'
+                                                    ? addToChecklistLabel
+                                                    : contextsLabel
                     }
                     className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
                     style={{
@@ -976,41 +1074,7 @@ export function TaskQuickActionMenu({
                     onKeyDown={handlePanelKeyDown}
                     onPointerEnter={cancelHoverOpen}
                 >
-                    {activePanel === 'dates' ? (
-                        <div className="space-y-1" role="menu" aria-label={datesLabel}>
-                            {renderMenuAction({
-                                icon: <Calendar className="h-4 w-4" />,
-                                label: `${startLabel}…`,
-                                onClick: () => openPanel('startTime'),
-                                showChevron: true,
-                            })}
-                            {renderMenuAction({
-                                icon: <Calendar className="h-4 w-4" />,
-                                label: `${dueLabel}…`,
-                                onClick: () => openPanel('dueDate'),
-                                showChevron: true,
-                            })}
-                            {renderMenuAction({
-                                icon: <CalendarClock className="h-4 w-4" />,
-                                label: `${reviewLabel}…`,
-                                onClick: () => openPanel('reviewAt'),
-                                showChevron: true,
-                            })}
-                            {canMarkReviewed && (
-                                <div className="my-1 h-px bg-border/70" role="separator" />
-                            )}
-                            {canMarkReviewed && renderMenuAction({
-                                icon: <CalendarClock className="h-4 w-4" />,
-                                label: markReviewedLabel,
-                                onClick: () => { void handleMarkReviewed(); },
-                            })}
-                            {canMarkReviewed && renderMenuAction({
-                                icon: <CalendarClock className="h-4 w-4" />,
-                                label: advanceReviewLabel,
-                                onClick: () => { void handleAdvanceReview(); },
-                            })}
-                        </div>
-                    ) : activePanel === 'startTime' ? (
+                    {activePanel === 'startTime' ? (
                         <div className="space-y-3">
                             <DateField
                                 t={t}
@@ -1202,6 +1266,7 @@ export function TaskQuickActionMenu({
                                     destinationLabel={destinationLabel}
                                     projectsLabel={projectsLabel}
                                     areasLabel={areasLabel}
+                                    deferredLabel={tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
                                     noneLabel={tFallback(t, 'common.none', 'None')}
                                     searchPlaceholder={searchDestinationLabel}
                                     noMatchesLabel={noMatchesLabel}
@@ -1246,6 +1311,50 @@ export function TaskQuickActionMenu({
                                 >
                                     {saveLabel}
                                 </Button>
+                            </div>
+                        </div>
+                    ) : activePanel === 'checklist' ? (
+                        <div
+                            className="space-y-2"
+                            onKeyDown={(event) => {
+                                if (isImeComposing(event) || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
+
+                                const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, [role="option"]'));
+                                const index = controls.indexOf(document.activeElement as HTMLElement);
+                                const next = controls[(index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) % controls.length];
+                                event.preventDefault();
+                                next?.focus();
+                            }}
+                        >
+                            <input
+                                autoFocus
+                                value={checklistQuery}
+                                onChange={(event) => setChecklistQuery(event.target.value)}
+                                placeholder={searchDestinationLabel}
+                                aria-label={searchDestinationLabel}
+                                className="w-full rounded border border-border bg-muted/50 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            />
+                            <div role="listbox" aria-label={addToChecklistLabel} className="max-h-64 space-y-0.5 overflow-y-auto">
+                                {checklistTargets.map((target) => (
+                                    <button
+                                        key={target.id}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={false}
+                                        onClick={() => chooseChecklistTarget(target.id)}
+                                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/60 focus:bg-muted focus:outline-none"
+                                    >
+                                        <span className="flex-1 truncate">{target.title}</span>
+                                        {target.checklist?.length ? (
+                                            <span className="shrink-0 text-xs text-muted-foreground">
+                                                {target.checklist.filter((item) => item.isCompleted).length}/{target.checklist.length}
+                                            </span>
+                                        ) : null}
+                                    </button>
+                                ))}
+                                {checklistTargets.length === 0 && (
+                                    <div className="px-3 py-2 text-sm text-muted-foreground">{noMatchesLabel}</div>
+                                )}
                             </div>
                         </div>
                     ) : activePanel === 'priority' ? (

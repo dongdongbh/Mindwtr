@@ -53,7 +53,7 @@ const attachments = (value: unknown) => Array.isArray(value) && value.every((ite
 const taskKeys = TASK_SYNC_FIELD_SCHEMA.map((field) => field.name);
 const projectKeys = PROJECT_SYNC_FIELD_SCHEMA.map((field) => field.name);
 
-/** Full saved Task rows, including Trash and raw focus/archive metadata. */
+
 const validTask = (value: unknown): value is Task => {
     if (!record(value) || !fields(value, taskKeys) || !id(value.id) || !text(value.title)
         || !['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'].includes(String(value.status))
@@ -148,7 +148,7 @@ const readRequest = (value: unknown): NativeTaxonomyRequest | null => {
     return input as NativeTaxonomyRequest;
 };
 
-/** Replan from the frozen request only, before a host opens SQLite on recovery. */
+
 const readPrepared = (value: unknown): NativePreparedTaxonomy | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

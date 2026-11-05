@@ -34,11 +34,8 @@ type TaskBulkOrganizeModalProps = {
     selectedCount: number;
     projects: Project[];
     areas: Area[];
-    /**
-     * Only set where every selected task lives in one project (the project
-     * workspace). Sections belong to a project, so views without a project
-     * scope get no section picker.
-     */
+
+
     sectionScope?: { projectId: string; sections: Section[] };
     isApplying: boolean;
     t: (key: string) => string;
@@ -48,11 +45,7 @@ type TaskBulkOrganizeModalProps = {
     onCancel: () => void;
 };
 
-/**
- * Commas and newlines separate tokens. A segment whose every word carries the
- * prefix ("@home @work") is a space-separated list, read with the parser mobile
- * uses; any other segment is one label that may contain spaces (#1344).
- */
+
 const parseTokenInput = (value: string, field: 'contexts' | 'tags'): string[] => {
     const prefix = field === 'contexts' ? '@' : '#';
     return Array.from(new Set(value.split(/[,\n]/).flatMap((segment) => (
@@ -145,8 +138,8 @@ export function TaskBulkOrganizeModal({
     const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0);
     const isBusy = isApplying || createPending;
     const selectedProjectId = projectChoice !== KEEP_VALUE && projectChoice !== NONE_VALUE ? projectChoice : undefined;
-    // A section lives inside its project, so the picker goes quiet as soon as
-    // the modal is about to move the tasks to a different project.
+
+
     const canChooseSection = sectionScope !== undefined
         && (projectChoice === KEEP_VALUE || projectChoice === sectionScope.projectId);
     const title = tFallback(t, titleKey, titleFallback);
@@ -297,8 +290,7 @@ export function TaskBulkOrganizeModal({
         void onApply(input);
     };
 
-    // Cancel is already disabled while applying; route every other dismissal
-    // (X, backdrop, Escape) through the same guard.
+
     const cancel = () => {
         if (isBusy || createPendingRef.current) return;
         onCancel();
@@ -370,6 +362,7 @@ export function TaskBulkOrganizeModal({
                             placeholder={tFallback(t, 'bulk.keepProject', 'Keep project')}
                             searchPlaceholder={tFallback(t, 'projects.search', 'Search projects')}
                             noMatchesLabel={tFallback(t, 'common.noMatches', 'No matches')}
+                            deferredLabel={tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
                             createProjectLabel={tFallback(t, 'projects.create', 'Create project')}
                             ariaLabel={tFallback(t, 'taskEdit.projectLabel', 'Project')}
                             disabled={isBusy}
@@ -435,8 +428,8 @@ export function TaskBulkOrganizeModal({
                     )}
                 </div>
 
-                {/* The labels sit outside DateField: a <label> wrapper would swallow
-                    clicks meant for the calendar button. */}
+                {
+                                                            }
                 <div className="grid gap-3 sm:grid-cols-3">
                     <div className="space-y-1 text-xs font-medium text-muted-foreground">
                         <span>{startDateLabel}</span>

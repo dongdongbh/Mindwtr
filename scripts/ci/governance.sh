@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Repo and metadata governance checks. The CI governance job (.github/workflows/ci.yml)
-# and `bun run verify` both run this script, so they always run the same checks.
-# On a contributor machine, a check whose tool is not installed is skipped with a
-# message. In CI (CI is set), a missing tool fails the run; it never passes silently.
+
+
 set -euo pipefail
 
 skipped=()
 
-# run <name> <tool>... -- <command> [args...]
+
 run() {
   local name="$1"
   shift
@@ -38,6 +36,7 @@ main() {
   run "Merged worktree cleanup regression tests" python3 -- python3 -m unittest discover -s scripts/maintenance -p test_cleanup_merged_worktrees.py
   run "Schema and release workflow governance checks" bun python3 -- bun run test:governance
   run "README heading parity check" bun -- bun run docs:check-readme
+  run "Feature map check" bun -- bun run docs:check-feature-map
   run "Store image asset check" file -- bash scripts/ci/validate-store-image-assets.sh
   run "AppStream metainfo locale check" python3 -- python3 scripts/ci/validate-appstream-locales.py
   run "Workflow JSON newline check" node -- node scripts/ci/validate-workflow-json-newlines.js
@@ -71,7 +70,7 @@ main() {
   fi
 }
 
-# Sourcing the script (its test does) defines `run` without running the checks.
+
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   main "$@"
 fi

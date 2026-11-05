@@ -6,7 +6,7 @@ import type { AppData, Area, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
 const DELETED = '2026-10-02T12:00:00.000Z';
-// A restored Done row must stay done on the cold reopen: a fixed completion date ages past auto-archive's 7 days.
+
 const RECENTLY_DONE = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const REQUEST_ID = '4bebf523-dd4e-40dc-9fce-37e456295d49';
 const ID = 'trash-restore-task';
@@ -124,9 +124,8 @@ describe('prepared single Task restore from Trash', () => {
 
     it.each(sharedRestoreCases.map((entry) => [entry.name, entry] as const))
     ('uses the shared container parity fixture for %s', async (_name, row) => {
-        // The shared parity fixture is historical; move its Trash timestamp inside
-        // retention and use the host recovery load to retain raw project+Area rows.
-        // A normal UI load already strips Area when projectId is present.
+
+
         const source = task({ ...row.task, id: ID, updatedAt: DELETED, deletedAt: DELETED });
         const env = await open(initial(source, {
             projects: row.containers.projects.map((entry) => ({ ...project(), ...entry })),

@@ -1,8 +1,7 @@
 import Foundation
 import Security
 
-/// SecItem work is synchronous and cannot be rolled back by cancelling its caller.
-/// Only plain records cross this serial worker; two retained replies bound memory.
+
 final class NativeSecretJobs: @unchecked Sendable {
     static let maximumBytes = 64 * 1024
     private let condition = NSCondition()
@@ -93,7 +92,7 @@ final class NativeSecretJobs: @unchecked Sendable {
         let job = Job(id: id, registryID: registryID, token: token, operation: operation,
                       account: account, value: value, accessibility: accessibility)
         jobs[id] = job
-        // Enqueue while admission is locked, so serial execution follows admission order.
+
         worker.async { [self] in execute(job) }
         condition.unlock()
         return job
@@ -204,8 +203,7 @@ final class NativeSecretJobs: @unchecked Sendable {
         return "absent"
     }
 
-    /// Private fixed-account metadata uses the same bounded job registry and serial drain.
-    /// No generic request can select this operation or receive credential data from it.
+
     func inspectAIProviderItem(account: String, cancellation: NativeAttachmentCancellation) throws -> String {
         guard ["mindwtr-ai-key_openai", "mindwtr-ai-key_gemini", "mindwtr-ai-key_anthropic"].contains(account) else {
             throw HostFailure("AI provider device metadata request is invalid")
@@ -237,7 +235,7 @@ final class NativeSecretJobs: @unchecked Sendable {
             if enforceUnlocked { changes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly }
             try check(status("update", alias: "no-auth") { SecItemUpdate(executionQuery(base) as CFDictionary, changes as CFDictionary) })
         } else { try check(result) }
-        // Stage1 intentionally retains legacy/auth aliases; no write-induced migration.
+
     }
     private func delete(_ account: String) throws {
         var failure: Error?
@@ -253,8 +251,8 @@ final class NativeSecretJobs: @unchecked Sendable {
     private func execute(_ job: Job) {
         let answer: [String: Any], succeeded: Bool
         do {
-            // This is the last cancellation boundary: a started synchronous
-            // SecItem operation completes even if close arrives during the call.
+
+
             guard !job.token.isCancelled else { throw HostFailure("Secure storage bridge is closed") }
             if job.operation == "ai-metadata" {
                 answer = ["id": job.id, "secureItem": try inspectAIProviderItem(job)]
@@ -285,10 +283,10 @@ final class NativeSecretJobs: @unchecked Sendable {
         condition.unlock(); registry.remove(job.registryID)
         return (String(decoding: try JSONSerialization.data(withJSONObject: answer), as: UTF8.self), completed)
     }
-    /// Do not abort accepted work: finally compensation still runs in this runtime.
+
     func drain() { worker.sync {} }
-    /// The selected attachment owner compares the same read-only account at its
-    /// serialized mutation boundaries. This does not lock external Keychain writers.
+
+
     func readCloudTokenForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
         try readForAttachmentOwner("mindwtr_cloud_token", cancellation: cancellation)
     }

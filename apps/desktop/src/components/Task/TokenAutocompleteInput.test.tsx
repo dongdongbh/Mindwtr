@@ -4,6 +4,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { TokenAutocompleteInput } from './TokenAutocompleteInput';
 
 describe('TokenAutocompleteInput', () => {
+    it.each([
+        { key: 'Enter', isComposing: true },
+        { key: 'Enter', keyCode: 229 },
+        { key: 'Process' },
+    ])('keeps IME keys out of consumer submit handlers: %j', (keyEvent) => {
+        const onKeyDown = vi.fn();
+        const onChange = vi.fn();
+        const { getByRole } = render(
+            <TokenAutocompleteInput value="中文" suggestions={[]} prefix="@" ariaLabel="Contexts" onChange={onChange} onKeyDown={onKeyDown} />
+        );
+        const input = getByRole('combobox');
+
+        fireEvent.keyDown(input, keyEvent);
+        expect(onKeyDown).not.toHaveBeenCalled();
+        expect(onChange).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(onKeyDown).toHaveBeenCalledOnce();
+    });
+
     it('does not accept a substring match on Enter until an option is selected', async () => {
         const onChange = vi.fn();
         const onKeyDown = vi.fn();

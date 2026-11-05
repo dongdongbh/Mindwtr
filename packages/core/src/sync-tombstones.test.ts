@@ -449,7 +449,7 @@ describe('purgeExpiredTombstones keeps referenced parents', () => {
     });
 
     it('drops a parent chain in the pass where its last child expires', () => {
-        // area <- project <- section <- task; the task tombstone expires last.
+
         const data = doc({
             areas: [area('a', { deletedAt: expired })],
             projects: [project('p', { areaId: 'a', deletedAt: expired })],

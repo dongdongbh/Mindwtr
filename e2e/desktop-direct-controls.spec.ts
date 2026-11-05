@@ -71,8 +71,8 @@ for (const theme of ['dark', 'light']) {
         await areaOption.click();
         await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr:list-options:v1') ?? '{}').focusGroupBy)).toBe('area');
         await page.reload();
-        // Focus sort is intentionally view-local; grouping retains its existing
-        // persisted preference. Exposing controls must not change either rule.
+
+
         await expect(focusSort).toContainText('Default');
         await expect(focusGroup).toContainText(areaLabel);
         await expect(focusGroup).toHaveClass(/(?:^|\s)border-primary(?:\s|$)/);

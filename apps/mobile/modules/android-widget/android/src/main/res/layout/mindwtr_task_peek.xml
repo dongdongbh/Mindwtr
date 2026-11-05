@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Colours are applied at runtime from the stored widget palette
-     (TaskPeekActivity.applyPalette); the resources here are the themeMode
-     "system" defaults shared with the widgets. -->
+
+
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/mindwtr_task_peek_root"
     android:layout_width="match_parent"
@@ -48,8 +47,7 @@
                 android:textColor="@color/mindwtr_widget_text"
                 android:textSize="14sp" />
 
-            <!-- Context and tag chips are added here at runtime; they scroll
-                 sideways rather than needing a wrapping layout. -->
+
             <HorizontalScrollView
                 android:id="@+id/mindwtr_task_peek_chip_row"
                 android:layout_width="match_parent"

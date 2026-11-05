@@ -4,7 +4,7 @@ import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Settings › Notifications' picked time goes to core as ASCII 'HH:MM' in every language (core refuses other digits). */
+
 class NotificationsTimeTest {
     @Test fun pickedTimeIsAsciiInArabicAndPersian() {
         val original = Locale.getDefault()

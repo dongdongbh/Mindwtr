@@ -96,9 +96,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   return {
     ...actual,
     shallow: Object.is,
-    // Run the real selector: the screen reads through
-    // `useTaskStore((state) => ({…}), shallow)`, so a mock that ignores the
-    // selector never executes the projection it is meant to cover.
+
+
     useTaskStore: (selector?: (state: unknown) => unknown) => (
       selector ? selector(mocks.storeState) : mocks.storeState
     ),
@@ -217,8 +216,7 @@ vi.mock('lucide-react-native', () => ({
 vi.mock('@/hooks/use-reduced-motion', () => ({ useReducedMotion: () => false }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 
-// The sheet's own rendering is covered by task-filter-sheet.test.tsx; here it is
-// only a destination, so stub it rather than pull its whole icon/Modal tree in.
+
 vi.mock('@/components/task-filter-sheet', () => ({
   TaskFilterSheet: (props: any) => React.createElement('TaskFilterSheet', props),
   FilterChip: (props: any) => React.createElement('FilterChip', props),
@@ -249,8 +247,8 @@ describe('ArchivedScreen', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // clearAllMocks keeps implementations, so restore the empty store or a test
-    // that seeds persisted view state leaks it into the next one.
+
+
     vi.mocked(AsyncStorage.getItem).mockImplementation(async () => null);
     mocks.areaFilter.areaById = new Map();
     mocks.areaFilter.resolvedAreaFilter = { included: [], excluded: [] };
@@ -385,9 +383,7 @@ describe('ArchivedScreen', () => {
     expect(mocks.updateTask).not.toHaveBeenCalledWith('task-1', { status: 'inbox' });
   });
 
-  // Restore and the completion-time edit were fire-and-forget, so a refused
-  // write left the row where it was with nothing on screen — unlike the bulk
-  // restore beside them, which warns.
+
   it('warns when restoring a single archived task is refused', async () => {
     mocks.updateTask.mockResolvedValueOnce({ success: false, error: 'Task not found' });
     let tree!: renderer.ReactTestRenderer;
@@ -489,8 +485,7 @@ describe('ArchivedScreen', () => {
     });
   };
 
-  // findAll matches the composite element and the host element it renders, so a
-  // plain count double-counts. Keep host nodes only.
+
   const countByLabel = (tree: renderer.ReactTestRenderer, label: string) => tree.root.findAll(
     (node) => typeof node.type === 'string' && node.props.accessibilityLabel === label,
   ).length;
@@ -578,7 +573,7 @@ describe('ArchivedScreen', () => {
       tree.root.find((node) => node.props.testID === 'archived-group-header-a1').props.onPress();
     });
 
-    // The heading and its count stay, so the group is still findable; the row does not.
+
     expect(hasText(tree, 'Work')).toBe(true);
     expect(hasText(tree, 'Quarterly report')).toBe(false);
     expect(hasText(tree, 'Fix the printer')).toBe(true);
@@ -646,8 +641,8 @@ describe('ArchivedScreen', () => {
     });
 
     typeSearch(tree, 'nothing matches this');
-    // The empty state must not take the search box down with it, or the only way
-    // back is to leave the screen.
+
+
     expect(countByLabel(tree, 'Search')).toBe(1);
     expect(hasText(tree, 'No tasks match these filters.')).toBe(true);
   });

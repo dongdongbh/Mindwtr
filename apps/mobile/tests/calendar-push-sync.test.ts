@@ -17,9 +17,6 @@ type MockCalendarStoreState = {
     _tasksById: Map<string, unknown>;
 };
 
-// ---------------------------------------------------------------------------
-// Hoisted mocks — must be set up before any imports that reference them
-// ---------------------------------------------------------------------------
 
 const {
     mockGetItem,
@@ -33,6 +30,7 @@ const {
     mockCreateEventAsync,
     mockUpdateEventAsync,
     mockDeleteEventAsync,
+    mockGetEventAsync,
     mockGetCalendarSyncEntry,
     mockUpsertCalendarSyncEntry,
     mockDeleteCalendarSyncEntry,
@@ -67,7 +65,8 @@ const {
     mockDeleteCalendarAsync: vi.fn(async (_id: string) => {}),
     mockCreateEventAsync: vi.fn(async () => 'evt-1'),
     mockUpdateEventAsync: vi.fn(async () => 'evt-1'),
-    mockDeleteEventAsync: vi.fn(async () => {}),
+    mockDeleteEventAsync: vi.fn(async (_id?: string) => {}),
+    mockGetEventAsync: vi.fn(async (id: string) => ({ id })),
     mockGetCalendarSyncEntry: vi.fn<(taskId: string, platform: string) => Promise<MockCalendarSyncEntry | null>>(async () => null),
     mockUpsertCalendarSyncEntry: vi.fn<(entry: MockCalendarSyncEntry) => Promise<void>>(async () => {}),
     mockDeleteCalendarSyncEntry: vi.fn<(taskId: string, platform: string) => Promise<void>>(async () => {}),
@@ -94,6 +93,11 @@ let calendarSyncEntries = new Map<string, MockCalendarSyncEntry>();
 
 function calendarSyncEntryKey(taskId: string, platform: string) {
     return `${platform}:${taskId}`;
+}
+
+async function pushedEvent(id: string) {
+    const owners = [...calendarSyncEntries.values()].filter((entry) => entry.calendarEventId === id);
+    return { id, notes: owners.map((entry) => calendarPushTaskMarkerLine(entry.taskId)).join('\n') };
 }
 
 function setCalendarSyncEntries(entries: MockCalendarSyncEntry[]) {
@@ -133,6 +137,7 @@ vi.mock('expo-calendar', () => ({
     createEventAsync: mockCreateEventAsync,
     updateEventAsync: mockUpdateEventAsync,
     deleteEventAsync: mockDeleteEventAsync,
+    getEventAsync: mockGetEventAsync,
     getCalendarPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
     requestCalendarPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
 }));
@@ -163,10 +168,8 @@ vi.mock('@/lib/app-log', () => ({
     logError: mockLogError,
 }));
 
-// ---------------------------------------------------------------------------
-// Subject under test — imported AFTER mocks are established
-// ---------------------------------------------------------------------------
 
+import { calendarPushTaskMarkerLine } from '@mindwtr/core';
 import {
     deleteMindwtrCalendar,
     ensureMindwtrCalendar,
@@ -178,9 +181,6 @@ import {
     updateMindwtrCalendarColor,
 } from '@/lib/calendar-push-sync';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeTask(overrides: Partial<{
     id: string;
@@ -213,13 +213,13 @@ function makeTask(overrides: Partial<{
     };
 }
 
-/** Sets up the AsyncStorage.getItem calls made by runFullCalendarSync. */
+
 function setupEnabled(calendarId = 'cal-1', targetCalendarId: string | null = null) {
     mockGetItem
-        .mockResolvedValueOnce('1')         // getCalendarPushEnabled → enabled
-        .mockResolvedValueOnce(targetCalendarId); // getCalendarPushTargetCalendarId
+        .mockResolvedValueOnce('1')
+        .mockResolvedValueOnce(targetCalendarId);
     if (!targetCalendarId) {
-        mockGetItem.mockResolvedValueOnce(calendarId); // ensureMindwtrCalendar → stored ID
+        mockGetItem.mockResolvedValueOnce(calendarId);
     }
 }
 
@@ -249,12 +249,7 @@ type MockAndroidCalendar = {
     source?: { name: string; type?: string; isLocalAccount?: boolean };
 };
 
-/**
- * Wires AsyncStorage and the device calendar list as stateful mocks so the
- * Android delete-then-recreate color flow behaves like a real device: the
- * managed calendar starts as `cal-old`, deleting it removes it from the list,
- * and creating a new one yields `cal-new` carrying the requested color.
- */
+
 function setupStatefulAndroidCalendar() {
     const storage = new Map<string, string>([
         ['mindwtr:calendar-push-sync:enabled', '1'],
@@ -291,9 +286,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockPlatform.OS = 'ios';
-    // Default: the stored calendar still exists
-    mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr' }]);
-    // Mirror the storage adapter's persistent task/platform mapping contract.
+    mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', name: 'mindwtr' }]);
     setCalendarSyncEntries([]);
     mockGetCalendarSyncEntry.mockImplementation(async (taskId, platform) => (
         calendarSyncEntries.get(calendarSyncEntryKey(taskId, platform)) ?? null
@@ -308,6 +301,7 @@ beforeEach(() => {
         Array.from(calendarSyncEntries.values()).filter((entry) => entry.platform === platform)
     ));
     mockEnsureCalendarSyncStorageReady.mockResolvedValue(undefined);
+    mockGetEventAsync.mockImplementation(pushedEvent);
 });
 
 afterEach(() => {
@@ -315,9 +309,6 @@ afterEach(() => {
     vi.useRealTimers();
 });
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe('calendar sync storage readiness', () => {
     it('skips the full calendar run before touching events when SQLite is unavailable', async () => {
@@ -365,7 +356,7 @@ describe('ensureMindwtrCalendar', () => {
     });
 
     it('returns the stored calendar ID when the calendar still exists', async () => {
-        mockGetItem.mockResolvedValueOnce('cal-1'); // CALENDAR_ID_KEY
+        mockGetItem.mockResolvedValueOnce('cal-1');
 
         const id = await ensureMindwtrCalendar();
 
@@ -374,8 +365,8 @@ describe('ensureMindwtrCalendar', () => {
     });
 
     it('recreates the calendar when the stored one has been deleted', async () => {
-        mockGetItem.mockResolvedValueOnce('cal-old'); // stored but gone
-        mockGetCalendarsAsync.mockResolvedValue([]);  // not found
+        mockGetItem.mockResolvedValueOnce('cal-old');
+        mockGetCalendarsAsync.mockResolvedValue([]);
         mockCreateCalendarAsync.mockResolvedValue('cal-2');
 
         const id = await ensureMindwtrCalendar();
@@ -424,7 +415,7 @@ describe('ensureMindwtrCalendar', () => {
         expect(id).toBe('cal-android');
         expect(mockCreateCalendarAsync).toHaveBeenCalledWith(expect.objectContaining({
             title: 'Mindwtr',
-            // The internal name carries this install's marker, so a create cut short is recognized.
+
             name: expect.stringMatching(/^mindwtr:[0-9a-f-]{36}$/),
             ownerAccount: 'me@gmail.com',
             accessLevel: 'owner',
@@ -467,7 +458,7 @@ describe('calendar push color', () => {
         expect(updated).toBe(true);
         expect(mockSetItem).toHaveBeenCalledWith('mindwtr:calendar-push-sync:color', '#059669');
         expect(mockUpdateCalendarAsync).toHaveBeenCalledWith('cal-1', { color: '#059669' });
-        // iOS updates the calendar in place — it must not recreate it.
+
         expect(mockDeleteCalendarAsync).not.toHaveBeenCalled();
         expect(mockCreateCalendarAsync).not.toHaveBeenCalled();
     });
@@ -481,8 +472,8 @@ describe('calendar push color', () => {
 
         expect(updated).toBe(true);
         expect(mockSetItem).toHaveBeenCalledWith('mindwtr:calendar-push-sync:color', '#059669');
-        // expo-calendar cannot change a calendar's color in place on Android, so
-        // the managed calendar is deleted and recreated with the new color.
+
+
         expect(mockUpdateCalendarAsync).not.toHaveBeenCalled();
         expect(mockDeleteCalendarAsync).toHaveBeenCalledWith('cal-old');
         expect(mockCreateCalendarAsync).toHaveBeenCalledTimes(1);
@@ -669,12 +660,12 @@ describe('getCalendarPushTargetCalendars', () => {
 });
 
 describe('deleteMindwtrCalendar', () => {
-    // Another install (another phone, or a second Mindwtr app) can own a calendar with the same
-    // title and name on the same account: only the calendar whose id this install saved is its own.
+
+
     it('deletes no Mindwtr calendar it did not save, even one named like its own', async () => {
         mockGetItem
-            .mockResolvedValueOnce(null) // stored calendar id after reinstall
-            .mockResolvedValueOnce(null); // selected target id
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null);
         mockGetCalendarsAsync.mockResolvedValue([
             {
                 id: 'old-app-calendar',
@@ -708,7 +699,7 @@ describe('deleteMindwtrCalendar', () => {
     it('clears the selected target and sync rows for deleted Mindwtr calendars', async () => {
         mockGetItem
             .mockResolvedValueOnce('stored-calendar')
-            .mockResolvedValueOnce(null) // no iOS creation intent
+            .mockResolvedValueOnce(null)
             .mockResolvedValueOnce('stored-calendar');
         mockGetCalendarsAsync.mockResolvedValue([
             {
@@ -768,9 +759,8 @@ describe('deleteMindwtrCalendar', () => {
 describe('buildEventDetails — date-only calendar events stay on the intended day', () => {
     it('exports a YYYY-MM-DD due date as an all-day event ending inside the same day on iOS', async () => {
         setupEnabled();
-        // Use a fixed date-only string — no time, no timezone suffix.
-        // new Date('2026-04-20') parses as UTC midnight and shifts to Apr 19
-        // in US time zones; safeParseDate('2026-04-20') must produce Apr 20.
+
+
         const task = makeTask({ dueDate: '2026-04-20' });
         setStoreTasks([task]);
 
@@ -782,13 +772,11 @@ describe('buildEventDetails — date-only calendar events stay on the intended d
 
         expect(eventData.allDay).toBe(true);
         expect(eventData.startDate.getFullYear()).toBe(2026);
-        expect(eventData.startDate.getMonth()).toBe(3); // April (0-indexed)
+        expect(eventData.startDate.getMonth()).toBe(3);
         expect(eventData.startDate.getDate()).toBe(20);
         expect(eventData.startDate.getHours()).toBe(0);
 
-        // EventKit counts every day the range touches: a next-midnight end made
-        // the event span two days in Calendar and in Google accounts synced
-        // through iOS (#1065). The end must stay inside the same local day.
+
         expect(eventData.endDate.getFullYear()).toBe(2026);
         expect(eventData.endDate.getMonth()).toBe(3);
         expect(eventData.endDate.getDate()).toBe(20);
@@ -845,8 +833,8 @@ describe('buildEventDetails — date-only calendar events stay on the intended d
 
     it('sizes the pushed event by the estimate only while Time estimates is on', async () => {
         setupEnabled();
-        // Feature off: the stored estimate stays on the task but stops
-        // stretching the pushed event (the 30-minute default takes over).
+
+
         const task = makeTask({
             dueDate: null,
             startTime: '2026-04-20T10:45:00.000Z',
@@ -1524,5 +1512,216 @@ describe('startCalendarPushSync', () => {
             title: 'Second task updated',
             allDay: true,
         }));
+    });
+});
+
+describe('Android: expo-calendar never reports a missing event, so the binding reads it back', () => {
+    const notFound = (id: string) => Object.assign(new Error(`Event with id ${id} could not be found`), { code: 'E_EVENT_NOT_FOUND' });
+    const notDeleted = (id: string) => Object.assign(new Error(`Event with id ${id} could not be deleted`), { code: 'E_EVENT_NOT_DELETED' });
+    const androidCalendars = () => mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', name: 'mindwtr', accessLevel: 'owner', allowsModifications: true }]);
+    afterEach(() => {
+        mockDeleteEventAsync.mockImplementation(async () => {});
+        mockGetEventAsync.mockImplementation(pushedEvent);
+    });
+
+    it('recreates an event the user deleted in the calendar app, where expo\'s update succeeds on a missing row (RN bug 1)', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(mockUpsertCalendarSyncEntry).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.id, calendarEventId: 'evt-1' }));
+        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({ force: true,
+            extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome: 'recreated' },
+        }));
+    });
+
+    it('pushes again to a new calendar after the user deleted the old one in the system app (RN bug 2)', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-deleted', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-gone'));
+        mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteEventAsync).toHaveBeenCalledWith('evt-gone');
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarId: 'cal-1', calendarEventId: 'evt-1' }));
+        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({ force: true,
+            extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome: 'cleared' },
+        }));
+    });
+
+    it('never updates the user\'s event that took a pushed event\'s ID: core makes its own event instead', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'users-cal' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarEventId: 'evt-1' }));
+    });
+
+    it('never deletes the user\'s event that took a done task\'s event ID: the row is forgotten', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'users-cal' }));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
+    });
+
+    it('never touches the user\'s event when both the Mindwtr calendar\'s ID and the event\'s ID were reused', async () => {
+        mockPlatform.OS = 'android';
+        mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Work', name: 'work@example.com', ownerAccount: 'me@gmail.com',
+            accessLevel: 'owner', allowsModifications: true, source: { name: 'me@gmail.com', type: 'com.google' } }]);
+        setupEnabled();
+        const live = makeTask();
+        const done = makeTask({ id: 'task-done', status: 'done' });
+        setStoreTasks([live, done]);
+        setCalendarSyncEntries([
+            { taskId: live.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' },
+            { taskId: done.id, calendarEventId: 'evt-reused-2', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' },
+        ]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'cal-1' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(live.id, 'ios');
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(done.id, 'ios');
+    });
+
+    it('writes nothing and keeps the row when the event read fails for another reason', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-1', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockRejectedValue(Object.assign(new Error('provider busy'), { code: 'E_EVENT_READ' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).not.toHaveBeenCalled();
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarEventId: 'evt-1' }));
+    });
+
+    it('updates its own event in place when the event carries the task\'s marker', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-own', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).toHaveBeenCalledWith('evt-own', expect.objectContaining({ title: task.title }));
+        expect(mockCreateEventAsync).not.toHaveBeenCalled();
+    });
+
+    it('never overwrites the user\'s event that took a pushed event\'s ID in the same calendar: core makes its own event', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'cal-1', notes: 'Dentist at 9' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarEventId: 'evt-1' }));
+        expect(mockLogWarn).toHaveBeenCalledWith('Calendar push left an event it did not make', expect.objectContaining({ force: true,
+            extra: { releaseCheck: 'v1.3.8/calendar-push-unmarked-event', outcome: 'recreated' },
+        }));
+    });
+
+    it('never deletes the user\'s event that took a done task\'s event ID in the same calendar: the row is forgotten', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'cal-1', notes: 'Dentist at 9' }));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
+    });
+
+    it('clears the row of a done task whose event is already gone (RN bug 2)', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-gone'));
+        mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
+    });
+
+    it('keeps the row when a delete fails and the event is still there', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-kept', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-kept'));
+
+        await runFullCalendarSync();
+
+        expect(mockGetEventAsync).toHaveBeenCalledWith('evt-kept');
+        expect(mockDeleteCalendarSyncEntry).not.toHaveBeenCalled();
+    });
+
+    it('keeps the row when the read-back itself fails for another reason', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-kept', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-kept'));
+        mockGetEventAsync.mockRejectedValue(new Error('CALENDAR permission is required to do this operation.'));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteCalendarSyncEntry).not.toHaveBeenCalled();
     });
 });

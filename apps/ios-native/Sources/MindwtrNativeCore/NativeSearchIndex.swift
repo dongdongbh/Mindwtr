@@ -17,7 +17,7 @@ protocol NativeSearchIndexPort: AnyObject {
     func add(_ items: [NativeSearchIndexEntry], domain: String) async throws
 }
 
-/// Completion reports acceptance by the OS journal, not search visibility.
+
 @MainActor
 public final class NativeSearchIndex {
     static let domain = "tech.dongdongbh.mindwtr.native.search"
@@ -141,7 +141,7 @@ public final class NativeSearchIndex {
             dirty = false
             let currentEpoch = epoch, snapshot = desired
             do {
-                // Replacing only our domain also removes tasks absent from the new snapshot.
+
                 try await port.remove(domain: Self.domain)
                 acceptedFingerprint = nil
                 let removedCount = acceptedCount; acceptedCount = 0
@@ -163,7 +163,7 @@ public final class NativeSearchIndex {
                 acceptedFingerprint = nil
                 guard epoch == currentEpoch else { continue }
                 status = "failed"; event(status, snapshot?.items.count ?? acceptedCount)
-                // Keep desired state for an explicit Retry or fresh lifecycle request; never spin.
+
                 return
             }
         }

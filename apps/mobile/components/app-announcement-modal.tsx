@@ -11,7 +11,8 @@ import {
 import { ExternalLink, Megaphone, MessageSquare, X } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { AppAnnouncement, AppAnnouncementAction } from '@mindwtr/core';
+import { translateWithFallback, type AppAnnouncement, type AppAnnouncementAction } from '@mindwtr/core';
+import { useLanguage } from '@/contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
@@ -32,6 +33,7 @@ export function AppAnnouncementModal({
 }: AppAnnouncementModalProps) {
   const tc = useThemeColors();
   const filledButton = useFilledButtonColors();
+  const { t } = useLanguage();
 
   React.useEffect(() => {
     if (visible && announcement) onShown?.();
@@ -40,7 +42,7 @@ export function AppAnnouncementModal({
   if (!announcement) return null;
 
   const action = announcement.action;
-  const dismissLabel = announcement.dismissLabel ?? 'Not now';
+  const dismissLabel = announcement.dismissLabel ?? translateWithFallback(t, 'common.notNow', 'Not now');
   const actionIcon = action?.type === 'feedback'
     ? <MessageSquare color={tc.onTint} size={16} strokeWidth={2.2} />
     : <ExternalLink color={tc.onTint} size={16} strokeWidth={2.2} />;
@@ -68,7 +70,7 @@ export function AppAnnouncementModal({
                 <Text style={[styles.title, { color: tc.text }]}>{announcement.title}</Text>
               </View>
               <TouchableOpacity
-                accessibilityLabel="Dismiss announcement"
+                accessibilityLabel={translateWithFallback(t, 'announcement.dismiss', 'Dismiss announcement')}
                 accessibilityRole="button"
                 hitSlop={8}
                 onPress={onDismiss}

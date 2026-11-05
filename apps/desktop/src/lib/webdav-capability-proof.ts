@@ -8,10 +8,8 @@ export type { WebdavCapabilityProofConfig };
 
 export const WEBDAV_CAPABILITY_PROOF_STORAGE_KEY = 'mindwtr-webdav-capability-proof-v1';
 export const WEBDAV_LEGACY_PROOF_STORAGE_KEY = 'mindwtr-webdav-legacy-proof-v1';
-// A legacy (no strong ETag) answer is re-checked daily, not per cycle: the probe is the
-// cold first request of every sync and on a slow link it failed cycles whose own reads
-// then succeeded (Jianguoyun, roaming, 2026-08-31). A day bounds how long a server that
-// starts serving strong ETags goes unnoticed without asking the user to re-save.
+
+
 export const WEBDAV_LEGACY_PROOF_TTL_MS = 24 * 60 * 60_000;
 
 export const hasWebdavCapabilityProof = (config: WebdavCapabilityProofConfig): boolean => {
@@ -30,8 +28,8 @@ export const rememberWebdavCapabilityProof = (config: WebdavCapabilityProofConfi
             serializeWebdavCapabilityProof(config),
         );
     } catch {
-        // The current run was proven. If renderer storage is unavailable, the
-        // next run safely probes again instead of trusting an unrecorded result.
+
+
     }
 };
 
@@ -56,13 +54,13 @@ const rememberLegacyProof = (config: WebdavCapabilityProofConfig, now: number): 
             JSON.stringify({ proof: serializeWebdavCapabilityProof(config), at: now }),
         );
     } catch {
-        // Next run probes again.
+
     }
 };
 
 export type EnsureWebdavCapabilityProofOptions = {
-    /** Only a caller that accepts plaintext without a strong ETag may reuse a cached
-     *  legacy answer; with encryption on, the probe must run and reject it. */
+
+
     allowLegacyPlaintext?: boolean;
     now?: () => number;
 };
@@ -78,7 +76,7 @@ export const ensureWebdavCapabilityProof = async (
     const compatibility = await probe() ?? 'strong-etag';
     if (compatibility === 'strong-etag') {
         rememberWebdavCapabilityProof(config);
-        try { localStorage.removeItem(WEBDAV_LEGACY_PROOF_STORAGE_KEY); } catch { /* next run probes again */ }
+        try { localStorage.removeItem(WEBDAV_LEGACY_PROOF_STORAGE_KEY); } catch {                             }
     } else if (options.allowLegacyPlaintext) {
         rememberLegacyProof(config, now);
     }

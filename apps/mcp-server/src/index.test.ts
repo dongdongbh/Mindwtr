@@ -1,20 +1,22 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodTypeAny } from 'zod';
+import { ZodObject } from 'zod';
 
 import { NotFoundError } from './errors.js';
 import { addTaskSchema, logError, parseArgs, parseBooleanFlag, registerMindwtrTools, resolveServerConfig, resolveServerModeFlags, updateTaskSchema } from './index.js';
 import { MAX_TASK_LIST_LIMIT } from './input-validation.js';
+import { createLocalApiService } from './local-api-service.js';
 import type { Area, Person, Project, Section, Task } from './queries.js';
 import type { MindwtrService } from './service.js';
 
 type RegisteredTool = {
   name: string;
   inputSchema: ZodTypeAny;
-  /** Parses through the registered inputSchema first, like the SDK does. */
+
   handler: (input: any) => Promise<any>;
-  /** The handler on its own, for the tests that cover its runtime validators
-   *  directly with input the schema would already have rejected. */
+
+
   rawHandler: (input: any) => Promise<any>;
 };
 
@@ -22,9 +24,8 @@ const createMockServer = () => {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool: (name: string, meta: any, handler: (input: any) => Promise<any>) => {
-      // The SDK validates each call against the registered inputSchema before the
-      // handler runs. Keep the schema and do the same here, so the caps it declares
-      // (search length, offset ceiling, limit range, enums, date shape) are covered.
+
+
       const inputSchema = meta?.inputSchema as ZodTypeAny;
       tools.set(name, {
         name,
@@ -93,6 +94,7 @@ const createMockService = (): MindwtrService => ({
   listTasks: async () => [mockTask()],
   listProjects: async () => [mockProject()],
   listSections: async () => [mockSection()],
+  listViewSections: async () => [],
   listAreas: async () => [mockArea()],
   listPeople: async () => [mockPerson()],
   getTask: async () => mockTask(),
@@ -143,9 +145,7 @@ describe('mcp server index', () => {
     expect(parseBooleanFlag(undefined, 'write')).toBeUndefined();
   });
 
-  // SEC-11: an unrecognized string value used to silently parse as `true` - the OPPOSITE of
-  // what a typo like `--write=disabled` looks like it should mean. It must fail closed (throw,
-  // naming the flag) instead of guessing.
+
   test('rejects an unrecognized boolean flag value instead of defaulting to true', () => {
     expect(() => parseBooleanFlag('nope', 'write')).toThrow(/--write/);
     expect(() => parseBooleanFlag('disabled', 'write')).toThrow(/--write/);
@@ -169,9 +169,7 @@ describe('mcp server index', () => {
     });
   });
 
-  // SEC-11: `--write=nope` used to silently parse `write` as true (parseBooleanFlag's
-  // fail-open default) - enabling edits from a typo that reads like it should mean the
-  // opposite. Startup must now fail loudly instead.
+
   test('rejects an unrecognized --write value at startup instead of silently enabling writes', () => {
     expect(() => resolveServerModeFlags(parseArgs(['--write=nope']))).toThrow(/--write/);
   });
@@ -239,15 +237,79 @@ describe('mcp server index', () => {
     expect(tools.get('mindwtr_update_task')!.inputSchema.safeParse({ id: 't1', attachments: null }).success).toBe(false);
   });
 
+  test('Local API schemas forward reliable writes and expose sibling versions through the adapter', async () => {
+    const { server, tools } = createMockServer();
+    const version = `sha256-${'a'.repeat(64)}`;
+    const calls: Array<{ url: string; headers: Headers; body: string | undefined }> = [];
+    let conflict = false;
+    const service = createLocalApiService({
+      url: 'http://127.0.0.1:3456', token: 'fixture-token',
+      fetcher: async (input, init) => {
+        calls.push({ url: String(input), headers: new Headers(init?.headers), body: typeof init?.body === 'string' ? init.body : undefined });
+        if (conflict) return new Response(JSON.stringify({ code: 'task_version_conflict', error: 'private-response' }), { status: 412 });
+        return new Response(JSON.stringify({ task: mockTask(), version }), { headers: { ETag: `"${version}"` } });
+      },
+    });
+    registerMindwtrTools(server, service, false, { localApi: true });
+    const get = tools.get('mindwtr_get_task')!.handler;
+    const add = tools.get('mindwtr_add_task')!.handler;
+    const update = tools.get('mindwtr_update_task')!.handler;
+    for (const result of [await get({ id: 't1' }), await add({ title: 'Capture', idempotencyKey: 'capture' }),
+      await update({ id: 't1', title: 'Changed', expectedVersion: version })]) {
+      expect(JSON.parse(result.content[0].text)).toEqual({ task: mockTask(), version });
+    }
+    expect(calls[1].url).toBe('http://127.0.0.1:3456/v1/tasks');
+    expect(calls[1].headers.get('Idempotency-Key')).toBe('capture');
+    expect(JSON.parse(calls[1].body!)).toEqual({ title: 'Capture', props: {} });
+    expect(calls[2].url).toBe('http://127.0.0.1:3456/v1/tasks/t1');
+    expect(calls[2].headers.get('If-Match')).toBe(`"${version}"`);
+    expect(JSON.parse(calls[2].body!)).toEqual({ title: 'Changed' });
+    conflict = true;
+    const result = await update({ id: 't1', title: 'Changed again', expectedVersion: version });
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text).code).toBe('task_version_conflict');
+    expect(result.content[0].text).not.toContain('private-response');
+    expect(calls).toHaveLength(4);
+  });
+
+  test('reliable write fields validate only in Local API mode and cannot be silently ignored elsewhere', () => {
+    const version = `sha256-${'a'.repeat(64)}`;
+    const localApi = createMockServer();
+    registerMindwtrTools(localApi.server, createMockService(), false, { localApi: true });
+    const add = localApi.tools.get('mindwtr_add_task')!.inputSchema;
+    const update = localApi.tools.get('mindwtr_update_task')!.inputSchema;
+    expect(add.safeParse({ title: 'Capture', idempotencyKey: '!' }).success).toBe(true);
+    expect(add.safeParse({ title: 'Capture', idempotencyKey: 'x'.repeat(128) }).success).toBe(true);
+    expect(update.safeParse({ id: 't1', expectedVersion: version }).success).toBe(true);
+    for (const idempotencyKey of ['', 'x'.repeat(129), 'has space', '\n', 'é']) {
+      expect(add.safeParse({ title: 'Capture', idempotencyKey }).success).toBe(false);
+    }
+    for (const expectedVersion of ['1', `"${version}"`, '*', `W/"${version}"`]) {
+      expect(update.safeParse({ id: 't1', expectedVersion }).success).toBe(false);
+    }
+    const other = createMockServer();
+    registerMindwtrTools(other.server, createMockService(), false);
+    const otherAdd = other.tools.get('mindwtr_add_task')!.inputSchema;
+    const otherUpdate = other.tools.get('mindwtr_update_task')!.inputSchema;
+    if (!(otherAdd instanceof ZodObject) || !(otherUpdate instanceof ZodObject)) throw new Error('Expected task object schemas');
+    expect(Object.hasOwn(otherAdd.shape, 'idempotencyKey')).toBe(false);
+    expect(Object.hasOwn(otherUpdate.shape, 'expectedVersion')).toBe(false);
+    expect(otherAdd.safeParse({ title: 'Capture', idempotencyKey: 'capture' }).success).toBe(false);
+    expect(otherUpdate.safeParse({ id: 't1', title: 'Changed', expectedVersion: version }).success).toBe(false);
+    expect(otherAdd.safeParse({ title: 'Capture' }).success).toBe(true);
+    expect(otherUpdate.safeParse({ id: 't1', title: 'Changed' }).success).toBe(true);
+  });
+
   test('registers all mindwtr tools', () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    expect(tools.size).toBe(27);
+    expect(tools.size).toBe(28);
     expect(tools.has('mindwtr_list_tasks')).toBe(true);
     expect(tools.has('mindwtr_add_task')).toBe(true);
     expect(tools.has('mindwtr_restore_task')).toBe(true);
     expect(tools.has('mindwtr_get_project')).toBe(true);
     expect(tools.has('mindwtr_list_sections')).toBe(true);
+    expect(tools.has('mindwtr_list_view_sections')).toBe(true);
     expect(tools.has('mindwtr_get_section')).toBe(true);
     expect(tools.has('mindwtr_add_section')).toBe(true);
     expect(tools.has('mindwtr_update_section')).toBe(true);
@@ -421,7 +483,7 @@ describe('mcp server index', () => {
   test('validates add_task title length', async () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    // The registered schema caps the title too; this covers the handler's own guard.
+
     const addHandler = tools.get('mindwtr_add_task')?.rawHandler;
     expect(addHandler).toBeTruthy();
     const longTitle = 'x'.repeat(501);
@@ -671,8 +733,8 @@ describe('registered tool input schemas', () => {
     await expect(addTask({ title: 'Buy milk', dueDate: '2026/01/01' })).rejects.toThrow();
     await expect(addTask({ title: 'Buy milk', tags: ['  '] })).rejects.toThrow();
     expect((await addTask({ title: 'Buy milk', dueDate: '2026-01-01' })).isError).toBeUndefined();
-    // Known gap: the date schema checks shape only, so an impossible calendar date
-    // reaches the handler. Tightening it is a schema change, out of this test's scope.
+
+
     expect((await addTask({ title: 'Buy milk', dueDate: '2026-13-45' })).isError).toBeUndefined();
   });
 });

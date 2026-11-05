@@ -12,14 +12,7 @@ import {
 } from '@mindwtr/core';
 import type { Area, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus, ViewSectionDefinition } from '@mindwtr/core';
 
-// The rosters are data, and the types are derived from them — never the other
-// way round. One array per view is what the dropdown renders AND what the
-// persistence sanitizer accepts, so an axis the menu offers can never be one
-// the sanitizer silently rewrites to 'none' on the next reload. Adding an axis
-// to a view is one entry here plus one `groupTasks` case, nothing else.
-// (Same reason `lib/view-url-params.ts` derives URL_KNOWN_VIEWS from
-// RESTORABLE_VIEWS instead of restating it.)
-// Order is the order users see in the dropdown.
+
 export const FOCUS_AXES = ['none', 'context', 'area', 'project', 'tag', 'energy', 'priority', 'person'] as const;
 export type NextGroupBy = typeof FOCUS_AXES[number];
 
@@ -29,35 +22,27 @@ export type SomedayGroupBy = typeof SOMEDAY_AXES[number];
 export const REFERENCE_AXES = ['none', 'context', 'area', 'project', 'tag'] as const;
 export type ReferenceGroupBy = typeof REFERENCE_AXES[number];
 
-// Done is the only list where every task has a completion to group by, so the
-// axis lives here rather than in FOCUS_AXES (#945).
+
 export const DONE_AXES = ['none', 'completedDate', 'context', 'area', 'project', 'tag'] as const;
 export type DoneGroupBy = typeof DONE_AXES[number];
 
 export type TaskListGroupBy = NextGroupBy | SomedayGroupBy | ReferenceGroupBy | DoneGroupBy;
 
-// Every axis any status list can offer. Collapse state is sanitized against
-// this one roster instead of the per-status one, so a list keeps the collapsed
-// groups of an axis it no longer shows rather than dropping them silently.
+
 export const LIST_AXES: readonly TaskListGroupBy[] = Array.from(
     new Set<TaskListGroupBy>([...FOCUS_AXES, ...SOMEDAY_AXES, ...REFERENCE_AXES, ...DONE_AXES]),
 );
 
-// Contexts and Review both span every status, so status itself is a useful axis
-// there (see one #topic across Next / Waiting / Someday / Reference at a glance).
+
 export const CONTEXTS_AXES = ['none', 'status', 'tag', 'context', 'area', 'project'] as const;
 export type ContextsGroupBy = typeof CONTEXTS_AXES[number];
 
-// The muted catch-all ("No project", "General", "No context", …) always sorts
-// LAST. Grouping is for finding a group, and the ungrouped pile is the least
-// specific thing in the list — leading with it pushed every real group below a
-// scroll. Priority, energy and person already ended this way; the rest matched
-// them (#963).
+
 export interface TaskGroup {
     id: string;
     title: string;
     tasks: Task[];
-    /** Parked projects shown above the tasks (Someday sections, #1319). */
+
     projects?: Project[];
     muted?: boolean;
     dotColor?: string;
@@ -73,7 +58,7 @@ interface GroupByAreaParams {
 interface GroupByContextParams {
     tasks: Task[];
     noContextLabel: string;
-    /** Active theme, for the token swatch palette only (#974). */
+
     theme?: string;
 }
 
@@ -87,7 +72,7 @@ interface GroupByProjectParams {
 interface GroupByTagParams {
     tasks: Task[];
     noTagLabel: string;
-    /** Active theme, for the token swatch palette only (#974). */
+
     theme?: string;
 }
 
@@ -150,7 +135,7 @@ export function groupTasksByArea({
 
     if (noAreaTasks.length > 0) {
         groups.push({
-            // id stays 'general' so persisted collapse state survives the label rename
+
             id: 'general',
             title: noAreaLabel,
             tasks: noAreaTasks,
@@ -289,11 +274,9 @@ export function groupTasksByProject({
             id: `project:${project.id}`,
             title: project.title,
             tasks: projectTasks,
-            // Same precedence the task rows' project chips and the Agenda's
-            // project dots use: the area color is the identity color, the
-            // project's own color is the fallback — a header dot must not
-            // disagree with the chips right under it.
-            dotColor: getProjectAccentColor(project, areaById),
+
+
+            dotColor: getProjectAccentColor(project, areaById) ?? DEFAULT_AREA_COLOR,
         });
     });
 
@@ -391,11 +374,7 @@ export function groupTasksByTag({
     ));
 }
 
-/**
- * Every axis any view offers — the union of the rosters above, so a new roster
- * entry lands here (and therefore in the `groupTasks` switch below, which the
- * compiler checks for exhaustiveness) automatically.
- */
+
 export type TaskGroupAxis = TaskListGroupBy | ContextsGroupBy;
 
 export type GroupTasksInputs = {
@@ -403,16 +382,12 @@ export type GroupTasksInputs = {
     areas: Area[];
     projectMap: Map<string, Project>;
     t: (key: string) => string;
-    /** Active theme, for the context/tag swatch palette only (#974). */
+
     theme?: string;
     viewSectionDefinitions?: readonly ViewSectionDefinition[];
 };
 
-/**
- * One dispatch for every grouped list: axis in, groups out, i18n label wiring
- * included. Views declare which axes they offer and where the choice
- * persists — nothing else.
- */
+
 export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, theme, viewSectionDefinitions }: GroupTasksInputs): TaskGroup[] {
     switch (axis) {
         case 'none':
@@ -434,8 +409,8 @@ export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, t
         case 'context':
             return groupTasksByContext({ tasks, noContextLabel: tFallback(t, 'contexts.none', 'No context'), theme });
         case 'completedDate':
-            // Bucketing and labels live in core so Done/Archive read the same
-            // on both platforms (#959).
+
+
             return buildCompletionDateSections({ tasks, t });
         case 'viewSection':
             return groupTasksByViewSection(
@@ -463,10 +438,7 @@ export function getGroupAxisLabel(axis: TaskGroupAxis, t: (key: string) => strin
     }
 }
 
-/**
- * A persisted axis in, a valid one out — checked against the same array the
- * dropdown renders, so a stored choice the menu offers is never rejected.
- */
+
 export function sanitizeAxis<Axis extends TaskGroupAxis>(
     axes: readonly Axis[],
     value: unknown,
@@ -475,7 +447,7 @@ export function sanitizeAxis<Axis extends TaskGroupAxis>(
     return axes.includes(value as Axis) ? value as Axis : fallback;
 }
 
-/** Collapsed group ids per axis. Deliberately not `Partial`: see below. */
+
 export type CollapsedGroups<Axis extends TaskGroupAxis> = Record<Exclude<Axis, 'none'>, string[]>;
 
 type CollapseKey<Axis extends TaskGroupAxis> = Exclude<Axis, 'none'>;
@@ -491,16 +463,7 @@ export function emptyCollapsedGroups<Axis extends TaskGroupAxis>(
     return state;
 }
 
-/**
- * Collapse state for every axis in the roster.
- *
- * Iterating the roster is the whole point. This used to be a hand-written
- * `Partial<Record<Axis, string[]>>` literal per view, and because it was
- * `Partial`, omitting an axis compiled clean — a new axis's collapse state was
- * dropped on every read with nothing to catch it. Driving both the default and
- * the sanitizer off the array means a new axis is covered the moment it is
- * added to the roster.
- */
+
 export function sanitizeCollapsedGroups<Axis extends TaskGroupAxis>(
     axes: readonly Axis[],
     value: unknown,

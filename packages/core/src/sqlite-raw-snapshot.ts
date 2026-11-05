@@ -5,9 +5,8 @@ import { AREA_SQLITE_COLUMNS, areaToSqliteRow } from './area-sync-schema';
 import { isRecord, toJson } from './entity-sync-schema';
 
 type TaskRowEntry = { row: unknown[]; fingerprint: string };
-// A raw read is a persistence snapshot, not the display codec's normalized
-// serialization. Retain exact cells only while the public object still encodes
-// to its captured projection; raw callers may mutate objects in place.
+
+
 const rawReadRowEntries = new WeakMap<object, TaskRowEntry & { projection: string }>();
 const rawReadSettings = new WeakMap<AppData['settings'], { projection: string; json: string | null }>();
 export const rememberRawReadRow = (entity: object, row: Record<string, unknown>, columns: readonly string[], projection: unknown[]) => {
@@ -21,7 +20,7 @@ export const rawReadRow = (entity: object, projection: unknown[]): TaskRowEntry 
     if (cached) rawReadRowEntries.set(entity, entry);
     return entry;
 };
-/** Task188 binds the actual raw JSON members without changing older raw DTOs. */
+
 export const rawReadTaskSnapshot = (task: Task): Task | null => {
     const snapshot = JSON.parse(JSON.stringify(task)) as Task;
     const entry = rawReadRowEntries.get(task);
@@ -35,7 +34,7 @@ export const rawReadTaskSnapshot = (task: Task): Task | null => {
         return snapshot;
     } catch { return null; }
 };
-/** Task191 preserves Project JSON member presence for its raw BEFORE only. */
+
 export const rawReadProjectSnapshot = (project: Project): Project | null => {
     const snapshot = JSON.parse(JSON.stringify(project)) as Project;
     const entry = rawReadRowEntries.get(project);
@@ -49,7 +48,7 @@ export const rawReadProjectSnapshot = (project: Project): Project | null => {
         return snapshot;
     } catch { return null; }
 };
-/** Task193 binds literal legacy Area timestamps instead of the clock-dependent display fallback. */
+
 export const rawReadAreaSnapshot = (area: Area): Area => {
     const snapshot = JSON.parse(JSON.stringify(area)) as Area;
     const entry = rawReadRowEntries.get(area);
@@ -64,13 +63,13 @@ export const savedFilterSqliteRow = (filter: SavedFilter): unknown[] => {
         toJson(filter.criteria ?? {}), textOr(filter.sortBy, null), textOr(filter.sortOrder, null),
         textOr(filter.groupBy, null), textOr(filter.createdAt, ''), textOr(filter.updatedAt, ''), textOr(filter.deletedAt, null)];
 };
-/** Retain raw-read provenance through the save queue's sanitized settings clone. */
+
 export const retainRawReadSettingsSnapshot = (source: AppData['settings'], sanitized: AppData['settings']): void => {
     const settings = rawReadSettings.get(source);
     if (settings && JSON.stringify(source) === settings.projection && JSON.stringify(sanitized) === settings.projection)
         rawReadSettings.set(sanitized, settings);
-    // Settings may intentionally change (device initialization or secret stripping)
-    // while their unchanged filter rows still belong to the original raw read.
+
+
     const sourceFilters = Array.isArray(source?.savedFilters) ? source.savedFilters : [];
     if (!sourceFilters.some((filter) => isRecord(filter) && rawReadRowEntries.has(filter))) return;
     const clones = Array.isArray(sanitized?.savedFilters) ? sanitized.savedFilters : [];

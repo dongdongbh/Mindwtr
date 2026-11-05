@@ -10,6 +10,7 @@ import { repairMergedSyncReferences } from './sync-normalization';
 import { mockAppData } from './sync-test-utils';
 import { markArchiveRetentionSyncCompleted } from './store-archive-retention';
 import { withQuickJsArgumentLimit } from './quickjs-test-utils';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
 const NOW = '2026-10-01T12:00:00.000Z';
 const OLD = '2026-08-01T12:00:00.000Z';
@@ -55,7 +56,7 @@ describe('Archive retention', () => {
         install([]);
     });
     afterEach(async () => {
-        try { await flushPendingSave(); } catch { /* terminal save failure case */ }
+        try { await flushPendingSave(); } catch {                                  }
         resetForTests();
         setLogger(consoleLogger);
         vi.useRealTimers();
@@ -158,7 +159,7 @@ describe('Archive retention', () => {
         expect(useTaskStore.getState()._projectsById.get('group')?.purgedAt).toBeUndefined();
         expect(useTaskStore.getState()._tasksById.get('child')?.projectId).toBe('group');
         await useTaskStore.getState().updateProject('group', { status: 'archived' });
-        // A new archive period protects the whole group; the old preview cannot authorize it.
+
         expect(getArchiveRetentionPreview({ tasks: useTaskStore.getState()._allTasks,
             projects: useTaskStore.getState()._allProjects, sections: useTaskStore.getState()._allSections }, 30).projectIds).toEqual([]);
         install(data.tasks, data.projects, data.sections);
@@ -169,16 +170,26 @@ describe('Archive retention', () => {
         expect(saved.tasks.find((row) => row.id === 'child')).toMatchObject({ deletedAt: NOW, purgedAt: NOW });
         expect(saved.projects.find((row) => row.id === 'group')).toMatchObject({ deletedAt: NOW, purgedAt: NOW });
         expect(saved.sections.find((row) => row.id === 'part')?.deletedAt).toBe(NOW);
-        expect(saved.tasks.find((row) => row.id === 'child')?.projectId).toBeUndefined(); // compact tombstone, never detached live
+        expect(saved.tasks.find((row) => row.id === 'child')?.projectId).toBeUndefined();
         expect(logs.filter((entry) => entry.context?.releaseCheck === 'v1.3.4/archive-retention')).toHaveLength(1);
         saveData.mockClear();
         expect((await useTaskStore.getState().runArchiveRetention({ syncConfigured: false })).success).toBe(true);
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('keeps a purged archived Project\'s and task\'s legacy tokens in the saved list (#828)', async () => {
+        install([task('standalone', { tags: ['#TaskOnly'], contexts: ['@TaskOnly'] })],
+            [project('group', { tagIds: ['#ProjectOnly'] })]);
+        expect((await useTaskStore.getState().runArchiveRetention({ syncConfigured: false })).success).toBe(true);
+        const saved = saveData.mock.calls.at(-1)?.[0] as AppData;
+        expect(saved.projects[0].purgedAt).toBe(NOW);
+        expect(getSavedTaxonomyTokens(saved.settings, 'tag')).toEqual(['#ProjectOnly', '#TaskOnly']);
+        expect(getSavedTaxonomyTokens(saved.settings, 'context')).toEqual(['@TaskOnly']);
+    });
+
     it('waits for this session to sync so a restore on another device is not purged (R-2)', async () => {
-        // Laptop was offline for days: its copy of the task is still archived (rev 2).
-        // Meanwhile the phone un-archived and edited it (rev 4).
+
+
         install([task('restored-elsewhere', { rev: 2 }), task('still-archived')]);
         const phone = mockAppData([
             task('restored-elsewhere', { status: 'next', archivedAt: undefined, updatedAt: RECENT, rev: 4, revBy: 'phone' }),
@@ -190,7 +201,7 @@ describe('Archive retention', () => {
         await useTaskStore.getState().runArchiveRetention({ syncConfigured: true });
         expect(logs.filter((entry) => entry.context?.releaseCheck === 'v1.3.5/archive-retention-after-sync')).toHaveLength(1);
 
-        // The first sync merges the phone's restore; only then may retention run.
+
         const state = useTaskStore.getState();
         const laptop = mockAppData(state._allTasks, state._allProjects);
         laptop.settings = state.settings;

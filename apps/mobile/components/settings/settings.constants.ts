@@ -43,13 +43,12 @@ export const SETTINGS_SCREEN_SET: Record<SettingsScreen, true> = {
 
 export function normalizeSettingsScreen(value: string | undefined): SettingsScreen {
     if (!value || !SETTINGS_SCREEN_SET[value as SettingsScreen]) return 'main';
-    // Compatibility alias for links and restored navigation state created
-    // before the time-estimate preset-list editor was retired.
+
+
     return value === 'gtd-time-estimates' ? 'gtd' : value as SettingsScreen;
 }
 
-// The root menu's rows, keywords and search live in core (settings-menu-model.ts),
-// shared with the native host.
+
 export {
     buildSettingsMenuSearchText,
     findSettingsMenuMatch,
@@ -59,13 +58,12 @@ export {
     type SettingsMenuRowId,
 } from '@mindwtr/core';
 
-// 'en' plus every locale in core's LOCALES table (general-settings-model.ts).
+
 export { SETTINGS_LANGUAGE_OPTIONS as LANGUAGES } from '@mindwtr/core';
 
 export { WHISPER_MODEL_BASE_URL };
 
-// Mobile's Whisper subset, the consent key and the FOSS model suggestions are core's
-// (ai-settings-model.ts); the full Whisper catalogue lives in whisper-models.ts.
+
 export {
     AI_PROVIDER_CONSENT_KEY,
     FOSS_LOCAL_LLM_COPILOT_OPTIONS,

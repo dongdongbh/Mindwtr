@@ -21,7 +21,7 @@ import { loadScreenFixture, openScreenHost, value, type ScreenHost } from './scr
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import type { Area, Project, Task } from './types';
 
-// Sandbox mode is fixed per runtime (initializeSandboxRuntime); these tests switch what the contract reads.
+
 const sandbox = vi.hoisted(() => ({ on: false }));
 vi.mock('./sandbox', async (importOriginal) => ({ ...await importOriginal<typeof import('./sandbox')>(), isSandboxMode: () => sandbox.on }));
 const setSandboxMode = (on: boolean) => { sandbox.on = on; };
@@ -40,7 +40,7 @@ type Fixture = {
         delivered: Delivered;
     }[];
 };
-// Captured from React Native at 4735572f9 (apps/mobile/tests/entry-points.parity.test.tsx; the file's provenance says how).
+
 const fixture = loadScreenFixture<Fixture>('entry-points');
 const T0 = '2026-09-01T00:00:00.000Z';
 const lookup = {
@@ -49,7 +49,7 @@ const lookup = {
     _areasById: new Map(fixture.store.areas.map((area) => [area.id, area])),
 };
 
-/** The route params React Native pushed to its capture screen, exactly as it pushed them. */
+
 const captureParams = (delivered: Delivered) => {
     const call = delivered.router.find(([, route]) => typeof route === 'object' && route.pathname === '/capture-modal');
     return call ? (call[1] as { params: Record<string, string> }).params : null;
@@ -124,10 +124,10 @@ describe('entry points: React Native parity', () => {
     });
 
     it('keeps a link that an email body already holds out of its description', () => {
-        // The body carries the link: the description is the body alone, not the body and the link again.
+
         expect(buildShareCaptureDraft({ shareSubject: 'Subject', shareText: 'Body with https://example.com/doc', shareWebUrl: 'https://example.com/doc' }))
             .toEqual({ title: 'Subject', description: 'Body with https://example.com/doc' });
-        // A link the body does not hold still follows it, and a body that is the link is one line.
+
         expect(buildShareCaptureDraft({ shareSubject: 'Subject', shareText: 'Body', shareWebUrl: 'https://example.com/doc' }))
             .toEqual({ title: 'Subject', description: 'Body\nhttps://example.com/doc' });
         expect(buildShareCaptureDraft({ shareSubject: 'Subject', shareText: 'https://example.com/doc', shareWebUrl: 'https://example.com/doc' }))
@@ -137,10 +137,10 @@ describe('entry points: React Native parity', () => {
     it('turns an assistant note into the capture link React Native\'s MainActivity builds', () => {
         const link = fixture.urls.find(({ url }) => url.includes('source=create_note'))!;
         expect(buildCreateNoteCapture({ name: ' Voice note ', text: 'Longer spoken text ', extraText: 'ignored' })).toEqual(parseShortcutCaptureUrl(link.url));
-        // The name wins; else the text, the Assistant's extra before EXTRA_TEXT; the text is the note only when it differs.
+
         expect(buildCreateNoteCapture({ name: null, text: null, extraText: '  Call mom  ' })).toEqual({ title: 'Call mom', tags: [] });
         expect(buildCreateNoteCapture({ name: 'Same', text: 'Same', extraText: null })).toEqual({ title: 'Same', tags: [] });
-        // An empty extra is still the Assistant's text (Kotlin's ?: falls back only on null), so EXTRA_TEXT is not read.
+
         expect(buildCreateNoteCapture({ name: '', text: '', extraText: 'Not read' })).toBeNull();
         expect(buildCreateNoteCapture({ name: '  ', text: null, extraText: null })).toBeNull();
     });
@@ -161,23 +161,23 @@ describe('native host contract: resolveNativeEntryPoint', () => {
     afterAll(async () => { await flushPendingSave(); resetForTests(); });
 
     const link = (url: string) => value(host.resolveNativeEntryPoint({ kind: 'link', url: url.replace(/^mindwtr:/i, `${SCHEME}:`), scheme: SCHEME }));
-    /** The capture popup's fresh options (open-feature capture opens the popup, as React Native's tab route does). */
+
     const fresh = () => ({
         note: '', dueDate: null, dueDateHasTime: false, startTime: null, contexts: [],
         projectId: null, areaId: null, priority: null, focus: false, addAnother: false,
     });
-    const none = { version: 1, route: null, taskId: null, projectId: null, search: null, capture: null, captureModal: null, notice: null };
+    const none = { version: 1, route: null, taskId: null, projectId: null, search: null, capture: null, captureModal: null, notice: null, contextAutomation: null };
 
     it('opens what React Native opened for every link of the fixture', () => {
         for (const { url, redirectCold, delivered } of fixture.urls) {
-            // React Native ignores a link of the development build's scheme; here it is the app's own (checked below).
+
             if (url.startsWith(`${SCHEME}:`)) continue;
             const native = link(url);
             const params = captureParams(delivered);
             const [call] = delivered.router;
             let expected: unknown;
             if (!/^mindwtr:/i.test(url)) expected = none;
-            // The capture screen, with React Native's own route params.
+
             else if (params) expected = { ...none, route: '/inbox', captureModal: { params } }; else if (delivered.toasts.length > 0) expected = { ...none, route: '/inbox', notice: { ...delivered.toasts[0] } };
             else if (call && typeof call[1] === 'object') {
                 const route = call[1];
@@ -190,9 +190,9 @@ describe('native host contract: resolveNativeEntryPoint', () => {
             } else if (redirectCold === '/capture-modal?origin=system') {
                 expected = { ...none, captureModal: { params: { origin: 'system' } } };
             } else if (redirectCold.startsWith('/settings')) expected = { ...none, route: '/settings' };
-            else if (redirectCold === '/inbox') expected = none; // iOS's share handoff
+            else if (redirectCold === '/inbox') expected = none;
             else {
-                // Expo Router's path: host and path, and the global search's query.
+
                 const parsed = new URL(url);
                 const route = `/${[parsed.hostname, ...parsed.pathname.split('/')].filter(Boolean).join('/')}`;
                 expected = route === '/global-search'
@@ -203,11 +203,18 @@ describe('native host contract: resolveNativeEntryPoint', () => {
         }
     });
 
+    it('runs a context automation link quietly, opening no screen, as React Native does', () => {
+        expect(link('mindwtr://contexts?context=@home&contextAction=activate')).toEqual({ ...none, contextAutomation: { action: 'activate', context: '@home' } });
+        expect(link('mindwtr://deactivate-context/work')).toEqual({ ...none, contextAutomation: { action: 'deactivate', context: '@work' } });
+
+        expect(link('mindwtr://contexts')).toEqual({ ...none, route: '/contexts' });
+    });
+
     it('opens every text share React Native opened, in its capture screen, which closes to the Inbox', () => {
         for (const { share, delivered } of fixture.shares) {
             const native = value(host.resolveNativeEntryPoint({ kind: 'share', ...share }));
             const params = captureParams(delivered);
-            // React Native replaces the screen it was on, so the capture screen closes to the Inbox (getCaptureModalCloseTarget).
+
             const expected = params ? { ...none, route: '/inbox', captureModal: { params } }
                 : delivered.toasts.length > 0 ? { ...none, notice: { ...delivered.toasts[0] } } : none;
             expect([share, native]).toEqual([share, expected]);
@@ -227,10 +234,10 @@ describe('native host contract: resolveNativeEntryPoint', () => {
         };
         expect(await save('project=groceries', '00000000-0000-4000-8000-000000000201')).toEqual({ title: 'Buy milk', tags: [], project: 'Groceries' });
         expect(await save('project=p-shop', '00000000-0000-4000-8000-000000000202')).toEqual({ title: 'Buy milk', tags: [], project: 'Groceries' });
-        // An archived project takes no task: skipped, as React Native skips it; a name no project carries is created.
+
         expect(await save('project=old%20plans', '00000000-0000-4000-8000-000000000203')).toEqual({ title: 'Buy milk', tags: [], project: null });
         expect(await save('project=New%20%22big%22%20plan', '00000000-0000-4000-8000-000000000204')).toEqual({ title: 'Buy milk', tags: [], project: 'New "big" plan' });
-        // Tags stay tags, never title text.
+
         expect(await save('tags=errand,two%20words,%23x', '00000000-0000-4000-8000-000000000205'))
             .toEqual({ title: 'Buy milk', tags: ['#errand', '#two words', '#x'], project: null });
     });
@@ -252,7 +259,7 @@ describe('native host contract: resolveNativeEntryPoint', () => {
         expect(value(host.resolveNativeEntryPoint({ kind: 'share', text: 'x'.repeat(500_001), title: null, subject: null }))).toEqual({ ...none, notice });
         expect(value(host.resolveNativeEntryPoint({ kind: 'share', text: 'Body', title: 't'.repeat(100_001), subject: null }))).toEqual({ ...none, notice });
         expect(value(host.resolveNativeEntryPoint({ kind: 'createNote', name: 'n'.repeat(100_001), text: null, extraText: null }))).toEqual({ ...none, notice });
-        // The capture screen takes route params up to 500,000 characters (the popup's note limit), URI-encoded: é is six.
+
         const long = value(host.resolveNativeEntryPoint({ kind: 'share', text: 'é'.repeat(20_000), title: null, subject: null }));
         expect(long.captureModal?.params.initialValue).toHaveLength(120_000);
         expect(value(host.openCaptureModal({ params: long.captureModal!.params })).draft.text).toBe('é'.repeat(20_000));
@@ -260,10 +267,10 @@ describe('native host contract: resolveNativeEntryPoint', () => {
     });
 
     it('opens the capture popup for the detailed capture shortcut (#1333), as React Native\'s capture-quick tab route does', () => {
-        // RN's DetailedCaptureActivity sends this link; the widget's own quick capture link keeps the capture screen.
+
         expect(link('mindwtr:///capture-quick?mode=text&entry=details')).toEqual({ ...none, route: '/inbox', capture: { text: '', options: fresh() } });
         expect(link('mindwtr:///capture-quick?mode=text')).toEqual({ ...none, captureModal: { params: { origin: 'system' } } });
-        // Each native build's DetailedCaptureActivity link is of that build's scheme (mindwtr_link_scheme, build-shortcuts.mjs).
+
         for (const scheme of ['mindwtr-native-dev', 'mindwtr-upgradetest', 'mindwtr', 'mindwtr-native-bench']) {
             expect(value(host.resolveNativeEntryPoint({ kind: 'link', url: `${scheme}:///capture-quick?mode=text&entry=details`, scheme })))
                 .toEqual({ ...none, route: '/inbox', capture: { text: '', options: fresh() } });
@@ -305,7 +312,7 @@ describe('native host contract: planQuickCaptureImport', () => {
             lineCount: 2,
             text: 'Buy milk\r\nCall mom\n',
         });
-        // A blank line joins a paragraph into one line, as React Native's split does (a trailing blank line too).
+
         expect(plan('  First part\n\n second part ')).toEqual({ kind: 'setText', text: 'First part second part' });
         expect(plan('Buy milk\nCall mom\n\n')).toEqual({ kind: 'setText', text: 'Buy milk Call mom' });
         expect(plan(' \n \n')).toEqual({ kind: 'empty' });

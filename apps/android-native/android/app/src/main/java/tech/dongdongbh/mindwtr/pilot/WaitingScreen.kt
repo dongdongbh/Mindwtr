@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,12 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/**
- * RN's Waiting For (components/views/waiting-view.tsx) on core's getWaitingView: core's two stats, the person filter
- * (core's All, each person core offers, and Clear while one is chosen), the parked projects, core's rows with their detail
- * parts (Waiting shows them) and RN's status glyph (a long-press starts selection mode, core's bulk bar), and core's empty
- * state. The stats and the filter scroll with the rows, as every list here does, so landscape shows rows.
- */
+
 @Composable
 fun WaitingList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -56,12 +50,12 @@ fun WaitingList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's person filter: core's label, then All and each person as RN's pills (the tint when chosen), then core's Clear. */
+
 @Composable
 private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.menu) {
     val c = LocalTheme.current.colors
     val view = shown.view
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 10.dp),
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(view.getString("filterLabel"), style = rnText(12, 600), color = c.secondaryText)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -74,7 +68,7 @@ private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.me
         }
         view.menuText("clearLabel")?.let { clear ->
             val shape = RoundedCornerShape(8.dp)
-            Text(clear, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+            Text(clear, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                 .clickable(enabled = idle, role = Role.Button) { person("") }.padding(horizontal = 8.dp, vertical = 4.dp))
         }
     }
@@ -84,7 +78,7 @@ private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.me
 private fun PersonChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     Text(label, style = rnText(12, 600), color = if (selected) c.onTint else c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.widthIn(max = 180.dp).clip(CircleShape).background(if (selected) c.tint else c.filterBg).border(1.dp, c.border, CircleShape)
+        modifier = Modifier.widthIn(max = 180.dp).clip(CircleShape).background(if (selected) c.tint else c.filterBg).rnBorder(1.dp, c.border, CircleShape)
             .semantics { contentDescription = label }.selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp))
 }

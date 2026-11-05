@@ -1,5 +1,6 @@
 import { createElement, useCallback, useMemo } from 'react';
 import {
+    canMoveTaskToChecklist,
     canSkipRecurringTaskOccurrence,
     createBulkOrganizeProject,
     createTaskCancellationUndo,
@@ -12,6 +13,7 @@ import {
     shallow,
     tFallback,
     updateTaskFromDraft,
+    resolveQuickCaptureDefaultAreaId,
     useTaskStore,
     type Task,
     type TaskDraftSetter,
@@ -22,6 +24,7 @@ import { useLanguage } from '../../contexts/language-context';
 import { logInfo } from '../../lib/app-log';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { resolveNativeDateInputLocale } from '../../lib/native-date-input-locale';
+import { getSystemDefaultLocale } from '../../lib/system-locale';
 import { reportError } from '../../lib/report-error';
 import { registerUndoableAction } from '../../lib/undo-registry';
 import { undoTaskCompletion } from '../../lib/undo-task-completion';
@@ -37,11 +40,11 @@ export type TaskQuickActionMenuOverrides = {
     readOnly?: boolean;
     onRename?: () => void;
     focusAction?: TaskQuickActionMenuProps['focusAction'];
-    /** Runs before the default delete; the row uses it to close its edit session. */
+
     onBeforeDelete?: () => void;
-    /** Fully replaces the default status change (the row intercepts 'waiting'). */
+
     onStatusChange?: (status: TaskStatus) => void;
-    /** Extra entries rendered above Delete. The calendar passes "Remove from calendar". */
+
     extraActions?: Array<{
         id: string;
         label: string;
@@ -49,11 +52,7 @@ export type TaskQuickActionMenuOverrides = {
     }>;
 };
 
-// Single delete-with-undo implementation for every quick-action-menu surface:
-// the menu's own default (calendar) and the row's other delete entry points
-// (editor, display actions) all call this instead of hand-rolling the same
-// registerUndoableAction + toast pattern (see task-list-scope.ts's canonical
-// version, which this mirrors).
+
 export function deleteTaskWithUndo(
     taskId: string,
     { t, onBeforeDelete }: { t: (key: string) => string; onBeforeDelete?: () => void },
@@ -65,9 +64,8 @@ export function deleteTaskWithUndo(
     });
     if (useTaskStore.getState().settings?.undoNotificationsEnabled === false) return;
     useUiStore.getState().showToast(
-        // task.aria.delete is "Delete task" (an aria label for the button, an
-        // imperative), not a completion message — list.taskDeleted is the key
-        // task-list-scope.ts uses for this same toast.
+
+
         tFallback(t, 'list.taskDeleted', 'Task deleted'),
         'info',
         5000,
@@ -78,15 +76,41 @@ export function deleteTaskWithUndo(
     );
 }
 
-/**
- * Single duplicate implementation for every surface that offers it: the row's
- * hover button, the row menu, and the calendar menu.
- *
- * Deliberately NOT gated on read-only. Duplicating never touches the source
- * task — it writes a new one — and the row only renders its Duplicate button on
- * read-only (done/archived) rows, so a read-only guard made the button dead in
- * the one place it appears (#950).
- */
+
+export async function moveTaskToChecklistWithUndo(
+    sourceId: string,
+    targetId: string,
+    { t }: { t: (key: string) => string },
+): Promise<void> {
+    const failed = (error?: string) => useUiStore.getState().showToast(
+        error || tFallback(t, 'task.updateFailed', 'Could not update task.'), 'error');
+    try {
+        const result = await useTaskStore.getState().moveTaskToChecklist(sourceId, targetId);
+        if (!result.success) {
+            failed(result.error);
+            return;
+        }
+    } catch (error) {
+        reportError('Failed to move task to checklist', error);
+        failed();
+        return;
+    }
+    const undo = registerUndoableAction(() => {
+        void useTaskStore.getState().undoMoveTaskToChecklist(sourceId, targetId)
+            .then((result) => { if (!result.success) failed(result.error); })
+            .catch((error) => reportError('Failed to undo move to checklist', error));
+    });
+    useUiStore.getState().showToast(
+        tFallback(t, 'task.addedToChecklist', 'Added to checklist'),
+        'info',
+        5000,
+        useTaskStore.getState().settings?.undoNotificationsEnabled === false
+            ? undefined
+            : { label: tFallback(t, 'common.undo', 'Undo'), onClick: undo },
+    );
+}
+
+
 export async function duplicateTaskAndReveal(
     task: Pick<Task, 'id' | 'projectId' | 'status'>,
     { t }: { t: (key: string) => string },
@@ -103,10 +127,8 @@ export async function duplicateTaskAndReveal(
                 useUiStore.getState().setProjectView({ selectedProjectId: task.projectId });
                 dispatchNavigateEvent('projects');
             } else if (isTaskFinished(task)) {
-                // The copy goes to the Inbox to be re-clarified, so it is never in the
-                // Done/Archived list it was made from. Without this the duplicate
-                // succeeds somewhere the user cannot see and the click reads as a
-                // no-op (#950).
+
+
                 dispatchNavigateEvent('inbox');
             }
             useUiStore.getState().setTaskExpanded(result.id!, false);
@@ -118,40 +140,28 @@ export async function duplicateTaskAndReveal(
     }
 }
 
-/**
- * Builds the full prop bag for TaskQuickActionMenu from the store, with
- * override points for the handful of behaviours that differ by caller. Both
- * TaskItem's row menu and the calendar's block/chip menu render through this
- * so delete-with-undo and status-change logic exist in exactly one place.
- *
- * Only call this from a component that mounts while the menu is open (see
- * TaskQuickActionMenuHost below) — its data props are gated on that.
- */
+
 export function useTaskQuickActionMenuProps(
     task: Task,
     overrides?: TaskQuickActionMenuOverrides,
 ): Omit<TaskQuickActionMenuProps, 'x' | 'y' | 'onClose'> {
     const { t, language } = useLanguage();
-    const { areas, projects, sections, settings } = useTaskStore(
-        (state) => ({ areas: state.areas, projects: state.projects, sections: state.sections, settings: state.settings }),
+    const { areas, projects, sections, settings, tasks } = useTaskStore(
+        (state) => ({ areas: state.areas, projects: state.projects, sections: state.sections, settings: state.settings, tasks: state.tasks }),
         shallow,
     );
     const nativeDateInputLocale = useMemo(() => {
-        const systemLocale = typeof navigator !== 'undefined'
-            ? String(navigator.languages?.[0] || navigator.language || '').trim()
-            : '';
         return resolveNativeDateInputLocale({
             language,
             dateFormat: settings?.dateFormat,
             calendarSystem: settings?.calendarSystem,
             timeFormat: settings?.timeFormat,
             weekStart: normalizeWeekStartSetting(settings?.weekStart),
-            systemLocale,
+            systemLocale: getSystemDefaultLocale(),
         });
     }, [language, settings?.calendarSystem, settings?.dateFormat, settings?.timeFormat, settings?.weekStart]);
-    // The context token list is task-independent (it's every token used across
-    // all tasks), so reuse TaskItem's own project-context hook rather than a
-    // second copy of the token-collection/prefixing logic.
+
+
     const { allContexts, popularContextOptions } = useTaskItemProjectContext({
         task,
         sections,
@@ -221,6 +231,11 @@ export function useTaskQuickActionMenuProps(
     const onDelete = useCallback(() => {
         deleteTaskWithUndo(task.id, { t, onBeforeDelete: overrides?.onBeforeDelete });
     }, [overrides?.onBeforeDelete, t, task.id]);
+
+    const checklistMove = useMemo(() => (readOnly || !canMoveTaskToChecklist(task, resolveQuickCaptureDefaultAreaId(useTaskStore.getState().settings, useTaskStore.getState().areas)) ? undefined : {
+        tasks,
+        onSelect: (targetId: string) => { void moveTaskToChecklistWithUndo(task.id, targetId, { t }); },
+    }), [readOnly, t, task, tasks]);
 
     const cancelAction = useMemo(() => {
         if (readOnly || !isTaskActionable(task) || isProjectedRecurringTask(task)) return [];
@@ -302,10 +317,7 @@ export function useTaskQuickActionMenuProps(
         }];
     }, [readOnly, t, task]);
 
-    // Canonical store-level status change (task-list-scope.ts's setStatusSelected
-    // pattern): move + undo + the shared moved/marked-done toast text. Callers
-    // with row-specific behaviour (TaskItem's waiting-assignment prompt) replace
-    // this outright via overrides.onStatusChange.
+
     const defaultOnStatusChange = useCallback((nextStatus: TaskStatus) => {
         if (task.status === nextStatus) return;
         const previousStatus = task.status;
@@ -360,6 +372,7 @@ export function useTaskQuickActionMenuProps(
         onCreateArea,
         onCreateProject,
         onUpdateTask,
+        checklistMove,
         extraActions: [...cancelAction, ...(overrides?.extraActions ?? [])],
     };
 }
@@ -372,12 +385,10 @@ type TaskQuickActionMenuHostProps = {
     overrides?: TaskQuickActionMenuOverrides;
 };
 
-// Mounts only while a menu is actually open (callers render it inside the same
-// `quickActionMenu &&` guard that used to wrap TaskQuickActionMenu directly),
-// so the hook's store reads only run then rather than on every row render.
+
 export function TaskQuickActionMenuHost({ task, x, y, onClose, overrides }: TaskQuickActionMenuHostProps) {
     const props = useTaskQuickActionMenuProps(task, overrides);
-    // createElement, not JSX: this file is .ts (no JSX parsing) so the hook and
-    // its mount-gated host can live together without a second file.
+
+
     return createElement(TaskQuickActionMenu, { ...props, x, y, onClose });
 }

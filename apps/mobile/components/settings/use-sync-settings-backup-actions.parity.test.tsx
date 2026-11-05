@@ -3,12 +3,6 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-/**
- * RN's preview and result texts for every Data transfer (use-sync-settings-backup-actions.ts), frozen in
- * use-sync-settings-backup-actions.parity.fixtures.json at 9972f29f6, before they moved into core's one home
- * (data-transfer-messages.ts, pass D1a). Each flow runs through the hook with RN's English `tr`; the Alert's title and
- * message and the result toast's title and message must stay byte-identical. `MINDWTR_FREEZE_PARITY=1` rewrites the fixture.
- */
 
 vi.mock('react-native', () => ({ Alert: { alert: vi.fn() } }));
 vi.mock('expo-constants', () => ({ default: { expoConfig: { version: '1.3.4', extra: {} } } }));
@@ -87,7 +81,7 @@ describe('Settings › Data texts: frozen RN parity', () => {
     it('keeps every preview and result byte for byte', async () => {
         await act(async () => { create(<Harness />); });
         const seen: Record<string, unknown> = {};
-        // Each flow names its mocks; looked up on a plain object (a namespace import takes no computed member).
+
         const mocks = { ...dataTransfer } as unknown as Record<string, ReturnType<typeof vi.fn>>;
         for (const rich of [false, true]) {
             for (const flow of flows(rich)) {
@@ -119,7 +113,7 @@ describe('Settings › Data texts: frozen RN parity', () => {
                 seen[`${mode}:${rich ? 'rich' : 'plain'}`] = { preview, result: lastToast() };
             }
         }
-        // The JSON preview's backup date is drawn in the test's locale and zone (toLocaleString): frozen as a placeholder.
+
         const text = `${JSON.stringify(seen, null, 2)}\n`.split(new Date('2026-08-13T10:00:00.000Z').toLocaleString()).join('<backupDate>');
         if (process.env.MINDWTR_FREEZE_PARITY === '1' || !existsSync(FIXTURE)) writeFileSync(FIXTURE, text);
         expect(text).toBe(readFileSync(FIXTURE, 'utf8'));

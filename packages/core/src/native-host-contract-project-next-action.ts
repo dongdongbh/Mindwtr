@@ -158,8 +158,8 @@ const revisionContent = (c: NativeProjectNextActionContext) => canonical({ sourc
         sectionId: r.sectionId, deletedAt: r.deletedAt, status: r.status, order: r.order, orderNum: r.orderNum,
         createdAt: r.createdAt, title: r.title, revision: taskRevisionOf(r) })) });
 const revisionOf = (c: NativeProjectNextActionContext): string => {
-    // Hash UTF-16 code units without platform encoder dependencies or Unicode
-    // normalization. The complete context remains independently bound below.
+
+
     const value = revisionContent(c); const bytes = new Uint8Array(value.length * 2);
     for (let i = 0; i < value.length; i++) { const unit = value.charCodeAt(i); bytes[i * 2] = unit >>> 8; bytes[i * 2 + 1] = unit & 255; }
     return `projectNextAction:${Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -206,8 +206,8 @@ const chooseEffect = (request: Extract<NativeReferenceProjectNextActionRequest, 
             recurringCandidate: null, recurringDuplicate: null, focusCount: fills ? count : null,
             focusLimit: fills ? limit : null, focusBoundary: fills ? op.clock.futureBoundary : null, autoArchiveDays: null } };
 };
-// Freeze only values actually consumed by Choose. First plan with the whole
-// normal RN state, then require that the smaller witness reproduces it exactly.
+
+
 const trimChooseOperation = (request: Extract<NativeReferenceProjectNextActionRequest, { action: 'choose' }>, op: ChooseOperation): ChooseOperation => {
     const source = op.effect.sourceBefore;
     const sections = op.lists.sections.filter((r) => r.id === source.sectionId);
@@ -249,10 +249,8 @@ const validIntent = (v: unknown, context: Pick<NativeProjectNextActionContext, '
             && typeof a.id === 'string' && UUID.test(a.id) && a.kind === 'link' && text(a.title, 100_000) && text(a.uri, 100_000)
             && iso(a.createdAt) && a.createdAt === a.updatedAt);
 };
-// The intent cannot carry a reminder policy, so the new row inherits the library
-// default and its suppression flag records that default. The journal shape (which
-// Swift checks exactly) stays unchanged: rows written before Skip was honored
-// carry `false`, which replays as Send, exactly as they were prepared.
+
+
 const frozenReminderDefault = (task: Task): 'send' | 'skip' => task.suppressMindwtrReminders === true ? 'skip' : 'send';
 const addTask = (op: AddOperation, taskReminderDefault = frozenReminderDefault(op.task)): Task => {
     const { creation: c } = op; const f = c.focus; const props = c.intent.props;
@@ -467,8 +465,8 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                 if (existing.some((r) => ids.includes(r.id) || r.attachments?.some((a) => ids.includes(a.id)))) throw new Error('Creation ID exists');
                 if (c.focus) {
                     const f = c.focus;
-                    // Normal loading can consume local-day environment. Refuse an
-                    // unlanded stale intent conservatively; never reinterpret it.
+
+
                     if (new Date(at).getTimezoneOffset() !== f.preparedOffsetMinutes
                         || normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) !== f.focusLimit
                         || !same({ tasks: lists.tasks, projects: lists.projects, sections: lists.sections }, f.lists)) throw new Error('Focus creation context changed');
@@ -512,7 +510,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
     } });
     const diagnose = (r: NativeReferenceProjectNextActionResult) => {
         try { logInfo('Native Reference project next action confirmed', { scope: 'native-host', category: 'storage',
-            context: { releaseCheck: 'v1.3.4/ios-reference-project-next-action', outcome: r.action } }); } catch { /* ACK remains durable. */ }
+            context: { releaseCheck: 'v1.3.4/ios-reference-project-next-action', outcome: r.action } }); } catch {                            }
     };
     return {
         referenceProjectNextActionInput(input: string): NativeHostResult<{ canSave: boolean }> {

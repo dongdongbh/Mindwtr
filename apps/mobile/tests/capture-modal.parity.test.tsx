@@ -1,26 +1,6 @@
-/**
- * React Native's capture confirmation screen (app/capture-modal.tsx: what capture
- * links, shares, assistant notes, a widget's or tile's quick capture and in-app
- * openers show), replayed against the frozen parity fixture that core's
- * capture-modal-model and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_CAPTURE_MODAL=1 MINDWTR_CAPTURE_CAPTURE_MODAL_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run tests/capture-modal.parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code, so the provenance always names the code that ran.
- * To recapture only the scenarios a deliberate RN change affects, also set
- *   MINDWTR_CAPTURE_CAPTURE_MODAL_SCENARIOS='<name>|<name>' MINDWTR_CAPTURE_CAPTURE_MODAL_REASON='<why>'
- * The other scenarios keep their frozen observations, and `provenance.recaptured`
- * records the commit, the reason and the names.
- *
- * Each scenario renders the real screen with the real core store, opened with
- * the route params an entry hands it (the link, share and assistant-note params
- * are the ones entry-points-parity.fixtures.json records React Native's root
- * layout pushing), drives it through its inputs and buttons, and records what a
- * user sees, what the store is asked to write, the toasts, the navigation and
- * the AI requests.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -52,7 +32,7 @@ const harness = vi.hoisted(() => ({
   canGoBack: false,
   suggestions: {} as Record<string, unknown>,
   refuseWrites: false,
-  /** Set once the screen navigated away; it then asks the AI nothing more. */
+
   closed: false,
   log: {
     toasts: [] as unknown[],
@@ -64,7 +44,7 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindwtr/core')>()),
-  // The AI provider answers from the scenario's suggestions, by title.
+
   createAIProvider: () => ({
     predictMetadata: async (input: { title: string; contexts: string[]; tags: string[] }) => {
       if (!harness.closed) harness.log.ai.push(['predictMetadata', input]);
@@ -102,7 +82,7 @@ vi.mock('@/hooks/use-theme-colors', () => ({
     secondaryText: '#64748b', tint: '#3b82f6', danger: '#ef4444',
   }),
 }));
-// A key is stored and required, so the AI settings alone decide whether the screen asks.
+
 vi.mock('@/lib/ai-config', () => ({
   buildCopilotConfig: () => ({}),
   isAIKeyRequired: () => true,
@@ -125,7 +105,7 @@ vi.mock('@/lib/task-meta-navigation', () => ({
   stashPendingCaptureTaskOpen: (request: unknown) => { harness.log.navigation.push(['stashPendingCaptureTaskOpen', request]); },
 }));
 vi.mock('@/components/themed-alert', () => ({ ThemedAlertHost: () => null }));
-// The app's managed attachments folder: files directly inside it may be saved.
+
 vi.mock('@/lib/attachment-sync-utils', () => ({
   getAttachmentsDir: async () => 'file:///data/mindwtr/attachments/',
   canUploadAttachmentFrom: (uri: string) => {
@@ -135,8 +115,6 @@ vi.mock('@/lib/attachment-sync-utils', () => ({
   },
 }));
 
-// ---------------------------------------------------------------------------
-// Inputs
 
 export const TIME_ZONE = 'UTC';
 export const NOW = '2026-09-28T14:00:00.000Z';
@@ -180,23 +158,23 @@ export type CaptureModalAction =
   | ['save']
   | ['saveAndEdit']
   | ['cancel']
-  /** Android's back button. */
+
   | ['back']
   | ['confirmBulk']
   | ['cancelBulk']
-  /** A suggested copilot chip, by its text. */
+
   | ['applyCopilot', string]
   | ['applyAllCopilot']
-  /** From now on the store refuses (true) or accepts (false) task writes. */
+
   | ['refuseWrites', boolean];
 export type CaptureModalScenario = {
   name: string;
-  /** The route params the screen opens with. */
+
   params: Record<string, string>;
   settings: string;
-  /** Whether a screen sits behind the capture screen (an in-app opener; false for a cold link or widget). */
+
   canGoBack: boolean;
-  /** The AI's answer for a title; any other title gets no suggestion. */
+
   suggestions?: Record<string, { context?: string; timeEstimate?: string; tags?: string[] }>;
   actions: CaptureModalAction[];
 };
@@ -208,7 +186,7 @@ const managedFile = {
 
 export const scenarios: CaptureModalScenario[] = [
   {
-    // entry-points fixture: mindwtr://capture?title=Buy%20groceries&note=From%20store&project=Shopping&tags=errands,%20home
+
     name: 'a capture link with a note, tags and a project no project carries',
     params: {
       initialValue: 'Buy%20groceries',
@@ -220,7 +198,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['save']],
   },
   {
-    // entry-points fixture: mindwtr://capture?title=Plan%20trip&project=p-live&body=Book%20flights (a live project's id here)
+
     name: 'a capture link naming a project by its id',
     params: { initialValue: 'Plan%20trip', initialProps: '%7B%22description%22%3A%22Book%20flights%22%7D', project: 'p-launch' },
     settings: 'base',
@@ -242,7 +220,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['type', 'Fix sink +Launch'], ['save']],
   },
   {
-    // entry-points fixture: an Android share with subject "Subject" and text "Body with https://example.com/doc"
+
     name: 'a share with a subject, a body and a link; Save & edit opens the editor',
     params: {
       initialValue: 'Subject',
@@ -253,7 +231,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['description', 'Body with https://example.com/doc'], ['saveAndEdit']],
   },
   {
-    // entry-points fixture: a plain text share
+
     name: 'a plain text share',
     params: { initialValue: 'The%20paragraph%20I%20selected%20in%20another%20app' },
     settings: 'base',
@@ -261,7 +239,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['save']],
   },
   {
-    // entry-points fixture: an Android share of "Multi\nline\nshare"
+
     name: 'a multi-line share asks first, then creates one task per line',
     params: { initialValue: 'Multi%0Aline%0Ashare' },
     settings: 'base',
@@ -269,7 +247,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['save'], ['cancelBulk'], ['save'], ['back'], ['save'], ['confirmBulk']],
   },
   {
-    // entry-points fixture: mindwtr:capture?title=Voice%20note&source=create_note&note=Longer%20spoken%20text
+
     name: 'an assistant note, its description merged with a typed /note: token',
     params: { initialValue: 'Voice%20note', initialProps: '%7B%22description%22%3A%22Longer%20spoken%20text%22%7D' },
     settings: 'base',
@@ -277,7 +255,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['type', 'Voice note /note:said aloud'], ['description', '  Longer spoken text  '], ['save']],
   },
   {
-    // A widget's or tile's quick capture: mindwtr:///capture-quick?mode=text opens /capture-modal?origin=system.
+
     name: 'a widget quick capture saves, then returns to the previous app',
     params: { origin: 'system' },
     settings: 'base',
@@ -299,7 +277,7 @@ export const scenarios: CaptureModalScenario[] = [
     actions: [['type', 'Draft agenda'], ['saveAndEdit']],
   },
   {
-    // The project screen's + button: openQuickCapture({ initialProps: { projectId }, returnTo }).
+
     name: "a project's add button: Save & edit stays on the project",
     params: { initialProps: encodedProps({ projectId: 'p-launch' }), returnTo: '/projects-screen?projectId=p-launch' },
     settings: 'base',
@@ -463,12 +441,10 @@ export const scenarios: CaptureModalScenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Harness
 
 const writeLog: unknown[] = [];
 const createdIds = new Map<string, string>();
-/** Created ids are random, so they read as `<created:title>` (or `<uuid>`) wherever they appear. */
+
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
   entry === undefined ? '<undefined>' : entry
 )).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, (match) => (
@@ -528,17 +504,14 @@ const hostOf = (root: ReactTestInstance, type: string) => root.findAll((node) =>
 const textOf = (node: ReactTestInstance): string => node.children
   .map((child) => (typeof child === 'string' ? child : textOf(child)))
   .join('');
-/** Each timer the screen set runs (the copilot waits 800 ms), then pending promises settle. */
+
 const settle = async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
 };
 
-/**
- * What a user sees: every text in reading order (the preview strip's chips are
- * `preview`), the two inputs, and each pressable control by its label.
- */
+
 const observe = (root: ReactTestInstance) => {
   const preview = root.findAllByType(QuickAddPreview)[0];
   const inPreview = new Set(preview ? preview.findAll(() => true) : []);
@@ -576,7 +549,7 @@ async function runScenario(scenario: CaptureModalScenario) {
   let open = true;
   await act(async () => { renderer = create(<CaptureScreen />); });
   await settle();
-  // A screen that navigated away is gone: the step shows no screen, and no step follows.
+
   const step = () => {
     const screen = open && !harness.closed ? observe(renderer.root) : null;
     if (open && harness.closed) {
@@ -605,7 +578,7 @@ async function runScenario(scenario: CaptureModalScenario) {
           case 'help': findControl(root, '?').props.onPress(); break;
           case 'save': findControl(root, t('common.save')).props.onPress(); break;
           case 'saveAndEdit': findControl(root, t('quickAdd.saveAndEdit')).props.onPress(); break;
-          // The card's Cancel is the first button with that text; the question's is the last.
+
           case 'cancel': hostOf(root, 'TouchableOpacity').find((node) => textOf(node) === t('common.cancel'))!.props.onPress(); break;
           case 'cancelBulk': hostOf(root, 'TouchableOpacity').filter((node) => textOf(node) === t('common.cancel')).pop()!.props.onPress(); break;
           case 'confirmBulk': findControl(root, t('quickAdd.bulkConfirmCreate')).props.onPress(); break;
@@ -632,10 +605,7 @@ async function runScenario(scenario: CaptureModalScenario) {
   return observations;
 }
 
-/**
- * The commit a recapture runs at. It must be declared, equal HEAD, and the checkout
- * must hold no other change than this harness and its fixture.
- */
+
 function captureProvenance() {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: new URL('.', import.meta.url).pathname, encoding: 'utf8' });
   const head = git('rev-parse', 'HEAD').trim();

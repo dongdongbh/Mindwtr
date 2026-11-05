@@ -24,7 +24,7 @@ const seed = (source: Task['status'], destination: Task['status']): Partial<AppD
 });
 type Sqlite = Awaited<ReturnType<typeof openSqliteHost>>;
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
-// All app/FTS tables and raw rowids, including shadow tables; only the intended receipt rows differ from RN.
+
 const domain = async (sqlite: Sqlite) => {
     const schema = await sqlite.sql<{ type: string; name: string; tbl_name: string; sql: string | null }>(
         "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name");

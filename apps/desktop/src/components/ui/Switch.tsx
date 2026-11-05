@@ -36,8 +36,8 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
                 'after:absolute after:inset-x-0 after:-inset-y-[11px] after:content-[\'\']',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                 'disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none',
-                // An off track must not be bg-card: these switches sit inside cards, so it read as
-                // a floating thumb with no track at all.
+
+
                 checked ? 'border-primary bg-primary' : 'border-border bg-muted',
                 className,
             )}

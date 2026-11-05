@@ -129,6 +129,11 @@ export const projectsScreenStyles = StyleSheet.create({
     projectReorderListFill: {
         flex: 1,
     },
+
+    projectReorderHeader: {
+        paddingHorizontal: 12,
+        paddingTop: 12,
+    },
     projectTaskPinnedToolbar: {
         minHeight: 56,
         borderBottomWidth: 1,
@@ -207,6 +212,10 @@ export const projectsScreenStyles = StyleSheet.create({
         fontWeight: '700',
         letterSpacing: 0.4,
         textTransform: 'uppercase',
+    },
+    areaHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     collapsibleAreaHeader: {
         flexDirection: 'row',
@@ -826,16 +835,20 @@ export const projectsScreenStyles = StyleSheet.create({
     },
     areaManagerHeader: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: 8,
     },
     areaSortButtons: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         alignItems: 'center',
         gap: 6,
     },
     areaSortButton: {
+        minHeight: 44,
+        justifyContent: 'center',
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 8,
@@ -847,6 +860,7 @@ export const projectsScreenStyles = StyleSheet.create({
     },
     areaManagerRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingVertical: 8,
@@ -863,12 +877,16 @@ export const projectsScreenStyles = StyleSheet.create({
         flexWrap: 'wrap',
     },
     areaManagerInfo: {
+        flex: 1,
+        minWidth: 44,
+        minHeight: 44,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
     },
     areaManagerActions: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         alignItems: 'center',
         gap: 8,
     },
@@ -883,6 +901,10 @@ export const projectsScreenStyles = StyleSheet.create({
         marginRight: 8,
     },
     colorToggleButton: {
+        minWidth: 44,
+        minHeight: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
         padding: 6,
         borderRadius: 8,
         borderWidth: 1,
@@ -904,6 +926,9 @@ export const projectsScreenStyles = StyleSheet.create({
         fontWeight: '700',
     },
     areaDeleteButton: {
+        minWidth: 44,
+        minHeight: 44,
+        justifyContent: 'center',
         paddingHorizontal: 6,
         paddingVertical: 4,
     },
@@ -922,6 +947,7 @@ export const projectsScreenStyles = StyleSheet.create({
         maxWidth: 360,
     },
     pickerRow: {
+        minHeight: 44,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
@@ -976,6 +1002,9 @@ export const projectsScreenStyles = StyleSheet.create({
         fontWeight: '600',
     },
     linkModalButton: {
+        minWidth: 44,
+        minHeight: 44,
+        justifyContent: 'center',
         paddingHorizontal: 10,
         paddingVertical: 8,
         borderRadius: 10,

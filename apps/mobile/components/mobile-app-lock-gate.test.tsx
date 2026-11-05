@@ -5,6 +5,9 @@ import { AppState, Modal, Platform, type AppStateStatus } from 'react-native';
 import { useTaskStore, type MobileAppLockRelockDelayMinutes } from '@mindwtr/core';
 
 const authenticateWithDeviceLockMock = vi.hoisted(() => vi.fn());
+const logInfoMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/app-log', () => ({ logInfo: logInfoMock }));
 
 vi.mock('expo-local-authentication', () => ({
   SecurityLevel: { NONE: 0 },
@@ -61,6 +64,8 @@ describe('MobileAppLockGate', () => {
       vi.useFakeTimers({ now: START });
       authenticateWithDeviceLockMock.mockReset();
       authenticateWithDeviceLockMock.mockResolvedValue({ success: true });
+      logInfoMock.mockReset();
+      logInfoMock.mockResolvedValue(null);
       vi.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, listener: (state: AppStateStatus) => void) => {
         onAppStateChange = listener;
         return { remove: () => { onAppStateChange = null; } };
@@ -82,7 +87,7 @@ describe('MobileAppLockGate', () => {
     };
     const wait = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
     const changeTo = async (state: AppStateStatus) => { await act(async () => { onAppStateChange?.(state); }); };
-    /** Mounts as a cold start and unlocks with the first prompt. */
+
     const coldStart = async () => {
       let tree!: ReactTestRenderer;
       await act(async () => {
@@ -137,6 +142,26 @@ describe('MobileAppLockGate', () => {
       expect(shows(tree)).toBe(false);
     });
 
+
+    it('reports the lock from the first render, the unlock, and the next lock', async () => {
+      setDelay(0);
+      const onLockedChange = vi.fn();
+      authenticateWithDeviceLockMock.mockResolvedValueOnce({ success: false, reason: 'cancelled' });
+      let tree!: ReactTestRenderer;
+      await act(async () => {
+        tree = create(<MobileAppLockGate enabled onLockedChange={onLockedChange}><></></MobileAppLockGate>);
+      });
+      mounted = tree;
+      expect(onLockedChange.mock.calls).toEqual([[true]]);
+      await wait(300);
+      expect(onLockedChange.mock.calls).toEqual([[true]]);
+      const unlock = tree.root.findAll((node) => String(node.type) === 'TouchableOpacity')[0];
+      await act(async () => { await unlock.props.onPress(); });
+      expect(onLockedChange).toHaveBeenLastCalledWith(false);
+      await changeTo('background');
+      expect(onLockedChange).toHaveBeenLastCalledWith(true);
+    });
+
     it('stays locked on a quick return when the app left while still locked', async () => {
       setDelay(15);
       authenticateWithDeviceLockMock.mockResolvedValue({ success: false, reason: 'cancelled' });
@@ -171,14 +196,58 @@ describe('MobileAppLockGate', () => {
         return tree;
       };
 
-      it('keeps the app, and an open task, mounted under the lock while it is away', async () => {
+      const privacyCover = (tree: ReactTestRenderer) => tree.root.findAll((node) => (
+        String(node.type) === 'View' && node.props.testID === 'app-lock-privacy-cover'
+      ));
+
+      it('keeps the open task mounted behind a blank privacy cover while away', async () => {
+        setDelay(5);
+        const tree = await coldStartCounting();
+        await changeTo('inactive');
+        expect(lockModal(tree).props.visible).toBe(true);
+        expect(textNode(tree.root, 'Mindwtr is locked')).toBeUndefined();
+        expect(privacyCover(tree)).toHaveLength(1);
+        await changeTo('background');
+        expect(lockModal(tree).props.visible).toBe(true);
+        expect(textNode(tree.root, 'Mindwtr is locked')).toBeUndefined();
+        expect(privacyCover(tree)).toHaveLength(1);
+        expect(shows(tree)).toBe(true);
+        expect(contentMounts).toBe(1);
+      });
+
+      it('clears the privacy cover without an unlock panel on a quick return', async () => {
         setDelay(5);
         const tree = await coldStartCounting();
         await changeTo('inactive');
         await changeTo('background');
-        expect(lockModal(tree).props.visible).toBe(true);
-        expect(shows(tree)).toBe(true);
+        vi.setSystemTime(Date.now() + 60_000);
+        await changeTo('active');
+        expect(lockModal(tree).props.visible).toBe(false);
+        expect(textNode(tree.root, 'Mindwtr is locked')).toBeUndefined();
+        expect(privacyCover(tree)).toHaveLength(0);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(1);
         expect(contentMounts).toBe(1);
+        expect(logInfoMock).toHaveBeenCalledWith('App lock grace return cleared privacy cover', {
+          scope: 'app-lock',
+          extra: { releaseCheck: 'v1.3.9/app-lock-resume-cover', outcome: 'grace-return' },
+          force: true,
+        });
+      });
+
+      it('keeps the native unlock panel on a return that requires authentication', async () => {
+        setDelay(1);
+        const tree = await coldStartCounting();
+        await changeTo('background');
+        vi.setSystemTime(Date.now() + 61_000);
+        authenticateWithDeviceLockMock.mockResolvedValue({ success: false, reason: 'cancelled' });
+        await changeTo('active');
+        expect(lockModal(tree).props.visible).toBe(true);
+        expect(textNode(tree.root, 'Mindwtr is locked')).toBeDefined();
+        await wait(300);
+        expect(lockModal(tree).props.visible).toBe(true);
+        expect(textNode(tree.root, 'Mindwtr is locked')).toBeDefined();
+        expect(contentMounts).toBe(1);
+        expect(logInfoMock).not.toHaveBeenCalled();
       });
 
       it('shows the same screen at once when the app returns within the delay', async () => {

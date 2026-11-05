@@ -1,13 +1,6 @@
-/**
- * React Native's Daily Review, replayed against the `dailyReview` part of the
- * review views parity fixture (packages/core/src/review-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_REVIEW_VIEWS=1 rewrites that part.
- *
- * Each scenario opens the real screen with the real core store, steps through it,
- * follows up waiting items, pauses and resumes and finishes, and records what a
- * user sees, what the store is asked to write and what the device stores. Rows and
- * the task editor are stand-ins that record their props.
- */
+
+
+
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -228,7 +221,7 @@ async function perform(root: ReactTestInstance, action: [string, ...unknown[]]) 
   }
 }
 
-/** The Daily Review screen mounts only while open, as the modal and route do. */
+
 function Host() {
   const [mounted, setMounted] = React.useState(true);
   harness.mounted = setMounted;

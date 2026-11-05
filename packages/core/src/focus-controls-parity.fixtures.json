@@ -7,7 +7,8 @@
   "recapture": "2026-09-26 (task rn-focus-menu-bugs-20260924-01): recaptured with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after two RN fixes. (1) useTaskFilterSelections drops an applied saved filter's selections for hidden sections: observations 1-3 of \"priority rules with priorities off\" now show priorities [] and More filters \"All\". (2) markSavedFilterDeleted changes only the deleted entry: observations 2-3 of \"delete saved filters\" now write sf-list with its stored view \"list\" in stored order, so \"List only\" no longer appears in the Focus saved row. Every other observation and every input is byte-identical.",
   "clockRecapture": "2026-09-28: recaptured via MINDWTR_CAPTURE_FOCUS_CONTROLS=1 on 8d0a3267ae002400f992186f2ad1ef7aeadb3b28 after the shared saved-filter store adopted monotonic update clocks. Only one repeated-edit write timestamp advances from .000Z to .001Z; all inputs and other observations are unchanged.",
   "areaSelectionRecapture": " 2026-10-20 (#1421): real RN Focus harness recaptured with the area-selection fix; only Today’s Focus sections/counts and the occupied empty state changed in 47 observations. Empty sibling sections are retained with that occupied header. Occupied slots are global before criteria; no inputs, writes, nonempty sibling sections, or other behavior changed.",
-  "projectColorRecapture": "2026-10-20: real RN Focus harness recaptured on 3d10ce6154d1a485e860a30945fec9040b54faf0 with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after Project color inheritance changed. Exactly four Alpha project headers now omit the implicit default-gray accent; every input and all other observations are unchanged."
+  "projectColorRecapture": "2026-10-20: real RN Focus harness recaptured on 3d10ce6154d1a485e860a30945fec9040b54faf0 with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after Project color inheritance changed. Exactly four Alpha project headers now omit the implicit default-gray accent; every input and all other observations are unchanged.",
+  "noColorDotRecapture": "2026-10-24 (#1422 follow-up): real RN Focus harness recaptured with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after a Project with no Area and no own color got the grey default dot back, as Area buckets have. Exactly the four Alpha project headers changed (empty color to #94a3b8); every input and all other observations are unchanged."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-23T14:00:00.000Z",
@@ -10847,7 +10848,7 @@
        "n3~",
        "#project:p-launch|Launch|1|0|#2563eb",
        "n5~",
-       "#project:p-alpha|Alpha|1|0|",
+       "#project:p-alpha|Alpha|1|0|#94a3b8",
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
@@ -13459,7 +13460,7 @@
        "n3~",
        "#project:p-launch|Launch|1|0|#2563eb",
        "n5~",
-       "#project:p-alpha|Alpha|1|0|",
+       "#project:p-alpha|Alpha|1|0|#94a3b8",
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
@@ -13710,7 +13711,7 @@
        "n3~",
        "#project:p-launch|Launch|1|0|#2563eb",
        "n5~",
-       "#project:p-alpha|Alpha|1|0|",
+       "#project:p-alpha|Alpha|1|0|#94a3b8",
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
@@ -13961,7 +13962,7 @@
        "n3~",
        "#project:p-launch|Launch|1|0|#2563eb",
        "n5~",
-       "#project:p-alpha|Alpha|1|0|",
+       "#project:p-alpha|Alpha|1|0|#94a3b8",
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"

@@ -1,6 +1,7 @@
 import { getProjectAccentColor } from '@mindwtr/core';
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
+import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
   View,
@@ -111,6 +112,8 @@ import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { PullSyncIndicator } from '@/components/PullSyncIndicator';
 import { useManualPullSync } from '@/hooks/use-manual-pull-sync';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useCollapsedTaskGroups } from '@/lib/view-state/task-group-collapse-state';
+import { logInfo as logAppInfo } from '@/lib/app-log';
 import { projectMatchesAreaFilterSelection } from '@mindwtr/core';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import {
@@ -183,8 +186,7 @@ const getStartDateOffset = (days: number): Date => {
 
 const formatDateOnly = (date: Date): string => safeFormatDate(date, 'yyyy-MM-dd');
 
-// A start date must not fall after the due date (#1252): a task due on Friday can start
-// tomorrow, but not next week.
+
 const canStartOn = (task: Task, date: Date): boolean => (
   isTaskDateCoherent({ dueDate: task.dueDate, startTime: formatDateOnly(date) })
 );
@@ -287,8 +289,8 @@ export default function FocusScreen() {
   const saveFilterKeyboardInset = useAndroidKeyboardInset(filtersVisible && saveFilterDialogVisible);
   const [saveFilterName, setSaveFilterName] = useState('');
   const [expandedSections, setExpandedSections] = useState(DEFAULT_EXPANDED_SECTIONS);
-  // Off by default: Focus is the day's shortlist, so titles alone read faster;
-  // the persisted per-device choice above wins for anyone who turned it on.
+
+
   const [showDetails, setShowDetails] = useState(false);
   const [focusViewStateHydrated, setFocusViewStateHydrated] = useState(false);
   const didToggleSectionRef = useRef(false);
@@ -359,10 +361,8 @@ export default function FocusScreen() {
     unbindSaved: unbindSavedFilter,
   } = selections;
   const hasFilters = selections.hasActive;
-  // A saved or stored 'priority' sort/group stops taking effect while
-  // Priorities is off (the preference survives for re-enable) — otherwise
-  // Focus would keep ordering and bucketing by a field hidden everywhere else
-  // in the UI. The chip rows below drop the option to match.
+
+
   const {
     effectiveSortBy: effectiveFocusSortBy,
     effectiveGroupBy: effectiveFocusGroupBy,
@@ -378,9 +378,8 @@ export default function FocusScreen() {
   });
   const focusSortOptions = getFocusSortOptions(prioritiesEnabled);
   const focusGroupByOptions = getFocusGroupByOptions(prioritiesEnabled);
-  // Area-visible pools share the derivation; occupied slots are counted globally.
-  // futureStartTick makes a later-today start leave the Next actions pool the
-  // moment its time arrives; localDayKey covers the day rollover.
+
+
   const actionableTasks = useMemo(() => tasks.filter(isTaskActionable), [tasks]);
   const focusPools = useMemo(() => {
     void localDayKey;
@@ -395,9 +394,8 @@ export default function FocusScreen() {
     });
   }, [actionableTasks, areaById, baseActiveTasks, futureStartTick, localDayKey, projectById, projects, resolvedAreaFilter, selections.criteria]);
   const upcomingEntries = focusPools.upcoming;
-  // The date a deferred row surfaces on is the section's whole point, so it rides
-  // the row itself rather than the meta line. Built once per list so the footer
-  // node stays identity-stable and the row keeps its memo boundary (#766).
+
+
   const upcomingAppearsAtFooters = useMemo(() => {
     const byTaskId = new Map<string, React.ReactNode>();
     for (const entry of upcomingEntries) {
@@ -426,7 +424,7 @@ export default function FocusScreen() {
     });
     if (!plan) return;
     unbindSavedFilter();
-    // The gtd group is rebuilt from the latest stored settings, so a key another device changed stays.
+
     void updateSettingsFromLatest((latest) => planFocusGroupChange(nextGroupBy, {
       effectiveGroupBy: effectiveFocusGroupBy,
       hasActiveSavedFilter: Boolean(activeSavedFilter),
@@ -451,14 +449,14 @@ export default function FocusScreen() {
     const startDate = new Date(selectedDate);
     startDate.setHours(0, 0, 0, 0);
     const startTime = formatDateOnly(startDate);
-    // The menu hides the choices that cannot work; this catches the custom date.
+
     if (!canStartOn(task, startDate)) {
       showTaskUpdateError(resolveText('task.dateIssue.startAfterDue', 'Starts after due date'));
       return;
     }
     const previousStartTime = task.startTime;
-    // A future-start Next action keeps its star queued for its start day.
-    // Other statuses still drop a star when deferred.
+
+
     const startsToday = startDate.getTime() <= getStartDateOffset(0).getTime();
     const previousFocused = !startsToday && task.status !== 'next' && task.isFocusedToday === true;
     const deferUpdates: Partial<Task> = {
@@ -571,7 +569,7 @@ export default function FocusScreen() {
       resolveText('taskEdit.startDateLabel', 'Start Date'),
       task.title,
       [
-        // Not offered to a task that already sits under Today: it would change nothing.
+
         ...(isTodayScheduleCandidate(task, new Date()) ? [] : [{
           text: resolveText('quickDate.today', 'Today'),
           onPress: () => deferTaskUntil(task, getStartDateOffset(0)),
@@ -609,8 +607,8 @@ export default function FocusScreen() {
     if (!selectedDate) return;
     let nextDate = new Date(selectedDate);
     nextDate.setHours(0, 0, 0, 0);
-    // Deferring means "not today": the iOS inline picker has no native
-    // minimumDate (see the render site), so enforce the tomorrow floor here.
+
+
     const floor = getStartDateOffset(1);
     if (nextDate < floor) nextDate = floor;
     setDeferPickerDate(nextDate);
@@ -637,18 +635,18 @@ export default function FocusScreen() {
       nowIso: new Date().toISOString(),
     });
     if (!plan) return;
-    // Saved filters are edited on the latest stored list, so one another device deleted stays deleted.
+
     updateSettingsFromLatest((latest) => ({
       savedFilters: [...(latest.savedFilters ?? []), plan.filter],
     }), { write: updateSettings, read: () => useTaskStore.getState().settings }).then(() => {
-      // Binds the new filter as the active one; its criteria are the ones just
-      // saved, so re-applying them is a no-op beyond marking it selected.
+
+
       applySavedFocusFilter(plan.filter);
       setSaveFilterDialogVisible(false);
     }).catch(() => undefined);
   }, [applySavedFocusFilter, canSaveFocusPerspective, effectiveFocusGroupBy, effectiveFocusSortBy, saveFilterName, selections.currentCriteria, settings?.savedFilters, updateSettings]);
-  // A deleted saved filter drops out of savedFocusFilters, and the selections
-  // hook clears its own binding from there.
+
+
   const deleteSavedFilter = useCallback((filter: SavedFilter) => {
     updateSettingsFromLatest((latest) => planFocusFilterDelete(latest.savedFilters, filter.id), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(() => undefined);
   }, [updateSettings]);
@@ -754,17 +752,15 @@ export default function FocusScreen() {
     };
   }, [highlightTaskId, setHighlightTask]);
 
-  // The home-screen widget's Focus list shows what this screen shows, so hand
-  // it the current selection and republish when it changes (#1173). Task edits
-  // republish on their own; only a filter or sort change moves nothing else.
+
   useEffect(() => {
     if (!setFocusWidgetFilter({
       criteria: selections.criteria,
       sortBy: effectiveFocusSortBy,
       sortOrder: activeSavedFilter?.sortOrder,
     })) return;
-    // Imported here rather than at the top: the widget service pulls in the
-    // native widget bridges, which this screen must not need to render.
+
+
     void import('@/lib/widget-service').then((widgets) => widgets.updateMobileWidgetFromStore()).catch(() => {});
   }, [activeSavedFilter?.sortOrder, effectiveFocusSortBy, selections.criteria]);
 
@@ -798,10 +794,8 @@ export default function FocusScreen() {
     projectSections,
     settings?.gtd?.focusIncludeStartDates,
   ]);
-  // A Today row whose timed start hasn't arrived yet gets the same appears-at
-  // footer as Upcoming, formatted as a time (it's today) so it drops the
-  // moment the start passes — hence the futureStartTick dep, unlike schedule
-  // itself which is day-granularity only.
+
+
   const schedulePendingFooters = useMemo(() => {
     void futureStartTick;
     const now = new Date();
@@ -826,12 +820,7 @@ export default function FocusScreen() {
     return getReviewDueProjects(visibleProjects, new Date());
   }, [localDayKey, visibleProjects]);
 
-  // Manual focusOrder is a full-list concept. focusedTasks derives from
-  // filteredActiveTasks, so an active filter narrows it to a subset; reordering
-  // that subset writes focusOrder indices 0..n over only the visible rows and
-  // corrupts the positions of hidden focused tasks. Gate reorder on the default
-  // sort AND no active filter (the effect below also exits reorder mode if a
-  // filter engages mid-reorder). Clearing the filter is the correction path.
+
   const canReorderFocus = canReorderFocusTasks({
     effectiveSortBy: effectiveFocusSortBy,
     hasActiveFilters: hasFilters,
@@ -885,18 +874,14 @@ export default function FocusScreen() {
     return () => subscription.remove();
   }, [exitFocusReorder, focusReorderMode]);
 
-  // Reorder mode owns the whole screen; if the section empties or a non-default
-  // sort takes over while it is open, drop back to the normal list.
+
   useEffect(() => {
     if (focusReorderMode && !canReorderFocus) {
       exitFocusReorder();
     }
   }, [canReorderFocus, exitFocusReorder, focusReorderMode]);
 
-  // Reconcile the dragged order with the live Focus list at render time (a task
-  // finishing or arriving mid-reorder) without discarding the user's ordering.
-  // Deriving this rather than syncing draft state in an effect avoids a render
-  // loop: focusedTasks is a fresh array every render.
+
   const focusReorderData = useMemo(
     () => reconcileFocusReorderOrder(focusReorderDraft, focusedTasks),
     [focusReorderDraft, focusedTasks],
@@ -916,6 +901,8 @@ export default function FocusScreen() {
     [projectById],
   );
 
+  const { collapsedGroupIds: collapsedNextGroups, toggleGroup: toggleNextGroup } = useCollapsedTaskGroups('focus-next', effectiveFocusGroupBy);
+  const { collapsedGroupIds: collapsedScheduleGroups, toggleGroup: toggleScheduleGroup } = useCollapsedTaskGroups('focus-schedule', 'schedule');
   const sections = useMemo<FocusSection[]>(() => {
     if (!focusViewStateHydrated) return [];
 
@@ -926,14 +913,14 @@ export default function FocusScreen() {
       items.map((project) => ({ type: 'project' as const, project }))
     );
     const buildScheduleItems = (): FocusListItem[] => (
-      expandedSections.schedule ? buildFocusScheduleItems(scheduleByStartTime, t) : []
+      expandedSections.schedule ? buildFocusScheduleItems(scheduleByStartTime, t, collapsedScheduleGroups) : []
     );
     const buildGroupedNextItems = (): FocusListItem[] => (
       expandedSections.next
-        ? buildFocusNextItems({ groupBy: effectiveFocusGroupBy, tasks: nextActions, projects, areas, t, theme: themePreset })
+        ? buildFocusNextItems({ groupBy: effectiveFocusGroupBy, tasks: nextActions, projects, areas, t, theme: themePreset, collapsedGroupIds: collapsedNextGroups })
         : []
     );
-    // Same buckets, order and titles as the widget (@mindwtr/core focus-sections).
+
     const nextSections: FocusSection[] = buildFocusTaskSections(
       { focusedTasks, schedule, reviewDue, nextActions, upcoming },
       t,
@@ -961,6 +948,8 @@ export default function FocusScreen() {
     return nextSections;
   }, [
     areas,
+    collapsedNextGroups,
+    collapsedScheduleGroups,
     effectiveFocusGroupBy,
     expandedSections,
     focusViewStateHydrated,
@@ -998,7 +987,7 @@ export default function FocusScreen() {
             item.project.updatedAt ?? '',
           ].join(':');
         }
-        return ['group', item.id, item.count].join(':');
+        return ['group', item.id, item.count, item.collapsed ? 'collapsed' : 'expanded'].join(':');
       }).join(',');
       return [section.type, section.expanded ? 'expanded' : 'collapsed', section.totalCount, itemVersion].join('|');
     }).join('||')
@@ -1010,10 +999,8 @@ export default function FocusScreen() {
   const visibleOtherSections = sections.filter((section) => section.type !== 'focus' && section.totalCount > 0);
   const canToggleOtherSections = visibleOtherSections.length > 0;
   const collapseOtherSections = visibleOtherSections.some((section) => section.expanded);
-  // Measured-height getItemLayout: without it the
-  // SectionList estimates unmounted regions from a running average, and the
-  // mixed row heights (group headers vs task rows) make Android's scroll
-  // corrections oscillate at the bottom of the list (#826).
+
+
   const focusItemHeightsRef = useRef<Record<string, number>>({});
   const [focusLayoutVersion, setFocusLayoutVersion] = useState(0);
   const registerFocusItemHeight = useCallback((itemKey: string, height: number) => {
@@ -1043,7 +1030,7 @@ export default function FocusScreen() {
     }
   }, [firstVisibleSectionType, sections]);
   const focusItemLayouts = useMemo(() => {
-    // focusLayoutVersion invalidates memoized frames when ref-backed heights change.
+
     void focusLayoutVersion;
     return buildFocusListLayoutFrames(sections, {
       measuredHeights: focusItemHeightsRef.current,
@@ -1063,8 +1050,8 @@ export default function FocusScreen() {
   }, [focusItemLayouts]);
   const hasTasks = focusPools.selection.globalCount > 0 || schedule.length > 0 || nextActions.length > 0 || upcoming.length > 0 || reviewDue.length > 0 || reviewDueProjects.length > 0;
   const activeFilterCount = selections.activeCount;
-  // Criteria an applied saved filter carries that no picker can express; they
-  // are removed from the saved filter itself rather than from the selections.
+
+
   const advancedFilterChips = useMemo<FocusFilterChip[]>(() => {
     if (!activeSavedFilter) return [];
     return buildFocusAdvancedFilterChips({
@@ -1110,8 +1097,7 @@ export default function FocusScreen() {
     setIsModalVisible(true);
   }, []);
 
-  // One object for every row, so a store write does not hand each row a fresh
-  // set of arrows and re-render the whole visible list (#766).
+
   const rowActions = useMemo<TaskRowActions>(() => ({
     edit: onEdit,
     changeStatus: (task, status) => updateTask(task.id, { status }),
@@ -1119,7 +1105,7 @@ export default function FocusScreen() {
   }), [deleteTask, onEdit, updateTask]);
 
   const onSaveTask = useCallback((taskId: string, updates: Partial<Task>) => {
-    // Returned, not swallowed: the editor reports a failed save from this result.
+
     return updateTask(taskId, updates);
   }, [updateTask]);
 
@@ -1155,9 +1141,8 @@ export default function FocusScreen() {
     setShowDetails((current) => {
       const next = !current;
       AsyncStorage.setItem(FOCUS_VIEW_STATE_STORAGE_KEY, serializeFocusViewState(expandedSections, next)).catch(() => {});
-      // Measured row heights key on task.rev only, not on the details flag, so a
-      // toggle must invalidate them itself or stale frames make Android's scroll
-      // corrections oscillate (#826) — same reset the pull-refresh effect uses.
+
+
       focusItemHeightsRef.current = {};
       setFocusLayoutVersion((prev) => prev + 1);
       return next;
@@ -1183,8 +1168,8 @@ export default function FocusScreen() {
   ), [resolveText, tc]);
 
   const renderItem = ({ item, section }: { item: FocusListItem; section: FocusSection }) => {
-    // Margin-free measuring wrapper: its height includes the row's own
-    // margins, matching the cell frames VirtualizedList measures natively.
+
+
     const measureRow = (node: React.ReactNode) => (
       <View
         onLayout={(event) => registerFocusItemHeight(
@@ -1197,12 +1182,21 @@ export default function FocusScreen() {
     );
     if (item.type === 'groupHeader') {
       return measureRow(
-        <View
+        <TouchableOpacity
           accessible
-          accessibilityRole="header"
+          accessibilityRole="button"
           accessibilityLabel={`${item.title} ${item.count}`}
+          accessibilityState={{ expanded: !item.collapsed }}
+          onPress={() => {
+            (section.type === 'schedule' ? toggleScheduleGroup : toggleNextGroup)(item.id);
+            void logAppInfo('Focus subgroup toggled', { scope: 'focus', force: true, extra: {
+              releaseCheck: 'v1.3.8/focus-subgroup-collapse', section: section.type,
+              grouping: section.type === 'schedule' ? 'schedule' : effectiveFocusGroupBy, collapsed: !item.collapsed,
+            } });
+          }}
           style={styles.contextGroupHeader}
         >
+          <Text style={[styles.sectionChevron, { color: tc.secondaryText }]}>{item.collapsed ? '▸' : '▾'}</Text>
           <View
             style={[
               styles.contextGroupDot,
@@ -1220,7 +1214,7 @@ export default function FocusScreen() {
           <Text style={[styles.contextGroupCount, { color: tc.secondaryText }]}>
             {item.count}
           </Text>
-        </View>
+        </TouchableOpacity>
       );
     }
 
@@ -1264,12 +1258,12 @@ export default function FocusScreen() {
     }
 
     const canMarkReviewed = section.type === 'reviewDue' && Boolean(item.task.reviewAt);
-    // A task due today or overdue has no later start date left to choose, so it gets no menu.
+
     const canDeferTask = !canMarkReviewed
       && canStartOn(item.task, getStartDateOffset(1))
       && (item.task.isFocusedToday === true || item.task.status === 'next');
-    // Passed by reference, not wrapped: both already take the task, and a fresh
-    // arrow here would defeat the row's memo boundary (#766).
+
+
     const longPressAction = canMarkReviewed
       ? openReviewMenu
       : canDeferTask
@@ -1411,6 +1405,7 @@ export default function FocusScreen() {
 
   return (
     <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
+      <WidgetLaunchDestination path="/focus" />
       {focusReorderMode ? (
         <View style={styles.reorderContainer}>
           <View style={[styles.reorderHeader, { borderBottomColor: tc.border }]}>
@@ -1517,8 +1512,8 @@ export default function FocusScreen() {
                     },
                   ]}
                 >
-                  {/* Tinted while any option in this sheet is off its default,
-                      Show details included — it lives here now too. */}
+                  {
+                                                                         }
                   <Settings2
                     size={20}
                     color={(effectiveFocusGroupBy !== 'none' || effectiveFocusSortBy !== DEFAULT_FOCUS_SORT_BY || showDetails)
@@ -1626,8 +1621,8 @@ export default function FocusScreen() {
                           {filter.icon ? `${filter.icon} ` : ''}{filter.name}
                         </CompactText>
                       </TouchableOpacity>
-                      {/* Mirrors the desktop chip's always-visible delete affordance:
-                          deletion must not depend on discovering a long press. */}
+                      {
+                                                                                  }
                       <TouchableOpacity
                         accessibilityRole="button"
                         accessibilityLabel={deleteAccessibilityLabel}
@@ -1953,11 +1948,10 @@ export default function FocusScreen() {
               >
                 {deferPickerTask.title}
               </Text>
-              {/* No minimumDate here: on iOS 26 the inline picker's
-                  UICalendarView asserts (SIGABRT) when setMinimumDate: replays
-                  an animated visible-month update during a Fabric mount
-                  transaction. handleDeferDateChange clamps to the same floor
-                  instead. */}
+              {
+
+
+                             }
               <DateTimePicker
                 value={deferPickerDate}
                 mode="date"
@@ -2267,6 +2261,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   contextGroupHeader: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

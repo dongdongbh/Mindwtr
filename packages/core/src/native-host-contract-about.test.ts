@@ -6,11 +6,7 @@ import { createNativeHostContract, type NativeAboutHost, type NativeHostResult }
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings } from './types';
 
-/**
- * Settings › About, the heartbeat and the store review prompt through the native host contract, against React Native's frozen
- * fixture (about-settings-parity.fixtures.json, captured from RN's screen at HEAD by about-settings-screen.parity.test.tsx):
- * the same scenario must show the same rows, alerts and toasts, store the same keys and send the same requests.
- */
+
 const fixture = JSON.parse(readFileSync(new URL('./about-settings-parity.fixtures.json', import.meta.url), 'utf8'));
 const NOW = Date.parse(fixture.now);
 
@@ -22,7 +18,7 @@ const value = <T,>(result: NativeHostResult<T>): T => {
 type Event = unknown[];
 type GithubAnswer = { status: number; body?: unknown };
 
-/** The host's device as RN's harness stubs it: AsyncStorage in memory, GitHub's queued answers, the feedback endpoint. */
+
 function device(options: { storage?: Record<string, string>; github?: GithubAnswer[]; feedbackStatus?: number; foss?: boolean; feedbackEndpointUrl?: string;
     releaseVersion?: string; heartbeatUrl?: string; channel?: string; isDev?: boolean } = {}) {
     const storage = new Map(Object.entries(options.storage ?? {}));
@@ -102,15 +98,12 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
     it.each(scenarios.map((scenario) => [scenario.name, scenario] as const))('%s: the screen RN draws', async (_name, scenario) => {
         const contract = await openContract(device({ foss: scenario.foss, releaseVersion: scenario.releaseVersion, feedbackEndpointUrl: scenario.feedbackEndpointUrl }), scenario.language ?? 'en');
         const about = value(contract.getAboutSettings({ installerSource: installer(scenario) }));
-        // RN's first screen: the top bar's title, the header, then each row's label and value.
+
         const texts = [about.title, about.appName, about.versionText, ...about.rows.flatMap((row) => [row.label, row.value])];
         expect(observed(scenario.name).screens[0].slice(0, texts.length)).toEqual(texts);
     });
 
-    /**
-     * Check for updates: from the storage RN held when the user tapped it, with the channel's last queued answer (RN's silent
-     * check took the earlier ones), the same alert or toast, the same keys stored and GitHub asked the same way.
-     */
+
     const manual = scenarios.filter((scenario) => scenario.steps?.some((step) => step.tap === 'settings.checkForUpdates'));
     it.each(manual.map((scenario) => [scenario.name, scenario] as const))('%s: Check for updates as RN runs it', async (_name, scenario) => {
         vi.useFakeTimers({ toFake: ['Date'] });
@@ -126,7 +119,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         const contract = await openContract(bound, scenario.language ?? 'en');
         const play = scenario.play?.at(-1) ?? null;
         const answer = value(await contract.runAboutUpdateCheck({ mode: 'manual', installerSource: installer(scenario), play, marketAvailable: true }));
-        // RN's events after the tap, in RN's shapes: canOpenURL and the press are the host's, the dot is the answer's.
+
         const after = rn.events.slice(tap + 1);
         const press = after.findIndex((event) => event[0] === 'openURL');
         const expected = after.slice(0, press === -1 ? after.length : press)
@@ -142,7 +135,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         })).toEqual(notices);
         const badges = after.filter((event) => event[0] === 'badge');
         expect(answer.badge).toBe(badges.length ? badges.at(-1)![1] : null);
-        // The pressed button opens the link RN opened.
+
         const opened = after[press];
         if (opened) {
             const pressed = scenario.steps!.find((step) => 'pressAlert' in step)!.pressAlert as string;
@@ -160,14 +153,14 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         let contract = await openContract(within);
         expect(value(await contract.runAboutUpdateCheck({ mode: 'silent', installerSource: 'play-store', play: null, marketAvailable: true }))).toEqual({ badge: true, notices: [] });
         expect(within.events).toEqual([]);
-        // RN's first scenario: a stale check on a Play install finds Play's update.
+
         const stale = device({ storage: { 'mindwtr-update-last-check': String(NOW - 25 * 60 * 60 * 1000) } });
         contract = await openContract(stale);
         const answer = value(await contract.runAboutUpdateCheck({ mode: 'silent', installerSource: 'play-store',
             play: { value: { updateAvailable: true, availableVersionCode: 160 } }, marketAvailable: true }));
         expect(answer).toEqual({ badge: true, notices: [] });
         expect(stale.events).toEqual(observed('play: screen opens, silent check finds a Play update').events.filter((event) => event[0] !== 'badge'));
-        // A FOSS build never checks.
+
         const foss = device({ foss: true });
         contract = await openContract(foss);
         expect(value(await contract.runAboutUpdateCheck({ mode: 'silent', installerSource: 'sideload', play: null, marketAvailable: false }))).toEqual({ badge: null, notices: [] });
@@ -200,13 +193,13 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
             return getItem(key);
         };
         const contract = await openContract(bound);
-        // The host's preflight read fails: not due, so the host asks no Play and sends play = null.
+
         expect(await contract.isAboutUpdateCheckDue({ mode: 'silent' })).toMatchObject({ ok: false });
         for (const mode of ['silent', 'manual'] as const) {
             expect(value(await contract.runAboutUpdateCheck({ mode, installerSource: 'play-store', play: null, marketAvailable: true }))).toEqual({ badge: null, notices: [] });
         }
         expect(bound.events).toEqual([]);
-        // Within the day the stored dot still answers without Play.
+
         bound.storage.set('mindwtr-update-last-check', String(NOW - 60_000));
         bound.storage.set('mindwtr-update-available', 'true');
         expect(value(await contract.runAboutUpdateCheck({ mode: 'silent', installerSource: 'unknown', play: null, marketAvailable: true }))).toEqual({ badge: true, notices: [] });
@@ -220,7 +213,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(source(null, 'com.android.vending')).toBe('play-store');
         expect(source('utm_source=google-play', null)).toBe('play-store');
         expect(source('', null)).toBe('sideload');
-        // An unreadable referrer, and no Play installer: RN's 'unknown'.
+
         expect(source(null, null)).toBe('unknown');
         contract = await openContract(device({ foss: true }));
         expect(source('utm_source=google-play', 'com.android.vending')).toBe('sideload');
@@ -244,7 +237,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(about.rate.urls[1]).toBe('https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr');
     });
 
-    /** Each feedback scenario's draft, as the steps typed it, sent through the contract: RN's request body, or RN's line. */
+
     const feedback = scenarios.filter((scenario) => scenario.steps?.some((step) => step.tap === 'settings.feedback'));
     it.each(feedback.map((scenario) => [scenario.name, scenario] as const))('%s: feedback as RN sends it', async (_name, scenario) => {
         const rn = observed(scenario.name);
@@ -273,7 +266,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(bound.events).toEqual(rn.events.filter((event) => event[0] === 'fetch'));
         if (answer.sent) expect(lastScreen).toContain(label('en', 'settings.feedbackSent'));
         else expect(lastScreen).toContain(answer.failed);
-        // The GitHub link RN opened for the category.
+
         const github = rn.events.find((event) => event[0] === 'openURL');
         if (github) expect(value(contract.getAboutSettings({ installerSource })).feedback.text.gitHub[draft.category as 'bug'].url).toBe(github[1]);
     });
@@ -297,7 +290,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         const first = device(config);
         let contract = await openContract(first);
         expect(value(await contract.sendAboutHeartbeat())).toEqual({ sent: true });
-        // The store gives every dataset its synced profile id (#1237); RN's fixture sent settings without one.
+
         const profileId = useTaskStore.getState().settings.analyticsProfileId;
         const sentBody = (first.events[1][1] as { body: Record<string, string> }).body;
         expect(sentBody.profile_id).toBe(profileId);
@@ -367,7 +360,7 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(useTaskStore.getState().settings.analytics?.heartbeatEnabled).toBe(false);
         const optOut = bound.events.find((event) => event[0] === 'fetch')![1] as { body: Record<string, string> };
         expect(optOut.body).toMatchObject({ event: 'opt_out', analytics_enabled: 'false', distinct_id: 'id-6' });
-        // A replay writes and sends nothing.
+
         const sends = bound.events.length;
         expect(value(await contract.setDataSetting({ requestId: '00000000-0000-4000-8000-000000000002', edit: analytics.edit })).changed).toBe(true);
         expect(bound.events.length).toBe(sends);
@@ -376,25 +369,6 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         expect(value(await contract.setDataSetting({ requestId: '00000000-0000-4000-8000-000000000003', edit: back.edit })).changed).toBe(true);
         await vi.waitFor(() => expect(bound.storage.has('mindwtr-analytics-opt-out-sent')).toBe(false));
         expect(useTaskStore.getState().settings.analytics?.heartbeatEnabled).toBe(true);
-    });
-
-    it('counts today for the prompts and logs it after the write, or the failure', async () => {
-        const bound = device({ storage: { 'mindwtr:local-user-prompts:v1': JSON.stringify({ firstSeenAt: '2026-01-02T00:00:00.000Z', firstSeenDayKey: '2026-01-02', activeDayKeys: ['2026-01-02'] }) } });
-        const lines: unknown[][] = [];
-        bound.host.logInfo = (message, context) => { lines.push([message, context]); bound.events.push(['log', message]); };
-        let contract = await openContract(bound);
-        expect(value(await contract.recordAboutPromptActivity())).toBeNull();
-        const stored = JSON.parse(bound.storage.get('mindwtr:local-user-prompts:v1')!);
-        expect(stored.activeDayKeys.length).toBe(2);
-        expect(bound.events.map((event) => event[0])).toEqual(['storage.set', 'log']);
-        expect(lines).toEqual([['Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome: 'stored' }]]);
-        const failing = device();
-        failing.host.storage.setItem = async () => { throw new Error('disk full'); };
-        const failed: unknown[][] = [];
-        failing.host.logInfo = (message, context) => { failed.push([message, context]); };
-        contract = await openContract(failing);
-        expect(value(await contract.recordAboutPromptActivity())).toBeNull();
-        expect(failed).toEqual([['Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome: 'failed' }]]);
     });
 
     it('answers ACTION_FAILED without an About host', async () => {

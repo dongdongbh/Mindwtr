@@ -85,6 +85,7 @@ import { createSomedaySection } from '../lib/someday-section-actions';
 import { logInfo } from '../lib/app-log';
 import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 import { resolveTaskOpenTab, useTaskOpenMode } from '@/lib/view-state/task-open-mode';
+import { subscribeWidgetLaunch } from '@/hooks/use-widget-launch';
 
 
 const EMPTY_COPILOT_TAGS: string[] = [];
@@ -160,15 +161,15 @@ interface TaskEditModalProps {
     task: Task | null;
     onClose: () => void;
     onDismiss?: () => void;
-    /** Return the store write's result (e.g. `updateTask(...)`) so a failed save can be reported. */
+
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     defaultTab?: 'task' | 'view';
-    /** Normal per-screen default used only when the device preference is Automatic. */
+
     automaticDefaultTab?: 'task' | 'view';
     onProjectNavigate?: (projectId: string) => void;
     onContextNavigate?: (context: string) => void;
     onTagNavigate?: (tag: string) => void;
-    /** Archived-project tasks remain inspectable, but every mutation is disabled. */
+
     readOnly?: boolean;
 }
 
@@ -261,8 +262,8 @@ function TaskEditModalInner({
         [allTasks, settings],
     );
     const { t, language } = useLanguage();
-    // Already identity-stable: resolveThemeTokens caches its result on the theme,
-    // so this only changes when a colour actually does (#766).
+
+
     const tc = useThemeColors();
     const adaptiveWindow = useAdaptiveWindow();
     const reducedMotion = useReducedMotion();
@@ -647,7 +648,8 @@ function TaskEditModalInner({
         ? getTaskEditorBackdatedCompletionStart(task, taskEditDraft?.draft ?? createTaskDraft(task))
         : null, [task, taskEditDraft?.draft]);
     const focusStar = useMemo(() => {
-        if (!task || !taskEditDraft || readOnly || task.deletedAt || task.status === 'archived') return undefined;
+        if (!task || !taskEditDraft || readOnly || task.deletedAt || task.status === 'archived'
+            || taskEditDraft.draft.status === 'reference') return undefined;
         const limit = normalizeFocusTaskLimit(settings.gtd?.focusTaskLimit);
         const action = resolveTaskEditorFocusStar(task, taskEditDraft.draft, {
             tasks: collectFocusEligibilityTasks(activeTasksByStatus),
@@ -693,7 +695,7 @@ function TaskEditModalInner({
     const toggleCustomMonthDay = useCallback((day: number) => {
         setCustomMonthDays((current) => {
             if (!current.includes(day)) return [...current, day].sort((a, b) => a - b);
-            // The rule needs at least one day, so ignore the tap that would empty it.
+
             return current.length > 1 ? current.filter((value) => value !== day) : current;
         });
     }, []);
@@ -1142,24 +1144,26 @@ function TaskEditModalInner({
         || isTagInputFocused;
 
     const navigation = React.useContext(NavigationContext);
-    const navigationBlurRef = useRef(() => {});
+    const navigationBlurRef = useRef<() => 'list' | 'closed-clean' | 'preserved-draft'>(() => 'list');
     navigationBlurRef.current = () => {
-        if (!visible) return;
+        if (!visible) return 'list';
         if (!readOnly && (isDirtyRef.current || draftLifecycle.hasPendingChanges()
             || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing
             || audioModalVisible || linkModalVisible || imagePreviewAttachment || aiModal
             || showDatePicker || showAreaPicker || showProjectPicker || showSectionPicker
             || customRecurrenceVisible || waitingAssignmentModalVisible || completedAtPickerVisible
-            || projectConversionOpen || descriptionEditor.descriptionExpanded)) return;
+            || projectConversionOpen || descriptionEditor.descriptionExpanded)) return 'preserved-draft';
         if (readOnly) onClose();
         else draftLifecycle.discard();
         void logInfo('Mobile task editor dismissed on navigation', {
             scope: 'task-edit',
             extra: { releaseCheck: 'v1.3.7/mobile-editor-navigation', outcome: 'closed-clean' },
         });
+        return 'closed-clean';
     };
-    // Blurred screens can freeze before another render; subscribe to the owner route directly.
+
     useEffect(() => navigation?.addListener('blur', () => navigationBlurRef.current()), [navigation]);
+    useEffect(() => subscribeWidgetLaunch(() => navigationBlurRef.current()), []);
 
     if (!task) return null;
 
@@ -1468,7 +1472,7 @@ function TaskEditModalInner({
                 </AdaptiveModalSurface>
             </KeyboardAccessoryHost>
             <ToastViewport />
-            {/* Last child so the alert covers the header and the toasts (#940). */}
+            {                                                                      }
             <ThemedAlertHost />
         </Modal>
         {visible && !readOnly && completedAtPickerVisible ? (

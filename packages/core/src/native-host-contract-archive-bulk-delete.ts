@@ -97,7 +97,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
 const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).size === rows.length;
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
-// Only the known Delete request paths can carry the selection-sized revision dictionary.
+
 const revisionPaths = new Set(['taskRevisions', 'request.taskRevisions', 'prepared.request.taskRevisions',
     'delete.request.taskRevisions', 'delete.prepared.request.taskRevisions',
     'prepared.delete.request.taskRevisions', 'prepared.delete.prepared.request.taskRevisions']);
@@ -178,7 +178,7 @@ const deleteAfter = (prepared: Pick<DeletePrepared, 'before' | 'updateAt' | 'dev
         buildUpdates: (_task, { now }) => ({ deletedAt: now }), now: prepared.updateAt,
         deviceId: prepared.deviceIdBefore ?? prepared.deviceIdToInitialize! });
 
-/** Only references consumed by the existing restore sanitizer, in saved order. */
+
 export const archivedTasksDeleteUndoScope = (tasks: readonly Task[], data: Pick<AppData, 'projects' | 'sections' | 'areas'>): NativeArchivedTasksDeleteUndoScope => {
     const sectionIds = new Set(tasks.flatMap((row) => row.sectionId ? [row.sectionId.trim()] : []));
     const sections = data.sections.filter((row) => sectionIds.has(row.id));
@@ -197,7 +197,7 @@ const validArea = (row: unknown): row is Area => record(row) && text(row.id, 500
 const validContextProject = (row: unknown): row is Project => record(row) && text(row.id, 500)
     && (row.deletedAt === undefined || iso(row.deletedAt)) && (row.purgedAt === undefined || iso(row.purgedAt))
     && validProject({ ...row, deletedAt: undefined, purgedAt: undefined }, row.id);
-// Validate known legacy codec defaults without changing the raw guarded snapshot.
+
 const validReferenceContextProject = (row: unknown): row is Project => record(row) && text(row.id, 500)
     && (row.deletedAt === undefined || iso(row.deletedAt)) && (row.purgedAt === undefined || iso(row.purgedAt))
     && validProject({ ...row, tagIds: row.tagIds ?? [], deletedAt: undefined, purgedAt: undefined,
@@ -361,8 +361,8 @@ export function createTasksDeleteMethods(deps: {
     };
     const apply = (envelope: MutationEnvelope, authority: PreparedAreaAuthority) => {
         if (requiresRawSnapshots(envelope)) {
-            // Only operated rows need the exact JSON member snapshot. Preserve
-            // every other raw object and its original SQLite-row provenance.
+
+
             const snapshots = referenceRows(selectedRows(envelope.prepared.before.map((row) => row.id), authority.snapshot.tasks));
             if (!snapshots) return Promise.resolve({ success: false as const, reason: 'conflict' as const, error: `Saved ${sourceName(envelope)} raw JSON could not be bound safely` });
             const selected = buildEntityMap(snapshots);
@@ -425,7 +425,7 @@ export function createTasksDeleteMethods(deps: {
             context: { releaseCheck: 'v1.3.4/ios-reference-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
         else logInfo(`Native ${sourceName(envelope)} bulk Trash confirmed`, { scope: 'native-host', category: 'storage',
             context: { releaseCheck: isDone(envelope) ? 'v1.3.4/ios-done-bulk-trash' : 'v1.3.4/ios-archive-bulk-trash', outcome: isUndo(envelope) ? 'restored' : 'deleted' } }); }
-        catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ } }
+        catch {                                                               } }
         return confirmed;
     };
     return {

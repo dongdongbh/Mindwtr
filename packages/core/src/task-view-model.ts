@@ -1,4 +1,5 @@
 import { getAttachmentDisplayTitle } from './attachment-link-utils';
+import { isAttachmentKeptWithoutFile } from './unreachable-attachments';
 import { tFallback } from './i18n';
 import { formatRecurrenceLabel, getRecurringTaskPreviewDate } from './recurrence';
 import { hasTimeComponent } from './date';
@@ -7,11 +8,6 @@ import { shouldSendTaskReminders } from './task-reminder-policy';
 import type { NotificationSettings } from './types';
 import type { Area, Attachment, Project, Section, Task, TaskStatus, TimeEstimate } from './types';
 
-/**
- * The task editor's View tab, as the React Native editor shows it: the task's
- * facts, its notes, its checklist and its attachments, in display order. A
- * done task opens on this tab.
- */
 
 export type TaskViewField =
     | 'priority' | 'energyLevel' | 'assignedTo' | 'project' | 'section' | 'area' | 'startTime' | 'dueDate'
@@ -19,32 +15,32 @@ export type TaskViewField =
 
 export type TaskViewRow =
     | { type: 'title'; label: string; value: string }
-    /** `editable`: the status can be changed from here (not read-only, and the task has a status). */
+
     | { type: 'status'; label: string; value: string; status: TaskStatus | null; editable: boolean }
-    /** `project`: the Project row opens the project. */
+
     | { type: 'field'; field: TaskViewField; label: string; value: string; project: { id: string; accessibilityLabel: string } | null }
-    /** Contexts and tags, each one opening its list. */
+
     | { type: 'tokens'; field: 'contexts' | 'tags'; label: string; items: Array<{ value: string; accessibilityLabel: string }> }
-    /** The notes, trimmed; draw them as Markdown. */
+
     | { type: 'description'; label: string; markdown: string }
     | {
         type: 'checklist';
         label: string;
-        /** A tap ticks the item (toggle by its `index`) when not read-only; a reference list too. */
+
         tappable: boolean;
-        /** Titles are inline Markdown. `accessibilityLabel` names a static item: "Step. Done". */
+
         items: Array<{ index: number; id: string; title: string; completed: boolean; accessibilityLabel: string }>;
-        /** The add input after the items (append on submit). */
+
         add: { placeholder: string; label: string } | null;
     }
     | {
         type: 'attachments';
         label: string;
-        /** `image`: show the image itself. `note`: Loading, Download or Missing under the title. `disabled` while downloading. */
+
         items: Array<{ attachment: Attachment; title: string; image: boolean; note: string | null; disabled: boolean }>;
     };
 
-/** The React Native editor's image rule: an image MIME type, or an image file extension. */
+
 export function isImageAttachment(attachment: Pick<Attachment, 'mimeType' | 'uri'>): boolean {
     const mime = attachment.mimeType?.toLowerCase();
     if (mime?.startsWith('image/')) return true;
@@ -52,19 +48,19 @@ export function isImageAttachment(attachment: Pick<Attachment, 'mimeType' | 'uri
 }
 
 export type TaskViewModelInput = {
-    /** The task with the editor's unsaved draft applied; the saved task when read-only. */
+
     task: Partial<Task>;
     projects: readonly Project[];
-    /** The sections the task's project shows. */
+
     sections: readonly Section[];
     areas: readonly Area[];
-    /** Attachments that are not deleted. */
+
     attachments: readonly Attachment[];
     prioritiesEnabled: boolean;
     timeEstimatesEnabled: boolean;
-    /** From the editor layout (getTaskEditorFieldLayout). */
+
     showStatusField: boolean;
-    /** A task in an archived project. */
+
     readOnly: boolean;
     settings?: Pick<NotificationSettings, 'taskReminderDefault' | 'notificationsEnabled'>;
     t: (key: string) => string;
@@ -75,7 +71,7 @@ export type TaskViewModelInput = {
     now?: Date;
 };
 
-/** The View tab's rows, in order. A row without a value is left out. */
+
 export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
     const { task, t, readOnly } = input;
     const rows: TaskViewRow[] = [];
@@ -184,7 +180,9 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
                 const isDownloading = attachment.localStatus === 'downloading';
                 const note = isDownloading
                     ? t('common.loading')
-                    : isMissing && attachment.cloudKey ? t('attachments.download') : isMissing ? t('attachments.missing') : null;
+                    : isMissing && attachment.cloudKey && !isAttachmentKeptWithoutFile(attachment)
+                        ? t('attachments.download')
+                        : isMissing ? t('attachments.missing') : null;
                 return {
                     attachment,
                     title: getAttachmentDisplayTitle(attachment),

@@ -7,11 +7,7 @@ export const AREA_FILTER_NONE = '__none__';
 
 export type AreaFilterValue = typeof AREA_FILTER_ALL | typeof AREA_FILTER_NONE | string;
 
-/**
- * Multi-select area filter: a union of included areas, minus the excluded ones.
- * Both lists empty means "all areas". `AREA_FILTER_NONE` is a member of either
- * list and stands for tasks/projects without an area.
- */
+
 export interface AreaFilterSelection {
     included: string[];
     excluded: string[];
@@ -36,11 +32,7 @@ const sanitizeAreaIds = (value: unknown, areas: Area[]): string[] => {
     return kept;
 };
 
-/**
- * Tolerant reader for the stored area filter. Accepts the legacy single-value
- * string, the `FilterSettings` object, or a bare selection, and drops ids whose
- * area was deleted or no longer exists.
- */
+
 export function resolveAreaFilterSelection(value: unknown, areas: Area[]): AreaFilterSelection {
     if (value == null || typeof value === 'string') {
         const resolved = resolveAreaFilter(value ?? undefined, areas);
@@ -69,16 +61,13 @@ export function isAreaFilterSelectionActive(selection: AreaFilterSelection): boo
     return selection.included.length > 0 || selection.excluded.length > 0;
 }
 
-/**
- * Collapses a selection to the legacy single value: the one selected area when
- * exactly one is included and nothing is excluded, otherwise "all areas".
- */
+
 export function areaFilterSelectionToValue(selection: AreaFilterSelection): AreaFilterValue {
     if (selection.excluded.length > 0 || selection.included.length !== 1) return AREA_FILTER_ALL;
     return selection.included[0];
 }
 
-/** Settings patch for a selection, including the legacy `areaId` mirror. */
+
 export function areaFilterSelectionToFilters(selection: AreaFilterSelection): Required<Pick<FilterSettings, 'areaId' | 'areaIds' | 'excludedAreaIds'>> {
     return {
         areaId: areaFilterSelectionToValue(selection),
@@ -87,7 +76,7 @@ export function areaFilterSelectionToFilters(selection: AreaFilterSelection): Re
     };
 }
 
-/** Tri-state cycle for one row: unselected -> included -> excluded -> unselected. */
+
 export function cycleAreaFilterSelection(selection: AreaFilterSelection, id: string): AreaFilterSelection {
     if (selection.included.includes(id)) {
         return {
@@ -110,7 +99,7 @@ const normalizeAreaId = (areaId: string | undefined, areaById?: Map<string, Area
     return areaId;
 };
 
-// Exclusion wins over inclusion when an id somehow lands in both lists.
+
 const areaIdMatchesSelection = (areaId: string | undefined, selection: AreaFilterSelection): boolean => {
     const key = areaId ?? AREA_FILTER_NONE;
     if (selection.excluded.includes(key)) return false;
@@ -136,44 +125,21 @@ export function taskMatchesAreaFilterSelection(
     return areaIdMatchesSelection(normalizeAreaId(getTaskAreaId(task, projectMap), areaById), selection);
 }
 
-/**
- * The lookups every task list needs to answer "is this task visible right now",
- * in one shape so a caller can bundle them with the resolved filter and hand the
- * same object to each list it renders. How widely that bundle gets shared is the
- * caller's business — mobile screens each build their own.
- */
+
 export interface AreaVisibilityContext {
     areaById?: Map<string, Area>;
     projectById: Map<string, Project>;
     resolvedAreaFilter: AreaFilterSelection;
 }
 
-/**
- * Base visibility for a task in any list: not in the trash, not owned by a
- * project the user has parked, and inside the current area filter. Callers add
- * their own status clause on top (`.filter(t => t.status === 'waiting')`).
- *
- * `deletedAt` lives INSIDE the predicate rather than at each call site. Screens
- * reading the store's `tasks` projection get it for free — that list is already
- * tombstone-free — but Trash and Archive read `_allTasks`, which is not, and
- * the whole point of one predicate is that it cannot be handed a list it
- * quietly mis-answers. `purgedAt` deliberately stays out: a purged task is
- * still deleted, so `deletedAt` already hides it, and Trash needs to tell the
- * two apart itself.
- */
+
 export function isTaskVisibleInArea(task: Task, ctx: AreaVisibilityContext): boolean {
     return !task.deletedAt
         && isTaskInActiveProject(task, ctx.projectById)
         && taskMatchesAreaFilterSelection(task, ctx.resolvedAreaFilter, ctx.projectById, ctx.areaById);
 }
 
-/**
- * Base visibility for Inbox surfaces. The Inbox is a global capture queue, so
- * it keeps the normal tombstone and active-project guards but deliberately
- * ignores the user's area selection. Callers retain their own queue/status
- * rule; Process Inbox also admits due Someday items that have returned for
- * clarification.
- */
+
 export function isTaskVisibleInInbox(
     task: Task,
     ctx: Pick<AreaVisibilityContext, 'projectById'>,

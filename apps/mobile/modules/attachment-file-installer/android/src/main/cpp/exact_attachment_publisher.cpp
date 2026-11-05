@@ -78,7 +78,7 @@ constexpr bool rename_noreplace_needs_exact_handle_fallback(int error) {
 static_assert(rename_noreplace_needs_exact_handle_fallback(EINVAL));
 static_assert(!rename_noreplace_needs_exact_handle_fallback(EEXIST));
 
-}  // namespace
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_publishRelativeNoReplace(

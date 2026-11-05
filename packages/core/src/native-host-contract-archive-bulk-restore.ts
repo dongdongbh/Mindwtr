@@ -66,8 +66,7 @@ const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).si
 const canonicalPayload = (value: unknown): string => JSON.stringify(value, (_name, item) => record(item)
     ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 
-// The existing bounded JSON rules, with a narrow exception for the public
-// revision dictionary: it can contain one entry per selected ID, not only128.
+
 const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number, path: string): boolean => {
         if (depth > 24) return false;
@@ -121,7 +120,7 @@ const validArea = (row: unknown): row is Area => record(row) && text(row.id, 500
     && typeof row.name === 'string' && iso(row.createdAt) && iso(row.updatedAt)
     && (row.deletedAt === undefined || iso(row.deletedAt));
 
-/** The complete relevant membership in saved storage order, including active parents. */
+
 export const archivedTasksRestoreScope = (request: NativeArchivedTasksRestoreRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeArchivedTasksRestoreScope => {
     const selected = new Set(request.taskIds);
@@ -155,7 +154,7 @@ const selectedSourcesMatch = (request: NativeArchivedTasksRestoreRequest, scope:
     });
 };
 
-/** Reconstructs RN loaded-before rows, then invokes the actual shared batch planner once. */
+
 export const archivedTasksRestoreEffect = (prepared: Pick<NativePreparedArchivedTasksRestore,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates'>)
     : NativePreparedArchivedTasksRestore['effect'] | null => {
@@ -346,7 +345,7 @@ export function createArchivedTasksRestoreMethods(deps: {
                 try { logInfo(isRemoveTag(envelope.request) ? 'Native Done bulk tag removal confirmed' : isAddTag(envelope.request) ? 'Native Done bulk tag confirmed' : envelope.request.source === 'done' ? 'Native Done bulk status confirmed' : 'Native Archive bulk Restore confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: isRemoveTag(envelope.request) ? 'v1.3.4/ios-done-bulk-tag-remove' : isAddTag(envelope.request) ? 'v1.3.4/ios-done-bulk-tag' : envelope.request.source === 'done' ? 'v1.3.4/ios-done-bulk-status' : 'v1.3.4/ios-archive-bulk-restore',
                         outcome: isRemoveTag(envelope.request) ? 'removed' : isAddTag(envelope.request) ? 'added' : envelope.request.source === 'done' ? 'moved' : 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

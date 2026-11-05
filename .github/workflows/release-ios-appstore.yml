@@ -167,7 +167,7 @@ jobs:
           fi
 
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
@@ -197,12 +197,12 @@ jobs:
           printf 'DEVELOPER_DIR=%s\nMINDWTR_VALIDATED_IOS_SDK=%s\n' "$DEVELOPER_DIR" "$IOS_SDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
@@ -554,7 +554,7 @@ jobs:
         run: npx expo prebuild --platform ios --non-interactive --no-install
 
       - name: Cache CocoaPods dependencies
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb
         with:
           path: |
             apps/mobile/ios/Pods
@@ -631,8 +631,8 @@ jobs:
             } > "$EXPORT_OPTIONS_PATH"
           fi
 
-          # Normalize ExportOptions for CI signing so stale IOS_EXPORT_OPTIONS
-          # secrets cannot override app/widget provisioning profile mapping.
+
+
           /usr/libexec/PlistBuddy -c "Set :method app-store-connect" "$EXPORT_OPTIONS_PATH" \
             || /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$EXPORT_OPTIONS_PATH"
           /usr/libexec/PlistBuddy -c "Set :destination export" "$EXPORT_OPTIONS_PATH" \
@@ -900,7 +900,7 @@ jobs:
 
       - name: Upload iOS dSYMs
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: mindwtr-ios-${{ env.IOS_ARTIFACT_VARIANT }}-dsyms-${{ github.run_id }}
           path: ${{ runner.temp }}/Mindwtr.xcarchive/dSYMs/
@@ -1000,7 +1000,7 @@ jobs:
 
       - name: Upload iOS xcodebuild logs
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: mindwtr-ios-${{ env.IOS_ARTIFACT_VARIANT }}-xcodebuild-logs
           path: ${{ runner.temp }}/ios-xcodebuild-*.log
@@ -1276,6 +1276,13 @@ jobs:
                 in_house: false
               )
 
+              unless ENV.fetch("SKIP_METADATA", "false") == "true"
+                update_app_age_rating(
+                  api_key: api_key,
+                  app_identifier: ENV.fetch("EXPECTED_BUNDLE_ID"),
+                  age_rating_config_path: File.join(ENV.fetch("GITHUB_WORKSPACE"), "metadata/apple-age-rating.json")
+                )
+              end
               deliver(deliver_options.merge(api_key: api_key))
             end
           end
@@ -1445,7 +1452,7 @@ jobs:
           ASC_KEY_PATH="$ASC_KEY_PATH" bundle exec fastlane ios distribute_external_group
 
       - name: Upload IPA artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: mindwtr-ios-${{ env.IOS_ARTIFACT_VARIANT }}-ipa
           path: ${{ env.IPA_PATH }}

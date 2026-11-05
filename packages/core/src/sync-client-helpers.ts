@@ -16,14 +16,13 @@ export const CLOUD_PROVIDER_SELF_HOSTED = 'selfhosted' as const;
 export { CLOUD_PROVIDER_DROPBOX } from './sync-storage-keys';
 export type CloudProvider = typeof CLOUD_PROVIDER_SELF_HOSTED | typeof CLOUD_PROVIDER_DROPBOX;
 
-/** 'stale-db': another write reached the database after this sliced cycle's read (design D9b W3/W4). */
+
 export type LocalSyncAbortReason = 'local-data-changed' | 'stale-db' | 'remote-write-conflict';
 
 export class LocalSyncAbort extends Error {
     readonly reason: LocalSyncAbortReason;
-    /** Transport-provided context for the abort, e.g. the HTTP status a WebDAV
-     *  conditional write was rejected with. Surfaced in the requeue log so a
-     *  server rejecting its own ETags (mod_deflate ETag mutation) is visible. */
+
+
     readonly detail: string | null;
 
     constructor(reason: LocalSyncAbortReason = 'local-data-changed', detail?: string) {
@@ -71,11 +70,7 @@ export const getInMemoryAppDataSnapshot = (): AppData => {
     });
 };
 
-/**
- * The store's collections and settings in one read, not copied: each list is a new array holding the store's records, which
- * the store replaces and never changes in place. A sliced sync cycle copies them later, a few at a time (cloneAppDataPass),
- * and still holds one consistent state.
- */
+
 export const captureInMemoryAppDataSnapshot = (store: Pick<typeof useTaskStore, 'getState'> = useTaskStore): AppData => {
     const state = store.getState();
     return {
@@ -88,20 +83,17 @@ export const captureInMemoryAppDataSnapshot = (store: Pick<typeof useTaskStore, 
     };
 };
 
-/** A store publish built before the write gate (D9b W6): applySyncedDataToStore swaps it in when the store has not moved. */
+
 export type PreparedStorePublish = {
-    /** The document it publishes; any other document is computed in the gate. */
+
     readonly data: AppData;
-    /** The store's data references it was reconciled against (storeDataOf). */
+
     readonly against: readonly unknown[];
-    /** Only what changed: the reconciled lists that differ from the store's, and the settings when they differ. */
+
     readonly update: Partial<TaskStore>;
 };
 
-/**
- * Builds applySyncedDataToStore's state for [data] against the store as it is now, as a cooperative pass. Its first step
- * takes the store's references; later steps read only them, never the live store.
- */
+
 export function* prepareSyncedDataPublishPass(
     data: AppData,
     store: Pick<typeof useTaskStore, 'getState'> = useTaskStore,
@@ -125,13 +117,7 @@ export function* prepareSyncedDataPublishPass(
     return { data, against, update };
 }
 
-/**
- * Would a load of [data] (fetchData with it preloaded, the end-of-cycle refresh) leave a store that shows [shown] as it is?
- * A cooperative pass that mirrors fetchData (store-settings.ts): it normalizes each task and project for load, keeps the
- * shown row where the normalized one has the same revision identity and the same Focus fields, and runs the load migrations
- * on the normalized document. [shown] must be the store's lists for [data]'s rows, in [data]'s order (after its publish).
- * It assumes the load reuses rows, which fetchData does not right after a recovery load (lastStoreLoadWasRecovery).
- */
+
 export function* loadLeavesStorePass(
     data: AppData,
     shown: { tasks: readonly Task[]; projects: readonly Project[] },
@@ -163,13 +149,7 @@ export function* loadLeavesStorePass(
     return applied.length === 0;
 }
 
-/**
- * Publish a document a sync save just wrote, inside the same store write gate hold
- * (store-write-gate.ts), so the next command acts on what disk holds. Rows whose
- * revision identity did not change keep their objects, as a load does (#766).
- * A [prepared] publish of this document is swapped in when the store still holds what it was built against; else, and
- * without one, the publish is computed here. Returns true when it swapped.
- */
+
 export const applySyncedDataToStore = (
     data: AppData,
     store: Pick<typeof useTaskStore, 'setState' | 'getState'> = useTaskStore,
@@ -191,23 +171,34 @@ export const applySyncedDataToStore = (
     return false;
 };
 
-/**
- * Change fingerprint of the live store, without the deep clone
- * getInMemoryAppDataSnapshot needs — this only reads. Callers that just want to
- * know "did anything sync-worthy change" (auto-sync triggers) must use this:
- * cloning + fingerprinting the whole payload instead cost seconds per store
- * change on large Android libraries (#766).
- */
+
+let lastChangeFingerprint: { inputs: unknown[]; fingerprint: string } | null = null;
+
 export const getInMemorySyncChangeFingerprint = (): string => {
     const state = useTaskStore.getState();
-    return computeSyncChangeFingerprint({
+    const data = {
         tasks: state._allTasks ?? state.tasks ?? [],
         projects: state._allProjects ?? state.projects ?? [],
         sections: state._allSections ?? state.sections ?? [],
         areas: state._allAreas ?? state.areas ?? [],
         people: state._allPeople ?? state.people ?? [],
         settings: state.settings ?? {},
-    });
+    };
+
+
+    const inputs = [data.tasks, data.projects, data.sections, data.areas, data.people, data.settings, state.lastDataChangeAt];
+    if (lastChangeFingerprint && inputs.every((input, index) => input === lastChangeFingerprint!.inputs[index])) {
+
+
+        if (typeof process !== 'undefined' && process.env?.VITEST
+            && computeSyncChangeFingerprint(data) !== lastChangeFingerprint.fingerprint) {
+            throw new Error('Sync change fingerprint memo is stale: a store collection or settings object was changed in place');
+        }
+        return lastChangeFingerprint.fingerprint;
+    }
+    const fingerprint = computeSyncChangeFingerprint(data);
+    lastChangeFingerprint = { inputs, fingerprint };
+    return fingerprint;
 };
 
 export const shouldRunAttachmentCleanup = (
@@ -269,9 +260,8 @@ export const createAbortableFetch = (
         }
         return baseFetch(input, { ...(init || {}), signal: mergedController.signal }).then(
             (response) => {
-                // Fetch resolves when response headers arrive, before its body is consumed.
-                // Keep the bridge alive for body-owning callers; a cycle controller is
-                // short-lived and aborts on teardown. Header-only responses can detach now.
+
+
                 if (!response.body) removeAbortListeners();
                 return response;
             },

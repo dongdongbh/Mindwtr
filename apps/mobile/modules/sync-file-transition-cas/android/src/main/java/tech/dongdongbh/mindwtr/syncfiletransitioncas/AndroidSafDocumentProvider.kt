@@ -6,7 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
 
-/** [SafDocumentProvider] on the app's ContentResolver. Child URIs are built as androidx's TreeDocumentFile builds them. */
+
 class AndroidSafDocumentProvider(private val context: Context) : SafDocumentProvider {
     private val resolver: ContentResolver get() = context.contentResolver
 
@@ -51,7 +51,7 @@ class AndroidSafDocumentProvider(private val context: Context) : SafDocumentProv
         val stream = java.io.FileInputStream(descriptor.fileDescriptor)
         return object : SafOpenedDocument {
             override val stream: java.io.InputStream = stream
-            // -1 for a pipe or socket: no length from the descriptor.
+
             override fun size(): Long? = descriptor.statSize.takeIf { it >= 0 }
             override fun close() {
                 try { stream.close() } finally { descriptor.close() }

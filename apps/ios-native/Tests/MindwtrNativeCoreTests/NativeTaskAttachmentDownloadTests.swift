@@ -60,7 +60,7 @@ private final class TaskDownloadCloudKitState: @unchecked Sendable {
     }
 }
 
-/// Actual selected JSC/HTTP/native producer. No real endpoint or credentials.
+
 private final class TaskDownloadHTTPState: @unchecked Sendable {
     private let lock = NSLock()
     var bytes = Data(), status = 200
@@ -92,7 +92,7 @@ private final class TaskDownloadHTTPProtocol: URLProtocol {
         Self.lock.lock(); let state = Self.states[request.url?.host ?? ""]; Self.lock.unlock()
         guard let state, let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)); return }
         let (status, bytes, held) = state.respond(request)
-        if held { return } // URLSession cancellation must settle this accepted GET.
+        if held { return }
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
             headerFields: ["Content-Length": String(bytes.count), "Content-Type": "application/octet-stream"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -165,8 +165,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let faults = supplied ?? HostIOFaults(), configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [TaskDownloadHTTPProtocol.self]; faults.httpConfiguration = configuration
         if faults.secretService == nil { faults.secretService = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased() }
-        // Headless macOS does not write or depend on Keychain. The actual native
-        // true-null route reads an isolated legacy value without migrating it.
+
+
         if !secureRead { faults.secretStatus = { operation, _ in operation == "get" ? errSecItemNotFound : nil } }
         let value = CoreHost(databaseURL: database, bundleURL: selected ?? bundle, faults: faults,
             deviceStorage: (containerURL: container, bundleIdentifier: namespace))
@@ -716,7 +716,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         } }
         faults.secretAfterOperation = { _, _ in secretWork += 1 }
         let live = host(faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
-        // Warm intentional settings persistence before taking exact domain/config baselines.
+
         let filter = try object(await live.call("areaFilter"))
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
         let sameSelection = try json(XCTUnwrap(option["next"]))
@@ -724,14 +724,14 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let options = try object(await live.call("projectAttachmentEditOptions", argumentsJSON: json([json(["projectId": projectID])])))
         let revision = try XCTUnwrap(options["revision"] as? String)
         let input = try json(["projectId": projectID, "attachmentId": attachmentID, "revision": revision])
-        // Canonicalize only SQL's outer JSON object keys across reopened connections.
-        // Attachment column values remain exact raw strings; their content is not parsed.
+
+
         func projectRows() throws -> String {
             try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM projects ORDER BY id").utf8)))
         }
         let original = try rows(), projects = try projectRows(), settings = try Data(contentsOf: manifest)
-        // An early refusal must preserve absent directories as well as contents;
-        // the fixture must not create them merely to inspect an empty inventory.
+
+
         func directoryInventory(_ url: URL) throws -> [String]? {
             FileManager.default.fileExists(atPath: url.path) ? try files(url) : nil
         }
@@ -757,9 +757,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             do { _ = try await live.foregroundSync(command: "projectAttachmentDownload", requestJSON: input); XCTFail("Same-URI available Project download must refuse before IO") }
             catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
             try assertPreserved()
-            // A same-current filter command retries persistence when a latch exists.
-            // Successful fresh reads and an unchanged row after this command prove
-            // refusal left no failed or queued downloading snapshot to publish.
+
+
             let fresh = try object(await live.call("projectAttachmentEditOptions", argumentsJSON: json([json(["projectId": projectID])])))
             XCTAssertEqual(fresh["revision"] as? String, revision)
             _ = try await live.call("setAreaFilter", argumentsJSON: json([sameSelection]))
@@ -1180,9 +1179,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: target).count, 9)
     }
 
-    // Synthetic roots model an actual container move on macOS. Hosted iOS
-    // already has a real Application/<UUID>/Library anchor; real reinstall
-    // acceptance uses the App fixture rather than nesting a second anchor.
+
     private func relocationRoot367(_ name: String) throws -> URL {
         #if os(iOS)
         throw XCTSkip("Synthetic relocation roots are macOS fixtures; actual iOS reinstall is separate acceptance")
@@ -1274,8 +1271,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         try await seed(); try FileManager.default.createDirectory(at: managed, withIntermediateDirectories: true); try bytes.write(to: target)
         let old = target, oldURI = old.absoluteString
         try relocate367(container, copy: true)
-        // The readable old file deliberately disagrees; success must use only
-        // the selected current target and never consult or retire old bytes.
+
+
         let oldBytes = Data("Unrelated readable old-container bytes".utf8)
         try oldBytes.write(to: old)
         let oldIdentity = try inode(old), currentIdentity = try inode(target), saved = try rows()
@@ -1384,7 +1381,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
                 case "library": selected["uri"] = oldURI.replacingOccurrences(of: "/Library/" + libraryName + "/", with: "/Library/36300000-4444-4444-8444-444444444444/")
                 case "extra-anchor": selected["uri"] = oldURI.replacingOccurrences(of: "/attachment-files/", with: "/Application/36300000-4444-4444-8444-444444444444/Library/attachment-files/")
                 case "query": selected["uri"] = oldURI + "?unexpected=1"
-                default: break // Valid metadata ID syntax, but not the selected relocation UUID grammar.
+                default: break
                 }
             }
             let identity = try inode(target), hooks = NativeAttachmentHostHooks(); var work = 0
@@ -1423,8 +1420,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             default:
                 XCTAssertTrue(FileManager.default.createFile(atPath: target.path, contents: Data()))
                 let handle = try FileHandle(forWritingTo: target); try handle.truncate(atOffset: 8_388_609); try handle.close()
-                // Sparse file, streaming hash: every other proof condition agrees
-                // so the selected descriptor cap itself is required to refuse.
+
+
                 let reader = try FileHandle(forReadingFrom: target); var digest = SHA256()
                 while let chunk = try reader.read(upToCount: 65_536), !chunk.isEmpty { digest.update(data: chunk) }
                 try reader.close()
@@ -1464,8 +1461,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             let live = host(); try await live.configureAttachmentHost(hooks); _ = try await live.start()
             await refusal { _ = try await live.downloadTaskAttachmentV5(requestJSON: self.request()) }
             XCTAssertFalse(mutationFailed); XCTAssertNotNil(replacementIdentity); XCTAssertNotEqual(replacementIdentity, originalIdentity)
-            // Admission may already have created an empty V5 owner; the changed
-            // current generation must never become an availability operation.
+
+
             XCTAssertEqual(try store.readAvailability()?.operations.count, 0)
             XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), checkpointIdentity)
             XCTAssertEqual(try rows(), saved); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), replacementIdentity)
@@ -1528,9 +1525,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             if name == "marker-failure" {
                 let cold = host(); _ = try await cold.start()
                 let checkpoint = try XCTUnwrap(editor.read()?.snapshot)
-                // A before-marker failure retains resultDurable while the
-                // editor is already at after; explicit recovery settles that
-                // owed transition before ordinary Resume validation.
+
+
                 _ = try await cold.recoverAttachmentDraftV3(expectedSession: checkpoint.sessionID)
                 XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
                 XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try inode(target), targetIdentity)
@@ -1556,7 +1552,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             await fulfillment(of: [accepted], timeout: 5); XCTAssertTrue(held); XCTAssertEqual(jobs?.counters.jobs, 1)
             operation.cancel()
             let closing: Task<Void, Never>? = name == "cancel-close" ? Task { await live.close() } : nil
-            // The accepted proof still owns the library even after cancellation.
+
             let replacement = host(); await refusal { _ = try await replacement.start() }
             release.signal(); await refusal { _ = try await operation.value }
             if let closing { await closing.value } else { await live.close() }
@@ -1618,7 +1614,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         faults.secretStatus = { operation, _ in
             guard operation == "get" else { XCTFail("Selected preparation cannot mutate secure storage"); return errSecInteractionNotAllowed }
             if reject { postAESReads += 1; return errSecNotAvailable }
-            return errSecItemNotFound // Actual nil secure reads retain the existing legacy fallback.
+            return errSecItemNotFound
         }
         faults.cryptoAfterOperation = { operation in
             operations.append(operation)
@@ -1645,8 +1641,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(http?.counters.jobs, 0); XCTAssertEqual(http?.counters.running, 0); XCTAssertEqual(secrets?.counters.jobs, 0)
         XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.running, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
         XCTAssertEqual(fileJobs?.counters.jobs, 0); XCTAssertEqual(fileJobs?.counters.bytes, 0)
-        // The RED's unexpected success already failed the safety assertions above.
-        // A successor is meaningful only after that first operation actually refused.
+
+
         guard didRefuse else { return }
         reject = false
         let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))
@@ -1688,7 +1684,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
     func testEncryptedSelfHostedTaskAcceptsSharedFormattedMaterialAndEmitsBoundedDiagnostic() async throws {
         try await seed(backend: "cloud", encrypted: true)
         var settings = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
-        // RN's decoder ignores whitespace/invalid characters and permits omitted padding.
+
         settings["@mindwtr_sync_encryption_key_v1"] = "\n!" + String(Data(count: 32).base64EncodedString().dropLast()) + " \n"
         try Data(json(settings).utf8).write(to: manifest)
         let faults = HostIOFaults(); var operations = [String](), readsAfterAES = 0, opened = false
@@ -1726,8 +1722,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         let hooks = NativeAttachmentHostHooks(); hooks.configureJobs = { $0.beforeStageSync = { syncs += 1 } }
         let live = host(selected, faults: faults); try await live.configureAttachmentHost(hooks); _ = try await live.start()
         let original = try rows(), configuration = try Data(contentsOf: manifest), checkpoint = try Data(contentsOf: editor.url), identity = try inode(editor.url)
-        // Shared on-demand decryption failures map to the exact unavailable
-        // result; they do not grant source creation or availability authority.
+
+
         let reply = try object(await live.downloadTaskAttachmentV5(requestJSON: request()))
         XCTAssertEqual(Set(reply.keys), Set(["version", "status", "requestId", "sessionID", "generation", "attachmentId"]))
         XCTAssertEqual(reply["version"] as? Int, 1); XCTAssertEqual(reply["status"] as? String, "unavailable")
@@ -1760,8 +1756,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: editor.url), checkpoint); XCTAssertEqual(try inode(editor.url), identity)
         XCTAssertEqual(try store.readAvailability()?.operations.count, 0); XCTAssertEqual(try files(cache), [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try materialOutcomes415(), [])
-        // Namespace freshness is deliberately conservative. No cleanup bypass
-        // or warm retry is claimed after an external shared-manifest edit.
+
+
     }
     func testNativeMaterialRevocationAfterSourceRetiresOnlyExactUnadoptedReceipt() async throws {
         try await seed(encrypted: true)
@@ -1879,8 +1875,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(reply["status"] as? String, "draftAvailable"); XCTAssertEqual(remote.requests, 1); XCTAssertEqual(coldAES, 0)
         XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), original); XCTAssertEqual(try Data(contentsOf: manifest), freshSettings)
         XCTAssertEqual(try store.readAvailability()?.operations.last?.phase, .checkpointed)
-        // Existing early durable replay owns recovery; it does not claim the
-        // cold process observed or retained the pre-crash encryption secret.
+
+
         if FileManager.default.fileExists(atPath: sourceURL.path) { XCTAssertEqual(try inode(sourceURL), sourceIdentity) }
     }
 
@@ -1972,8 +1968,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertEqual(secrets?.counters.jobs, 0); XCTAssertEqual(secrets?.counters.running, 0)
         XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.running, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
         XCTAssertEqual(fileJobs?.counters.jobs, 0); XCTAssertEqual(fileJobs?.counters.bytes, 0)
-        // An unexpected first success already fails the safety checks above.
-        // A fresh successor is meaningful only after the first request refused.
+
+
         guard didRefuse else { return }
         reject = false; http?.beforeCompletion = { completions += 1 }
         let successor = try object(await live.downloadTaskAttachmentV5(requestJSON: request(UUID().uuidString.lowercased())))

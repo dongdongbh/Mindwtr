@@ -1,7 +1,6 @@
-// Attachment lifecycle: the cloud-key bookkeeping that cascades from a project purge,
-// and the garbage collector that reconciles on-disk attachment files against what the
-// stored AppData still references. Pulled out of server.ts so these rules — previously
-// reachable only by spinning up a live server — have a direct test surface.
+
+
+
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'fs';
 import { join, relative } from 'path';
 import {
@@ -32,7 +31,7 @@ import {
 } from './server-storage';
 import { validateAppData } from './server-validation';
 
-// Relies on POSIX mtime; do not lower below 1 minute without auditing filesystem timestamp resolution and batching.
+
 const ORPHAN_ATTACHMENT_GC_GRACE_MS = 5 * 60 * 1000;
 
 export const getAttachmentCloudKey = (attachment: Attachment): string | null => {
@@ -99,10 +98,8 @@ export const appendPendingRemoteAttachmentDeletes = (
 
 export function collectReferencedAttachmentCloudKeys(data: AppData): Set<string> {
     const referenced = new Set<string>();
-    // Owner predicate mirrors collectRetainedAttachmentCloudKeysForProjectPurge and
-    // core's findLiveAttachmentResourceReferences: purgedAt, not deletedAt. A
-    // soft-deleted owner is still restorable from Trash for 90 days, so its
-    // attachment bytes stay referenced until the owner is actually purged.
+
+
     const collect = (attachments: Attachment[] | undefined, ownerPurged?: string) => {
         if (ownerPurged) return;
         for (const attachment of attachments ?? []) {
@@ -140,11 +137,8 @@ export function garbageCollectOrphanAttachments(
         };
     }
     const rootRealPath = realpathSync(rootDir);
-    // Cloud keys are URL-shaped (`attachments/id.m4a`), but this root is already
-    // the namespace's attachments directory. Resolve the stored identity before
-    // comparing it with a root-relative scanned path. Keep the old nested layout
-    // for prefixed keys too; historical captures may still have bytes there and
-    // the separate legacy-read compatibility path can serve them.
+
+
     const referenced = new Set<string>();
     for (const cloudKey of collectReferencedAttachmentCloudKeys(data)) {
         const rootRelative = cloudKey.startsWith('attachments/')
@@ -168,9 +162,8 @@ export function garbageCollectOrphanAttachments(
             try {
                 stat = lstatSync(entryPath);
             } catch (error) {
-                // S9: never surface (error as Error).message — node fs errors embed the
-                // absolute server path (and, here, the namespace key). Report the short
-                // error code alongside the already-namespace-relative path instead.
+
+
                 errors.push(`${relative(rootRealPath, entryPath)}: ${getFsErrorCode(error)}`);
                 continue;
             }
@@ -178,10 +171,8 @@ export function garbageCollectOrphanAttachments(
                 visit(entryPath);
                 try {
                     if (entryPath !== rootRealPath) {
-                        // syncParent: false — this directory's own removal from dirPath's
-                        // listing is published by the batched durablySyncDirectory(dirPath)
-                        // below, alongside every file this pass removed from dirPath. A
-                        // per-entry fsync here would republish the same parent N+1 times.
+
+
                         durablyRemoveDirectory(entryPath, removalFileSystem, { syncParent: false });
                     }
                 } catch (error) {
@@ -206,9 +197,8 @@ export function garbageCollectOrphanAttachments(
                 continue;
             }
             try {
-                // syncParent: false — same batching as the directory-prune case above:
-                // this file's removal is published by the trailing durablySyncDirectory
-                // call for dirPath, not by its own per-entry fsync.
+
+
                 if (durablyRemoveFile(entryPath, removalFileSystem, { syncParent: false })) {
                     deleted += 1;
                 }
@@ -216,17 +206,11 @@ export function garbageCollectOrphanAttachments(
                 errors.push(`${relativePath}: ${getFsErrorCode(error)}`);
             }
         }
-        // S7-CORRECTION: always attempt the trailing sync, even when an entry in this
-        // directory failed to remove. With syncParent:false (batched removals above),
-        // a removal failure can no longer mean "the parent fsync already failed" — it
-        // now only ever means "this one entry couldn't be unlinked/rmdir'd" — so
-        // skipping the batch sync here used to leave every OTHER successfully removed
-        // entry in the same directory permanently unpublished. This try/catch is the
-        // only place a directory-publish failure is now recorded.
+
+
         try {
-            // Publish the directory even when a prior run already made an unlink
-            // visible before its parent fsync failed. Otherwise GC loses the absent
-            // file as a retry target and can falsely report a durable clean pass.
+
+
             durablySyncDirectory(dirPath, removalFileSystem);
         } catch (error) {
             const relativeDir = relative(rootRealPath, dirPath).replace(/\\/g, '/') || '.';
@@ -246,7 +230,7 @@ export function garbageCollectOrphanAttachments(
     return { deleted, errors, kept, scanned };
 }
 
-/** Route body for POST/DELETE /v1/attachments/orphans, once withNamespace + the write lock have already run. */
+
 export function handleOrphanAttachmentGcRequest(dataDir: string, key: string, filePath: string): Response {
     const dataResult = loadAppDataForWrite(filePath);
     if (dataResult.state === 'unreadable') {
@@ -267,15 +251,12 @@ export function handleOrphanAttachmentGcRequest(dataDir: string, key: string, fi
     }
     const result = garbageCollectOrphanAttachments(dataDir, key, data);
     const ok = result.errors.length === 0;
-    // S8: a GC pass that failed to remove or durably publish some entries is not a
-    // 200 — 500 is the existing convention this file already uses for durability/
-    // filesystem failures (see e.g. the validation-failure branch above), and unlike
-    // 207 it makes response.ok false for every caller without bespoke handling.
+
+
     return jsonResponse({ ok, ...result }, { status: ok ? 200 : 500 });
 }
 
-/** Only the v1.2.8 capture layout is eligible: a single validated attachment
- * name under one extra `attachments/` directory, backed by current metadata. */
+
 const historicalCaptureReadPath = (
     dataFilePath: string,
     resolved: { rootRealPath: string; filePath: string },
@@ -339,8 +320,7 @@ const attachmentPathMissing = (filePath: string): boolean => {
 
 const normalizeAttachmentContentType = (value: string | null): string => value?.split(';', 1)[0]?.trim().toLowerCase() || '';
 
-/** Magic-byte admission check shared by PUT /v1/attachments and the capture
- *  webhook: an executable must never be stored as a synced attachment. */
+
 export const getBlockedAttachmentSignature = (bytes: Uint8Array): string | null => {
     if (bytes.length >= 2 && bytes[0] === 0x4d && bytes[1] === 0x5a) {
         return 'windows-pe';
@@ -358,17 +338,7 @@ export const getBlockedAttachmentSignature = (bytes: Uint8Array): string | null 
     return null;
 };
 
-/**
- * Route body for HEAD/GET/PUT/DELETE /v1/attachments/:path, once withNamespace has already
- * resolved and validated the on-disk path (see resolveAttachmentPath in
- * server-storage.ts). Takes the resolved path rather than resolving it itself, so it
- * can be exercised directly against a temp directory without a live server.
- *
- * HEAD shares GET's body below and drops the bytes at the end. It exists for the #1119
- * attachment presence pass: a client that cannot stop a response body early (React Native's
- * XHR transport buffers the whole reply before resolving) would otherwise have to download
- * every attachment to learn whether it is still there.
- */
+
 export async function handleAttachmentPathRequest(
     req: Request,
     pathname: string,
@@ -397,7 +367,7 @@ export async function handleAttachmentPathRequest(
                 options.assertStorageRoot?.();
                 return errorResponse('Not found', 404);
             }
-            // A canonical file published while metadata was checked still wins.
+
             selectedPath = attachmentPathMissing(filePath) ? historical : filePath;
         }
         try {
@@ -430,8 +400,8 @@ export async function handleAttachmentPathRequest(
             const headers = new Headers();
             headers.set('Access-Control-Allow-Origin', corsOrigin);
             headers.set('Content-Type', 'application/octet-stream');
-            // ponytail: HEAD still reads the file, so its status and Content-Length cannot
-            // disagree with GET's. Stat instead of read if presence checks ever get hot.
+
+
             if (req.method === 'HEAD') {
                 headers.set('Content-Length', String(file.byteLength));
                 return new Response(null, { status: 200, headers });
@@ -444,8 +414,8 @@ export async function handleAttachmentPathRequest(
     }
 
     if (req.method === 'PUT') {
-        // Namespace write cap already enforced by withNamespace's guardMethods
-        // override (attachmentPathServerConfig) before this handler runs.
+
+
         const contentType = normalizeAttachmentContentType(req.headers.get('content-type'));
         if (contentType) {
             const validation = await validateAttachmentForUpload({
@@ -475,9 +445,8 @@ export async function handleAttachmentPathRequest(
         }
 
         try {
-            // Reserve the exact staged inode under the verified root before the
-            // request body can suspend this handler. Publication later accepts
-            // only this stage and the same startup-pinned storage identity.
+
+
             const body = await readRequestBytes(req, options.maxAttachmentBytes, options.abortSignal);
             if (isBodyReadError(body)) {
                 return errorResponse(body.__mindwtrError.message, body.__mindwtrError.status);

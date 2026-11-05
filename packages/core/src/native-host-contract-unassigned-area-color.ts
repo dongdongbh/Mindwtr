@@ -34,7 +34,7 @@ const readRequest = (input: unknown): NativeUnassignedAreaColorRequest | null =>
     return request;
 };
 
-/** Validate a cold journal before opening SQLite. */
+
 export function validateUnassignedAreaColorWrite(input: unknown): NativeHostResult<NativeUnassignedAreaColorResult> {
     const request = readRequest(input);
     return request ? { ok: true, value: { color: request.color, changed: request.expected.color !== request.color } }
@@ -117,7 +117,7 @@ export function createUnassignedAreaColorMethods(deps: {
             const payload = JSON.stringify(request);
             const identity = receipts.checkIdentity(request.requestId, payload);
             if (!identity.ok) return identity;
-            // An unchanged raw color has no effect to save or receipt to reserve.
+
             if (request.expected.color === request.color) return target(request);
             const outcome = await receipts.run(request.requestId, payload, async () => {
                 const applied = target(request);
@@ -138,7 +138,7 @@ export function createUnassignedAreaColorMethods(deps: {
                 const written = await runStoreWrite(() => useTaskStore.getState().updateSettings(update));
                 return settleWrite(written, { color: request.color, changed: true });
             });
-            // A receipt proves an earlier save only while that color still exists.
+
             return outcome.ok ? target(request) : outcome;
         },
     };
