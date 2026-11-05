@@ -1,5 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -86,6 +88,7 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
     val shown = page
     val view = shown?.view
     val labels = view?.optJSONObject("labels")
+    DisposableEffect(Unit) { onDispose { if (screen != MenuScreen.Weekly) editOwn("weekly") { remove("keepProjectsStep") } } }
     Column(Modifier.fillMaxSize().background(c.bg).testTag("weekly-review")) {
         val current = view?.optJSONObject("step")
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -491,7 +494,9 @@ private fun LazyListScope.projectEntries(model: InboxViewModel, list: List<MenuI
         val card = open ?: return@forEachIndexed
         val next = list.getOrNull(index + 1)
         if (next != null && (next.row != null || next.type == "later") && next.json.menuText("projectId") == card.getString("id")) return@forEachIndexed
-        item(key = "open:${card.getString("id")}") { ExpandedTask { OpenProjectLink(model, card) } }
+        item(key = "open:${card.getString("id")}") {
+            ExpandedTask { Column(Modifier.padding(bottom = 8.dp)) { OpenProjectLink(model, card); CompleteProjectLink(model, card) } }
+        }
         open = null
     }
 }
@@ -502,11 +507,51 @@ private fun OpenProjectLink(model: InboxViewModel, project: JSONObject) {
     val menu = model.menu
     val c = LocalTheme.current.colors
     val label = project.getString("openLabel")
-    Row(Modifier.padding(bottom = 8.dp).clickable(enabled = menu.idle, role = Role.Button) { menu.openProjects(project.getString("id")) }
+    Row(Modifier.clickable(enabled = menu.idle, role = Role.Button) { menu.openProjects(project.getString("id")) }
         .semantics { contentDescription = label }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Icon(Lucide.FolderOpen, null, tint = c.tint, modifier = Modifier.size(14.dp))
         Text(label, style = rnText(13, 600), color = c.tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+
+@Composable
+private fun CompleteProjectLink(model: InboxViewModel, project: JSONObject) {
+    val menu = model.menu
+    val c = LocalTheme.current.colors
+    val id = project.getString("id")
+    val label = t("projects.complete")
+    Row(Modifier.fade(if (menu.idle) 1f else 0.5f).clickable(enabled = menu.idle, role = Role.Button) {
+        menu.editOwn("weekly") { put("keepProjectsStep", true) }
+        model.projectDetails.askCompleteFromReview(id)
+    }.semantics { contentDescription = label }.testTag("review-complete-project-$id").padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Lucide.CheckCircle2, null, tint = c.tint, modifier = Modifier.size(14.dp))
+        Text(label, style = rnText(13, 600), color = c.tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+
+@Composable
+fun WeeklyProjectCompletePrompt(model: InboxViewModel, completion: JSONObject) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val details = model.projectDetails
+    val enabled = model.menu.idle
+    BackHandler { details.dismissReviewCompletion() }
+    Box(Modifier.fillMaxSize().background(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(12.dp)
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp).testTag("review-complete-project-prompt")) {
+            Text(completion.getString("title"), style = rnText(18, 700), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() })
+            Text(completion.getString("confirm"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
+            Row(Modifier.padding(top = 14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                PromptButton(t("common.cancel"), c.text, enabled, filled = false) { details.dismissReviewCompletion() }
+                PromptButton(t("projects.complete"), theme.filledText, enabled, filled = true) { details.completeFromReview(completion.getString("projectId")) }
+            }
+        }
     }
 }
 

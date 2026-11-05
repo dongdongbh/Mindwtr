@@ -1347,6 +1347,10 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     projectNotesPreview: (input) => contract.getProjectNotesPreview(input),
 
     projectToSectionOptions: (input) => contract.getProjectToSectionOptions(input),
+    weeklyProjectCompletion: (input) => {
+        const read = contract.getWeeklyReviewProjectCompletion(input);
+        return read.ok ? { ok: true, value: { completion: read.value } } : read;
+    },
 
     taskShare: (input) => contract.getTaskShare(input),
 

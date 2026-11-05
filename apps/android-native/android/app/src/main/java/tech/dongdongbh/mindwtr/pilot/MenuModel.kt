@@ -452,6 +452,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             "weekly" -> JSONObject().put("checkpoint", prefs.getString(WEEKLY_REVIEW_KEY, null) ?: JSONObject.NULL)
                 .put("expandedProjectId", own.opt("expandedProjectId") ?: JSONObject.NULL)
                 .put("expandedLaterProjectIds", own.optJSONArray("expandedLaterProjectIds") ?: JSONArray())
+                .put("keepProjectsStep", own.optBoolean("keepProjectsStep"))
             "daily" -> JSONObject().put("checkpoint", prefs.getString(DAILY_REVIEW_KEY, null) ?: JSONObject.NULL)
             "savedSearch" -> JSONObject().put("id", own.optString("id"))
             "widgetList" -> JSONObject().put("id", own.optString("id"))

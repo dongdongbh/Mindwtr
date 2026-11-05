@@ -78,6 +78,7 @@ import {
     getWeeklyReviewContextMoreLabel,
     getWeeklyReviewLabels,
     getWeeklyReviewProjects,
+    weeklyReviewProjectHasUnfinishedTasks,
     getWeeklyReviewScheduledList,
     getWeeklyReviewSettings,
     getWeeklyReviewStale,
@@ -673,8 +674,9 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
     };
 
 
-    const buildWeekly = (base: string, checkpoint: string | null, calendar: NonNullable<ReturnType<typeof readCalendar>>, expandedProjectId: string | null, expandedLaterProjectIds: string[], now: Date) => (
-        cached('weekly', `${base}:${paramsKey([checkpoint, calendar, expandedProjectId, ...(expandedLaterProjectIds.length ? [expandedLaterProjectIds] : [])])}`, () => {
+    const buildWeekly = (base: string, checkpoint: string | null, calendar: NonNullable<ReturnType<typeof readCalendar>>, expandedProjectId: string | null, expandedLaterProjectIds: string[], now: Date,
+        keepProjectsStep: boolean) => (
+        cached('weekly', `${base}:${paramsKey([checkpoint, calendar, expandedProjectId, ...(expandedLaterProjectIds.length ? [expandedLaterProjectIds] : []), ...(keepProjectsStep ? ['keepProjectsStep'] : [])])}`, () => {
             const state = useTaskStore.getState();
             const t = deps.t();
             const formatDate = deps.formatDate();
@@ -686,7 +688,8 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 kind: 'weekly', includeContextStep, externalCalendarDayCount: days.length, externalCalendarHasError: Boolean(calendar.error),
                 externalCalendarLoading: calendar.loading,
             });
-            const steps = titleWeeklyReviewSteps(flags, labels);
+            const steps = titleWeeklyReviewSteps(flags, labels)
+                .map((entry) => (keepProjectsStep && entry.id === 'projects' ? { ...entry, hasWork: true } : entry));
             const { session, resumed } = restoreReviewSession<WeeklyReviewStepId>('weekly', checkpoint, { now, weekStart });
             const resolved = resolveReviewStepSession(steps, session.step);
             const step = resolved.displayedStep;
@@ -818,13 +821,16 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         if (!calendar
             || (input.checkpoint !== undefined && input.checkpoint !== null && !isText(input.checkpoint, 1000))
             || (input.expandedProjectId !== undefined && input.expandedProjectId !== null && !isText(input.expandedProjectId))
-            || (input.expandedLaterProjectIds !== undefined && !isIdList(input.expandedLaterProjectIds, true))) {
+            || (input.expandedLaterProjectIds !== undefined && !isIdList(input.expandedLaterProjectIds, true))
+            || (input.keepProjectsStep !== undefined && typeof input.keepProjectsStep !== 'boolean')) {
             return null;
         }
         const now = new Date();
         const base = deps.revision(now);
-        const view = buildWeekly(base, (input.checkpoint as string | null | undefined) ?? null, calendar, (input.expandedProjectId as string | null | undefined) ?? null, (input.expandedLaterProjectIds as string[] | undefined) ?? [], now);
-        return { now, view, revision: `${base}:${paramsKey([view.checkpoint, calendar, input.expandedProjectId ?? null, ...((input.expandedLaterProjectIds as string[] | undefined)?.length ? [input.expandedLaterProjectIds] : [])])}` };
+        const keepProjectsStep = input.keepProjectsStep === true;
+        const view = buildWeekly(base, (input.checkpoint as string | null | undefined) ?? null, calendar, (input.expandedProjectId as string | null | undefined) ?? null, (input.expandedLaterProjectIds as string[] | undefined) ?? [], now,
+            keepProjectsStep);
+        return { now, view, revision: `${base}:${paramsKey([view.checkpoint, calendar, input.expandedProjectId ?? null, ...((input.expandedLaterProjectIds as string[] | undefined)?.length ? [input.expandedLaterProjectIds] : []), ...(keepProjectsStep ? ['keepProjectsStep'] : [])])}` };
     };
 
     const weeklyReview = (input: Record<string, unknown>): NativeHostResult<NativeWeeklyReview> => {
@@ -1160,6 +1166,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             calendar?: NativeReviewCalendar;
             expandedProjectId?: string | null;
             expandedLaterProjectIds?: string[];
+            keepProjectsStep?: boolean;
             offset: number;
             limit: number;
             revision?: string;
@@ -1171,11 +1178,27 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         },
 
 
+        getWeeklyReviewProjectCompletion(input: { projectId: string }): NativeHostResult<{ projectId: string; title: string; confirm: string | null } | null> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !isText(input.projectId) || Object.keys(input).length !== 1) return fail('INVALID_INPUT', 'A project is required');
+            const state = useTaskStore.getState();
+            const project = state._projectsById.get(input.projectId);
+            if (!project || project.deletedAt || project.status !== 'active') return { ok: true, value: null };
+            return { ok: true, value: {
+                projectId: project.id,
+                title: project.title,
+                confirm: weeklyReviewProjectHasUnfinishedTasks(state, project.id) ? deps.t()('projects.completeConfirm') : null,
+            } };
+        },
+
+
         getWeeklyReviewList(input: {
             checkpoint?: string | null;
             calendar?: NativeReviewCalendar;
             expandedProjectId?: string | null;
             expandedLaterProjectIds?: string[];
+            keepProjectsStep?: boolean;
             list: NativeWeeklyReviewList;
             key?: string;
             offset: number;

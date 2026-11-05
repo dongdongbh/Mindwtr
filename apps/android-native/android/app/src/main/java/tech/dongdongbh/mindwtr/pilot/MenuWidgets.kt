@@ -156,6 +156,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
             }
         }
         MenuDialogs(model)
+        if (screen == MenuScreen.Weekly) model.projectDetails.reviewCompletion?.let { WeeklyProjectCompletePrompt(model, it) }
         StatusMenu(model)
         capture?.let { CapturePopup(model, it) }
         if (areaSheet) AreaSheet(model)

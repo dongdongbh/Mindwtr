@@ -29,6 +29,7 @@ import {
     type WeeklyReviewProjectEntry,
 } from './review-utils';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
+import { isTaskFinished } from './task-status';
 import { formatTimeSpentLabel } from './time-spent';
 import type { AppSettings, Area, Person, Project, Task, TaskStatus } from './types';
 
@@ -629,6 +630,18 @@ export function getWeeklyReviewProjects(
             countLabel: `${entry.tasks.length} ${entry.tasks.length === 1 ? labels.activeTask : labels.activeTasks}`,
         };
     });
+}
+
+
+export function weeklyReviewProjectHasUnfinishedTasks(
+    state: { _allTasks: readonly Task[]; _allSections: readonly { id: string; projectId: string }[] },
+    projectId: string,
+): boolean {
+    const sectionIds = new Set(state._allSections.filter((section) => section.projectId === projectId).map((section) => section.id));
+    return state._allTasks.some((task) => (
+        (task.projectId === projectId || (!task.projectId && task.sectionId && sectionIds.has(task.sectionId)))
+        && !task.deletedAt && !isTaskFinished(task) && task.status !== 'reference'
+    ));
 }
 
 

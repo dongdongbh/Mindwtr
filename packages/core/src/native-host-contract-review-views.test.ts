@@ -619,6 +619,40 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         expect(host.getWeeklyReview({ ...weeklyInput, expandedLaterProjectIds: [project.id], revision: weekly.revision, offset: 1, limit: 1 })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
     });
 
+    it('asks before Weekly Review completes a project with unfinished tasks and keeps the Projects step after a completion (RN d32f16947, #1395)', async () => {
+        freezeClock();
+        const busy = { ...part.projects[0], id: 'busy', title: 'Busy', status: 'active' as const };
+        const idle = { ...part.projects[0], id: 'idle', title: 'Idle', status: 'active' as const };
+        const done = { ...part.projects[0], id: 'done', title: 'Done', status: 'archived' as const };
+        const open = { ...part.tasks[0], id: 'open', title: 'Open', projectId: 'busy', sectionId: undefined, status: 'next' as const };
+        const finished = { ...open, id: 'finished', projectId: 'idle', status: 'done' as const, completedAt: part.now };
+        const reference = { ...open, id: 'reference', projectId: 'idle', status: 'reference' as const };
+        const { host } = await openHost(scenario(), undefined, { ...part, projects: [busy, idle, done], sections: [], tasks: [open, finished, reference] });
+        expect(value(host.getWeeklyReviewProjectCompletion({ projectId: 'busy' })))
+            .toEqual({ projectId: 'busy', title: 'Busy', confirm: t('projects.completeConfirm') });
+        expect(value(host.getWeeklyReviewProjectCompletion({ projectId: 'idle' }))).toEqual({ projectId: 'idle', title: 'Idle', confirm: null });
+        expect(value(host.getWeeklyReviewProjectCompletion({ projectId: 'done' }))).toBeNull();
+        expect(value(host.getWeeklyReviewProjectCompletion({ projectId: 'missing' }))).toBeNull();
+        expect(host.getWeeklyReviewProjectCompletion({ projectId: 'busy', extra: 1 } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+
+        const projectsStep = { checkpoint: JSON.stringify({ step: 'projects', startedAt: part.now }), ...page };
+        expect(value(host.getWeeklyReview(projectsStep)).step.id).toBe('projects');
+        await useTaskStore.getState().updateProject('busy', { status: 'archived' });
+        await useTaskStore.getState().updateProject('idle', { status: 'archived' });
+        expect(value(host.getWeeklyReview(projectsStep)).step.id).not.toBe('projects');
+        const kept = value(host.getWeeklyReview({ ...projectsStep, keepProjectsStep: true }));
+        expect(kept.step.id).toBe('projects');
+        expect(kept.content).toMatchObject({ step: 'projects', empty: expect.any(String) });
+        expect(kept.revision).not.toBe(value(host.getWeeklyReview(projectsStep)).revision);
+        expect(host.getWeeklyReview({ ...projectsStep, keepProjectsStep: 'yes' as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const iosKeys = (view: object) => Object.keys(view).sort();
+        const iosWeeklyKeys = ['back', 'checkpoint', 'content', 'finish', 'items', 'labels', 'next', 'rail', 'resumed', 'revision', 'step', 'storageKey', 'total', 'version'];
+        expect(iosKeys(kept)).toEqual(iosWeeklyKeys);
+        expect(iosKeys(value(host.getWeeklyReview(projectsStep)))).toEqual(iosWeeklyKeys);
+        expect(iosKeys(kept.content)).toEqual(['empty', 'step']);
+        expect(iosKeys(kept.step)).toEqual(['id', 'indicator', 'progress', 'title']);
+    });
+
     it('refuses invalid input', async () => {
         freezeClock();
         const { host } = await openHost();

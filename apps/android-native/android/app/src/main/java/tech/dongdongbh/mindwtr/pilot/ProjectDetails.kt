@@ -163,6 +163,8 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     var actionsOpen by mutableStateOf(false)
     var actionConfirm by mutableStateOf<String?>(null)
 
+    var reviewCompletion by mutableStateOf<JSONObject?>(null); private set
+
 
     var listFilterState by mutableStateOf(JSONObject()); private set
 
@@ -485,6 +487,21 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
             put("action", action)
         }
     }
+
+
+    fun askCompleteFromReview(projectId: String) {
+        shell.background(emptyList(), { runtime -> runtime.menuRead("weeklyProjectCompletion", JSONObject().put("projectId", projectId).toString()) }) { reply, _ ->
+            val completion = reply.optJSONObject("completion") ?: return@background
+            if (completion.isNull("confirm")) completeFromReview(projectId) else reviewCompletion = completion
+        }
+    }
+
+    fun completeFromReview(projectId: String) {
+        reviewCompletion = null
+        edit(projectId, "lifecycle", refused = { message -> shell.showToast(t("common.error"), message, "error") }) { put("action", "complete") }
+    }
+
+    fun dismissReviewCompletion() { reviewCompletion = null }
 
 
     fun openActions() {

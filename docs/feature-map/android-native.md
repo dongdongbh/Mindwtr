@@ -217,10 +217,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Review, Weekly Review, and Daily Review
 
 - Reach: Tab bar › Review (the default quick-access tab) › Start Review › Weekly or Daily. Rows due for review have Mark reviewed and Review in 1 week.
-- Selectors: `review-list`, `weekly-review`, `daily-review`, `review-step-indicator`, `review-step-title`, `review-step-scroll`
+- Selectors: `review-list`, `weekly-review`, `daily-review`, `review-step-indicator`, `review-step-title`, `review-step-scroll`, `review-complete-project-prompt`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ReviewScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ReviewOrganize.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WeeklyReviewScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/DailyReviewScreen.kt`
-- Checks: `apps/android-native/scripts/check-review-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`
-- Notes: Close keeps the review step on the device, and Finish deletes it. Organize on Review sends the task revisions it showed, so a stale write is refused.
+- Checks: `apps/android-native/scripts/check-review-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`, `apps/android-native/scripts/check-weekly-complete-device.mjs`
+- Notes: Close keeps the review step on the device, and Finish deletes it. Organize on Review sends the task revisions it showed, so a stale write is refused. In Weekly Review's Projects step, an open project card has Complete under Open project; it asks first while the project has unfinished tasks, and the step stays after the last project is completed.
 
 ## Calendar
 
