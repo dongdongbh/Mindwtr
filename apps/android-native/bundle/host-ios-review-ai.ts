@@ -15,7 +15,7 @@ import { sectionFromSqliteRow } from '../../../packages/core/src/section-sync-sc
 import { getStorageAdapter, useTaskStore } from '../../../packages/core/src/store';
 import { createIOSReadOnlyAIHost } from './host-ios-task-ai';
 
-type Contract = Pick<ReturnType<typeof createNativeHostContract>, 'getStrings' | 'requestWeeklyReviewAnalysis' | 'runReviewAction'>;
+type Contract = Pick<ReturnType<typeof createNativeHostContract>, 'getStrings' | 'requestWeeklyReviewAnalysis' | 'runConfirmedReviewSuggestions'>;
 const invalid = () => new Error('INVALID_INPUT: Review AI requires a bounded canonical review request');
 const stale = () => new Error('STALE_REVISION: Review AI owner changed');
 const unwrap = <T>(value: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => {
@@ -109,7 +109,7 @@ export function createIOSReviewAI(deps: { contract: Contract; adapter: () => Sql
         },
         async apply(raw: string) {
             ready(true); if (active) throw invalid();
-            return unwrap(await deps.contract.runReviewAction(readReviewAIApply(raw)));
+            return unwrap(await deps.contract.runConfirmedReviewSuggestions(readReviewAIApply(raw)));
         },
     };
 }

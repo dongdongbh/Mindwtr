@@ -106,7 +106,7 @@ export function createProjectToSectionMethods(deps: {
         return { ok: true, value };
     };
     return {
-        getProjectToSectionOptions(input: { projectId: string; projectRevision: string }): NativeHostResult<NativeProjectToSectionOptions> {
+        getProjectToSectionConversionOptions(input: { projectId: string; projectRevision: string }): NativeHostResult<NativeProjectToSectionOptions> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const query = detach<Record<string, unknown>>(input);

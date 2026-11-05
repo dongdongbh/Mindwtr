@@ -972,7 +972,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
     };
 
 
-    const perform = async (requestId: string, action: NativeReviewAction): Promise<Outcome> => {
+    const perform = async (requestId: string, action: NativeReviewAction, sequence: 'current' | 'confirmed' = 'current'): Promise<Outcome> => {
         const t = deps.t();
         const store = useTaskStore.getState();
         const tasksById = Object.fromEntries(store.tasks.map((task) => [task.id, task]));
@@ -1114,7 +1114,8 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
 
 
                 const { weekStart } = getWeeklyReviewSettings(store.settings);
-                const { staleItems } = getWeeklyReviewBuckets(store.tasks, store.projects, { weekStart, sections: store.sections });
+                const { staleItems } = getWeeklyReviewBuckets(store.tasks, store.projects,
+                    sequence === 'current' ? { weekStart, sections: store.sections } : { weekStart });
                 const suggestions = filterReviewSuggestions(action.suggestions, staleItems).filter((suggestion) => (
                     isActionableReviewSuggestion(suggestion)
                     && liveTask(suggestion.id)?.status !== (suggestion.action === 'someday' ? 'someday' : 'archived')
@@ -1136,7 +1137,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         }
     };
 
-    return {
+    const methods = {
 
 
         getReviewOverview(input: {
@@ -1251,12 +1252,21 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         },
 
 
-        async runReviewAction(input: { requestId: string; action: NativeReviewAction }): Promise<NativeHostResult<NativeReviewActionResult>> {
+        async runReviewAction(input: { requestId: string; action: NativeReviewAction },
+            sequence: 'current' | 'confirmed' = 'current'): Promise<NativeHostResult<NativeReviewActionResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || !isObjectRecord(input.action)) return fail('INVALID_INPUT', 'A request UUID and an action are required');
             const action = input.action as NativeReviewAction;
-            return receipts.run(input.requestId, JSON.stringify(['review', action]), () => perform(input.requestId, action));
+            return receipts.run(input.requestId, JSON.stringify(['review', action]), () => perform(input.requestId, action, sequence));
+        },
+
+
+        async runConfirmedReviewSuggestions(input: { requestId: string; action: Extract<NativeReviewAction, { type: 'applySuggestions' }> }): Promise<NativeHostResult<NativeReviewActionResult>> {
+            if (!isObjectRecord(input) || !isObjectRecord(input.action) || input.action.type !== 'applySuggestions')
+                return fail('INVALID_INPUT', 'A request UUID and the confirmed suggestions are required');
+            return methods.runReviewAction(input, 'confirmed');
         },
     };
+    return methods;
 }

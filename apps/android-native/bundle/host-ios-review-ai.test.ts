@@ -174,6 +174,25 @@ describe('private iOS Weekly Review AI', () => {
         expect(await validate()).toEqual({ ok: true, value: null });
     });
 
+    it('applies a confirmed selection once after its section became sequential, as a journal replay must', async () => {
+        const f = await fixture(), data = seed('openai');
+        data.projects[0] = { ...data.projects[0], perSectionFlow: true };
+        data.sections = [{ id: 'sequence', projectId: 'p1', title: 'Steps', order: 0, isSequential: false, createdAt: AT, updatedAt: AT }];
+        data.tasks = [{ ...data.tasks[0], sectionId: 'sequence', order: 1 },
+            { ...data.tasks[0], id: 'fresh-waiting-head', status: 'waiting', sectionId: 'sequence', order: 0, updatedAt: new Date().toISOString() }];
+        await f.boot(data);
+        const answer = await f.call('iosReviewAIRequest', {}), selected = answer.value.suggestions[0];
+        expect(selected.id).toBe(ID);
+        const request = { requestId: crypto.randomUUID(), suggestions: [{ id: selected.id, action: selected.action, reason: selected.reason }], taskRevisions: { [selected.id]: selected.taskRevision } };
+        const state = useTaskStore.getState();
+        useTaskStore.setState({ _allSections: state._allSections.map(section => ({ ...section, isSequential: true })) });
+        const applied = await f.call('iosReviewAIApply', request);
+        expect(applied).toEqual({ ok: true, value: { changed: true, toast: null, createdId: null } });
+        expect(f.db.query('SELECT status FROM tasks WHERE id=?').get(ID)).toEqual({ status: 'someday' });
+        expect(await f.call('iosReviewAIOutcome', request)).toEqual(applied);
+        expect(f.db.query('SELECT count(*) AS total FROM native_request_receipts WHERE request_id=?').get(request.requestId)).toEqual({ total: 1 });
+    });
+
     it.each(['openai', 'gemini', 'anthropic'] as const)('keeps %s analysis canonical/read-only then applies only selected rows with durable exact receipts', async provider => {
         const f = await fixture(provider); await f.boot();
         const before = JSON.stringify(f.db.query('SELECT * FROM tasks ORDER BY rowid').all());

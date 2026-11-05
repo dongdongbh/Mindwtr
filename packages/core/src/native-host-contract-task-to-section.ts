@@ -6,7 +6,8 @@ import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { isProjectedRecurringTaskId } from './recurrence';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { ensureDeviceId, getNextProjectOrder } from './store-helpers';
-import { planTaskToSection, taskEditValuesEqual, taskToSectionOrderMax } from './store-tasks';
+import { planTaskToSection, taskToSectionOrderMax } from './store-tasks';
+import { taskEditValuesEqual } from './json-value-equality';
 import { requestRowId, taskRevisionOf, type NativeRequestReceipts } from './native-request-receipts';
 import { normalizeOptionalContainerId } from './task-container-rules';
 

@@ -181,7 +181,7 @@ describe('native project to section conversion (UI-18)', () => {
     it('previews eligible destinations without writing', async () => {
         const { host, saves } = await open(sectionFixture());
         const before = saves();
-        const options = unwrap(host.getProjectToSectionOptions({ projectId: 'source', projectRevision: destinationRevision('source') }));
+        const options = unwrap(host.getProjectToSectionConversionOptions({ projectId: 'source', projectRevision: destinationRevision('source') }));
         expect(saves()).toBe(before);
         expect(options).toMatchObject({ blockedMessage: null, sequentialMessage: null,
             notesMessage: 'Project notes become section notes.', defaultTitle: 'Source' });
@@ -189,7 +189,7 @@ describe('native project to section conversion (UI-18)', () => {
         expect(options.destinations[0]).toMatchObject({ summary: 'Move 2 tasks (1 done, 0 archived) from Source into Destination.',
             areaLine: 'Moved tasks use the destination Area: No area.', revision: destinationRevision('destination') });
         const blocked = await open(sectionFixture({ tagIds: ['#tag'] }));
-        expect(unwrap(blocked.host.getProjectToSectionOptions({ projectId: 'source', projectRevision: destinationRevision('source') })))
+        expect(unwrap(blocked.host.getProjectToSectionConversionOptions({ projectId: 'source', projectRevision: destinationRevision('source') })))
             .toMatchObject({ blockedMessage: 'Remove this project’s tags first.', destinations: [] });
     });
 
@@ -225,7 +225,7 @@ describe('native project to section conversion (UI-18)', () => {
 
     it('keeps a sequential source as a sequential section in a Per section destination', async () => {
         const { host, saved } = await open(sectionFixture({ isSequential: true }, { perSectionFlow: true }));
-        const options = unwrap(host.getProjectToSectionOptions({ projectId: 'source', projectRevision: destinationRevision('source') }));
+        const options = unwrap(host.getProjectToSectionConversionOptions({ projectId: 'source', projectRevision: destinationRevision('source') }));
         expect(options.sequentialMessage).toContain('Within sections');
         expect(options.destinations.map((row) => row.id)).toEqual(['destination']);
         unwrap(await host.commitPreparedProjectToSection(convert(host)));

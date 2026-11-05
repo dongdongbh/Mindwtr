@@ -5158,7 +5158,7 @@ globalThis.MindwtrHost = {
         return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(await contract.commitPreparedTaskPromotionUndo(editorJson(json) as Parameters<typeof contract.commitPreparedTaskPromotionUndo>[0])); });
     },
     projectToSectionOptions(json: string): string {
-        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.getProjectToSectionOptions(completionJson(json, 4_096) as Parameters<typeof contract.getProjectToSectionOptions>[0])); });
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.getProjectToSectionConversionOptions(completionJson(json, 4_096) as Parameters<typeof contract.getProjectToSectionConversionOptions>[0])); });
     },
     projectToSectionPrepare(json: string): string {
         return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.prepareProjectToSection(completionJson(json, 200_000) as Parameters<typeof contract.prepareProjectToSection>[0])); });

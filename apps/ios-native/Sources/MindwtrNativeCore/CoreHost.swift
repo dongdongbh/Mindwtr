@@ -16735,7 +16735,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
     func recordCloseCancellationOrder() {
-        guard started, !closed, context != nil else { return }
+        guard started, !closed, context != nil, (try? diagnosticsFile.perform("exists", text: "")) == "1" else { return }
         if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-close-cancellation-order", "operation": "close", "outcome": "drained"]) {
             _ = try? invoke("logLine", arguments: ["Native iOS close cancellation reached finalization", context])
         }
