@@ -4821,8 +4821,6 @@ private final class Engine: @unchecked Sendable {
     private var confirmedReferenceTaskBackdateEnvelope: String?
     private var confirmedChecklistMoveEnvelope: String?
     private var confirmedChecklistMoveUndoEnvelope: String?
-    private var startupChecklistMoveResult: (method: String, result: String)?
-    private var startupConversionResult: (method: String, result: String)?
     private var confirmedProjectToSectionEnvelope: String?
     private var confirmedTaskPromoteEnvelope: String?
     private var confirmedRowTaskFocusEnvelope: String?
@@ -4833,8 +4831,6 @@ private final class Engine: @unchecked Sendable {
 
     private var referenceProjectNextActionOrigin: [String: Any]?
     private var confirmedReferenceProjectNextActionEnvelope: String?
-    private var startupReferenceProjectNextActionResult: String?
-    private var startupReferenceProjectNextActionSource: String?
     private var confirmedDoneTaskCompletedAtEnvelope: String?
     private var confirmedArchiveTaskCompletedAtEnvelope: String?
     private var confirmedTaskCompletionUndoEnvelope: String?
@@ -4844,7 +4840,6 @@ private final class Engine: @unchecked Sendable {
     private var confirmedTrashItemsPurgeEnvelope: String?
     private var confirmedPomodoroPlanJSON: String?
     private var lastPomodoroProjectionReloaded = false
-    private var startupPomodoroResult: String?
     private var confirmedInboxTasksMoveEnvelope: String?
     private var confirmedProjectTasksMoveEnvelope: String?
     private var confirmedReferenceTasksMoveEnvelope: String?
@@ -4880,118 +4875,8 @@ private final class Engine: @unchecked Sendable {
     #endif
 
 
-    private var startupAttachmentSaveResult: (method: String, resultJSON: String, requestId: String?)?
-    private var startupBoardResult: String?
-    private var startupTaskDeleteResult: String?
-    private var startupArchivedTaskRestoreResult: String?
-    private var startupArchivedTasksRestoreResult: String?
-    private var startupTrashItemsRestoreResult: String?
-    private var startupTrashItemsPurgeResult: String?
-    private var startupInboxTasksMoveResult: String?
-    private var startupProjectTasksMoveResult: String?
-    private var startupReferenceTasksMoveResult: String?
-    private var startupInboxTasksAddTagResult: String?
-    private var startupProjectTasksAddTagResult: String?
-    private var startupInboxTasksRemoveTagResult: String?
-    private var startupProjectTasksRemoveTagResult: String?
-    private var startupInboxTasksOrganizeResult: String?
-    private var startupProjectTasksOrganizeResult: String?
-    private var startupInboxOrganizeDestinationCreateResult: String?
-    private var startupProjectOrganizeDestinationCreateResult: String?
-    private var startupReferenceTasksAddTagResult: String?
-    private var startupReferenceTasksRemoveTagResult: String?
-    private var startupArchivedTasksDeleteResult: String?
-    private var startupArchivedTasksDeleteUndoResult: String?
-    private var startupProjectTasksDeleteResult: String?
-    private var startupProjectTasksDeleteUndoResult: String?
-    private var startupTaskCompletionResult: String?
-    private var startupTaskCompletionSource: String?
-    private var startupTaskCompletionRequestID: String?
-    private var startupRowQuickStatusResult: String?
-    private var startupInlineChecklistResult: String?
-    private var startupDoneTaskStatusResult: String?
-    private var startupReferenceTaskBackdateResult: String?
-    private var startupRowTaskFocusResult: String?
-    private var startupRowTaskDatesResult: String?
-    private var startupRowTaskDestinationResult: String?
-    private var startupRowTaskBackdateResult: String?
-    private var startupReferenceTaskDestinationResult: String?
-    private var startupDoneTaskStatusSource: String?
-    private var startupDoneTaskCompletedAtResult: String?
-    private var startupArchiveTaskCompletedAtResult: String?
-    private var startupTaskCompletionUndoResult: String?
-    private var startupProjectDeleteResult: String?
-    private var startupProjectDeleteUndoResult: String?
-    private var startupProjectDuplicateResult: String?
-    private var startupProjectLifecycleResult: String?
-    private var startupTrashTaskRestoreResult: String?
-    private var startupTrashProjectRestoreResult: String?
-    private var startupTaskPromoteResult: String?
-    private var startupCalendarResult: String?
-    private var startupMindSweepResult: String?
-    private var startupReviewProjectTaskResult: String?
-    private var startupProjectCreateResult: String?
-    private var startupProjectSectionCreateResult: String?
-    private var startupProjectSectionRenameResult: String?
-    private var startupProjectSectionDeleteResult: String?
-    private var startupProjectSectionOrderResult: String?
-    private var startupAppLockResult: String?
-    private var startupGtdWorkflowResult: String?
+    private var startupRecovery: NativeStartupRecovery?
     private var backupUnreturnedReply: String?
-    private var startupBackupDocumentResult: String?
-    private var startupDataSettingResult: String?
-    private var startupGettingStartedResult: String?
-    private var startupGeneralPreferenceResult: String?
-    private var startupAITextConfigurationResult: String?
-    private var startupAITextConfigurationMethod: String?
-    private var startupAIRequestTimeoutResult: String?
-    private var startupAIReasoningEffortResult: String?
-    private var startupAIGeminiThinkingBudgetResult: String?
-    private var startupNotificationSettingResult: String?
-    private var startupDeviceCalendarSettingResult: String?
-    private var startupCalendarSubscriptionSettingResult: String?
-    private var startupCalendarSubscriptionAddResult: String?
-    private var startupReminderCompletionResult: String?
-    private var startupReminderSnoozeResult: String?
-    private var startupTaxonomyResult: String?
-    private var startupPersonEditResult: String?
-    private var startupPersonDeleteResult: String?
-    private var startupPersonCreateResult: String?
-    private var startupAreaCreateResult: String?
-    private var startupAreaColorResult: String?
-    private var startupAreaRenameResult: String?
-    private var startupAreaOrderResult: String?
-    private var startupAreaDeleteResult: String?
-    private var startupProjectFocusResult: String?
-    private var startupTaskFocusResult: String?
-    private var startupFocusOrderResult: String?
-    private var startupFocusSavedFilterResult: String?
-    private var startupCalendarDeleteResult: String?
-    private var startupCalendarUnscheduleResult: String?
-    private var startupSavedSearchResult: String?
-    private var startupProjectRenameResult: String?
-    private var startupProjectFlowResult: String?
-    private var startupProjectTaskSortResult: String?
-    private var startupProjectTaskOrderResult: String?
-    private var startupProjectNotesWriteResult: String?
-    private var startupProjectTagsWriteResult: String?
-    private var startupProjectAttachmentWriteResult: String?
-    private var startupProjectFileRemoveWriteResult: String?
-    private var startupProjectStatusResult: String?
-    private var startupProjectDateResult: String?
-    private var startupProjectAreaResult: String?
-    private var startupInboxResult: String?
-    private var startupInboxUndoResult: String?
-    private var startupChecklistResult: String?
-    private var startupFocusGroupResult: String?
-    private var startupTaskListSortResult: String?
-    private var startupUnassignedAreaColorResult: String?
-    private var startupSomedaySectionCreateResult: String?
-    private var startupSomedaySectionRenameResult: String?
-    private var startupSomedaySectionDeleteResult: String?
-    private var startupSomedaySectionOrderResult: String?
-    private var startupSomedaySectionTaskResult: String?
-    private var startupSomedaySectionMoveResult: (method: String, value: String)?
     #if DEBUG
     var faults: HostIOFaults?
     #endif
@@ -6234,9 +6119,6 @@ private final class Engine: @unchecked Sendable {
     private func startupWindow(retentionJSON: String) throws -> String {
         if pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil { throw CoreHostProjectFileAvailabilityRecovery() }
         if pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil { throw CoreHostProjectFileAddRecovery() }
-        let recoveringAttachmentSaveMethod: String? = pending.flatMap { command in
-            [Self.ownedSaveMethod, Self.mixedSaveMethod].contains(command.method) ? command.method : nil
-        }
         var recoveringAttachmentCancelRequestId: String?
         if let command = pending, command.method == Self.mixedSaveMethod {
             let captured = try mixedSaveJournal(command, checkingNative: false)
@@ -6250,654 +6132,84 @@ private final class Engine: @unchecked Sendable {
         let owedAppleReminderRequestID = try pending.flatMap { command -> String? in
             command.method == Self.appleReminderMethod ? try appleReminderItem(command).reference.id : nil
         }
-        let recoveringPomodoroCommand = pending?.method == Self.pomodoroMethod ? pending : nil
-        let owedPomodoroRequestID = try recoveringPomodoroCommand.flatMap { command -> String? in
+        let owedPomodoroRequestID = try (pending?.method == Self.pomodoroMethod ? pending : nil).flatMap { command -> String? in
             guard let json = try pomodoroJournalArguments(command).first as? String else { throw Self.pomodoroFailure }
             return (try Self.pomodoroObject(json, maximum: 2_000_000)["request"] as? [String: Any])?["requestId"] as? String
         }
-        let recoveringBackupDocument = pending?.method == "backupDocumentCommit"
-        if pending == nil, let backupUnreturnedReply { startupBackupDocumentResult = backupUnreturnedReply }
-        let recoveringChecklistMove = pending.flatMap { Self.checklistMovePrefix($0.method) != nil ? $0 : nil }
-        let recoveringConversion = pending.flatMap { Self.conversionPrefix($0.method) != nil ? $0 : nil }
-        let recoveringBoard = pending?.method == "boardCommit"
-        let recoveringTaskDelete = pending?.method == "taskDeleteCommit"
-        let recoveringTaskDeleteCommand = recoveringTaskDelete ? pending : nil
-        let recoveringTaskDeleteUndoCommand = pending?.method == "taskDeleteUndoCommit" ? pending : nil
-        let recoveringArchivedTaskRestore = pending?.method == "archivedTaskRestoreCommit"
-        let recoveringInboxTasksMove = pending?.method == "inboxTasksMoveCommit"
-        let recoveringInboxTasksMoveCommand = recoveringInboxTasksMove ? pending : nil
-        let recoveringProjectTasksMove = pending?.method == "projectTasksMoveCommit"
-        let recoveringReferenceTasksMove = pending?.method == "referenceTasksMoveCommit"
-        let recoveringInboxTasksAddTag = pending?.method == "inboxTasksAddTagCommit"
-        let recoveringInboxTasksAddTagCommand = recoveringInboxTasksAddTag ? pending : nil
-        let recoveringProjectTasksAddTag = pending?.method == "projectTasksAddTagCommit"
-        let recoveringInboxTasksRemoveTag = pending?.method == "inboxTasksRemoveTagCommit"
-        let recoveringProjectTasksRemoveTag = pending?.method == "projectTasksRemoveTagCommit"
-        let recoveringInboxTasksOrganize = pending?.method == "inboxTasksOrganizeCommit"
-        let recoveringProjectTasksOrganize = pending?.method == "projectTasksOrganizeCommit"
-        let recoveringInboxOrganizeDestinationCreate = pending?.method == "inboxOrganizeDestinationCreateCommit"
-        let recoveringProjectOrganizeDestinationCreate = pending?.method == "projectOrganizeDestinationCreateCommit"
-        let recoveringReferenceTasksAddTag = pending?.method == "referenceTasksAddTagCommit"
-        let recoveringReferenceTasksRemoveTag = pending?.method == "referenceTasksRemoveTagCommit"
-        let recoveringArchivedTasksRestore = pending?.method == "archivedTasksRestoreCommit"
-        let recoveringArchivedTasksRestoreCommand = recoveringArchivedTasksRestore ? pending : nil
-        let recoveringTrashItemsRestore = pending?.method == "trashItemsRestoreCommit"
-        let recoveringTrashItemsPurge = pending?.method == "trashItemsPurgeCommit"
-        let recoveringArchivedTasksDelete = pending?.method == "archivedTasksDeleteCommit"
-        let recoveringArchivedTasksDeleteUndo = pending?.method == "archivedTasksDeleteUndoCommit"
-        let recoveringProjectTasksDelete = pending?.method == "projectTasksDeleteCommit"
-        let recoveringProjectTasksDeleteUndo = pending?.method == "projectTasksDeleteUndoCommit"
-        let recoveringArchivedTasksDeleteCommand = recoveringArchivedTasksDelete || recoveringArchivedTasksDeleteUndo || recoveringProjectTasksDelete || recoveringProjectTasksDeleteUndo ? pending : nil
-        let recoveringArchivedTaskRestoreCommand = recoveringArchivedTaskRestore ? pending : nil
-        let recoveringTaskCompletion = pending?.method == "taskCompletionCommit"
-        let recoveringBackdateMethod = ["referenceTaskBackdateCommit", "rowTaskBackdateCommit"].first { $0 == pending?.method }
-        let recoveringRowEditMethod = ["referenceTaskDestinationCommit", "rowTaskDestinationCommit", "rowTaskDatesCommit", "rowTaskFocusCommit"].first { $0 == pending?.method }
-        let recoveringReferenceProjectNextAction = pending?.method == "referenceProjectNextActionCommit"
-        let recoveringReferenceProjectNextActionCommand = recoveringReferenceProjectNextAction ? pending : nil
-        let recoveringRowQuickStatus = pending?.method == "rowQuickStatusCommit"
-        let recoveringInlineChecklist = pending?.method == "inlineChecklistCommit"
-        let recoveringDoneTaskStatus = pending?.method == "doneTaskStatusCommit"
-        let recoveringDoneTaskStatusCommand = recoveringDoneTaskStatus ? pending : nil
-        let recoveringDoneTaskCompletedAt = pending?.method == "doneTaskCompletedAtCommit"
-        let recoveringArchiveTaskCompletedAt = pending?.method == "archiveTaskCompletedAtCommit"
-        let recoveringTaskCompletionUndo = pending?.method == "taskCompletionUndoCommit"
-        let recoveringCompletionCommand = recoveringTaskCompletion || recoveringTaskCompletionUndo ? pending : nil
-        let recoveringProjectDelete = pending?.method == "projectDeleteCommit"
-        let recoveringProjectDeleteCommand = recoveringProjectDelete ? pending : nil
-        let recoveringProjectDeleteUndo = pending?.method == "projectDeleteUndoCommit"
-        let recoveringProjectDuplicate = pending?.method == "projectDuplicateCommit"
-        let recoveringProjectLifecycle = pending?.method == "projectLifecycleCommit"
-        let recoveringProjectLifecycleCommand = recoveringProjectLifecycle ? pending : nil
-        let recoveringTrashTaskRestore = pending?.method == "trashTaskRestoreCommit"
-        let recoveringTrashProjectRestore = pending?.method == "trashProjectRestoreCommit"
-        let recoveringTaskPromote = pending?.method == "taskPromoteCommit"
-        let recoveringCalendarMethod = ["calendarComposerCreateCommit", "calendarComposerCommit", "calendarEventTaskCommit"].first { $0 == pending?.method }
-        let recoveringMindSweep = pending?.method == "mindSweepCommit"
-        let recoveringReviewProjectTask = pending?.method == "weeklyReviewProjectTaskCommit"
-        let recoveringProjectCreate = pending?.method == "projectCreateCommit"
-        let recoveringProjectSectionCreate = pending?.method == "projectSectionCreateCommit"
-        let recoveringProjectSectionRename = pending?.method == "projectSectionRenameCommit"
-        let recoveringProjectSectionDelete = pending?.method == "projectSectionDeleteCommit"
-        let recoveringProjectSectionOrder = pending?.method == "projectSectionOrderCommit"
-        let recoveringAppLock = pending?.method == "appLockCommit"
-        let recoveringGtdWorkflow = pending?.method == "gtdWorkflowCommit"
-        let recoveringDataSetting = pending?.method == "dataSetting"
-        let recoveringGettingStarted = pending?.method == "gettingStarted"
-        let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
-        let recoveringAITextConfiguration = pending.map { Self.aiTextConfigurationCommitMethods.contains($0.method) } ?? false
-        let recoveringAITextConfigurationMethod = recoveringAITextConfiguration ? pending?.method : nil
-        let recoveringAIRequestTimeout = pending?.method == "iosAIRequestTimeoutCommit"
-        let recoveringAIReasoningEffort = pending?.method == "iosAIReasoningEffortCommit"
-        let recoveringAIGeminiThinkingBudget = pending?.method == "iosAIGeminiThinkingBudgetCommit"
-        let recoveringNotificationSetting = pending?.method == "notificationSettingCommit"
-        let recoveringDeviceCalendarSetting = pending?.method == "deviceCalendarSettingCommit"
-        let recoveringCalendarSubscriptionSetting = pending?.method == "calendarSubscriptionSettingCommit"
-        let recoveringCalendarSubscriptionAdd = pending?.method == "calendarSubscriptionAddCommit"
-        let recoveringReminderCompletion = pending?.method == "reminderCompletionCommit"
-        let recoveringReminderSnooze = pending?.method == "reminderSnoozeCommit"
-        let recoveringTaxonomy = pending?.method == "manageTaxonomyCommit"
-        let recoveringPersonEdit = pending?.method == "managePersonEditCommit"
-        let recoveringPersonDelete = pending?.method == "managePersonDeleteCommit"
-        let recoveringPersonCreate = pending?.method == "managePersonCreateCommit"
-        let recoveringAreaCreateMethod = ["areaCreateCommit", "manageAreaCreateCommit"].first { $0 == pending?.method }
-        let recoveringAreaColor = pending?.method == "areaColorCommit"
-        let recoveringAreaRenameMethod = ["areaRenameCommit", "manageAreaEditCommit"].first { $0 == pending?.method }
-        let recoveringAreaOrder = pending?.method == "areaOrderCommit"
-        let recoveringAreaDeleteMethod = ["areaDeleteCommit", "manageAreaDeleteCommit"].first { $0 == pending?.method }
-        let recoveringProjectFocus = pending?.method == "projectFocusCommit"
-        let recoveringTaskFocus = pending?.method == "taskFocusCommit"
-        let recoveringFocusOrder = pending?.method == "focusOrderCommit"
-        let recoveringFocusSavedFilter = pending?.method == "focusSavedFilterCommit"
-        let recoveringCalendarDelete = pending?.method == "calendarDeleteCommit"
-        let recoveringCalendarUnschedule = pending?.method == "calendarUnscheduleCommit"
-        let recoveringSavedSearch = pending?.method == "savedSearchCommit"
-        let recoveringProjectRename = pending?.method == "projectRenameCommit"
-        let recoveringProjectFlow = pending?.method == "projectFlowCommit"
-        let recoveringProjectTaskSort = pending?.method == "projectTaskSortCommit"
-        let recoveringProjectTaskOrder = pending?.method == "projectTaskOrderCommit"
-        let recoveringProjectNotesWrite = pending?.method == "projectNotesWriteCommit"
-        let recoveringProjectTagsWrite = pending?.method == "projectTagsWriteCommit"
-        let recoveringProjectAttachmentWrite = pending?.method == "projectAttachmentWriteCommit"
-        let recoveringProjectFileRemoveWrite = pending?.method == "projectFileRemoveWriteCommit"
-        let recoveringProjectStatus = pending?.method == "projectStatusCommit"
-        let recoveringProjectDate = pending?.method == "projectDateCommit"
-        let recoveringProjectArea = pending?.method == "projectAreaCommit"
-        let recoveringInbox = pending?.method == "inboxPreparedCommit"
-        let recoveringInboxUndo = pending?.method == "inboxUndoCommit"
+        if pending == nil, let backupUnreturnedReply {
+            startupRecovery = NativeStartupRecovery(method: "backupDocumentCommit", resultJSON: backupUnreturnedReply)
+        }
         let owedInboxRequestIDs = try pending.map(inboxRetainedRequestIDs) ?? []
-        let recoveringChecklist = pending?.method == "checklistPreparedCommit"
-        let recoveringFocusGroup = pending?.method == "focusGroupWrite"
-        let recoveringTaskListSort = pending?.method == "taskListSortWrite"
-        let recoveringUnassignedAreaColor = pending?.method == "unassignedAreaColorWrite"
-        let recoveringSomedaySectionCreate = pending?.method == "somedaySectionCreateWrite"
-        let recoveringSomedaySectionRename = pending?.method == "somedaySectionRenameWrite"
-        let recoveringSomedaySectionDelete = pending?.method == "somedaySectionDeleteWrite"
-        let recoveringSomedaySectionOrder = pending?.method == "somedaySectionOrderWrite"
-        let recoveringSomedaySectionTask = pending?.method == "somedaySectionTaskCommit"
-        let recoveringSomedaySectionMove = pending.flatMap { Self.somedayMoveCommits.contains($0.method) ? $0.method : nil }
+        let resolving = pending
         let terminal = try resolvePending()
-        if let recoveringChecklistMove, let terminal, case .success(let value) = terminal {
-            startupChecklistMoveResult = (recoveringChecklistMove.method, value)
-        }
-        if let recoveringConversion, let terminal, case .success(let value) = terminal {
-            startupConversionResult = (recoveringConversion.method, value)
-        }
-        if recoveringPomodoroCommand != nil, let terminal, case .success(let value) = terminal { startupPomodoroResult = value }
-        if let method = recoveringAttachmentSaveMethod, let terminal, case .success(let result) = terminal {
-
-
-            let actual = try NativeJSON.jsonObject(with: Data(result.utf8)) as? [String: Any]
-            startupAttachmentSaveResult = (method, result,
-                actual?["cancellation"] is [String: Any] ? recoveringAttachmentCancelRequestId : nil)
-        }
-        if recoveringBackupDocument, let terminal, case .success(let value) = terminal { startupBackupDocumentResult = value }
-        if recoveringReminderCompletion, let terminal, case .success(let value) = terminal { startupReminderCompletionResult = value }
-        if recoveringReminderSnooze, let terminal, case .success(let value) = terminal { startupReminderSnoozeResult = value }
-        if let recoveringTaskDeleteCommand, let terminal, case .success = terminal {
-            rememberConfirmedTaskDelete(recoveringTaskDeleteCommand)
-        }
-        if let recoveringTaskDeleteUndoCommand, let terminal, case .success = terminal {
-            rememberConfirmedTaskDelete(recoveringTaskDeleteUndoCommand)
-        }
-        if let recoveringArchivedTaskRestoreCommand, let terminal, case .success = terminal {
-            rememberConfirmedArchivedRestore(recoveringArchivedTaskRestoreCommand)
-        }
-        if let recoveringCompletionCommand, let terminal, case .success = terminal {
-            rememberConfirmedTaskCompletion(recoveringCompletionCommand)
-
-            startupTaskCompletionSource = taskCompletionSource(recoveringCompletionCommand)
-            startupTaskCompletionRequestID = taskCompletionRequestID(recoveringCompletionCommand)
-        }
-        if let recoveringProjectDeleteCommand, let terminal, case .success = terminal {
-            rememberConfirmedProjectDelete(recoveringProjectDeleteCommand)
-        }
-        if recoveringBoard, let terminal, case .success(let value) = terminal { startupBoardResult = value }
-        if recoveringTaskDelete, let terminal, case .success(let value) = terminal { startupTaskDeleteResult = value }
-        if recoveringArchivedTaskRestore, let terminal, case .success(let value) = terminal { startupArchivedTaskRestoreResult = value }
-        if recoveringInboxTasksMove, let terminal, case .success(let value) = terminal { startupInboxTasksMoveResult = value }
-        if recoveringProjectTasksMove, let terminal, case .success(let value) = terminal { startupProjectTasksMoveResult = value }
-        if recoveringReferenceTasksMove, let terminal, case .success(let value) = terminal { startupReferenceTasksMoveResult = value }
-        if recoveringInboxTasksAddTag, let terminal, case .success(let value) = terminal { startupInboxTasksAddTagResult = value }
-        if recoveringProjectTasksAddTag, let terminal, case .success(let value) = terminal { startupProjectTasksAddTagResult = value }
-        if recoveringInboxTasksRemoveTag, let terminal, case .success(let value) = terminal { startupInboxTasksRemoveTagResult = value }
-        if recoveringProjectTasksRemoveTag, let terminal, case .success(let value) = terminal { startupProjectTasksRemoveTagResult = value }
-        if recoveringInboxTasksOrganize, let terminal, case .success(let value) = terminal { startupInboxTasksOrganizeResult = value }
-        if recoveringProjectTasksOrganize, let terminal, case .success(let value) = terminal { startupProjectTasksOrganizeResult = value }
-        if recoveringInboxOrganizeDestinationCreate, let terminal, case .success(let value) = terminal { startupInboxOrganizeDestinationCreateResult = value }
-        if recoveringProjectOrganizeDestinationCreate, let terminal, case .success(let value) = terminal { startupProjectOrganizeDestinationCreateResult = value }
-        if recoveringReferenceTasksAddTag, let terminal, case .success(let value) = terminal { startupReferenceTasksAddTagResult = value }
-        if recoveringReferenceTasksRemoveTag, let terminal, case .success(let value) = terminal { startupReferenceTasksRemoveTagResult = value }
-        if recoveringArchivedTasksRestore, let terminal, case .success(let value) = terminal { startupArchivedTasksRestoreResult = value }
-        if recoveringTrashItemsRestore, let terminal, case .success(let value) = terminal { startupTrashItemsRestoreResult = value }
-        if recoveringTrashItemsPurge, let terminal, case .success(let value) = terminal { startupTrashItemsPurgeResult = value }
-        if recoveringArchivedTasksDelete, let terminal, case .success(let value) = terminal { startupArchivedTasksDeleteResult = value }
-        if recoveringArchivedTasksDeleteUndo, let terminal, case .success(let value) = terminal { startupArchivedTasksDeleteUndoResult = value }
-        if recoveringProjectTasksDelete, let terminal, case .success(let value) = terminal { startupProjectTasksDeleteResult = value }
-        if recoveringProjectTasksDeleteUndo, let terminal, case .success(let value) = terminal { startupProjectTasksDeleteUndoResult = value }
-        if recoveringTaskCompletion, let terminal, case .success(let value) = terminal { startupTaskCompletionResult = value }
-        if recoveringRowQuickStatus, let terminal, case .success(let value) = terminal { startupRowQuickStatusResult = value }
-        if recoveringInlineChecklist, let terminal, case .success(let value) = terminal { startupInlineChecklistResult = value }
-        if recoveringDoneTaskStatus, let terminal, case .success(let value) = terminal {
-            startupDoneTaskStatusResult = value
-
-            startupDoneTaskStatusSource = recoveringDoneTaskStatusCommand.flatMap(historyTaskStatusSource)
-        }
-        if let recoveringBackdateMethod, let terminal, case .success(let value) = terminal {
-            if recoveringBackdateMethod == "rowTaskBackdateCommit" { startupRowTaskBackdateResult = value }
-            else { startupReferenceTaskBackdateResult = value }
-        }
-        if let recoveringRowEditMethod, let terminal, case .success(let value) = terminal {
-            if recoveringRowEditMethod == "rowTaskFocusCommit" { startupRowTaskFocusResult = value }
-            else if recoveringRowEditMethod == "rowTaskDatesCommit" { startupRowTaskDatesResult = value }
-            else if recoveringRowEditMethod == "rowTaskDestinationCommit" { startupRowTaskDestinationResult = value }
-            else { startupReferenceTaskDestinationResult = value }
-        }
-        if recoveringReferenceProjectNextAction, let terminal, case .success(let value) = terminal {
-            startupReferenceProjectNextActionResult = value
-            startupReferenceProjectNextActionSource = recoveringReferenceProjectNextActionCommand.flatMap(referenceProjectNextActionSource)
-        }
-        if recoveringDoneTaskCompletedAt, let terminal, case .success(let value) = terminal { startupDoneTaskCompletedAtResult = value }
-        if recoveringArchiveTaskCompletedAt, let terminal, case .success(let value) = terminal { startupArchiveTaskCompletedAtResult = value }
-        if recoveringTaskCompletionUndo, let terminal, case .success(let value) = terminal { startupTaskCompletionUndoResult = value }
-        if recoveringProjectDelete, let terminal, case .success(let value) = terminal { startupProjectDeleteResult = value }
-        if recoveringProjectDeleteUndo, let terminal, case .success(let value) = terminal { startupProjectDeleteUndoResult = value }
-        if recoveringProjectDuplicate, let terminal, case .success(let value) = terminal { startupProjectDuplicateResult = value }
-        if recoveringProjectLifecycle, let terminal, case .success(let value) = terminal {
-            startupProjectLifecycleResult = value
-            if let recoveringProjectLifecycleCommand { rememberConfirmedProjectLifecycle(recoveringProjectLifecycleCommand) }
-        }
-        if recoveringTrashTaskRestore, let terminal, case .success(let value) = terminal { startupTrashTaskRestoreResult = value }
-        if recoveringTrashProjectRestore, let terminal, case .success(let value) = terminal { startupTrashProjectRestoreResult = value }
-        if recoveringTaskPromote, let terminal, case .success(let value) = terminal { startupTaskPromoteResult = value }
-        if recoveringCalendarMethod != nil, let terminal, case .success(let value) = terminal { startupCalendarResult = value }
-        if recoveringMindSweep, let terminal, case .success(let value) = terminal { startupMindSweepResult = value }
-        if recoveringReviewProjectTask, let terminal, case .success(let value) = terminal { startupReviewProjectTaskResult = value }
-        if recoveringProjectCreate, let terminal, case .success(let value) = terminal { startupProjectCreateResult = value }
-        if recoveringProjectSectionCreate, let terminal, case .success(let value) = terminal { startupProjectSectionCreateResult = value }
-        if recoveringProjectSectionRename, let terminal, case .success(let value) = terminal { startupProjectSectionRenameResult = value }
-        if recoveringProjectSectionDelete, let terminal, case .success(let value) = terminal { startupProjectSectionDeleteResult = value }
-        if recoveringProjectSectionOrder, let terminal, case .success(let value) = terminal { startupProjectSectionOrderResult = value }
-        if recoveringAppLock, let terminal, case .success(let value) = terminal { startupAppLockResult = value }
-        if recoveringGtdWorkflow, let terminal, case .success(let value) = terminal { startupGtdWorkflowResult = value }
-        if recoveringDataSetting, let terminal, case .success(let value) = terminal { startupDataSettingResult = value }
-        if recoveringGettingStarted, let terminal, case .success(let value) = terminal { startupGettingStartedResult = value }
-        if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
-        if recoveringAITextConfiguration, let terminal, case .success(let value) = terminal { startupAITextConfigurationResult = value; startupAITextConfigurationMethod = recoveringAITextConfigurationMethod }
-        if recoveringAIRequestTimeout, let terminal, case .success(let value) = terminal { startupAIRequestTimeoutResult = value }
-        if recoveringAIReasoningEffort, let terminal, case .success(let value) = terminal { startupAIReasoningEffortResult = value }
-        if recoveringAIGeminiThinkingBudget, let terminal, case .success(let value) = terminal { startupAIGeminiThinkingBudgetResult = value }
-        if recoveringNotificationSetting, let terminal, case .success(let value) = terminal { startupNotificationSettingResult = value }
-        if recoveringDeviceCalendarSetting, let terminal, case .success(let value) = terminal { startupDeviceCalendarSettingResult = value }
-        if recoveringCalendarSubscriptionSetting, let terminal, case .success(let value) = terminal { startupCalendarSubscriptionSettingResult = value }
-        if recoveringCalendarSubscriptionAdd, let terminal, case .success(let value) = terminal { startupCalendarSubscriptionAddResult = value }
-        if recoveringTaxonomy, let terminal, case .success(let value) = terminal { startupTaxonomyResult = value }
-        if recoveringPersonEdit, let terminal, case .success(let value) = terminal { startupPersonEditResult = value }
-        if recoveringPersonDelete, let terminal, case .success(let value) = terminal { startupPersonDeleteResult = value }
-        if recoveringPersonCreate, let terminal, case .success(let value) = terminal { startupPersonCreateResult = value }
-        if recoveringAreaCreateMethod != nil, let terminal, case .success(let value) = terminal { startupAreaCreateResult = value }
-        if recoveringAreaColor, let terminal, case .success(let value) = terminal { startupAreaColorResult = value }
-        if recoveringAreaRenameMethod != nil, let terminal, case .success(let value) = terminal { startupAreaRenameResult = value }
-        if recoveringAreaOrder, let terminal, case .success(let value) = terminal { startupAreaOrderResult = value }
-        if recoveringAreaDeleteMethod != nil, let terminal, case .success(let value) = terminal { startupAreaDeleteResult = value }
-        if recoveringProjectFocus, let terminal, case .success(let value) = terminal { startupProjectFocusResult = value }
-        if recoveringTaskFocus, let terminal, case .success(let value) = terminal { startupTaskFocusResult = value }
-        if recoveringFocusOrder, let terminal, case .success(let value) = terminal { startupFocusOrderResult = value }
-        if recoveringFocusSavedFilter, let terminal, case .success(let value) = terminal { startupFocusSavedFilterResult = value }
-        if recoveringCalendarDelete, let terminal, case .success(let value) = terminal { startupCalendarDeleteResult = value }
-        if recoveringCalendarUnschedule, let terminal, case .success(let value) = terminal { startupCalendarUnscheduleResult = value }
-        if recoveringSavedSearch, let terminal, case .success(let value) = terminal { startupSavedSearchResult = value }
-        if recoveringProjectRename, let terminal, case .success(let value) = terminal { startupProjectRenameResult = value }
-        if recoveringProjectFlow, let terminal, case .success(let value) = terminal { startupProjectFlowResult = value }
-        if recoveringProjectTaskSort, let terminal, case .success(let value) = terminal { startupProjectTaskSortResult = value }
-        if recoveringProjectTaskOrder, let terminal, case .success(let value) = terminal { startupProjectTaskOrderResult = value }
-        if recoveringProjectNotesWrite, let terminal, case .success(let value) = terminal { startupProjectNotesWriteResult = value }
-        if recoveringProjectTagsWrite, let terminal, case .success(let value) = terminal { startupProjectTagsWriteResult = value }
-        if recoveringProjectAttachmentWrite, let terminal, case .success(let value) = terminal { startupProjectAttachmentWriteResult = value }
-        if recoveringProjectFileRemoveWrite, let terminal, case .success(let value) = terminal { startupProjectFileRemoveWriteResult = value }
-        if recoveringProjectStatus, let terminal, case .success(let value) = terminal { startupProjectStatusResult = value }
-        if recoveringProjectDate, let terminal, case .success(let value) = terminal { startupProjectDateResult = value }
-        if recoveringProjectArea, let terminal, case .success(let value) = terminal { startupProjectAreaResult = value }
-        if recoveringInbox, let terminal, case .success(let value) = terminal { startupInboxResult = value }
-        if recoveringInboxUndo, let terminal, case .success(let value) = terminal { startupInboxUndoResult = value }
-        if recoveringChecklist, let terminal, case .success(let value) = terminal { startupChecklistResult = value }
-        if recoveringFocusGroup, let terminal, case .success(let value) = terminal { startupFocusGroupResult = value }
-        if recoveringTaskListSort, let terminal, case .success(let value) = terminal { startupTaskListSortResult = value }
-        if recoveringUnassignedAreaColor, let terminal, case .success(let value) = terminal { startupUnassignedAreaColorResult = value }
-        if recoveringSomedaySectionCreate, let terminal, case .success(let value) = terminal { startupSomedaySectionCreateResult = value }
-        if recoveringSomedaySectionRename, let terminal, case .success(let value) = terminal { startupSomedaySectionRenameResult = value }
-        if recoveringSomedaySectionDelete, let terminal, case .success(let value) = terminal { startupSomedaySectionDeleteResult = value }
-        if recoveringSomedaySectionOrder, let terminal, case .success(let value) = terminal { startupSomedaySectionOrderResult = value }
-        if recoveringSomedaySectionTask, let terminal, case .success(let value) = terminal { startupSomedaySectionTaskResult = value }
-        if let recoveringSomedaySectionMove, let terminal, case .success(let value) = terminal {
-            startupSomedaySectionMoveResult = (recoveringSomedaySectionMove, value)
+        if let resolving, let terminal, case .success(let value) = terminal {
+            rememberConfirmedStartupCommand(resolving)
+            if let recovery = try projectStartupRecovery(resolving, value: value, cancelRequestId: recoveringAttachmentCancelRequestId) {
+                startupRecovery = recovery
+            }
         }
         try resumeActivationIfNeeded()
         _ = try invoke("iosPruneReceipts", arguments: [retentionJSON, (owedAppleReminderRequestID ?? owedPomodoroRequestID).map { $0 as Any } ?? NSNull(), owedInboxRequestIDs])
         let value = try invoke("window", arguments: [0, 50, ""])
-        let recoveredAreas = startupAreaCreateResult ?? startupAreaColorResult ?? startupAreaRenameResult
-            ?? startupAreaOrderResult ?? startupAreaDeleteResult
-        let recoveredProjectMetadata = startupProjectFlowResult ?? startupProjectTaskSortResult ?? startupProjectTaskOrderResult ?? startupProjectNotesWriteResult ?? startupProjectTagsWriteResult
-            ?? startupProjectAttachmentWriteResult ?? startupProjectFileRemoveWriteResult ?? startupProjectStatusResult ?? startupProjectDateResult ?? startupProjectAreaResult
-        let recoveredProjects = startupProjectCreateResult ?? startupProjectSectionCreateResult
-            ?? startupProjectSectionRenameResult ?? startupProjectSectionDeleteResult ?? startupProjectSectionOrderResult
-            ?? recoveredAreas ?? startupProjectFocusResult
-            ?? startupProjectRenameResult ?? recoveredProjectMetadata
-        let recoveredFocus = startupTaskFocusResult ?? startupFocusOrderResult ?? startupFocusSavedFilterResult
-            ?? startupFocusGroupResult ?? startupSavedSearchResult ?? startupCalendarUnscheduleResult ?? startupCalendarDeleteResult
-        let recoveredSomedaySections = startupSomedaySectionCreateResult ?? startupSomedaySectionRenameResult
-            ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
-            ?? startupSomedaySectionTaskResult
-        let recoveredAISettings = startupAITextConfigurationResult ?? startupAIRequestTimeoutResult ?? startupAIReasoningEffortResult ?? startupAIGeminiThinkingBudgetResult
-        let recoveredCalendarSettings = startupNotificationSettingResult ?? startupDeviceCalendarSettingResult
-            ?? startupCalendarSubscriptionSettingResult ?? startupCalendarSubscriptionAddResult
-        let recoveredSettings = startupGettingStartedResult ?? startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
-            ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? recoveredAISettings ?? recoveredCalendarSettings
-        let recoveredManage = recoveredSettings ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
-            ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
-        let recoveredDoneRows = startupDoneTaskCompletedAtResult ?? startupDoneTaskStatusResult
-        let recoveredHistoryRows = startupArchiveTaskCompletedAtResult ?? recoveredDoneRows
-        let recoveredReference = startupReferenceProjectNextActionResult ?? startupReferenceTaskDestinationResult ?? startupReferenceTaskBackdateResult ?? startupTaskCompletionResult ?? startupTaskCompletionUndoResult
-        let recoveredTaskCompletion = recoveredHistoryRows ?? recoveredReference
-        let recoveredReminderCommands = startupReminderCompletionResult ?? startupReminderSnoozeResult
-        let recoveredCompletion = recoveredTaskCompletion ?? recoveredReminderCommands
-        let recoveredRowChanges = startupRowTaskFocusResult ?? startupRowTaskDatesResult ?? startupRowTaskDestinationResult ?? startupRowTaskBackdateResult ?? startupRowQuickStatusResult ?? startupInlineChecklistResult
-        let recoveredLists = recoveredRowChanges ?? recoveredCompletion
-            ?? startupInboxUndoResult ?? startupInboxResult ?? startupChecklistResult ?? startupTaskListSortResult
-            ?? recoveredManage ?? recoveredSomedaySections
-            ?? startupSomedaySectionMoveResult?.value
-        let recoveredProjectDelete = startupProjectTasksDeleteResult ?? startupProjectTasksDeleteUndoResult
-        let recoveredArchiveDelete = recoveredProjectDelete ?? startupArchivedTasksDeleteResult ?? startupArchivedTasksDeleteUndoResult
-        let recoveredInboxOrganize = startupInboxTasksOrganizeResult ?? startupInboxOrganizeDestinationCreateResult
-        let recoveredProjectOrganize = startupProjectOrganizeDestinationCreateResult ?? startupProjectTasksOrganizeResult
-        let recoveredProjectTags = startupProjectTasksAddTagResult ?? startupProjectTasksRemoveTagResult
-        let recoveredBulkTags = recoveredProjectTags ?? startupReferenceTasksRemoveTagResult ?? startupInboxTasksRemoveTagResult
-            ?? startupInboxTasksAddTagResult ?? startupReferenceTasksAddTagResult
-        let recoveredBulkMoves = startupProjectTasksMoveResult ?? startupInboxTasksMoveResult ?? startupReferenceTasksMoveResult
-            ?? recoveredArchiveDelete ?? startupArchivedTasksRestoreResult ?? startupArchivedTaskRestoreResult
-        let recoveredArchiveRestore = startupTrashItemsPurgeResult ?? startupTrashItemsRestoreResult
-            ?? recoveredProjectOrganize ?? recoveredInboxOrganize ?? recoveredBulkTags ?? recoveredBulkMoves
-        let recoveredDeleteRestore = recoveredArchiveRestore ?? startupTaskDeleteResult ?? startupProjectDeleteResult
-            ?? startupProjectDeleteUndoResult ?? startupProjectDuplicateResult ?? startupProjectLifecycleResult
-            ?? startupTrashTaskRestoreResult ?? startupTrashProjectRestoreResult
-        let recoveredTaskActions = startupChecklistMoveResult?.result ?? startupConversionResult?.result ?? recoveredDeleteRestore ?? startupTaskPromoteResult ?? startupBoardResult
-            ?? startupCalendarResult ?? startupMindSweepResult ?? startupReviewProjectTaskResult
-        guard let recovered = startupAttachmentSaveResult?.resultJSON ?? recoveredTaskActions
-            ?? recoveredProjects ?? recoveredFocus ?? recoveredLists ?? startupPomodoroResult else { return value }
+        guard let recovery = startupRecovery else { return value }
         guard var window = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any] else {
             throw HostFailure("Malformed startup window")
         }
-        let projectRecoveryMethod: String? = [
-            (startupProjectCreateResult, "projectCreateCommit"),
-            (startupProjectSectionCreateResult, "projectSectionCreateCommit"),
-            (startupProjectSectionRenameResult, "projectSectionRenameCommit"),
-            (startupProjectSectionDeleteResult, "projectSectionDeleteCommit"),
-            (startupProjectSectionOrderResult, "projectSectionOrderCommit"),
-            (startupAreaCreateResult, recoveringAreaCreateMethod ?? "areaCreateCommit"),
-            (startupAreaColorResult, "areaColorCommit"),
-            (startupAreaRenameResult, recoveringAreaRenameMethod ?? "areaRenameCommit"),
-            (startupAreaOrderResult, "areaOrderCommit"),
-            (startupAreaDeleteResult, recoveringAreaDeleteMethod ?? "areaDeleteCommit"),
-            (startupProjectFocusResult, "projectFocusCommit"),
-            (startupProjectRenameResult, "projectRenameCommit"),
-            (startupProjectFlowResult, "projectFlowCommit"),
-            (startupProjectTaskSortResult, "projectTaskSortCommit"),
-            (startupProjectTaskOrderResult, "projectTaskOrderCommit"),
-            (startupProjectNotesWriteResult, "projectNotesWriteCommit"),
-            (startupProjectTagsWriteResult, "projectTagsWriteCommit"),
-            (startupProjectAttachmentWriteResult, "projectAttachmentWriteCommit"),
-            (startupProjectFileRemoveWriteResult, "projectFileRemoveWriteCommit"),
-            (startupProjectStatusResult, "projectStatusCommit"),
-            (startupProjectDateResult, "projectDateCommit"),
-            (startupProjectAreaResult, "projectAreaCommit"),
-        ].first(where: { $0.0 != nil })?.1
-        let completionRecoveryMethod = startupRowTaskFocusResult != nil ? "rowTaskFocusCommit"
-            : startupRowTaskDatesResult != nil ? "rowTaskDatesCommit"
-            : startupRowTaskDestinationResult != nil ? "rowTaskDestinationCommit"
-            : startupRowTaskBackdateResult != nil ? "rowTaskBackdateCommit"
-            : startupRowQuickStatusResult != nil ? "rowQuickStatusCommit"
-            : startupInlineChecklistResult != nil ? "inlineChecklistCommit"
-            : startupReferenceProjectNextActionResult != nil ? "referenceProjectNextActionCommit"
-            : startupArchiveTaskCompletedAtResult != nil ? "archiveTaskCompletedAtCommit"
-            : startupDoneTaskCompletedAtResult != nil ? "doneTaskCompletedAtCommit"
-            : startupDoneTaskStatusResult != nil ? "doneTaskStatusCommit"
-            : startupReferenceTaskDestinationResult != nil ? "referenceTaskDestinationCommit"
-            : startupReferenceTaskBackdateResult != nil ? "referenceTaskBackdateCommit"
-            : startupTaskCompletionResult != nil ? "taskCompletionCommit"
-            : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit"
-            : startupReminderCompletionResult != nil ? "reminderCompletionCommit"
-            : startupReminderSnoozeResult != nil ? "reminderSnoozeCommit" : nil
-        let archiveMutationRecoveryMethod = startupProjectTasksDeleteResult != nil ? "projectTasksDeleteCommit"
-            : startupProjectTasksDeleteUndoResult != nil ? "projectTasksDeleteUndoCommit"
-            : startupArchivedTasksDeleteResult != nil ? "archivedTasksDeleteCommit"
-            : startupArchivedTasksDeleteUndoResult != nil ? "archivedTasksDeleteUndoCommit" : nil
-        let organizeRecoveryMethod = startupProjectOrganizeDestinationCreateResult != nil ? "projectOrganizeDestinationCreateCommit"
-            : startupProjectTasksOrganizeResult != nil ? "projectTasksOrganizeCommit"
-            : startupInboxTasksOrganizeResult != nil ? "inboxTasksOrganizeCommit"
-            : startupInboxOrganizeDestinationCreateResult != nil ? "inboxOrganizeDestinationCreateCommit" : nil
-        let historyRecoveryMethod = organizeRecoveryMethod ?? (startupTrashItemsPurgeResult != nil ? "trashItemsPurgeCommit" : startupTrashItemsRestoreResult != nil ? "trashItemsRestoreCommit" : startupReferenceTasksRemoveTagResult != nil ? "referenceTasksRemoveTagCommit" : startupProjectTasksRemoveTagResult != nil ? "projectTasksRemoveTagCommit" : startupInboxTasksRemoveTagResult != nil ? "inboxTasksRemoveTagCommit" : startupProjectTasksAddTagResult != nil ? "projectTasksAddTagCommit" : startupInboxTasksAddTagResult != nil ? "inboxTasksAddTagCommit" : startupReferenceTasksAddTagResult != nil ? "referenceTasksAddTagCommit" : startupProjectTasksMoveResult != nil ? "projectTasksMoveCommit" : startupInboxTasksMoveResult != nil ? "inboxTasksMoveCommit" : startupReferenceTasksMoveResult != nil ? "referenceTasksMoveCommit" : archiveMutationRecoveryMethod ?? (startupArchivedTasksRestoreResult != nil ? "archivedTasksRestoreCommit" : completionRecoveryMethod))
-        let aiSettingsRecoveryMethod: String? = startupAITextConfigurationResult != nil ? startupAITextConfigurationMethod
-            : startupAIRequestTimeoutResult != nil ? "iosAIRequestTimeoutCommit"
-            : startupAIReasoningEffortResult != nil ? "iosAIReasoningEffortCommit"
-            : startupAIGeminiThinkingBudgetResult != nil ? "iosAIGeminiThinkingBudgetCommit" : nil
-        window["recovery"] = ["method": historyRecoveryMethod ?? (startupArchivedTaskRestoreResult != nil ? "archivedTaskRestoreCommit"
-            : startupTaskDeleteResult != nil ? "taskDeleteCommit"
-            : startupProjectDeleteResult != nil ? "projectDeleteCommit"
-            : startupProjectDeleteUndoResult != nil ? "projectDeleteUndoCommit"
-            : startupProjectDuplicateResult != nil ? "projectDuplicateCommit"
-            : startupProjectLifecycleResult != nil ? "projectLifecycleCommit"
-            : startupTrashTaskRestoreResult != nil ? "trashTaskRestoreCommit"
-            : startupTrashProjectRestoreResult != nil ? "trashProjectRestoreCommit"
-            : startupTaskPromoteResult != nil ? "taskPromoteCommit"
-            : startupBoardResult != nil ? "boardCommit"
-            : startupCalendarResult != nil ? (recoveringCalendarMethod ?? "calendarComposerCommit")
-            : startupMindSweepResult != nil ? "mindSweepCommit"
-            : startupReviewProjectTaskResult != nil ? "weeklyReviewProjectTaskCommit"
-            : projectRecoveryMethod ?? (startupTaskFocusResult != nil ? "taskFocusCommit"
-                : startupFocusOrderResult != nil ? "focusOrderCommit"
-                : startupCalendarDeleteResult != nil ? "calendarDeleteCommit"
-                : startupCalendarUnscheduleResult != nil ? "calendarUnscheduleCommit"
-                : startupSavedSearchResult != nil ? "savedSearchCommit"
-                : startupFocusSavedFilterResult != nil ? "focusSavedFilterCommit"
-                : startupInboxUndoResult != nil ? "inboxUndoCommit" : startupInboxResult != nil ? "inboxPreparedCommit" : startupChecklistResult != nil ? "checklistPreparedCommit"
-                : startupTaskListSortResult != nil ? "taskListSortWrite"
-                : startupPersonCreateResult != nil ? "managePersonCreateCommit"
-                : startupAppLockResult != nil ? "appLockCommit"
-                : startupGtdWorkflowResult != nil ? "gtdWorkflowCommit"
-                : startupBackupDocumentResult != nil ? "backupDocumentCommit"
-                : startupDataSettingResult != nil ? "dataSetting"
-                : startupGettingStartedResult != nil ? "gettingStarted"
-                : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
-                : aiSettingsRecoveryMethod != nil ? aiSettingsRecoveryMethod!
-                : startupNotificationSettingResult != nil ? "notificationSettingCommit"
-                : startupDeviceCalendarSettingResult != nil ? "deviceCalendarSettingCommit"
-                : startupCalendarSubscriptionSettingResult != nil ? "calendarSubscriptionSettingCommit"
-                : startupCalendarSubscriptionAddResult != nil ? "calendarSubscriptionAddCommit"
-                : startupTaxonomyResult != nil ? "manageTaxonomyCommit"
-                : startupPersonEditResult != nil ? "managePersonEditCommit"
-                : startupPersonDeleteResult != nil ? "managePersonDeleteCommit"
-                : startupUnassignedAreaColorResult != nil ? "unassignedAreaColorWrite"
-                : startupSomedaySectionCreateResult != nil ? "somedaySectionCreateWrite"
-                : startupSomedaySectionRenameResult != nil ? "somedaySectionRenameWrite"
-                : startupSomedaySectionDeleteResult != nil ? "somedaySectionDeleteWrite"
-                : startupSomedaySectionOrderResult != nil ? "somedaySectionOrderWrite"
-                : startupSomedaySectionTaskResult != nil ? "somedaySectionTaskCommit"
-                : startupSomedaySectionMoveResult?.method ?? "focusGroupWrite")),
-                              "result": try NativeJSON.jsonObject(with: Data(recovered.utf8))]
-        if let conversion = startupConversionResult {
-            window["recovery"] = ["method": conversion.method,
-                "result": try NativeJSON.jsonObject(with: Data(conversion.result.utf8))]
-        }
-        if let move = startupChecklistMoveResult {
-            window["recovery"] = ["method": move.method,
-                "source": move.method == "taskChecklistMoveCommit" ? "checklistMove" : "checklistMoveUndo",
-                "result": try NativeJSON.jsonObject(with: Data(move.result.utf8))]
-        }
-        if startupRowQuickStatusResult != nil, var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = "rowQuickStatus"
-            window["recovery"] = recovery
-        }
-        if startupInlineChecklistResult != nil, var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = "inlineChecklist"
-            window["recovery"] = recovery
-        }
-        if startupReferenceTasksMoveResult != nil || startupReferenceTasksAddTagResult != nil || startupReferenceTasksRemoveTagResult != nil, var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = "reference"
-            window["recovery"] = recovery
-        }
-        if startupProjectTasksMoveResult != nil || recoveredProjectTags != nil || startupProjectTasksOrganizeResult != nil || startupProjectOrganizeDestinationCreateResult != nil, var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = "project"
-            window["recovery"] = recovery
-        }
-        if startupInboxTasksMoveResult != nil || startupInboxTasksAddTagResult != nil || startupInboxTasksRemoveTagResult != nil || recoveredInboxOrganize != nil, var recovery = window["recovery"] as? [String: Any] {
-            let statusListCommand = startupInboxTasksMoveResult != nil ? recoveringInboxTasksMoveCommand
-                : startupInboxTasksAddTagResult != nil ? recoveringInboxTasksAddTagCommand : nil
-            recovery["source"] = statusListCommand.map { statusListMoveSource($0) } ?? "inbox"
-            window["recovery"] = recovery
-        }
-        if let command = recoveringArchivedTasksDeleteCommand, archiveMutationRecoveryMethod != nil,
-           ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(historyBulkSource(command)), var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = historyBulkSource(command)
-            window["recovery"] = recovery
-        }
-        if let command = recoveringArchivedTasksRestoreCommand, startupArchivedTasksRestoreResult != nil,
-           historyBulkSource(command) == "done", var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = "done"
-            window["recovery"] = recovery
-        }
-        if startupDoneTaskStatusResult != nil, startupDoneTaskStatusSource == "reference",
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "doneTaskStatusCommit" {
-            recovery["source"] = "reference"
-            window["recovery"] = recovery
-        }
-        if startupReferenceProjectNextActionResult != nil, let source = startupReferenceProjectNextActionSource,
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "referenceProjectNextActionCommit" {
-            recovery["source"] = source
-            window["recovery"] = recovery
-        }
-        if startupRowTaskFocusResult != nil,
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "rowTaskFocusCommit" {
-            recovery["source"] = "rowFocus"
-            window["recovery"] = recovery
-        }
-        if startupRowTaskDatesResult != nil,
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "rowTaskDatesCommit" {
-            recovery["source"] = "rowDates"
-            window["recovery"] = recovery
-        }
-        if startupRowTaskDestinationResult != nil,
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "rowTaskDestinationCommit" {
-            recovery["source"] = "rowDestination"
-            window["recovery"] = recovery
-        }
-        if startupReferenceTaskDestinationResult != nil,
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "referenceTaskDestinationCommit" {
-
-            recovery["source"] = "reference"
-            window["recovery"] = recovery
-        }
-        if startupReferenceTaskBackdateResult != nil || startupRowTaskBackdateResult != nil,
-           var recovery = window["recovery"] as? [String: Any], ["referenceTaskBackdateCommit", "rowTaskBackdateCommit"].contains(recovery["method"] as? String ?? "") {
-            recovery["source"] = startupRowTaskBackdateResult != nil ? "row" : "reference"
-            window["recovery"] = recovery
-        }
-        if startupTaskCompletionSource == "reference",
-           var recovery = window["recovery"] as? [String: Any],
-           ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(recovery["method"] as? String ?? "") {
-            recovery["source"] = "reference"
-            window["recovery"] = recovery
-        }
-        if let source = startupTaskCompletionSource, ["board", "row"].contains(source), let requestID = startupTaskCompletionRequestID,
-           let recovery = window["recovery"] as? [String: Any],
-           let method = recovery["method"] as? String,
-           ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(method), let result = recovery["result"] {
-            window["recovery"] = ["method": method, "source": source, "requestId": requestID, "result": result]
-        }
-        if let saved = startupAttachmentSaveResult {
-            var recovery: [String: Any] = ["method": saved.method, "result": try NativeJSON.jsonObject(with: Data(saved.resultJSON.utf8))]
-            if let requestId = saved.requestId { recovery["requestId"] = requestId }
-            window["recovery"] = recovery
-        }
-        if let value = startupPomodoroResult { window["recovery"] = ["method": Self.pomodoroMethod, "result": try Self.pomodoroResult(value)] }
+        var result = try NativeJSON.jsonObject(with: Data(recovery.resultJSON.utf8))
+        if recovery.method == Self.pomodoroMethod { result = try Self.pomodoroResult(recovery.resultJSON) }
+        window["recovery"] = recovery.payload(result: result)
         let encoded = String(decoding: try JSONSerialization.data(withJSONObject: window, options: [.sortedKeys]), as: UTF8.self)
-        if startupAttachmentSaveResult != nil {
+        if [Self.ownedSaveMethod, Self.mixedSaveMethod].contains(recovery.method) {
             NSLog("Native iOS attachment recovery returned releaseCheck=v1.3.5/ios-attachment-recovery outcome=saved")
         }
-        startupAttachmentSaveResult = nil
-        startupBoardResult = nil
-        startupArchivedTaskRestoreResult = nil
-        startupArchivedTasksRestoreResult = nil
-        startupTrashItemsRestoreResult = nil
-        startupTrashItemsPurgeResult = nil
-        startupPomodoroResult = nil
-        startupInboxTasksMoveResult = nil
-        startupProjectTasksMoveResult = nil
-        startupReferenceTasksMoveResult = nil
-        startupInboxTasksAddTagResult = nil
-        startupProjectTasksAddTagResult = nil
-        startupInboxTasksRemoveTagResult = nil
-        startupProjectTasksRemoveTagResult = nil
-        startupInboxTasksOrganizeResult = nil
-        startupProjectTasksOrganizeResult = nil
-        startupInboxOrganizeDestinationCreateResult = nil
-        startupProjectOrganizeDestinationCreateResult = nil
-        startupReferenceTasksAddTagResult = nil
-        startupReferenceTasksRemoveTagResult = nil
-        startupArchivedTasksDeleteResult = nil
-        startupArchivedTasksDeleteUndoResult = nil
-        startupProjectTasksDeleteResult = nil
-        startupProjectTasksDeleteUndoResult = nil
-        startupTaskDeleteResult = nil
-        startupTaskCompletionResult = nil
-        startupTaskCompletionSource = nil
-        startupTaskCompletionRequestID = nil
-        startupRowQuickStatusResult = nil
-        startupInlineChecklistResult = nil
-        startupDoneTaskStatusResult = nil
-        startupReferenceTaskBackdateResult = nil
-        startupChecklistMoveResult = nil
-        startupConversionResult = nil
-        startupRowTaskFocusResult = nil
-        startupRowTaskDatesResult = nil
-        startupRowTaskDestinationResult = nil
-        startupRowTaskBackdateResult = nil
-        startupReferenceTaskDestinationResult = nil
-        startupReferenceProjectNextActionResult = nil
-        startupReferenceProjectNextActionSource = nil
-        startupDoneTaskStatusSource = nil
-        startupDoneTaskCompletedAtResult = nil
-        startupArchiveTaskCompletedAtResult = nil
-        startupTaskCompletionUndoResult = nil
-        startupProjectDeleteResult = nil
-        startupProjectDeleteUndoResult = nil
-        startupProjectDuplicateResult = nil
-        startupProjectLifecycleResult = nil
-        startupTrashTaskRestoreResult = nil
-        startupTrashProjectRestoreResult = nil
-        startupTaskPromoteResult = nil
-        startupCalendarResult = nil
-        startupMindSweepResult = nil
-        startupReviewProjectTaskResult = nil
-        startupProjectCreateResult = nil
-        startupProjectSectionCreateResult = nil
-        startupProjectSectionRenameResult = nil
-        startupProjectSectionDeleteResult = nil
-        startupProjectSectionOrderResult = nil
-        startupAppLockResult = nil
-        startupGtdWorkflowResult = nil
-        if startupBackupDocumentResult != nil { backupUnreturnedReply = nil }
-        startupBackupDocumentResult = nil
-        startupDataSettingResult = nil
-        startupGettingStartedResult = nil
-        startupGeneralPreferenceResult = nil
-        startupAITextConfigurationResult = nil; startupAITextConfigurationMethod = nil
-        startupAIRequestTimeoutResult = nil
-        startupAIReasoningEffortResult = nil
-        startupAIGeminiThinkingBudgetResult = nil
-        startupNotificationSettingResult = nil
-        startupDeviceCalendarSettingResult = nil
-        startupCalendarSubscriptionSettingResult = nil
-        startupCalendarSubscriptionAddResult = nil
-        startupReminderCompletionResult = nil
-        startupReminderSnoozeResult = nil
-        startupTaxonomyResult = nil
-        startupPersonEditResult = nil
-        startupPersonDeleteResult = nil
-        startupPersonCreateResult = nil
-        startupAreaCreateResult = nil
-        startupAreaColorResult = nil
-        startupAreaRenameResult = nil
-        startupAreaOrderResult = nil
-        startupAreaDeleteResult = nil
-        startupProjectFocusResult = nil
-        startupTaskFocusResult = nil
-        startupFocusOrderResult = nil
-        startupFocusSavedFilterResult = nil
-        startupSavedSearchResult = nil
-        startupCalendarUnscheduleResult = nil
-        startupCalendarDeleteResult = nil
-        startupProjectRenameResult = nil
-        startupProjectFlowResult = nil
-        startupProjectTaskSortResult = nil
-        startupProjectNotesWriteResult = nil
-        startupProjectTagsWriteResult = nil
-        startupProjectAttachmentWriteResult = nil
-        startupProjectFileRemoveWriteResult = nil
-        startupProjectStatusResult = nil
-        startupProjectDateResult = nil
-        startupProjectAreaResult = nil
-        startupInboxResult = nil
-        startupInboxUndoResult = nil
-        startupChecklistResult = nil
-        startupFocusGroupResult = nil
-        startupTaskListSortResult = nil
-        startupUnassignedAreaColorResult = nil
-        startupSomedaySectionCreateResult = nil
-        startupSomedaySectionRenameResult = nil
-        startupSomedaySectionDeleteResult = nil
-        startupSomedaySectionOrderResult = nil
-        startupSomedaySectionTaskResult = nil
-        startupSomedaySectionMoveResult = nil
+        if recovery.method == "backupDocumentCommit" { backupUnreturnedReply = nil }
+        startupRecovery = nil
         return encoded
+    }
+
+    private func rememberConfirmedStartupCommand(_ command: PendingCommand) {
+        switch command.method {
+        case "taskDeleteCommit", "taskDeleteUndoCommit": rememberConfirmedTaskDelete(command)
+        case "archivedTaskRestoreCommit": rememberConfirmedArchivedRestore(command)
+        case "taskCompletionCommit", "taskCompletionUndoCommit": rememberConfirmedTaskCompletion(command)
+        case "projectDeleteCommit": rememberConfirmedProjectDelete(command)
+        case "projectLifecycleCommit": rememberConfirmedProjectLifecycle(command)
+        default: break
+        }
+    }
+
+    private func projectStartupRecovery(_ command: PendingCommand, value: String, cancelRequestId: String?) throws -> NativeStartupRecovery? {
+        guard NativeStartupRecovery.methods.contains(command.method) || Self.somedayMoveCommits.contains(command.method)
+                || Self.aiTextConfigurationCommitMethods.contains(command.method)
+                || [Self.ownedSaveMethod, Self.mixedSaveMethod, Self.pomodoroMethod].contains(command.method) else { return nil }
+        var recovery = NativeStartupRecovery(method: command.method, resultJSON: value)
+        switch command.method {
+        case Self.ownedSaveMethod, Self.mixedSaveMethod:
+            let actual = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any]
+            recovery.requestId = actual?["cancellation"] is [String: Any] ? cancelRequestId : nil
+        case "inboxTasksMoveCommit", "inboxTasksAddTagCommit":
+            recovery.source = statusListMoveSource(command)
+        case "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "projectTasksDeleteCommit", "projectTasksDeleteUndoCommit":
+            let source = historyBulkSource(command)
+            if ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(source) { recovery.source = source }
+        case "archivedTasksRestoreCommit":
+            if historyBulkSource(command) == "done" { recovery.source = "done" }
+        case "doneTaskStatusCommit":
+            recovery.source = historyTaskStatusSource(command)
+        case "referenceProjectNextActionCommit":
+            recovery.source = referenceProjectNextActionSource(command)
+        case "taskCompletionCommit", "taskCompletionUndoCommit":
+            let source = taskCompletionSource(command)
+            if source == "reference" {
+                recovery.source = source
+            } else if let source, ["board", "row"].contains(source), let requestID = taskCompletionRequestID(command) {
+                recovery.source = source
+                recovery.requestId = requestID
+            }
+        default:
+            recovery.source = NativeStartupRecovery.fixedSources[command.method]
+        }
+        return recovery
     }
 
     func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String, cancellation: NativeAttachmentCancellation) throws -> String {
@@ -35419,7 +34731,7 @@ private final class Engine: @unchecked Sendable {
     func shutdown() {
         dispatchPrecondition(condition: .onQueue(queue))
         closed = true
-        startupAttachmentSaveResult = nil
+        startupRecovery = nil
         if let jobs = appleRemindersJobs { Task { await jobs.closeAndDrain() }; appleRemindersJobs = nil }
         releaseRuntime()
     }
@@ -35463,9 +34775,7 @@ private final class Engine: @unchecked Sendable {
         deviceCalendarSettingTurn = nil
         calendarSubscriptionSettingTurn = nil
         calendarAccessTurn = nil
-        startupDeviceCalendarSettingResult = nil
-        startupCalendarSubscriptionSettingResult = nil
-        startupCalendarSubscriptionAddResult = nil
+        startupRecovery = startupRecovery?.releasingRuntime()
         reminderOwnerAccess = false
         reminderSourceStale = false
         foregroundCleanupCancellation = nil
@@ -35493,13 +34803,6 @@ private final class Engine: @unchecked Sendable {
         encryptionUnlockTurn = nil
         started = false
         recoveryActivationPending = false
-        startupBoardResult = nil
-        startupRowQuickStatusResult = nil
-        startupInlineChecklistResult = nil
-        startupDoneTaskStatusResult = nil
-        startupReferenceTaskBackdateResult = nil
-        startupChecklistMoveResult = nil
-        startupConversionResult = nil
         confirmedChecklistMoveEnvelope = nil
         confirmedChecklistMoveUndoEnvelope = nil
         confirmedProjectToSectionEnvelope = nil
@@ -35507,30 +34810,9 @@ private final class Engine: @unchecked Sendable {
         confirmedRowTaskFocusEnvelope = nil
         confirmedRowTaskDatesEnvelope = nil
         confirmedRowTaskDestinationEnvelope = nil
-        startupRowTaskFocusResult = nil
-        startupRowTaskDatesResult = nil
-        startupRowTaskDestinationResult = nil
-        startupRowTaskBackdateResult = nil
-        startupReferenceTaskDestinationResult = nil
-        startupReferenceProjectNextActionResult = nil
-        startupReferenceProjectNextActionSource = nil
         referenceProjectNextActionOrigin = nil
-        startupDoneTaskStatusSource = nil
-        startupTaskCompletionSource = nil
-        startupTaskCompletionRequestID = nil
-        startupDoneTaskCompletedAtResult = nil
-        startupArchiveTaskCompletedAtResult = nil
-        startupTrashTaskRestoreResult = nil
-        startupTrashProjectRestoreResult = nil
-        startupCalendarResult = nil
-        startupMindSweepResult = nil
-        startupReviewProjectTaskResult = nil
-        startupInboxResult = nil
-        startupInboxUndoResult = nil
         confirmedInboxDecisionEnvelope = nil
         confirmedInboxUndoEnvelope = nil
-        startupChecklistResult = nil
-        startupFocusGroupResult = nil
         context = nil
         database?.close()
         database = nil
