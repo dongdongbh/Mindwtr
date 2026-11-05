@@ -145,7 +145,9 @@ final class SearchSnapshotHostTests: XCTestCase {
         catch let error as HostFailure { XCTAssertTrue(error.message.hasPrefix("INVALID_INPUT:")) }
         _ = try await core.searchSnapshot()
         XCTAssertEqual(try rows(), started); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-        await core.close(); await refused { try await core.searchSnapshot() }
+        await core.close()
+        do { _ = try await core.searchSnapshot(); XCTFail("Expected closed-host refusal") }
+        catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
     }
 
     func testMalformedProjectionIsReadonlyAndNextRequestRecovers() async throws {

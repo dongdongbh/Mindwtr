@@ -860,12 +860,12 @@ final class NativeDeviceKVTests: XCTestCase {
     }
 
     func testExactWriteAllowlistAndSecretRemoveOnlyAdmission() throws {
-        let removeOnly = ["@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1"]
+        let removeOnly = ["@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1", "@mindwtr_dropbox_tokens"]
         let denied = ["mindwtr-ai-provider-consent-v1", "mindwtr-ai-key_openai", "mindwtr-data", "gtd-data",
             "mindwtr-data:json-ahead-of-sqlite", "mindwtr-data:sqlite-json-reconcile-v1",
             "@mindwtr_attachment_presence_reconcile_v1_extra", "@mindwtr/file-sync-publication-reservations-v1",
             "mindwtr-external-calendars_extra", "mindwtr-system-calendar-settings_extra", "@mindwtr_background_sync_failure_state_v1",
-            "@mindwtr_background_sync_last_registered_interval", "@mindwtr_dropbox_last_rev",
+            "@mindwtr_background_sync_last_registered_interval", "@mindwtr_dropbox_last_rev_extra", "@mindwtr_dropbox_tokens_extra",
             "@mindwtr_cloudkit_change_token", "@mindwtr_cloudkit_seeded", "@mindwtr_cloudkit_zone_created",
             "@mindwtr_sync_backend_extra", "@MINDWTR_SYNC_BACKEND", "unknown"]
         let seedValues = Dictionary(uniqueKeysWithValues: (removeOnly + denied).map { ($0, "\u{FEFF}preserve 🧠") })
@@ -879,7 +879,7 @@ final class NativeDeviceKVTests: XCTestCase {
         let allowed = [backend, path, "@mindwtr_sync_path_bookmark", webdav, "@mindwtr_webdav_username",
             "@mindwtr_webdav_allow_insecure_http", "@mindwtr_webdav_allow_weak_fingerprint",
             "@mindwtr_cloud_provider", "@mindwtr_cloud_url", "@mindwtr_cloud_allow_insecure_http",
-            "@mindwtr_sync_encryption_state_v1", "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1",
+            "@mindwtr_sync_encryption_state_v1", "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1", "@mindwtr_dropbox_last_rev",
             "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
             "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars", "mindwtr-system-calendar-settings"]
         try store.multiSet(allowed.map { ($0, "opaque") })

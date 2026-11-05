@@ -210,7 +210,9 @@ final class ReminderPlanHostTests: XCTestCase {
         }
         await fulfillment(of: [entered], timeout: 5); task.cancel(); release.signal()
         await cancelled { try await task.value }
-        await value.close(); await cancelled { try await value.readReminderPlan() }
+        await value.close()
+        do { _ = try await value.readReminderPlan(); XCTFail("Expected closed-host refusal") }
+        catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
         let calls = await permission.calls; XCTAssertEqual(calls, 0)
         XCTAssertEqual(try Data(contentsOf: manifest), bytes); XCTAssertEqual(try markers().count, 0)
     }

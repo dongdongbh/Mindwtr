@@ -1004,15 +1004,17 @@ final class CoreHostTests: XCTestCase {
         reopenFaults.journalRemove = nil
         _ = try await reopened.start()
         XCTAssertEqual(commits, 1)
-        XCTAssertGreaterThan(taskWrites, 0)
+        XCTAssertEqual(taskWrites, 0)
         await reopened.close()
         let verify = try SQLiteBridge(url: database)
         let promoted = try verify.execute("SELECT * FROM tasks WHERE id = ?", parametersJSON: json([id]))
         verify.close()
         let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(promoted.utf8)) as? [[String: Any]])
+        XCTAssertEqual(task["status"] as? String, "next")
         XCTAssertEqual(rows.first?["status"] as? String, "next")
-        XCTAssertEqual(rows.first?["rev"] as? Int, (task["rev"] as? Int ?? 0) + 1)
-        XCTAssertEqual(rows.first?["updatedAt"] as? String, "2026-09-29T03:10:00.000Z")
+        XCTAssertEqual(rows.first?["rev"] as? Int, task["rev"] as? Int)
+        XCTAssertEqual(rows.first?["updatedAt"] as? String, "2026-09-26T23:50:00.000Z")
+        XCTAssertEqual(rows.first?["dueDate"] as? String, task["dueDate"] as? String)
         let settled = host(bundleURL: try bundleAt("2026-09-29T03:10:00.000Z", rejectPreparation: true))
         _ = try await settled.start()
         await settled.close()
@@ -4225,7 +4227,7 @@ final class CoreHostTests: XCTestCase {
         let completedProject = try XCTUnwrap((projectTail["items"] as? [[String: Any]])?.first)
         XCTAssertEqual(completedProject["id"] as? String, "archived-project")
         XCTAssertEqual(completedProject["struck"] as? Bool, true)
-        XCTAssertEqual(completedProject["indicatorColor"] as? String, "#123456")
+        XCTAssertEqual(completedProject["indicatorColor"] as? String, "#abcdef")
         for name in ["archive", "archiveTokens"] {
             await expectFailure("STALE_REVISION") { _ = try await read(name, ["params": params, "offset": 0, "limit": 50, "revision": revision + "-stale"]) }
             for malformed in ["[]", "null", "broken JSON"] {
@@ -4327,7 +4329,7 @@ final class CoreHostTests: XCTestCase {
             if kind == "task" { XCTAssertEqual(item["descriptionMarkdown"] as? String, "**Kept** note") }
         }
         XCTAssertEqual(items[1]["indicatorColor"] as? String, "#abcdef")
-        XCTAssertEqual(items[3]["indicatorColor"] as? String, "#123456")
+        XCTAssertEqual(items[3]["indicatorColor"] as? String, "#abcdef")
         await expectFailure("STALE_REVISION") { _ = try await read(["offset": 50, "limit": 50, "revision": revision + "-stale"]) }
         for invalid in [["offset": 1, "limit": 1] as [String: Any], ["offset": 0, "limit": 101], ["offset": -1, "limit": 1], ["offset": true, "limit": 1],
                         ["offset": 0, "limit": 1, "selected": ["taskIds": [7], "projectIds": []]], ["offset": 0, "limit": 1, "selected": NSNull()]] {
@@ -4917,7 +4919,7 @@ final class CoreHostTests: XCTestCase {
         let view = try await read("focus", ["limit": 50, "controls": [:]])
         let controlModel = try XCTUnwrap(view["controls"] as? [String: Any])
         let controls = try XCTUnwrap(controlModel["state"] as? [String: Any])
-        let revision = try XCTUnwrap(view["revision"] as? String)
+        var revision = try XCTUnwrap(view["revision"] as? String)
         let sheet = try XCTUnwrap(controlModel["filterSheet"] as? [String: Any])
         XCTAssertEqual(diagnostics, 0)
         for list in ["tokens", "projects"] {
@@ -4955,6 +4957,10 @@ final class CoreHostTests: XCTestCase {
             var changedInput = input
             changedInput["controls"] = try XCTUnwrap((applied["controls"] as? [String: Any])?["state"])
             await expectFailure("STALE_REVISION") { _ = try await read("focusControls", changedInput) }
+            await expectFailure("STALE_REVISION") { _ = try await read("focusControls", input) }
+            let reread = try await read("focus", ["limit": 50, "controls": controls])
+            revision = try XCTUnwrap(reread["revision"] as? String)
+            input["revision"] = revision
             input["query"] = "not-present"
             let empty = try await read("focusControls", input)
             XCTAssertEqual(empty["total"] as? Int, 0)
@@ -10309,7 +10315,7 @@ final class CoreHostTests: XCTestCase {
         let session = try XCTUnwrap(opened["sessionId"] as? String)
         var view = try XCTUnwrap(opened["view"] as? [String: Any])
         XCTAssertEqual(view["taskId"] as? String, id)
-        for _ in 0..<2 {
+        for _ in 0..<1 {
             let flow = try object(await core.call("inboxCommit", argumentsJSON: json([json([
                 "sessionId": session, "taskId": id, "step": try XCTUnwrap(view["step"] as? String),
                 "decision": ["choice": "project"], "requestId": UUID().uuidString.lowercased(),
@@ -10723,7 +10729,7 @@ final class CoreHostTests: XCTestCase {
         let session = try XCTUnwrap(opened["sessionId"] as? String)
         var view = try XCTUnwrap(opened["view"] as? [String: Any])
         XCTAssertEqual(view["taskId"] as? String, id)
-        for choice in ["project", "single"] {
+        for choice in ["next"] {
             let flow = try object(await core.call("inboxCommit", argumentsJSON: json([json([
                 "sessionId": session, "taskId": id, "step": try XCTUnwrap(view["step"]),
                 "decision": ["choice": choice], "requestId": UUID().uuidString.lowercased(),
@@ -10771,7 +10777,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         let settled = try diagnostics197FullSnapshot()
         await core.close()
-        let cold = host(); _ = try await cold.start()
+        let cold = host(bundleURL: try dateBundle(at: "2026-11-03T12:00:00.000Z")); _ = try await cold.start()
         let reopened = try object(await cold.call("editorModel", argumentsJSON: json([id])))
         XCTAssertEqual((reopened["draft"] as? [String: Any])?["projectId"] as? String, "destination-project-a")
         XCTAssertEqual((reopened["draft"] as? [String: Any])?["sectionId"] as? String, "destination-section-a")
@@ -10803,7 +10809,7 @@ final class CoreHostTests: XCTestCase {
             let session = try XCTUnwrap(opened["sessionId"] as? String)
             var view = try XCTUnwrap(opened["view"] as? [String: Any])
             XCTAssertEqual(view["taskId"] as? String, id)
-            for choice in ["project", "single"] {
+            for choice in ["next"] {
                 let flow = try object(await core.call("inboxCommit", argumentsJSON: json([json([
                     "sessionId": session, "taskId": id, "step": try XCTUnwrap(view["step"]),
                     "decision": ["choice": choice], "requestId": UUID().uuidString.lowercased(),
@@ -10840,7 +10846,7 @@ final class CoreHostTests: XCTestCase {
             XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
             let settled = try diagnostics197FullSnapshot()
             await core.close()
-            let cold = host(); _ = try await cold.start()
+            let cold = host(bundleURL: try dateBundle(at: "2026-11-03T12:00:00.000Z")); _ = try await cold.start()
             let editor = try object(await cold.call("editorModel", argumentsJSON: json([id])))
             XCTAssertEqual((editor["draft"] as? [String: Any])?["dueDate"] as? String, expected)
             XCTAssertEqual(try diagnostics197FullSnapshot(), settled)
@@ -11182,7 +11188,17 @@ final class CoreHostTests: XCTestCase {
         let changed: Set<String> = ["status", "completedAt", "timeSpentMinutes", "isFocusedToday", "focusOrder", "recurrence", "rev", "revBy", "updatedAt"]
         XCTAssertEqual(try datePreservedFields(saved, excluding: changed), try datePreservedFields(original, excluding: changed))
         let after = try snapshot()
-        XCTAssertEqual(Array(after.dropFirst()), Array(before.dropFirst()))
+        for index in after.indices.dropFirst() where index != 5 { XCTAssertEqual(after[index], before[index]) }
+        func settingsData(_ table: String) throws -> [String: Any] {
+            try object(XCTUnwrap((JSONSerialization.jsonObject(with: Data(table.utf8)) as? [[String: Any]])?.first?["data"] as? String))
+        }
+        var expectedSettings = try settingsData(before[5])
+        let retainedRevBy = try XCTUnwrap(saved["revBy"] as? String)
+        let retainedAt = try XCTUnwrap(saved["updatedAt"] as? String)
+        let retainedContext: [String: Any] = ["token": "@desk", "rev": 1, "revBy": retainedRevBy, "updatedAt": retainedAt]
+        let retainedTag: [String: Any] = ["token": "#keep", "rev": 1, "revBy": retainedRevBy, "updatedAt": retainedAt]
+        expectedSettings["taxonomy"] = ["contexts": [retainedContext], "tags": [retainedTag]]
+        XCTAssertEqual(try json(settingsData(after[5])), try json(expectedSettings))
         let oldTasks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(before[0].utf8)) as? [[String: Any]])
         let newTasks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(after[0].utf8)) as? [[String: Any]])
         let siblingIDs = Set(oldTasks.compactMap { $0["id"] as? String }.filter { $0 != id })
@@ -22857,7 +22873,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(targetAfter["areaId"] as? String, areaID)
         XCTAssertEqual(targetAfter["areaTitle"] as? String, "Details Area")
         XCTAssertEqual(targetAfter["rev"] as? Int, (targetBefore["rev"] as? Int ?? 0) + 1)
-        for (field, value) in targetBefore where !["areaId", "areaTitle", "orderNum", "rev", "revBy", "updatedAt"].contains(field) {
+        XCTAssertEqual(targetAfter["color"] as? String, "#ef4444")
+        for (field, value) in targetBefore where !["areaId", "areaTitle", "color", "orderNum", "rev", "revBy", "updatedAt"].contains(field) {
             XCTAssertEqual(try json([targetAfter[field] ?? NSNull()]), try json([value]), field)
         }
         XCTAssertEqual(try json(projectRows().filter { $0["id"] as? String != "focus-target" }), peersBefore)
@@ -23066,7 +23083,16 @@ final class CoreHostTests: XCTestCase {
         let saved = try SQLiteBridge(url: database)
         let after = try nineTableSnapshot(saved)
         saved.close()
-        for index in before.indices where index != 1 { XCTAssertEqual(after[index], before[index]) }
+        for index in before.indices where index != 1 && index != 5 { XCTAssertEqual(after[index], before[index]) }
+        func settingsData(_ table: String) throws -> [String: Any] {
+            try object(XCTUnwrap((JSONSerialization.jsonObject(with: Data(table.utf8)) as? [[String: Any]])?.first?["data"] as? String))
+        }
+        var expectedSettings = try settingsData(before[5])
+        let tagRevBy = try XCTUnwrap(targetAfter["revBy"] as? String)
+        let tagUpdatedAt = try XCTUnwrap(targetAfter["updatedAt"] as? String)
+        let newTag: [String: Any] = ["token": "#new", "rev": 1, "revBy": tagRevBy, "updatedAt": tagUpdatedAt]
+        expectedSettings["taxonomy"] = ["tags": [newTag]]
+        XCTAssertEqual(try json(settingsData(after[5])), try json(expectedSettings))
         XCTAssertEqual(diagnostics, ["projectTagsWriteApplied"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         var writes = 0, journals = 0

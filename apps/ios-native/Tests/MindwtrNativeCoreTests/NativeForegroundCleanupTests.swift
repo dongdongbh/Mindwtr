@@ -326,7 +326,7 @@ final class NativeForegroundCleanupTests: XCTestCase {
             do {
                 _ = try await value.foregroundSync(command: "syncNow", requestJSON: outer)
                 XCTFail("A closed host must refuse before cleanup admission")
-            } catch is CancellationError {} catch { XCTFail("Expected cancellation before dispatcher admission") }
+            } catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable, "Expected closed-host refusal before dispatcher admission") }
             let cold = core(); _ = try await cold.start()
             XCTAssertEqual(try Data(contentsOf: target), replacement); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
             XCTAssertEqual(try rows(), before); await cold.close()

@@ -328,7 +328,8 @@ final class ReminderEffectsHostTests: XCTestCase {
         await port.releaseAdd(); await closing.value; await cancelled { try await task.value }
         let events = await port.mutations, pending = try await port.pending(namespace: namespace)
         XCTAssertEqual(events.map(\.operation), ["add"]); XCTAssertEqual(pending.count, 1); XCTAssertEqual(try markers().count, 0)
-        await cancelled { try await value.reconcileReminders() }
+        do { _ = try await value.reconcileReminders(); XCTFail("Expected closed-host refusal") }
+        catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
     }
     func testConcurrentCycleAndGenericPrivateSelectorsCannotOverlapEffectsOwner() async throws {
         let value = try await seed(), entered = expectation(description: "Single effects owner")

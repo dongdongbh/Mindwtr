@@ -61,7 +61,7 @@ final class NativeBoardMoveTests: XCTestCase {
     }
 
     private func assertBoardFixtureSettings(_ before: [String: Any], actual: [String: Any],
-        taskAfter: [String: Any], operationStartedAt: Date, operationEndedAt: Date,
+        taskAfter: [String: Any], operationStartedAt: Date, operationEndedAt: Date, retainsTokens: Bool,
         file: StaticString = #filePath, line: UInt = #line) throws -> [String: Any] {
         let device = try XCTUnwrap(before["deviceId"] as? String, file: file, line: line)
         XCTAssertFalse(device.isEmpty, file: file, line: line)
@@ -82,13 +82,14 @@ final class NativeBoardMoveTests: XCTestCase {
             let encoded = try XCTUnwrap(taskAfter[field] as? String, file: file, line: line)
             let assigned = try JSONSerialization.jsonObject(with: Data(encoded.utf8))
             XCTAssertEqual(try json(assigned), try json([token]), file: file, line: line)
+            guard retainsTokens else { continue }
             var rows = taxonomy[field] == nil ? [] : try XCTUnwrap(taxonomy[field] as? [[String: Any]], file: file, line: line)
             if !rows.contains(where: { ($0["token"] as? String)?.lowercased() == token }) {
                 rows.append(["token": token, "rev": 1, "revBy": device, "updatedAt": at])
             }
             taxonomy[field] = rows
         }
-        expected["taxonomy"] = taxonomy
+        if retainsTokens { expected["taxonomy"] = taxonomy }
         XCTAssertEqual(try json(actual), try json(expected), file: file, line: line)
         return expected
     }
@@ -173,7 +174,7 @@ final class NativeBoardMoveTests: XCTestCase {
             XCTAssertEqual(try storedTask(id)["status"] as? String, status)
             XCTAssertEqual(try json(storedTask(id + "-protected")), try json(protected))
             expectedSettings = try assertBoardFixtureSettings(expectedSettings, actual: calendarPreferenceSettings(),
-                taskAfter: storedTask(id), operationStartedAt: operationStartedAt, operationEndedAt: operationEndedAt)
+                taskAfter: storedTask(id), operationStartedAt: operationStartedAt, operationEndedAt: operationEndedAt, retainsTokens: false)
             let attachments = try XCTUnwrap(NativeJSON.jsonObject(with:
                 Data(try XCTUnwrap(storedTask(id)["attachments"] as? String).utf8)) as? [[String: Any]])
             XCTAssertEqual(try json(attachments), try json(initialAttachments))
@@ -343,9 +344,13 @@ final class NativeBoardMoveTests: XCTestCase {
             _ = try await core.call("boardAction", argumentsJSON: boardMovePayload(core, taskID: id, status: status))
             let operationEndedAt = Date()
             expectedSettings = try assertBoardFixtureSettings(expectedSettings, actual: calendarPreferenceSettings(),
-                taskAfter: storedTask(id), operationStartedAt: operationStartedAt, operationEndedAt: operationEndedAt)
+                taskAfter: storedTask(id), operationStartedAt: operationStartedAt, operationEndedAt: operationEndedAt, retainsTokens: false)
             let before = try storedTask(id), request = try await boardCompletionRequest(core, taskID: id)
+            let completionStartedAt = Date()
             let reply = try object(await core.call("taskCompletion", argumentsJSON: json([json(request)])))
+            let completionEndedAt = Date()
+            expectedSettings = try assertBoardFixtureSettings(expectedSettings, actual: calendarPreferenceSettings(),
+                taskAfter: storedTask(id), operationStartedAt: completionStartedAt, operationEndedAt: completionEndedAt, retainsTokens: true)
             XCTAssertEqual(Set(reply.keys), Set(["id", "completion"]))
             XCTAssertEqual(reply["id"] as? String, id)
             let notice = try XCTUnwrap(reply["completion"] as? [String: Any])
@@ -668,7 +673,7 @@ final class NativeBoardMoveTests: XCTestCase {
             XCTAssertEqual(try json(attachments), try json(beforeAttachments))
             XCTAssertEqual(try json(storedTask(id + "-protected")), try json(protected))
             let expectedSettings = try assertBoardFixtureSettings(settings, actual: calendarPreferenceSettings(),
-                taskAfter: after, operationStartedAt: operationStartedAt, operationEndedAt: operationEndedAt)
+                taskAfter: after, operationStartedAt: operationStartedAt, operationEndedAt: operationEndedAt, retainsTokens: false)
             XCTAssertEqual(markers, 1); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
             await core.close()
             let cold = host(); _ = try await cold.start()

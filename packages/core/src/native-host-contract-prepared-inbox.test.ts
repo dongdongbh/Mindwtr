@@ -325,7 +325,7 @@ describe('native prepared Process Inbox writer', () => {
         const owner = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
         for (const edit of [
             { type: 'setPickedDate', field, day: '2030-07-21' },
-            { type: 'setTime', field, time: '17:35' },
+            { type: 'setTime', field, value: '17:35' },
             { type: 'setPickedDate', field, day: '2030-07-22' },
         ] as const) view = ok(host.getInboxProcessingStep({ ...owner, edit }));
         if (field === 'followUp') view = ok(host.getInboxProcessingStep({ ...owner, edit: { type: 'set', field: 'delegateWho', value: 'Alice' } }));

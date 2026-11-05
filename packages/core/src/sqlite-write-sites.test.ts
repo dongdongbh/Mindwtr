@@ -38,6 +38,8 @@ const ALLOWED: Record<string, Record<string, number>> = {
 
         'NativeReceiptSqliteAdapter.readDurableReceipt': 3,
 
+        'NativeReceiptSqliteAdapter.readWatchPomodoroPlan': 4,
+
         'NativeReceiptSqliteAdapter.beforeCommit': 3,
 
         'NativeReceiptSqliteAdapter.commitReceiptOnlyNow': 4,

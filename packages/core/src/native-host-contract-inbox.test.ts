@@ -178,7 +178,7 @@ describe('native host contract: Process Inbox', () => {
             sessionId: view.sessionId, taskId: view.taskId, step: view.step, decision: { choice }, requestId: generateUUID(),
         })).view!; };
         if (mode === 'guided') { await choose('actionable'); await choose('no'); await choose('defer'); await choose('single'); }
-        else { await choose('project'); await choose('single'); }
+        else await choose('next');
         const request = () => ({ sessionId: view.sessionId, taskId: view.taskId, step: view.step });
         view = ok(host.getInboxProcessingStep({ ...request(), edit: { type: 'selectProject', value: 'p-launch' } }));
         expect(view.project?.sections?.options.map((option) => option.edit)).toEqual([
@@ -242,9 +242,9 @@ describe('native host contract: Process Inbox', () => {
         const request = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
         if (field === 'followUp') view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'delegateWho', value: 'Alice' } }));
         view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setPickedDate', field, day: '2030-07-21' } }));
-        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field, time: '17:35' } }));
+        view = ok(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field, value: '17:35' } }));
         expect(view.draft[field]).toEqual({ date: '2030-07-21', dateOnly: false, time: '17:35' });
-        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field, time: '24:01' } }))
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field, value: '24:01' } }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         const input = { ...request, decision: { choice: 'fileIt' }, requestId: generateUUID() };
         const prepared = ok(host.inboxCommitPrepare(input));
@@ -267,22 +267,25 @@ describe('native host contract: Process Inbox', () => {
             view = ok(host.getInboxProcessingStep({ ...request, edit: value }));
         };
         edit({ type: 'setPickedDate', field: 'dueDate', day: '2030-07-21' });
-        edit({ type: 'setTime', field: 'dueDate', time: '00:05' });
+        edit({ type: 'setTime', field: 'dueDate', value: '00:05' });
         edit({ type: 'setPickedDate', field: 'dueDate', day: '2030-07-22' });
         expect(view.draft.dueDate).toMatchObject({ date: '2030-07-22', time: '00:05' });
         edit({ type: 'setDateOnly', field: 'dueDate', value: true });
         expect(view.draft.dueDate).toEqual({ date: '2030-07-22', dateOnly: true });
-        edit({ type: 'setTime', field: 'dueDate', time: '23:55' });
+        edit({ type: 'setTime', field: 'dueDate', value: '23:55' });
         edit({ type: 'setDate', field: 'dueDate', value: null });
         expect(view.draft.dueDate).toBeNull();
         const legacy = ok(host.startInboxProcessing()).view!;
         expect(legacy.draft.dueDate?.time).toBeUndefined();
-        expect(host.getInboxProcessingStep({ sessionId: legacy.sessionId, taskId: legacy.taskId, step: legacy.step,
-            edit: { type: 'setTime', field: 'dueDate', time: '11:30' } }))
+        const legacyRequest = { sessionId: legacy.sessionId, taskId: legacy.taskId, step: legacy.step };
+        expect(host.getInboxProcessingStep({ ...legacyRequest, edit: { type: 'setTime', field: 'dueDate', time: '11:30' } as never }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.getInboxProcessingStep({ ...legacyRequest, edit: { type: 'setPickedDate', field: 'dueDate', day: '2030-07-23' } }).ok).toBe(true);
+        expect(host.getInboxProcessingStep({ ...legacyRequest, edit: { type: 'setTime', field: 'dueDate', value: '11:30' } }))
+            .toMatchObject({ ok: true, value: { draft: { dueDate: { date: '2030-07-23', dateOnly: false, time: '11:30' } } } });
     });
 
-    it('keeps an untouched stored timestamp exact in detailed processing and formats picked clocks in 12/24 hours', async () => {
+    it('keeps an untouched stored timestamp exact in detailed processing and labels a picked clock as RN does in 12/24 hours', async () => {
         freezeClock();
         const { host } = await openHost({ ...scenario('start later'), taskIds: ['inbox-b'] });
         const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
@@ -305,13 +308,12 @@ describe('native host contract: Process Inbox', () => {
         view = ok(await host.commitInboxProcessingStep({ sessionId: view.sessionId, taskId: view.taskId,
             step: view.step, decision: { choice: 'later' }, requestId: generateUUID() })).view!;
         const formatRequest = { sessionId: view.sessionId, taskId: view.taskId, step: view.step };
-        view = ok(host.getInboxProcessingStep({ ...formatRequest, edit: { type: 'setTime', field: 'startTime', time: '17:35' } }));
+        view = ok(host.getInboxProcessingStep({ ...formatRequest, edit: { type: 'setTime', field: 'startTime', value: '17:35' } }));
         for (const timeFormat of ['12h', '24h']) {
             useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, timeFormat } });
             const current = ok(host.getInboxProcessingStep(formatRequest));
-            const formatter = createDateFormatter({ language: 'en', timeFormat });
-            expect(current.dateRow?.clock?.label).toBe(formatter(`${current.draft.startTime!.date}T17:35`, 'p'));
-            expect(current.dateRow?.clock?.timeFormat).toBe(timeFormat);
+            expect(current.dateRow?.time).toEqual({ label: '17:35', hour: 17, minute: 35, edit: { type: 'setTime', field: 'startTime' } });
+            expect(current.dateRow?.display).toBe(`${createDateFormatter({ language: 'en', timeFormat })(current.draft.startTime!.date, 'P')} 17:35`);
         }
     });
 
@@ -336,7 +338,7 @@ describe('native host contract: Process Inbox', () => {
             value: { view: { taskId: view.taskId, step: view.step, draft: { title: 'Durable editor title' } } } });
     });
 
-    it('keeps legacy section-task keysets exact and rebases the saved section in detailed processing', async () => {
+    it('carries the saved section with or without includeDetails and rebases it in detailed processing', async () => {
         freezeClock();
         const { host } = await openHost(scenario('guided next action'));
         const ok = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
@@ -348,10 +350,12 @@ describe('native host contract: Process Inbox', () => {
         await useTaskStore.getState().updateTask('inbox-a', { projectId: 'p-launch', sectionId: 'section-kept' });
         await flushPendingSave();
         const legacy = ok(host.startInboxProcessing()).view!;
-        expect(legacy.draft).not.toHaveProperty('sectionId');
-        expect(legacy.project?.sections).toBeUndefined();
+        expect(legacy.draft.sectionId).toBe('section-kept');
+        expect(legacy.project).toBeNull();
         let detailed = ok(host.startInboxProcessing({ includeDetails: true })).view!;
         expect(detailed.draft.sectionId).toBe('section-kept');
+        expect(detailed.draft).toEqual(legacy.draft);
+        expect(detailed.project).toBeNull();
         const model = ok(host.getTaskEditorModel({ id: detailed.taskId }));
         ok(await host.saveTaskDraft({ id: detailed.taskId, base: { title: model.draft.title }, patch: { title: 'New saved title' } }));
         detailed = ok(host.reloadInboxProcessingTask({ sessionId: detailed.sessionId, taskId: detailed.taskId, step: detailed.step })).view!;

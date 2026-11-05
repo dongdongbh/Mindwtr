@@ -1103,22 +1103,20 @@ extension ProjectFileDownloadHostTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try assertNoTaskOwner()
         await cold.close()
     }
-    func testDropboxSelectedProjectNotFoundUsesMetadataOnlyPrivateModeAndColdProof() async throws {
+    func testDropboxSelectedProjectNotFoundIsUnavailableAndLeavesTheRowWithoutAJournal() async throws {
         try await seed(); try dropboxSelectedSettings()
         let fixture = NativeDropboxSelectedHTTPFixture(path: "/attachments/" + attachmentID + ".txt", bytes: bytes); fixture.notFound = true
         let core = try dropboxSelectedHost(fixture); _ = try await core.start()
-        let input = try await request(core), other = try others(), fired = await inject(core, .afterIntent)
-        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
-        XCTAssertTrue(fired()); XCTAssertEqual(fixture.counts, [1, 1, 0])
-        let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
-        XCTAssertEqual(retained["version"] as? Int, 2); XCTAssertEqual(retained["outcome"] as? String, "unrecoverable"); XCTAssertNil(retained["source"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try others(), other)
+        let input = try await request(core), before = try rows(), other = try others(), fired = await inject(core, .afterIntent)
+        let response = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+        let value = try XCTUnwrap(response["value"] as? [String: Any])
+        XCTAssertEqual(value["status"] as? String, "unavailable"); XCTAssertTrue(value["update"] is NSNull)
+        XCTAssertFalse(fired()); XCTAssertEqual(fixture.counts, [1, 1, 0]); XCTAssertEqual(try rows(), before)
+        XCTAssertNil(try selected()["deletedAt"]); XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try others(), other); try assertNoTaskOwner()
         await core.close()
-        let cold = host(); try await retainedStart(cold)
-        let result = try object(await cold.recoverProjectFileAvailability(requestId: id))
-        XCTAssertEqual(result["status"] as? String, "unrecoverable"); XCTAssertEqual(fixture.counts, [1, 1, 0])
-        XCTAssertNotNil(try selected()["deletedAt"] as? String); XCTAssertEqual(try others(), other)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); try assertNoTaskOwner()
+        let cold = host(); _ = try await cold.start()
+        XCTAssertEqual(fixture.counts, [1, 1, 0]); XCTAssertEqual(try rows(), before); XCTAssertEqual(try others(), other)
         await cold.close()
     }
 }
