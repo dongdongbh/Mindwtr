@@ -1,7 +1,6 @@
 #if DEBUG && targetEnvironment(simulator)
 import Foundation
 
-/// Isolated UI fixtures use the real sync engine without an iCloud account or network.
 actor NativeCloudKitFixture {
     private let account: String
     private var records: [String: String] = [:]

@@ -835,7 +835,6 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     io.coordinate = { url, body in
       counts.increment("coordinate")
       if counts.count("coordinate") == 1 { body(url) }
-      // The missing-file operation never enters its root coordinator.
     }
     let reader = owner(root, counts, access: io), handle = try await reader.open()
     await refuses { _ = try await reader.read("missing", using: handle) }
@@ -948,7 +947,6 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
                      "Awaited close returned while coordinated IO was still entered")
     }
     XCTAssertEqual(closeStarted.wait(timeout: .now() + 5), .success)
-    // The read barrier controls the race; this bounded completion wait is not an IO-scheduling sleep.
     XCTAssertEqual(closed.wait(timeout: .now() + 0.05), .timedOut)
     XCTAssertEqual(counts.count("scope-stop"), 0)
     let competing = SyncFileLockEngine(); defer { competing.drain() }
@@ -974,7 +972,6 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     await refuses { _ = try await reader.read("late", using: handle) }
   }
 
-  // Two explicitly selected test processes retain these fixtures between orderly closes.
   private let restartQuarantine = ".mindwtr-et-q-restart-observed"
   private let restartSentinel = "unrelated-sentinel.bin"
 
@@ -1037,7 +1034,6 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
 
   func testOrderlyRestartPrepareArtifact() async throws {
     let context = try restartEnvironment("prepare")
-    // No teardown deletion: process B must see the exact native-produced endpoint.
     try FileManager.default.createDirectory(at: context.root, withIntermediateDirectories: false)
     var cases = [[String: Any]]()
     for label in ["missing-primary", "valid-primary"] {
@@ -1093,7 +1089,6 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     try JSONSerialization.data(withJSONObject: artifact, options: [.sortedKeys]).write(to: context.artifact, options: [.withoutOverwriting])
   }
 
-  /// Optional artifact is produced by actual owner IO, never a replacement fixture transcript.
   func testSharedReadPolicyArtifactComesFromActualOwnerResults() async throws {
     let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
     let document = Data(#"{"tasks":[],"projects":[],"sections":[],"areas":[],"settings":{}}"#.utf8)
@@ -1114,7 +1109,6 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
       let reader = owner(root, counts, access: io), handle = try await reader.open()
       let listing = try await reader.list(using: handle)
       var files = [[String: Any]]()
-      // Capture actual stat/absence before the deliberately failed read closes its owner.
       for name in names {
         let entry = try await reader.metadata(name, using: handle)
         files.append(["name": name, "exists": entry != nil, "size": entry?.byteCount ?? 0])

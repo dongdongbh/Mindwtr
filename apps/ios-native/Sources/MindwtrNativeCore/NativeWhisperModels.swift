@@ -46,7 +46,6 @@ struct NativeWhisperModelDiagnostic: Sendable {
     }
 }
 
-/// Only the private shared-catalog projection supplies production specifications.
 struct NativeWhisperModelSpec: Sendable {
     let id: String
     let fileName: String
@@ -87,7 +86,6 @@ struct NativeWhisperModelSpec: Sendable {
     }
 }
 
-/// The store retains the descriptor and named generation until explicit engine/context release.
 final class NativeWhisperModelLease: @unchecked Sendable {
     let url: URL
     private let lock = NSLock()
@@ -107,7 +105,6 @@ final class NativeWhisperModelLease: @unchecked Sendable {
     func validate() async throws {
         guard let body = validation() else { throw NativeWhisperModelError.unavailable }; try await body()
     }
-    /// Caller owns the duplicate. Its shared offset starts at zero; loaders can use pread with a local offset.
     func duplicateDescriptor() async throws -> Int32 {
         guard let body = duplication() else { throw NativeWhisperModelError.unavailable }; return try await body()
     }
@@ -115,7 +112,6 @@ final class NativeWhisperModelLease: @unchecked Sendable {
     deinit { if let body = takeRelease() { Task { await body() } } }
 }
 
-/// One file lane and one root lock own publication, inspection and active decoder leases.
 final class NativeWhisperModelStore: @unchecked Sendable {
     private struct Generation: Equatable {
         let device: UInt64, inode: UInt64, size: Int64, mode: mode_t
@@ -323,7 +319,6 @@ final class NativeWhisperModelStore: @unchecked Sendable {
         }
     }
 
-    /// Cancels the active operation, waits for URLSession terminal/invalidation and exact stage cleanup, and remains reusable.
     func cancelAndDrain() async {
         await withCheckedContinuation { continuation in
             queue.async {
@@ -332,7 +327,6 @@ final class NativeWhisperModelStore: @unchecked Sendable {
             }
         }
     }
-    /// A busy lease leaves the store closed to new work; release it and retry close to release the root lock.
     func close() async throws {
         try await files { self.closed = true }
         await cancelAndDrain()
@@ -407,12 +401,10 @@ final class NativeWhisperModelStore: @unchecked Sendable {
         try requireRoot()
         guard Darwin.renameatx_np(rootFD, name, directory, "file", UInt32(RENAME_EXCL)) == 0 else { throw NativeWhisperModelError.invalidModel }
         var claimed = stat()
-        // Rename can update ctime. The retained FD still proves which inode was claimed.
         guard let retained = try? regular(descriptor), Darwin.fstatat(directory, "file", &claimed, AT_SYMLINK_NOFOLLOW) == 0,
               claimed.st_mode & S_IFMT == S_IFREG, claimed.st_nlink == 1, Generation(claimed) == retained,
               retained.device == generation.device, retained.inode == generation.inode, retained.size == generation.size,
               retained.mode == generation.mode, retained.modified == generation.modified, retained.modifiedNanos == generation.modifiedNanos else {
-            // An intervening public-name replacement is restored without overwriting another entry, or preserved privately.
             _ = Darwin.renameatx_np(directory, "file", rootFD, name, UInt32(RENAME_EXCL))
             _ = Darwin.fsync(directory); _ = Darwin.fsync(rootFD)
             throw NativeWhisperModelError.invalidModel
@@ -534,7 +526,6 @@ final class NativeWhisperModelStore: @unchecked Sendable {
     }
 }
 
-/// Delegate callbacks and every stage write run on the store's file lane, never JSC.
 private final class NativeWhisperModelTransfer: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let source: URL
     private let model: NativeWhisperModelSpec

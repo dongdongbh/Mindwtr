@@ -9,7 +9,6 @@ import AVFoundation
 import UniformTypeIdentifiers
 import WidgetKit
 
-// MARK: Native voice draft plan (Foundation-only seam)
 enum NativeVoiceDraftPlan {
     static func isSingleTask(_ text: String) -> Bool {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
@@ -18,7 +17,6 @@ enum NativeVoiceDraftPlan {
         return normalized.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: trim).isEmpty }.count <= 1
     }
 }
-// MARK: End native voice draft plan
 
 
 struct BoardOrderDragCapture: Equatable {
@@ -826,8 +824,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && settingsSyncGeneration == owner.generation && foregroundSyncGeneration == owner.foreground
             && settingsSync.object("panel").text("kind") == "dropbox" && !settingsSyncNeedsReload
     }
-    /// Only the captured system browser/return may keep this foreground invocation
-    /// through inactivity. A real background, lock or workspace retirement never does.
     func dropboxAuthorizationWillResignActive() -> Bool {
         let owned = nativeDropboxHostCurrent() && nativeDropboxAuthorization?.ownsBrowserPresentation == true
         nativeDropboxBrowserInactive = owned
@@ -882,8 +878,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               settingsDropboxAuthorizationCurrent(owner.requestID), !Task.isCancelled,
               let value = settingsSyncValue(result) else { return }
         _ = adoptSettingsSyncToasts(value)
-        // A toast is not activation proof. Read the settled shared configuration;
-        // no replay of a consumed code or optimistic connected state is retained.
         await readSettingsSyncModel(resetDraft: true)
     }
 
@@ -6128,8 +6122,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if Data(before.utf8) != Data(after.utf8) { taskAIInputChanged() }
     }
     private func taskAIRawInputsChanged<Key: Hashable>(_ before: [Key: String], _ after: [Key: String]) {
-        // Input normalization can republish the same buffers while dismissing the keyboard.
-        // Only actual byte changes revoke the lease; A→B→A still revokes on its first transition.
         if before.mapValues({ Data($0.utf8) }) != after.mapValues({ Data($0.utf8) }) { taskAIInputChanged() }
     }
     private func taskAIValuesChanged(_ before: Any, _ after: Any) {
@@ -6141,7 +6133,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         taskAIOptionsLease?.invalidate(); taskAIOptionsTask?.cancel(); taskAIOptionsTask = nil
         if taskAIOwner != nil { retireTaskAI() }
     }
-    /// Synchronous revocation precedes every async cancellation/drain and every competing editor action.
     func retireTaskAI(clearOptions: Bool = false) {
         taskAIInputRevision &+= 1; taskAIApplyID = nil; taskAIStartID = nil
         taskAIOptionsLease?.invalidate(); taskAIOptionsLease = nil
@@ -6158,7 +6149,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         taskAIRetirementTasks[retirementID] = Task { [weak self] in
             if let owner, let handle = owner.handle { await owner.host.cancelTaskAI(handle) }
             await request?.value
-            // Begin may have completed after synchronous revocation, before its handle was published.
             if let owner, let handle = owner.handle { await owner.host.cancelTaskAI(handle) }
             self?.taskAIRetirementTasks[retirementID] = nil
             self?.refreshTaskAIOptions()
@@ -6311,8 +6301,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             do {
                 try await owner.host.validateTaskAIAnswer(handle)
                 guard current(), self.taskAICurrent(owner) else { throw CancellationError() }
-                // The local claim blocks repeated Apply while read-only DTOs are staged. Keep its immutable
-                // native witness alive until the final readmission; no transport/private slot remains active.
                 self.taskAIAnswer = [:]; self.taskAIAnswerID = nil
                 self.taskAIBusyOwner = claim; self.busy = true
                 guard current() else { throw CancellationError() }
@@ -6349,7 +6337,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     await owner.host.cancelTaskAI(handle)
                     self?.taskAIRetirementTasks[retirementID] = nil
                 }
-                // All reads were staged. Suppress intermediate recovery snapshots during this synchronous publication.
                 self.taskRecoveryHydrating = true
                 self.taskEditor = editor
                 if changed.contains("title") { self.taskTitleDraft = next.text("title") }
@@ -6504,7 +6491,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 publication: ticket.publication, revision: ticket.revision, mutationRevision: ticket.mutationRevision)
             navigationReplayFixtureHoldRender = false
             navigationReplayContentEntered(wrong, uncovered: guardContent)
-            // Observe the exact original callback ACK synchronously, before its resumed task can run.
             navigationReplayFixtureWrongRendered = owner.rendered
             navigationReplayFixtureWrongWaiterACK = owner.renderWaiter == nil
             navigationReplayFixtureHoldRender = true; navigationReplayFixtureMode = "wrong-delivered"; return
@@ -6533,8 +6519,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         if ["consent-unknown", "consent-changing"].contains(command) {
             guard let original = host, let token = completedStartupToken else { return }
-            // Adversarial cached authority, not a fabricated native read/write result.
-            // Join the existing observation task so it cannot overwrite this unknown/changing episode.
             searchPublicationGeneration &+= 1; searchAttemptedTicket = searchWakeTicket
             let observation = searchLifecycleTask; observation?.cancel(); await observation?.value
             guard host === original, completedStartupToken == token else { return }
@@ -6598,7 +6582,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         let ingressBefore = entityLinkSequence
         let expectedIngress = command == "terminal-frontier" ? 33 : 1
-        // Distinct raw inputs keep the production one-second echo policy intact, even for the same target.
         let source = "native-replay-\(ingressBefore + 1)"
         switch command {
         case "task", "same-task": receiveEntityLink(URL(string: "mindwtr-native-dev://open?task=task454-a&source=\(source)")!)
@@ -6616,12 +6599,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let taskID = command == "search-inbox" ? "task454-deleted" : "task454-a"
                 let identifier = command == "search-invalid" ? "synthetic.foreign.scope" : try NativeSearchIndex.identifier(taskID: taskID, selection: selection)
                 let event = try NativePersonalIntakeEvent.spotlight(identifier)
-                // Real capture ingress only; sticky quarantine stores the original raw identifier, never this decoded hint.
                 receiveEntityInput(.searchTask(taskID), event: event)
             } catch { navigationReplayFixtureMode = "capture-held"; return }
         default: return
         }
-        // No await since ingress: this is the actual accepted delivery queue, not a requested-command count.
         guard let capture = navigationCaptureOwner, capture.queue.count == expectedIngress,
               entityLinkSequence == ingressBefore + UInt64(expectedIngress),
               capture.queue.enumerated().allSatisfy({ index, delivery in
@@ -6795,7 +6776,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let reached = navigationFixtureReadReached; navigationFixtureReadReached = nil; reached?.resume()
             }
         }
-        // One held boundary; HEAD also fails the original read's retry attempts.
         if navigationFixtureMode == "head" { throw CocoaError(.fileReadUnknown) }
     }
     private func navigationCaptureTailFixture() async {
@@ -7028,7 +7008,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     #endif
 
-    // Capture concrete original Task handles, including their post-native refresh tails.
     private var workspaceAdmittedTasks: [Task<Void, Never>] {
         var tasks: [Task<Void, Never>?] = [
             inboxFilterReadTask, inboxBulkRemoveTask, inboxBulkOrganizeTask, inboxBulkOrganizePickerTask, inboxBulkTagReadTask,
@@ -7100,7 +7079,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             || (owner.receipt != nil && owner.diagnosticDelivered)
     }
 
-    /// Capture-only handover leaves admitted original tasks, ready/Host/token and background leases intact.
     func reserveReminderCaptureHandover() -> Bool {
         if reminderCaptureHandoverOwner != nil { return true }
         let ownedBusy = (notificationResponseTask != nil && notificationResponseBusyOwner == notificationResponseTaskID)
@@ -7127,7 +7105,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let reservation: UUID
         do { reservation = try await NativeNotificationResponses.shared.reserveHandover() }
         catch { return await refuseReminderHandover(owner, reservation: nil) }
-        // Whole actual original tasks include Core receipt/reconcile/finish/diagnostic/lease/defer tails.
         await owner.notification?.value
         await owner.entity?.value
         do { try await NativeNotificationResponses.shared.drainHandover(reservation) }
@@ -7156,7 +7133,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             return await refuseReminderHandover(owner, reservation: reservation)
         } catch { return .held }
     }
-    /// Diagnostics is observational; retain the ACK without constructing/reopening any logging Host.
     private func recordReminderHandoverDiagnostic(host original: CoreHost, startupToken: UUID) async {
         func current() -> Bool {
             ready && host === original && startupSyncCompletedHost === original && completedStartupToken == startupToken
@@ -7172,7 +7148,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             ]))
             guard current() else { return }
             reminderHandoverDiagnosticHost = original; reminderHandoverDiagnosticToken = startupToken
-        } catch { /* Keep the original ACK; logging preference/failure cannot decide business completion. */ }
+        } catch { }
     }
     private func recordSandboxReminderPreparationDiagnostic(host original: CoreHost, startupToken: UUID) async {
         guard ready, host === original, startupSyncCompletedHost === original, completedStartupToken == startupToken,
@@ -7214,7 +7190,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         suspendNavigationReplay()
         ready = false
         owner.index?.sealForRetirement()
-        // New ordinary admission is fenced. Existing Task/OS owners still finish on their original host.
         let replayTail = navigationReplayOwner.flatMap {
             $0.submissionInFlight || $0.nativeSubmitted ? navigationReplayTask : nil
         }
@@ -7249,7 +7224,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
             if workspaceRetirementFixtureEnabled, workspaceRetirementCloseOriginalFixture {
                 workspaceRetirementCloseOriginalFixture = false
-                // The real negative cut is after App joins, before the actual native retirement call.
                 await owner.host.close()
                 workspaceRetirementFixtureState = "host-closed"
             }
@@ -7265,7 +7239,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch CoreHostRetirementError.refused {
             return refuseWorkspaceRetirement(owner)
         } catch {
-            // Native shutdown/health uncertainty is held. A new model cannot erase it.
             workspaceUnavailable = true
             ready = false
             return .unavailable
@@ -7824,7 +7797,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             await inspectNavigationCapture()
             reminderCaptureHeld = await NativeNotificationResponses.shared.startupHeld()
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
-            // Neither a bounded legacy list nor an intake page is a complete retained-ID inventory.
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
             if reminderHandoverFixtureEnabled { reminderHandoverStartupNil = true }
             #endif
@@ -7915,7 +7887,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                       result.text("id").utf16.count <= 500, let focused = result["focused"] as? NSNumber,
                       CFGetTypeID(focused) == CFBooleanGetTypeID() else { throw CocoaError(.coderReadCorrupt) }
                 if rowSwipeOwner?.operation == .focus { _ = try await settleRowSwipeMutationReceipt(on: currentHost) }
-                // An id/target cold marker never proves a retained request UUID or rebuilds UI.
             }
             if let owner = rowSwipeOwner, owner.operation != .focus, owner.operation.recoveryMethod == recovery.text("method") {
                 _ = try await settleRowSwipeMutationReceipt(on: currentHost)
@@ -7927,14 +7898,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                       result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
                 if rowTaskDatesPending { _ = try await settleRowTaskDatesReceipt(on: currentHost) }
                 retireRowTaskDatesPresentation()
-                // An id-only cold marker cannot prove a retained UUID or reopen a draft.
             }
             if recovery.text("method") == "rowTaskDestinationCommit" {
                 let result = recovery.object("result")
                 guard Set(recovery.keys) == Set(["method", "source", "result"]), recovery.text("source") == "rowDestination",
                       Set(result.keys) == Set(["id"]), !result.text("id").isEmpty,
                       result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
-                // A cold id marker cannot prove a retained request UUID or reconstruct its picker.
                 if rowTaskDestinationPending { _ = try await settleRowTaskDestinationReceipt(on: currentHost) }
                 retireRowTaskDestinationPresentation()
             }
@@ -7946,14 +7915,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                       result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
                 if taskChecklistMoveOwner?.operation == operation { _ = try await settleTaskChecklistMoveReceipt(on: currentHost) }
                 retireTaskChecklistMovePresentation()
-                // Cold receipts acknowledge data only; never recreate a picker, toast, Undo or navigation.
             }
             if recovery.text("method") == "rowTaskBackdateCommit" {
                 let result = recovery.object("result")
                 guard Set(recovery.keys) == Set(["method", "source", "result"]), recovery.text("source") == "row",
                       Set(result.keys) == Set(["id"]), !result.text("id").isEmpty,
                       result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
-                // An id-only cold marker never proves a retained request UUID.
                 if rowTaskBackdatePending { _ = try await settleRowTaskBackdateReceipt(on: currentHost) }
                 retireRowTaskBackdatePresentation()
             }
@@ -7971,7 +7938,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 guard Set(recovery.keys) == Set(["method", "source", "result"]),
                       recovery.text("source") == "inlineChecklist", Set(result.keys) == Set(["id"]),
                       !result.text("id").isEmpty, result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
-                // Startup has settled the host journal; no editor, Undo or next-action presentation.
                 inlineChecklistPending = nil
                 retryNeeded = false
             }
@@ -8031,8 +7997,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 try validateProjectBulkResult(recovery.object("result"), operation: operation)
                 if projectBulkOwner != nil { _ = try await settleProjectBulkReceipt(on: currentHost) }
                 clearProjectTaskSelection()
-                // The receipt proves the operation, not a currently open Project.
-                // Keep normal startup routing; never reconstruct a header from recovery.
             }
             if ["inboxTasksMoveCommit", "inboxTasksAddTagCommit"].contains(recovery.text("method")), Self.statusListSources.contains(recovery.text("source")) {
                 let result = recovery.object("result"), source = recovery.text("source")
@@ -8181,8 +8145,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if !appLock.concealed {
                 try await readSelectedSurface()
             } else {
-                // Startup must reach ready so the lock can authenticate. The unlock
-                // observer refreshes the selected surface after admission opens.
                 NSLog("Native App lock startup awaiting authentication releaseCheck=v1.3.9/ios-app-lock-delay outcome=awaiting-unlock")
             }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
@@ -8247,7 +8209,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 foregroundSyncIntent = recovery.isEmpty && foregroundSyncInboxClean
                     ? ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token, reason: .startup) : nil
             }
-            // A fresh selected container may have become available only during CoreHost.start.
             await inspectNavigationCapture()
             reminderCaptureHeld = await NativeNotificationResponses.shared.startupHeld()
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
@@ -8398,8 +8359,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               !settingsSyncRestartRequired, !appLockRecoveryPending,
               !retryNeeded || notificationResponseRetryRequested,
               !notificationResponseDeferredUntilClean || notificationResponseContextClean else { return }
-        // Cold personal startup and later unlock/foreground wakes share the original dispatcher task.
-        // A sealed source stays held until its exact import is re-established for this live startup.
         if reminderCaptureHeld && !heldReminderReplayEnabled {
             guard !sandboxEntryPreparing, !workspaceReturning, ready, notificationResponseForeground,
                   notificationResponseContextClean, let current = host,
@@ -8436,7 +8395,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                   self.startupSyncCompletedHost === currentHost else { return }
             let owner = NotificationResponseOwner(id: id, host: currentHost, token: token)
             guard !self.busy else {
-                // No dispatch began. Keep this current startup's wake for the existing operation's tail.
                 self.notificationResponseWakePending = true
                 return
             }
@@ -8602,7 +8560,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     private func receiveOrdinaryEntityDelivery(_ delivery: EntityLinkDelivery) {
-        // Preserve original-route volatile intake while sealed; it is outside this App/Host retirement receipt.
         if workspaceAdmissionsOpen { withdrawEntityLinkPreview() }
         entityLinkDeliveryToken = delivery.token
         entityLinkPending = delivery
@@ -8636,7 +8593,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             await recordIntakeSameTreeReopenDiagnostic(host: original, startupToken: token)
         }
     }
-    /// Observational only; cold admission never creates a logging Host or releases business debt.
     private func recordIntakeSameTreeReopenDiagnostic(host original: CoreHost, startupToken: UUID) async {
         func current() -> Bool {
             ready && host === original && startupSyncCompletedHost === original && completedStartupToken == startupToken
@@ -8655,10 +8611,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             ]))
             guard current() else { return }
             intakeSameTreeDiagnosticHost = original; intakeSameTreeDiagnosticToken = startupToken
-        } catch { /* Keep marker and unacknowledged observation; logging cannot decide intake admission. */ }
+        } catch { }
     }
 
-    /// Synchronous private fence; the captured original task keeps its token, preview and Host through its tail.
     func reserveNavigationCapture() -> Bool {
         if navigationCaptureOwner != nil { return true }
         let originalPreview = navigationCaptureOriginalPreviewIsCurrent
@@ -8700,14 +8655,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         navigationCaptureTask = Task {
             defer { navigationCaptureTask = nil; admitSandboxNavigationReplay() }
             do {
-                // A preparing claim survives process death; it says nothing about the old App task's completion.
                 owner.reservation = try await NativeNotificationResponses.shared.reserveNavigationCapture(id: owner.reservation)
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
                 if navigationCaptureFixtureEnabled {
                     let reached = navigationFixtureDrainReached; navigationFixtureDrainReached = nil; reached?.resume()
                 }
                 #endif
-                // Join the actual read/presentation/diagnostic/defer tail before transferring its pending delivery.
                 await owner.originalTask?.value
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
                 if navigationCaptureFixtureEnabled {
@@ -8753,7 +8706,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
         }
         #endif
-        // Caller ACK owns this awaited observation; cold capture has no eligible original Host and skips it.
         guard let original = owner.host, let token = owner.startupToken, ready, host === original,
               startupSyncCompletedHost === original, completedStartupToken == token,
               !settingsSyncRestartRequired, !appLockRecoveryPending else { return }
@@ -8763,7 +8715,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         ]))
     }
 
-    /// Explicit private authority only. Ordinary ingress/startup wakes never create a replay owner.
     func reserveNavigationReplay() -> Bool {
         if let owner = navigationReplayOwner {
             guard navigationReplayTask == nil, navigationReplayCurrent(owner), !busy,
@@ -8888,7 +8839,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    /// The actual successful content supplies its immutable ticket and its live local cover/edit guard.
     func navigationReplayContentEntered(_ ticket: NavigationReplayTicket, uncovered: @escaping () -> Bool) {
         guard uncovered(), navigationReplayControllerUncovered(ticket.destination),
               navigationReplayTicketCurrent(ticket), let owner = navigationReplayOwner else { return }
@@ -9105,17 +9055,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                   outcome == .ignored || (owner.rendered && owner.contentGuard?() == true
                     && owner.ticket.map(navigationReplayTicketCurrent) == true
                     && navigationReplayControllerUncovered(owner.destination)) else { throw NavigationReplayFailure.held }
-            // From this point the native actor may accept publication. Preserve this exact Task through its full tail.
             owner.submissionInFlight = true
             navigationReplayPhase = "submitting"
             let submission = await storage.writer.submitFinish(item, outcome: outcome)
             switch submission {
             case .submitted:
-                // Sticky before any post-await validity/cancellation check: only this original settlement may follow.
                 owner.nativeSubmitted = true; owner.submissionInFlight = false
                 navigationReplayTicket = nil; navigationReplayPhase = "finishing"
             case .notSubmitted:
-                // Definite refusal for this invocation is not old completion and cannot clear submitted debt.
                 owner.submissionInFlight = false
                 guard !owner.nativeSubmitted else { break }
                 invalidateNavigationReplayTicket(owner)
@@ -9127,7 +9074,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         if owner.receipt == nil {
             let proof = try await NativeNotificationResponses.shared.settleNavigationFinish(item, outcome: outcome, storage: storage, owner: owner.id)
-            // Transfer to the original owner before any relay removal, cancellation or Host check.
             owner.receipt = proof.receipt; owner.diagnostic = proof.diagnostic
         }
         guard let marker = owner.diagnostic else { throw NavigationReplayFailure.held }
@@ -9190,7 +9136,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if productionWidgetFamilyEligible {
             requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
         }
-        // Withdrawing an untouched URL preview is not a new external wake.
         if let delivery = entityLinkCleanupDelivery, entityLinkPending?.token == delivery { return }
         requestNotificationResponses()
         requestEntityLinks()
@@ -10502,8 +10447,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private func widgetNextPublicationCurrent(_ owner: SearchLifecycleOwner) -> Bool {
         guard widgetNextEligible, searchOwnerCurrent(owner) else { return false }
         guard !busy else {
-            // The competing operation may be read-only: no observation callback is guaranteed.
-            // One retained wake is admitted by lifecycle defer or finishOperation after busy clears.
             searchWakeTicket &+= 1
             return false
         }
@@ -10582,7 +10525,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
             }
             if !settled.isEmpty {
-                // Facades prove committed receipts before any source can be retired.
                 for source in sources where settled.contains(source.name) {
                     if try decode(source.body).text("kind") == "audio" {
                         try await receiver.retirePendingAudio(for: source)
@@ -10606,7 +10548,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if dispatched, host === owner.host, !isDefiniteRejection(error) {
                 retryNeeded = true; self.error = error.localizedDescription
             }
-            // Failed transport/retirement retains the source for the next lifecycle wake.
         }
     }
 
@@ -10648,7 +10589,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if !settled.isEmpty, widgetCompletionCurrent(owner) { try await readSelectedSurface() }
             return settled
         } catch {
-            // Claimed rows and the host journal survive; the next admitted foreground turn retries them.
             if dispatched, host === owner.host, !isDefiniteRejection(error) {
                 retryNeeded = true; self.error = error.localizedDescription
             }
@@ -10663,7 +10603,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         do {
             let observation = try await owner.host.searchObservation()
             guard widgetNextPublicationCurrent(owner), observation.ready else { return }
-            // Deadline ownership is independent of Spotlight consent and any later Spotlight read failure.
             installSearchDeadline(observation.nextAt, owner: owner)
             guard widgetNextForceSnapshot || !sameSearchObservation(widgetNextLastObservation, observation) else { return }
             let actions = try await owner.host.widgetNextActionSnapshot()
@@ -10677,11 +10616,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             let expires = floor(min(observation.nextAt ?? now + 86_400_000, now + 86_400_000))
             guard expires > now else { return }
             let identifiers = try snapshot.items.map { try NativeSearchIndex.identifier(taskID: $0.id, selection: selection) }
-            // No suspension between the final owner/scope fence and synchronous atomic promotion/reload.
             guard widgetNextPublicationCurrent(owner) else { return }
             try cache.publish(actions, identifiers: identifiers, publishedAtMs: now, expiresAtMs: expires)
             widgetNextLastObservation = observation; widgetNextPublishedHost = owner.host; widgetNextForceSnapshot = false
-            // Publication follows durable completion; only then retire its claimed producer records.
             if !settled.isEmpty {
                 let store = try NativeWidgetActionStore.live()
                 for id in settled { try store.acknowledge(id: id) }
@@ -10692,7 +10629,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     "releaseCheck": "v1.3.9/ios-widget-next-publication", "count": snapshot.items.count]),
             ]))
         } catch {
-            // Read/write failure preserves the previous valid same-scope cache until its own expiration.
         }
     }
 
@@ -10950,8 +10886,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         archiveRetentionWake?.cancel()
         archiveRetentionWake = nil
         archiveRetentionRequested = false
-        // Cancellation consumes no new intent and releases no operation. The
-        // captured host must settle before its owner may release busy.
     }
 
     private var surfaceRefreshAllowed: Bool {
@@ -11103,7 +11037,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     try await self.readInbox(foregroundSyncOwner: owner.id)
                 }
             } catch {
-                // A known Sync settlement is not made unknown by a later read.
                 guard self.foregroundSyncCurrent(owner) else { return }
                 self.error = self.label("settings.feedback.actionFailed")
             }
@@ -11721,7 +11654,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     owner.endpointRequest = nil; self.retryNeeded = false
                     await self.refreshVoiceSettings(owner)
                 } else {
-                    // Retain the exact accepted value and original session until its save is confirmed.
                     self.retryNeeded = true; self.error = self.label("persistence.failureMessage")
                 }
                 guard self.voiceSettingsCurrent(owner), owner.page == request.page else { return }
@@ -11978,8 +11910,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                                             preserveOptionsOnFailure: Bool = false) async {
         guard aiTextConfigurationCurrent(owner, page: page), owner.extraBodyAttempt == nil else { return }
         discardAITextDiscoveredModels()
-        // Pending fixed consent work blocks ordinary metadata reads. Keep the page's
-        // original options/session so its typed local-record retry can settle first.
         settingsAIAnthropicThinkingOptions = nil
         if owner.consentRecordPending {
             settingsAITextCredentialAvailable = nil
@@ -13542,13 +13472,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func clearSettingsSyncForPrivacy() {
         nativeDropboxAuthorization?.cancelAuthorization(); settingsDropboxTask?.cancel()
-        // Revoke delivery and local text synchronously; the captured owner keeps
-        // busy until its accepted bridge call and any required host close settle.
         settingsSyncEncryptionTask?.cancel()
         settingsSyncDirectoryTask?.cancel()
         if settingsSyncDirectoryPickerID != nil {
             settingsSyncDirectoryPickerID = nil
-            // No bridge invocation has started; a cancelled picker has no settlement to retain.
             settingsSyncDirectoryOwner = nil
             if busy { finishOperation() }
         }
@@ -13824,7 +13751,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             guard !Task.isCancelled, settingsSyncPresented, !settingsSyncNeedsReload,
                   !settingsSyncRestartRequired else { return }
             guard !busy else { settingsSyncReadDeferred = true; return }
-            // Only cancel the delay, never an already-dispatched foreground command.
             settingsSyncReadTask = nil
             await readSettingsSyncModel()
         }
@@ -13943,7 +13869,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if command == "pickSyncFolder" || command == "syncNow" { input["revision"] = owner.revision }
             accepted = true
             let raw = try await owner.host.foregroundDirectorySyncSettings(command: command, requestJSON: try json(input), pickedBookmark: bookmark)
-            // Privacy revokes UI delivery, never the accepted transaction's rollback access.
             guard settingsSyncDirectoryCurrent(owner) else { throw CancellationError() }
             let result = try decode(raw)
             guard result["ok"] is Bool else { throw CocoaError(.coderReadCorrupt) }
@@ -13956,7 +13881,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch {
             if accepted {
                 requireSettingsSyncRestart(owner.host)
-                // The accepted call has terminated and drained before registry/runtime closure.
                 await owner.host.close()
             }
         }
@@ -14011,7 +13935,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               settingsSyncCurrent(capturedHost, session), let value = settingsSyncValue(result) else { return }
         let succeeded = adoptSettingsSyncToasts(value)
         archiveRetentionRequested = true
-        // A known failure preserves both the fields and their opening revision.
         await readSettingsSyncModel(resetDraft: succeeded && action != "test")
     }
 
@@ -14502,7 +14425,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard diagnosticsOwner == owner else { return }
         invalidateDiagnostics()
         if owner == settingsDiagnosticsOwner { settingsDataPresented = false; admitRequestedArchiveRetention() }
-        // The original domain error, request and retry context are untouched.
     }
 
     func diagnosticsCurrent(owner: UUID, session: UUID) -> Bool {
@@ -16679,8 +16601,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 throw CocoaError(.coderReadCorrupt)
             }
             if projectFileAddPending || projectFileAvailabilityPending {
-                // Retained attachment recovery exposes only the App lock flag read.
-                // Use immediate relock until normal startup can load the delay.
                 appLockDelayRow = [:]
                 appLockDelayExpected = [:]
                 appLock.relockDelayMinutes = 0
@@ -18172,8 +18092,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    // The presentation DTO never grants write authority. Each activation captures
-    // the current occurrence again and the existing/new writer proves its source.
     var taskRowSwipeLanguageGeneration: Int { rowSwipeLanguageGeneration }
     func taskRowSwipeRowCurrent(_ row: CoreObject) -> Bool {
         (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActionsEnabled) && taskRowSwipeRowListed(row)
@@ -18257,7 +18175,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
             }
             return identities.count <= 5 ? value : nil
-        } catch { return nil } // Rendering fails closed; never invent a local policy.
+        } catch { return nil }
     }
 
     private struct RowSwipeContext {
@@ -18391,8 +18309,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                       owner.operation == .undoDelete || self.taskRowSwipeRowListed(owner.context.row) else { return false }
                 dispatched = true; return true
             })
-            // Blocked/noop Focus has no receipt; the original call's exact result
-            // settles its owner even when the originating surface/Host has retired.
             try await acknowledgeRowSwipeMutation(result, owner: owner, allowingBlocked: true)
         } catch { handleRowSwipeMutationError(error, owner: owner, undispatched: !dispatched) }
     }
@@ -18681,8 +18597,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     rowTaskDatesModel = value; rowTaskDatesEdits.removeFirst()
                 }
             } catch {
-                // Retain the failed logical edit and its successors. Retry is pure;
-                // Save cannot silently submit the older acknowledged draft.
                 if current() { rowTaskDatesError = error.localizedDescription }
             }
         }
@@ -18700,8 +18614,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard rowTaskDatesCanSave, let context = rowTaskDatesContext else { return false }
         rowTaskDatesSaveWaiting = true
         defer { if rowTaskDatesContext?.presentation == context.presentation { rowTaskDatesSaveWaiting = false } }
-        // A final native picker change enqueues synchronously before this action.
-        // Await every pure edit; failed edits never become an older Save request.
         if let editing = rowTaskDatesEditTask { await editing.value }
         guard rowTaskDatesPresentationCurrent, rowTaskDatesContext?.presentation == context.presentation,
               rowTaskDatesError == nil, rowTaskDatesEdits.isEmpty, !rowTaskDatesModel.isEmpty else { return false }
@@ -18723,8 +18635,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                           self.taskCardCurrentRow(context.row) else { return false }
                     dispatched = true; return true
                 })
-                // An unchanged Prepare has no durable receipt. Its exact original
-                // call's validated acknowledgment settles even after owner UI retires.
                 try await acknowledgeRowTaskDates(result, owner: owner)
                 return true
             } catch { handleRowTaskDatesError(error, owner: owner, undispatched: !dispatched); return false }
@@ -19294,7 +19204,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         do {
             let request = try json(["requestId": UUID().uuidString.lowercased(), "moveRequestId": origin.move.moveRequestID])
             let move = origin.move
-            // Fresh Undo may run elsewhere; bind publication to the clean context at this tap.
             let context = TaskChecklistMoveContext(host: move.context.host, context: taskCardPresentationContext,
                 foreground: foregroundSyncGeneration, row: move.context.row)
             await runTaskChecklistMove(.init(context: context, operation: .undo, request: request, sourceID: move.sourceID,
@@ -19375,7 +19284,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch {
             guard taskChecklistMoveOwned(owner) else { return }
             if host !== owner.context.host {
-                // A retired Host's gateway refusal does not prove this retained UUID never landed.
                 markTaskChecklistMoveRetry(owner); taskChecklistMoveError = error.localizedDescription
             } else { handleTaskChecklistMoveError(error, owner: owner) }
         }
@@ -19542,7 +19450,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if undispatched || isDefiniteRejection(failure) {
             rowTaskBackdateOwner = nil; releaseRowTaskBackdateRetry(owner.request)
         } else { markRowTaskBackdateRetry(owner) }
-        // This operation never owns the global error or any task Undo notice.
         rowTaskBackdateError = visibleWriteFailure(failure, undispatched: undispatched)
     }
     private func rowTaskBackdateOutcomeResult(_ outcome: CoreObject) throws -> CoreObject? {
@@ -19681,7 +19588,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               ["inbox", "next", "waiting", "someday", "reference"].contains(status),
               options.objects("options").contains(where: { $0.text("status") == status && !$0.flag("selected") }) else { return }
         rowQuickStatusOptionsOwner = nil
-        // Capture the selected row before SwiftUI dismisses its menu; subsequent admission requires all modals clean.
         taskStatusMenuPresented = false
         Task { await performRowQuickStatus(menu, status: status) }
     }
@@ -24494,7 +24400,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    /// A numeric observation only, emitted alongside the existing once-per-attempt cancel slot.
     func logBoardDragGeometry(reason: String, originalViewport: CGRect?, currentViewport: CGRect?,
                               originalArea: CGRect?, currentArea: CGRect?, originalRow: CGRect?, currentRow: CGRect?,
                               rebaseReason: NativeBoardDragGeometry.RebaseRejection? = nil, columnOrdinal: Int? = nil,
@@ -24510,7 +24415,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    /// Final claim consumption and command retention must remain synchronous.
     @discardableResult
     func orderBoardCard(_ capture: BoardOrderDragCapture, afterID: String?, consume: () -> Bool) -> Bool {
         guard boardOrderDragIsCurrent(capture),
@@ -26072,7 +25976,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if clear {
             reviewAIPresentation = UUID(); reviewAISelectionRevision &+= 1
             reviewAISuggestions = []; reviewAISelectedIDs = []; reviewAIRan = false; reviewAIError = nil
-            // Retire admission only. A journaled Apply remains owed and is never cancelled or erased here.
             reviewAIApplyPending?.owner.lease.invalidate()
             reviewAIApplyPending?.owner.retired = true
         }
@@ -28666,7 +28569,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         return page
     }
 
-    // Project selection is a complete core-owned scope, independent of loaded pages.
     func projectTaskSelected(_ id: String) -> Bool { projectSelectedIDBytes.contains(Data(id.utf8)) }
     func projectTaskSelectable(_ id: String) -> Bool {
         projectCurrent && host === projectSelectionEligibilityHost && projectFilterSession == projectSelectionEligibilitySession
@@ -28781,7 +28683,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         projectSelectionGeneration += 1
         projectSelectionMode = false; projectSelectedIDs = []; projectSelectedRevisions = [:]
         projectAnchorID = nil; projectRangeSelectMode = false; projectBulk = [:]
-        // Retire the read's publication, but let its matching defer release busy.
         projectBulkError = nil
     }
     func leaveProjectTaskSelection() {
@@ -29127,7 +29028,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               expected.map({ count.doubleValue == Double($0) }) != false else { throw CocoaError(.coderReadCorrupt) }
     }
     private func releaseProjectDeleteUndoRetryGate(_ request: String) {
-        // Undo never owns the global error string; leave unrelated errors intact.
         if projectBulkRetryRequest?.utf8.elementsEqual(request.utf8) == true { retryNeeded = false }
     }
     private func acknowledgeProjectDeleteUndo(_ result: CoreObject, owner: ProjectDeleteUndoOwner, warm: Bool) throws {
@@ -29476,7 +29376,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch { handleProjectBulkError(error, context: context, operation: operation, request: request) }
     }
 
-    // MARK: Waiting and Someday selection, one owner for both status lists
     @Published private(set) var statusListSelectionMode = false
     @Published private(set) var statusListSelectedIDs: [String] = [] {
         didSet { statusListSelectedIDBytes = Set(statusListSelectedIDs.map { Data($0.utf8) }) }
@@ -30006,7 +29905,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         await writeStatusListBulk(.addTag, fields: ["tag": statusListTagText])
     }
 
-    // MARK: Task739 Inbox selection, using the list's complete core-owned scope
     private var inboxBulkMutationPending: Bool {
         inboxBulkDeleteOwner != nil || inboxBulkUndoOwner != nil || inboxTasksMoveOwner != nil || inboxTasksAddTagOwner != nil || inboxTasksRemoveTagOwner != nil || inboxTasksOrganizeOwner != nil || inboxOrganizeDestinationCreateOwner != nil
     }
@@ -36165,7 +36063,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             projectCurrent = true
             projectError = nil
         } catch {
-            // Restart at zero after a stale or failed window; never append mixed revisions.
             guard current() else { return }
             await readProjectDetail()
             if projectNotesExpanded && projectCurrent {
@@ -36204,7 +36101,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         for attempt in 0..<2 {
             do {
                 guard ownedGuard?() != false && selectionCurrent() else { return false }
-                // Reference labels may be aliases; resolve the destination header through core.
                 if projectHeader["title"] == nil {
                     try await readProjectRenameOptions(ownedGuard: ownedGuard)
                     guard ownedGuard?() != false && selectionCurrent() else { return false }
@@ -38909,8 +38805,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             taskRecoveryChecklistTouched = false
             taskRecoveryAttachmentsOwned = false
         }
-        // Reset can commit while the editor stays open; Close and Discard must
-        // also refresh the caller, including its status membership and counts.
         if returningToProcessing {
             if resumeProcessing { Task { await resumeProcessInboxTaskEditor() } }
         } else if refreshCaller { Task { await refresh() } }
@@ -40402,8 +40296,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func setTaskRelativeAmount(_ text: String) {
         guard taskDateFieldAvailable("startTime", requiringAdmission: false), taskRelativeAmountInput != text else { return }
-        // Claim ownership in the binding setter itself; FocusState onChange may
-        // arrive after this callback. No core reply may win that opening gap.
         beginTaskRelativeInput()
         taskRelativeAmountInput = text
         enqueueTaskScheduleEdit("relativeStart", edit: ["type": "relativeStart", "amount": text, "unit": taskRelativeUnitInput])
@@ -41838,7 +41730,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if shareCaptureOwner?.outcome == nil {
             guard shareCaptureReadCurrent(original, startup: startup) else { return }
             if let owner = shareCaptureOwner, owner.host !== original || owner.startup != startup {
-                // No save/finish was submitted; the durable private item remains the next original-route source.
                 guard !capturePending && !capturePresented else { return }
                 owner.saveLease?.invalidate(); shareCaptureOwner = nil
             }
@@ -41943,7 +41834,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     if owner.outcome == nil && (Task.isCancelled || !self.notificationResponseForeground) { self.shareCaptureWakePending = true; return }
                     owner.requiresRetry = true; self.retryNeeded = true; self.error = self.label("share.unavailable")
                 }
-                // Missing optional App Group access does not block startup or create an empty fallback source.
             }
         }
     }
@@ -42026,7 +41916,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             quickCaptureIntentFixtureBusy = false; finishOperation()
         case "conceal":
             guard ready, !busy, !capturePresented, !taskPresented, appLock.enabled == false else { return }
-            // Isolated fixture only: exercise the real concealed gate without changing a saved setting.
             quickCaptureIntentFixtureConcealed = true; appLock.readFailed()
             suspendQuickCaptureIntent()
             _ = try? await MindwtrOpenQuickCaptureIntent().perform()
@@ -42065,7 +41954,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               !appLockRecoveryPending, notificationResponseForeground,
               let original = host, startupSyncCompletedHost === original,
               let startup = completedStartupToken else { return }
-        // An already displayed capture satisfies Add Task without touching its draft.
         guard capturePresented || (notificationResponseContextClean && shareCaptureOwner == nil),
               !capturePending else { return }
         let lifecycle = quickCaptureIntentLifecycle
@@ -42075,8 +41963,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             var heldDuringRead = false
             defer {
                 self.quickCaptureIntentTask = nil
-                // A competing operation may have finished while this selected task was still retained.
-                // Read errors wait for an external wake instead of spinning on the same failed read.
                 if heldDuringRead || requests.claim(for: self).map({ $0 != claim }) == true {
                     self.requestQuickCaptureIntent()
                 }
@@ -42140,7 +42026,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     guard admission?() != false else { return }
                     opened = result.object("view")
                 }
-                // Keep results local until the original shortcut admission still owns publication.
                 capture = opened
                 captureID = UUID().uuidString
                 draft = ""
@@ -42425,7 +42310,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    /// Open the existing AI Settings page without ending or saving this processing session.
     func openProcessInboxAISettings() {
         guard let owner = processInboxAIOwner, processInboxAICurrent(owner), !busy,
               processInboxAIAnswer.text("kind") == "toast", processInboxAISettingsTask == nil else { return }
@@ -42454,7 +42338,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         retireAISettingsPage(); settingsAdvancedPresented = false
         selectedSurface = visit.caller; processInboxCaller = visit.caller; processInboxPresented = true
         processInboxAISettingsVisit = nil
-        // Original session retains its draft. Re-read eligibility without replaying edits or making a decision.
         busy = true; defer { finishOperation() }
         do {
             let view = try await query("inboxStep", [try processInboxStepInput()])
@@ -43077,8 +42960,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         canSave && voiceCaptureOwner == nil && !captureCopilotEditing && !captureCopilotWorking && captureCopilotSuggestion != nil
     }
 
-    // Cancellation invalidates publication immediately. The concrete task stays retained
-    // until the native facade has settled its selected HTTP and secret workers.
     private func retireCaptureCopilot(clearApplied: Bool) {
         captureCopilotGeneration += 1
         captureCopilotTask?.cancel()
@@ -43089,7 +42970,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func cancelCaptureCopilot() {
-        // Preserve the offer after an explicit Stop, so Suggest can be tried again.
         let options = captureCopilotOptions, appliedLabel = captureCopilotView.text("appliedLabel")
         retireCaptureCopilot(clearApplied: false)
         captureCopilotOptions = options
@@ -43138,13 +43018,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                                         text: text, options: frozenOptions, language: language) else { return }
             captureCopilotOptions = result
             captureCopilotApplied = result.object("applied")
-            // An applied line is a shared projection even after the suggestion is retired.
             let view = try await projectCaptureCopilot(owner, options: result, suggestion: captureCopilotSuggestion, edit: nil)
             guard captureCopilotCurrent(owner, presentation: presentation, identifier: identifier,
                                         text: text, options: frozenOptions, language: language) else { return }
             captureCopilotView = view
         } catch {
-            // Optional AI projection failure never makes ordinary capture unavailable.
             guard captureCopilotCurrent(owner, presentation: presentation, identifier: identifier,
                                         text: text, options: frozenOptions, language: language) else { return }
             captureCopilotOptions = [:]; captureCopilotView = [:]
@@ -43191,8 +43069,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                       captureCopilotCurrent(owner, presentation: presentation, identifier: identifier,
                                             text: text, options: frozenOptions, language: language) else { return }
                 let fresh = try await readCaptureCopilotOptions(owner, text: text, options: options, applied: captureCopilotApplied)
-                // The minute is part of the core revision. Refresh that revision while
-                // retaining an answer to the identical title and taxonomy question.
                 guard generation == captureCopilotGeneration,
                       captureCopilotCurrent(owner, presentation: presentation, identifier: identifier,
                                             text: text, options: frozenOptions, language: language),
@@ -43578,7 +43454,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if let owner = shareCaptureOwner, owner.outcome != nil {
                 owner.requiresRetry = true; retryNeeded = true; self.error = label("share.unavailable"); return
             }
-            // The host owns the durable request. Freeze this exact draft until its outcome is known.
             if !dispatched || isDefiniteRejection(error) { capturePending = false; captureSubmission = nil }
             retryNeeded = capturePending
             self.error = error.localizedDescription
@@ -45643,7 +45518,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
            owner.source.id == submission.captureID.lowercased() {
             owner.outcome = .completed; owner.saveLease?.invalidate()
         }
-        // Receipt settlement belongs to the submitted host; presentation belongs to this sheet episode.
         capturePending = false
         captureSubmission = nil
         retryNeeded = false
@@ -46803,7 +46677,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
                 if workspaceRetirementFixtureEnabled, workspaceRetirementHoldFocusRead, !Task.isCancelled {
                     workspaceRetirementHoldFocusRead = false
-                    // The real native read returned; this original App Task has not completed its apply/refresh tail.
                     workspaceRetirementFixtureState = "read-returned"
                     await withCheckedContinuation { workspaceRetirementReadWaiter = $0 }
                 }

@@ -4,7 +4,6 @@ import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import type { Task } from './types';
 import type { TranslateFn } from './i18n';
 export type NativeTaskRowSwipeActionsInput = { status: Task['status']; isFocusedToday: boolean; selectionMode: boolean; interactionDisabled: boolean };
-/** Presentation only: supplied flags and the current translator, with no store or persistence access. */
 export const nativeTaskRowSwipeActions = (input: NativeTaskRowSwipeActionsInput, t: TranslateFn): NativeHostResult<TaskRowSwipeActions> => {
     if (!input || typeof input !== 'object' || Array.isArray(input) || !isNativeJsonWithinBytes(input, 4096)
         || Object.keys(input).length !== 4 || !['status', 'isFocusedToday', 'selectionMode', 'interactionDisabled'].every(field => Object.prototype.hasOwnProperty.call(input, field))

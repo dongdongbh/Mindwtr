@@ -153,7 +153,6 @@ export const readNativeTaskDraftSaveRequest = (input: unknown, validateField: (f
         || !keys(value.base, fields) || fields.some((field) => !(FIELDS as readonly string[]).includes(field)
             || (!allowChecklist && ['status', 'focusedToday', 'completedAt'].includes(field))
             || ((field === 'timeSpentMinutes' || REMINDER_FIELDS.includes(field)) && !allowChecklist && !allowPlain))) return null;
-    // Older saved drafts own the recurrence group without the newly added checklist flag.
     if (editsRecurrence && (!RECURRENCE.every((field) => field === 'preserveChecklistOnRepeat' || own(value.patch as object, field))
         || !record(value.recurrenceBase) || !keys(value.recurrenceBase, ['recurrence', 'showFutureRecurrence'])
         || !(value.recurrenceBase.recurrence === null || typeof value.recurrenceBase.recurrence === 'string' || record(value.recurrenceBase.recurrence))
@@ -360,8 +359,6 @@ const draftSaveEffect = (before: Task, request: NativeTaskDraftSaveRequest,
         'isFocusedToday', 'focusOrder', 'pushCount', 'boardOrder'].forEach((field) => owned.add(field));
     if (moves) ['projectId', 'sectionId', 'areaId', 'order', 'orderNum'].forEach((field) => owned.add(field));
     if (own(request.patch, 'reminderPolicy')) owned.add('suppressMindwtrReminders');
-    // The shared update computes dependent fields, but a title-only edit must
-    // not copy its unrelated legacy lifecycle normalization into the raw row.
     const unstamped = { ...before } as Task;
     for (const field of owned) {
         const value = applied.updatedTask[field as keyof Task];
@@ -427,9 +424,6 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
         }
         if (policyEdited && !taskEditValuesEqual(after.suppressMindwtrReminders,
             normalizeTaskUpdate(before, { reminderPolicy: request.patch.reminderPolicy }).suppressMindwtrReminders)) return false;
-        // Match RN's narrowed recurrence write, preserving untouched legacy raw
-        // values. Only the recurrence projection is normalized here; clock and
-        // timezone-dependent schedule/focus effects remain frozen in changes.
         const recurrenceUpdates = request.recurrenceBase ? buildTaskEditUpdatePatch({
             draft: applyTaskDraftPatch(createTaskDraft(before), patchValues(request)),
             checklist: before.checklist, attachments: before.attachments,

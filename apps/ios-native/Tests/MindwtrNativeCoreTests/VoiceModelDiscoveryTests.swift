@@ -39,7 +39,6 @@ private final class VoiceDiscoveryState: @unchecked Sendable {
     var completed: Bool { lock.lock(); defer { lock.unlock() }; return done }
 }
 
-/// Actual bundle/JSC, selected native key reads, HTTP transport and SQLite. Root runs on Apple runtime.
 final class VoiceModelDiscoveryTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -204,7 +203,6 @@ final class VoiceModelDiscoveryTests: XCTestCase {
             await failure { _ = try await core.discoverAITextModels(session: text.id, expected: text.options.expected) }
             await failure { _ = try await core.readVoiceSettings(session: opened.id) }
             XCTAssertLessThan(Date().timeIntervalSince(began), 1)
-            // Identical UUID through the wrong page kind must not select this operation.
             await core.retireAITextConfiguration(session: opened.id)
             let drain: Task<Void, Never>
             if action == "cancel" { drain = Task { work.cancel(); _ = try? await work.value; state.complete() } }

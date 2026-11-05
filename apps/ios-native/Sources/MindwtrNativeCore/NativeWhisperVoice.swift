@@ -11,7 +11,6 @@ struct NativeWhisperVoiceModel: Sendable {
     let language: String
 }
 
-// Own every C inference until its engine and model lease have both drained.
 final class NativeWhisperInferenceJobs: @unchecked Sendable {
     private let lock = NSLock()
     private var tasks: [UUID: Task<String, Error>] = [:]

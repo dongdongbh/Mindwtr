@@ -60,7 +60,6 @@ public enum NativeLaunchSelection: Sendable {
                 #if DEBUG
                 NSLog("Native iOS RN rehearsal source selected releaseCheck=v1.3.9/ios-rn-rehearsal-source outcome=production-copy")
                 #endif
-                // The staged source belongs to production RN, independently of the test app's namespace.
                 return .rehearsal(containerURL: container,
                     databaseURL: container.appendingPathComponent("Documents/SQLite/mindwtr.db"), bundleIdentifier: "tech.dongdongbh.mindwtr")
             }

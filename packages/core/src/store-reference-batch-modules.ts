@@ -3,7 +3,6 @@ import type { NativeReceiptSqliteAdapter } from './native-request-receipts';
 import type { AppData } from './types';
 import type { TaskLoadTemporalContext } from './task-status';
 
-/** One Reference batch family's checks, bound to the prepared input the store action holds. */
 export type ReferenceBatchValidator = { validateEnvelope: () => boolean; authorityMatches: (data: AppData) => boolean;
     temporal?: TaskLoadTemporalContext };
 

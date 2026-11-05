@@ -47,7 +47,6 @@ const savedReply = (value: unknown, source: NativeShareCaptureIdentity): { versi
     return { version: 1, requestFingerprint: value.requestFingerprint, result };
 };
 
-/** Share-only source receipt; the existing atomic document transaction owns all persistence. */
 export function createNativeShareCaptureMethods(deps: { contract: Contract; current: () => void }) {
     const adapter = () => {
         deps.current();

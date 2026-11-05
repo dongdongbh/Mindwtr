@@ -207,7 +207,6 @@ const areaDurableState = (state: TaskStore, data: AppData): TaskStore => ({ ...s
     _allTasks: data.tasks, _allProjects: data.projects, _allSections: data.sections ?? [],
     _allAreas: data.areas ?? [], _allPeople: data.people ?? [], settings: data.settings });
 
-/** Apply only the Area policy changes to the current Task display projection. */
 const areaMemoryTasks = (memory: Task[], durable: Task[], effects: Array<{ before: Task; after: Task }>,
     loadTask: (task: Task) => Task = normalizeTaskForLoad): Task[] => {
     const existing = new Map(memory.map((row) => [row.id, row]));
@@ -245,7 +244,6 @@ export const createAreaActions = ({
             _allPeople: next.people ?? [], _allTasks: taskReference,
             settings: next.settings, lastDataChangeAt };
     };
-    /** A first raw creation effect only; a completed retry needs its typed receipt. */
     const commitPreparedOrganizeDestinationCreate = async (
         input: Parameters<TaskStore['commitPreparedInboxOrganizeDestinationCreate']>[0] | Parameters<TaskStore['commitPreparedProjectOrganizeDestinationCreate']>[0],
         authority: PreparedAreaAuthority, family: typeof referenceBatchModules.inboxOrganizeCreate,
@@ -253,7 +251,6 @@ export const createAreaActions = ({
     ): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: conflictMessage };
         const adapter = getStorageAdapter();
-        // Match the existing registered prepared-batch seam and recheck every authority after yielding.
         await Promise.resolve();
         const shared = referenceBatchModules.shared;
         const checks = family?.(input);

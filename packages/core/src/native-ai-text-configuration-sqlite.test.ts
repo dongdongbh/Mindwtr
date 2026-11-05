@@ -176,7 +176,6 @@ describe('private AI text setup actual SQLite ownership', () => {
             expect(await env.methods.commit(invalid)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await env.methods.commit(a.envelope, () => { throw new Error('retired owner'); })).toMatchObject({ ok: false });
         expect(settings(env.db)).toEqual(before);
-        // A new factory represents the explicit native reload after retirement.
         env.methods = env.create();
         const first = await plan(env), second = await plan(env, { type: 'model', value: 'current' }, '00000000-0000-4000-8000-000000000591');
         expect(await env.methods.commit(first.envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -234,7 +233,6 @@ describe('version 2 AI provider setup through production SQLite/store ownership'
         expect(await env.methods.prepareV2(request, () => {}, 'openai')).toEqual({ ok: true, value: { kind: 'consent', provider: target,
             prompt: getAIConsentPrompt(target, false, { t, tr: createAISettingsTranslator(t) }) } });
         expect(settings(env.db)).toEqual(before); expect(receipts(env.db)).toEqual([]);
-        // A dismissed dialog has no authorization and cannot be committed by manufacturing an envelope.
         expect(await env.methods.commitV2({ request, prepared: { version: 2, request } })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const agreed = await planV2(env, request.change, '00000000-0000-4000-8000-000000000591', target === 'gemini', target === 'anthropic' ? target : null);
         expect(await env.methods.commitV2(agreed.envelope)).toMatchObject({ ok: true });

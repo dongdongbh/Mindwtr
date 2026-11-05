@@ -20,8 +20,6 @@ const raw=async(db:Db)=>Object.fromEntries(await Promise.all(['tasks','projects'
 const request=()=>({requestId:MOVE,id:sourceId,taskRevision:taskRevisionOf(useTaskStore.getState()._tasksById.get(sourceId)!),targetId,targetRevision:taskRevisionOf(useTaskStore.getState()._tasksById.get(targetId)!)});
 const prepare=async(db:Db)=>{const input=request();return{request:input,prepared:value(await db.host.prepareTaskChecklistMove(input)).prepared};};
 const prepareUndo=async(db:Db,move:NativeTaskChecklistMoveEnvelope)=>{const input={requestId:UNDO,moveRequestId:MOVE};return{request:input,prepared:value(await db.host.prepareTaskChecklistMoveUndo({request:input,move})).prepared};};
-// The donor's actual mutateTasks select/buildUpdates path, with only its save
-// callback captured so the same real SQLite adapter writes the RN snapshot.
 const rn=async(isUndo:boolean)=>{
     const itemId=checklistItemIdForMovedTask(sourceId),snapshots:AppData[]=[];
     const result=await mutateTasks({set:useTaskStore.setState,debouncedSave:data=>{snapshots.push(data);}}, {

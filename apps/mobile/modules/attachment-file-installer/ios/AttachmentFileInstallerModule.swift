@@ -46,7 +46,6 @@ public struct ImmutableAttachmentPreparedStage {
   public let privateDirectoryIdentity: String
 }
 
-/// A reserved inode only. The caller serializes writes; publication stays with the installer.
 public final class ImmutableAttachmentStageWriter {
   private var descriptor: Int32
   private var expected: stat
@@ -184,9 +183,6 @@ public final class AttachmentFileInstaller {
     return try installer.hash(input, directoryDescriptor: directoryDescriptor, requireAuthority: requireAuthority)
   }
 
-  /// Reserves an exclusive private stage using the existing RN installer.
-  /// This facade is transport, not a durable reservation record: the caller must
-  /// persist its operation/intent and every returned identity token across crashes.
   public func prepareImmutableStage(
     targetInput: URL,
     operationId: String
@@ -229,8 +225,6 @@ public final class AttachmentFileInstaller {
     return try installer.openPreparedStageForWriting(prepared, targetInput: targetInput)
   }
 
-  /// Records the written stage's proof. Atomic replacement invalidates the
-  /// prepared stage token; snapshot the actual bytes before publication.
   public func snapshotImmutableStage(
     stagedInput: URL,
     targetInput: URL,
@@ -2033,8 +2027,6 @@ final class AttachmentFileInstallerEngine {
           guard try sha256(artifacts.quarantine, retained: retained) == expectedLocal else {
             return .conflict(preservedUrl: artifacts.quarantine)
           }
-          // Equal bytes do not prove both names reference the same inode.
-          // Preserve the active quarantine independently before retrying.
           _ = try preserveActiveQuarantine(artifacts, retained: retained)
         }
         try deleteInternalIfRegular(artifacts.candidate, retained: retained)
@@ -2119,8 +2111,6 @@ final class AttachmentFileInstallerEngine {
         guard try sha256(artifacts.quarantine, retained: retained) == sha256(preservedUrl, retained: retained) else {
           throw installerError("Attachment preservation generations diverged")
         }
-        // Equal bytes are not an inode-identity proof. Retain the active
-        // quarantine under a fresh name before clearing its installer slot.
         _ = try preserveActiveQuarantine(artifacts, retained: retained)
       }
     case .directory:

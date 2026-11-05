@@ -194,17 +194,11 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         return decoded.includes('Mobile Documents') || decoded.includes('iCloud');
     };
 
-    /**
-     * Detect iCloud Optimize Storage eviction on iOS.
-     * When macOS/iOS evicts a file, the real file disappears and a hidden
-     * `.filename.icloud` placeholder appears instead.
-     */
     const isICloudEvicted = async (fileUri: string): Promise<boolean> => {
         if (host.os() !== 'ios') return false;
         if (!fileUri.startsWith('file://')) return false;
         try {
-            if (await pathExists(fileUri)) return false; // Real file is present
-            // Check for .Name.icloud placeholder
+            if (await pathExists(fileUri)) return false;
             const parts = fileUri.split('/');
             const name = parts.pop() ?? '';
             const parentUri = parts.join('/');
@@ -571,7 +565,6 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 host.log.info('Resolved sync path from directory URI to file URI', { scope: 'sync' });
             }
 
-            // Detect iCloud Optimize Storage eviction before attempting reads.
             if (await isICloudEvicted(resolvedUri)) {
                 host.log.warn(ICLOUD_EVICTED_MESSAGE, { scope: 'sync' });
 
@@ -584,7 +577,6 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                     }
                 } catch (error) {
                     if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
-                    // Backup also unavailable.
                 }
                 throw new Error(ICLOUD_EVICTED_MESSAGE);
             }
@@ -632,8 +624,6 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                     await sleep(120 + attempt * 80);
                 }
             }
-            // Before the "invalid JSON" repair path can fire: ciphertext under the plain name
-            // is not corrupt JSON (decision #4). Read the raw bytes and check for MWENC1.
             const rawBytes = await readSyncArtifactBytes(resolvedUri).catch((error: unknown) => {
                 if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                 return null;
@@ -644,12 +634,6 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             throw lastError;
         } catch (error) {
             if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
-            // Fail closed: neither a no-key discovery nor a failed decrypt may reach the
-            // "invalid JSON -> return null and repair" branch below. Defense in depth — no
-            // current MWENC1 error message matches that branch's regex, so removing these
-            // three lines does not fail a test today. They exist so that a future wording
-            // change ("...is not valid JSON container...") cannot silently turn a wrong
-            // passphrase into "no remote data, overwrite it".
             if (error instanceof FileSyncUnverifiedReadError) throw error;
             if (error instanceof SyncEncryptionNoKeyError
                 || error instanceof SyncEncryptionRemotePlaintextError

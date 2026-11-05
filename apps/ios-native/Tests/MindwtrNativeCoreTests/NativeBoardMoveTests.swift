@@ -60,8 +60,6 @@ final class NativeBoardMoveTests: XCTestCase {
         return try object(XCTUnwrap(rows.first?["data"] as? String))
     }
 
-    // Raw legacy fixture tokens acquire missing catalog entries on the first RN/native write.
-    // Carry the complete expected settings forward so existing catalog metadata never restamps.
     private func assertBoardFixtureSettings(_ before: [String: Any], actual: [String: Any],
         taskAfter: [String: Any], operationStartedAt: Date, operationEndedAt: Date,
         file: StaticString = #filePath, line: UInt = #line) throws -> [String: Any] {
@@ -74,7 +72,6 @@ final class NativeBoardMoveTests: XCTestCase {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let date = try XCTUnwrap(formatter.date(from: at), file: file, line: line)
         XCTAssertEqual(formatter.string(from: date), at, file: file, line: line)
-        // JS Date has millisecond precision; do not reject the partial millisecond at entry.
         let earliest = Date(timeIntervalSince1970: floor(operationStartedAt.timeIntervalSince1970 * 1000) / 1000)
         XCTAssertLessThanOrEqual(operationStartedAt, operationEndedAt, file: file, line: line)
         XCTAssertGreaterThanOrEqual(date, earliest, file: file, line: line)
@@ -1181,7 +1178,6 @@ final class NativeBoardMoveTests: XCTestCase {
             _ = try await core.call("logLine", argumentsJSON: json([stageMessage,
                 #"{"releaseCheck":"v1.3.5/ios-board-drag-stage","stage":"begin","reason":"ready","reason":"private"}"#]))
         }
-        // Exercise the same numeric formatter used by App geometry and the real host boundary.
         let geometryMessage = NativeBoardDragGeometry.message
         let sample = CGRect(x: 0.125, y: 12.0000001, width: 342.5, height: 53.25)
         func geometryPayload(_ viewport: CGRect? = nil, area: CGRect? = nil, row: CGRect? = nil) throws -> [String: Any] {
@@ -1310,7 +1306,6 @@ final class NativeBoardMoveTests: XCTestCase {
         mixed = columnMismatch; mixed["currentColumn"] = missing
         XCTAssertFalse(NativeBoardDragGeometry.accepts(mixed))
         await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([geometryMessage, json(mixed)])) }
-        // New numeric records must not widen the old three-field stage schema.
         var forgedStage: [String: Any] = stageContext; forgedStage["currentViewport"] = numeric
         await expectFailure("INVALID_INPUT") { _ = try await core.call("logLine", argumentsJSON: json([stageMessage, json(forgedStage)])) }
         let pagingMessage = "Native iOS Inbox paging recovered"

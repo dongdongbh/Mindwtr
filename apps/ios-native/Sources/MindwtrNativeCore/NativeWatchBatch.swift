@@ -11,7 +11,6 @@ public struct NativeWatchBatch: Sendable {
     public let entries: [Entry]
     let json: String
 
-    /// Select the oldest commands before bounding the frame, so later taps cannot overtake queued ones.
     public static func orderedSources(_ sources: [(name: String, body: String)]) throws -> [(name: String, body: String)] {
         let fractional = ISO8601DateFormatter(); fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let ordinary = ISO8601DateFormatter()
@@ -33,7 +32,6 @@ public struct NativeWatchBatch: Sendable {
     public static func next(_ sources: [(name: String, body: String)]) throws -> NativeWatchBatch? {
         guard !sources.isEmpty else { return nil }
         let ordered = try orderedSources(sources)
-        // Sixfold JSON escaping of sixteen maximum-size bodies still fits the 4 MiB frame.
         let entries = ordered.prefix(16).map { ["name": $0.name, "body": $0.body] }
         let frame: [String: Any] = ["version": 1, "requestId": UUID().uuidString.lowercased(), "entries": entries]
         return try Self(json: String(decoding: JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys]), as: UTF8.self))

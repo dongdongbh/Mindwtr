@@ -125,7 +125,6 @@ it('encodes the actual observed write call without browser base64 globals', asyn
         if (request.op === 'create') return { id: 'reply', value: 'created' };
         if (request.op === 'writeCreated') {
             encoded = request.base64;
-            // End at the real transport call. This codec case claims no simulated native publication.
             throw new Error('Selected transport refusal after encoded bytes');
         }
         return { id: 'reply', value: null };

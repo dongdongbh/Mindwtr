@@ -131,8 +131,6 @@ const readEnvelope=(v:unknown,isUndo:boolean):Envelope|null=>{
 };
 
 
-// The prospective Undo uses this Move's frozen clock and SQL-normalized AFTER rows.
-// It is checked again at Commit so a valid standalone Move envelope cannot bypass the bound.
 const immediateUndoFits=(move:NativeTaskChecklistMoveEnvelope,data:AppData):boolean=>{
     const p=move.prepared,tasks=data.tasks.map(row=>{const changed=p.effect.tasks.find(r=>r.after.id===row.id)?.after;if(!changed)return row;
         const values=taskToSqliteRow(changed);return taskFromSqliteRow(Object.fromEntries(TASK_SQLITE_COLUMNS.map((name,index)=>[name,values[index]])));});
@@ -180,7 +178,6 @@ export function createTaskChecklistMoveMethods(deps:{readiness:()=>NativeHostRes
     const commit=async(e:Envelope):Promise<NativeHostResult<{id:string}>>=>{const ready=deps.readiness();if(!ready.ok)return ready;const allowed=guard();if(!allowed.ok)return allowed;const prior=saved(e);if(prior)return prior;
         let notSaved:NativeHostResult<never>|null=null;
         const beforeApplyFailure=(error:Extract<NativeHostResult<null>,{ok:false}>)=>{
-            // receipts.run reserves SAVE_FAILED for an effect that already owes a save.
             if(error.error.code==='SAVE_FAILED'){notSaved=error;return fail('INVALID_INPUT','Checklist move could not validate saved authority');}
             return error;
         };

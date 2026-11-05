@@ -32,7 +32,6 @@ type StorageEntry = readonly [string, string];
 type StorageSnapshotEntry = readonly [string, string | null];
 
 export type MobileSyncConfigurationTransactionDependencies = {
-    /** Native foreground owner only; absent preserves existing mobile transaction behavior. */
     beforeActivation?: () => Promise<void>;
     beforeDropboxPromotion?: () => Promise<void>;
     clearConfigCache: () => void;

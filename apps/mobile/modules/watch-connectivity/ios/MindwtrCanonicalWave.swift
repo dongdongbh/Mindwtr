@@ -8,9 +8,6 @@ enum MindwtrCanonicalWaveError: Error {
     case audioConversion(Int32)
 }
 
-/// whisper.rn's iOS decoder removes exactly 44 bytes, then interprets every
-/// remaining byte as little-endian Int16 PCM. Keep this layout deliberately
-/// narrower than the many valid RIFF/WAVE layouts accepted by AVFoundation.
 public enum MindwtrCanonicalWave {
     static let headerSize = 44
     static let sampleRate: UInt32 = 16_000
@@ -36,7 +33,6 @@ public enum MindwtrCanonicalWave {
         )
     }
 
-    /// The receiver and local voice decoder share the same bounded resampling lane.
     static func streamPCM(_ input: ExtAudioFileRef, maximumDataBytes: Int,
                           checkCancellation: () throws -> Void = {}, consume: (Data) throws -> Void) throws -> Int {
         var source = AudioStreamBasicDescription(), size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
@@ -83,7 +79,6 @@ public enum MindwtrCanonicalWave {
         }
     }
 
-    /// Converts immutable proof-checked audio without reopening a caller path.
     public static func samplesFromAudio(_ bytes: Data, maximumSamples: Int, checkCancellation: () throws -> Void = {}) throws -> [Float] {
         guard !bytes.isEmpty, bytes.count <= 4 * 1024 * 1024, maximumSamples > 0, maximumSamples <= 120 * 16_000 else {
             throw MindwtrCanonicalWaveError.invalidDataSize

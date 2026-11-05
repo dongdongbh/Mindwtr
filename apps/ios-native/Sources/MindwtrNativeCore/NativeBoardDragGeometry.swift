@@ -2,7 +2,6 @@ import Foundation
 import CoreFoundation
 import CoreGraphics
 
-/// Fixed, content-free geometry snapshot shared by App emission and host admission.
 public enum NativeBoardDragGeometry {
     public static let message = "Native iOS Board drag geometry"
     public static let releaseCheck = "v1.3.9/ios-board-drag-geometry"
@@ -20,8 +19,6 @@ public enum NativeBoardDragGeometry {
     private static let columnRejections: [RebaseRejection] = [.columnIdentity, .columnInvalid, .columnX, .columnSize, .columnArithmetic, .columnY]
     private static let reasons = ["geometry-missing", "geometry-viewport", "geometry-area", "geometry-rows", "geometry-other", "geometry-scroll-rebased", "geometry-scroll-roundoff-rebased", "geometry-scroll-height-roundoff-rebased"]
 
-    /// Global vertical endpoints can round independently when converted into an origin and height.
-    /// Only height admits that endpoint ULP residue; horizontal geometry stays exact.
     public static func matchesVerticalTranslation(_ original: CGRect, _ current: CGRect, delta: CGFloat,
         rejected: (RebaseRejection) -> Void = { _ in }) -> Bool {
         func refuse(_ reason: RebaseRejection) -> Bool { rejected(reason); return false }

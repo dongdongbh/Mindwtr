@@ -533,8 +533,6 @@ const rowDatesSaveRequest = (source: Task, request: NativeRowTaskDatesRequest, r
         patch: Object.fromEntries(fields.map(field => [field, field === 'relativeStartOffset' ? changed[field] ?? null : changed[field] ?? ''])),
         checklist: { base: toChecklist(source.checklist), value: toChecklist(source.checklist) } };
 };
-// A linked date uses local calendar setters in RN. Retain the nominal wall
-// input as an existing frozen-date record so a cold process never reparses it.
 const rowDatesRelativeNominal = (source: Task, request: NativeChecklistSaveRequest, dates: ReadonlyMap<string, FocusDateProjection>) => {
     if (!own(request.patch, 'relativeStartOffset') || request.patch.relativeStartOffset == null) return null;
     const offset = normalizeRelativeStartOffset(request.patch.relativeStartOffset);
@@ -562,9 +560,6 @@ const rowDatesFrozenRelative = (source: Task, request: NativeChecklistSaveReques
     if (startTime !== requested) throw new Error('Dates linked Start is not bound to requested calendar result');
     return { startTime, relativeStartOffset: link.offset };
 };
-// rescheduleTask uses Date.parse: an ISO date-only value is UTC midnight,
-// whereas a floating datetime is local. Keep that distinction separate from
-// Focus's local date-only parser, using an explicit nominal record when local.
 const rowDatesRescheduleParse = (value: string | undefined): { instant: number | null } | { nominal: string } => {
     if (!value) return { instant: null };
     if (/^[+-]?\d{4,6}(?:-\d{2}(?:-\d{2})?)?$/.test(value)
@@ -769,8 +764,6 @@ const rowQuickStatusSelection: ChecklistSelection = {
             && same(request.checklist.base, request.checklist.value) ? request : null;
     },
 };
-// This parser is selected only by the explicit row wrapper. Generic Save keeps
-// its current grammar and cannot validate or commit the selected v2 proof.
 const rowBackdateSelection: ChecklistSelection = {
     kind: 'rowBackdate',
     readRequest: (value, validateField) => {
@@ -906,8 +899,6 @@ const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witnes
         if (selection?.kind === 'rowDates') {
             if (!same(expected[name as keyof Task], frozen[name as keyof Task]) || own(expected, name) !== own(frozen, name)) return false;
         } else if (temporal.has(name)) {
-            // Date/link projections can depend on the preparing process's zone.
-            // Only fields actually requested (and their linked start) may vary.
             if (!own(request.patch, name)
                 && !(name === 'startTime' && (own(request.patch, 'dueDate') || own(request.patch, 'relativeStartOffset')))
                 && !same(expected[name as keyof Task], frozen[name as keyof Task])) return false;
@@ -1006,8 +997,6 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
             if (!id) throw new Error('Missing frozen checklist child ID');
             return id;
         };
-        // A clean Skip has one lifecycle transition. A dirty Skip first resolves
-        // the ordinary Save, then archives that row in the same atomic effect.
         const hasDraftUpdate = selection?.kind === 'rowDestination' ? true : selection && !skip ? Object.keys(direct).some((field) => !same(source[field as keyof Task], direct[field as keyof Task]))
             : !skip || Object.keys(direct).length > 0;
         const effects = hasDraftUpdate ? planTaskUpdateEffects({ task: source, preparedUpdates: prepared.updates,
@@ -1017,8 +1006,6 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
                 && source.status !== 'archived' ? witness.recurrenceProjection : undefined }) : null;
         if (effects && selection?.kind === 'rowDates') {
             const relative = rowDatesFrozenRelative(source, request, dates!);
-            // Only decisions independently proved from raw/request dates replace
-            // the shared planner's ambient parses; every other effect stays shared.
             effects.updatedTask = { ...effects.updatedTask, ...(relative ?? {}),
                 ...(own(request.patch, 'dueDate') ? { pushCount: rowDatesFrozenPushCount(source, request, dates!) } : {}) };
             effects.tasks = effects.tasks.map(row => row.id === source.id ? effects.updatedTask : row);
@@ -1086,7 +1073,6 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
     return { effect, result: undo || unchanged ? { id: source.id } : effectResult(kind, effect, request, witness) };
 };
 
-/** Keep only rows the deterministic planner reads; never journal the library. */
 const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state: Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas'>, reference = false, retainedContext?: Task, rowFocus = false): void => {
     const tasks = new Set<string>([
         witness.source.id,
@@ -1808,7 +1794,7 @@ const readInlineEnvelope = (value: unknown, validateField: (field: TaskDraftFiel
 const diagnoseInline = (request: NativeInlineChecklistRequest): void => {
     try { logInfo('Native iOS inline checklist confirmed', { scope: 'native-host', category: 'storage', force: true,
         context: { releaseCheck: 'v1.3.9/ios-inline-checklist', action: request.action, outcome: 'confirmed' } }); }
-    catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+    catch { }
 };
 
 const readRowQuickStatusSourceRef = (value: unknown): { id: string; taskRevision: string } | null => {
@@ -1841,12 +1827,12 @@ const readRowQuickStatusEnvelope = (value: unknown, validateField: (field: TaskD
 const diagnoseRowQuickStatus = (request: NativeRowQuickStatusRequest): void => {
     try { logInfo('Native iOS row quick status confirmed', { scope: 'native-host', category: 'storage', force: true,
         context: { releaseCheck: 'v1.3.9/ios-row-quick-status', target: request.status, outcome: 'confirmed' } }); }
-    catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+    catch { }
 };
 const diagnoseRowCompletion = (kind: 'rowComplete' | 'rowCompleteUndo'): void => {
     try { logInfo('Native iOS row completion confirmed', { scope: 'native-host', category: 'storage', force: true,
         context: { releaseCheck: 'v1.3.9/ios-row-completion', outcome: kind === 'rowComplete' ? 'completed' : 'undone' } }); }
-    catch { /* Diagnostics cannot change a durable acknowledgment. */ }
+    catch { }
 };
 
 const rawWriteEffect = (envelope: NativeRawWriteEnvelope): PreparedChecklistEffect => (envelope.prepared.kind === 'rowQuickStatus' || envelope.prepared.kind === 'referenceCompleteUndo' || envelope.prepared.kind === 'boardCompleteUndo' || envelope.prepared.kind === 'rowCompleteUndo')
@@ -2074,8 +2060,6 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const applied = await applyHistoryRowOverlay(pending.envelope, read.value.authority);
             if (!applied.success || applied.outcome !== 'applied')
                 return fail('STALE_REVISION', applied.error ?? `${action} raw retry was superseded`);
-            // The old guard stayed armed throughout reapply. Only a validated,
-            // installed owned snapshot may bind a newer complete BEFORE settings row.
             armRowFocus(pending.envelope, pending.adapter, read.value.authority.snapshot.settings);
             pending.boundary = read.value.authority.saveBoundary;
         }
@@ -2375,7 +2359,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
     });
     const widgetDiagnostic = (result: NativeWidgetCompletionResult) => {
         try { logInfo('Native iOS widget completion confirmed', { scope: 'widget', force: true,
-            context: { releaseCheck: 'v1.3.9/ios-widget-completion', outcome: result.outcome } }); } catch { /* Diagnostics cannot change a saved result. */ }
+            context: { releaseCheck: 'v1.3.9/ios-widget-completion', outcome: result.outcome } }); } catch { }
     };
     const widgetAuthority = {
         prepareWidgetCompletion(input: unknown): NativeHostResult<{ kind: 'prepared'; prepared: NativeWidgetCompletionEnvelope }
@@ -2788,8 +2772,6 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         if (matches.length !== 1 || matches[0].deletedAt || matches[0].purgedAt || isProjectedRecurringTaskId(input.id))
             return fail('TASK_NOT_FOUND', 'Row status task is unavailable');
         const state = ownedChecklistState(data, at), source = state._tasksById.get(input.id)!;
-        // The row exposes the normal-load revision (for example, a clock rollback
-        // can clamp its displayed updatedAt). Raw BEFORE authority stays separate.
         if (taskRevisionOf(source) !== input.taskRevision) return fail('STALE_REVISION', 'Task changed since the row was shown');
         if (deps.isReadOnly(source) || isStatusListTaskReadOnly(source, state._allProjects)
             || referenceContainerReadOnly(source, { projects: state._allProjects, sections: state._allSections }))
@@ -3485,7 +3467,6 @@ export function createOwnedCompleteTaskChecklistSaveAuthority(deps: NativeTaskCh
     return createTaskChecklistSaveFactory(deps).ownedAuthority;
 }
 
-/** Private widget capability; ordinary completion readers never admit its tap-time context. */
 export function createNativeWidgetCompletionMethods(deps: NativeTaskChecklistSaveDependencies) {
     return createTaskChecklistSaveFactory(deps).widgetAuthority;
 }

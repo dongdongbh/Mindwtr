@@ -1,6 +1,5 @@
 import Foundation
 
-/// Frozen, receiver-owned WAV bytes bound to one published queue generation.
 public struct MindwtrWatchPendingAudio: Sendable {
     public let command: MindwtrWatchPendingCommand
     public let bytes: Data
@@ -203,7 +202,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         }
     }
 
-    /// May be called by the native Engine queue; never invokes Engine or UI work.
     public func validatePendingAudio(_ audio: MindwtrWatchPendingAudio) throws {
         try workQueue.sync { try validatePendingAudioLocked(audio) }
     }
@@ -224,7 +222,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
         }
     }
 
-    /// For a host-proven committed receipt: absence of WAV must not prevent source retirement.
     public func retirePendingAudio(for command: MindwtrWatchPendingCommand) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             workQueue.async {
@@ -421,7 +418,6 @@ public final class MindwtrWatchConnectivityReceiver: NSObject, WCSessionDelegate
     }
 
     public func sessionDidBecomeInactive(_ session: WCSession) {
-        // iOS can briefly make the session inactive while the paired Watch changes.
     }
 
     public func sessionDidDeactivate(_ session: WCSession) {

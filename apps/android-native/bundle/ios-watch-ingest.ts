@@ -16,7 +16,6 @@ const flatJSON = (raw: string, maximum: number) => {
     try { parsed = JSON.parse(raw); } catch { throw invalid(); }
     if (!object(parsed) || Object.values(parsed).some(value => value !== null && typeof value === 'object')) throw invalid();
     const names = new Set<string>();
-    // Scan complete string tokens so quoted JSON inside the immutable body is not mistaken for a field.
     for (const token of raw.matchAll(/"(?:[^"\\]|\\[\s\S])*"/gu)) {
         if (!/^\s*:/u.test(raw.slice(token.index + token[0].length))) continue;
         const name: unknown = JSON.parse(token[0]);
@@ -106,7 +105,6 @@ export async function readIOSWatchBatchOutcome(raw: string, current: () => void)
     return { version: 1 as const, ingested: completed.length, completed };
 }
 
-/** Native journals the complete immutable batch; physical queue retirement follows its durable completion. */
 export async function ingestIOSWatchBatch(raw: string, deps: {
     contract: Contract;
     current: () => void;
@@ -209,7 +207,6 @@ export function readIOSWatchAudioNeedsTranscript(sourceJSON: string, current: ()
     return needsTranscript;
 }
 
-/** Only the native-owned immutable transcript envelope grants the shared drain an audio port. */
 export async function ingestIOSWatchAudio(raw: string, deps: {
     contract: Contract; current: () => void; lastApplied: PendingCaptureRecordPort;
 }) {

@@ -191,13 +191,11 @@ export type CaptureModalCopilotApplied = { context?: string; timeEstimate?: Time
 
 export type CaptureModalCopilotPart = { kind: 'context' | 'timeEstimate' | 'tag'; value: string };
 
-/** Capture copilot choices: used tokens first, followed by live saved tokens not already used. */
 export const getCaptureModalCopilotTokens = (settings: AppSettings, tasks: Task[]) => ({
     contexts: Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' }), ...getSavedTaxonomyTokens(settings, 'context')])),
     tags: Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' }), ...getSavedTaxonomyTokens(settings, 'tag')])),
 });
 
-/** Add explicitly applied metadata without interpreting it as quick-add command text. A typed estimate wins. */
 export function applyCaptureModalCopilotProps(props: Partial<Task>, applied: CaptureModalCopilotApplied,
     timeEstimatesEnabled: boolean): Partial<Task> {
     return { ...props,
@@ -207,7 +205,6 @@ export function applyCaptureModalCopilotProps(props: Partial<Task>, applied: Cap
     };
 }
 
-/** Whether the screen asks the AI about this title: AI on, a key when one is required, and 4 characters or more. */
 export function shouldRequestCaptureModalCopilot(input: { aiEnabled: boolean; keyRequired: boolean; hasKey: boolean; title: string }): boolean {
     if (!input.aiEnabled || (input.keyRequired && !input.hasKey)) return false;
     return input.title.length >= 4;

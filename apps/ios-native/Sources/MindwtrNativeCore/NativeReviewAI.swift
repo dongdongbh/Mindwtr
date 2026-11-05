@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 
-/// Weekly Review analysis is read-only; selected Apply is a separate exact, revision-bound journal command.
 enum NativeReviewAIJSON {
     static func request(_ raw: String) throws {
         guard try NativeTaskAIJSON.object(raw, maximum: 1024).isEmpty else { throw NativeTaskAIJSON.invalid }

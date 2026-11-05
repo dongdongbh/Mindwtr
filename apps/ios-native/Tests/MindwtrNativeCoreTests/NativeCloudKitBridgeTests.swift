@@ -62,7 +62,6 @@ final class NativeCloudKitBridgeTests: XCTestCase {
             DispatchQueue.global().async {
                 do {
                     if let op = operation as? CKFetchRecordsOperation {
-                        // Upload receipt is frozen before even the initial record lookup.
                         try later.write(to: source)
                         op.fetchRecordsResultBlock?(.success(()))
                     } else if let op = operation as? CKModifyRecordsOperation {
@@ -180,7 +179,6 @@ final class NativeCloudKitBridgeTests: XCTestCase {
         let selected = bridge { operation in
             DispatchQueue.global().async {
                 guard let op = operation as? CKFetchRecordsOperation else { self.fail(operation, HostFailure("Expected fetch")); return }
-                // Genuine record absence: no matched record and successful fetch completion.
                 op.fetchRecordsResultBlock?(.success(()))
             }
         }

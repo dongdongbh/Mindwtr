@@ -194,15 +194,12 @@ export function getAIProviderDefaultsPatch(provider: AIProviderId, isFossBuild: 
     };
 }
 
-/** Anthropic's thinking switch: a budget of 1,024 tokens (the default when it has one), or none. */
 export const getAnthropicThinkingPatch = (enabled: boolean): { thinkingBudget: number } => ({
     thinkingBudget: enabled ? (DEFAULT_ANTHROPIC_THINKING_BUDGET || 1024) : 0,
 });
 
-/** The existing mobile Anthropic presets, with Low following the shared switch default. */
 export const getAnthropicThinkingBudgetPresets = (): number[] => [getAnthropicThinkingPatch(true).thinkingBudget, 2048, 4096];
 
-/** A speech provider choice: its default model; Whisper also takes that model's file. */
 export function getSpeechProviderPatch(provider: SpeechProviderChoice, whisperModelUri: (modelId: string) => string | undefined): Partial<SpeechSettings> {
     return {
         provider,

@@ -3,7 +3,6 @@ import type { NativePreparedChecklistWrite, NativeTaskCompletionRequest } from '
 
 export const NATIVE_WIDGET_NAMESPACE = 'tech.dongdongbh.mindwtr.native.dev';
 export const PRODUCTION_WIDGET_NAMESPACE = 'tech.dongdongbh.mindwtr';
-// SHA256 of the fixed standard namespace, matching NativeSearchIndex's scope codec.
 const SCOPE = '6a427f83abc15c8e99ca3ab26acb1afd9b7a82458efa3a5c34b2c133056f7d8f';
 export const NATIVE_WIDGET_COMPLETION_BYTES = 2_100_000;
 export const NATIVE_WIDGET_SOURCE_BYTES = 65_536;
@@ -22,7 +21,6 @@ const validUnicode = (text: string) => Array.from(text).every(char => {
     const code = char.codePointAt(0)!; return code < 0xd800 || code > 0xdfff;
 });
 
-/** Canonical generation, not permissive base64 decoding. No raw task URL is accepted. */
 export const nativeWidgetIdentifier = (taskID: string): string => SCOPE + '.'
     + bytesToBase64(bytes(taskID)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -46,7 +44,6 @@ export const readNativeWidgetCompletionSource = (value: unknown): NativeWidgetCo
 };
 export const nativeWidgetSourceTaskID = (source: NativeWidgetCompletionSource): string => JSON.parse(source.token)[0];
 
-/** Exact source tuple, with canonical object ordering; preserves the token's original string bytes. */
 export const nativeWidgetCompletionPayload = (source: NativeWidgetCompletionSource): string => JSON.stringify(['iosWidgetCompletion', {
     actionId: source.actionId, createdAt: source.createdAt, identifier: source.identifier, namespace: source.namespace, token: source.token,
 }]);

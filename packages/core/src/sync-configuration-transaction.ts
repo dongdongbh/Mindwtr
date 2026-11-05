@@ -73,7 +73,6 @@ export type PersistedSyncConfiguration = {
 };
 
 export type SyncConfigurationPort = {
-    /** Optional native owner admission immediately before enabling the candidate; rollback never calls it. */
     beforeActivation?: () => Promise<void>;
     recoverDropboxCredentialsBeforeConfiguration: () => Promise<void>;
     readConfiguration: (

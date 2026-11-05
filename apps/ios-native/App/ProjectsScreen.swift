@@ -2422,7 +2422,6 @@ struct ProjectDetailScreen: View {
     }
 }
 
-// Concrete boundaries keep the Notes view metadata shallow on iOS 17.
 private struct ProjectToSectionDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var model: CoreModel

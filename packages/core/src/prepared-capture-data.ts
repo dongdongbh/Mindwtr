@@ -9,7 +9,6 @@ type Collections = { _allTasks: Task[]; _allProjects: Project[]; _allSections: S
 type Result = { tasks: Task[]; projects: Project[]; settings: AppSettings; changed: boolean };
 const unchanged = (state: Collections): Result => ({ tasks: state._allTasks, projects: state._allProjects, settings: state.settings, changed: false });
 
-/** Canonical post-preparation checks/effects shared by ordinary capture and the atomic share receipt writer. */
 export function applyPreparedCaptureData(state: Collections,
     { task, project, deviceIdToInitialize }: { task: Task; project: Project | null; deviceIdToInitialize: string | null }): Result | null {
     const existingTask = state._allTasks.find((entry) => entry.id === task.id);

@@ -264,7 +264,6 @@ export const withAIRequestStopNotifications = (
     ),
 });
 
-/** Preserves the request's own timeout signal while also forwarding its owner's cancellation. */
 export function abortableAIFetch(fetcher: typeof fetch, signal: AbortSignal | undefined): typeof fetch {
     if (!signal) return fetcher;
     return (url, init = {}) => {

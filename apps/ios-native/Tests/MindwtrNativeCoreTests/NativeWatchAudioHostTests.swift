@@ -71,7 +71,6 @@ private final class WatchAudioFixtureState: @unchecked Sendable {
     }
 }
 
-/// Production JSC/SQLite and native HTTP orchestration with fixed local data; no Watch or network claim.
 final class NativeWatchAudioHostTests: XCTestCase {
     private var root: URL!, bundle: URL!, state: WatchAudioFixtureState!, service: String!
     private let namespace = "mindwtr.watch.audio.fixture", at = "2026-10-31T12:00:00.000Z"

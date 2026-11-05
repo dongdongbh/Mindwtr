@@ -80,7 +80,6 @@ final class NativeTaskAIHostTests: XCTestCase {
         let original = try await createTask(seed, title: "Target AI title")
         let originalSibling = try await createTask(seed, title: "Unrelated AI sibling"); await seed.close()
         let sqlite = try SQLiteBridge(url: database)
-        // Cold-load bounded legacy IDs without changing a live core's backing rows.
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([id, original]))
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([sibling, originalSibling]))
         if contextSiblings > 0 {
@@ -182,7 +181,6 @@ final class NativeTaskAIHostTests: XCTestCase {
         let original = try await request(core)
         let handle = try await core.beginTaskAI(requestJSON: original, editor: nil, lease: NativeTaskAIEditorLease(), readmit: { true })
         try await wait(state.entered)
-        // This durable command must complete while HTTP remains held, through the ordinary writer.
         _ = try await core.call("complete", argumentsJSON: json([sibling]))
         state.release()
         let answer = try object(await core.awaitTaskAI(handle)); XCTAssertEqual(answer["kind"] as? String, "dialog")
@@ -277,7 +275,6 @@ final class NativeTaskAIHostTests: XCTestCase {
             }
         }
         let state = TaskAIHTTPState(); state.held.update { $0 = true }
-        // A hostile/malformed private answer may settle before its accepted transport. Drain is still mandatory.
         let suffix = """
         MindwtrHost.iosTaskAIRequest=function(json,owner){
           owner(JSON.stringify({phase:'begin',provider:'openai',configuration:JSON.stringify({enabled:true,provider:'openai',model:'fixture',requestTimeoutSeconds:30}),language:'en'}));

@@ -76,7 +76,6 @@ const deferred = <T>() => {
     let resolve!: (value: T) => void;
     let reject!: (reason: unknown) => void;
     const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
-    // Removed-await controls must fail assertions, not create unhandled rejections.
     void promise.catch(() => undefined);
     return { promise, resolve, reject };
 };

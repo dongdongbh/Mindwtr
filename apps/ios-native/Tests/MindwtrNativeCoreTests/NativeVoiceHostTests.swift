@@ -87,8 +87,6 @@ private actor VoiceEditorGate {
     func close() { waiter?.resume(returning: true); waiter = nil }
 }
 
-/// Production bundle/JSC/SQLite, fixed synthetic credential and intercepted HTTP.
-/// These fixtures make no microphone, network or physical-device claim.
 final class NativeVoiceHostTests: XCTestCase {
     private var root: URL!, bundle: URL!, state: VoiceFixtureState!, service: String!
     private var rnCandidate = false
@@ -298,7 +296,6 @@ final class NativeVoiceHostTests: XCTestCase {
         let speech = try await core.completeVoiceSpeech(jobID: speechID, readmission: { _ in true })
         XCTAssertEqual(speech, .applied)
 
-        // Match the App's post-voice canonical reset, then use the ordinary bridge.
         let resetOpen = try object(await core.call("captureOpen"))
         let resetEdit = try object(await core.call("captureEdit", argumentsJSON: json([json([
             "text": "", "options": XCTUnwrap(resetOpen["options"]),
@@ -335,13 +332,13 @@ final class NativeVoiceHostTests: XCTestCase {
         state.fail(false)
         let saved = try await core.retryVoiceCapture(handle, readmission: { true })
         _ = try job(saved); XCTAssertEqual(try rows("SELECT id FROM tasks").count, 1); XCTAssertEqual(state.count, 0)
-        await core.cancelVoiceRecording(handle) // Accepted source/job survives sheet close.
+        await core.cancelVoiceRecording(handle)
         await core.cancelVoiceSpeech(jobID: try job(saved)); try assertPrivateBytesAbsent()
     }
     func testColdRecoveryAfterReservationProofWriteFailureUsesFreshPrivateStage() async throws {
         try await seed()
         let core = host(); _ = try await core.start(); let (handle, raw) = try await recording(core)
-        state.failJournalOn(3) // Prepared command, fresh reservation intent, then lost stage-proof write.
+        state.failJournalOn(3)
         let pending = try await core.stopVoiceCapture(handle, requestJSON: raw, readmission: { true })
         XCTAssertEqual(pending, .savePending)
         let disk = try object(String(contentsOf: journal)), file = try XCTUnwrap(disk["voiceFiles"] as? [String: Any])

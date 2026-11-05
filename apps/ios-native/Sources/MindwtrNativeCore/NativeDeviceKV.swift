@@ -198,7 +198,6 @@ final class NativeDeviceKV {
     }
     #endif
 
-    /// Inspect before close() releases the uncertain batch and namespace evidence.
     func validateWorkspaceRetirement() throws {
         guard !closed, !poisoned else { throw CoreHostRetirementError.unavailable }
         guard pending == nil else { throw CoreHostRetirementError.refused }
@@ -306,7 +305,6 @@ final class NativeDeviceKV {
     func readAIConsentRecorded(provider: NativeAISettingsProjection.Provider) throws -> Bool {
         try readAIProviderDeviceMetadata(provider: provider).consentRecorded
     }
-    /// A retained consent mutation belongs to its original agreed provider.
     func recordAIConsent(provider: NativeAISettingsProjection.Provider) throws {
         try requireUsable()
         if let pending {
@@ -332,7 +330,6 @@ final class NativeDeviceKV {
             value: String(decoding: data, as: UTF8.self))], skipUnchanged: true)
         aiConsentPendingProvider = nil
     }
-    /// Selected explicit Save/Clear only; generic JS storage remains restricted.
     func retireAILegacyCredential(provider: NativeAISettingsProjection.Provider) throws {
         let name = "mindwtr-ai-key:" + provider.rawValue
         try mutate([Change(key: name, bytes: Data(name.utf8), value: nil)], retiringAILegacy: provider)

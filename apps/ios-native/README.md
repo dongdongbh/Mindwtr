@@ -48,6 +48,8 @@ xcodebuild -project apps/ios-native/MindwtrNativeDev.generated.xcodeproj \
 
 The mount check runs before any directory creation. The explicit ad-hoc signing overrides apply only to this `iphonesimulator` command. This is simulator SDK/build evidence only; runtime testing still needs an explicitly selected simulator and preserved data. Device signing remains disabled by default, with no team/profile/account changes; physical signing and release acceptance are separate. The generator adds only the native.dev App Group to the App, Share and widget targets; the Next widget reads its bounded derived cache in that dev group, and preserves the base App/test target IDs and relative package paths. Focused generator checks: `python3 apps/ios-native/scripts/create-dev-project.test.py -v`.
 
+The generator copies the Watch app icon from `scripts/create-dev-project-assets/WatchAppIcon.png`. To rebuild it, run `magick apps/mobile/assets/images/icon.png -background white -alpha remove -alpha off PNG24:apps/ios-native/scripts/create-dev-project-assets/WatchAppIcon.png`.
+
 ## Project download fixture preflight
 
 Before each first Download action, stop the isolated test app and capture its library after setup. Settings Save may prefetch files, so a Download button alone does not prove an absent-file fixture. Run the read-only check against that fresh capture and the server request slice since setup began:

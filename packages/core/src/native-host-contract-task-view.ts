@@ -240,7 +240,6 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             const checklist = checklistInput ?? task.checklist;
             const attachmentsBase = readNativeSavedAttachmentsForView(task.attachments ?? []);
             if (!attachmentsBase) return fail('INVALID_INPUT', 'Saved attachments exceed the native response bound or repeat an ID');
-            // The editor's task with its draft applied (React Native's mergedTask).
             const shown: Task = readOnly ? task : {
                 ...task,
                 ...(taskDraftToUpdatePatch(draft, task, { attachments: task.attachments }) ?? {}),

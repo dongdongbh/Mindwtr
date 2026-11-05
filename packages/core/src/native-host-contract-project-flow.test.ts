@@ -318,7 +318,6 @@ describe('prepared native Project flow', () => {
             const changed = first.data().sections?.find((row) => row.id === missing.id);
             if (to === 'perSection') expect(changed).toMatchObject({ isSequential: from === 'sequential', rev: 3 });
             else expect(changed).toEqual(missing);
-            // Cold validation uses only the journal; replay opens the durable after-image.
             const second = await open(structuredClone(first.data()));
             const cold = JSON.parse(JSON.stringify(sortKeys(envelope)));
             expect(second.methods.validatePreparedProjectFlow(cold)).toMatchObject({ ok: true });

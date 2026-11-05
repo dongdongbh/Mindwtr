@@ -11,7 +11,6 @@ public enum NativeVoiceCaptureOutcome: Sendable, Equatable { case saved(taskId: 
 public struct NativeVoiceSpeechSavePending: Error, Sendable { }
 public enum NativeVoiceSpeechOutcome: String, Sendable { case applied, discarded, empty, skipped, failed, cancelled }
 
-// File settlement rides the existing PendingCommand; it is never a second queue.
 struct NativeVoiceFileSettlement: Codable {
     struct Source: Codable {
         let sourceURI: String, sha256: String, identity: String, cacheRootIdentity: String, parentIdentity: String
@@ -35,8 +34,6 @@ struct NativeVoiceFileSettlement: Codable {
     var stage: Stage?
 }
 
-/// Only native-selected roots/proofs enter this file port. Its serial file queue
-/// runs the existing installer and bounded file primitives outside JSC.
 final class NativeVoiceFiles: @unchecked Sendable {
     let files: NativeAttachmentFiles
     private let installer: NativeAttachmentInstaller
@@ -107,8 +104,6 @@ struct NativeVoiceUnavailableBackend: NativeVoiceRecorderBackend {
     func makeRecorder(at url: URL, onEvent: @escaping @Sendable (NativeVoiceRecorderEvent) -> Void) throws -> any NativeVoiceRecordingAdapter { throw NativeVoiceRecordingError.unavailable }
 }
 
-/// One consumer for one isolated NativeHTTPJobs instance. No Engine work is held
-/// while URLSession waits, and cancellation waits for its terminal callback.
 final class NativeVoiceHTTPWait: @unchecked Sendable {
     private let lock = NSLock()
     private let http: NativeHTTPJobs
@@ -124,8 +119,6 @@ final class NativeVoiceHTTPWait: @unchecked Sendable {
                 self.continuation = continuation
                 http.setWake { [weak self] in self?.consume() }
                 do {
-                    // Publish the registered request under the cancellation lock:
-                    // drain can never pass an upload that has not submitted yet.
                     requestID = try http.submit(json)
                     lock.unlock(); consume()
                 } catch {

@@ -27,7 +27,6 @@ struct MindwtrWatchRetainedAudio: Sendable {
     }
 }
 
-/// Identity retained before upload; this record never authorizes cleanup by itself.
 struct MindwtrWatchAudioAdmission: Codable, Equatable {
     let version: Int
     let id: String
@@ -54,7 +53,6 @@ struct MindwtrWatchAudioAdmission: Codable, Equatable {
     }
 }
 
-/// Durable acknowledgement of the host callback; it grants cleanup of these generations only.
 struct MindwtrWatchAudioCleanup: Codable, Equatable {
     let version: Int
     let id: String

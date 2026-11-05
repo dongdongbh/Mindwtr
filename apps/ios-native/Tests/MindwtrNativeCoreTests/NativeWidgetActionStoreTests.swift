@@ -10,7 +10,6 @@ final class NativeWidgetActionStoreTests: XCTestCase {
     private func operation(_ id: String, revision: Int = 0) throws -> (String, String) {
         let selection = NativeLaunchSelection.standard(databaseURL: URL(fileURLWithPath: "/synthetic/db"),
             containerURL: URL(fileURLWithPath: "/synthetic"), namespace: NativeWidgetActionStore.namespace)
-        // Apple bridging of a Swift string literal can consume a leading BOM; construct the fixture from bytes.
         let rawID = String(decoding: id.utf8, as: UTF8.self) as NSString
         return (try NativeSearchIndex.identifier(taskID: id, selection: selection),
                 String(decoding: try json([rawID, revision, "2026-10-30T00:00:00.000Z", "next"]), as: UTF8.self))
@@ -86,7 +85,7 @@ final class NativeWidgetActionStoreTests: XCTestCase {
         XCTAssertNil(NativeWidgetActionProjection.pendingAction(for: identity, in: actions, at: at.addingTimeInterval(3)))
         XCTAssertTrue(NativeWidgetActionProjection.isHidden(identity, by: actions, at: at.addingTimeInterval(3)))
         let otherToken = token.replacingOccurrences(of: "é", with: "é")
-        XCTAssertEqual(token, otherToken) // Swift normalizes equality; the outbox/projection must not.
+        XCTAssertEqual(token, otherToken)
         XCTAssertNil(NativeWidgetActionProjection.pendingAction(for: .init(identifier: identifier, token: otherToken), in: actions, at: at))
         XCTAssertFalse(NativeWidgetActionProjection.isHidden(.init(identifier: identifier, token: otherToken), by: actions, at: at.addingTimeInterval(3)))
         XCTAssertEqual(NativeWidgetActionProjection.timelineDates(pendingActions: actions + actions, now: at), [at, at.addingTimeInterval(3)])

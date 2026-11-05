@@ -601,8 +601,6 @@ private struct CaptureTextInput: UIViewRepresentable {
         context.coordinator.parent = self
         if view.text != text { view.text = text }
         if view.isEditable != enabled || !context.coordinator.requestedInitialFocus {
-            // UIKit can resolve the SwiftUI responder graph while changing editability.
-            // Apply after this render, using the latest owner state rather than a stale update.
             DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
                 guard let view, let coordinator else { return }
                 if view.isEditable != coordinator.parent.enabled { view.isEditable = coordinator.parent.enabled }

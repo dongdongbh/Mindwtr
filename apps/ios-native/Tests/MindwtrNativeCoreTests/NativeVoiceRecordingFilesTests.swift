@@ -39,8 +39,6 @@ final class NativeVoiceRecordingFilesTests: XCTestCase {
         -> (receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt, source: NativeAttachmentFiles.CacheSourceProof) {
         try files.finishVoiceRecording(reservation, maximumBytes: NativeVoiceRecorder.maximumAudioBytes)
     }
-    /// Diagnostic fixture wrapper only. Retain an independent descriptor and
-    /// compare fixed stat fields across a refusal, without paths or contents.
     private func probe<T>(_ stage: String, url: URL, expected: NativeAttachmentFilesError? = nil,
                           _ operation: () throws -> T) throws -> T {
         let fd = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW_ANY | O_CLOEXEC)

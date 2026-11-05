@@ -141,7 +141,6 @@ class DevProjectTests(unittest.TestCase):
                 shutil.copyfile(HERE.parent / name, target)
             for name in ["ShareExtension", "CaptureWidget"]:
                 shutil.copytree(HERE.parent / name, native / name, dirs_exist_ok=True)
-            # A newly maintained locale is discovered, not hardcoded by the overlay.
             extra = native / "CaptureWidget/xx.lproj/Localizable.strings"
             extra.parent.mkdir(); extra.write_text('"Add Task" = "Example";\n')
             project = native / generator.BASE

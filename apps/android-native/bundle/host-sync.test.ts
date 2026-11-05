@@ -1103,8 +1103,6 @@ describe('native background sync binding', () => {
     }, 60_000);
 });
 
-// D9b change 5 (design §2, §6): only the Android host slices its sync cycles. iOS keeps unsliced cycles, its recovery save
-// and its in-gate publish; a sliced cycle there would also need the token ports, which the binding passes on both platforms.
 it.each(['android', 'ios'] as const)('binds a complete CloudKit port only to an explicit iOS invocation on %s', async (platform) => {
     if (platform === 'ios') iosFiles();
     globals.__mindwtrHostPlatform = platform;

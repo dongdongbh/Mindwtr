@@ -45,7 +45,6 @@ export const readReviewAIApply = (raw: string) => {
     return { requestId: input.requestId, action: { type: 'applySuggestions' as const, suggestions, taskRevisions: revisions as Record<string, string> } };
 };
 
-/** Manual full-bucket analysis; only explicit selected Apply enters the canonical durable writer. */
 export function createIOSReviewAI(deps: { contract: Contract; adapter: () => SqliteAdapter | null;
     isIOS: () => boolean; otherAIActive: () => boolean; isFossBuild: boolean }) {
     let active = false, selectedHost: NativeAIHost | null = null;

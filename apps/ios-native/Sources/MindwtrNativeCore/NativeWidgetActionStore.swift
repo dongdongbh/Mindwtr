@@ -18,7 +18,6 @@ public struct NativeWidgetActionIdentity: Sendable {
     public init(identifier: String, token: String?) { self.identifier = identifier; self.token = token }
 }
 
-/// RN's read-only grace overlay. Undo cancels queued work; it never reopens a saved Task.
 public enum NativeWidgetActionProjection {
     public static func pendingAction(for identity: NativeWidgetActionIdentity,
                                      in actions: [NativeWidgetPendingAction], at date: Date) -> NativeWidgetPendingAction? {
@@ -71,7 +70,6 @@ private struct WidgetActionState {
     var receipts: [ConsumedWidgetAction] = []
 }
 
-/// Concrete dev-only port of RN's locked, synced widget outbox. The App remains the only Task writer.
 public final class NativeWidgetActionStore: @unchecked Sendable {
     public static let namespace = "tech.dongdongbh.mindwtr.native.dev"
     public static let group = "group." + namespace
@@ -102,7 +100,6 @@ public final class NativeWidgetActionStore: @unchecked Sendable {
         #endif
     }
 
-    /// Explicit private directory only; production resolves the fixed dev group above.
     init(directory: URL) { self.directory = directory }
 
     public func pendingActions() throws -> [NativeWidgetPendingAction] {
@@ -129,7 +126,6 @@ public final class NativeWidgetActionStore: @unchecked Sendable {
     private func cancelLocked(id: String, now: Date?) throws -> Bool {
         guard Self.validUUID(id) else { throw NativeWidgetActionStoreError.invalidValue }
         return try withLockedState { state in
-            // Resolve the production clock after the cross-process lock: waiting cannot extend Undo.
             let clock = try Self.milliseconds(now ?? Date())
             guard let index = state.pending.firstIndex(where: { $0.id == id }), !state.pending[index].claimed,
                   clock < state.pending[index].notBefore else { return (false, false) }
@@ -241,7 +237,6 @@ public final class NativeWidgetActionStore: @unchecked Sendable {
         var state = try readState(directoryFD)
         let (result, changed) = try body(&state)
         if changed { try writeState(state, directoryFD: directoryFD, lock: lock) }
-        // Also settles a prior uncertain promotion when an exact retry is a deduplicated no-op.
         guard fsync(directoryFD) == 0 else { throw failure("synchronize its directory") }
         try check(directoryFD, lock: lock)
         return result
@@ -331,7 +326,6 @@ public final class NativeWidgetActionStore: @unchecked Sendable {
         guard descriptor >= 0 else { throw failure("create its temporary state") }
         defer { Darwin.close(descriptor); _ = unlinkat(directoryFD, temporary, 0) }
         guard fchmod(descriptor, 0o600) == 0 else { throw failure("protect its temporary state") }
-        // Simulator protection-class fcntls fail with EINVAL; physical iOS must verify them.
         #if os(iOS) && !targetEnvironment(simulator)
         let protection = fcntl(directoryFD, F_GETPROTECTIONCLASS)
         guard protection == 3, fcntl(descriptor, F_SETPROTECTIONCLASS, protection) == 0,

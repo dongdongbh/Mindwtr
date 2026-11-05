@@ -6,14 +6,12 @@ import { transform } from 'esbuild';
 import { createSyncSecretVault } from '../../../packages/core/src/sync-secret-storage';
 import { createNativeIosDropbox, readNativeIosDropboxConfiguration } from './host-ios-dropbox';
 
-// Execute the production entry method and its private capability, rather than a second
-// implementation of the public-request -> native-grant identity handoff.
 test('foreground Connect forwards its original public UUID to the strict native owner and retires it on exit', async () => {
     const source = readFileSync(join(import.meta.dir, 'host-entry.ts'), 'utf8');
     const capabilityStart = source.indexOf('let iosDropboxControl:');
     const capabilityEnd = source.indexOf('const ensureIosManualSync', capabilityStart);
     const methodStart = source.indexOf('    iosForegroundSync(name:');
-    const methodEnd = source.indexOf('    /** `name` is one of MENU_COMMANDS', methodStart);
+    const methodEnd = source.indexOf('    gettingStartedOutcome(json: string): string {', methodStart);
     expect([capabilityStart, capabilityEnd, methodStart, methodEnd].every(value => value >= 0)).toBe(true);
     const original = '00000000-0000-4000-8000-000000009703';
     const configuration = { version: 1 as const, clientId: 'PublicTest123', redirectUri: 'mindwtr-native-dev://redirect' as const };
@@ -46,8 +44,6 @@ test('foreground Connect forwards its original public UUID to the strict native 
         getItem: async () => null, setItem: async () => { throw new Error('Unapproved legacy write'); }, removeItem: async () => undefined,
     }, secrets, vault: createSyncSecretVault(secrets), fetch: async () => { tokenCalls++;
         return new Response(JSON.stringify({ access_token: 'synthetic-access', refresh_token: 'synthetic-refresh', expires_in: 3600 })); } });
-    // The cached factory reads public configuration only inside its admitted turn.
-    // Recreate it at the actual command seam, after the production entry arms that owner.
     expect(binding).toBeNull();
     sandbox.MENU_COMMANDS.connectDropbox = async () => {
         const owned = createNativeIosDropbox(sandbox.entryCapability, { storage: {

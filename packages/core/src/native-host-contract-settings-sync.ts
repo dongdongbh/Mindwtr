@@ -85,7 +85,6 @@ type Translate = (key: string) => string;
 
 
 export type NativeSyncSettingsHost = {
-    /** Private foreground ownership; never serialized in a Settings read. */
     beforeDropboxPromotion?: () => Promise<void>;
     beforeActivation?: () => Promise<void>;
     platform: {
@@ -113,7 +112,6 @@ export type NativeSyncSettingsHost = {
     encryption: {
 
         unlockOnly?: boolean;
-        /** Selected capabilities; saved-webdav-or-local adds only local Enable and Disable. */
         mode?: 'saved-webdav-enable-unlock' | 'saved-webdav' | 'saved-webdav-or-local' | 'saved-dropbox';
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;
@@ -154,7 +152,6 @@ export const NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS = [
 export type NativeSyncSettingsSettlement = { pending: boolean; uncertain: boolean };
 
 export type SyncSettingsDeps = {
-    /** Private native lifecycle observation; never a screen command or a cancellation authority. */
     registerRetirementStatus?: (read: () => NativeSyncSettingsSettlement) => void;
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
@@ -409,7 +406,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     const receipts = createNativeRequestReceipts({ save: durableSave });
     const toasts: NativeSyncToast[] = [];
     let screen: Screen | null = null;
-    // Closing a view does not settle its original reads/configuration ownership.
     const closedRetirementScreens = new Set<Screen>();
 
 
@@ -658,7 +654,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 .catch((error) => { current.retirementUncertain = true; host.log.error(transport.redactError(error)); }));
         }
         await settle(current);
-        // An unreadable secret leaves no revision: a form's Save then reads as stale.
         current.configRevision = await readConfigRevision(host).catch(() => { current.retirementUncertain = true; return ''; });
         current.opening = false;
         return current;
@@ -891,7 +886,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const durable = stored == null || stored.trim() === 'off' ? 'local'
             : stored.trim() === 'webdav' ? 'webdav'
                 : stored.trim() === 'cloud' && snapshot.cloudProvider === 'dropbox' && encryptionMode(current) === 'saved-dropbox' ? 'dropbox' : null;
-        // A selection started during the read is not a settled target proof.
         const refused = snapshot.revision !== revision
             ? fail('STALE_REVISION', 'The stored sync configuration changed since this form was read; read the screen again')
             : !captured || current.pending.size > 0 || durable !== captured || selectedEncryptionTarget(current) !== captured
@@ -1187,7 +1181,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 || card?.stateUnavailable === true || card?.incompleteTransition === true || card?.partlyEncrypted === true;
             pending ||= owed;
             uncertain ||= unknown;
-            // Only an observed clean, closed screen can release its in-memory observation.
             if (screen !== current && !owed && !unknown && running.size === 0) closedRetirementScreens.delete(current);
         }
         return { pending, uncertain };
@@ -1434,7 +1427,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             if (!panelAction(current, 'syncNow', draft)) return fail('ACTION_FAILED', 'Sync now is not available now; read the screen again');
             const identity = ['syncNow', kind, input.revision ?? null, fieldsPrint(webdav ?? selfHosted)];
             return runScreenAction(input.requestId, identity, current, async () => {
-                // A form's Sync now stores the form's settings, as its Save does.
                 if (withFields || kind === 'file' && input.revision !== undefined) {
                     const stale = await refuseStaleConfiguration(current, input.revision!);
                     if (stale) return stale;
@@ -1489,7 +1481,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             return { ok: true, value: { toasts: takeToasts() } };
         },
 
-        /** File Sync's Select folder: the system picker, then the picked folder activates through its first sync. */
         async pickSyncFolder(input: { requestId: string; revision?: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
             const opened = openedScreen();
             if (!opened.ok) return opened;

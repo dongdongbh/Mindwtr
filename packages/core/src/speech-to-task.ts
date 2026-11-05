@@ -79,7 +79,6 @@ export function resolveOpenAIParseModel(value?: string): string {
     return value;
 }
 
-/** The adapter owns the binary file and credentials; custom endpoint resolution stays shared. */
 export function buildRemoteOpenAISpeechTranscriptionRequest(config: OpenAISpeechTranscriptionRequestConfig): OpenAISpeechTranscriptionRequest {
     const language = normalizeSpeechLanguage(config.language);
     const fields: [string, string][] = [['model', config.model]];
@@ -207,7 +206,6 @@ const geminiSpeechUpload = (modelId: string, audioBase64: string, mimeType: stri
             maxOutputTokens: 1024, responseMimeType: 'application/json' } }),
 });
 
-/** Bounded native upload projection; no credential or transport is consulted. */
 export function buildRemoteGeminiSpeechRequest(config: GeminiSpeechRequestConfig, audioBase64: string, mimeType: string): GeminiSpeechRequest {
     if (!config || typeof config.model !== 'string' || !config.model.trim() || config.model.length > 2000
         || config.mode !== undefined && !['smart_parse', 'transcribe_only'].includes(config.mode)

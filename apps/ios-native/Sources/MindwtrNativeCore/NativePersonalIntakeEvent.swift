@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
 
-/// Native callback bytes only. Decoding, presentation and Core mutation require later route admission.
 public struct NativePersonalIntakeEvent: Sendable, Equatable, Codable {
     public enum Kind: String, Sendable, Codable { case reminder, url, spotlight, share }
     public let id: String
@@ -79,8 +78,6 @@ enum IntakeWire {
         let bytes = try encoder.encode(value)
         guard bytes.count <= limit else { throw NativePersonalIntakeError.unavailable }; return bytes
     }
-    // Files are exclusively our canonical wire format. Exact re-encoding refuses unknown fields,
-    // duplicate names, noncanonical numbers and partial/foreign JSON without a repair interpretation.
     static func decode<T: Codable>(_ type: T.Type, _ bytes: Data, limit: Int) throws -> T {
         guard bytes.count <= limit else { throw NativePersonalIntakeError.unavailable }
         let value = try JSONDecoder().decode(type, from: bytes)

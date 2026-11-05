@@ -5,7 +5,6 @@ export type NativeIosDropboxGrant = NativeIosDropboxConfiguration & { requestId:
 export type NativeIosDropboxCapability = {
     configuration(): NativeIosDropboxConfiguration | null;
     assertCurrent(): void;
-    /** Exact original public Connect identity, available only in its captured invocation. */
     authorizationRequestId(): string;
     authorize(request: { version: 1; requestId: string }): Promise<unknown>;
 };
@@ -16,7 +15,6 @@ export const readNativeIosDropboxConfiguration = (v: unknown): NativeIosDropboxC
     && exact(v, ['version', 'clientId', 'redirectUri']) && v.version === 1 && typeof v.clientId === 'string' && /^[A-Za-z0-9]{1,512}$/.test(v.clientId)
     && v.redirectUri === 'mindwtr-native-dev://redirect' ? v as NativeIosDropboxConfiguration : null;
 const unavailable = () => new Error('Dropbox authorization is unavailable for this foreground owner');
-/** One shared store/vault, with the current invocation rechecked at every token entrance. */
 export const createNativeIosDropbox = (capability: NativeIosDropboxCapability, deps: DropboxTokenStoreDeps) => {
     const configuration = readNativeIosDropboxConfiguration(capability.configuration());
     if (!configuration) return null;
@@ -65,8 +63,6 @@ export const createNativeIosDropbox = (capability: NativeIosDropboxCapability, d
     const settings: SyncSettingsDropboxPort = {
         authorize, redirectUri: () => configuration.redirectUri, isConnected: auth.isConnected,
         getStoredTokens: () => owned(() => store.getStoredDropboxTokens(current)),
-        // Only the existing configuration transaction calls these raw mutation ports.
-        // Its beforePromotion/beforeActivation admissions guard forward writes, while rollback remains able to settle.
         saveTokens: store.saveDropboxTokens, clearTokens: store.clearDropboxTokens,
         disconnect: id => owned(() => { client(id); return store.disconnectDropbox(id, ownedFetch(deps.fetch), current); }),
         revokeTokens: (id, tokens) => owned(() => { client(id); return store.revokeDropboxTokens(id, tokens, ownedFetch(deps.fetch)); }),

@@ -241,8 +241,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
         var stored = config; stored["fixture_unrelated"] = "preserved"
         try Data(json(stored).utf8).write(to: manifest)
 
-        // Create the row through Capture, then seed its old archive clock before
-        // opening the host whose real first-sync boundary this test exercises.
         let seed = self.host(); _ = try await seed.start()
         let archivedID = try await capture(seed); await seed.close()
         let database = root.appendingPathComponent("core.sqlite"), old = "2026-01-01T00:00:00.000Z"
@@ -293,8 +291,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
         XCTAssertEqual(Set((merged["tasks"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }), Set([archivedID, remoteID]))
         let published = try Data(contentsOf: file)
 
-        // No test hook marks session sync complete: the production File Sync
-        // merge above must unlock the configured-backend retention gate.
         let retained = try object(await host.foregroundSync(command: "archiveRetention", requestJSON: request))
         XCTAssertEqual(try json(retained), try json(["ok": true, "value": ["outcome": "purged",
             "purged": ["tasks": 1, "projects": 0, "sections": 0], "skipped": NSNull()]]))
@@ -438,7 +434,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
                     if observation.count("gate") > 0 {
                         observation.record("secret-after-gate")
                         if failReadback && operation == "get" && observation.record("verification-read") == 1 {
-                            // KV has completed its own paired write; fail only shared configuration verification.
                             observation.record("verification-failed")
                             return errSecNotAvailable
                         }
@@ -453,8 +448,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
                               values["@mindwtr_sync_path"] as? String == selectedPath,
                               observation.record("candidate-readback") == 1 else { return }
                         observation.record("gate"); observation.entered.signal(); observation.release.wait()
-                        // Return normally so NativeDeviceKV acknowledges/clears its exact pending batch.
-                        // The recoverable failure above is in the subsequent real secret readback.
                     }
                 }
             })
@@ -470,7 +463,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
             guard observation.entered.wait(timeout: .now() + 15) == .success else {
                 call.cancel(); observation.release.signal(); XCTFail("The real off-pair candidate readback was never entered"); await call.value; return
             }
-            // This is after the probe's independent physical close acknowledgment.
             XCTAssertEqual(observation.count("constructed"), 1)
             call.cancel()
             XCTAssertEqual(observation.returned.wait(timeout: .now() + 0.02), .timedOut)
@@ -494,7 +486,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: prior.file), prior.bytes, "The previous valid target must stay untouched")
             let log = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
             XCTAssertFalse(log.contains("Native iOS manual directory File Sync completed"))
-            // UI's retained-owner pattern closes only now, after the accepted native action returned.
             await host.close()
             try Data(json(["failedReadback": failReadback, "configuration": settled,
                 "owners": observation.count("constructed"), "secretReads": observation.count("secret-after-gate"),
@@ -519,7 +510,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
                           values["@mindwtr_sync_path"] as? String == selectedPath,
                           observation.record("candidate-readback") == 1 else { return }
                     observation.entered.signal(); observation.release.wait()
-                    // This stronger cut deliberately retains NativeDeviceKV's exact pending operation.
                     throw HostFailure("Injected unresolved native paired-write readback")
                 }
             }
@@ -551,14 +541,13 @@ final class NativeFileSyncBindingTests: XCTestCase {
                 let value = retried["value"] as? [String: Any], toasts = value?["toasts"] as? [[String: Any]] ?? []
                 XCTAssertTrue(toasts.contains { $0["tone"] as? String == "error" }, "A blocked retry must not report activation success")
             } else { XCTAssertEqual(retried["ok"] as? Bool, false) }
-        } catch { /* Refusing the unusable store is also terminal without new owner IO. */ }
+        } catch { }
         XCTAssertEqual(observation.count("constructed"), 1); XCTAssertEqual(observation.count("owner-read"), reads)
         XCTAssertEqual(try readConfiguration(), expected)
         let log = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
         XCTAssertFalse(log.contains("Native iOS manual directory File Sync completed"))
         XCTAssertEqual(try Data(contentsOf: prior.file), prior.bytes)
         await host.close()
-        // Closing discards no command and never replays the uncertain batch. Cold metadata can read its stable Off result.
         let beforeCold = try readConfiguration(), cold = self.host(configure: { faults in
             faults.configureFileSyncJobs = { _ in observation.record("cold-owner") }
         })
@@ -720,8 +709,6 @@ final class NativeFileSyncBindingTests: XCTestCase {
                         XCTFail("Unexpected repeated real owner read after the cancellation gate"); return
                     }
                     do {
-                        // The actual session has returned complete bytes under its still-held real lease.
-                        // Replace the named lock inode, so its real release validation must fail.
                         try FileManager.default.moveItem(at: directory.appendingPathComponent(".mindwtr.lock"),
                             to: directory.appendingPathComponent("retained-original-lock"))
                         try Data().write(to: directory.appendingPathComponent(".mindwtr.lock"))

@@ -42,7 +42,6 @@ const metadata = (value: unknown, recordName?: string): MobileCloudKitAttachment
         ...(typeof value.deletedAt === 'string' ? { deletedAt: value.deletedAt } : {}) };
 };
 
-/** Only transports owned paths. Swift authorizes and receipts all staging and SDK asset IO. */
 export const createNativeCloudKitAssets = (call: NativeCloudKitTransportCall): MobileCloudKitAttachmentAssetPort => {
     const request = async (input: NativeCloudKitAssetRequest, signal: AbortSignal): Promise<unknown> => {
         abort(signal);

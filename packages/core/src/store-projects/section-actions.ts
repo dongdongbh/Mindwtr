@@ -78,7 +78,6 @@ export const sectionRenameEffect = (before: Section, title: string, deviceId: st
         rev: nextRevision(before.rev), revBy: deviceId } },
 });
 
-/** RN updateSection's flow-only patch, preserving the stored title and stamping its revision. */
 export const sectionFlowEffect = (before: Section, sequential: boolean, deviceId: string,
     now: string): PreparedProjectFlowV3['effect'] | null => {
     if (!before.title || (before.isSequential === true) === sequential) return null;
@@ -86,7 +85,6 @@ export const sectionFlowEffect = (before: Section, sequential: boolean, deviceId
         updatedAt: now, rev: nextRevision(before.rev), revBy: deviceId } } };
 };
 
-/** The existing deleteSection tombstone and every sectionId-linked Task detach. */
 export const sectionDeleteEffect = (section: Section, tasks: readonly Task[], deviceId: string,
     now: string): PreparedProjectSectionDelete['effect'] => ({
     section: { before: section, after: { ...section, deletedAt: now, updatedAt: now,

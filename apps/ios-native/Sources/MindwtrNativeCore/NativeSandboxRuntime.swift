@@ -23,7 +23,6 @@ public enum NativeSandboxRuntimeError: LocalizedError, Sendable, Equatable {
     }
 }
 
-/// A disposable memory core. Its constructor accepts no personal storage or platform capability.
 public final class NativeSandboxRuntime: @unchecked Sendable {
     public let identity = UUID()
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.native-sandbox", qos: .userInitiated)
@@ -39,7 +38,6 @@ public final class NativeSandboxRuntime: @unchecked Sendable {
     public func call(_ method: NativeSandboxMethod, argumentsJSON: String = "{}") async throws -> String {
         try await run(.call(method, argumentsJSON))
     }
-    /// Terminal and idempotent. Caller cancellation never abandons its retained close operation.
     public func closeAndDrain() async throws { try await closeOperation().value }
 
     private func existingClose() -> Task<Void, Error>? { lock.lock(); defer { lock.unlock() }; return closing }
@@ -81,7 +79,6 @@ public final class NativeSandboxRuntime: @unchecked Sendable {
         }
     }
     private func pause() async {
-        // Unlike Task.sleep, this bounded wait still yields while a cancelled operation drains.
         await withCheckedContinuation { continuation in queue.asyncAfter(deadline: .now() + .milliseconds(5)) { continuation.resume() } }
     }
     private func perform<T: Sendable>(_ work: @escaping @Sendable (SandboxEngine) throws -> T) async throws -> T {

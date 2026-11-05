@@ -1,19 +1,4 @@
 import type { SyncSettingsDropboxPort } from '@mindwtr/core';
-/**
- * Attachments on the Android host: core's mobile attachment modules (files, common, installer, availability, the WebDAV and
- * self-hosted cloud passes, the cleanup run), bound to this host's ports as React Native's lib/attachment-sync-utils.ts,
- * attachment-sync-backends.ts, attachment-sync-availability.ts, attachment-file-installer.ts and sync-attachment-cleanup.ts
- * bind them to Expo. Every rule is core's; this file only binds:
- *
- * - core's file port to the host's app-private files (host-polyfills.js `__mindwtrFileCall`, HostFiles.kt), off the engine
- *   thread, with expo-file-system's units (getInfo's modificationTime in seconds);
- * - core's native installer port to RN's installer Kotlin (`__mindwtrInstallerCall`, HostInstaller.kt);
- * - the device keys, the keystore, the log, sync encryption's state and cipher, through host-sync.ts's bindings.
- *
- * Not on this host yet, and refused the way an unbound port is: File Sync's folder and its immutable publication (S5), Dropbox
- * (S4), the streamed upload (a WebDAV or cloud upload sends its bytes in one PUT, as RN does where expo has no upload task).
- */
-// Load this leaf directly across deferred store imports and the iOS core alias.
 import { createMobileAttachmentAvailability, getAttachmentDownloadFileName, getAttachmentDownloadIdentity } from '../../../packages/core/src/mobile-attachment-availability';
 import { parseCloudKitAttachmentKey } from '../../../packages/core/src/cloudkit-attachments';
 import { extractExtension } from '../../../packages/core/src/attachment-paths';
@@ -253,8 +238,6 @@ export const createNativeAttachments = (bindings: NativeAttachmentBindings, chan
         maxWebdavBufferedUploadBytes: bindings.maxWebdavBufferedUploadBytes,
         maxCloudBufferedUploadBytes: bindings.maxCloudBufferedUploadBytes,
         maxDropboxBufferedUploadBytes: bindings.maxDropboxBufferedUploadBytes,
-        // host-polyfills.js's fetch answers from HostIo.kt (Android) or NativeHTTPJobs.swift (iOS), which refuse a body over
-        // their ceiling while receiving it.
         boundedWebdavResponses: true,
     });
 
@@ -420,7 +403,6 @@ export type NativeTaskAttachmentPreparationBindings = {
     fetch?: typeof fetch;
 };
 
-/** Route admission only; the selected preparation still validates its full captured attachment. */
 export const nativeTaskAttachmentPreparationUsesCloudKit = (json: string): boolean => {
     const input = taskDownloadObject(json, ['version', 'taskID', 'beforePayloadJSON', 'requestJSON', 'rawConfigJSON']);
     const raw = taskDownloadText(input.rawConfigJSON, TASK_DOWNLOAD_BYTES);
@@ -429,7 +411,6 @@ export const nativeTaskAttachmentPreparationUsesCloudKit = (json: string): boole
     return true;
 };
 
-/** One selected invocation: no migration, global SHA replacement, sync or publication. */
 export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttachmentPreparationBindings, channels: NativeFileChannels) => {
     const value = taskDownloadObject(bindings.rawConfigJSON);
     const cloudKit = value.backend === 'cloudkit';

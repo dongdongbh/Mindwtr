@@ -1,20 +1,4 @@
 import { applyPreparedCaptureData, applyPreparedCaptureLinesData } from './prepared-capture-data';
-/**
- * The native host contract for the capture popup: React Native's quick capture
- * sheet, the one the tab bar's center + opens. Kept in its own file and spread
- * into createNativeHostContract; every view and save comes from
- * quick-capture-model.ts, the module React Native's popup calls.
- *
- * The host keeps the typed text and the options, and sends both with every
- * call. The contract keeps the popup's one parse-options bag, as React Native
- * does: openQuickCapture rebuilds it, and so does every capture that lands, so
- * capture 2 of an "Add another" burst knows a context capture 1 created. Reads
- * in between reuse it, so the preview and the save cannot disagree; a sync that
- * lands mid-draft stays unknown until the next rebuild, as on mobile.
- *
- * Only functions read this module's imports from native-host-contract.ts, so
- * the import cycle between the two files is safe.
- */
 import { serializeBackupData } from './backup-transfer';
 import { applyCapturedProject, resolveCaptureAreaQuery, resolveCaptureProjectQuery, type CaptureTaskPlan } from './capture';
 import { safeParseDate, type DateFormatter } from './date';
@@ -246,7 +230,6 @@ const readCaptureRequest = (value: unknown): NativeQuickCaptureInput | null => {
     return options ? { text: value.text, options, captureId: value.captureId.toLowerCase(), openAfterSave: value.openAfterSave === true } : null;
 };
 
-/** Pure input decoder reused by the separately versioned native audio capture. */
 export const readNativeQuickCaptureInput = readCaptureRequest;
 
 const readCopilotCaptureRequest = (value: unknown): NativeQuickCaptureCopilotInput | null => {
@@ -357,9 +340,6 @@ const readPreparedCapture = (value: unknown): AnyPreparedQuickCapture | null => 
     if (value.version === 2) {
         if (!copilot || typeof value.timeEstimatesEnabled !== 'boolean'
             || value.typedTimeEstimate !== null && !isNativeCaptureCopilotEstimate(value.typedTimeEstimate)) return null;
-        // The planner's estimate is frozen before Apply: deriving it from the
-        // final task would let any valid forged estimate preserve itself.
-        // Reference creation clears estimates after both typed and AI props.
         const estimate = task.status === 'reference' ? undefined
             : value.typedTimeEstimate ?? (value.timeEstimatesEnabled ? copilot.applied.timeEstimate : undefined);
         if (task.timeEstimate !== estimate || !sameJson(task, applyCaptureModalCopilotProps(task, copilot.applied, false))) return null;
@@ -369,7 +349,6 @@ const readPreparedCapture = (value: unknown): AnyPreparedQuickCapture | null => 
     return { version: 1, request, ...common };
 };
 
-/** Pure cold-journal validation; does not inspect current settings, provider state or credentials. */
 export const validatePreparedQuickCapture = (input: unknown): NativeHostResult<NativePreparedQuickCapture['result']> => {
     if (!isObjectRecord(input) || !hasKeys(input, ['request', 'prepared'])) return fail('INVALID_INPUT', 'A prepared capture command is required');
     if (isObjectRecord(input.prepared) && input.prepared.version === 2 && !isNativeJsonWithinBytes(input))
@@ -585,7 +564,6 @@ const windowed = <T extends { items: unknown[] }>(picker: T): Windowed<T> => ({
 });
 
 export type NativeShareCaptureMethod = 'captureSubmit' | 'captureCopilotSubmit' | 'captureLinesSubmit';
-/** Share-only pure admission. Ordinary captures use the same prepared decoders and post-plan effects. */
 export function buildPreparedShareCaptureDocument(method: NativeShareCaptureMethod, command: unknown, before: AppData):
     NativeHostResult<{ data: AppData; result: AnyPreparedQuickCapture['result'] | NativePreparedQuickCaptureLines['result'] }> {
     if (!isObjectRecord(command) || !hasKeys(command, ['request', 'prepared'])) return fail('INVALID_INPUT', 'Prepared share capture is invalid');
@@ -774,8 +752,6 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         const prepared: AnyPreparedQuickCapture = applied
             ? { version: 2, request: { capture: request, applied }, timeEstimatesEnabled, typedTimeEstimate, ...common }
             : { version: 1, request, ...common };
-        // Detach every nested row/option from live state, and exercise the same
-        // decoder used after a journal JSON round-trip before handing it out.
         const decoded = readPreparedCapture(JSON.parse(JSON.stringify(prepared)));
         if (!decoded) return fail('INVALID_INPUT', 'Capture could not produce a valid prepared journal');
         if (decoded.version === 2 && !isNativeJsonWithinBytes({ request: decoded.request, prepared: decoded }))
@@ -826,7 +802,6 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
 
         validatePreparedQuickCapture,
 
-        /** Read-only prerequisite; the native owner must write its backup and journal before commit. */
         prepareQuickCaptureLines(input: NativeQuickCaptureLinesInput): NativeHostResult<
             { kind: 'prepared'; prepared: NativePreparedQuickCaptureLines } | Extract<NativeQuickCaptureLinesResult, { kind: 'refused' }>
         > {
@@ -913,10 +888,8 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             return { ok: true, value: prepared.result };
         },
 
-        /** Read-only. The serial native owner must journal this result before commit. */
         prepareQuickCapture: (input: NativeQuickCaptureInput): NativeHostResult<NativeQuickCapturePrepareResult> => prepareQuickCapture(input),
 
-        /** Replay only the journaled rows; no parsing, clock, settings or focus policy runs here. */
         async commitPreparedQuickCapture(input: NativePreparedQuickCaptureCommand): Promise<NativeHostResult<Extract<NativeQuickCaptureSubmitResult, { kind: 'saved' }>>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

@@ -59,7 +59,6 @@ async function fixture(platform = 'ios', database = new Database(':memory:')) {
         __mindwtrSecrets: { get: () => { effects.push('secret-get'); throw new Error(PRIVATE); }, set: () => { effects.push('secret-set'); throw new Error(PRIVATE); } },
         __mindwtrSyncSecrets: {}, __cancelHostCalls() {}, __resumeHostCalls() {},
         fetch: () => { effects.push('http'); throw new Error(PRIVATE); } });
-    // Bun imports the production TS module directly; no esbuild or production bundle artifact is built.
     await import(`./host-entry.ts?voiceFixture=${++sequence}`);
     const host = (globalThis as any).MindwtrHost;
     const poll = async (ticket: string) => {

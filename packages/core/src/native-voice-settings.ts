@@ -84,7 +84,6 @@ export function buildNativeVoiceSettingsOptions(settings: AppSettings): NativeVo
     const expected = nativeVoiceSettingsWitness(settings); if (!expected) return null;
     const provider = expected.provider ?? 'gemini', model = expected.model ?? (provider === 'gemini' ? DEFAULT_GEMINI_STT_MODEL
         : provider === 'openai' ? DEFAULT_OPENAI_STT_MODEL : MOBILE_DEFAULT_WHISPER_MODEL);
-    // Same shared catalog used by the RN settings resolver; no other AI settings are read here.
     const supported = provider === 'gemini' || provider === 'openai' || provider === 'whisper';
     const defaults = provider === 'openai' ? OPENAI_STT_MODEL_OPTIONS
         : provider === 'whisper' ? MOBILE_WHISPER_MODELS.map(entry => entry.id) : GEMINI_STT_MODEL_OPTIONS;
@@ -94,7 +93,6 @@ export function buildNativeVoiceSettingsOptions(settings: AppSettings): NativeVo
 }
 
 export type NativeVoiceRuntimeOptions = Omit<NativeVoiceSettingsOptions, 'modelOptions'> & { saveAudioAttachments: boolean };
-/** Only the recording policy and selected nonsecret speech fields. Credential readiness remains native. */
 export function buildNativeVoiceRuntimeOptions(settings: AppSettings): NativeVoiceRuntimeOptions | null {
     const options = buildNativeVoiceSettingsOptions(settings); if (!options) return null;
     const { modelOptions: _catalog, ...runtime } = options;

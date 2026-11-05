@@ -80,7 +80,6 @@ final class NativeInboxAIHostTests: XCTestCase {
         let original = try await createTask(seed, title: "Target AI title")
         let originalSibling = try await createTask(seed, title: "Unrelated AI sibling"); await seed.close()
         let sqlite = try SQLiteBridge(url: database)
-        // Cold-load bounded legacy IDs without changing a live core's backing rows.
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([id, original]))
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([sibling, originalSibling]))
         if contextSiblings > 0 {

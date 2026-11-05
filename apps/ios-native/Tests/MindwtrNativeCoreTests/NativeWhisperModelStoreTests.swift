@@ -54,7 +54,6 @@ private final class WhisperModelFixtureState: @unchecked Sendable {
     func once() -> Bool { lock.lock(); defer { lock.unlock() }; if claimed { return false }; claimed = true; return true }
 }
 
-/// Real file proofs/publication and intercepted streaming HTTP; no live model/provider claim.
 final class NativeWhisperModelStoreTests: XCTestCase {
     private var fixture: URL!
     private let bytes = Data((0..<4096).map { UInt8($0 % 251) })

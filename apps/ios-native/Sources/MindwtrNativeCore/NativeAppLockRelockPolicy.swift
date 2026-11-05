@@ -1,6 +1,5 @@
 import Foundation
 
-/// A warm return may reuse an unlocked session; a cold launch has no departure to reuse.
 public struct NativeAppLockRelockPolicy {
     private var leftUnlockedAt: TimeInterval?
     public init() {}

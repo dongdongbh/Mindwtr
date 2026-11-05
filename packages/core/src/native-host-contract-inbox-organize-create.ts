@@ -331,13 +331,12 @@ export function createOrganizeDestinationCreateMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
                     context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-organize-destination-create' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch { }
             }
             return confirmed;
         },
     };
 }
-// Preserve the Inbox API and journal grammar; Project uses the same source-bound engine.
 export const inboxOrganizeDestinationCreateEffect = (p: Omit<NativeInboxOrganizeDestinationCreatePrepared, 'effect' | 'result' | 'resolution'>):
     Pick<NativeInboxOrganizeDestinationCreatePrepared, 'effect' | 'result' | 'resolution'> | null => organizeDestinationCreateEffect(p);
 export const readInboxOrganizeDestinationCreateEnvelope = (input: unknown): NativeInboxOrganizeDestinationCreateEnvelope | null =>

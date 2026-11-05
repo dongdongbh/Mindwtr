@@ -39,7 +39,6 @@ private final class ModelDiscoveryState: @unchecked Sendable {
     var completed: Bool { lock.lock(); defer { lock.unlock() }; return done }
 }
 
-/// Actual bundle/JSC, selected native key reads, HTTP transport and SQLite. Root runs on Apple runtime.
 final class AIModelDiscoveryTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }

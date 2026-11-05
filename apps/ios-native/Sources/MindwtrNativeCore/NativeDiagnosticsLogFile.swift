@@ -15,7 +15,6 @@ final class NativeDiagnosticsLogFile {
     }
 
     static func normalizingSystemVarAlias(_ url: URL) -> URL {
-        // Normalize only this verified OS alias, never a library-owned link.
         if url.pathComponents.dropFirst().first == "var",
            let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: "/var"),
            ["private/var", "/private/var"].contains(destination) {

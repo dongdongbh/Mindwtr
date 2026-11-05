@@ -178,7 +178,6 @@ final class CloudKitSyncManager {
         return (record, sourceURL)
     }
 
-    /// Native caller consumes the SDK-owned asset while its CKRecord is still retained.
     func fetchAttachmentAsset(recordName: String, consume: @Sendable (URL, String) async throws -> Void) async throws -> String {
         let (record, sourceURL) = try await attachmentAsset(recordName: recordName)
         defer { withExtendedLifetime(record) {} }
@@ -618,10 +617,6 @@ final class CloudKitSyncManager {
 
     private static let ckServerErrorUnknownRecordType = 2003
 
-    /// Fetches all records of a given type from the custom zone.
-    /// Returns an empty array when the record type does not exist yet in the
-    /// CloudKit schema (first sync). The subsequent write phase auto-creates
-    /// the record type in the Development environment.
     func fetchAllRecords(recordType: String, maximumRecords: Int? = nil, maximumEncodedBytes: Int? = nil) async throws -> [CKRecord] {
         try operations.checkActive()
         var allRecords: [CKRecord] = []

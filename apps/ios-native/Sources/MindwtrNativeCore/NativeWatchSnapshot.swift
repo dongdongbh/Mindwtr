@@ -1,7 +1,6 @@
 import Foundation
 import MindwtrWatchPayloadValidation
 
-/// A validated Watch application context, independent of a live connectivity session.
 public struct NativeWatchSnapshot: Sendable {
     private let propertyList: Data
 
@@ -16,7 +15,6 @@ public struct NativeWatchSnapshot: Sendable {
         } catch { throw Self.invalid }
     }
 
-    /// Each caller receives its own decoded value; no mutable Foundation graph is retained.
     public func applicationContext() throws -> [String: Any] {
         guard let context = try PropertyListSerialization.propertyList(from: propertyList, options: [], format: nil)
                 as? [String: Any] else { throw Self.invalid }
@@ -25,7 +23,6 @@ public struct NativeWatchSnapshot: Sendable {
 
     private static var invalid: HostFailure { HostFailure("INVALID_INPUT: Native Watch snapshot is invalid") }
 
-    // Bound recursion before NativeJSON restores strings and the shared validator strips nulls.
     private static func hasBoundedNesting(_ bytes: Data) -> Bool {
         var depth = 0, quoted = false, escaped = false
         for byte in bytes {

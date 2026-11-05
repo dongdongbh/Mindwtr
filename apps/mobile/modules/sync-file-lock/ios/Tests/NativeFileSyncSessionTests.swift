@@ -13,7 +13,6 @@ final class NativeFileSyncSessionTests: XCTestCase {
     let url = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
       .appendingPathComponent("file-sync-session-" + UUID().uuidString.lowercased(), isDirectory: true)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
-    // Evidence is deliberately retained in the root command's disk-backed TMPDIR.
     return url
   }
   private func access(_ root: URL) -> NativeFileSyncReadOwner.Access {
@@ -107,7 +106,6 @@ final class NativeFileSyncSessionTests: XCTestCase {
     let session = NativeFileSyncSession(owner: owner)
     try await session.open()
     await refuses { _ = try await session.read("data.json") }
-    // submit already shut the owner down. This must still expose engine.release's retained failure.
     for _ in 0..<2 {
       do { try await session.close(); XCTFail("Retained cleanup error became success") }
       catch {
@@ -146,7 +144,6 @@ final class NativeFileSyncSessionTests: XCTestCase {
     XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
     let closed = Counter()
     let close = Task { try await session.close(); closed.bump() }
-    // The real owner read is held at Access.read; close must not settle while it owns the descriptor.
     try await Task.sleep(nanoseconds: 20_000_000)
     XCTAssertEqual(closed.count, 0); XCTAssertEqual(stopped.count, 0)
     release.signal()

@@ -601,7 +601,6 @@ public enum NativeAITextConfigurationChangeV2: Sendable, Equatable {
         if let object = input as? [String: Any], Set(object.keys) == Set(["type", "value"]), let type = object["type"] as? String {
             if type == "provider", let value = object["value"] as? String, let provider = NativeAISettingsProjection.Provider(rawValue: value) { return .provider(provider) }
             if type == "anthropicThinking", let number = object["value"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return .anthropicThinking(number.boolValue) }
-            // The shared request parser owns the current preset catalog; native only admits bounded integers.
             if type == "thinkingBudget", let number = object["value"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
                number.doubleValue == Double(number.intValue), (1...32768).contains(number.intValue) { return .thinkingBudget(number.intValue) }
         }
@@ -916,21 +915,15 @@ struct NativeAIProviderDeviceState: Decodable, Sendable, Equatable {
     }
 }
 
-/// One off-main owner for the core runtime, database and pending command journal.
-/// Every result is the JSON-encoded core value, with host/core failures thrown.
-/// Immutable native authority. Restricted is an outward-denied candidate, not Sandbox bootstrap.
 public enum NativeWorkspaceMode: Sendable, Equatable { case personal, restricted }
 
-/// Constructed only by a successful retirement of this exact, previously ready host.
 public struct CoreHostRetirementReceipt: Sendable, Equatable {
     fileprivate let identity: UUID
     fileprivate init(identity: UUID) { self.identity = identity }
 }
 
 public enum CoreHostRetirementError: Error, Sendable, Equatable {
-    /// No shutdown began. Existing recovery and ordinary admission remain available.
     case refused
-    /// Original ownership stays held; neither resume nor a replacement is acknowledged.
     case unavailable
 }
 
@@ -981,7 +974,6 @@ public final class CoreHost: @unchecked Sendable {
         }
     }
     #if DEBUG
-    // Ordering only: tests still assert rejection through the real public facade.
     func workspaceRetirementIsFencedForTests() -> Bool {
         admissionLock.lock(); defer { admissionLock.unlock() }
         if case .open = admission { return false }
@@ -1002,7 +994,6 @@ public final class CoreHost: @unchecked Sendable {
         guard case .retiring = admission else { throw CoreHostRetirementError.unavailable }
         if let error {
             admission = error == .refused ? .open : .unavailable
-            // Only a definite pre-shutdown refusal may be attempted again.
             if error == .refused { retirement = nil }
             throw error
         }
@@ -1021,7 +1012,6 @@ public final class CoreHost: @unchecked Sendable {
         } catch {
             return try completeRetirement(error as? CoreHostRetirementError ?? .unavailable)
         }
-        // Caller cancellation cannot dispose this retained original-host operation.
         await closeRuntime()
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -1050,7 +1040,6 @@ public final class CoreHost: @unchecked Sendable {
                         dropboxAuthorization: dropboxAuthorization)
     }
 
-    /// Production-layout candidate only; the caller owns a quiescent RN container.
     public init(rnAdoptionContainerURL: URL, bundleURL: URL,
                 dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) throws {
         let path: String
@@ -1071,7 +1060,6 @@ public final class CoreHost: @unchecked Sendable {
         engine.faults = faults
     }
 
-    /// UI fixtures must isolate Keychain accounts as well as their database and device settings.
     public convenience init(databaseURL: URL, bundleURL: URL,
                             deviceStorage: (containerURL: URL, bundleIdentifier: String), isolatedTestID: UUID,
                             workspaceMode: NativeWorkspaceMode = .personal, cloudKitAccountFixture: String? = nil,
@@ -1263,7 +1251,6 @@ public final class CoreHost: @unchecked Sendable {
         return try await beginVoiceCapture(presentationID: presentationID, captureID: captureID, backend: NativeVoiceUnavailableBackend())
         #endif
     }
-    // Package fixture seam uses the real host/file/journal path without a microphone.
     func beginVoiceCapture(presentationID: UUID, captureID: UUID, backend: any NativeVoiceRecorderBackend) async throws -> NativeVoiceCaptureHandle {
         try beginOuterAdmission(); defer { finishOuterAdmission() }
         let capture = try await perform { try $0.createVoiceCapture(presentationID: presentationID, captureID: captureID, backend: backend) }
@@ -1354,8 +1341,6 @@ public final class CoreHost: @unchecked Sendable {
                         try await perform { try $0.decodeVoiceSpeech(job, response: response) }
                     }
                 }
-                // The decoded value stays native while its editor closes. This
-                // wait owns no Engine turn and never re-uploads the recording.
                 guard !job.cancellation.isCancelled, await readmission(job.capture.captureID.uuidString.lowercased()), !job.cancellation.isCancelled else { job.cancel(); throw CancellationError() }
                 let result = try await perform {
                     if let replay = try $0.prepareVoiceResult(job) { return replay }
@@ -1885,7 +1870,6 @@ public final class CoreHost: @unchecked Sendable {
     }
     #endif
 
-    // Package tests use this same orchestration without constructing a WatchConnectivity session.
     func ingestWatchAudio(_ source: NativeWatchAudio, lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
                           load: @escaping @Sendable () async throws -> NativeWatchAudioBytes,
                           readmit: @escaping @Sendable () async -> Bool = { true }) async throws {
@@ -1972,7 +1956,6 @@ public final class CoreHost: @unchecked Sendable {
                         try await perform { try $0.checkWatchAudio(job) }
                         continue
                     }
-                    // Shared policy chooses parsed.transcript || initial before Watch trims it.
                     return try await perform { try $0.finishWatchOpenAITranscript(job, value: parsed.isEmpty ? initial : parsed) }
                 }
             }
@@ -2172,8 +2155,6 @@ public final class CoreHost: @unchecked Sendable {
                 return try engine.applyReviewAISuggestions(requestJSON, lease: lease)
             }
         } catch {
-            // This invocation cannot have journaled intent until its Engine closure starts.
-            // A caller retrying already-owed intent must retain it and use retryPending().
             if !entry.value, !(error is CoreHostRejection) {
                 throw CoreHostRejection(message: "STALE_REVISION: Review AI submission was not admitted")
             }
@@ -2189,10 +2170,8 @@ public final class CoreHost: @unchecked Sendable {
         else { _ = try NativeTaskAIJSON.request(requestJSON, operation: true) }
         let handle = try taskAIRequests.reserve(lease, scope: scope)
         if Task.isCancelled { handle.cancel() }
-        // Admission retires an old displayed answer before any asynchronous new-owner readmission.
         do { try await perform { $0.retireTaskAIAnswer(nil) } }
         catch { taskAIRequests.finish(handle); handle.settle(.failure(error)); throw error }
-        // Retained independently of the caller: cancellation and close await the same owned drain.
         Task { await self.runTaskAI(handle, requestJSON: requestJSON, editor: editor, readmit: readmit) }
         return handle
     }
@@ -2200,14 +2179,13 @@ public final class CoreHost: @unchecked Sendable {
     public func awaitTaskAI(_ handle: NativeTaskAIHandle) async throws -> String {
         guard handle.host == taskAIRequests.identity else { throw NativeTaskAIJSON.unavailable }
         return try await withTaskCancellationHandler {
-            let value = try await handle.value() // Completion includes owned transport drain, even for a cancelled waiter.
+            let value = try await handle.value()
             try handle.cancellation.check()
             guard handle.lease.isCurrent, !Task.isCancelled else { throw CancellationError() }
             return value
         } onCancel: { handle.cancel() }
     }
 
-    /// Rechecks the original immutable durable/editor witness immediately before an unsaved choice is applied.
     public func validateTaskAIAnswer(_ handle: NativeTaskAIHandle) async throws {
         try beginOuterAdmission(); defer { finishOuterAdmission() }
         guard handle.host == taskAIRequests.identity else { throw NativeTaskAIJSON.unavailable }
@@ -2254,10 +2232,8 @@ public final class CoreHost: @unchecked Sendable {
             try handle.cancellation.check()
             result = .success(answer!)
         } catch { result = .failure(error) }
-        // Abort the selected JS ticket first. Transport completion may lag JS settlement: always drain it.
         _ = try? await perform(reminderOwned: true) { $0.abortTaskAI(handle) }
         if let resources { await Task.detached { resources.http.shutdown() }.value }
-        // AbortSignal/canonical finally must settle before the next private owner is admitted.
         while (try? await perform(reminderOwned: true, { try $0.pollTaskAI(handle, requireCurrent: false) == nil })) == true {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
@@ -2296,7 +2272,6 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// Cancelling and awaiting this task settles its selected JS request and native workers.
     public func requestCaptureCopilot(requestJSON: String) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2309,7 +2284,6 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// Capture while UIKit still owns the selected directory URL. No directory authority survives this temporary scope.
     public nonisolated static func captureSyncDirectoryBookmark(_ url: URL) throws -> Data {
         guard url.isFileURL, url.host == nil || url.host == "", url.query == nil, url.fragment == nil else {
             throw HostFailure("Selected Sync folder is unavailable")
@@ -2331,7 +2305,6 @@ public final class CoreHost: @unchecked Sendable {
         return bookmark
     }
 
-    /// Metadata opens no directory. Explicit File actions retain this host until the existing Settings transaction settles.
     public func foregroundDirectorySyncSettings(command: String, requestJSON: String, pickedBookmark: Data? = nil) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2345,7 +2318,6 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    /// An explicit app-local foreground cycle; no saved provider capability is granted.
     public func foregroundFileSync(directoryURL: URL) async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -2728,7 +2700,6 @@ public final class CoreHost: @unchecked Sendable {
             try await perform { try $0.recoverProjectFileAdd(requestId: requestId, abandon: true, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    /// Bounded structural inventory, also available after a retained-operation startup refusal.
     public func projectFileAddSummary() async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -3699,8 +3670,6 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     private func closeRuntime() async {
-        // This primitive flag reaches a running local invoke immediately; an
-        // ordinary durable command remains governed by its existing journal.
         localAttachmentRequests.close()
         await drainAIModelDiscovery()
         await drainTaskAIOperations()
@@ -4012,7 +3981,6 @@ private final class Engine: @unchecked Sendable {
     private var taskAITurn: TaskAITurn?
     private var taskAIRuntimeLanguage: String?
     private var reviewAIApplyLease: NativeTaskAIEditorLease?
-    // Result ownership has no ticket, transport or private active slot. Only its immutable witness remains.
     private var taskAIAnswer: (handle: NativeTaskAIHandle, current: () throws -> Void, durable: () throws -> Void,
                                requestJSON: String, canonical: Any, answerJSON: String)?
 
@@ -5651,16 +5619,12 @@ private final class Engine: @unchecked Sendable {
                 legacyStorage = snapshot
             }
             if workspaceMode == .personal {
-            // Device storage is explicitly opted in; an unavailable namespace
-            // leaves a refusing port, never an empty fallback or failed boot.
             if rnAdoptionContainerURL == nil, let location = deviceStorageLocation {
                 deviceStorage = try? NativeDeviceKV(containerURL: location.containerURL, bundleIdentifier: location.bundleIdentifier)
                 #if DEBUG
                 if let deviceStorage { faults?.configureDeviceStorage?(deviceStorage) }
                 #endif
             }
-            // Optional platform capability: failure leaves attachments unbound,
-            // never prevents database recovery or leaks the exclusive lock.
             let calendarFiles: NativeAttachmentFiles?
             if let container = rnAdoptionContainerURL {
                 attachmentJobs = try? NativeAttachmentFileJobs(rnAdoptionContainerURL: container)
@@ -5861,7 +5825,6 @@ private final class Engine: @unchecked Sendable {
             if rnAdoptionContainerURL != nil {
                 guard let location = deviceStorageLocation else { throw Self.rnAdoptionFailure }
                 try verifyRNAdoptionDirectories()
-                // RN marker promotion must finish before this owner captures its exact manifest baseline.
                 deviceStorage = try NativeDeviceKV(containerURL: location.containerURL, bundleIdentifier: location.bundleIdentifier)
                 #if DEBUG
                 if let deviceStorage { faults?.configureDeviceStorage?(deviceStorage) }
@@ -5892,8 +5855,6 @@ private final class Engine: @unchecked Sendable {
         NSLog("Native iOS App lock recovery cancelled releaseCheck=v1.3.4/ios-app-lock outcome=cancelled")
     }
 
-    // Separate phases keep unrelated command temporaries out of the same
-    // native stack frame while JavaScriptCore validates a retained journal.
     @inline(never)
     private func validatePendingStartupContent(retainedBackup: String?, recoveringTrashItemsPurge: Bool) throws {
         try validatePendingChecklistMoveStartup()
@@ -5941,8 +5902,6 @@ private final class Engine: @unchecked Sendable {
             else { try validateDraftAcknowledgment(command) }
         }
         if let command = pending, command.method == "boardCommit" {
-            // Full immutable authority is checked before opening SQLite, even
-            // for terminal journals whose remaining work is only cleanup.
             _ = try invoke("boardValidate", arguments: journalArguments(command))
             if case .success(let value) = command.terminal { try validateBoardAcknowledgment(command, value: value) }
         }
@@ -5991,8 +5950,6 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke(prefix + "Validate", arguments: archivedRestoreJournalArguments(command))
             if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
             if recoveringTrashItemsPurge {
-                // A structurally closed purge plan may still have a forged effect.
-                // Shared pure validation must succeed before optional GC touches bytes.
                 try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
                 try? backupExportFile.discardInterruptedExports()
                 try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
@@ -6774,7 +6731,6 @@ private final class Engine: @unchecked Sendable {
         }
         if startupReferenceProjectNextActionResult != nil, let source = startupReferenceProjectNextActionSource,
            var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "referenceProjectNextActionCommit" {
-            // This route is established only by the validated captured command's proven result.
             recovery["source"] = source
             window["recovery"] = recovery
         }
@@ -6801,7 +6757,6 @@ private final class Engine: @unchecked Sendable {
         }
         if startupReferenceTaskBackdateResult != nil || startupRowTaskBackdateResult != nil,
            var recovery = window["recovery"] as? [String: Any], ["referenceTaskBackdateCommit", "rowTaskBackdateCommit"].contains(recovery["method"] as? String ?? "") {
-            // Only a validated captured command with its exact proven result reaches this marker.
             recovery["source"] = startupRowTaskBackdateResult != nil ? "row" : "reference"
             window["recovery"] = recovery
         }
@@ -8992,7 +8947,6 @@ private final class Engine: @unchecked Sendable {
                   try selectedVoiceProvider(binding) == selected.provider,
                   selected.provider.rawValue == (try expected.object["provider"] as? String ?? "gemini"),
                   let provider = NativeAISettingsProjection.Provider(rawValue: selected.provider.rawValue) else { throw Self.aiModelDiscoveryUnavailable }
-            // Common native identity only; no text session or JS endpoint session is registered.
             session = .init(id: sessionID, provider: provider, version: 2, runtime: binding.runtime, connection: binding.connection,
                 storage: binding.storage, library: binding.library, generation: binding.generation, epoch: try captureLinesDataVersion())
             voiceBinding = binding
@@ -9290,11 +9244,9 @@ private final class Engine: @unchecked Sendable {
             if method == "iosAITextConfigurationPrepare" { selectedArguments.append(aiTextConfigurationConsentRecorded) }
             if method == "iosAITextConfigurationPrepareV2" { selectedArguments.append(aiTextConfigurationConsentRecorded ? (aiTextConfigurationTurn?.consentTarget?.rawValue as Any? ?? NSNull()) : NSNull()) }
             let value = try invoke(method, arguments: selectedArguments, localCancellation: aiTextConfigurationTurn?.cancellation)
-            // A published commit's validated terminal result wins caller cancellation.
             try requireAITextConfigurationTurn(checkCancellation: !Self.aiTextConfigurationCommitMethods.contains(method))
             return value
         } catch {
-            // JS may have advanced the adapter epoch before refusal; do not reuse this native admission.
             let message = (error as? HostFailure)?.message
             let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
                 || message?.hasPrefix("CANCELLED:") == true
@@ -10504,8 +10456,6 @@ private final class Engine: @unchecked Sendable {
         _ = try invokeVoice(action.prefix + "Validate", [envelope], binding: binding, cancellation: cancellation)
         if let terminal = command.terminal { return try finishVoice(command, value: terminal.value(), binding: binding) }
         if voiceWarmEnvelope?.method != action.commit || voiceWarmEnvelope?.json != envelope {
-            // Only a cold owner needs reconstruction. Warm failed saves retain
-            // core's original authority and must reach its exact save retry.
             let recovered = try NativeVoiceJSON.object(invokeVoice(action.prefix + "Recover", [envelope], binding: binding, cancellation: cancellation), maximum: 2 * 1024 * 1024)
             if recovered["kind"] as? String == "saved", Set(recovered.keys) == Set(["kind", "result"]), let value = recovered["result"] {
                 return try finishVoice(command, value: NativeVoiceJSON.encode(value), binding: binding)
@@ -10516,8 +10466,6 @@ private final class Engine: @unchecked Sendable {
         if var file = command.voiceFiles {
             let port = try newVoiceFiles()
             if file.stage == nil {
-                // An unacknowledged reservation may already exist. Never adopt
-                // its path; retain it and reserve a fresh private operation.
                 file.operationID = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
                 command.voiceFiles = file; pending = command; try persist(command)
                 file.stage = try port.reserve(file)
@@ -10727,7 +10675,6 @@ private final class Engine: @unchecked Sendable {
         guard checkpoint?.attempt == nil, Self.taskAIEditorEqual(checkpoint?.snapshot, editor), editor == nil || id.map({ Self.ownedEqual(editor!.taskID, $0) }) == true,
               let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
               let secrets = secretJobs, let storage = deviceStorage else { throw NativeTaskAIJSON.unavailable }
-        // Validate canonical draft/eligibility before touching the selected secret worker.
         let optionsRaw = try Self.ownedJSON(["id": input["id"]!, "draft": input["draft"]!])
         _ = try NativeTaskAIJSON.options(invoke("iosTaskAIOptions", arguments: [optionsRaw]))
         let settings = try taskAISettings(), configuration = settings["ai"] as? [String: Any] ?? [:]
@@ -10764,13 +10711,11 @@ private final class Engine: @unchecked Sendable {
                 try storage.validateAIProviderDeviceMetadataRead()
             })
         taskAITurn = turn
-        // No wake callback enters JSC; the retained operation polls in short queue admissions.
         return TaskAIPreload(secrets: secrets, provider: provider, legacy: legacy, http: http)
     }
 
     private func reviewAIDurableWitness(_ canonical: [String: Any]) throws -> Any {
         let sqlite = try requireDatabase(), settings = try taskAISettings()
-        // Eligibility cells detect a changed stale bucket without pinning the global store revision.
         let tasks = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,status,projectId,sectionId,orderNum,deletedAt,purgedAt,createdAt,updatedAt,startTime,reviewAt FROM tasks WHERE status IN ('next','waiting') ORDER BY rowid").utf8))
         let projects = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,title,status,isSequential,perSectionFlow,sequentialScope,deletedAt,purgedAt,createdAt,updatedAt,dueDate,reviewAt FROM projects ORDER BY rowid").utf8))
         let sections = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,projectId,title,orderNum,isSequential,deletedAt FROM sections WHERE projectId IN (SELECT id FROM projects WHERE status='active' AND deletedAt IS NULL) ORDER BY rowid").utf8))
@@ -10917,7 +10862,6 @@ private final class Engine: @unchecked Sendable {
                     guard selected.enabled, NativeWhisperInferenceJobs.supported else { throw NativeWatchAudioRetryable() }
                     runtime = .whisper(try whisperModel(binding))
                 } else if openAI != "null" {
-                    // Validate the configured destination before touching its selected provider credential.
                     let selected = try NativeWatchOpenAIRuntime.validated(openAI)
                     guard selected.enabled else { throw NativeWatchAudioRetryable() }
                     _ = try voiceCredential(binding, cancellation: cancellation, provider: .openai)
@@ -11182,7 +11126,6 @@ private final class Engine: @unchecked Sendable {
             project = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,status,deletedAt,purgedAt FROM projects WHERE id=?", parametersJSON: Self.ownedJSON([projectID])).utf8))
         }
         let settings = try taskAISettings()
-        // Only context cells can change the context pool. Unrelated title/note/revision writes remain admissible.
         let contexts = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,contexts FROM tasks WHERE deletedAt IS NULL AND purgedAt IS NULL AND status<>'archived' AND contexts IS NOT NULL AND contexts<>'[]' ORDER BY id").utf8))
         return ["task": task, "project": project, "contexts": contexts, "ai": settings["ai"] ?? [:],
                 "features": (settings["features"] as? [String: Any])?["timeEstimates"] ?? NSNull(),
@@ -11241,7 +11184,6 @@ private final class Engine: @unchecked Sendable {
             do { try answer.durable(); return "" } catch { return "!MindwtrNativeError:Inbox AI Apply owner unavailable" }
         }
         guard let callback = JSValue(object: owner, in: runtime) else { throw NativeTaskAIJSON.unavailable }
-        // The selected batch has no awaits between its canonical pure session edits.
         let raw = try invoke("iosInboxAIApply", arguments: [request, callback])
         try answer.durable()
         let view = try NativeTaskAIJSON.object(raw), original = try NativeInboxAIJSON.request(answer.requestJSON)
@@ -11354,7 +11296,6 @@ private final class Engine: @unchecked Sendable {
             }, current, raw, canonical, turn.answerJSON ?? "")
         }
         taskAITurn = nil
-        // Fixed, content-free marker. Suggestions are unsaved editor choices.
         if handle.review {
             if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-review-ai", "outcome": outcome]) {
                 _ = try? invoke("logLine", arguments: ["Native iOS Weekly Review AI settled", diagnostic])
@@ -11737,8 +11678,6 @@ private final class Engine: @unchecked Sendable {
                   let uri = raw["uri"] as? String, !uri.isEmpty,
                   Self.ownedEqual(uri, turn.originalURI) || Self.ownedEqual(uri, turn.targetURI)
                     || turn.cloudKitBridge?.selectedStageProof(for: uri) != nil else { throw Self.taskDownloadFailure }
-            // The selected native cap is carried into the actual opened
-            // descriptor and accumulation; no separate stat grants a read.
             return
         }
         guard attachmentDraftEvidence || pending?.method == Self.projectFileAddMethod || projectFileAddTurn != nil else { return }
@@ -12118,7 +12057,6 @@ private final class Engine: @unchecked Sendable {
                 turn.cloudKitBridge?.retireSelectedStage()
                 if cloudKitJobs === turn.cloudKitJobs { cloudKitJobs = nil }
                 taskDownloadTurn = nil
-                // Cleanup already proved this exact receipt; delivery no longer belongs to the revoked download.
                 if turn.unadoptedSourceRetired {
                     _ = try? invoke("attachmentDraftAcknowledged", arguments: ["webdav-task-availability", "source-retired"])
                 }
@@ -12267,7 +12205,6 @@ private final class Engine: @unchecked Sendable {
                         _ = try? invoke("attachmentDraftAcknowledged", arguments: ["cloudkit-task-availability", "confirmed"])
                     } catch { }
                 }
-                // Optional scratch cleanup cannot revoke the durable checkpoint ACK.
                 try? finishTaskDownloadSource(turn, completed: true)
                 if cloud && status != "unrecoverable" {
 
@@ -15920,9 +15857,6 @@ private final class Engine: @unchecked Sendable {
             if ["gtdArchiveOptions", "gtdTaskEditorFieldOptions", "taskOpenTab", "archiveRetentionOptions", "archiveRetentionReview", "captureCopilotEdit", "captureCopilotSubmit"].contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
-            // Mind Sweep has no journal or write before argument validation.
-            // Its UI may release an oversized draft only on a definite refusal.
-            // With an older command still owed, keep every error uncertain.
             if ["mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
@@ -16796,15 +16730,12 @@ private final class Engine: @unchecked Sendable {
     private func recordCommandPreparationStack() {
         guard !commandPreparationStackLogged else { return }
         commandPreparationStackLogged = true
-        // Best effort, once per Engine; this marks preparation, never a saved command.
         if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-native-command-stack", "outcome": "prepared"]) {
             _ = try? invoke("logLine", arguments: ["Native iOS command preparation frame returned", context])
         }
     }
     func recordCloseCancellationOrder() {
         guard started, !closed, context != nil else { return }
-        // The primitive cancellation and AI/voice drains reached this queued
-        // finalization; the runtime and remaining native drains still follow.
         if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-close-cancellation-order", "operation": "close", "outcome": "drained"]) {
             _ = try? invoke("logLine", arguments: ["Native iOS close cancellation reached finalization", context])
         }
@@ -16816,7 +16747,6 @@ private final class Engine: @unchecked Sendable {
         case command(PendingCommand)
     }
 
-    // Each bounded group returns before the next starts, so preparation frames do not accumulate.
     @inline(never)
     private func prepareCallCommand(_ method: String, argumentsJSON: String, args: [Any],
         editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult {
@@ -19095,7 +19025,6 @@ private final class Engine: @unchecked Sendable {
                 try validateAITextConfigurationAcknowledgment(command, value: value)
                 terminal = .success(value)
             } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-                // A cold intent without a receipt has no surviving permission or write authority.
                 terminal = .rejected(failure.message)
             }
             return try finish(command, with: terminal)
@@ -25391,7 +25320,6 @@ private final class Engine: @unchecked Sendable {
     }
 
     private static func inlineChecklistRequest(_ raw: String) throws -> [String: Any] {
-        // Match JavaScript trim without rewriting literal IDs or accepting NEL as whitespace.
         let trimSpace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
         guard raw.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(raw),
               let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -26032,7 +25960,6 @@ private final class Engine: @unchecked Sendable {
         return nil
     }
 
-    // Called only after the captured command and exact saved result have been validated.
     private func referenceProjectNextActionSource(_ command: PendingCommand) -> String? {
         guard let args = try? journalArguments(command), let encoded = args.first as? String,
               let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
@@ -26041,7 +25968,6 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func rememberReferenceProjectNextActionOrigin(kind: String, envelope encoded: String) {
-        // A newer confirmed completion always replaces the previous unsubmitted offer.
         referenceProjectNextActionOrigin = nil
         guard let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else { return }
         let origin: [String: Any] = ["kind": kind, "envelope": envelope]
@@ -26055,7 +25981,6 @@ private final class Engine: @unchecked Sendable {
               let ref = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
               Self.validReferenceProjectNextActionOriginRef(ref),
               (try? expandedReferenceProjectNextActionOrigin(ref)) != nil else { return }
-        // Retiring presentation authority never discards a frozen write or its saved receipt.
         referenceProjectNextActionOrigin = nil
     }
 
@@ -27999,7 +27924,6 @@ private final class Engine: @unchecked Sendable {
               !language.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 }) else {
             throw HostFailure("INVALID_INPUT: Getting Started requires one bounded request UUID and language")
         }
-        // Core remains authoritative for its supported language catalog.
     }
     private func validateGettingStartedAcknowledgment(_ raw: String) throws {
         let value = try Self.projectObject(raw, maximum: 4096)
@@ -30328,7 +30252,6 @@ private final class Engine: @unchecked Sendable {
                 let contextsSelection = input["list"] as? String == "contexts"
                 let selectionName = projectSelection ? "Project" : referenceSelection ? "Reference" : inboxSelection ? "Inbox"
                     : waitingSelection ? "Waiting" : somedaySelection ? "Someday" : reviewSelection ? "Review" : contextsSelection ? "Contexts" : "Done"
-                // Inbox also exposes the core-owned Organize draft and destination picker.
                 let selectionKeys: Set<String> = ["list", "params", "taskIds", "anchorId", "selectionEdit", "rangeSelectMode", "busy", "picker", "organize"]
                 guard json.utf8.count <= 2_000_000, ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(input["list"] as? String ?? ""),
                       !(reviewSelection || contextsSelection) || (input["organize"] == nil && input["picker"] == nil && input["rangeSelectMode"] as? Bool != true),
@@ -31119,7 +31042,6 @@ private final class Engine: @unchecked Sendable {
               let runtime = context else { throw Self.foregroundSyncFailure }
         try cancellation.check()
         _ = try requireDeviceStorageAdmission()
-        // This entry grants only the already-admitted app container, never a picked external scope.
         guard let location = deviceStorageLocation else { throw Self.foregroundSyncFailure }
         let selectedParts = try NativeAttachmentFiles.filePath(directoryURL.absoluteString).split(separator: "/").map(String.init)
         let containerParts = try NativeAttachmentFiles.filePath(location.containerURL.absoluteString).split(separator: "/").map(String.init)
@@ -31135,7 +31057,6 @@ private final class Engine: @unchecked Sendable {
         defer { cancellation.setCancellationHandler(nil); fileSyncTurn = nil }
         do {
             let result = try invoke("iosForegroundFileSync", arguments: [jobs.token, jobs.rootURI, jobs.canonicalPath], localCancellation: cancellation)
-            // This outer fence is independent of shared releaseResources and its cleanup deferral.
             do { try jobs.closeAndDrain() } catch { fileSyncCloseFailed = true; throw Self.foregroundSyncFailure }
             try cancellation.check()
             guard fileSyncTurn === turn, context === runtime, attachmentGeneration == turn.generation,
@@ -31390,7 +31311,6 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    // Kept outside startup and the foreground orchestration frame. No browser or credential work at boot.
     private func beginDropboxForeground(command: String, requestJSON: String, runtime: JSContext,
                                         cancellation: NativeAttachmentCancellation) throws -> DropboxTurn? {
         guard let binding = dropboxAuthorization else { return nil }
@@ -32090,7 +32010,6 @@ private final class Engine: @unchecked Sendable {
                       let token = UUID(uuidString: run), token.uuidString.lowercased() == run else {
                     throw HostFailure("Isolated Review AI fixture requires its exact run token")
                 }
-                // Insert-only, under the selected fixture's pre-boot lock/transaction. Cold reads never enter here.
                 for role in ["someday", "archive"] {
                     let id = "review-ai-" + run + "-" + role
                     let found = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id])).utf8)) as? [[String: Any]]
@@ -32756,7 +32675,6 @@ private final class Engine: @unchecked Sendable {
                 guard let key = selected["cloudKey"] as? String else { throw Self.projectDownloadFailure }
                 _ = try NativeDropboxSelectedAdmission.path(key); turn.dropboxCloudKey = key
             }
-            // Eligibility/incomplete refusal precedes all secure reads and local byte proof.
             try observeProjectDownloadCredential(turn)
             try requireProjectDownloadTurn(strict: true)
             let baseline = try projectDownloadFile(.snapshotBaseline(attachmentID: attachment, targetURI: target), turn: turn, cancellation: cancellation)
@@ -34260,14 +34178,10 @@ private final class Engine: @unchecked Sendable {
             guard arguments.count == 1, let originalRequest = arguments.first as? String else {
                 throw HostFailure("INVALID_INPUT: Invalid Data setting request")
             }
-            // The journal retains its original method and raw request. The
-            // shared host exposes this exact existing command through its menu dispatcher.
             ticket = host.invokeMethod("menuCommand", withArguments: [method, originalRequest])
         } else {
             ticket = host.invokeMethod(method, withArguments: arguments)
         }
-        // Capture a trusted submitted ticket before observing a synchronous
-        // exception so an accepted selected call is still cancelled and polled.
         if drainCalendarTest || selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil || selectedCaptureAI != nil || selectedAIConfiguration != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
             selectedTicket = id
         }
@@ -34303,8 +34217,6 @@ private final class Engine: @unchecked Sendable {
                     if let jobs = fileSyncTurn?.jobs {
                         do { try jobs.closeAndDrain() }
                         catch {
-                            // Native authority is drained. The unavailable latch deliberately forbids
-                            // pumping this JS ticket again, so dispose its runtime instead of polling it.
                             fileSyncCloseFailed = true
                             fileSyncInvocationDisposed = true
                             releaseRuntime()
@@ -34315,8 +34227,6 @@ private final class Engine: @unchecked Sendable {
                     try checkException()
                     selectedTurn?.cloudKitJobs?.closeAndDrain()
                     dropboxTurn?.jobs.closeAndDrain()
-                    // Completes uninterruptible RN installer work before allowing
-                    // another operation or library owner to observe the namespace.
                     if !drainCalendarTest {
                         attachmentJobs?.cancelAndDrain()
                         httpJobs?.cancelAndDrain()
@@ -35194,7 +35104,6 @@ private final class Engine: @unchecked Sendable {
                   let text = input.toString(), self.attachmentGeneration == turn.generation,
                   Data(self.databaseURL.absoluteString.utf8) == Data(turn.databaseURL.absoluteString.utf8),
                   self.invoking, !self.fileSyncCloseFailed else { return "!MindwtrNativeError:File Sync is unavailable" }
-            // The mailbox validates every field. End remains admitted after cancellation.
             return turn.jobs.submit(text)
         }
         let fileSyncAbort: @convention(block) (String) -> Void = { [weak self] _ in self?.fileSyncTurn?.jobs.abort() }
@@ -35435,7 +35344,6 @@ private final class Engine: @unchecked Sendable {
     private func validateRestrictedFixtureStorage() throws {
         guard workspaceMode == .restricted else { return }
         #if DEBUG
-        // Production sample-root admission/seed is deliberately absent in this unit.
         guard let root = restrictedFixtureRoot, legacyStorage == nil, deviceStorageLocation == nil,
               root.isFileURL, root.standardizedFileURL == root,
               root.resolvingSymlinksInPath() == root,
@@ -35453,7 +35361,6 @@ private final class Engine: @unchecked Sendable {
 
     func validateWorkspaceRetirement() throws {
         dispatchPrecondition(condition: .onQueue(queue))
-        // Ordinary close and failed startup clear evidence and cannot prove retirement.
         guard started, !closed, context != nil, database != nil, lockFD >= 0,
               !localRequests.isClosing, !fileSyncCloseFailed, !reminderSourceStale,
               !aiTextConfigurationRetired, !aiRequestTimeoutRetired, !aiReasoningEffortRetired, !aiGeminiThinkingBudgetRetired else { throw CoreHostRetirementError.unavailable }
@@ -35529,7 +35436,6 @@ private final class Engine: @unchecked Sendable {
             turn.cancellation.setCancellationHandler(nil)
             fileSyncTurn = nil
         }
-        // Drain accepted writes while their original storage, database and file lease still exist.
         if let turn = calendarPushTurn ?? retainedCalendarPushTurn {
             try? retryCalendarPushState(turn)
             try? turn.effects.retryPublication()
@@ -35571,7 +35477,6 @@ private final class Engine: @unchecked Sendable {
         retainedOrdinaryTurn = nil
         attachmentGeneration &+= 1
         attachmentIdlePump?.cancel(); attachmentIdlePump = nil
-        // No file/installer worker survives release of the library lock.
         retireTaskAIAnswer(nil)
         taskAITurn?.handle.cancel(); taskAITurn?.http.shutdown(); taskAITurn = nil
         httpJobs?.shutdown(); httpJobs = nil

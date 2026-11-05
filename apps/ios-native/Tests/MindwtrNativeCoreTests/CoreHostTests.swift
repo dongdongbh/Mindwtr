@@ -36086,7 +36086,6 @@ extension CoreHostTests {
             faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected unconfirmed completion") } }
             await expectFailure("SAVE_FAILED") { _ = try await core.call("taskCompletion", argumentsJSON: json([json(request)])) }
             XCTAssertEqual(try storedTask(id)["status"] as? String, "next")
-            // The retained completion owns retry; no prompt is exposed before its exact ACK.
             await expectFailure { _ = try await projectNext191Options(core, origin: origin) }
             faults.beforeSQL = nil; _ = try await core.retryPending()
             _ = try await projectNext191Options(core, origin: origin)
@@ -39858,7 +39857,7 @@ extension CoreHostTests {
         XCTAssertEqual(state.stopped.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(try diagnostics197FullSnapshot(), before)
         state.setHeld(false)
-        state.releaseResponses() // A late old completion cannot revive its cancelled request.
+        state.releaseResponses()
         let fresh = try await captureAIQuestion(core, text: "Later synthetic question")
         let answer = try object(await core.requestCaptureCopilot(requestJSON: fresh.request))
         XCTAssertNotNil(answer["suggestion"] as? [String: Any])
@@ -39869,7 +39868,6 @@ extension CoreHostTests {
         let closingQuestion = try await captureAIQuestion(core, text: "Closing synthetic question")
         let closingJSON = closingQuestion.request
         let closingRequest = Task.detached { try await core.requestCaptureCopilot(requestJSON: closingJSON) }
-        // The second successful response also signalled entered; consume it before waiting for the held third request.
         XCTAssertEqual(state.entered.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(state.entered.wait(timeout: .now() + 10), .success)
         await core.close()
@@ -39968,15 +39966,11 @@ extension CoreHostTests {
         return try XCTUnwrap((settings["gtd"] as? [String: Any])?["archiveRetentionDays"] as? Int)
     }
 
-    /// Reuse the existing archived-library fixture, with one old standalone
-    /// candidate and a legacy clock that must be backfilled rather than purged.
     private func seedArchiveRetention() async throws -> (old: String, legacy: String) {
         let ids = try await seedArchiveTasks180(), base = try XCTUnwrap(ids.first)
         let sql = try SQLiteBridge(url: database); defer { sql.close() }
         let old = "2026-08-01T12:00:00.000Z"
         let id = base + "-retention-old", legacy = base + "-retention-legacy"
-        // Use a nonrecurring standalone archive row; the source fixture's
-        // recurring task remains under its recently archived parent.
         _ = try sql.execute("INSERT INTO tasks (id,title,status,tags,contexts,createdAt,updatedAt,completedAt,archivedAt,rev) VALUES (?,?,?,?,?,?,?,?,?,?)",
             parametersJSON: json([id, "Expired retention candidate", "archived", "[]", "[]", old, old, old, old, 1]))
         _ = try sql.execute("INSERT INTO tasks (id,title,status,tags,contexts,createdAt,updatedAt,rev) VALUES (?,?,?,?,?,?,?,?)",
@@ -40162,8 +40156,6 @@ extension CoreHostTests {
         _ = try await seedArchiveRetention()
         let (core, manifest) = try archiveRetentionHost(backend: "off"); _ = try await core.start()
         _ = try await core.call("dataSetting", argumentsJSON: json([archiveRetentionRequest(30)]))
-        // Damage the fixture only after hydration: the native KV read returns
-        // an error marker, which must resolve to unknown rather than off.
         let invalid = Data("{".utf8); try invalid.write(to: manifest)
         let before = try diagnostics197FullSnapshot(), waiting = try await archiveRetentionRun(core)
         XCTAssertEqual(waiting["outcome"] as? String, "skipped")
@@ -40276,7 +40268,6 @@ extension CoreHostTests {
         let changedID = append.merging(["id": "inline-é"]) { _, new in new }
         let unproven = try object(await core.call("inlineChecklistRetryOutcome", argumentsJSON: json([json(changedID)])))
         XCTAssertEqual(unproven["kind"] as? String, "unproven")
-        // NEL is nonempty to JavaScript trim; FEFF-only is empty and tested below.
         let nel = try await inlineChecklistHostRequest(core, id: id, append: "\u{0085}")
         _ = try await core.call("inlineChecklistWrite", argumentsJSON: json([json(nel)]))
         XCTAssertEqual(Array(try XCTUnwrap(inlineChecklistHostItems(id).last?["title"] as? String).utf8), [0xC2, 0x85])
@@ -40422,7 +40413,6 @@ extension CoreHostTests {
             let bytes = Data(try json(saved).utf8); try bytes.write(to: journal)
             let replay = HostIOFaults(); var statements = 0
             replay.beforeSQL = { sql in
-                // A well-formed terminal result needs a database read to disprove its receipt.
                 if part != "missingReceipt" || sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+(?:tasks|projects|sections|areas|people|settings|saved_filters|native_request_receipts|native_pomodoro_session)\b"#, options: .regularExpression) != nil { statements += 1 }
             }
             let cold = host(replay, bundleURL: try dateBundle(at: "2026-10-02T14:00:00.000Z"))
@@ -40588,7 +40578,6 @@ extension CoreHostTests {
                                       "completionRequestId": try XCTUnwrap(request["requestId"])]
             _ = try await core.call("taskCompletionUndo", argumentsJSON: json([json(undo)]))
             XCTAssertEqual(try storedTask(id)["status"] as? String, "archived")
-            // RN Undo restores the prior status, not the old cancellation marker.
             let undone = try storedTask(id)
             XCTAssertTrue(undone["cancelledAt"] == nil || undone["cancelledAt"] is NSNull)
             await core.close()
@@ -40949,7 +40938,6 @@ extension CoreHostTests {
             faults.commandDiagnostic = { if $0.hasPrefix("inboxOrganizeDestinationCreate") { inboxDiagnostics.append($0) } }
             let core = host(faults, bundleURL: try dateBundle(at: "2026-10-02T13:00:00.000Z"))
             _ = try await core.start()
-            // Creation accepts a complete draft whose Waiting delegate is still incomplete.
             var draft = organize743EmptyDraft
             draft["status"] = "waiting"; draft["tags"] = "#UnappliedDestination"; draft["contexts"] = "@unapplied"
             let kind = mode == "project" ? "project" : "area"
@@ -41044,7 +41032,6 @@ extension CoreHostTests {
     private func seedProjectBulkDeleteHost() async throws -> [String] {
         let id = try await seedInlineChecklistHost()
         let sql = try SQLiteBridge(url: database); defer { sql.close() }
-        // The donor cleared recurrence; keep its raw flag canonical before cloning.
         _ = try sql.execute("UPDATE tasks SET showFutureRecurrence=0 WHERE id=? AND recurrence IS NULL", parametersJSON: json([id]))
         let original = try storedTask(id)
         _ = try sql.execute("UPDATE projects SET tagIds=? WHERE id='destination-project-a'", parametersJSON: json([json(["#shared-delete"])]))
@@ -41083,7 +41070,6 @@ extension CoreHostTests {
     private func projectBulkDeletePreservedFields(_ row: [String: Any]) throws -> String {
         let changed: Set<String> = ["deletedAt", "rev", "revBy", "updatedAt"]
         var comparable = row.filter { !changed.contains($0.key) }
-        // The row codec rewrites object order/escaping; content and array order stay exact.
         for column in ["attachments", "checklist"] {
             if let encoded = comparable[column] as? String {
                 comparable[column] = try JSONSerialization.jsonObject(with: Data(encoded.utf8), options: [.fragmentsAllowed])

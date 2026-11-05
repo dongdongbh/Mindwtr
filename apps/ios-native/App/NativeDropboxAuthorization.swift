@@ -5,7 +5,6 @@ import MindwtrNativeCore
 import Security
 import UIKit
 
-/// Read by NativeCore's worker without crossing synchronously onto MainActor.
 private final class NativeDropboxAuthorizationSnapshot: @unchecked Sendable {
     private let lock = NSLock()
     private var live = false
@@ -51,8 +50,6 @@ private final class NativeDropboxSystemBrowser: NSObject, NativeDropboxBrowser, 
     func cancel() { session.cancel() }
 }
 
-/// Codes/verifiers stay in this owner until the private native grant is delivered.
-/// This object never stores tokens, calls Dropbox HTTP, or publishes callback data.
 @MainActor
 final class NativeDropboxAuthorization {
     enum Failure: LocalizedError {
@@ -95,15 +92,12 @@ final class NativeDropboxAuthorization {
     }
     static func isCallbackRoute(_ url: URL, configuration: NativeDropboxConfiguration?) -> Bool {
         guard let configuration else { return false }
-        // Strip only the query/fragment. No suffix, host normalization or alternate path.
         let base = url.absoluteString.prefix { $0 != "?" && $0 != "#" }
         return base.utf8.elementsEqual(configuration.redirectURI.utf8)
     }
     static func shouldConsumeCallback(_ url: URL, configuration: NativeDropboxConfiguration?) -> Bool {
         guard let configuration, let configured = URLComponents(string: configuration.redirectURI),
               let callback = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
-        // The configured callback host is reserved even for malformed/late callbacks;
-        // none of its code/error query data may become ordinary capture text.
         return callback.scheme?.lowercased() == configured.scheme?.lowercased()
             && callback.host?.lowercased() == configured.host?.lowercased()
     }
@@ -126,7 +120,7 @@ final class NativeDropboxAuthorization {
                 guard let self else { throw Failure.unavailable }
                 return try await self.authorize(requestID)
             }, cancel: { [weak self] requestID in
-                snapshot.cancel(requestID) // Invalidate before a queued MainActor cancellation.
+                snapshot.cancel(requestID)
                 Task { @MainActor in self?.cancel(requestID) }
             })
     }
@@ -141,7 +135,7 @@ final class NativeDropboxAuthorization {
         else if active { deliverIfReadmitted() }
     }
     func cancelAuthorization() {
-        snapshot.cancelCurrent() // Also fences exchange/verification after grant delivery.
+        snapshot.cancelCurrent()
         cancelPending()
     }
     func retire() {
@@ -166,7 +160,7 @@ final class NativeDropboxAuthorization {
                     continuation.resume(throwing: Failure.cancelled); return
                 }
                 pending.waiters.append(continuation)
-                guard pending.browser == nil else { return } // Same live request joins its one session.
+                guard pending.browser == nil else { return }
                 do {
                     let url = try Self.authorizationURL(configuration: configuration, state: pending.state, verifier: pending.verifier)
                     let browser = try browserFactory(url, "mindwtr-native-dev") { [weak self, weak pending] url, error in
@@ -200,8 +194,6 @@ final class NativeDropboxAuthorization {
             guard pending.code == nil else { throw Failure.invalidCallback }
             guard !failed, let url else { throw Failure.cancelled }
             pending.code = try Self.callbackCode(url, configuration: configuration, state: pending.state)
-            // Retain only this browser's return through the inactive -> active handoff.
-            // No grant is delivered until the same owner is actually active again.
             deliverIfReadmitted()
         } catch { finish(pending, result: .failure(error is Failure ? error : Failure.invalidCallback)) }
     }
@@ -275,8 +267,6 @@ private extension UInt8 {
 
 #if DEBUG && targetEnvironment(simulator)
 extension NativeDropboxAuthorization {
-    /// Isolated, explicitly requested fixture. Uses no OS browser, HTTP or secrets.
-    /// Only its pass/fail result leaves this scope; synthetic grants stay private.
     static func runControlledFixture() async -> Bool {
         final class Browser: NativeDropboxBrowser {
             var cancelled = false

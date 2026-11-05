@@ -183,7 +183,6 @@ type PreparedProjectFlowBase = {
     updateAt: string;
 };
 
-/** Legacy native Project type/scope journals keep their original Project-only receipt. */
 export type PreparedProjectFlowV1 = PreparedProjectFlowBase & {
     version: 1;
     request: { projectId: string; action: Extract<ProjectFlowAction, { kind: 'toggleType' | 'setScope' }> };
@@ -191,7 +190,6 @@ export type PreparedProjectFlowV1 = PreparedProjectFlowBase & {
     effect: { project: { before: Project; after: Project } };
 };
 
-/** Explicit flow mode freezes the full section scope and atomically defaults missing choices. */
 export type PreparedProjectFlowV2 = PreparedProjectFlowBase & {
     version: 2;
     request: { projectId: string; action: Extract<ProjectFlowAction, { kind: 'flowMode' }> };
@@ -199,7 +197,6 @@ export type PreparedProjectFlowV2 = PreparedProjectFlowBase & {
     effect: { project: { before: Project; after: Project }; sections: Array<{ before: Section; after: Section }> };
 };
 
-/** One selected Section flow choice; the parent is a frozen guard, never an effect. */
 export type PreparedProjectFlowV3 = PreparedProjectFlowBase & {
     version: 3;
     request: { projectId: string; action: Extract<ProjectFlowAction, { kind: 'sectionFlow' }> };
@@ -209,7 +206,6 @@ export type PreparedProjectFlowV3 = PreparedProjectFlowBase & {
 
 export type PreparedProjectFlow = PreparedProjectFlowV1 | PreparedProjectFlowV2 | PreparedProjectFlowV3;
 
-/** One frozen synced Project task sort change; Task and Section rows are untouched. */
 export type PreparedProjectTaskSort = {
     scope: { project: Project };
     effect: { project: { before: Project; after: Project } };
@@ -706,13 +702,11 @@ export interface TaskStore {
         initialProps?: Partial<Task>;
         captureId?: string;
     }>) => Promise<StoreActionResult>;
-    /** Private voice metadata writes; no HTTP or file side effects. */
     commitPreparedVoiceRows: (prepared: Exclude<import('./native-voice-prepared').NativeVoicePrepared, { kind: 'settings' }>,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedVoiceSettings: (request: import('./native-voice-settings').NativeVoiceSettingsRequest,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedVoiceSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Internal prepared-capture commit; the native contract validates the journal envelope first. */
     commitPreparedCapture: (input: {
         task: Task;
         project: Project | null;
@@ -728,7 +722,6 @@ export interface TaskStore {
 
     commitPreparedTaskEdit: (input: PreparedTaskEdit) => Promise<PreparedTaskEditResult>;
     commitPreparedTaskEdits: (input: PreparedTaskEdit[]) => Promise<PreparedTaskEditResult>;
-    /** Native one-task raw overlay; the calling contract validates its effect and guards. */
     commitPreparedTaskDraftV2: (input: Pick<import('./native-host-contract-task-save').NativePreparedTaskDraftSaveV2,
         'deviceIdBefore' | 'deviceIdToInitialize' | 'effect'> & { request: { id: string } },
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
@@ -752,28 +745,23 @@ export interface TaskStore {
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectTasksMove: (input: import('./native-host-contract-project-bulk-status').NativeProjectTasksMovePrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Inbox Add tag's full source-aware guarded raw batch. */
     commitPreparedInboxTasksAddTag: (input: import('./native-host-contract-inbox-bulk-tag').NativeInboxTasksAddTagPrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectTasksAddTag: (input: import('./native-host-contract-project-bulk-tag').NativeProjectTasksAddTagPrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Inbox Remove tag's complete source-aware guarded raw batch. */
     commitPreparedInboxTasksRemoveTag: (input: import('./native-host-contract-inbox-bulk-remove-tag').NativeInboxTasksRemoveTagPrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectTasksRemoveTag: (input: import('./native-host-contract-project-bulk-remove-tag').NativeProjectTasksRemoveTagPrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Inbox Organize's shared planner effect, including recurrence and parent changes. */
     commitPreparedInboxTasksOrganize: (input: import('./native-host-contract-inbox-bulk-organize').NativeInboxTasksOrganizePrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectTasksOrganize: (input: import('./native-host-contract-project-bulk-organize').NativeProjectTasksOrganizePrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Reference Add tag's shared guarded raw batch; contract validates all selected members. */
     commitPreparedReferenceTasksAddTag: (input: import('./native-host-contract-reference-bulk-tag').NativeReferenceTasksAddTagPrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
 
     commitPreparedReferenceTasksRemoveTag: (input: import('./native-host-contract-reference-bulk-remove-tag').NativeReferenceTasksRemoveTagPrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Selected-row raw Delete/Undo overlay; native validates the full effect and receipt guards. */
     commitPreparedTaskChecklistMove: (input: {
         before: Task[]; after: Task[]; deviceIdBefore: string | null; deviceIdToInitialize: string | null;
         updateAt: string; frozenTemporal: { futureBoundary: string; dates: ReadonlyMap<string, FocusDateProjection> };
@@ -916,12 +904,10 @@ export interface TaskStore {
     commitPreparedAIRequestTimeout: (request: import('./native-ai-request-timeout').AIRequestTimeoutRequest,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedAIRequestTimeoutSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Private versioned text setup scalars/provider defaults; credentials and endpoints stay outside the journal. */
     commitPreparedAITextConfiguration: (request: import('./native-ai-text-configuration-request').AITextConfigurationRequest
         | import('./native-ai-text-configuration-request').AITextConfigurationRequestV2,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedAITextConfigurationSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
-    /** Private OpenAI reasoning effort against raw saved authority; preserves saved minimal until explicit choice. */
     applyPreparedAIReasoningEffort: (request: import('./native-ai-reasoning-effort').AIReasoningEffortRequest,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     retryPreparedAIReasoningEffortSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;

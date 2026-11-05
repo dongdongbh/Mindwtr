@@ -139,8 +139,6 @@ final class SyncFileLockEngineTests: XCTestCase {
       XCTAssertFalse(FileManager.default.fileExists(atPath: parent.appendingPathComponent(".mindwtr.lock").path))
       if existingForeignLock { XCTAssertEqual(try Data(contentsOf: foreignLock), foreignBytes) }
       else { XCTAssertFalse(FileManager.default.fileExists(atPath: foreignLock.path)) }
-      // A last-moment rename cannot redirect openat into the replacement. The
-      // original retained inode may gain metadata; it is never admitted as a lease.
       XCTAssertTrue(FileManager.default.fileExists(atPath: displaced.appendingPathComponent(".mindwtr.lock").path))
       let next = SyncFileLockEngine()
       let token = try next.acquireDirectory(displaced)

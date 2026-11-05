@@ -155,7 +155,6 @@ const referenceProjects = (projects: readonly Project[]): Project[] | null => {
     const snapshots = projects.map(rawReadProjectSnapshot);
     return snapshots.every((row) => row !== null) ? snapshots as Project[] : null;
 };
-// These sources bind raw JSON and durable origin receipts without sharing source identity.
 const usesRawSnapshots = (source: DeleteRequest['source']): boolean => source === 'reference' || source === 'inbox' || source === 'project' || isStatusList(source);
 const isShown = (source: DeleteRequest['source']): source is 'review' | 'contexts' => source === 'review' || source === 'contexts';
 const isStatusList = (source: DeleteRequest['source']): source is 'waiting' | 'someday' | 'review' | 'contexts' => source === 'waiting' || source === 'someday' || isShown(source);
@@ -267,7 +266,6 @@ const statusListOf = (envelope: MutationEnvelope): 'waiting' | 'someday' | 'revi
 };
 const requiresRawSnapshots = (envelope: MutationEnvelope): boolean => usesRawSnapshots((isUndo(envelope) ? envelope.prepared.delete.request : envelope.request).source);
 const sourceName = (envelope: MutationEnvelope): string => statusListOf(envelope) ? STATUS_LIST_NAMES[statusListOf(envelope)!] : isProject(envelope) ? 'Project' : isInbox(envelope) ? 'Inbox' : isReference(envelope) ? 'Reference' : isDone(envelope) ? 'Done' : 'Archive';
-// Preserve existing Archive wording on Done's legacy raw-safety error branches.
 const rawSourceName = (envelope: MutationEnvelope): string => statusListOf(envelope) ? STATUS_LIST_NAMES[statusListOf(envelope)!] : isProject(envelope) ? 'Project' : isInbox(envelope) ? 'Inbox' : isReference(envelope) ? 'Reference' : 'Archive';
 const requestSourceName = (request: DeleteRequest): string => isStatusList(request.source) ? STATUS_LIST_NAMES[request.source] : request.source === 'project' ? 'Project' : request.source === 'inbox' ? 'Inbox' : request.source === 'reference' ? 'Reference' : request.source === 'done' ? 'Done' : 'Archive';
 const buildUndo = (request: NativeArchivedTasksDeleteUndoRequest, deletion: DeleteEnvelope,
@@ -509,7 +507,6 @@ export function createTasksDeleteMethods(deps: {
     };
 }
 
-/** Preserve all legacy entry points and their exact source/envelope grammar. */
 export function createArchivedTasksDeleteMethods(deps: Parameters<typeof createTasksDeleteMethods>[0]) {
     const methods = createTasksDeleteMethods(deps, 'legacy');
     return {

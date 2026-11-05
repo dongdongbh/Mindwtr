@@ -44,8 +44,6 @@ enum NativeAppLaunch {
     }
 }
 
-/// One pre-host owner; a failed open is retried only by a later explicit capture or startup.
-/// One synchronous native marker, bound before settlement and transferred before it is removed.
 private final class NativeNavigationFinishRelay: @unchecked Sendable {
     struct Identity: Sendable {
         let owner: UUID
@@ -154,8 +152,6 @@ actor NativeNotificationResponses {
     private var publisherFailed = false
     private var legacyOperations = 0
     private var legacyWaiters: [CheckedContinuation<Void, Never>] = []
-    // shortcut: no eviction; RAM is O(unconfirmed distinct deliveries). OS completion is not durable ACK;
-    // process death before the first durable write can lose those envelopes. A second spool is out of scope.
     private var pendingCaptures: [String: PendingCapture] = [:]
     private var captureOrder: [String] = []
     private var diagnostics: [Diagnostic] = []
@@ -186,7 +182,6 @@ actor NativeNotificationResponses {
         guard let response = NativeReminderResponse.capture(request, deliveredAt: now, receivedAt: now,
             actionIdentifier: UNNotificationDefaultActionIdentifier, namespace: namespace) else { throw CocoaError(.coderInvalidValue) }
         _ = try retain(response, wake: {
-            // The fixture uses the same publisher and original callback tail as the real delegate.
             NativeAppModel.shared.requestNotificationResponses()
         }, callbackManaged: true)
         if publisher == nil { publisherFailed = false; startPublisher() }
@@ -224,7 +219,6 @@ actor NativeNotificationResponses {
         pendingCaptures[response.requestID] = entry; captureOrder.append(response.requestID)
         return entry
     }
-    /// The delegate owns OS completion separately; after this call the original validated envelope stays here.
     fileprivate func receive(_ response: NativeReminderResponse, wake: Wake?, completion: NativeReminderCallbackCompletion) {
         do {
             _ = try retain(response, wake: wake, callbackManaged: true, completion: completion)
@@ -257,29 +251,25 @@ actor NativeNotificationResponses {
                     mode = .held; bufferHandover(); return
                 }
                 guard !coldUncertain else { throw HandoverFailure.held }
-                // No reminder preparation says nothing about the same writer's navigation claim.
             } else { guard !coldUncertain else { throw HandoverFailure.held } }
-            // A definitive no-progress observation permits the ordinary original owner only.
             do { storage = try NativeReminderInbox(selection: route.selection) }
             catch { mode = .unchecked; throw HandoverFailure.refused }
             preparation = nil; mode = .legacy
         } catch HandoverFailure.refused { throw HandoverFailure.refused }
         catch { coldUncertain = true; mode = .blocked; throw HandoverFailure.held }
     }
-    /// No model/Host await: startup can safely call this before creating its first CoreHost.
     func startupHeld() async -> Bool {
         do {
             try await ensureCold()
             if publisher == nil { publisherFailed = false; startPublisher() }
             return mode != .legacy
         }
-        catch HandoverFailure.refused { return false } // No intake progress; ordinary startup may create its selected library first.
+        catch HandoverFailure.refused { return false }
         catch { return true }
     }
 
     var sameTreeReopenDiagnostic: NativePersonalIntake.Diagnostic? { navigationFinishRelay.retainedSameTreeReopen() }
 
-    /// Existing-only and independent of Host/reminder startup; unknown state never means ordinary navigation.
     func navigationReservationID() async throws -> String? {
         let route = try NativeAppLaunch.reminderRoute.get()
         if intake == nil { intake = try NativePersonalIntake.openExisting(route: route, diagnostic: { [relay = navigationFinishRelay] in relay.receive($0) }) }
@@ -329,7 +319,6 @@ actor NativeNotificationResponses {
               receipt.outcome == outcome else { throw HandoverFailure.held }
         return .init(receipt: receipt, diagnostic: try navigationFinishRelay.retained(identity))
     }
-    /// The App owner must retain both receipt and marker debt before releasing this native relay.
     func transferredNavigationFinish(_ item: NativePersonalIntake.Item, outcome: NativePersonalIntake.Outcome,
                                      storage: NavigationReplayStorage, owner: UUID) throws {
         guard intake === storage.writer else { throw HandoverFailure.held }
@@ -359,7 +348,6 @@ actor NativeNotificationResponses {
         let mailbox = try NativeShareMailbox.current(), page = try await mailbox.pendingPage()
         guard heldWriter == nil || intake === heldWriter else { throw HandoverFailure.held }
         if intake == nil, page.items.isEmpty { return nil }
-        // Only the unchanged ordinary path may create its intake. Held return requires its original writer.
         if intake == nil, reservation == nil { intake = try NativePersonalIntake(route: try NativeAppLaunch.reminderRoute.get(), diagnostic: { [relay = navigationFinishRelay] in relay.receive($0) }) }
         guard let original = intake else { throw HandoverFailure.held }
         try await validateShareCaptureStorage(original, reminder: reminder, reservation: reservation)
@@ -369,7 +357,6 @@ actor NativeNotificationResponses {
             try await validateShareCaptureStorage(original, reminder: reminder, reservation: reservation)
             do { _ = try await original.importShare(source, from: mailbox) }
             catch {
-                // The original producer bytes remain in the mailbox. A durable private capture may still be offered safely.
                 try await validateShareCaptureStorage(original, reminder: reminder, reservation: reservation)
                 try await original.retry()
                 try await validateShareCaptureStorage(original, reminder: reminder, reservation: reservation)
@@ -447,7 +434,6 @@ actor NativeNotificationResponses {
         precondition(legacyOperations > 0); legacyOperations -= 1
         if legacyOperations == 0 { let waiters = legacyWaiters; legacyWaiters.removeAll(); waiters.forEach { $0.resume() } }
     }
-    /// Explicit ordinary Retry owns one serialized publisher attempt and its whole callback tail.
     func retryCaptures() async throws {
         guard !Task.isCancelled else { throw CancellationError() }
         try await ensureCold()
@@ -517,7 +503,6 @@ actor NativeNotificationResponses {
         }
         let current = try legacyOwner(); defer { finishLegacyOperation() }
         try await current.retry()
-        // Native settlement alone cannot hide retained callback envelopes from the ordinary Retry affordance.
         guard captureOrder.isEmpty || (!publisherFailed && publisher != nil) else { throw HandoverFailure.held }
         return try await current.pending()
     }
@@ -622,7 +607,6 @@ actor NativeNotificationResponses {
             entry.completions.removeAll { $0.isFinished }
         }
     }
-    /// Synchronous actor reservation; later captures park without becoming legacy wrappers.
     func reserveHandover() throws -> UUID {
         if let preparation { return preparation.id }
         guard mode == .legacy, let storage else { throw HandoverFailure.held }
@@ -712,7 +696,7 @@ actor NativeNotificationResponses {
     func releasePersistentCaptureFailureFixture() async {
         guard fixtureEnabled else { return }
         await storage?.setIOFaults()
-        fixtureState = "storage-usable" // Only the ordinary Retry action may restart the retained publisher.
+        fixtureState = "storage-usable"
     }
     func armCaptureRetryFixture() async throws {
         guard fixtureEnabled else { return }; try await ensureCold()
@@ -904,7 +888,7 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
     }
     private static func submit(_ captured: NativeReminderResponse, original: PersonalCallbacks?, completion: NativeReminderCallbackCompletion) {
         Task {
-            defer { completion.finish() } // OS completion is once, not a durable storage acknowledgement.
+            defer { completion.finish() }
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
             await NativeNotificationResponses.shared.holdCallbackEntryFixtureIfArmed()
             #endif
@@ -1165,7 +1149,6 @@ final class AppLockController: ObservableObject {
                 errorKey = nil
                 NSLog("Native App lock warm return releaseCheck=v1.3.9/ios-app-lock-delay outcome=within-delay")
             }
-            // Remove after SwiftUI has reconciled the locked tree, including any presented sheets.
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.phase == .active else { return }
                 self.privacyCovers.forEach { $0.removeFromSuperview() }

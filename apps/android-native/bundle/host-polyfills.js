@@ -96,7 +96,6 @@
         try { entry.settle(answer); } catch (error) { global.__hostLog('host call error: ' + error); }
         return 1;
     };
-    // A File Sync abort revokes native admission. Its promise remains pending until native close drains.
     global.__mindwtrFileSyncCall = function (request) {
         return new Promise(function (resolve, reject) {
             var id;
@@ -104,7 +103,7 @@
                 id = hostCall(native().fileSyncCall(JSON.stringify(request)));
                 if (typeof id !== 'string' || !id) throw new Error('File Sync is unavailable');
                 startIo(id, function (answer) { resolve(answer); }, function () {
-                    try { hostCall(native().fileSyncAbort(id)); } catch (_) { /* Outer fence still drains. */ }
+                    try { hostCall(native().fileSyncAbort(id)); } catch (_) { }
                 });
             } catch (_) { reject(new Error('File Sync is unavailable')); }
         });

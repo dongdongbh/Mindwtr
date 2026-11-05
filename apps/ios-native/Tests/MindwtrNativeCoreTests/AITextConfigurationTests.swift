@@ -61,7 +61,6 @@ private final class AITextConfigurationIO: @unchecked Sendable {
     }
 }
 
-/// Production JSC/SQLite/isolated Keychain checks. Apple runtime execution is a separate gate.
 final class AITextConfigurationTests: XCTestCase {
     private var root: URL!, bundle: URL!, service: String!
     private var database: URL { root.appendingPathComponent("core.sqlite") }

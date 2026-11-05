@@ -1,7 +1,5 @@
 import AppIntents
 
-// Paired with App/NativeCaptureIntents.swift. The foreground app implementation
-// owns the pending capture request; an extension-local singleton cannot deliver it.
 @available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct MindwtrOpenQuickCaptureIntent: AppIntent {
     static var title: LocalizedStringResource = "Add Task"

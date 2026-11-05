@@ -109,7 +109,6 @@ final class NativeCloudKitRequestTests: XCTestCase {
             XCTAssertThrowsError(try parse(["op": "fetchAttachmentAsset", "recordName": id, "targetPath": "opaque"]))
         }
         XCTAssertThrowsError(try parse(["op": "deleteRecords", "recordType": "MindwtrTask", "recordIDs": ["same", "same"]]))
-        // Only the future asset owner can turn one of these opaque values into an authorized file.
         for path in ["../relative", "file:///opaque/cache/file", "/outside/opaque", "https://example.invalid/opaque", String(repeating: "x", count: 16_384)] {
             guard case .fetchAttachmentAsset(_, let retained) = try parse(["op": "fetchAttachmentAsset", "recordName": "asset", "targetPath": path]) else {
                 return XCTFail("Wrong asset request")

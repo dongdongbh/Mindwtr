@@ -32,7 +32,6 @@ final class NativeDropboxSelectedAdmissionTests: XCTestCase {
     }
 }
 
-/// URLProtocol and fault statuses keep selected production Host tests off network and real Keychain.
 final class NativeDropboxSelectedHTTPFixture: @unchecked Sendable {
     private let lock = NSLock()
     let path: String
@@ -61,7 +60,6 @@ final class NativeDropboxSelectedHTTPFixture: @unchecked Sendable {
         let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [NativeDropboxSelectedHTTPProtocol.self]
         faults.httpConfiguration = configuration
         faults.secretService = "mindwtr.native-keychain.fixture." + UUID().uuidString.lowercased()
-        // Simulate an available empty keystore and accepted synthetic writes; no SecItem call executes.
         faults.secretStatus = { operation, _ in operation == "get" ? errSecItemNotFound : errSecSuccess }
         NativeDropboxSelectedHTTPProtocol.install(self)
     }

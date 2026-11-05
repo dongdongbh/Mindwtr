@@ -73,7 +73,6 @@ public final class NativeSearchIndex {
         Self.taskID(for: identifier, scope: scope)
     }
 
-    /// Decode an incoming personal identifier without constructing an OS index owner.
     public static func taskID(for identifier: String, selection: NativeLaunchSelection) -> String? {
         guard let scope = try? scope(selection) else { return nil }
         return taskID(for: identifier, scope: scope)
@@ -127,7 +126,6 @@ public final class NativeSearchIndex {
         epoch &+= 1
     }
 
-    /// An entered OS operation is not cancellable. Keep its owner until its callback returns.
     public func retireAndDrain() async {
         sealForRetirement()
         let admitted = drainTask

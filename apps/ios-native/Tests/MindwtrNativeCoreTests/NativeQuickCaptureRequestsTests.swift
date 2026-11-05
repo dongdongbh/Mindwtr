@@ -44,7 +44,7 @@ final class NativeQuickCaptureRequestsTests: XCTestCase {
         let stale = try XCTUnwrap(first.claimed)
         requests.register(replacement)
         XCTAssertFalse(requests.confirm(stale, for: first))
-        requests.unregister(first) // An old view disappearing must not unbind its replacement.
+        requests.unregister(first)
         XCTAssertNotNil(requests.claim(for: replacement))
         let beforeDisappear = try XCTUnwrap(replacement.claimed)
         requests.unregister(replacement)

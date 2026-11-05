@@ -5,7 +5,6 @@ import WidgetKit
 private struct NativeNextWidgetEntry: TimelineEntry {
     let date: Date
     let record: NativeWidgetNextCache.Record?
-    /// nil means unavailable: keep display, but never offer actions from an unreadable queue.
     let pendingActions: [NativeWidgetPendingAction]?
 }
 

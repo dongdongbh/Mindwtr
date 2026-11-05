@@ -1,7 +1,6 @@
 import Foundation
 import Darwin
 
-/// One immutable producer file per delivery. It never opens a task database or RN mailbox.
 public actor NativeShareMailbox {
     public static let appIdentifier = "tech.dongdongbh.mindwtr.native.dev"
     public static let extensionIdentifier = "tech.dongdongbh.mindwtr.native.dev.share"
@@ -194,7 +193,6 @@ public actor NativeShareMailbox {
         try acquire(); defer { _ = flock(lockFD, LOCK_UN) }
         if let (existing, _) = try read(name) {
             guard existing == bytes else { throw NativeShareError.changedSource }
-            // A previous uncertain directory fsync is settled before acknowledging repeated publication.
             let published = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
             guard published >= 0 else { throw NativeShareError.unavailable }
             defer { Darwin.close(published) }

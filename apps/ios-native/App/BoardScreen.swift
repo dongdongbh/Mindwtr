@@ -575,7 +575,6 @@ struct BoardScreen: View {
                             rebaseReason: NativeBoardDragGeometry.RebaseRejection? = nil, columnOrdinal: Int? = nil,
                             originalColumn: CGRect? = nil, currentColumn: CGRect? = nil) {
         guard drag.capture != nil || drag.claim != nil || dropIndicator != nil else { return }
-        // Copy existing measurements before invalidation; this adds no layout observation.
         let original = drag.measurements, capture = drag.capture
         drag.invalidate(); dropIndicator = nil
         guard let attempt = dragDiagnostics.attempt, attempt.take(.cancel) else { return }

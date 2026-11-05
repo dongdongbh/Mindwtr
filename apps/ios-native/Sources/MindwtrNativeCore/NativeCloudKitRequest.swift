@@ -1,6 +1,5 @@
 import Foundation
 
-/// Wire grammar only. Asset paths stay opaque until the native asset owner authorizes them.
 enum NativeCloudKitRequest: Sendable {
     enum RecordType: String, Sendable {
         case task = "MindwtrTask", project = "MindwtrProject", section = "MindwtrSection"

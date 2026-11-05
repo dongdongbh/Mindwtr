@@ -513,13 +513,11 @@ const readBulkUndoEnvelope = (value: unknown): NativeSomedaySectionBulkMoveUndoE
         ? envelope as unknown as NativeSomedaySectionBulkMoveUndoEnvelope : null;
 };
 
-/** Pure cold-journal validation before SQLite opens. */
 export const validatePreparedSomedaySectionBulkMove = (value: unknown): NativeHostResult<NativeSomedaySectionBulkMoveResult> => {
     const envelope = readBulkMoveEnvelope(value);
     return envelope ? { ok: true, value: envelope.prepared.result }
         : fail('INVALID_INPUT', 'Prepared Someday bulk section move is malformed');
 };
-/** Pure cold-journal validation before SQLite opens. */
 export const validatePreparedSomedaySectionBulkMoveUndo = (value: unknown): NativeHostResult<NativeSomedaySectionBulkMoveUndoResult> => {
     const envelope = readBulkUndoEnvelope(value);
     return envelope ? { ok: true, value: envelope.prepared.result }

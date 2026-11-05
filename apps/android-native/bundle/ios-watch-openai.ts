@@ -14,7 +14,6 @@ const text = (value: unknown, maximum: number): value is string => typeof value 
 const field = (value: unknown, maximum: number): value is string => text(value, maximum) && !/[\u0000-\u001f\u007f]/u.test(value);
 const api = (value: unknown): value is 'responses' | 'chat' => value === 'responses' || value === 'chat';
 
-/** Separate private projection preserves the existing recorder/settings read contracts. */
 export function readWatchOpenAIRuntime(settings: AppSettings) {
     const options = buildNativeVoiceSettingsOptions(settings);
     if (!options) throw invalid();

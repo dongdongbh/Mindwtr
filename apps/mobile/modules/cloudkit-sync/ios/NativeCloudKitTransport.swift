@@ -23,7 +23,6 @@ public struct NativeCloudKitTransportError: Error, LocalizedError, Sendable {
     init(_ code: Code, retryAfterSeconds: Double? = nil) { self.code = code; self.retryAfterSeconds = retryAfterSeconds }
 }
 
-/// One foreground transport's SDK operations. Retirement is sticky; terminal callbacks release each entry.
 final class NativeCloudKitOperationRegistry: @unchecked Sendable {
     private let lock = NSLock()
     private var retired = false
@@ -36,7 +35,6 @@ final class NativeCloudKitOperationRegistry: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !retired, !Task.isCancelled else { throw CancellationError() }
         operations[ObjectIdentifier(operation)] = operation
-        // SDK add only queues the operation; no SDK/network wait occurs under this lock.
         add(operation)
     }
     func complete(_ operation: CKDatabaseOperation) {
@@ -49,7 +47,6 @@ final class NativeCloudKitOperationRegistry: @unchecked Sendable {
     var count: Int { lock.lock(); defer { lock.unlock() }; return operations.count }
 }
 
-/// Serializes arbitrary query callback queues and never turns a matched-record failure into a partial snapshot.
 final class NativeCloudKitQueryCollector: @unchecked Sendable {
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.cloudkit.querycb")
     private var records: [CKRecord] = []
@@ -64,7 +61,6 @@ final class NativeCloudKitQueryCollector: @unchecked Sendable {
             var failures = errors
             if case .failure(let error) = result, !records.isEmpty || !failures.isEmpty { failures.append(error) }
             if !failures.isEmpty {
-                // A top-level partial failure cannot be mistaken for an initially absent schema.
                 throw NSError(domain: CKErrorDomain, code: CKError.Code.partialFailure.rawValue, userInfo: [
                     CKPartialErrorsByItemIDKey: Dictionary(uniqueKeysWithValues: failures.enumerated().map { (AnyHashable($0.offset), $0.element) })])
             }
@@ -76,7 +72,6 @@ final class NativeCloudKitQueryCollector: @unchecked Sendable {
     }
 }
 
-/// Foreground-only SDK facade. Every instance requires its explicit container/zone and owns one cancellable job.
 public actor NativeCloudKitTransport {
     public static let maximumJSONBytes = 16 * 1_024 * 1_024
     public static let maximumRecords = 100_000
@@ -135,7 +130,6 @@ public actor NativeCloudKitTransport {
         return try await run(attachment: true) { try Self.encode(await self.manager.fetchAttachmentAsset(recordName: recordName, targetPath: targetPath)) }
     }
 
-    /// The URL comes only from the SDK asset; the consumer must adopt/copy it before returning.
     public func fetchAttachmentAsset(recordName: String, consume: @Sendable (URL, String) async throws -> Void) async throws -> String {
         guard Self.identifier(recordName) else { throw NativeCloudKitTransportError(.invalidInput) }
         return try await run(attachment: true) {
@@ -231,7 +225,6 @@ public actor NativeCloudKitTransport {
 
     static func mappedRecord(_ record: CKRecord) -> [String: Any] {
         var result = CloudKitRecordMapper.json(from: record)
-        // Reuse the mapper; decode its nested JSON fields through the same byte-preserving boundary.
         for spec in CloudKitRecordMapper.fieldSpecsForType(record.recordType) {
             if case .jsonString = spec.kind, let json = record[spec.ckKey] as? String,
                let decoded = try? JSONDecoder().decode(NativeCloudKitJSON.self, from: Data(json.utf8)) {
@@ -267,7 +260,6 @@ public actor NativeCloudKitTransport {
     }
 }
 
-/// Scoped JSON boundary: Swift strings are decoded directly and boxed from bytes, retaining leading BOMs.
 private indirect enum NativeCloudKitJSON: Decodable {
     case null, bool(Bool), string(String), signed(Int64), unsigned(UInt64), number(Double)
     case array([NativeCloudKitJSON]), object([(String, NativeCloudKitJSON)])

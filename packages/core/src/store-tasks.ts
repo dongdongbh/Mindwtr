@@ -1148,8 +1148,6 @@ const preparedTaskEditUpdate = (current: Task, changes: PreparedTaskEdit['change
     rev: nextRevision(current.rev), revBy: deviceId, updatedAt,
 });
 
-/** The existing duplicate row construction, shared with native preparation.
- * Generated IDs and order reservations may be supplied from an immutable journal. */
 export function buildDuplicateTask({ sourceTask, asNextAction, copyId, now, deviceId, projectOrder, boardOrder, generateId = uuidv4 }: {
     sourceTask: Task;
     asNextAction?: boolean;
@@ -2324,7 +2322,6 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
     commitPreparedReferenceTasksRemoveTag: async (input, authority: PreparedAreaAuthority): Promise<PreparedTaskEditResult> =>
         commitPreparedRawReferenceBatch(input, authority, referenceBatchModules.removeTag, 'Reference Remove tag conflicts with saved data'),
 
-    /** Only the checklist-move contract supplies this exact two-row raw effect. */
     commitPreparedTaskChecklistMove: async (input, authority): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict', error: 'Checklist move conflicts with saved data' };
         set(memory => {

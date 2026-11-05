@@ -1,7 +1,6 @@
 import Foundation
 import CloudKitAttachmentErrorClassifier
 
-/// The SDK receives only native-owned upload copies; downloads enter the existing scratch/installer path.
 final class NativeCloudKitBridge: @unchecked Sendable {
     static var configuredContainer: String? {
         let bundle = Bundle.main

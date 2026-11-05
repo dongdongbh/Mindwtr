@@ -54,7 +54,6 @@ type DiscoveryGate = {
     kind: (credential: string, baseUrl: string) => ModelListKind | null;
 };
 
-/** One uncached fetch/merge/abort lane for text and speech, with caller-owned selection gates. */
 async function discoverModels<Result extends ModelChoices>(gate: DiscoveryGate,
     dependencies: NativeAITextModelDiscoveryDependencies,
     choices: (status: ModelChoices['status'], fetched: string[] | null) => Result): Promise<Result> {
@@ -82,13 +81,11 @@ async function discoverModels<Result extends ModelChoices>(gate: DiscoveryGate,
         const loaded = choices('loaded', fetched);
         return bounded(loaded) ? loaded : fallback;
     } catch {
-        // An ordinary provider failure falls back; retired ownership or an outer abort never publishes.
         current();
         return fallback;
     }
 }
 
-/** Explicit uncached selected-provider discovery. No store, consent, credential or selection mutation. */
 export async function discoverNativeAITextModels(input: NativeAITextModelDiscoveryInput,
     dependencies: NativeAITextModelDiscoveryDependencies): Promise<NativeAITextModelDiscoveryResult> {
     return discoverModels({ provider: input.provider, baseUrl: input.baseUrl, consent: input.consent,
@@ -101,7 +98,6 @@ export async function discoverNativeAITextModels(input: NativeAITextModelDiscove
     }));
 }
 
-/** Speech consent comes from the matching enabled assistant or recorded consent, never speech enabled. */
 export async function discoverNativeVoiceModels(input: NativeVoiceModelDiscoveryInput,
     dependencies: NativeAITextModelDiscoveryDependencies): Promise<NativeVoiceModelDiscoveryResult> {
     const provider = !input.isFossBuild && (input.provider === 'openai' || input.provider === 'gemini') ? input.provider : null;

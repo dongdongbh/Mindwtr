@@ -2,7 +2,6 @@ import SwiftUI
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
-/// Synchronous content entry only; the closure keeps the ticket from this exact successful View value.
 struct NavigationReplayContentEntry: View {
     let model: CoreModel
     let ticket: CoreModel.NavigationReplayTicket
@@ -149,7 +148,6 @@ struct InboxScreen: View {
             } else {
                 header
                 if model.ready {
-                    // Bound opaque metadata after an observed iOS 17 stack overflow.
                     if model.selectedSurface == .inbox {
                         AnyView(inboxContent)
                             .onAppear { Task { await model.recordInboxViewBoundaryRendered() } }
@@ -1760,7 +1758,6 @@ private struct TaskRowSwipeButton: View {
         }
     }
     @ViewBuilder var body: some View {
-        // Native List actions need the container's contextual button style.
         if native { actionButton.buttonStyle(.automatic) }
         else { actionButton.buttonStyle(.plain) }
     }
@@ -1782,8 +1779,6 @@ private struct TaskRowSwipeButton: View {
     }
 }
 
-/// A List uses its native reveal. Stack hosts share this small local tray;
-/// neither reveal engine owns an action or dispatches on drag release.
 private struct TaskRowSwipeTray: ViewModifier {
     let host: TaskRowSwipeHost
     let actions: CoreObject
@@ -1810,7 +1805,6 @@ private struct TaskRowSwipeTray: ViewModifier {
         if host == .list {
             content
                 .swipeActions(edge: layoutDirection == .leftToRight ? .leading : .trailing, allowsFullSwipe: false) {
-                    // First native button is nearest its exposed outer edge.
                     ForEach(left.indices, id: \.self) { index in button(left[index], native: true) }
                 }
                 .swipeActions(edge: layoutDirection == .leftToRight ? .trailing : .leading, allowsFullSwipe: false) {
@@ -1848,7 +1842,6 @@ private struct TaskRowSwipeTray: ViewModifier {
             .modifier(TaskRowSwipeDrag(active: !left.isEmpty || !right.isEmpty, began: dragBegan, changed: dragChanged, ended: dragEnded))
             .accessibilityElement(children: .contain)
             .accessibilityActions {
-                // Available while closed too; these call the very same dispatcher.
                 ForEach((left + right).indices, id: \.self) { index in
                     let action = (left + right)[index]
                     Button(action.text("label")) { activate(action, identity) }
@@ -2004,7 +1997,6 @@ struct TaskCard: View {
     var swipeInteractionDisabled = false
     @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
     @Environment(\.isEnabled) private var rowEnabled
-    // Native swipe edges follow the List host, not this card's text direction.
     @Environment(\.layoutDirection) private var hostLayoutDirection
     @State private var swipeDTO: CoreObject = [:]
     @State private var swipePublishedKey = ""
@@ -2187,7 +2179,6 @@ struct TaskCard: View {
         .environment(\.layoutDirection, meta.text("textDirection") == "rtl" ? .rightToLeft : .leftToRight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(meta.text("accessibilityLabel"))
-        // Observe the whole card without adding a hit-testing overlay or replacing taps.
         .modifier(TaskCardSelectionLongPress(identity: row.text("id"), host: swipeHost, enabled: onSelectionStart != nil, action: {
             recordStackSelectionPress()
             onSelectionStart?(row)
@@ -2308,7 +2299,6 @@ struct TaskCard: View {
                   NSDictionary(dictionary: $0).isEqual(to: action)
               }) else { return }
         let displayed = swipePublishedRow
-        // Capture before any callback or unstructured Task can retire this presentation.
         guard let activation = model.captureTaskRowSwipeActivation(displayed) else { return }
         swipeCloseGeneration += 1
         if action.text("id") == "organize" {
@@ -2327,7 +2317,6 @@ struct TaskCard: View {
         case "focus": Task { await model.focusRowTask(displayed, focused: !action.flag("focused"), activation: activation) }
         case "dates": model.openRowTaskDatesFromSwipe(displayed)
         case "delete":
-            // Only this explicit action cancels the row's undispatched checklist input.
             resetInlineChecklist()
             if let onSwipeDelete { onSwipeDelete(displayed) }
             else { Task { await model.deleteRowTask(displayed, activation: activation) } }

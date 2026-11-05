@@ -84,7 +84,6 @@ final class NativeWatchSnapshotHostTests: XCTestCase {
             let table = try XCTUnwrap(row["name"] as? String)
             let quoted = "\"" + table.replacingOccurrences(of: "\"", with: "\"\"") + "\""
             let columns = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("PRAGMA table_info(" + quoted + ")").utf8)) as? [[String: Any]])
-            // Encode FTS BLOBs as SQL literals; shadow tables may have no rowid.
             let projection = try columns.map { column -> String in
                 let name = try XCTUnwrap(column["name"] as? String)
                 let identifier = "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""

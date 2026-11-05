@@ -426,7 +426,7 @@ final class NativeReminderImportTests: XCTestCase {
         let operation = Task { try await owner.importSealed(token, into: destination, route: route) { diagnostics.receive($0) } }
         await barrier.wait()
         let header = try Data(contentsOf: state), accepted = try Data(contentsOf: record(event.requestID))
-        await destination.close() // Must return while the original operation is still suspended.
+        await destination.close()
         await barrier.open(); await failure { try await operation.value }
         XCTAssertTrue(diagnostics.events.isEmpty)
         XCTAssertEqual(try Data(contentsOf: state), header); XCTAssertEqual(try Data(contentsOf: record(event.requestID)), accepted)

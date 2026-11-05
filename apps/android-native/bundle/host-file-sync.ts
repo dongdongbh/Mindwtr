@@ -41,7 +41,6 @@ const logNativeFileSyncEvents = (events: unknown, log: MobileFileSyncFullHost['l
 };
 
 
-/** Resolve once under the owner's live scope. The subsequent port adopts that same session. */
 export const prepareNativeFileSync = async (turn: string, call: NativeFileSyncCall,
     log: MobileFileSyncFullHost['log']): Promise<NativeFileSyncSelection> => {
     const reply = await call({ turn, op: 'prepare' });
@@ -115,8 +114,7 @@ export const createNativeFileSync = (selection: NativeFileSyncSelection, call: N
             return reply;
         } catch {
             terminal = true;
-            // Native failures already drain; an invalid decoded envelope also ends the real session.
-            if (op !== 'close') { try { await call({ turn: selection.turn, op: 'close' }); } catch { /* Outer native fence retains failure. */ } }
+            if (op !== 'close') { try { await call({ turn: selection.turn, op: 'close' }); } catch { } }
             return refused();
         }
     };
@@ -164,7 +162,7 @@ export const createNativeFileSync = (selection: NativeFileSyncSelection, call: N
         try { return await operation(); }
         catch {
             terminal = true;
-            try { await call({ turn: selection.turn, op: 'close' }); } catch { /* Outer native fence retains cleanup failure. */ }
+            try { await call({ turn: selection.turn, op: 'close' }); } catch { }
             return refused();
         }
     };

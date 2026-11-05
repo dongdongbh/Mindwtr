@@ -5,7 +5,6 @@ public protocol NativeQuickCaptureIntentTarget: AnyObject {
     func requestQuickCaptureIntent()
 }
 
-/// A coalesced, content-free request to show capture. Process death may discard it.
 @MainActor
 public final class NativeQuickCaptureRequests {
     public static let shared = NativeQuickCaptureRequests()

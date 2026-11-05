@@ -6,7 +6,6 @@ public enum NativeVoiceMode: String, Decodable, Sendable { case smartParse = "sm
 public enum NativeVoiceFieldStrategy: String, Decodable, Sendable { case smart, titleOnly = "title_only", descriptionOnly = "description_only" }
 public enum NativeVoiceAvailabilityReason: Sendable { case disabled, unsupportedProvider, credentialMissing, modelMissing, unavailable }
 
-// The witness is opaque to App: only core's closed nonsecret grammar can mint it.
 public struct NativeVoiceSettingsWitness: Sendable, Equatable {
     let json: String
     var object: [String: Any] { get throws { try NativeVoiceJSON.object(json, maximum: 32768) } }

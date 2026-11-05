@@ -7,7 +7,6 @@ import XCTest
 import CoreFoundation
 @testable import SyncFileLockEngine
 
-// Test-only transport. All publication policy stays in the current bundled shared writer.
 private enum LiveFailure: Error { case setup, malformed, unsupported, timeout, end, duplicate }
 private typealias LiveOwner = NativeFileSyncReadOwner
 private let liveCurrent = Data(#"{"tasks":[],"projects":[],"sections":[],"areas":[],"settings":{"weekStart":"sunday"}}"#.utf8)

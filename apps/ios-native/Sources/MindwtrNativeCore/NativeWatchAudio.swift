@@ -2,10 +2,8 @@ import CoreFoundation
 import Foundation
 import MindwtrWatchPayloadValidation
 
-/// A pre-journal refusal leaves the receiver's audio available for a later attempt.
 public struct NativeWatchAudioRetryable: Error, Sendable { public init() {} }
 
-/// A successful parse selected a truthy value that Watch cannot admit as transcript text.
 struct NativeWatchAudioInvalidParsedTranscript: Error, Sendable {}
 
 struct NativeWatchAudio: Sendable {
@@ -61,13 +59,11 @@ struct NativeWatchAudio: Sendable {
     static var ownerChanged: CoreHostRejection { CoreHostRejection(message: "NOT_READY: Watch audio owner changed") }
 }
 
-/// The production receiver supplies both the frozen bytes and its synchronous generation check.
 struct NativeWatchAudioBytes: Sendable {
     let bytes: Data
     let validate: @Sendable () throws -> Void
 }
 
-/// This private read carries endpoint policy without changing the recorder/settings read shapes.
 struct NativeWatchOpenAIRuntime: Sendable {
     let enabled: Bool
     let model: String

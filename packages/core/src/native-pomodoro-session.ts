@@ -372,7 +372,6 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
                 }
             }
             if (request.action === 'reconcile') {
-                // A display countdown alone does not own a SQL transition or generation.
                 const structural = { ...serializePomodoroSession(resolved), timerState: { ...resolved.timerState,
                     remainingSeconds: before.session.timerState.remainingSeconds } };
                 const { updatedAtMs: _mutationClock, ...previous } = before.session;

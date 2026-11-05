@@ -89,8 +89,6 @@ export const createDropboxTokenStore = ({
     fetch: defaultFetcher,
     now = () => Date.now(),
 }: DropboxTokenStoreDeps): DropboxTokenStore => {
-    // Native forward operations admit each mutation after awaited IO. Compensation callers
-    // omit this optional callback so an already-started configuration rollback can settle.
     const readRawTokenPayload = async (beforeMutation?: () => void): Promise<string | null> => {
         if (await vault.isSecureStoreAvailable()) {
             const secureValue = await secrets.getItem(DROPBOX_SECURESTORE_TOKENS_KEY);

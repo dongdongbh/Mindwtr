@@ -1,59 +1,4 @@
 import { readProjectBulkParams, type NativeProjectBulkParams as ProjectBulkParams } from './native-host-project-task-list';
-/**
- * The native host contract for selection mode on the Inbox, Waiting, Someday,
- * Reference and Done lists: React Native's bulk bar (move to a status, Range, add
- * and remove tags, delete with Undo, Someday's Move to section) and Bulk Organize
- * on the Inbox, from core's task-list-bulk-actions.ts. Kept in its own file and
- * spread into createNativeHostContract.
- *
- * Selection state stays with the host, as it stays in React state on mobile:
- *
- * - The selection is the tapped rows in the order they were tapped. Send it as
- *   `taskIds`; a row tap goes in as `selectionEdit` and the view returns the new
- *   `selectedIds` and Range's `anchorId` to keep. Range mode ends after one tap.
- *   Leaving selection mode (the exit button, or any action that `changed`) clears
- *   the selection and the anchor.
- * - Select all is stateless, as on Archive: send `selectAll: { except }` (the rows
- *   deselected since) and the view returns `selectAll: { params, revision, except }`,
- *   the object an action takes. The action resolves it again and refuses with
- *   STALE_REVISION once the rows on screen changed, unless no row it covers now
- *   needs a write (then changed: false, as for the replay of one that landed).
- * - `params` are the list view's own inputs as last sent (the returned
- *   `filters.state`, no `filterEdit`, no paging). A row that a filter or a folded
- *   heading hides is not on screen: it leaves the selection and Select all skips it,
- *   as it does rows whose project is archived (they open read-only).
- * - Bulk Organize's choices are a `draft` the host keeps while the dialog is open
- *   (EMPTY_BULK_ORGANIZE_DRAFT each time it opens). Send it with a control's `edit`
- *   as `organize`; the view returns the new `draft`. Show `validationMessage` after
- *   an Apply while `canApply` is false, until the status or the person changes.
- * - Dates go in only as local days (yyyy-MM-dd); each date field names its picker
- *   start and its Today and Tomorrow chips' values.
- *
- * - The organize dialog's project and area pickers can create one, as on mobile:
- *   their search box offers `create` for a name no option carries, and `submit` is
- *   the search box's Done key (the exact match, or the create). Send a create to
- *   createBulkOrganizeDestination with the draft; keep the `draft` it returns
- *   (the new project or area chosen). Creating writes no task: Apply does. A new
- *   project or area takes the request UUID as its ID, so a replay after a restart
- *   finds the row it made (renamed, archived or deleted since) and adds nothing. A
- *   name an option already carries is refused: choose it with `submit.edit`.
- *
- * Review's selection offers the same dialog: the organize view, its pickers and the
- * draft's Apply check are exported for native-host-contract-review-views.ts, and
- * createBulkOrganizeDestination takes `list: 'review'`.
- *
- * Every write takes a request UUID and retries exactly (native-request-receipts.ts):
- * while its save is owed (SAVE_FAILED) a retry only saves. Each write is
- * target-state (a replay whose target already holds writes nothing) and
- * compare-and-set: explicit rows go with `taskRevisions` (the view's, for exactly
- * the ids sent), and Select all's revision folds in each row's revision, so a
- * replay after a restart refuses (STALE_REVISION) any row changed since. Undo is its
- * own command: a delete's toast carries `undo.action` ({ type: 'restoreTasks' },
- * with the trashed tasks' revisions) to send with a new request UUID.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
 import type { BulkOrganizeTaskUpdateInput } from './bulk-organize';
 import { addBulkOrganizeArea, addBulkOrganizeProject } from './bulk-organize-create';
 import { collectBulkTaskTokens, type BulkTaskTokenMode } from './bulk-task-tokens';
@@ -123,7 +68,6 @@ import type { Area, Project, Task, TaskStatus } from './types';
 
 export type NativeBulkList = 'inbox' | 'waiting' | 'someday' | 'reference' | 'done';
 const BULK_LISTS: readonly NativeBulkList[] = ['inbox', 'waiting', 'someday', 'reference', 'done'];
-/** Project selection reads share presentation; its writes require separate prepared commands. */
 export type NativeBulkReadList = NativeBulkList | 'project' | 'review' | 'contexts';
 const BULK_READ_LISTS: readonly NativeBulkReadList[] = [...BULK_LISTS, 'project', 'review', 'contexts'];
 const BULK_READ_SCREENS: Record<NativeBulkReadList, (typeof TASK_LIST_BULK_SCREENS)[keyof typeof TASK_LIST_BULK_SCREENS]> = {
@@ -180,7 +124,6 @@ export type NativeBulkActionsView = {
 
     revision: string;
     list: NativeBulkReadList;
-    /** The explicit selection still on screen, in the order it was made; send it back as `taskIds`. Empty under Select all. */
     selectedIds: string[];
 
     taskRevisions: NativeRevisions;
@@ -404,7 +347,6 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
         return task && !task.deletedAt ? task : undefined;
     };
 
-    /** Every row the list shows for these params, in list order, paged through the list's own view. */
     const listRows = (list: NativeBulkReadList, params: unknown): NativeHostResult<{ revision: string; rows: Row[] }> => {
         if (!isObjectRecord(params) || PARAM_ONLY_KEYS.some((key) => params[key] !== undefined)) {
             return fail('INVALID_INPUT', 'The list view\'s own params are required (filters as returned, no filterEdit or paging)');
@@ -619,7 +561,6 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                 if (!organize) return fail('INVALID_INPUT', 'A Bulk organize draft and edit with choices the dialog offers are required');
             }
             if (organizePicker) {
-                // Display minutes do not change an offer; re-read eligibility and bind its complete picker context.
                 revision = `${deps.pickerRevision()}:${revisionsToken([
                     JSON.stringify({ list: input.list, params: input.params ?? {}, kind: input.picker!.kind, query: (input.picker!.query ?? '').trim() }),
                     JSON.stringify(selectable),

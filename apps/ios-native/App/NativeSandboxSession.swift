@@ -2,7 +2,6 @@ import Combine
 import Foundation
 import MindwtrNativeCore
 
-/// The first Sandbox unit retires this personal owner only. It cannot create or select a sample.
 @MainActor
 final class NativeSandboxSession: ObservableObject {
     enum Phase: String { case personal, draining, retired, unavailable }
@@ -25,7 +24,6 @@ final class NativeSandboxSession: ObservableObject {
     @Published private(set) var phase: Phase = .personal
     @Published private(set) var outcome = "none"
     private(set) var receipt: Receipt?
-    // A successful diagnostic is buffered: writing the retired personal log would cross its endpoint.
     private(set) var diagnostic: [String: String]?
     private var retirement: Task<Void, Never>?
 
@@ -61,7 +59,6 @@ final class NativeSandboxSession: ObservableObject {
         }
     }
 
-    /// Private actual consumer only; no public Enter/Sandbox or ordinary-startup activation.
     func requestReminderCaptureHandover() {
         guard captureHandover == nil else { return }
         guard model.reserveReminderCaptureHandover() else { captureHandoverPhase = "refused"; return }
@@ -80,7 +77,6 @@ final class NativeSandboxSession: ObservableObject {
 
     @Published private(set) var navigationCapturePhase = "ordinary"
     private var navigationCapture: Task<Void, Never>?
-    /// Private capture quarantine only; repeating joins the same sticky claim and original task.
     func requestNavigationCapture() {
         guard navigationCapture == nil else { return }
         guard model.reserveNavigationCapture() else { navigationCapturePhase = "refused"; return }
@@ -97,7 +93,6 @@ final class NativeSandboxSession: ObservableObject {
 
     @Published private(set) var navigationReplayPhase = "idle"
     private var navigationReplay: Task<Void, Never>?
-    /// Explicit private request/retry only; it never activates Sandbox or grants cold presentation.
     func requestNavigationReplay() {
         guard navigationReplay == nil else { return }
         guard model.reserveNavigationReplay() else { navigationReplayPhase = "held"; return }

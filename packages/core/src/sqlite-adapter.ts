@@ -1422,12 +1422,6 @@ export class SqliteAdapter {
         return this.lastSaveDataStats;
     }
 
-    /**
-     * Runs inside every transaction that commits app data (saveData, saveTask), after
-     * its writes and just before COMMIT: a subclass adds rows that must land with that
-     * data or not at all. A throw rolls the whole transaction back.
-     */
-    /** Optional native snapshot proof, inside BEGIN and before any domain write. */
     protected async beforeDataWrite(_data: AppData): Promise<void> {}
 
     protected async beforeCommit(_write: { data: AppData } | { task: Task }): Promise<void> {}

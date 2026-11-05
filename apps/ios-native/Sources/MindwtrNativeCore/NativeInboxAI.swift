@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 
-/// Processing-session grammar stays separate from editor TaskDraft/checklist answer shapes.
 enum NativeInboxAIJSON {
     static func request(_ raw: String) throws -> [String: Any] {
         let value = try NativeTaskAIJSON.object(raw)

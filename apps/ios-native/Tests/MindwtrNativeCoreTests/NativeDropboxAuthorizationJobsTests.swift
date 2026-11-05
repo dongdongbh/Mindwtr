@@ -124,7 +124,7 @@ final class NativeDropboxAuthorizationJobsTests: XCTestCase {
             let owner = DropboxAuthorizationTestCurrent(), value = grant(requestID)
             let jobs = NativeDropboxAuthorizationJobs(registry: NativeAttachmentLocalRequests(), binding: NativeDropboxAuthorizationBinding(configuration: try config(), isCurrent: { owner.read() }, authorize: { _ in value }, cancel: { _ in }), expectedRequestID: requestID)
             let ticket = try jobs.submit(input(requestID))
-            jobs.drain() // Authorize has finished; the successful grant is queued but unconsumed.
+            jobs.drain()
             if mode == "abort" { jobs.abort(ticket) }
             else if mode == "close" { jobs.closeAndDrain() }
             else { owner.retire() }

@@ -52,7 +52,6 @@ final class NativeShareMailboxTests: XCTestCase {
         XCTAssertThrowsError(try NativeShareEnvelope.decode(JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])))
         let duplicate = Data("{\"version\":1,\"version\":1}".utf8)
         XCTAssertThrowsError(try NativeShareEnvelope.decode(duplicate))
-        // Old navigation envelopes retain their exact canonical wire without a new share member.
         let old = try NativePersonalIntakeEvent.url("mindwtr-native-dev://open?task=a")
         let oldBytes = try IntakeWire.encode(old, limit: IntakeWire.recordLimit)
         XCTAssertFalse(String(decoding: oldBytes, as: UTF8.self).contains("\"share\""))
@@ -184,7 +183,6 @@ final class NativeShareMailboxTests: XCTestCase {
         try await store.finish(admitting, outcome: .ignored)
         _ = try await store.settleFinish(admitting, outcome: .ignored)
         await store.close()
-        // A later producer retry is checked against the retained terminal's original payload fingerprint.
         let cold = try intake(); try await box.publish(value)
         let replayPage = try await box.pendingPage(), replay = try XCTUnwrap(replayPage.items.first)
         let terminal = try await cold.importShare(replay, from: box)

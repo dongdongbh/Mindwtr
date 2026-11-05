@@ -6,8 +6,6 @@ private struct ListFilterPickerRow: Identifiable {
     var id: Data { Data((kind + "-" + value.text(kind == "tokens" ? "value" : "id")).utf8) }
 }
 
-/// The RN TaskFilterSheet contents shared by the two core list DTOs.
-/// Query, paging and edit ownership remain with the calling screen's model.
 struct ListFilterControls: View {
     let data: CoreObject
     let strings: CoreObject

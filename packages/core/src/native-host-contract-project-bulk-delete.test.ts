@@ -217,8 +217,6 @@ describe('Project Delete/Undo actual RN and raw authority', () => {
     });
     it('rejects prospective Undo overflow while the validated Delete envelope fits', async () => {
         clock();
-        // Start with a genuine prepared command, then expand only the raw description
-        // witnesses and their actual revision to match the larger saved fixture.
         const small = await openSqliteHost(seed()); let deletion: NativeProjectTasksDeleteEnvelope;
         try { deletion = clone(await prepare(methods())); } finally { await small.close(); }
         const description = 'x'.repeat(450_000), fixture = seed(), mutations: string[] = [];

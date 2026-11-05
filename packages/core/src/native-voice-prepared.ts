@@ -72,7 +72,6 @@ export function readNativeVoiceResultRequest(value: unknown): NativeVoiceResultR
 const validTask = (value: unknown): value is Task => record(value) && typeof value.id === 'string' && validRawTask(value, value.id);
 const pick = <T extends object>(value: T, fields: string[]) => Object.fromEntries(fields.filter(field => Object.prototype.hasOwnProperty.call(value, field))
     .map(field => [field, (value as Record<string, unknown>)[field]]));
-/** Only container/order/mapping fields consulted by the deterministic late effect. */
 export function nativeVoiceBasis(data: AppData): NativeVoiceBasis | null {
     const voice = nativeVoiceSettingsWitness(data.settings); if (!voice) return null;
     const settings: AppSettings = { deviceId: data.settings.deviceId,
@@ -134,7 +133,6 @@ export function planNativeVoiceSpeechResult(request: NativeVoiceResultRequest, i
     return { taskAfter: { ...updatedTask, rev: nextRevision(taskBefore.rev), revBy: deviceId }, project, outcome: 'applied' };
 }
 
-/** Metadata grammar and deterministic correspondence only; grants no storage/file authority. */
 export function readNativeVoicePrepared(value: unknown): NativeVoicePrepared | null {
     if (!record(value) || !isNativeJsonWithinBytes(value, NATIVE_VOICE_JOURNAL_BYTES)) return null;
     if (value.kind === 'settings') {
@@ -167,7 +165,6 @@ export function readNativeVoicePrepared(value: unknown): NativeVoicePrepared | n
         || !exact(value.basis, ['tasks', 'projects', 'areas', 'sections', 'settings'])) return null;
     try {
         const basis = value.basis as unknown as NativeVoiceBasis;
-        // Reprojection rejects hidden settings/paths and malformed context before planning.
         const replayBasis = nativeVoiceBasis({ ...basis, tasks: basis.tasks as unknown as Task[] });
         if (!replayBasis || !taskEditValuesEqual(replayBasis, basis)) return null;
         const initial = value.initial as unknown as NativeVoiceCaptureResult;

@@ -7,7 +7,7 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
     private var database: URL { root.appendingPathComponent("core.sqlite") }
     private var journal: URL { database.appendingPathExtension("pending.json") }
     private let taskID = "widget-completion-fixture"
-    private let tap = Date(timeIntervalSince1970: 1_793_188_800) // 2026-10-28T12:00:00Z
+    private let tap = Date(timeIntervalSince1970: 1_793_188_800)
 
     override func setUpWithError() throws {
         guard let path = ProcessInfo.processInfo.environment["MINDWTR_CORE_BUNDLE"],
@@ -67,7 +67,6 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
         let bootstrap = host(); _ = try await bootstrap.start(); await bootstrap.close()
         let recurrence: Any = recurring ? try json(["rule": "daily", "strategy": "fluid", "seriesId": "widget-fixture-series",
                                                    "count": 3, "completedOccurrences": 0]) : NSNull()
-        // Recurrence without a start defers until due; a past start plus future due belongs to canonical Next.
         _ = try execute("INSERT INTO tasks(id,title,status,contexts,tags,description,startTime,dueDate,recurrence,createdAt,updatedAt,rev,revBy,isFocusedToday,showFutureRecurrence,suppressMindwtrReminders,pushCount) VALUES (?,?,'next','[]','[]',?,?,?,?, ?,?,1,'fixture',0,0,0,0)",
             [taskID, "Synthetic widget task", "Preserve private fixture note", recurring ? "2026-10-01" as Any : NSNull(),
              recurring ? "2026-11-01" as Any : NSNull(), recurrence,

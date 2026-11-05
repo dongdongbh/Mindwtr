@@ -1,6 +1,5 @@
 import Foundation
 
-/// Fixed states only; platform errors and recording paths never reach callers.
 enum NativeVoiceRecordingError: Error, Equatable {
     case permissionDenied, unavailable, stale, cancelled, interrupted, backgrounded, routeLost, tooLarge, emptyRecording
 }
@@ -28,18 +27,14 @@ struct NativeVoiceRecordingSource: Sendable {
 
 protocol NativeVoiceRecordingAdapter: AnyObject {
     func start() throws
-    /// Must synchronously close/drain all writers, even when returning an error.
     func close() throws
 }
 protocol NativeVoiceRecorderBackend: Sendable {
     func requestPermission() async throws -> Bool
-    /// On error, close any partially created writer before throwing.
     func makeRecorder(at url: URL, onEvent: @escaping @Sendable (NativeVoiceRecorderEvent) -> Void) throws
         -> any NativeVoiceRecordingAdapter
 }
 
-/// Local serialization only. No Engine/SQLite owner is held while recording or
-/// waiting for permission. A successful Stop transfers source lifetime to Host.
 actor NativeVoiceRecorder {
     static let maximumAudioBytes = NativeAttachmentFiles.maximumVoiceRecordingBytes
     private let ownerID = UUID()
@@ -128,8 +123,6 @@ actor NativeVoiceRecorder {
                 }
             }
         } catch {
-            // Factory errors promise a drained writer; live post-factory errors
-            // are drained through the same close-before-cleanup path.
             try? adapter?.close(); adapter = nil
             let cleanup = cleanupReservation()
             state = .cancelled(.unavailable)
@@ -144,8 +137,6 @@ actor NativeVoiceRecorder {
         guard case .recording = state, let reservation, let adapter else { throw stateError() }
         monitor?.cancel(); monitor = nil
         do {
-            // No await until the stopped source has been frozen. Lifecycle
-            // cancellation delivered later cannot revoke this accepted Stop.
             try adapter.close(); self.adapter = nil
             let frozen = try files.finishVoiceRecording(reservation, maximumBytes: Self.maximumAudioBytes)
             guard frozen.source.size > 0 else {
@@ -172,7 +163,7 @@ actor NativeVoiceRecorder {
     func cancel(_ selected: NativeVoiceRecordingSession, reason: NativeVoiceRecordingCancellation = .cancelled) throws {
         try require(selected)
         switch state {
-        case .stopped, .retired: return // Host already owns the accepted source.
+        case .stopped, .retired: return
         case .cancelled: return
         default: break
         }
@@ -185,7 +176,6 @@ actor NativeVoiceRecorder {
         if !closed || !cleaned { throw NativeVoiceRecordingError.unavailable }
     }
 
-    /// The caller must drain every source consumer and settle adoption first.
     func retire(_ selected: NativeVoiceRecordingSource) throws -> NativeAttachmentFiles.BaselineAttachmentRetirementOutcome {
         try require(selected.session)
         guard let source, source.receipt.matches(selected.proof), selected.receipt.matches(source.proof) else {
@@ -206,7 +196,7 @@ actor NativeVoiceRecorder {
     private func cleanupReservation() -> Bool {
         guard let reservation else { return true }
         do { _ = try files.cancelVoiceRecording(reservation); self.reservation = nil; return true }
-        catch { return false } // Retain unknown/replaced generations, no path fallback.
+        catch { return false }
     }
     private func checkRecordingSize(_ selected: NativeVoiceRecordingSession) -> Bool {
         guard selected == session, case .recording = state, let reservation else { return false }

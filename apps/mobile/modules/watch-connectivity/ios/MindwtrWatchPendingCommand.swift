@@ -2,7 +2,6 @@ import CryptoKit
 import Darwin
 import Foundation
 
-/// A captured queue file; retirement is limited to that same file and directory generation.
 public struct MindwtrWatchPendingCommand: Sendable {
     public let name: String
     public let body: String
@@ -19,13 +18,11 @@ public struct MindwtrWatchPendingCommand: Sendable {
 
     func validate() throws { try proof.validate(directory: directory, name: name, maximumBytes: 32 * 1024) }
 
-    /// Receiver workQueue serializes this check/unlink with every native queue producer and consumer.
     func retire(beforeRemoval: () throws -> Void = {}) throws {
         try proof.retire(directory: directory, name: name, maximumBytes: 32 * 1024, beforeRemoval: beforeRemoval)
     }
 }
 
-/// The narrow binary counterpart of a pending-command generation, also stored in cleanup markers.
 struct MindwtrWatchFileProof: Codable, Equatable, Sendable {
     struct Generation: Codable, Equatable, Sendable {
         let device: Int64, inode: UInt64, size: Int64
@@ -76,7 +73,6 @@ struct MindwtrWatchFileProof: Codable, Equatable, Sendable {
             }
             try beforeRemoval()
             try Self.requireParent(directory, matches: parentInfo)
-            // Callbacks may perform a durable write, but may never replace this source.
             if current != nil {
                 var named = stat()
                 guard fstatat(parent, name, &named, AT_SYMLINK_NOFOLLOW) == 0,

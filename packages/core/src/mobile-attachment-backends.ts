@@ -148,11 +148,7 @@ export type MobileAttachmentBackendsHost = {
   maxWebdavBufferedUploadBytes?: number;
 
   maxCloudBufferedUploadBytes?: number;
-  /** Optional wire-byte admission for the native Dropbox buffered transport. */
   maxDropboxBufferedUploadBytes?: number;
-  /** The host's fetch refuses a response body over its ceiling while receiving it (the native hosts' HostIo and
-   *  NativeHTTPJobs). Only then does a WebDAV upload download an unversioned remote copy to compare it; React Native's
-   *  fetch buffers the whole body first, so there it keeps refusing. */
   boundedWebdavResponses?: boolean;
   eagerFileSyncDownloads?: boolean;
   core?: Partial<MobileAttachmentBackendsCoreFunctions>;
@@ -349,12 +345,6 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     const attachmentsById = collectAttachmentsById(appData);
 
     if (!options.activationProbe) files.pruneWebdavDownloadBackoff();
-    // See `isAttachmentPresenceReconciliationDue`: an uploaded attachment's key is derived
-    // from its id and its bytes never change, so the presence pass below can only ever
-    // discover a server-side deletion — worth proving daily, not hourly (audit F3). An
-    // activation probe is different: it has to prove the candidate backend holds every object
-    // right now. Later batches in that same guarded trial retain the earlier proof,
-    // avoiding repeated HEADs. A separate activation always reconciles and never stamps.
     const reconcilePresence = options.activationProbe
       ? options.activationContinuation !== true
       : await files.isAttachmentPresenceReconciliationDue();
@@ -1294,9 +1284,6 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       : Math.max(0, maxDropboxBufferedUploadBytes - (options.material ? encryptedSyncArtifactByteLength(0) : 0));
     const attachmentsDir = await files.getAttachmentsDir();
     const attachmentsById = collectAttachmentsById(appData);
-    // This backend runs its own loops rather than the shared lifecycle, so it does the same
-    // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
-    // back into `attachmentsById`. The patches are folded into a fresh document at the end.
     const allPatches = await common.migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal, plaintextLimit);
     const recordPatch = (attachment: Attachment): void => {
       allPatches.set(attachment.id, attachment);
@@ -1665,7 +1652,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
       if (maxDropboxBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
         try { files.logAttachmentWarn('Dropbox host upload admission refused', undefined, {
           releaseCheck: 'v1.3.9/ios-dropbox', operation: 'attachment-upload', outcome: 'refused',
-        }); } catch { /* The original refusal is authoritative. */ }
+        }); } catch { }
         throw new Error('Dropbox attachment upload cannot be admitted by this host transport');
       }
       throw error;

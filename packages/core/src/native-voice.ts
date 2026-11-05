@@ -22,10 +22,8 @@ export * from './native-voice-prepared';
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED' | 'ACTION_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 type Preparation<P, R> = { kind: 'prepared'; prepared: P } | { kind: 'noop'; result: R };
-/** Three closed metadata commands, one existing native writer/receipt lifecycle. No file or network work. */
 export function createNativeVoiceMethods(deps: QuickCaptureDeps) {
     const capture = createQuickCaptureMethods(deps);
-    // A getData race can advance the adapter's accepted epoch. Only a new explicit host load restores authority.
     let retired = false;
     const read = async (current: () => void): Promise<NativeHostResult<{ adapter: ReturnType<typeof getStorageAdapter>; authority: PreparedAreaAuthority }>> => {
         if (retired) return fail('STALE_REVISION', 'Voice owner is retired; reload before editing');
@@ -146,7 +144,6 @@ export function createNativeVoiceMethods(deps: QuickCaptureDeps) {
                 authorize(request, prepared, data.value);
                 return { ok: true, value: { kind: 'prepared', prepared } };
             },
-            /** Cold native journal initial-apply admission: never infers a receipt from equality. */
             async recover(input: unknown, current: () => void = () => {}): Promise<NativeHostResult<{ kind: 'authorized' } | { kind: 'saved'; result: V }>> {
                 const prepared = envelope(input); if (!prepared) return fail('INVALID_INPUT', 'Voice prepared journal is invalid');
                 const request = prepared.request;

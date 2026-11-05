@@ -43,14 +43,12 @@ export function createAreaSaveGuard(save: () => Promise<NativeHostResult<null>>)
             && !status.immediate && !status.retrying);
     };
     return {
-        // Explicit row destination owns this opt-in. Existing families retain
-        // their original failure-identity/generation policy.
         rememberSameSnapshotFailure(prepared: unknown, adapter: ReturnType<typeof getStorageAdapter>): void {
             const state = useTaskStore.getState();
             if (!failedSave || !owns(prepared, adapter, state)) return;
             try { failedSave.sameSnapshot = { serialized: JSON.stringify(buildSaveSnapshot(state)),
                 projects: state._allProjects, sections: state._allSections, areas: state._allAreas,
-                people: state._allPeople, settings: state.settings }; } catch { /* No proof means no refreshed retry. */ }
+                people: state._allPeople, settings: state.settings }; } catch { }
         },
         refreshSameSnapshotFailure(prepared: unknown, adapter: ReturnType<typeof getStorageAdapter>): boolean {
             const state = useTaskStore.getState(), status = getPersistenceStatus(), captured = failedSave?.sameSnapshot;

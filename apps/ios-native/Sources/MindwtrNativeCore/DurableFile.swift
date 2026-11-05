@@ -1,7 +1,6 @@
 import Foundation
 import Darwin
 
-// All callers, including teardown, run on CoreHost's serial queue.
 enum DurableFile {
     enum ProtectionStage: String, Sendable { case source, set, readback }
     #if (DEBUG || NATIVE_DEVICE_TEST) && !MINDWTR_SHARE_EXTENSION
@@ -181,7 +180,6 @@ enum DurableFile {
 }
 
 #if DEBUG && !MINDWTR_SHARE_EXTENSION
-// IO boundary only; no fixtures, domain mutation hooks, or release-build knobs.
 final class HostIOFaults {
 
     var configureRuntimeLifetime: ((AnyObject, AnyObject, AnyObject?) -> Void)?

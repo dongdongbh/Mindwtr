@@ -10,7 +10,6 @@ public enum NativePersonalIntakeError: Error, Sendable, Equatable {
     case staleItem
 }
 
-/// A fresh process/system choice; persisted descriptors are equality evidence, never IO authority.
 public struct NativePersonalIntakeRoute: Sendable {
     public let selection: NativeLaunchSelection
     public let namespace: String
@@ -60,10 +59,8 @@ public struct NativePersonalIntakeRoute: Sendable {
         self.fingerprint = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Descriptor comparison only. Saved paths never open files or select a library.
-    /// Header admission separately requires every original physical intake/lease witness.
     func matchesStoredOrigin(_ saved: Data) -> Bool {
-        if saved == descriptor { return true } // Exact current resolver bytes already have the canonical eight-field shape.
+        if saved == descriptor { return true }
         do {
             guard saved.count <= 64 * 1024,
                   let origin = try JSONSerialization.jsonObject(with: saved) as? [String: String],
@@ -105,7 +102,6 @@ public struct NativePersonalIntakeRoute: Sendable {
             && samePath(path, "/" + parts.joined(separator: "/"))
     }
 
-    /// Uses the same compile-selected availability as the existing native launch snapshot; no production fallback.
     public static func current() throws -> Self {
         #if targetEnvironment(simulator)
         #if DEBUG
@@ -127,7 +123,6 @@ public struct NativePersonalIntakeRoute: Sendable {
     }
 
     #if DEBUG
-    /// Owned synthetic homes only; never substitute this injection for production process/system authority.
     static func fixture(home: URL, arguments: [String] = [], bundleIdentifier: String? = "mindwtr.intake.fixture",
                         mode: NativeLaunchSelection.BuildMode = .simulatorDebug) throws -> Self {
         let path = try Self.normalizedPath(home)

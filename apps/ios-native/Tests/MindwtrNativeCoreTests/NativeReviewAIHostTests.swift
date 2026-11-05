@@ -80,7 +80,6 @@ final class NativeReviewAIHostTests: XCTestCase {
         let original = try await createTask(seed, title: "Target AI title")
         let originalSibling = try await createTask(seed, title: "Unrelated AI sibling"); await seed.close()
         let sqlite = try SQLiteBridge(url: database)
-        // Cold-load bounded legacy IDs without changing a live core's backing rows.
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([id, original]))
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([sibling, originalSibling]))
         _ = try sqlite.execute("UPDATE tasks SET status='next',updatedAt='2025-01-01T00:00:00.000Z',createdAt='2025-01-01T00:00:00.000Z'")
@@ -214,7 +213,6 @@ final class NativeReviewAIHostTests: XCTestCase {
         XCTAssertEqual(try snapshot(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         XCTAssertEqual(state.requests.value.count, 2)
-        // The App keeps its prior proposals on the fixed failure; their original revisions retain independent Apply authority.
         let result = try object(await core.applyReviewAISuggestions(requestJSON: selected, lease: NativeTaskAIEditorLease(), readmit: { true }))
         XCTAssertEqual(result["changed"] as? Bool, true)
         let sqlite = try SQLiteBridge(url: database); defer { sqlite.close() }
@@ -247,7 +245,6 @@ final class NativeReviewAIHostTests: XCTestCase {
         await refused { _ = try await core.applyReviewAISuggestions(requestJSON: selected, lease: NativeTaskAIEditorLease(), readmit: { true }) }
         XCTAssertGreaterThan(commits.value, 0); XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
         let owed = try Data(contentsOf: journal), request = try object(selected)
-        // A new facade invocation can be definitely unadmitted while earlier intent remains owed.
         try await cancelApplyAfterReadmission(core, request: selected)
         XCTAssertEqual(try Data(contentsOf: journal), owed)
         var different = request; different["requestId"] = UUID().uuidString.lowercased()

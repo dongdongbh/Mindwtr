@@ -519,7 +519,6 @@ export interface SecuritySettings {
     mobileAppLockEnabled?: boolean;
 
     mobileAppLockRelockDelayMinutes?: MobileAppLockRelockDelayMinutes;
-    /** Device-local revision used by durable native preference replay. */
     mobileAppLockRelockDelayUpdatedAt?: string;
 }
 

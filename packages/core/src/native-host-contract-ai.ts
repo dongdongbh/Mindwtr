@@ -103,11 +103,8 @@ export type NativeAIHost = {
 
 
     fetch?: typeof fetch;
-    /** Read-only action loader supplied by hosts that must not migrate existing credentials. Settings keep their normal store. */
     loadRequestKey?: (provider: AIProviderId) => Promise<string | null>;
-    /** A selected native configuration owner stores the explicit replacement without broad key-store access. */
     saveConfigurationKey?: (provider: AIProviderId, value: string) => Promise<void>;
-    /** The app log (no key is ever passed). */
     log?: {
         warn(message: string): void;
         info(message: string, context: { scope: string; extra: Record<string, string | number> }): void;
@@ -120,7 +117,6 @@ export type NativeAIHost = {
     };
 };
 
-/** Commands carrying credentials, private URLs or arbitrary request JSON stay process-only. */
 export const NATIVE_AI_UNJOURNALED_COMMANDS = ['setAIKey', 'setAIEndpoint', 'setAIExtraBodyParams'] as const;
 
 export type AIDeps = {
@@ -293,7 +289,6 @@ const EXTRA_BODY_PLACEHOLDER = '{\n  "thinking": { "type": "disabled" }\n}';
 const SPEECH_BASE_URL_PLACEHOLDER = 'http://localhost:8000/v1';
 const TEXT_LIMIT = 4000;
 
-/** Shared private-editor preflight. No input or parser error text crosses its boundary. */
 export function readNativeAIExtraBodyInput(text: unknown): { value: Record<string, unknown> | undefined; formatted: string } | null {
     if (typeof text !== 'string' || text.length > TEXT_LIMIT) return null;
     try {
@@ -949,7 +944,6 @@ export function createAIMethods(deps: AIDeps) {
             });
         },
 
-        /** The private editor's exact input has only a salted process receipt and a Boolean reply. */
         async setAIExtraBodyParams(input: { requestId: string; text: string }): Promise<NativeHostResult<{ changed: boolean }>> {
             try {
                 const request = extraBodyRequest(input);
@@ -966,7 +960,6 @@ export function createAIMethods(deps: AIDeps) {
             } catch { return fail('ACTION_FAILED', 'AI extra body parameters could not be confirmed'); }
         },
 
-        /** A saved process receipt may outlive later settings; no equality-only or cold acknowledgment. */
         probeAIExtraBodyParamsOutcome(input: { requestId: string; text: string }): NativeHostResult<{ changed: boolean }> | null {
             try {
                 const request = extraBodyRequest(input);
@@ -975,11 +968,6 @@ export function createAIMethods(deps: AIDeps) {
             } catch { return fail('ACTION_FAILED', 'AI extra body parameters are unavailable'); }
         },
 
-        /**
-         * A key field's change: stored in the keystore under the provider's name (blank removes
-         * it). `provider` is the one the view shows for that field; another answers STALE_REVISION.
-         * Never journaled (NATIVE_AI_UNJOURNALED_COMMANDS).
-         */
         async setAIKey(input: { requestId: string; field: 'assistant' | 'speech'; provider: string; value: string }): Promise<NativeHostResult<{ mask: string }>> {
             const bound = requireHost();
             if (!bound.ok) return bound;
@@ -1271,11 +1259,6 @@ export function createAIMethods(deps: AIDeps) {
             }
         },
 
-        /**
-         * The Weekly Review's "Run analysis" on the stale step's items. The host keeps the list: a
-         * null `suggestions` or `selectedIds` keeps what it shows. Apply sends the chosen suggestions
-         * to runReviewAction's applySuggestions.
-         */
         async requestWeeklyReviewAnalysis(options: AIRequestOptions = {}): Promise<NativeHostResult<NativeWeeklyReviewAnalysis>> {
             const bound = requireHost();
             if (!bound.ok) return bound;

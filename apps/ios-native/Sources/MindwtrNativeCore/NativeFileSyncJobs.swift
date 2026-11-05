@@ -1,7 +1,6 @@
 import Foundation
 import SyncFileLockEngine
 
-/// One turn's plain mailbox. Native tasks never retain or enter JavaScriptCore.
 final class NativeFileSyncJobs: @unchecked Sendable {
     static let maximumEnvelope = 12 * 1024 * 1024
     let token = UUID().uuidString.lowercased()
@@ -28,7 +27,6 @@ final class NativeFileSyncJobs: @unchecked Sendable {
     private var takenSlot = false
     private var events: [[String: Any]] = []
     #if DEBUG
-    // Observation/gating at real IO boundaries only; no replacement file or cleanup implementation.
     var afterRead: (() -> Void)?
     var afterClose: ((Bool) -> Void)?
     #endif
@@ -71,7 +69,6 @@ final class NativeFileSyncJobs: @unchecked Sendable {
               same(data.base64EncodedString(), text) else { throw Failure.unavailable }
         return data
     }
-    /// Cleanup admission bypasses both normal slots and cancellation. It never waits on its own request.
     func submit(_ text: String) -> String {
         let parsed = text.utf8.count <= Self.maximumEnvelope && (try? NativeJSON.hasUniqueObjectKeys(text)) == true
             ? (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] : nil
@@ -85,7 +82,6 @@ final class NativeFileSyncJobs: @unchecked Sendable {
             active += 1
             let previous = tail
             let task = Task { [self] in
-                // End starts closing now, rather than waiting behind an entered operation.
                 if close || !admitted { _ = startClosing() }
                 if let previous { await previous.value }
                 var value: Any = NSNull(), body: Data?, failed = !admitted
@@ -227,7 +223,6 @@ final class NativeFileSyncJobs: @unchecked Sendable {
         }
     }
     func abort() { _ = startClosing() }
-    /// Called on the CoreHost queue; tasks need no JS callback to reach this fence.
     func closeAndDrain() throws {
         _ = startClosing()
         condition.lock(); defer { condition.unlock() }

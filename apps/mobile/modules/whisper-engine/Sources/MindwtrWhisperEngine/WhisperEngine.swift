@@ -24,7 +24,6 @@ final class WhisperCancellation: @unchecked Sendable {
     }
 }
 
-/// File authority belongs to the caller; all context operations belong to this worker.
 public final class WhisperEngine: @unchecked Sendable {
     public static let sampleRate = 16_000
     public static let maximumSamples = 120 * sampleRate
@@ -65,7 +64,6 @@ public final class WhisperEngine: @unchecked Sendable {
         }
     }
 
-    /// The caller owns its descriptor; initialization reads only an owned duplicate.
     public static func open(modelDescriptor: Int32) async throws -> WhisperEngine {
         #if canImport(rnwhisper)
         let descriptor = Darwin.dup(modelDescriptor)
@@ -104,7 +102,6 @@ public final class WhisperEngine: @unchecked Sendable {
         var parameters = whisper_context_default_params()
         parameters.flash_attn = false
         #if targetEnvironment(simulator)
-        // The pinned engine traps in Simulator Metal shared-buffer allocation.
         parameters.use_gpu = false
         #endif
         return parameters
@@ -230,7 +227,6 @@ private final class WhisperModelReader {
         guard count >= 0, count <= original.st_size - offset else { failed = true; return 0 }
         var received = 0
         while received < count {
-            // The pinned C loader ignores short reads; cancel only after initialization drains.
             let result = Darwin.pread(descriptor, output.advanced(by: received), min(count - received, 1_048_576), off_t(offset))
             if result < 0 && errno == EINTR { continue }
             guard result > 0 else { failed = true; return received }

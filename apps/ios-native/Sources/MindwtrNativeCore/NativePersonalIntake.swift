@@ -1,6 +1,5 @@
 import Foundation
 
-/// Private migration prerequisite: durable original-route callbacks, without App dispatch or Sandbox bootstrap.
 public actor NativePersonalIntake {
     public enum Stage: String, Sendable, Codable { case captured, admitting, terminal }
     public enum Outcome: String, Sendable, Codable { case completed, ignored }
@@ -17,7 +16,6 @@ public actor NativePersonalIntake {
         fileprivate let witness: IntakeFileWitness
         fileprivate let fingerprint: String
     }
-    /// Durable fact observed for one original finish, never authority to finish another item.
     public struct FinishSettlement: Sendable {
         public let id: String
         public let kind: NativePersonalIntakeEvent.Kind
@@ -45,7 +43,6 @@ public actor NativePersonalIntake {
         public let scanned: Int
         public let next: Cursor?
     }
-    /// Fixed fields only. Future App binding must deliver this to Diagnostics without reopening a personal host.
     public struct Diagnostic: Sendable {
         public let message: String
         public let releaseCheck: String
@@ -143,7 +140,6 @@ public actor NativePersonalIntake {
         } catch { files.close(); throw NativePersonalIntakeError.unavailable }
     }
 
-    /// Existing-only cold inspection; an absent path creates no intake directories, lock or payload.
     public static func openExisting(route: NativePersonalIntakeRoute, diagnostic: @escaping DiagnosticSink) throws -> NativePersonalIntake? {
         guard try NativePersonalIntakeFiles.hasExistingRoot(route: route) else { return nil }
         return try NativePersonalIntake(existingRoute: route, diagnostic: diagnostic)
@@ -158,7 +154,6 @@ public actor NativePersonalIntake {
             if existing.origin != route.descriptor { diagnostic(.init(sameTreeReopen: ())) }
         } catch { files.close(); throw NativePersonalIntakeError.unavailable }
     }
-    /// A read-only stored-progress fact, never a live seal or successful original-owner acknowledgement.
     public func requiresReminderPreparation() throws -> Bool {
         guard !importInFlight, importAcknowledgement?.isPending != true else { throw NativePersonalIntakeError.legacyHeld }
         try files.check(); try header.validate(files: files)
@@ -167,7 +162,6 @@ public actor NativePersonalIntake {
         return false
     }
 
-    /// Capture quarantine only; this never certifies a previous App task or reminder handover.
     public func navigationReservationID() throws -> String? {
         try files.check(); try header.validate(files: files)
         if let claim = header.navigationReservation { return claim }
@@ -177,7 +171,6 @@ public actor NativePersonalIntake {
         return nil
     }
 
-    /// The original writer settles any uncertain publication before joining or creating one sticky claim.
     public func reserveNavigationCapture(id: String) throws -> String {
         guard IntakeWire.uuid(id) else { throw NativePersonalIntakeError.unavailable }
         try retry()
@@ -188,7 +181,6 @@ public actor NativePersonalIntake {
         return id
     }
 
-    /// First accepted bytes/clock win. A matching reservation is settled before any duplicate acknowledgement.
     public func capture(_ event: NativePersonalIntakeEvent) throws -> Item {
         if event.kind == .reminder {
             try event.validate(namespace: files.route.namespace)
@@ -201,7 +193,6 @@ public actor NativePersonalIntake {
         return try captureRecord(event)
     }
 
-    /// The App owns the private intake before the original producer envelope can be acknowledged.
     public func importShare(_ source: NativeShareMailbox.Item, from mailbox: NativeShareMailbox) async throws -> Item {
         guard files.route.namespace == source.namespace else { throw NativePersonalIntakeError.unavailable }
         let event = try NativePersonalIntakeEvent.shared(source.envelope)
@@ -221,7 +212,6 @@ public actor NativePersonalIntake {
         return accepted
     }
 
-    /// Stored facts only; a terminal has no truthful Item and the floor proves ambiguity, not completion.
     public func captureReminder(_ response: NativeReminderResponse) throws -> ReminderCaptureDisposition {
         try requireNoImportWork(); try files.check()
         let event = NativePersonalIntakeEvent.reminder(response)
@@ -286,7 +276,6 @@ public actor NativePersonalIntake {
         return item(record, snapshot: snapshot)
     }
 
-    /// A cursor bounds both the frontier and scanned slots. Empty nonfinal pages do not prove global emptiness.
     public func pendingPage(after cursor: Cursor? = nil) throws -> Page {
         try ready()
         if let cursor {
@@ -309,7 +298,6 @@ public actor NativePersonalIntake {
             next: sequence < frontier ? .init(owner: owner, frontier: frontier, next: sequence) : nil)
     }
 
-    /// Generic storage admission never grants reminder authority.
     public func markAdmitting(_ item: Item) throws -> Item {
         try ready()
         let (record, snapshot, _) = try exact(item)
@@ -364,8 +352,6 @@ public actor NativePersonalIntake {
         files.clearHotArtifacts(); return self.item(next, snapshot: written)
     }
 
-    /// Matching retained intent stays submitted even when storage is unhealthy: debt, never a receipt.
-    /// notSubmitted applies only to this call, never historical nonpublication or permission to resubmit.
     public func submitFinish(_ item: Item, outcome: Outcome) -> FinishSubmission {
         if let slot = finishSlot, matchesFinish(item, outcome: outcome, slot: slot) { return .submitted }
         do {
@@ -377,7 +363,6 @@ public actor NativePersonalIntake {
         }
     }
 
-    /// The dispatcher must first possess its actual domain receipt. This primitive never calls Core.
     public func finish(_ item: Item, outcome: Outcome) throws {
         try ready()
         if let slot = finishSlot, case .pending = slot.state { throw NativePersonalIntakeError.pendingPublication }
@@ -426,7 +411,6 @@ public actor NativePersonalIntake {
         files.clearHotArtifacts()
     }
 
-    /// Confirms only the retained exact finish; terminal-looking bytes and absent pages grant no receipt.
     public func settleFinish(_ originalAdmittingItem: Item, outcome: Outcome) throws -> FinishSettlement {
         guard let slot = finishSlot, matchesFinish(originalAdmittingItem, outcome: outcome, slot: slot) else {
             throw NativePersonalIntakeError.staleItem
@@ -474,7 +458,6 @@ public actor NativePersonalIntake {
         return attempt
     }
 
-    /// Retries the exact retained publication, then the one durable capture intent. No fresh sequence is allocated.
     public func retry() throws {
         try requireNoImportWork()
         let hotCaptureClear = header.pending != nil && files.attempt?.target == .header
@@ -487,7 +470,6 @@ public actor NativePersonalIntake {
             guard let written, attempt.target == .record(slot.original.id), written.bytes == slot.terminalBytes else {
                 throw NativePersonalIntakeError.unavailable
             }
-            // Transfer the actual synchronized publication before generic retry clears its hot witness.
             slot.state = .settled(written)
         }
         guard let snapshot = files.headerSnapshot else { throw NativePersonalIntakeError.unavailable }
@@ -499,7 +481,6 @@ public actor NativePersonalIntake {
             if hotCaptureClear { diagnostic(.init()) }
         }
     }
-    /// Teardown only; closing never certifies capture, domain completion or legacy quiescence.
     public func close() {
         finishSlot = nil
         if let acknowledgement = importAcknowledgement {
@@ -508,11 +489,10 @@ public actor NativePersonalIntake {
         } else { files.close() }
     }
 
-    /// Called only by the concrete original sealed owner; completion here is durable copied data, not admission.
     func importSealedReminders(from original: NativeReminderInbox, seal: NativeReminderInbox.Seal,
                                route: NativePersonalIntakeRoute) async throws -> IntakeImportAcknowledgement {
         guard !importInFlight, importAcknowledgement?.isPending != true else { throw NativePersonalIntakeError.legacyHeld }
-        importAcknowledgement = nil // Only a terminal, one-use prior proof can reach an explicit sealed retry.
+        importAcknowledgement = nil
         importInFlight = true
         defer { importInFlight = false }
         guard route.descriptor == files.route.descriptor else { throw NativePersonalIntakeError.unavailable }
@@ -521,14 +501,12 @@ public actor NativePersonalIntake {
         #endif
         let source = try await original.exportSealed(seal, route: route)
         guard source.namespace == files.route.namespace, source.active.count <= 128 else { throw NativePersonalIntakeError.unavailable }
-        // An unrelated ordinary capture must settle through its original API before starting an import.
         guard files.attempt == nil || importPublicationDebt else { throw NativePersonalIntakeError.pendingPublication }
         guard header.pending == nil || header.pending?.legacy != nil else { throw NativePersonalIntakeError.pendingPublication }
         let terminals = LegacyTerminals(source: source)
         try terminals.validate(namespace: files.route.namespace)
         let bytes = try IntakeWire.encode(terminals, limit: IntakeTarget.legacyTerminals.limit)
         let digest = IntakeWire.digest(bytes)
-        // Refuse source drift before settling even the retained original target attempt.
         if let legacy = header.legacy {
             guard legacy.matches(source, terminalDigest: digest) else { throw NativePersonalIntakeError.unavailable }
         }
@@ -546,7 +524,6 @@ public actor NativePersonalIntake {
             guard header.pending == nil, header.nextSequence <= IntakeWire.maximumSequence - Int64(source.active.count) else {
                 throw NativePersonalIntakeError.unavailable
             }
-            // No adoption of previously accepted IDs, even when a weaker ordinary duplicate comparison matches.
             for entry in source.active {
                 guard try readRecord(entry.item.response.requestID) == nil else { throw NativePersonalIntakeError.unavailable }
             }
@@ -597,7 +574,6 @@ public actor NativePersonalIntake {
         let acknowledgement = try files.retainImportAcknowledgement(artifacts)
         importAcknowledgement = acknowledgement
         importPublicationDebt = false
-        // This reservation, including close invalidation, survives the original actor's final synchronous ACK.
         return acknowledgement
     }
 
@@ -617,7 +593,7 @@ public actor NativePersonalIntake {
     func retainedFinishProofCounts() -> (slots: Int, snapshots: Int, creationDescriptors: Int) {
         guard let slot = finishSlot else { return (0, 0, 0) }
         switch slot.state {
-        case let .pending(_, _, attempt): return (1, 3, attempt.fd >= 0 ? 1 : 0) // Header aliases files.headerSnapshot.
+        case let .pending(_, _, attempt): return (1, 3, attempt.fd >= 0 ? 1 : 0)
         case .settled: return (1, 2, 0)
         }
     }
@@ -665,7 +641,6 @@ public actor NativePersonalIntake {
             pending.orderWitness = orderWitness
             var next = header; next.pending = pending; try writeHeader(next)
         }
-        // Verify both exact witnessed files immediately before the header clear that authorizes ACK.
         _ = try files.ensureArtifact(recordBytes, target: .record(record.id), witness: pending.recordWitness)
         _ = try files.ensureArtifact(slotBytes, target: .order(pending.sequence), witness: pending.orderWitness)
         var next = header; next.pending = nil

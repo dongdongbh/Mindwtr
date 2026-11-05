@@ -89,7 +89,6 @@ final class NativeWatchSnapshotTests: XCTestCase {
     }
 
     func testLeadingBOMInsideDetailSurvivesJSONAndPropertyList() throws {
-        // Escape the BOM on the wire, avoiding direct NSString literal bridging in the fixture.
         let raw = #"{"protocolVersion":1,"generatedAt":"2026-10-30T12:00:00Z","focus":[{"id":"bom","title":"Synthetic","description":"\uFEFFSynthetic detail"}],"pomodoro":{"phase":"focus","isRunning":false,"remainingSeconds":1500}}"#
         let decoded = try NativeWatchSnapshot(json: raw).applicationContext()
         let focus = try XCTUnwrap(decoded["focus"] as? [[String: Any]])

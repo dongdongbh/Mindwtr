@@ -174,7 +174,6 @@ public enum MindwtrWatchPayloadValidator {
             throw MindwtrWatchPayloadValidationError.invalidField("audioPath")
         }
         let validated = try validateTransport(transport, expectedKind: .audio)
-        // Validate the owned suffix here; only the receiver rebases and opens it.
         guard MindwtrWatchAudioPathResolver.rebase(absoluteString: path, id: validated.id, kind: .wave,
                                                   currentDocumentsURL: URL(fileURLWithPath: "/Documents", isDirectory: true)) != nil else {
             throw MindwtrWatchPayloadValidationError.invalidField("audioPath")

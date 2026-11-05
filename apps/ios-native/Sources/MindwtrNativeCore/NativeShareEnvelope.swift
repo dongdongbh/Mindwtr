@@ -2,7 +2,6 @@ import Foundation
 
 public enum NativeShareError: Error, Sendable { case unavailable, invalidInput, changedSource, full }
 
-/// Raw provider text only. The containing App's canonical core builds the capture title/note.
 public struct NativeShareEnvelope: Codable, Equatable, Sendable {
     public static let maximumBytes = 240 * 1024
     public static let textLimit = 50_000, subjectLimit = 10_000, webURLLimit = 16_000

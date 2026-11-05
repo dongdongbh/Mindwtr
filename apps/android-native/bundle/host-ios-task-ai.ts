@@ -21,7 +21,6 @@ const unwrap = <T>(result: { ok: true; value: T } | { ok: false; error: { code: 
 const invalid = () => new Error('INVALID_INPUT: Task AI requires a bounded canonical editor request');
 const stale = () => new Error('STALE_REVISION: Task AI owner changed');
 
-/** Shared only by the two private manual AI owners; no general storage or networking authority. */
 export function createIOSReadOnlyAIHost(deps: { isFossBuild: boolean }, provider: string,
     current: () => void, admit: (payload: object) => unknown): NativeAIHost {
     const accept = (payload: object) => { if (admit(payload) !== '') throw stale(); };
@@ -53,7 +52,6 @@ export function createIOSReadOnlyAIHost(deps: { isFossBuild: boolean }, provider
     return host;
 }
 
-/** Private manual editor actions; the native callback owns the actual editor/session and its workers. */
 export function createIOSTaskAI(deps: { contract: Contract; adapter: () => SqliteAdapter | null;
     isIOS: () => boolean; otherAIActive: () => boolean; isFossBuild: boolean }) {
     let active = false;
@@ -75,7 +73,6 @@ export function createIOSTaskAI(deps: { contract: Contract; adapter: () => Sqlit
             || !exact(value, request ? value.operation === 'breakdown'
                 ? ['operation', 'id', 'draft', 'checklist'] : ['operation', 'id', 'draft'] : ['id', 'draft'])
             || request && value.operation !== 'clarify' && value.operation !== 'breakdown') throw invalid();
-        // Core owns the complete draft/checklist grammar and canonical field defaults.
         const editor = unwrap(deps.contract.editTaskDraft({ id: value.id, draft: value.draft as TaskDraft,
             ...(value.operation === 'breakdown' ? { checklist: value.checklist as ChecklistItem[] } : {}) }));
         if (editor.readOnly) throw new Error('INVALID_INPUT: Task AI is unavailable for a read-only task');
@@ -108,7 +105,6 @@ export function createIOSTaskAI(deps: { contract: Contract; adapter: () => Sqlit
             ready();
             const { id, draft } = input(json, false);
             const value = snapshot({ operation: 'clarify', id, draft });
-            // Keep canonical visible-array ordering and its first-20 bound; native must not guess SQLite ordering.
             const contextTaskIDs = draft.projectId ? useTaskStore.getState().tasks
                 .filter(task => task.projectId === draft.projectId && task.id !== id && !task.deletedAt)
                 .slice(0, 20).map(task => task.id) : [];
@@ -138,7 +134,6 @@ export function createIOSTaskAI(deps: { contract: Contract; adapter: () => Sqlit
             try {
                 accept({ phase: 'begin', provider, configuration: JSON.stringify(frozen.configuration), language: frozen.language });
                 current();
-                // Canonical actions capture their host before their first await. Never lend it while HTTP waits.
                 selectedHost = host;
                 let pending;
                 try {

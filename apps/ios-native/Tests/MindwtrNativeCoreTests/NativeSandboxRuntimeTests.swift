@@ -15,7 +15,6 @@ private final class SandboxAdmissionState: @unchecked Sendable {
     var events: [NativeSandboxRuntimeTestEvent] { lock.lock(); defer { lock.unlock() }; return values }
 }
 
-/// Real packaged sample bundle in a fresh JSC context. No personal CoreHost is constructed.
 final class NativeSandboxRuntimeTests: XCTestCase {
     private func runtime(start: Bool = true) async throws -> NativeSandboxRuntime {
         let runtime = NativeSandboxRuntime()

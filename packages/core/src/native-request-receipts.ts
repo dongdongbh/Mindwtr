@@ -558,7 +558,6 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             return await this.exclusive('readWatchPomodoroPlan', async () => {
                 let opened = false;
                 try {
-                    // A receipt inside an unresolved writer transaction is not durable proof.
                     await this.receiptClient.run('BEGIN DEFERRED'); opened = true;
                     const rows = await this.receiptClient.all<DocumentReceiptRow>(
                         'SELECT request_id, method, reply, saved_at FROM native_request_receipts WHERE request_id = ?', [source.id]);
@@ -575,7 +574,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                     await this.receiptClient.run('ROLLBACK'); opened = false;
                     return plan;
                 } finally {
-                    if (opened) { try { await this.receiptClient.run('ROLLBACK'); } catch { /* Recovery must reopen the connection. */ } }
+                    if (opened) { try { await this.receiptClient.run('ROLLBACK'); } catch { } }
                 }
             });
         } catch { throw new Error('Watch Pomodoro receipt could not be read'); }
@@ -783,7 +782,6 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         if (this.prerequisite?.requestId === requestId && this.prerequisite.fingerprint === fingerprintOf(payload)) this.prerequisite = null;
     }
 
-    /** Row Focus alone re-proves its raw source and policy context before snapshot DML. */
     armRowFocusAuthority(requestId: string, payload: string, check: (read: SqliteClient['all']) => Promise<boolean>): void {
         this.refusePomodoroWriteFence();
         const fingerprint = fingerprintOf(payload), owned = this.rowFocusAuthority;
@@ -796,7 +794,6 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         if (this.rowFocusAuthority?.requestId === requestId && this.rowFocusAuthority.fingerprint === fingerprintOf(payload)) this.rowFocusAuthority = null;
     }
 
-    /** One feature's compatibility cell; never changes the older Task codec or schema. */
     async readTaskChecklistMoveSourceDetails(sourceId: string): Promise<NativeHostResult<TaskChecklistMoveSourceDetails>> {
         return this.exclusive('readTaskChecklistMoveSourceDetails', () => this.readTaskChecklistMoveSourceDetailsNow(sourceId));
     }
@@ -811,7 +808,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             const value = rows[0].dueReminderLeadMinutes;
             if (value === null || typeof value === 'number' && Number.isFinite(value) || typeof value === 'string' && value.length <= 200)
                 return { ok: true, value: { column: true, value } };
-        } catch { /* Optional newer metadata must never be inferred empty after a read error. */ }
+        } catch { }
         return { ok: false, error: { code: 'SAVE_FAILED', message: 'Checklist move source details could not be read' } };
     }
 
@@ -830,17 +827,10 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
             this.checklistMoveCompatibility = null;
     }
 
-    /**
-     * Saves an owned document and its exact reply in one transaction, without store generations.
-     * Requires a guarded adapter and native receipt boot. Inputs are detached before the first
-     * await. The host owns the document/store barrier and must not interleave getData baseline reads.
-     * SQL is always the replay authority; the session cache cannot establish a document outcome.
-     */
     async saveDocumentWithReceipt(input: NativeDocumentReceiptInput): Promise<NativeDocumentReceiptResult> {
         return this.saveAtomicDocumentWithReceipt(input, 'backupDocument');
     }
 
-    /** Share-only admission to the existing atomic data+receipt transaction; ordinary document inputs stay closed. */
     async saveShareCaptureWithReceipt(input: NativeDocumentReceiptInput): Promise<NativeDocumentReceiptResult> {
         if (!isNativeRequestReceiptDurable('iosShareCapture')) throw new Error('Share capture receipt storage is unavailable');
         return this.saveAtomicDocumentWithReceipt(input, 'iosShareCapture');

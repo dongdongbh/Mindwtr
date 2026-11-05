@@ -107,8 +107,6 @@ final class NativeSecretJobs: @unchecked Sendable {
                 kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
     }
 
-    /// Expo's byte query is retained on iOS. The macOS file Keychain drops
-    /// CFData account attributes on add, so execution there uses CFString.
     private func executionQuery(_ input: [String: Any]) -> [String: Any] {
         #if os(macOS)
         if let bytes = input[kSecAttrAccount as String] as? Data,
@@ -121,8 +119,6 @@ final class NativeSecretJobs: @unchecked Sendable {
     private func copyMatching(_ input: [String: Any], result: inout CFTypeRef?) -> OSStatus {
         let status = SecItemCopyMatching(executionQuery(input) as CFDictionary, &result)
         #if os(macOS)
-        // Older byte-form Mac fixtures have no account attribute. Retry only
-        // this exact account+generic query, and never fall back after denial.
         if status == errSecItemNotFound, let bytes = input[kSecAttrAccount as String] as? Data,
            input[kSecAttrGeneric as String] as? Data == bytes {
             result = nil; return SecItemCopyMatching(input as CFDictionary, &result)
@@ -134,8 +130,6 @@ final class NativeSecretJobs: @unchecked Sendable {
         let current = SecItemDelete(executionQuery(input) as CFDictionary)
         #if os(macOS)
         if let bytes = input[kSecAttrAccount as String] as? Data, input[kSecAttrGeneric as String] as? Data == bytes {
-            // Clear both selected representations; every query keeps service,
-            // account and generic identity. A partial failure remains failure.
             let previous = SecItemDelete(input as CFDictionary)
             if current != errSecSuccess && current != errSecItemNotFound { return current }
             if previous != errSecSuccess && previous != errSecItemNotFound { return previous }
@@ -296,13 +290,10 @@ final class NativeSecretJobs: @unchecked Sendable {
     func readEncryptionKeyForAttachmentOwner(cancellation: NativeAttachmentCancellation) throws -> String? {
         try readForAttachmentOwner("mindwtr_sync_encryption_key_v1", cancellation: cancellation)
     }
-    /// Fixed selected-provider action read. Never migrates, writes or removes an item.
     func readAIRequestKey(provider: NativeAISettingsProjection.Provider, cancellation: NativeAttachmentCancellation) throws -> String? {
         try readForAttachmentOwner("mindwtr-ai-key_" + provider.rawValue, cancellation: cancellation)
     }
 
-    /// Explicit selected-provider Save only. Secure readback must succeed before
-    /// the caller is permitted to retire the selected plaintext fallback.
     func replaceOpenAIConfigurationCredential(value: String, cancellation: NativeAttachmentCancellation) throws {
         try replaceAIConfigurationCredential(provider: .openai, value: value, cancellation: cancellation)
     }
@@ -334,7 +325,6 @@ final class NativeSecretJobs: @unchecked Sendable {
                 throw HostFailure("AI credential replacement could not be verified")
             }
             #else
-            // The macOS file-based Keychain omits iOS accessibility attributes.
             if let accessibility, accessibility != kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String {
                 throw HostFailure("AI credential replacement could not be verified")
             }
@@ -342,8 +332,6 @@ final class NativeSecretJobs: @unchecked Sendable {
         }
     }
 
-    /// Explicit selected-provider Clear only. Every alias is attempted and
-    /// independently checked; a partial deletion is never acknowledged as clear.
     func clearAIConfigurationCredential(provider: NativeAISettingsProjection.Provider, cancellation: NativeAttachmentCancellation) throws {
         try performAIConfigurationMutation(cancellation: cancellation) {
             let account = "mindwtr-ai-key_" + provider.rawValue
@@ -370,8 +358,6 @@ final class NativeSecretJobs: @unchecked Sendable {
             condition.lock(); let open = accepting; condition.unlock()
             guard open else { throw HostFailure("Secure storage bridge is closed") }
             try cancellation.check()
-            // Once admitted, do not abandon synchronous SecItem work or its
-            // verification halfway through. Cancellation retires publication.
             try work()
             condition.lock(); let stillOpen = accepting; condition.unlock()
             guard stillOpen else { throw HostFailure("Secure storage bridge is closed") }

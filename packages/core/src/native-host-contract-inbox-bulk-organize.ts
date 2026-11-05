@@ -73,7 +73,6 @@ const offersChoices = (request: OrganizeRequest, scope: NativeReferenceTasksMove
         && choice(request.draft.areaChoice, getBulkOrganizeAreaOptions(scope.areas).map(row => row.id));
 };
 
-/** Every Inbox visibility row and picker option; destination members also reserve container order. */
 export const tasksOrganizeScope = (request: OrganizeRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope => {
     const base = referenceTasksMoveScope(selectionRequest(request), data);
@@ -95,7 +94,6 @@ const requiredDates = (request: OrganizeRequest, scope: NativeReferenceTasksMove
 const temporalContext = (prepared: Pick<OrganizePrepared, 'futureBoundary' | 'dates'>) =>
     ({ futureBoundary: prepared.futureBoundary, dates: new Map(prepared.dates.map(row => [row.value, row])) });
 
-/** The RN planner/preflight/effects on raw BEFORE, with frozen time and identities. */
 const tasksOrganizeEffect = (prepared: Pick<OrganizePrepared,
     'request' | 'scope' | 'deviceIdBefore' | 'deviceIdToInitialize' | 'updateAt' | 'futureBoundary' | 'dates' | 'recurrenceProjections' | 'allocatedIds'>,
     allocate = false): OrganizePrepared['effect'] | null => {
@@ -328,13 +326,12 @@ export function createTasksOrganizeMethods(deps: {
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} bulk Organize confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
                     context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch { }
             }
             return confirmed;
         },
     };
 }
-// Preserve the public Inbox signatures and old serialized reader; only the private engine admits Project.
 export const inboxTasksOrganizeScope = (request: NativeInboxTasksOrganizeRequest,
     data: Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>): NativeReferenceTasksMoveScope => tasksOrganizeScope(request, data);
 export const inboxTasksOrganizeEffect = (prepared: Pick<NativeInboxTasksOrganizePrepared,

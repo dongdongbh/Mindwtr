@@ -114,7 +114,6 @@ final class NativePersonalIntakeReminderReplayTests: XCTestCase {
         for item in page.items {
             let admitted = try await original.admitHeldReminder(item, in: intake, route: route)
             let dispatch = try await original.heldReminderDispatchItem(admitted, in: intake, route: route)
-            // Model the existing CoreHost receipt boundary; no finish is attempted before this exact response is receipted.
             domainReceipts[dispatch.response.requestID] = dispatch.response
             XCTAssertEqual(domainReceipts[admitted.id], admitted.event?.response)
             let settled = try await original.finishHeldReminder(admitted, outcome: .completed, in: intake, route: route)
@@ -177,7 +176,6 @@ final class NativePersonalIntakeReminderReplayTests: XCTestCase {
             catch NativePersonalIntakeError.ambiguousReminderFloor { skipped.append(item.id); continue }
             let dispatch = try await original.heldReminderDispatchItem(admitted, in: intake, route: route)
             XCTAssertEqual(dispatch.response, fresh)
-            // Only the fresh exact response reaches the modeled domain receipt before finish.
             let settled = try await original.finishHeldReminder(admitted, outcome: .completed, in: intake, route: route)
             completed.append(settled.id)
         }
@@ -274,7 +272,7 @@ final class NativePersonalIntakeReminderReplayTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: record(captured.id)), before)
         await coldIntake.close(); await changedSource.close()
         var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: before) as? [String: Any])
-        raw["revision"] = 0 // An admitting row cannot masquerade as an original captured revision.
+        raw["revision"] = 0
         let malformed = try JSONSerialization.data(withJSONObject: raw, options: [.sortedKeys, .withoutEscapingSlashes])
         try malformed.write(to: record(captured.id))
         let malformedIntake = try destination(existing: true)

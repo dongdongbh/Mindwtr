@@ -32,7 +32,6 @@ const request = (value: unknown): Request => {
     return { sessionId: value.sessionId, taskId: value.taskId, step: value.step };
 };
 
-/** Manual Clarify for one current Process Inbox draft. All persistent decisions stay in inboxCommit. */
 export function createIOSInboxAI(deps: { contract: Contract; adapter: () => SqliteAdapter | null;
     isIOS: () => boolean; otherAIActive: () => boolean; isFossBuild: boolean }) {
     let active = false, selectedHost: NativeAIHost | null = null;
@@ -87,7 +86,6 @@ export function createIOSInboxAI(deps: { contract: Contract; adapter: () => Sqli
             if (active || typeof owner !== 'function' || !exact(value, ['request', 'expected', 'edits'])
                 || !record(value.expected) || !Array.isArray(value.edits) || value.edits.length < 1 || value.edits.length > 2) throw invalid();
             const input = request(value.request);
-            // Canonical Clarify emits exactly title then optional addContext. Validate the WHOLE list before any session edit.
             const edits: ProcessInboxDraftEdit[] = value.edits.map((edit, index) => {
                 if (!record(edit) || index === 0 && (!exact(edit, ['type', 'field', 'value']) || edit.type !== 'set'
                     || edit.field !== 'title' || !text(edit.value, 10_000, false))
@@ -96,7 +94,6 @@ export function createIOSInboxAI(deps: { contract: Contract; adapter: () => Sqli
                     : { type: 'addContext', value: edit.value as string };
             });
             if (owner() !== '' || !taskEditValuesEqual(snapshot(input).view, value.expected)) throw stale();
-            // All canonical operations below are synchronous; no promise/HTTP/UI callback can interleave.
             let view = unwrap(deps.contract.getInboxProcessingStep(input));
             for (const edit of edits) view = unwrap(deps.contract.getInboxProcessingStep({ ...input, edit }));
             return view;

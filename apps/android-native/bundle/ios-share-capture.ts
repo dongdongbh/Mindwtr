@@ -1,6 +1,5 @@
 import { buildShareCaptureDraft } from '../../../packages/core/src/entry-points';
 
-/** Native iOS supplies raw provider values; title/note semantics remain canonical. No persistence. */
 export function readIOSShareCaptureDraft(raw: string): { draft: { title: string; note: string } | null } {
     const invalid = () => new Error('INVALID_INPUT: Invalid iOS text share');
     if (typeof raw !== 'string' || raw.length > 256 * 1024) throw invalid();

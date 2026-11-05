@@ -25,7 +25,6 @@ export const readProjectBulkParams = (value: unknown): NativeProjectBulkParams |
             filters, filterSheetOpen: false } : null;
 };
 
-/** The same explicit saved data feeds Project reads and prepared selection authority. */
 export const nativeProjectTaskSources = (data: NativeProjectTaskListData, projectId: string, showCompleted: boolean) => {
     const project = data.projects.find(candidate => candidate.id === projectId);
     if (!project || project.deletedAt) return null;

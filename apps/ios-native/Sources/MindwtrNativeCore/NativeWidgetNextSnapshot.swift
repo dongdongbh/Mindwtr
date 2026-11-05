@@ -1,7 +1,6 @@
 import CoreFoundation
 import Foundation
 
-/// A bounded read-only canonical Next Actions list. Publication belongs to its caller.
 public struct NativeWidgetNextSnapshot: Sendable {
     public enum DueTone: String, Sendable { case overdue, today, normal }
 

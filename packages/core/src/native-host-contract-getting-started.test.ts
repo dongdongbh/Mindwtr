@@ -136,7 +136,6 @@ describe('native Getting Started: one transaction for the seed and its receipt',
         expect(await starterRows(env)).toEqual([]);
         expect(await env.receiptIds()).toEqual([]);
         expect(lines.filter((line) => line.message === 'Native Getting Started seeded')).toEqual([]);
-        // Retire the failed process state, without letting its queued save retry during cleanup.
         resetForTests();
         failReceipts = false;
     });

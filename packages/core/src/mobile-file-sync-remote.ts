@@ -16,7 +16,6 @@ import { LEGACY_SYNC_FILE_NAME, SYNC_FILE_NAME } from './sync-service-utils';
 
 export const SYNC_FILE_TRANSITION_CAS_UNAVAILABLE = 'SYNC_FILE_TRANSITION_CAS_UNAVAILABLE';
 
-/** A rejected observed-owner operation ends this attempt; error text never grants continuation. */
 export class FileSyncPathOwnerTerminatedError extends Error {
     readonly code = 'FILE_SYNC_PATH_OWNER_TERMINATED';
     constructor() {
@@ -33,8 +32,6 @@ export const fileSyncOwnerCall = async <T>(operation: () => T | Promise<T>): Pro
     }
 };
 
-/** A File Sync log line's error: the error's leading code (`SAF_DOCUMENT_UNAVAILABLE`, `SYNC_FILE_LOCK_BUSY`) or its plain
- *  name, never its text. Provider and file-system messages quote the document's URI or path, which names the user's files. */
 export const fileSyncErrorCode = (error: unknown): string => {
     const message = error instanceof Error ? error.message : String(error);
     const code = /^([A-Z][A-Z0-9_]{2,}):/.exec(message)?.[1];
@@ -88,12 +85,9 @@ export type MobileFileSyncPathPort = {
     writeBytes(uri: string, bytes: Uint8Array): Promise<void>;
 
     createExclusive(uri: string): Promise<'created' | 'exists'>;
-    /** Writes into the file createExclusive just made. */
     writeCreated(uri: string, bytes: Uint8Array): void | Promise<void>;
     delete(uri: string): Promise<void>;
-    /** Renames the file within its folder and answers its new URI; throws when the name is taken. */
     rename(uri: string, name: string): string | Promise<string>;
-    /** Undefined alone selects legacy mutations; a present capability must be complete. */
     observedPublication?: MobileFileSyncObservedPublication;
 };
 
@@ -890,8 +884,6 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 }
             } catch (error) {
                 if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
-                // The transition returns a conflict below. Suppressing restoration errors is
-                // intentional: deleting or replacing either generation would be less safe.
             }
         };
 

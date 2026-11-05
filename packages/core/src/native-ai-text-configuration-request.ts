@@ -27,7 +27,6 @@ const stamp = (value: unknown): value is string => typeof value === 'string' && 
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
-/** Only the selected nonsecret fields are read; embedded legacy credentials are refused by presence. */
 export function nativeAITextConfigurationWitness(settings: AppSettings): AITextConfigurationWitness | null {
     if (!record(settings)) return null;
     const aiPresent = owns(settings, 'ai'), rawAI = aiPresent ? settings.ai : undefined;
@@ -139,7 +138,6 @@ const provider = (value: unknown): value is AIProviderId => value === 'openai' |
 const effort = (value: unknown): value is AIReasoningEffort => value === 'minimal' || value === 'low' || value === 'medium' || value === 'high';
 const budget = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 32768;
 
-/** V2 adds only the other fields a provider switch replaces; sensitive fields are still never read. */
 export function nativeAITextConfigurationWitnessV2(settings: AppSettings): AITextConfigurationWitnessV2 | null {
     if (!record(settings)) return null;
     const aiPresent = owns(settings, 'ai'), rawAI = aiPresent ? settings.ai : undefined;
@@ -147,7 +145,6 @@ export function nativeAITextConfigurationWitnessV2(settings: AppSettings): AITex
     const ai = record(rawAI) ? rawAI : undefined;
     const providerPresent = !!ai && owns(ai, 'provider'), selected = providerPresent ? ai.provider : null;
     if (providerPresent && !provider(selected)) return null;
-    // Reuse v1's exact scalar/presence/stamp rules on a projection, never spread the source AI object.
     const scalars: Record<string, unknown> = {};
     for (const field of ['enabled', 'model', 'copilotModel']) if (ai && owns(ai, field)) scalars[field] = (ai as Record<string, unknown>)[field];
     const projected: Record<string, unknown> = {};
@@ -190,7 +187,6 @@ export const readAITextConfigurationChangeV2 = (input: unknown): AITextConfigura
     return null;
 };
 
-/** The target is frozen in the request, including when recovery happens after selection changed. */
 export function nativeAITextConfigurationConsentTarget(request: AITextConfigurationRequestV2): AIProviderId | null {
     const selected = request.expected.provider ?? 'openai';
     if (request.change.type === 'enabled' && request.change.value) return selected;
@@ -232,7 +228,6 @@ export function buildNativeAITextConfigurationOptionsV2(settings: AppSettings, t
         copilotModelOptions: Array.from(new Set([...getCopilotModelOptions(selected), copilotModel])), expected };
 }
 
-/** Separate closed read: no existing V1/V2 options or witness fields are widened. */
 export function buildNativeAIAnthropicThinkingOptions(settings: AppSettings, t: TranslateFn): AIAnthropicThinkingOptions | null {
     const expected = nativeAITextConfigurationWitnessV2(settings);
     if (!expected || expected.provider !== 'anthropic') return null;

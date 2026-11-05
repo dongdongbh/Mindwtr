@@ -8,7 +8,6 @@ import AVFoundation
 import UIKit
 #endif
 
-/// Default tests use synthetic backends; the explicit physical selector uses the real microphone.
 final class NativeVoiceRecorderTests: XCTestCase {
     private var root: URL!
     private var files: NativeAttachmentFiles!
@@ -26,7 +25,6 @@ final class NativeVoiceRecorderTests: XCTestCase {
     override func tearDownWithError() throws { if let root { try FileManager.default.removeItem(at: root) } }
     private var cache: URL { root.appendingPathComponent("attachment-files/cache", isDirectory: true) }
     private func entries() throws -> [URL] { try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil) }
-    /// Fixture metadata only: never include any path or recorded content.
     private func entrySummary() throws -> String {
         try entries().map { url in
             var value = stat()

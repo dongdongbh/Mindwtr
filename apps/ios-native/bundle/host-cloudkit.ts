@@ -8,7 +8,6 @@ export type NativeCloudKitRequest =
     | { op: 'fetchAllRecords'; recordType: NativeCloudKitRecordType }
     | { op: 'saveRecords'; recordType: NativeCloudKitRecordType; recordsJSON: string }
     | { op: 'deleteRecords'; recordType: NativeCloudKitRecordType; recordIDs: string[] };
-/** JSON replies: status string, null for void, records array, or save conflict-ID array. */
 export type NativeCloudKitCall = (request: NativeCloudKitRequest, signal: AbortSignal) => Promise<string>;
 export type NativeCloudKitAccountStatus = 'available' | 'noAccount' | 'restricted' | 'temporarilyUnavailable' | 'unknown';
 type Options = { signal?: AbortSignal };
@@ -50,7 +49,6 @@ const document = (value: unknown, source: 'local' | 'remote'): AppData => {
     return parsed.data;
 };
 
-/** Foreground records only. The caller owns account/container admission, merge, and attachment transfer. */
 export const createNativeCloudKitRecords = (call: NativeCloudKitCall) => {
     const request = async (input: NativeCloudKitRequest, signal: AbortSignal): Promise<unknown> => {
         abort(signal);
@@ -96,7 +94,6 @@ export const createNativeCloudKitRecords = (call: NativeCloudKitCall) => {
         write: async (data: AppData, options: Options = {}): Promise<void> => {
             const signal = options.signal ?? new AbortController().signal;
             abort(signal);
-            // Validate and detach the entire write before any native mutation or await.
             const snapshot = toRemoteSyncDocument(document(JSON.parse(boundedJSON(JSON.stringify(data))), 'local'));
             const saves: { recordType: NativeCloudKitRecordType; recordsJSON: string; ids: Set<string> }[] = [];
             for (const surface of ['tasks', 'projects', 'sections', 'areas', 'people'] as const) {

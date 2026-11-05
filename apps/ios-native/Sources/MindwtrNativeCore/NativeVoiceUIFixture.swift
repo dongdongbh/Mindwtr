@@ -1,7 +1,6 @@
 #if DEBUG && targetEnvironment(simulator)
 import Foundation
 
-// Installed only after the existing isolated capture fixture's namespace checks.
 enum NativeVoiceUIFixture {
     static func taskAIConfiguration() -> URLSessionConfiguration {
         let value = URLSessionConfiguration.ephemeral
@@ -16,7 +15,6 @@ enum NativeVoiceUIFixture {
 }
 
 private final class NativeVoiceUIFixtureProtocol: URLProtocol {
-    // Claim every request so an unexpected destination cannot reach the network.
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -45,7 +43,6 @@ private final class NativeVoiceUIFixtureProtocol: URLProtocol {
 }
 
 
-// No external HTTP or credential is needed for the selected synthetic task editor.
 private final class NativeTaskAIUIFixtureProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -132,7 +129,6 @@ private final class NativeTaskAIUIFixtureProtocol: URLProtocol {
     override func stopLoading() { }
 }
 
-// One second of generated silence; this path makes no microphone acceptance claim.
 struct NativeVoiceUIFixtureBackend: NativeVoiceRecorderBackend {
     func requestPermission() async throws -> Bool { true }
     func makeRecorder(at url: URL, onEvent: @escaping @Sendable (NativeVoiceRecorderEvent) -> Void) throws -> any NativeVoiceRecordingAdapter {

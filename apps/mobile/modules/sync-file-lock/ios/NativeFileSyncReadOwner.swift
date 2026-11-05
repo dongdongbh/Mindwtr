@@ -1,7 +1,6 @@
 import Darwin
 import Foundation
 
-/// Hidden selected-folder IO. Only owned stages/quarantines can be retired; no sync provider is exposed.
 final class NativeFileSyncReadOwner: @unchecked Sendable {
   enum Failure: Error, Equatable { case unavailable, staleBookmark, scopeUnproven, invalidName, invalidHandle, closed, incompleteRead, incompleteWrite, coordination }
   enum CreateResult: Equatable, Sendable { case created, exists }
@@ -45,7 +44,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     }
   }
 
-  /// Native-only platform boundary; tests retain actual owner/lease/FD logic.
   struct Access {
     var startScope: (URL) -> Bool = { $0.startAccessingSecurityScopedResource() }
     var stopScope: (URL) -> Void = { $0.stopAccessingSecurityScopedResource() }
@@ -87,7 +85,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     var unlink: (Int32, String) -> Int32 = { directory, name in
       name.withCString { Darwin.unlinkat(directory, $0, 0) }
     }
-    // A false scope start is only accepted for a proven app-local directory, not an arbitrary external path.
     var applicationContainer = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   }
 
@@ -122,15 +119,13 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.file-sync-read")
   private let queueMarker = DispatchSpecificKey<Bool>()
   private let lifecycle = NSLock()
-  private var state = 0 // accepting / closing / closed; protected by lifecycle
+  private var state = 0
   private let handle = Handle(identity: UUID())
-  // Remaining fields are accessed only on queue, including shutdown.
   private var root: URL?
   private var rootFD: Int32 = -1
   private var token: String?
   private var scoped = false
   private var cleanupError: Error?
-  // This one FD ledger also retains observed generations moved into quarantine.
   private var created: [Data: CreatedFile] = [:]
 
   init(selection: Selection, access: Access = Access(), maximumReadBytes: Int? = nil, diagnostic: @escaping (Diagnostic) -> Void) {
@@ -255,7 +250,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     }
   }
 
-  /// Moves an observed generation only to fresh quarantine; canonical installation stays exclusive-create.
   func renameObserved(_ source: String, to destination: String, expectedBytes: Data, using handle: Handle) async throws {
     try Self.validWriteName(source)
     try Self.validWriteName(destination)
@@ -302,7 +296,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     }
   }
 
-  /// Retires only this owner's verified stage/quarantine generation, never canonical/backup names.
   func deleteOwned(_ name: String, expectedBytes: Data, using handle: Handle) async throws {
     try Self.validWriteName(name)
     let key = Data(name.utf8)
@@ -353,7 +346,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     }
   }
 
-  /// Stops new admission immediately; completion waits for all entered coordinator/FD work.
   func close(_ handle: Handle) async throws {
     guard handle == self.handle else { throw Failure.invalidHandle }
     guard !isClosed() else { throw Failure.closed }
@@ -381,7 +373,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     try await submit(handle) { try self.validateRoot() }
   }
 
-  /// Unlike legacy close, this barrier also reports cleanup failure after submit already shut down.
   func finishClosing() async throws {
     requestClose()
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -531,7 +522,6 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   private func confirmedNode(_ name: String) throws -> Node? {
     try validateRoot()
     if let value = try lookup(name) { return value }
-    // ENOENT alone is not a successful provider read/list or affirmative absence.
     let listed = try names()
     guard !listed.contains(where: { $0.utf8.elementsEqual(name.utf8) }), try lookup(name) == nil else { throw Failure.unavailable }
     try validateRoot()

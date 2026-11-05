@@ -397,7 +397,6 @@ export const projectRenameEffect = (project: Project, title: string, deviceId: s
     }) } };
 };
 
-/** RN updateProject's nonstatus flow-field lifecycle result, without child writes. */
 export const projectFlowEffect = (project: Project, action: Extract<ProjectFlowAction, { kind: 'toggleType' | 'setScope' }>, deviceId: string,
     now: string): Extract<PreparedProjectFlow, { version: 1 }>['effect'] | null => {
     if (action.kind === 'setScope' && (!project.isSequential || project.sequentialScope === action.scope)) return null;
@@ -413,7 +412,6 @@ export const projectFlowEffect = (project: Project, action: Extract<ProjectFlowA
     }) } };
 };
 
-/** Freeze all related rows, including tombstones, in an order independent of store array order. */
 export const projectFlowSections = (projectId: string, sections: readonly Section[]): Section[] =>
     sections.filter((section) => section.projectId === projectId)
         .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
@@ -422,7 +420,6 @@ const sameProjectFlowSections = (left: readonly Section[], right: readonly Secti
     left.length === right.length && left.every((section, index) =>
         section.id === right[index].id && sameSectionSqliteRow(section, right[index]));
 
-/** Uses the shared mode planner; no native-specific defaults or lifecycle policy. */
 export const projectFlowModeEffect = (project: Project, sections: readonly Section[], mode: ProjectFlowMode,
     deviceId: string, now: string): Extract<PreparedProjectFlow, { version: 2 }>['effect'] | null => {
     const plan = planProjectFlowModeChange(project, sections, mode);
@@ -441,7 +438,6 @@ export const projectFlowModeEffect = (project: Project, sections: readonly Secti
     };
 };
 
-/** RN updateProject's Project-only sort result, normalized for synced storage. */
 export const projectTaskSortEffect = (project: Project, sortBy: TaskSortBy, deviceId: string,
     now: string): PreparedProjectTaskSort['effect'] | null => {
     const desired = normalizeProjectTaskSortBy(sortBy);
@@ -757,10 +753,6 @@ export const projectPurgeEffect = (project: Project, tasks: readonly Task[], sec
     };
 };
 
-/**
- * Release check for #1429: proves a Flow mode write (project mode, or one
- * section's choice) reached durable storage. No titles or identifiers.
- */
 export const logProjectFlowModeSaved = (mode: string, sectionDefaults: number,
     releaseCheck: 'v1.3.7/section-flow-mode' | 'v1.3.9/ios-project-flow-mode' = 'v1.3.7/section-flow-mode'): void => {
     logInfo('Project flow mode saved', { scope: 'store', category: 'storage',
@@ -939,7 +931,6 @@ export const createProjectCoreActions = ({
         set((state) => {
             if (input.version === 3) {
                 const section = state._allSections.find((row) => row.id === input.request.action.sectionId);
-                // A complete Section receipt survives later parent changes after a lost reply.
                 if (section && !section.deletedAt && !('purgedAt' in section)
                     && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
                     && sameSectionSqliteRow(section, input.effect.section.after)) {
@@ -971,7 +962,6 @@ export const createProjectCoreActions = ({
                 ? new Map(input.effect.sections.map((pair) => [pair.after.id, pair.after])) : new Map<string, Section>();
             const receiptSections = input.version === 2
                 ? input.scope.sections.map((section) => sectionAfterById.get(section.id) ?? section) : [];
-            // Complete after-row receipt precedes mutable status, token, and device guards.
             if (current && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
                 && sameProjectSqliteRow(current, input.effect.project.after)
                 && (input.version === 1 || sameProjectFlowSections(sections, receiptSections))) {

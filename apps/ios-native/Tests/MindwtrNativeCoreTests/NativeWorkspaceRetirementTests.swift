@@ -26,7 +26,6 @@ private final class WorkspaceObservation: @unchecked Sendable {
     var finished: Bool { lock.lock(); defer { lock.unlock() }; return terminal }
 }
 
-/// Real ready NORMAL/JSC/storage and native workers; these are authored Apple tests, not Linux acceptance.
 final class NativeWorkspaceRetirementTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private var database: URL { root.appendingPathComponent("personal.sqlite") }
@@ -90,8 +89,6 @@ final class NativeWorkspaceRetirementTests: XCTestCase {
     private func probe(_ core: CoreHost) async throws -> [String: Any] { try object(await core.call("inboxView", argumentsJSON: "[\"{}\"]")) }
     private func registerSecretCleanup(service: String, account: String = "fixture") {
         let bytes = Data(account.utf8)
-        // Register before host teardown: XCTest runs teardown blocks in reverse order,
-        // so actual worker close/drain precedes deletion of this exact synthetic account.
         addTeardownBlock {
             let result = SecItemDelete([kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service + ":no-auth", kSecAttrAccount as String: bytes,

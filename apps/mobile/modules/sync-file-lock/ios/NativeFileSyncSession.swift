@@ -1,6 +1,5 @@
 import Foundation
 
-/// One selected folder and the existing owner's sole handle/FD authority.
 public actor NativeFileSyncSession {
   public static let maximumBytes = 8 * 1024 * 1024
   public enum Selection: Sendable { case pickedDirectory(URL), bookmark(Data) }

@@ -1098,7 +1098,6 @@ export function createSettingsMethods(deps: SettingsDeps) {
             }
         },
 
-        /** Read only the exact saved receipt, even while ordinary write admission is unavailable. */
         probeGettingStartedOutcome(input: { requestId: string; language: string }): NativeHostResult<{ projectId: string | null } | null> {
             if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
                 || typeof input.language !== 'string' || !isSupportedLanguage(input.language)) {
@@ -1108,13 +1107,6 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 ?? { ok: true, value: null };
         },
 
-        /**
-         * Settings › Data's Getting Started row (RN's seedGettingStarted with the app language). The request UUID and the
-         * language are frozen at the tap and journaled with it. The seed only changes the store (`awaitSave: false`); the
-         * receipt's own save then commits the seed's rows and the receipt in one SQLite transaction. So a replay after process
-         * death either answers the first reply and writes nothing, or finds nothing and seeds once, whatever the seed copy is
-         * by then. The reply is the Getting Started project's id (null when none was made, RN's "not created" toast).
-         */
         async seedGettingStarted(input: { requestId: string; language: string }): Promise<NativeHostResult<{ projectId: string | null }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

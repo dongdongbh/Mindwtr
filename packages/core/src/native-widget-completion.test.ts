@@ -184,7 +184,6 @@ describe('private source-receipted native widget completion', () => {
         try {
             let readOnly = true;
             const save = vi.fn(async () => ({ ok: true as const, value: null }));
-            // Exercise the real factory's current read-only policy seam without a Project lifecycle write changing the child.
             const methods = createNativeWidgetCompletionMethods({ readiness: () => ({ ok: true, value: null }), save,
                 receipts: createNativeRequestReceipts({ save }), validateField: () => true, language: () => 'en', isReadOnly: () => readOnly });
             const input = source(savedTask()), response = value(methods.prepareWidgetCompletion(input));

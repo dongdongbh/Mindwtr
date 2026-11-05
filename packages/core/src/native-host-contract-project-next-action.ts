@@ -151,8 +151,6 @@ const contextOf = (data: AppData, lists: Lists, origin: NativeReferenceProjectNe
 };
 const policyOf = (c: NativeProjectNextActionContext) => getProjectNextActionPromptData({ ...c.source, status: 'done' },
     c.tasks.map((r) => r.id === c.source.id ? { ...r, status: 'done' as const } : r), [projectProjection(c.project)], c.section ? [c.section] : []);
-// Only fields consumed by eligibility, candidate order, displayed row revision,
-// and the completed-source/container authority enter the page revision.
 const revisionContent = (c: NativeProjectNextActionContext) => canonical({ source: c.source, rawSource: c.rawSource,
     project: c.project, section: c.section, scope: c.scope, tasks: c.tasks.map((r) => ({ id: r.id, projectId: r.projectId,
         sectionId: r.sectionId, deletedAt: r.deletedAt, status: r.status, order: r.order, orderNum: r.orderNum,
@@ -268,7 +266,6 @@ const rawBeforeOf = (data: AppData, tasks: { before: Task | null; after: Task }[
     sections: sections.map((r) => ({ id: r.after.id, before: r.before ? (data.sections ?? []).find((t) => t.id === r.after.id)! : null })),
 });
 
-/** One prompt coordinator; the existing three writers own all actual effects. */
 export type NativeProjectTaskAddOperation = AddOperation;
 export const isNativeProjectTaskAddOperation = (value: unknown, context: Pick<NativeProjectNextActionContext, 'project' | 'section'>,
     forbiddenIds: readonly string[] = []): value is NativeProjectTaskAddOperation => {
@@ -655,8 +652,6 @@ export const checkNativeProjectTaskAddAuthority = (op: NativeProjectTaskAddOpera
     if (existing.some((r) => ids.includes(r.id) || r.attachments?.some((a) => ids.includes(a.id)))) throw new Error('Creation ID exists');
     if (c.focus) {
         const f = c.focus;
-        // Normal loading can consume local-day environment. Refuse an
-        // unlanded stale intent conservatively; never reinterpret it.
         if (new Date(at).getTimezoneOffset() !== f.preparedOffsetMinutes
             || normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit) !== f.focusLimit
             || !same({ tasks: lists.tasks, projects: lists.projects, sections: lists.sections }, f.lists)) throw new Error('Focus creation context changed');

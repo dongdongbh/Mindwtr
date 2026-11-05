@@ -32,8 +32,6 @@ final class NativeAttachmentFiles {
         let cacheRootIdentity: String
         let parentIdentity: String
     }
-    /// Native recorder creation authority. Its URL is only borrowed while the
-    /// anchored inode is checked; a path alone can never mint a source receipt.
     final class VoiceRecordingReservation {
         fileprivate let owner: NativeAttachmentFiles
         fileprivate let leaf: String
@@ -43,9 +41,8 @@ final class NativeAttachmentFiles {
         fileprivate init(owner: NativeAttachmentFiles, leaf: String, output: Int32, created: Identity) {
             self.owner = owner; self.leaf = leaf; self.output = output; self.created = created
         }
-        deinit { Darwin.close(output) } // Never infer permission to unlink here.
+        deinit { Darwin.close(output) }
     }
-    /// Creation authority is minted here, never decoded from a borrowed proof.
     struct ProviderCacheCopyReceipt: Sendable {
         fileprivate let proof: CacheSourceProof
         fileprivate let modificationSeconds: Int64
@@ -774,8 +771,6 @@ final class NativeAttachmentFiles {
         return result
     }
 
-    /// While recording, size/times may change. Creation identity, parent and
-    /// single-link ownership may not. Callers serialize writer close/cancel.
     private func requireVoiceRecording(_ reservation: VoiceRecordingReservation) throws {
         guard reservation.owner === self, !reservation.finished else { throw NativeAttachmentFilesError.invalidRequest }
         let path = Reference(cache: true, components: [reservation.leaf])
@@ -794,8 +789,6 @@ final class NativeAttachmentFiles {
         return try Self.regular(reservation.output).st_size
     }
 
-    /// The adapter must already be closed. Hashing is bounded before allocation
-    /// and throughout the read; the existing immutable source receipt is reused.
     func finishVoiceRecording(_ reservation: VoiceRecordingReservation, maximumBytes: Int) throws
         -> (receipt: ProviderCacheCopyReceipt, source: CacheSourceProof) {
         guard (1...Self.maximumVoiceRecordingBytes).contains(maximumBytes) else {
@@ -827,8 +820,6 @@ final class NativeAttachmentFiles {
         return (receipt, proof)
     }
 
-    /// Close all recorder writers first. A changed inode/ancestor is retained,
-    /// including on error; no directory-wide or arbitrary-path cleanup exists.
     func cancelVoiceRecording(_ reservation: VoiceRecordingReservation) throws -> BaselineAttachmentRetirementOutcome {
         try requireVoiceRecording(reservation)
         let path = Reference(cache: true, components: [reservation.leaf])
@@ -851,8 +842,6 @@ final class NativeAttachmentFiles {
         return .removed
     }
 
-    /// The provider and buffered creator share one anchored output lifecycle.
-    /// Only native input validation/filling varies; creation authority stays here.
     private func createCacheSource(fileName: (String) -> String, mimeType: String?,
                                    validateInput: () throws -> Void, checkCancellation: () throws -> Void,
                                    fill: (Int32, () throws -> Void) throws -> AttachmentStageContent) throws -> ProviderCacheCopyReceipt {
@@ -1571,8 +1560,6 @@ final class NativeAttachmentFiles {
         guard try Self.identity(fd) == Self.identity(current) else { throw NativeAttachmentFilesError.unavailable }
         return names
     }
-    /// Native-only proof: the descriptor returning bytes must be the captured
-    /// generation, and its complete bytes must match the captured digest.
     private func readProvenBaseline(_ path: Reference, operation: String, proof: BaselineAttachmentProof,
                                     checkCancellation: () throws -> Void) throws -> Reply {
         try checkCancellation()

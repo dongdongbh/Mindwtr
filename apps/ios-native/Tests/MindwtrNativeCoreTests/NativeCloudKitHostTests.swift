@@ -276,7 +276,6 @@ final class NativeCloudKitHostTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 5)
         work.cancel()
         let closing = Task { await host.close(); await sdk.markClosed() }
-        // A bounded fallback prevents a broken cancellation path from hanging the whole test process.
         let released = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             await sdk.releaseHeldForFallback()

@@ -3,7 +3,6 @@ import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Production bundle/SQLite/journal checks; root owns Apple runtime execution.
 final class GettingStartedTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private var database: URL { root.appendingPathComponent("core.sqlite") }

@@ -118,7 +118,6 @@ final class WhisperEngineTests: XCTestCase {
             let elapsed = ProcessInfo.processInfo.systemUptime - started
             let evidence = XCTAttachment(string: "fullInferenceSeconds=\(baselines); cancelAfterSeconds=\(baseline / 4); cancelledTotalSeconds=\(elapsed); requiredTotalBelowSeconds=\(baseline * 0.75)")
             evidence.name = "Whisper cancellation calibration"; evidence.lifetime = .keepAlways; add(evidence)
-            // A post-call cancellation check alone still waits a full baseline and must fail this bound.
             XCTAssertLessThan(elapsed, baseline * 0.75, "Cancellation did not interrupt the running C inference")
             let reused = try await engine.transcribe(samples: fixture.samples, language: "en")
             XCTAssertTrue(reused.lowercased().contains("ask not what your country can do for you"))

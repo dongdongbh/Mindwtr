@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Stage the installed, locked Whisper binary without fetching or replacing data."""
 import argparse
 import fcntl
 import hashlib
@@ -94,13 +93,12 @@ def prepare(installed, destination):
         stage.rename(destination)
         return hashlib.sha256(encoded).hexdigest(), "prepared"
     finally:
-        # Only the unique staging directory created by this invocation is disposable.
         if stage.exists():
             shutil.rmtree(stage)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Stage the installed, locked Whisper binary without fetching or replacing data.")
     parser.add_argument("installed_package", type=Path)
     args = parser.parse_args()
     try:

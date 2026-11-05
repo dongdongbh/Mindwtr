@@ -11,7 +11,6 @@ public actor NativeReminderInbox {
         public let stage: Stage
     }
 
-    /// Hot owner authority only. Neither the token nor exported equality data is a cold import receipt.
     struct Seal: Equatable, Sendable { fileprivate let identifier: UUID }
     struct SealedExport: Sendable {
         struct Active: Sendable { let sequence: Int64; let item: Item }
@@ -49,7 +48,6 @@ public actor NativeReminderInbox {
     private var importAcknowledgementBarrier: (@Sendable () async -> Void)?
     #endif
 
-    // Read-only grammar reuse; personal intake does not alter the legacy writer or its v1 bytes.
     public static func validateForPersonalIntake(_ response: NativeReminderResponse, namespace: String) throws {
         try ReminderInboxState.validate(response, namespace: namespace)
     }
@@ -65,7 +63,6 @@ public actor NativeReminderInbox {
         catch { throw ReminderInboxFiles.failure }
     }
 
-    /// Reacquire only an existing original source. Missing cold handover data is held, never recreated.
     public static func openExistingForHandover(selection: NativeLaunchSelection) throws -> NativeReminderInbox {
         try NativeReminderInbox(existingSelection: selection)
     }
@@ -74,7 +71,6 @@ public actor NativeReminderInbox {
         catch { throw ReminderInboxFiles.failure }
     }
     public enum CaptureHandoverFailure: Error, Equatable, Sendable { case refused, unavailable }
-    /// After its App/domain wrapper drain, the original owner may establish a never-used empty source.
     public func prepareEmptySourceForPersonalIntake(route: NativePersonalIntakeRoute) throws {
         do {
             try files.prepareEmptySourceForPersonalIntake(route: route)
@@ -82,7 +78,6 @@ public actor NativeReminderInbox {
         } catch let failure as CaptureHandoverFailure { throw failure }
         catch { throw CaptureHandoverFailure.unavailable }
     }
-    /// The actual App consumer retains this same original actor through its final native acknowledgement.
     public func handoverCaptures(into destination: NativePersonalIntake, route: NativePersonalIntakeRoute) async throws {
         let alreadySealed = sealed != nil
         let token: Seal
@@ -92,7 +87,6 @@ public actor NativeReminderInbox {
         catch { throw CaptureHandoverFailure.unavailable }
     }
 
-    /// The original sealed producer alone may admit its confirmed destination's exact held reminder.
     public func admitHeldReminder(_ item: NativePersonalIntake.Item, in destination: NativePersonalIntake,
                                   route: NativePersonalIntakeRoute) async throws -> NativePersonalIntake.Item {
         let proof = try heldReplayProof(destination: destination, route: route)
@@ -109,7 +103,6 @@ public actor NativeReminderInbox {
         return .init(response: response, stage: .admitting)
     }
 
-    /// App must already hold its exact domain receipt; a repeat settles only this retained finish.
     public func finishHeldReminder(_ originalAdmittingItem: NativePersonalIntake.Item, outcome: NativePersonalIntake.Outcome,
                                    in destination: NativePersonalIntake, route: NativePersonalIntakeRoute) async throws -> NativePersonalIntake.FinishSettlement {
         let proof = try heldReplayProof(destination: destination, route: route)
@@ -211,8 +204,6 @@ public actor NativeReminderInbox {
     public func retry() throws { try requireUnsealed(); try files.retry() }
     public func close() { files.close() }
 
-    /// The future App handoff must first join its entire original wrapper/domain tails.
-    /// An uncertain original publication needs explicit retry before this operation can succeed.
     func sealForPersonalIntake(route: NativePersonalIntakeRoute,
                                diagnostic: @Sendable (SealDiagnostic) -> Void) throws -> Seal {
         let generation = try files.checkedSealGeneration(route: route)
@@ -228,7 +219,6 @@ public actor NativeReminderInbox {
 
     func exportSealed(_ token: Seal, route: NativePersonalIntakeRoute) throws -> SealedExport {
         guard let sealed, sealed.token == token, sealed.origin == route.descriptor else { throw ReminderInboxFiles.failure }
-        // Legacy state is already bounded/validated by its existing decoder (128 active, 16,384 terminal).
         let exported = SealedExport(namespace: files.namespace, nextSequence: files.state.nextSequence,
             active: files.state.active.map { .init(sequence: $0.sequence, item: $0.item) },
             terminal: files.state.tombstones.map { .init(requestID: $0.requestID, deliveredAtBits: $0.deliveredAtBits) },
@@ -237,7 +227,6 @@ public actor NativeReminderInbox {
         return exported
     }
 
-    /// Data transfer only. The original actor owns the final acknowledgement after all target awaits.
     func importSealed(_ token: Seal, into destination: NativePersonalIntake, route: NativePersonalIntakeRoute,
                       diagnostic: @Sendable (ImportDiagnostic) -> Void) async throws {
         guard !Task.isCancelled else { throw ReminderInboxFiles.failure }
@@ -532,7 +521,6 @@ private final class ReminderInboxFiles {
         try check()
         guard hasLease, let snapshot, let lockGeneration,
               try Self.sameSelection(selection, route.selection) else { throw Self.failure }
-        // Fixed native equality evidence only; no serialized legacy marker or decoded IO path.
         let values = [route.fingerprint, SHA256.hash(data: snapshot.bytes).map { String(format: "%02x", $0) }.joined(),
                       Self.generationText(snapshot.generation), Self.generationText(lockGeneration)]
             + directories.map { "\($0.identity.device):\($0.identity.inode)" }

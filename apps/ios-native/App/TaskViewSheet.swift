@@ -1868,7 +1868,6 @@ struct NativeDocumentPicker: UIViewControllerRepresentable {
     }
 }
 
-/// A separate directory picker leaves existing copied data/backup imports unchanged.
 struct NativeSyncDirectoryPicker: UIViewControllerRepresentable {
     let pickerID: UUID
     let admission: (UUID) -> Bool
@@ -1897,7 +1896,6 @@ struct NativeSyncDirectoryPicker: UIViewControllerRepresentable {
                 completion(.failure(CocoaError(.userCancelled)), pickerID)
                 return
             }
-            // Capture synchronously, before any Task suspension loses UIKit's temporary URL scope.
             let result = Result<Data, Error> {
                 guard urls.count == 1, let url = urls.first else { throw CocoaError(.fileReadInvalidFileName) }
                 return try captureBookmark(url)
@@ -2437,7 +2435,6 @@ private struct TaskScheduleField: View {
     }
 }
 
-/// The row quick sheet owns an ephemeral core draft, separate from the full editor.
 struct TaskRowDatesDialog: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2567,8 +2564,6 @@ struct TaskRowDatesDialog: View {
                     let day = TaskDatePickerComponents.string(date, time: false)
                     let previous = TaskDatePickerComponents.string(pickerValue, time: false)
                     pickerValue = date
-                    // Filter a synthetic unchanged picker event only; Save's semantic
-                    // change/no-change decision remains entirely in core.
                     if day != previous { model.pickRowTaskDate(field, date: day) }
                 }), displayedComponents: .date)
                 .datePickerStyle(.graphical).disabled(locked).labelsHidden()
@@ -2578,9 +2573,6 @@ struct TaskRowDatesDialog: View {
     }
 }
 
-/// Converts only core's machine picker components. Stored date strings and
-/// displayed labels never pass through Foundation formatting here. The wheel
-/// itself keeps the platform locale/calendar, as RN's native spinner does.
 enum TaskDatePickerComponents {
     private static func formatter(_ format: String, timeZone: TimeZone = .current) -> DateFormatter {
         let formatter = DateFormatter()

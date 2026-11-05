@@ -1,7 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
 
-/// The extension only queues raw text/a web URL. The containing App owns capture confirmation and saving.
 @MainActor
 final class ShareViewController: UIViewController {
     private let requestID = UUID()
@@ -66,7 +65,6 @@ final class ShareViewController: UIViewController {
     @objc private func closePressed() {
         guard !finished, close.isEnabled else { return }
         finished = true; operation?.cancel()
-        // A publication error can still mean a queued file exists. Closing never deletes/retracts it.
         extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
     }
     private func begin() {
@@ -81,7 +79,7 @@ final class ShareViewController: UIViewController {
                 if let frozenEnvelope = self.frozenEnvelope { envelope = frozenEnvelope }
                 else {
                     envelope = try await self.readEnvelope()
-                    self.frozenEnvelope = envelope // Every publication retry keeps the first UUID, clock and exact bytes.
+                    self.frozenEnvelope = envelope
                 }
                 try Task.checkCancellation()
                 guard !self.finished else { return }
@@ -145,7 +143,6 @@ final class ShareViewController: UIViewController {
         if let value = item as? NSString, value.length <= limit { return value as String }
         if let data = item as? Data, data.count <= NativeShareEnvelope.maximumBytes,
            let value = String(data: data, encoding: .utf8), value.utf16.count <= limit { return value }
-        // File URLs, rich text and media representations are never opened or copied.
         throw NativeShareError.invalidInput
     }
 }

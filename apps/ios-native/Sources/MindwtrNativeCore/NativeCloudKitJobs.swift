@@ -1,7 +1,6 @@
 import Foundation
 import CloudKitAttachmentErrorClassifier
 
-/// One foreground owner's CloudKit calls. Retirement waits for SDK callbacks before releasing the library.
 final class NativeCloudKitJobs: @unchecked Sendable {
     static let maximumBytes = 16 * 1024 * 1024
     private let condition = NSCondition()
@@ -56,7 +55,6 @@ final class NativeCloudKitJobs: @unchecked Sendable {
                 }
                 answer = ["id": current.id, "value": result]
             } catch {
-                // SDK errors can contain private record names and account details.
                 answer = ["id": current.id, "error": cancellation.isCancelled
                     ? "CloudKit operation was cancelled" : "CloudKit operation failed"]
                 if !cancellation.isCancelled, let failure = error as? NativeCloudKitTransportError {

@@ -24,7 +24,6 @@ const closedFields = (input: Record<string, unknown>, required: readonly string[
     required.every((field) => hasOwn(input, field))
     && Object.keys(input).every((field) => required.includes(field) || optional.includes(field));
 
-// Only this closed display preference object crosses from personal mode.
 const displaySettings = (json: string): AppSettings => {
     const input = parseObject(json, 4096);
     if (!closedFields(input, [], ['language', 'theme', 'dateFormat', 'calendarSystem', 'timeFormat', 'appearance'])
@@ -32,7 +31,6 @@ const displaySettings = (json: string): AppSettings => {
             input[field] !== undefined && typeof input[field] !== 'string')) throw new Error('INVALID_INPUT');
     if (input.appearance !== undefined && (!object(input.appearance)
         || !closedFields(input.appearance, [], ['density', 'textSize', 'showTaskAge', 'showFutureStarts']))) throw new Error('INVALID_INPUT');
-    // Shared picking validates theme and appearance values; no personal settings are spread.
     return pickSandboxDisplaySettings(input as AppSettings);
 };
 
@@ -108,7 +106,6 @@ const operations = (host: Contract) => ({
     renameProject: { required: ['projectId', 'title', 'expected', 'requestId'], method: async (input: Record<string, unknown>) => {
         if (typeof input.requestId !== 'string' || !UUID.test(input.requestId) || !receipts) return failure('INVALID_INPUT', 'A project rename UUID is required');
         return receipts.run(input.requestId, JSON.stringify(['sandboxRename', input.projectId, input.title, input.expected]), async () => {
-            // Shared preparation validates the complete request before the shared commit writer.
             const prepared: ReturnType<Contract['prepareProjectRename']> = Reflect.apply(host.prepareProjectRename, host, [input]);
             if (!prepared.ok) return prepared;
             if (prepared.value.kind === 'blocked') return failure('INVALID_INPUT', 'Sample project is read-only');
@@ -149,7 +146,6 @@ export const sandboxHost = {
             const input = parseObject(json);
             const operation = table[method as keyof typeof table];
             if (!closedFields(input, operation.required, 'optional' in operation ? operation.optional : [])) return failure('INVALID_INPUT', 'Unexpected or missing sample fields');
-            // Each allowlisted core method owns runtime validation of its DTO values.
             return Reflect.apply(operation.method, host, [input]);
         });
     },

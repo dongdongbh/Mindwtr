@@ -292,7 +292,7 @@ export function createTasksAddTagMethods(deps: {
                 const kind = tagSourceOf(envelope.request), statusList = kind === 'waiting' || kind === 'someday' || SHOWN_SOURCES.includes(kind);
                 try { logInfo(`Native ${TAG_LABELS[kind]} bulk tag confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' || statusList ? { force: true } : {}),
                     context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-tag' : statusList ? 'v1.3.9/ios-status-list-bulk-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-tag' : 'v1.3.4/ios-reference-bulk-tag', count: confirmed.value.count, outcome: 'added' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch { }
             }
             return confirmed;
         },
@@ -312,7 +312,6 @@ export function createReferenceTasksAddTagMethods(deps: Parameters<typeof create
     };
 }
 
-// The store's Reference addTag action reads these here: it cannot import this module (store-reference-batch-modules.ts).
 referenceBatchModules.shared = { get historyRowLoadProjection() { return historyRowLoadProjection; },
     get NativeReceiptSqliteAdapter() { return NativeReceiptSqliteAdapter; } };
 referenceBatchModules.addTag = (input) => {

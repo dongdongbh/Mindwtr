@@ -2,7 +2,6 @@
 
 import PackageDescription
 
-// The root entry gives SwiftPM a distinct identity from NativeCore's other ios dependency.
 
 let package = Package(
   name: "SyncFileLockEngine",

@@ -137,8 +137,6 @@ final class SyncFileLockEngine {
     try acquireRoot({ try rootDirectory(uriValue) }, strictDirectory: false)
   }
 
-  // Internal prerequisite for a future native folder owner, not an Expo export.
-  // A selected directory never takes the legacy file-or-folder parent fallback.
   func acquireDirectory(_ selected: URL) throws -> String {
     guard selected.isFileURL else {
       throw SyncFileLockEngineError.unavailable("selected sync root is not a file URL")
@@ -177,9 +175,6 @@ final class SyncFileLockEngine {
         }
         strictRootBoundaryForTesting(.validatedRoot)
       }
-      // A pathname can be rebound after validation. Strict metadata IO stays on
-      // the originally selected inode; final validation still refuses its lease
-      // if displaced. Never follow a replacement root to create its lock file.
       var lockFd = strictDirectory
         ? openat(rootFd, lockName, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         : open(lockPath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)

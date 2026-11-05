@@ -564,7 +564,6 @@ export function createGtdWorkflowMethods(deps: { readiness: () => NativeHostResu
             naturalLanguageDates: capture.naturalLanguageDates };
     };
     const captureAudioFor = (data: AppData): NativeGtdCaptureAudioOptions['capture'] => {
-        // Audio is a display context for the existing row, never a saved capture-method change.
         const capture = buildGtdSettingsModel({ settings: { gtd: { defaultCaptureMethod: 'audio',
             saveAudioAttachments: data.settings.gtd?.saveAudioAttachments } }, areas: [],
             taskOpenMode: 'automatic', t: deps.t() }).capture;

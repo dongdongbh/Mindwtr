@@ -88,17 +88,14 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
         if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
       } catch {                                                         }
     }
-    // Engine-local calls pass the literal context directly, as raw or escaped JSON.
     for (const call of source.matchAll(
       /\binvoke\(\s*"logLine"\s*,\s*arguments:\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*(?:(#+)"([\s\S]*?)"\1|("(?:\\[\s\S]|[^"\\])*"))\s*,?\s*\]\s*\)/g,
     )) {
       try {
         const context = JSON.parse(call[2] ?? JSON.parse(call[3]));
         if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
-      } catch { /* Interpolation, invalid JSON and unsupported escapes are not literal contexts. */ }
+      } catch { }
     }
-    // Shared Swift formatters: count only a guard-bound payload actually forwarded
-    // with that formatter's message to logLine, not an unused static tag literal.
     for (const call of source.matchAll(
       /\bguard\s+let\s+(\w+)\s*=\s*(\w+)\.payload\([^{}]*\)\s*else\s*\{\s*return\s*\}\s*let\s+(\w+)\s*=\s*host\s+Task\s*\{\s*_\s*=\s*try\?\s*await\s+\3\?\.call\(\s*"logLine"\s*,\s*argumentsJSON:\s*json\(\s*\[\s*\2\.message\s*,\s*json\(\s*\1\s*\)\s*\]\s*\)\s*\)/g,
     )) {
@@ -113,7 +110,6 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
       const returned = /\bvar\s+(\w+)\s*:\s*\[String:\s*Any\]\s*=\s*\[\s*"releaseCheck"\s*:\s*releaseCheck\s*,[^\]]*\][\s\S]*?\breturn\s+\1\b/.test(payload);
       if (tag !== undefined && message && returned) sites.push({ file, slug: tag });
     }
-    // Paired inline branches use the same simple condition for message and raw context.
     for (const call of source.matchAll(
       /\bcall\(\s*"logLine"\s*,\s*argumentsJSON:\s*(?:self\.)?json\(\s*\[\s*([A-Za-z_]\w*)\s*\?\s*"(?:\\[\s\S]|[^"\\])*"\s*:\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*\1\s*\?\s*(#+)"([\s\S]*?)"\2\s*:\s*(#+)"([\s\S]*?)"\4\s*,?\s*\]\s*\)\s*\)/g,
     )) {
@@ -138,10 +134,9 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
     )) {
       for (const field of call[2].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
         try { sites.push({ file, slug: JSON.parse(field[1]) }); }
-        catch { /* Interpolated or unsupported Swift strings are not resolved literals. */ }
+        catch { }
       }
     }
-    // An if-let binds an ownedJSON dictionary that its body forwards to logLine.
     for (const call of source.matchAll(
       /\blet\s+(\w+)\s*=\s*try\?\s*(?:Self|self)\.ownedJSON\(\s*\[((?:"(?:\\[\s\S]|[^"\\])*"|[^"[\]])*)\]\s*\)\s*\{[^{}]*?\binvoke\(\s*"logLine"\s*,\s*arguments:\s*\[[^[\]]*,\s*\1\s*\]\s*\)/g,
     )) {
@@ -378,7 +373,7 @@ describe("release diagnostics ledger", () => {
     const file = "apps/ios-native/App/CoreModel.swift";
     const source = sources.find((entry) => entry.file === file).source;
     const start = source.indexOf("    func logBoardDragGeometry(");
-    const end = source.indexOf("    /// Final claim consumption", start);
+    const end = source.indexOf("    @discardableResult\n    func orderBoardCard(", start);
     expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
     const emission = source.slice(start, end);
     const formatter = sources.find((entry) => entry.file.endsWith("/NativeBoardDragGeometry.swift"));

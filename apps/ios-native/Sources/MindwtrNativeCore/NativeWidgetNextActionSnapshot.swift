@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
 
-/// Canonical row capabilities travel with the unchanged read-only display snapshot.
 public struct NativeWidgetNextActionSnapshot: Sendable {
     public let snapshot: NativeWidgetNextSnapshot
     public let tokens: [String?]

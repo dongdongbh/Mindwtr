@@ -327,8 +327,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                 let bytes: Data?
                 switch work {
                 case .raw(let json, true, _):
-                    // Once begun the RN installer must finish; cancellation
-                    // cannot undo publication or release the library early.
                     try files.verifyCandidateRoots()
                     value = try NativeJSON.jsonObject(with: Data(installer.handle(json).utf8))
                     try files.verifyCandidateRoots()
@@ -446,8 +444,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             return ["status": outcome.rawValue]
         case .retirePrivateStage(let stage, let targetURI, let operationID):
             try token.check()
-            // Once entered, the existing installer finishes durability even if
-            // cancellation arrives. Keep its actual result for the owner.
             try files.verifyCandidateRoots()
             let status = try installer.retirePrivateStage(stage: stage, targetURI: targetURI, operationID: operationID)
             try files.verifyCandidateRoots()
@@ -486,8 +482,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         mutationLock.lock(); defer { mutationLock.unlock() }
         try files.deleteNow(uri)
     }
-    /// Native-only object transport. Never round-trip creation authority through
-    /// the JSON mailbox or call these synchronous wrappers from the file queue.
     func copyProviderSource(_ url: URL, cancellation: NativeAttachmentCancellation,
                             maximumProviderBytes: Int64 = NativeAttachmentFiles.maximumProviderBytes) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
         try queue.sync {
@@ -546,7 +540,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             try files.requireProviderSource(receipt)
         }
     }
-    /// Freeze an already-authorized local file before CloudKit reads its asset URL asynchronously.
     func prepareCloudKitUpload(_ uri: String, expectedHash: String?, expectedSize: Int64?,
                                cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
         try queue.sync {
@@ -555,7 +548,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             try cancellation.check()
             mutationLock.lock(); defer { mutationLock.unlock() }
             let request = try JSONSerialization.data(withJSONObject: ["op": "getInfo", "uri": uri])
-            // The ordinary file parser grants only this library's document/cache paths.
             let info = try files.call(String(decoding: request, as: UTF8.self), checkCancellation: cancellation.check)
             guard let object = info.value as? [String: Any], object["exists"] as? Bool == true,
                   let url = URL(string: uri), url.isFileURL else { throw NativeAttachmentFilesError.invalidRequest }
@@ -580,7 +572,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         return url.lastPathComponent
     }
     func isCloudKitDownloadStage(_ uri: String) -> Bool { (try? cloudKitStageLeaf(uri)) != nil }
-    /// SDK bytes first enter an owned cache receipt; only fresh core download scratch can receive them.
     @discardableResult
     func stageCloudKitSource(_ receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt, targetURI: String,
                              cancellation: NativeAttachmentCancellation, maximumBytes: Int? = nil) throws -> NativeAttachmentFiles.BaselineAttachmentProof? {
@@ -609,8 +600,6 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             _ = try files.retireBaselineAttachment(attachmentID: leaf, proof: proof, checkCancellation: {})
         }
     }
-    /// After drain, retirement stays on the off-main Engine turn so its final
-    /// callback may recheck editor/journal evidence without file-queue JSC use.
     func retireProviderSource(_ receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt,
                               requireOwner: () throws -> Void) throws -> NativeAttachmentFiles.BaselineAttachmentRetirementOutcome {
         lock.lock(); let ready = accepting; lock.unlock()

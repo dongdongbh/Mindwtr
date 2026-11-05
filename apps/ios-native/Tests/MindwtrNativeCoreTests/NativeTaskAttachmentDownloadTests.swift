@@ -359,8 +359,6 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         _ = try await cold.finishAttachmentDraftDiscardV3(expectedSession: checkpoint.sessionID, requestId: discard)
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try rows(), original)
         XCTAssertEqual(try Data(contentsOf: manifest), settings)
-        // Cold replay keeps a conservative source proof; it cannot recreate the
-        // original live creation receipt just to authorize cache retirement.
         XCTAssertEqual(try files(cache), sourceNames); XCTAssertEqual(try inode(sourceURL), sourceIdentity)
         XCTAssertEqual(try Data(contentsOf: sourceURL), bytes); XCTAssertEqual(hash(try Data(contentsOf: sourceURL)), source.sha256)
         XCTAssertEqual(remote.requests, 0); XCTAssertNil(try store.readAvailability()); XCTAssertNil(try editor.read())

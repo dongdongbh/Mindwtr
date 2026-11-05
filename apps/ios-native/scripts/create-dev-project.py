@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Generate a fresh sibling native.dev Xcode project. Does not build, sign or install."""
 import argparse
 import copy
 import hashlib
@@ -61,7 +60,6 @@ def read_project(path):
 
 
 def asset_locales(native_root):
-    """Read only maintained product files, including the exact existing dev claims."""
     required = (*SHARE_SOURCES, *WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
                 "ShareExtension/Info.plist", "CaptureWidget/Info.plist")
     for relative in required:
@@ -92,7 +90,6 @@ def asset_locales(native_root):
 
 
 def overlay(project, locales):
-    """Pure graph overlay: input graph and all existing target IDs remain untouched."""
     value = copy.deepcopy(project)
     objects = value["objects"]
     root = objects[value["rootObject"]]
@@ -212,7 +209,6 @@ def overlay(project, locales):
 
 
 def watch_overlay(project, native_root, output, generated_files):
-    """Mirror the maintained RN Watch packaging without touching its sources."""
     source_root = native_root / WATCH_ROOT
     resources = source_root / "Resources"
     shared = sorted((source_root / "Shared").glob("*.swift"))
@@ -235,7 +231,6 @@ def watch_overlay(project, native_root, output, generated_files):
             == WATCH_ICON_SOURCE_SHA256, "Watch icon source changed; regenerate scripts/create-dev-project-assets/WatchAppIcon.png")
     generated_files["Watch/Assets.xcassets/Contents.json"] = b'{"info":{"author":"xcode","version":1}}\n'
     generated_files["Watch/Assets.xcassets/AppIcon.appiconset/Contents.json"] = icon_contents
-    # magick apps/mobile/assets/images/icon.png -background white -alpha remove -alpha off PNG24:<WatchAppIcon.png>
     generated_files["Watch/Assets.xcassets/AppIcon.appiconset/AppIcon.png"] = (
         Path(__file__).parent / "create-dev-project-assets/WatchAppIcon.png").read_bytes()
     objects = project["objects"]
@@ -409,7 +404,7 @@ def generate(native_root, output, *, cloudkit=False, watch=False, dropbox_app_ke
             == [ref.get("BlueprintIdentifier") for ref in references], "Scheme target identities changed")
     encoded = plistlib.dumps(project, sort_keys=False)
     require(base.read_bytes() == original, "Base project changed while generating; no output written")
-    output.mkdir()  # Freshness is checked atomically; never replace any existing output.
+    output.mkdir()
     (output / ".gitignore").write_text("*\n")
     (output / "project.pbxproj").write_bytes(encoded)
     for relative, data in generated_files.items():
@@ -423,7 +418,7 @@ def generate(native_root, output, *, cloudkit=False, watch=False, dropbox_app_ke
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Generate a fresh sibling native.dev Xcode project. Does not build, sign or install.")
     parser.add_argument("--output-project", type=Path, help="fresh sibling .xcodeproj; otherwise use a separate default for each --cloudkit/--watch variant")
     parser.add_argument("--cloudkit", action="store_true", help="opt in to the isolated native.dev CloudKit Development container")
     parser.add_argument("--watch", action="store_true", help="opt in to the maintained Watch companion in a separate generated project")

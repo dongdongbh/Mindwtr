@@ -274,8 +274,6 @@ const readPreparedUnrecoverable = (raw: unknown): NativeProjectFileUnrecoverable
         ? { ...envelope, prepared: { ...prepared, effect: planned } } : null;
 };
 
-/** Private native prerequisite, deliberately not installed on the public contract.
- * Preparation grants metadata intent only; native must prove absence/publication. */
 export function createPreparedProjectAvailabilityMethods(deps: Pick<Deps, 'readiness' | 'revision' | 'save'> & { translate?: (key: string) => string }, mode: 'strict' | 'webdav' | 'dropbox' = 'strict') {
     const webdav = mode === 'webdav', unrecoverable = webdav || mode === 'dropbox';
     const readEnvelope = (raw: unknown) => unrecoverable && record(raw) && record(raw.prepared) && raw.prepared.version === 2

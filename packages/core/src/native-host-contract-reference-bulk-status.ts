@@ -452,7 +452,7 @@ export function createTasksMoveMethods(deps: {
         if (source !== 'project') return;
         try { logInfo('Native Project bulk status confirmed', { scope: 'native-host', category: 'storage', force: true,
             context: { releaseCheck: 'v1.3.9/ios-project-bulk-status', count: result.count, status: result.status, outcome: 'moved' } }); }
-        catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+        catch { }
     };
     let pending: { envelope: MoveEnvelope; adapter: ReturnType<typeof getStorageAdapter>;
         boundary: PreparedNativeSaveBoundary | undefined } | null = null;
@@ -606,7 +606,6 @@ export { detach as detachReferenceBatchJson, jsonSafe as detachReferenceBatchVal
     validTask as validReferenceBatchTask, validContextProject as validReferenceBatchProject,
     validArea as validReferenceBatchArea, relevantSettings as relevantReferenceBatchSettings };
 
-// The store's Reference move action reads these here: it cannot import this module (store-reference-batch-modules.ts).
 referenceBatchModules.shared = { get historyRowLoadProjection() { return historyRowLoadProjection; },
     get NativeReceiptSqliteAdapter() { return NativeReceiptSqliteAdapter; } };
 referenceBatchModules.move = (input) => {

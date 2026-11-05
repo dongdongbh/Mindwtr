@@ -892,7 +892,6 @@ const isMonthlyCustom = (value: unknown): value is TaskEditorMonthlyCustom => (
     && value.monthDays.every((day) => Number.isSafeInteger(day) && (day === -1 || (day >= 1 && day <= 31)))
 );
 
-/** A whole draft from a host: every field present and valid (JSON drops unset fields, or sends null). */
 const readTaskDraft = (value: unknown, source?: Task): TaskDraft | null => {
     if (!isObjectRecord(value) || Object.keys(value).some((field) => !DRAFT_FIELD_SET.has(field) && field !== 'dateInputBaseline')) return null;
     if (Object.prototype.hasOwnProperty.call(value, 'dateInputBaseline') && !isTaskDraftDateInputBaseline(value.dateInputBaseline)) return null;
@@ -901,7 +900,6 @@ const readTaskDraft = (value: unknown, source?: Task): TaskDraft | null => {
     if (!Object.prototype.hasOwnProperty.call(value, 'reminderPolicy')) draft.reminderPolicy = getTaskReminderPolicy(draft);
     return TASK_DRAFT_FIELD_KEYS.every((field) => (
         (Object.prototype.hasOwnProperty.call(value, field) || UNSET_DRAFT_FIELDS.has(field) || field === 'reminderPolicy' || field === 'preserveChecklistOnRepeat')
-        // Stored history must round-trip without making Archived an editable status.
         && ((field === 'status' && draft.status === 'archived') || DRAFT_VALUE_CHECKS[field](draft[field])
             || Boolean(source && ['startTime', 'dueDate', 'reviewAt'].includes(field)
                 && draft.dateInputBaseline?.taskId === source.id
@@ -1047,7 +1045,6 @@ const NATIVE_CONTRACT_PROMISE_COMMANDS: ReadonlySet<string> = new Set([
 
 export function createNativeHostContract(options: {
     syncSettings?: NativeSyncSettingsHost;
-    /** Native lifecycle observer, deliberately absent from generic contract commands. */
     registerSyncSettingsRetirementStatus?: (read: () => NativeSyncSettingsSettlement) => void;
     calendar?: NativeCalendarHost;
     ai?: NativeAIHost;
@@ -1440,8 +1437,6 @@ export function createNativeHostContract(options: {
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
         const { state, project, options, projectTasks } = sources;
-        // Mobile: ProjectDetailModal resolves the saved sort for features (it gates
-        // the cues); TaskList then resolves that for the all-status list.
         const projectSortBy = resolveTaskSortByForFeatures(project.taskSortBy ?? 'default', state.settings);
         const model = nativeProjectTaskModel(sources.data, sources, completedCollapsed, filter?.resolved, translate);
         const area = state.areas.find((candidate) => candidate.id === project.areaId);
@@ -1745,7 +1740,6 @@ export function createNativeHostContract(options: {
             && request.taskIds.every((id) => view.value.taskRevisions[id] === request.taskRevisions[id]);
     };
 
-    // Built before the contract object: Process Inbox's Clarify reads the current step's draft.
     const inboxProcessingMethods = createInboxProcessingMethods({
         readiness, save, receipts, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()),
         revision: (now) => `${revision()}:${displayRevision(now)}`,
@@ -1753,7 +1747,6 @@ export function createNativeHostContract(options: {
 
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
         validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }, readTaskDraft);
-    // The contract itself, for the commands that run its own methods (Project details' journaled edit).
     let self: Record<string, unknown> | null = null;
     const contract = {
         version: NATIVE_HOST_CONTRACT_VERSION,
@@ -1842,7 +1835,6 @@ export function createNativeHostContract(options: {
         ...bulkActionMethods,
         ...createInboxOrganizeDestinationCreateMethods({ readiness, save, getBulkActions: bulkActionMethods.getBulkActions }),
         ...createProjectOrganizeDestinationCreateMethods({ readiness, save, getBulkActions: bulkActionMethods.getBulkActions }),
-        // The Board: native-host-contract-board.ts.
         ...createBoardViewMethods({
             readiness,
             save,
@@ -1916,8 +1908,6 @@ export function createNativeHostContract(options: {
             formatDate: (value) => createDateFormatter(dateFormatting())(value, 'P', value),
         }),
         ...createSavedSearchWriteMethods({ readiness, save, t: (key) => translate(key) }),
-        // Settings: the menu, General and Manage: native-host-contract-settings.ts.
-        // Settings › About, the heartbeat and the store review prompt: native-host-contract-about.ts.
         ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
 
         ...createStartupPromptMethods({ readiness, save, t: () => translate, language: () => language, host: () => options.about ?? null }),
@@ -4084,10 +4074,6 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             return { ok: true, value: result(entry, null, null) };
         },
 
-        /**
-         * The current step. `edit` changes the draft first, as the step's controls do;
-         * `mode` switches guided and quick for the same task.
-         */
         getInboxProcessingStep(input: {
             sessionId: string;
             taskId: string;

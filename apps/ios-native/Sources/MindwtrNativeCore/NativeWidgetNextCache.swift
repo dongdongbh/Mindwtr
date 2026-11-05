@@ -2,7 +2,6 @@ import CoreFoundation
 import CryptoKit
 import Foundation
 
-/// Derived, standard-library-only widget data. It is never a source of task writes.
 public struct NativeWidgetNextCache: Sendable {
     public static let kind = "MindwtrNativeNextWidget"
     public static let namespace = "tech.dongdongbh.mindwtr.native.dev"
@@ -14,7 +13,6 @@ public struct NativeWidgetNextCache: Sendable {
     public struct Record: Sendable {
         public let snapshot: NativeWidgetNextSnapshot
         public let identifiers: [String]
-        /// Absent on v1: older caches remain display-only.
         public let actions: NativeWidgetNextActionSnapshot?
         public let publishedAtMs: Double
         public let expiresAtMs: Double
@@ -74,7 +72,6 @@ public struct NativeWidgetNextCache: Sendable {
         }
     }
 
-    /// No fallback to defaults, production/RN groups, or a different launch library.
     public static func live() -> NativeWidgetNextCache? {
         #if os(iOS)
         guard [namespace, namespace + ".capture-widget"].contains(Bundle.main.bundleIdentifier ?? ""),

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Closed foreground URL adapter. The qualified scope token stays in the original intake event.
 public enum NativeWidgetTaskLink {
     private static let prefix = "mindwtr-native-dev://widget-task/"
 
@@ -42,7 +41,6 @@ public enum NativeWidgetTaskLink {
     }
 
     #if !MINDWTR_WIDGET_EXTENSION
-    /// Same resolver for ordinary and reserved replay; no Spotlight consent is acquired.
     @MainActor
     public static func taskID(for url: URL, selection: NativeLaunchSelection) -> String? {
         guard let identifier = identifier(in: url) else { return nil }

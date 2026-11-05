@@ -80,7 +80,6 @@ export type HostKeyValue = {
 };
 
 export type NativeSyncBindings = {
-    /** Explicit personal iOS foreground capability; Android ignores this optional binding. */
     dropbox?: NativeIosDropboxCapability;
     keyValue: HostKeyValue;
     cloudKit?: Omit<MobileSyncCloudKitPort, 'syncAttachments'> & NonNullable<NativeSyncSettingsHost['cloudKit']> & {
@@ -632,11 +631,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
                 && (options.configOverride?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY)) === 'dropbox') try {
                 await logLine('info', 'Native iOS Dropbox shared cycle completed', { scope: 'native-ios', force: true,
                     extra: { releaseCheck: 'v1.3.9/ios-dropbox', operation: options.activationProbe ? 'verify' : 'sync', outcome: 'completed' } });
-            } catch { /* A diagnostic cannot change a completed candidate or stored cycle. */ }
+            } catch { }
             if (iosBackend === 'cloudkit' && answer.success && !answer.skipped) try {
                 await logLine('info', 'Native iOS CloudKit foreground cycle completed', { scope: 'native-ios', force: true,
                     extra: { releaseCheck: 'v1.3.9/ios-cloudkit-foreground', operation: 'foreground', outcome: 'completed' } });
-            } catch { /* Diagnostics cannot change the settled sync result. */ }
+            } catch { }
             return answer;
         } catch (error) {
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
@@ -998,7 +997,6 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
 
 export type NativeSync = ReturnType<typeof createNativeSync>;
 
-/** Fresh foreground-only factory; its port is never retained by the ordinary Settings host. */
 export const createIosFileSync = (bindings: NativeSyncBindings, selection: NativeFileSyncSelection, call: NativeFileSyncCall) => {
     const storage = { getItem: (name: string) => bindings.keyValue.get(name), setItem: (name: string, value: string) => bindings.keyValue.set(name, value), removeItem: (name: string) => bindings.keyValue.remove(name) };
     const secrets: SyncSecretStoragePort = { isAvailable: async () => true, getItem: bindings.secrets.getSecret,
@@ -1018,7 +1016,6 @@ export const createIosFileSync = (bindings: NativeSyncBindings, selection: Nativ
     return createNativeSync({ ...bindings, fileSync: { canonicalPath: selection.canonicalPath, port } }, state);
 };
 
-/** The Settings transaction owns config writes; this adapter owns only one fresh physical cycle at a time. */
 export const createIosDirectoryFileSync = (bindings: NativeSyncBindings, call: NativeFileSyncCall,
     control: (requestJSON: string) => unknown) => {
     type Prepared = { selection: NativeFileSyncSelection; bookmark: string; expectedPath: string | null };
@@ -1034,7 +1031,6 @@ export const createIosDirectoryFileSync = (bindings: NativeSyncBindings, call: N
     const finish = (admit: boolean) => {
         if (!active) return;
         const turn = active;
-        // A failed close remains terminal; no new owner may hide its failure.
         const result = command({ phase: 'finish', turn, admit });
         if (Object.keys(result).length !== 1 || result.closed !== true) throw new Error('Directory File Sync close was not confirmed');
         active = null;

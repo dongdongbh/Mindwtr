@@ -7,7 +7,6 @@ struct IntakeDirectoryIdentity: Codable, Equatable, Sendable {
     init(_ value: stat) { device = UInt64(truncatingIfNeeded: value.st_dev); inode = UInt64(truncatingIfNeeded: value.st_ino) }
 }
 
-/// Persisted only after the exact created inode is durable. Bytes never substitute for this witness.
 struct IntakeFileWitness: Codable, Equatable, Sendable {
     let identity: IntakeDirectoryIdentity
     let mode: UInt32
@@ -67,8 +66,6 @@ final class IntakePublicationAttempt {
     deinit { release() }
 }
 
-/// One concrete import reservation. The target actor fences every other file admission until terminal.
-/// Its only cross-actor file access is locked with target close; no actor-owned files escape this lifetime.
 final class IntakeImportAcknowledgement: @unchecked Sendable {
     struct Artifact: Sendable {
         let target: IntakeTarget
@@ -86,7 +83,6 @@ final class IntakeImportAcknowledgement: @unchecked Sendable {
     var isPending: Bool { lock.lock(); defer { lock.unlock() }; return state == .pending }
     var isConfirmed: Bool { lock.lock(); defer { lock.unlock() }; return state == .confirmed }
 
-    /// No awaits: target validation, final original check and diagnostic share the same close boundary.
     func confirm(_ confirmOriginal: () throws -> Void) throws {
         lock.lock(); defer { lock.unlock() }
         guard state == .pending, let files else { throw NativePersonalIntakeError.unavailable }
@@ -106,7 +102,6 @@ final class IntakeImportAcknowledgement: @unchecked Sendable {
     }
 }
 
-/// This helper is owned by one intake actor. No CoreHost, KV, secret or personal-library owner is opened.
 final class NativePersonalIntakeFiles {
     private struct Directory { let name: String; let fd: Int32; let identity: IntakeDirectoryIdentity }
     let route: NativePersonalIntakeRoute
@@ -123,7 +118,6 @@ final class NativePersonalIntakeFiles {
     private var poisoned = false
     private(set) var headerSnapshot: IntakeFileSnapshot?
     private(set) var attempt: IntakePublicationAttempt?
-    // At most one legacy terminal artifact, or the two artifacts in the single pending capture.
     private var hotArtifacts: [IntakeTarget: IntakeFileWitness] = [:]
     #if DEBUG
     var beforePublication: ((String) throws -> Void)?
@@ -131,7 +125,6 @@ final class NativePersonalIntakeFiles {
     var retainedArtifactCount: Int { hotArtifacts.count }
     #endif
 
-    /// An absent trusted path is the only negative fact; every uncertain existing path throws.
     static func hasExistingRoot(route: NativePersonalIntakeRoute) throws -> Bool {
         var chain: [Directory] = []
         defer { for directory in chain.reversed() { Darwin.close(directory.fd) } }
@@ -202,7 +195,6 @@ final class NativePersonalIntakeFiles {
             guard madeRoot ? headerSnapshot == nil : headerSnapshot != nil else { throw NativePersonalIntakeError.unavailable }
             if let snapshot = headerSnapshot { try synchronize(snapshot, target: .header) }
         } catch {
-            // Every opened descriptor is released even when a partial new root is deliberately left held.
             close(); throw NativePersonalIntakeError.unavailable
         }
     }
@@ -266,7 +258,6 @@ final class NativePersonalIntakeFiles {
         attempt = pending
         return try perform(pending)
     }
-    /// A failed write retains its original before snapshot and exact creation FD. Cancellation is not success.
     @discardableResult
     func retryPublication() throws -> IntakeFileSnapshot? {
         guard !closed, !poisoned else { throw NativePersonalIntakeError.unavailable }
@@ -286,13 +277,11 @@ final class NativePersonalIntakeFiles {
         try synchronize(current, target: pending.target); try accept(current, target: pending.target); attempt = nil
         return current
     }
-    /// A retained record retry may check its original header without admitting any other pending write.
     func checkPendingPublication(_ pending: IntakePublicationAttempt, header: IntakeFileSnapshot) throws {
         guard !closed, !poisoned, attempt === pending, pending.target != .header,
               headerSnapshot === header else { throw NativePersonalIntakeError.unavailable }
         try validateSnapshot(header, target: .header)
     }
-    /// Bytes alone never replace a snapshot's still-open original descriptor and complete witness.
     func validateSnapshot(_ snapshot: IntakeFileSnapshot, target: IntakeTarget) throws {
         do {
             try verifyNamespace()
@@ -300,7 +289,6 @@ final class NativePersonalIntakeFiles {
                   Self.matches(try read(target), snapshot) else { throw NativePersonalIntakeError.unavailable }
         } catch { poisoned = true; throw NativePersonalIntakeError.unavailable }
     }
-    /// A cold existing target without a persisted witness is held, even when every byte matches.
     func ensureArtifact(_ bytes: Data, target: IntakeTarget, witness: IntakeFileWitness?) throws -> IntakeFileWitness {
         try check()
         if let current = try read(target) {
@@ -311,7 +299,6 @@ final class NativePersonalIntakeFiles {
         guard witness == nil, hotArtifacts[target] == nil else { throw NativePersonalIntakeError.unavailable }
         return try publish(bytes, to: target, before: nil, exclusive: true).witness
     }
-    /// A recovered final clear may leave the exact hot pair; transfer its identity into the ACK metadata.
     func settleImportedHotArtifacts(_ artifacts: [IntakeImportAcknowledgement.Artifact]) throws {
         guard !hotArtifacts.isEmpty else { return }
         do {

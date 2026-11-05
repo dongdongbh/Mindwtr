@@ -67,7 +67,6 @@ const readRequest = (value: unknown): NativeTaskPromotionRequest | null => {
         ? request as NativeTaskPromotionRequest : null;
 };
 
-/** Rebuild from frozen consulted rows, never live store/clock/translator. */
 const expectedPromotion = (prepared: NativePreparedTaskMove) => {
     const { request, sourceBefore, sourceProject, selectedProject, selectedArea } = prepared;
     const projectWitness: Project[] = [];

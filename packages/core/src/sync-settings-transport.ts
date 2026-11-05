@@ -180,7 +180,6 @@ export type SyncSettingsDropboxPort = {
 };
 
 export type SyncSettingsTransportHost = {
-    /** Selected native owner admissions; rollback ports remain usable after retirement. */
     beforeDropboxPromotion?: () => Promise<void>;
     beforeActivation?: () => Promise<void>;
     params(): SyncSettingsTransportParams;

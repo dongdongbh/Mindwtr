@@ -194,7 +194,7 @@ export function createGeneralPreferenceMethods(deps: { readiness: () => NativeHo
             if (saved.ok && prepared.request.edit.type === 'appLockRelockDelay') {
                 try { logInfo('Native App lock delay saved', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.9/ios-app-lock-delay', outcome: 'saved' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch { }
             }
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },

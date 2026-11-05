@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 
-/// App invalidates this exact visible editor/input owner synchronously, before any async cleanup.
 public final class NativeTaskAIEditorLease: @unchecked Sendable {
     private let lock = NSLock()
     private var live = true
@@ -10,7 +9,6 @@ public final class NativeTaskAIEditorLease: @unchecked Sendable {
     public var isCurrent: Bool { lock.lock(); defer { lock.unlock() }; return live }
 }
 
-/// An ephemeral request, bound to one original Host. Settlement includes owned transport drain.
 public final class NativeTaskAIHandle: @unchecked Sendable {
     let host: UUID
     enum Scope { case task, inbox, review }
@@ -40,7 +38,6 @@ public final class NativeTaskAIHandle: @unchecked Sendable {
     }
 }
 
-/// One private AI owner. Closing cannot miss a reserved request which has not submitted a JS ticket yet.
 final class NativeTaskAIRequests: @unchecked Sendable {
     let identity = UUID()
     private let lock = NSLock()
@@ -98,7 +95,6 @@ enum NativeTaskAIJSON {
               ["clarify", "breakdown", "working"].allSatisfy({ text(value[$0], maximum: 10_000) }) else { throw invalid }
         return raw
     }
-    // These manual actions emit only field edits. Canonical editTaskDraft validates their values again at Apply.
     private static func fields(_ value: Any?, operation: String) -> Bool {
         guard let edit = value as? [String: Any], Set(edit.keys) == Set(["type", "patch"]), edit["type"] as? String == "fields",
               let patch = edit["patch"] as? [String: Any] else { return false }

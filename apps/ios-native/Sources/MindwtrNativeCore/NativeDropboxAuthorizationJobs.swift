@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 
-/// Explicit public build metadata. It contains no credentials and does not register a callback scheme.
 public struct NativeDropboxConfiguration: Sendable {
     public let clientID: String
     public let redirectURI: String
@@ -16,7 +15,6 @@ public struct NativeDropboxConfiguration: Sendable {
     }
 }
 
-/// Private once-only authorization result. Never publish this through a model, view, journal or diagnostic.
 public struct NativeDropboxAuthorizationGrant: Sendable {
     public let requestID: String
     public let clientID: String
@@ -30,8 +28,6 @@ public struct NativeDropboxAuthorizationGrant: Sendable {
     }
 }
 
-/// App owns MainActor presentation, PKCE/state, callback validation and foreground/AppLock readmission.
-/// isCurrent reads a thread-safe snapshot; it must never synchronously hop to MainActor from the Engine queue.
 public struct NativeDropboxAuthorizationBinding: Sendable {
     public let configuration: NativeDropboxConfiguration
     let isCurrent: @Sendable () -> Bool
@@ -47,7 +43,6 @@ public struct NativeDropboxAuthorizationBinding: Sendable {
     }
 }
 
-/// One captured native invocation. Grants are delivered once; abort/close drains its original App task.
 final class NativeDropboxAuthorizationJobs: @unchecked Sendable {
     private let condition = NSCondition()
     private let registry: NativeAttachmentLocalRequests
@@ -113,7 +108,6 @@ final class NativeDropboxAuthorizationJobs: @unchecked Sendable {
                 let value = try validatedGrant(grant, requestID: requestID)
                 answer = try Self.json(["id": current.id, "value": value])
             } catch {
-                // Neither provider errors nor callback/code/verifier values cross the error channel.
                 answer = (try? Self.json(["id": current.id, "error": "Dropbox authorization is unavailable"])) ?? ""
             }
             finish(current, answer: answer)
@@ -142,7 +136,6 @@ final class NativeDropboxAuthorizationJobs: @unchecked Sendable {
         condition.lock(); current.answer = answer; task = nil; condition.broadcast(); condition.unlock()
     }
     func next() -> String? {
-        // App state is a separate lock domain. Check it before taking the worker lock.
         let ownerCurrent = binding.isCurrent()
         condition.lock(); defer { condition.unlock() }
         guard let current = job, let answer = current.answer else { return nil }

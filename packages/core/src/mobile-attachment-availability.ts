@@ -94,19 +94,16 @@ export type MobileAttachmentAvailabilityCoreFunctions = {
   cloudGetFile: typeof cloudGetFile;
   webdavGetFile: typeof webdavGetFile;
   downloadDropboxFile: typeof downloadDropboxFile;
-  /** Dropbox's path-not-found refusal (a host whose Dropbox client throws its own error class says which). */
   isDropboxFileNotFoundError: (error: unknown) => boolean;
 };
 
 
 export type MobileAttachmentCloudKitPort = {
-  /** Downloads the record's asset into `stagedUri`. */
   fetchAttachmentAsset(recordName: string, stagedUri: string, options?: { signal?: AbortSignal }): Promise<unknown>;
   isAttachmentNotFoundError(error: unknown): boolean;
 };
 
 export type MobileAttachmentAvailabilityHost = {
-  /** Explicit source-bound native Dropbox preparation only; absence keeps existing admission closed. */
   selectedDropboxDownload?: { fetcher: typeof fetch };
   files: MobileAttachmentFiles;
   common: MobileAttachmentCommon;
@@ -345,7 +342,6 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       );
       return { ...attachment, uri: targetUri, localStatus: 'available' };
     } catch (error) {
-      // Selected scratch belongs to the native owner, including on refusal or cancellation.
       if (!preparing && !installerOwnsStage) {
         await common.deleteAttachmentDownloadStageBestEffort(stagedUri);
       }

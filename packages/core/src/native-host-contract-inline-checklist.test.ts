@@ -67,7 +67,6 @@ describe('inline checklist durable row edits', () => {
         try {
             const envelope = await prepare(s); value(await s.host.commitPreparedInlineChecklistWrite(envelope));
             const actual = await s.sql('SELECT id,status,completedAt,dueDate,checklist FROM tasks ORDER BY id');
-            // Recurring child identity is generated independently; compare domain values.
             const semantic = (rows: typeof actual) => rows.map(row => ({ ...row, id: row.id === 'source' ? 'source' : 'child',
                 checklist: JSON.parse(row.checklist as string).map((item: { id: string; title: string; isCompleted: boolean }) => row.id === 'source' ? item : { title: item.title, isCompleted: item.isCompleted }) }));
             expect(semantic(actual)).toEqual(semantic(expected as typeof actual));

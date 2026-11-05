@@ -109,7 +109,6 @@ final class NativePersonalIntakeTests: XCTestCase {
         let reminders = try await cold.requiresReminderPreparation(); XCTAssertFalse(reminders)
         let page = try await cold.pendingPage(); XCTAssertEqual(page.items.map(\.id), [unrelated.id])
         XCTAssertEqual(try Data(contentsOf: state), header)
-        // The previous strict reader drops this unknown field when encoding and therefore refuses these bytes.
         var oldReader = try dictionary(state); oldReader.removeValue(forKey: "navigationReservation")
         let previousBytes = try JSONSerialization.data(withJSONObject: oldReader, options: [.sortedKeys, .withoutEscapingSlashes])
         XCTAssertNotEqual(previousBytes, header, "Old exact-canonical readers cannot read a new claimed header")
@@ -397,7 +396,6 @@ final class NativePersonalIntakeTests: XCTestCase {
         let reopened = try open(); try await reopened.retry()
         let accepted = try await reopened.capture(first); XCTAssertEqual(accepted.sequence, 1)
         await reopened.close()
-        // A second independent reservation retains a persisted record witness across the cold boundary.
         let nextStore = try open(), second = try event()
         await nextStore.setIOFaults(beforePublication: { name in if name == "0000000000000002.json" { throw Injected.failure } })
         await failure { _ = try await nextStore.capture(second) }; await nextStore.close()
@@ -988,7 +986,6 @@ final class NativePersonalIntakeTests: XCTestCase {
 
     func testForeignRootLockHeaderAndRecordCorruptionRefuseWithoutRepair() async throws {
         let store = try open(), first = try event(); _ = try await store.capture(first)
-        // Concurrent owner cannot acquire the original route lease.
         XCTAssertThrowsError(try NativePersonalIntake(route: route, diagnostic: { _ in }))
         let original = try Data(contentsOf: state), foreign = try replacement(state)
         await failure(.unavailable) { _ = try await store.pendingPage() }
@@ -999,7 +996,6 @@ final class NativePersonalIntakeTests: XCTestCase {
         await failure(.unavailable) { _ = try await reopened.pendingPage() }
         XCTAssertEqual(try inode(root.appendingPathComponent(".lock")), lockInode)
         await reopened.close()
-        // Cold replacement of the whole directory cannot adopt even byte-identical header/records.
         let moved = root.deletingLastPathComponent().appendingPathComponent("retained-original")
         try FileManager.default.moveItem(at: root, to: moved)
         try FileManager.default.copyItem(at: moved, to: root)
@@ -1016,7 +1012,6 @@ final class NativePersonalIntakeTests: XCTestCase {
         XCTAssertThrowsError(try NativePersonalIntakeEvent.url(String(repeating: "x", count: 16_001)))
         XCTAssertThrowsError(try NativePersonalIntakeEvent.spotlight(String(repeating: "x", count: 8_001)))
         XCTAssertThrowsError(try NativePersonalIntakeEvent.url("x", receivedAt: Date(timeIntervalSince1970: .infinity)))
-        // Restore only this owned fixture's exact capture envelope by starting a separate native route.
         route = try .fixture(home: home, arguments: ["--native-ui-test-library", UUID().uuidString.lowercased()])
         let isolated = try open(); _ = try await isolated.capture(event())
         try FileManager.default.removeItem(at: slot(1))

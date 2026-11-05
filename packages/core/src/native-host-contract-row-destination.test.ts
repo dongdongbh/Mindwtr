@@ -6,7 +6,6 @@ import { buildTaskMovePatch, type TaskMoveDestination } from './task-container-r
 import type { NativeRowTaskDestinationEnvelope } from './native-host-contract-task-checklist';
 import type { AppData, Task } from './types';
 import { retainTaxonomyEffects } from './taxonomy-catalog';
-// Raw-byte preservation cases catalog existing labels before their baseline; legacy RN/native parity cases remain uncatalogued.
 
 const NOW = '2026-10-03T13:00:00.000Z';
 const ID = 'reference-destination';
