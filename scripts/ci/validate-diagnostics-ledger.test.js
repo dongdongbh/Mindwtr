@@ -150,6 +150,24 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
         catch {                                                                            }
       }
     }
+    for (const call of source.matchAll(
+      /\blet\s+(\w+)\s*=\s*try\?\s*(?:self\.)?json\(\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*try\s+(?:self\.)?json\(\s*\[((?:"(?:\\[\s\S]|[^"\\])*"|[^"[\]])*)\]\s*\)\s*,?\s*\]\s*\)\s*else\s*\{\s*return\s*\}\s*Task\s*\{\s*_\s*=\s*try\?\s*await\s+\w+\.call\(\s*"logLine"\s*,\s*argumentsJSON:\s*\1\s*\)/g,
+    )) {
+      for (const field of call[2].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
+        try { sites.push({ file, slug: JSON.parse(field[1]) }); }
+        catch {}
+      }
+    }
+  }
+
+  if (/\.[cm]?[jt]sx?$/.test(file)) {
+    for (const table of source.matchAll(
+      /\bconst\s+(\w+)\s*(?::[^=;]+)?=\s*\{([^{}]*)\};\s*const\s+(\w+)\s*=\s*\1\[event\.message\];[^;]*?\bevent\.context\.releaseCheck\s*!==\s*\3\[0\][^;]*;\s*log\.info\(\s*event\.message\b/g,
+    )) {
+      for (const entry of table[2].matchAll(/(['"])[^'"\r\n]*\1\s*:\s*\[\s*(['"])([^'"\r\n]*)\2/g)) {
+        sites.push({ file, slug: entry[3] });
+      }
+    }
   }
   return sites;
 }
@@ -469,6 +487,35 @@ describe("release diagnostics ledger", () => {
       let other = format!("Different extra.releaseCheck=v1.3.3/different");
       log::warn!("{unrelated}");
     ` })).toEqual([{ file, slug: "v1.3.3/formatted" }]);
+  });
+
+  it("resolves a Swift guard-bound logLine context only when its Task forwards that line", () => {
+    const file = "apps/ios-native/App/CoreModel.swift";
+    const source = sources.find((entry) => entry.file === file).source;
+    const start = source.indexOf("badge.report = { [weak self] publication in");
+    const end = source.indexOf("appIconBadgeStore = badge", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const emission = source.slice(start, end);
+    expect(collectCodeSlugs({ file, source: emission })).toEqual([{ file, slug: "v1.3.9/ios-due-badge" }]);
+    for (const text of [
+      emission.replace('call("logLine"', 'call("other"'),
+      emission.replace("argumentsJSON: line)", "argumentsJSON: other)"),
+    ]) expect(collectCodeSlugs({ file, source: text })).toEqual([]);
+  });
+
+  it("resolves a message-keyed TypeScript table only when its checked entry is logged", () => {
+    const file = "apps/android-native/bundle/host-file-sync.ts";
+    const source = sources.find((entry) => entry.file === file).source;
+    expect(collectCodeSlugs({ file, source }).map(({ slug }) => slug)).toEqual([
+      "v1.3.9/ios-file-sync-read-owner",
+      "v1.3.9/ios-file-sync-created-write",
+      "v1.3.9/ios-file-sync-publication-primitives",
+      "v1.3.9/ios-file-sync-publication-primitives",
+    ]);
+    for (const text of [
+      source.replace("event.context.releaseCheck !== fields[0]", "event.context.kind !== fields[0]"),
+      source.replace("log.info(event.message", "log.warn(event.message"),
+    ]) expect(collectCodeSlugs({ file, source: text })).toEqual([]);
   });
 
   it("uses version-prefixed slugs at every code site", () => {
