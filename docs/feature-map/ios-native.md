@@ -151,9 +151,18 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 - Reach: Menu › Contexts (or the Quick Access tab when it is set to Contexts).
 - Shortcuts: Long-press a chip to add it to the current selection.
-- Selectors: `contexts-search`, `contexts-filters`, `contexts-save-filter`, `contexts-more`
+- Selectors: `contexts-search`, `contexts-filters`, `contexts-filter-save`, `contexts-more`
 - Code: `apps/ios-native/App/ContextsScreen.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testContextsTokens…, testTask162ContextsRowIdentity…)
+
+## Review and Contexts bulk selection
+
+- Reach: Review (scope All or Due, groups expanded) or Contexts › long-press a task card. A bar shows the count, all six statuses, Add tag and Delete. Review also offers Share.
+- Shortcuts: Tap a row's circle or card to toggle it.
+- Selectors: screen prefix `review` or `contexts`, then `-bulk-count`, `-bulk-exit`, `-select-` (+ task id), `-bulk-status-` (+ status), `-bulk-tag-open`, `-bulk-share` (Review only), `-bulk-delete`, `-bulk-confirm`; `review-scroll`, `contexts-scroll`; Undo is `task-` + `statusListBulkDelete` + `-undo`
+- Code: `apps/ios-native/App/ReviewScreen.swift`, `apps/ios-native/App/ContextsScreen.swift`, `apps/ios-native/App/WaitingScreen.swift` (StatusListBulkBar), `apps/ios-native/App/CoreModel.swift` (statusList…)
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testShownListBulk…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testReviewAndContextsBulk…, testReviewBulkMoveColdRecovery…)
+- Notes: Review ends the selection when the scope changes or a selected row is folded away, as mobile does. Contexts drops only the selected rows a chip, search or filter hides. Mark reviewed, Organize, Remove tag, and Contexts' Add/Remove context are not built yet.
 
 ## Waiting For
 
@@ -166,12 +175,21 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Someday/Maybe
 
-- Reach: Menu › Someday. Section headings have Add task. The task status menu has Move to section.
+- Reach: Menu › Someday. Section headings have Add task. The task status menu has Move to section. Long-press a task card to select; the bulk bar also has Move to section.
 - Shortcuts: Swipe right on a deferred project row to reactivate it.
-- Selectors: `someday-scroll`, `someday-overflow-button`, `someday-section-create-input`, `someday-section-create-save`, `someday-section-move-new-section`, `someday-section-move-undo`, `someday-section-task-input`
+- Selectors: `someday-scroll`, `someday-overflow-button`, `someday-section-create-input`, `someday-section-create-save`, `someday-section-move-new-section`, `someday-section-move-undo`, `someday-section-task-input`, `someday-bulk-move-section`, `someday-section-move-choice-` (+ index)
 - Code: `apps/ios-native/App/SomedayScreen.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testSomedaySection…, testSomedayNested…, testSomedayGroupFilter…)
-- Notes: Move-to-section Undo lasts only for the session and does not return after restart. Section rename and delete live in Settings › Manage.
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testSomedaySection…, testSomedayNested…, testSomedayGroupFilter…, testStatusListBulkSomedayMoveToSection…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testSomedaySectionBulkMove…)
+- Notes: Move-to-section Undo lasts only for the session and does not return after restart. Bulk Move to section moves only the selected tasks not already in that section, ends the selection, and its Undo restores each task's own earlier section. Section rename and delete live in Settings › Manage.
+
+## Waiting and Someday bulk selection
+
+- Reach: Waiting For or Someday › long-press a task card. A bar shows the count, the five other statuses, Add tag, Range and Delete. Someday also shows Move to section.
+- Shortcuts: Tap a row's circle or card to toggle it. Range selects every row between the last tapped row and the next tap.
+- Selectors: screen prefix `waiting` or `someday`, then `-bulk-count`, `-bulk-exit`, `-select-` (+ task id), `-bulk-status-` (+ status), `-bulk-tag-open`, `-bulk-tag-input`, `-bulk-tag-save`, `-bulk-range`, `-bulk-move-section` (Someday only), `-bulk-delete`, `-bulk-confirm`; Undo is `task-` + `statusListBulkDelete` + `-undo`
+- Code: `apps/ios-native/App/WaitingScreen.swift` (StatusListBulkBar), `apps/ios-native/App/SomedayScreen.swift`, `apps/ios-native/App/CoreModel.swift` (statusList…)
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testStatusListBulk…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testStatusListBulk…)
+- Notes: Changing the person or a filter drops selected rows that are no longer on screen. Delete confirms first and then offers Undo. The row's own Move to section is hidden while selecting; use the bar's Move to section (`someday-bulk-move-section`) instead.
 
 ## Reference
 
