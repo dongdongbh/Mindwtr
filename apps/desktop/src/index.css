@@ -210,6 +210,10 @@
     stroke: hsl(var(--foreground));
   }
 
+  :root.theme-eink .border-l-amber-400 {
+    border-left-color: hsl(var(--foreground));
+  }
+
   :root.theme-nord {
     color-scheme: dark;
     --background: 220 16.4% 21.6%;
