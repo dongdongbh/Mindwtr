@@ -838,21 +838,42 @@
     // timed-out operation drains and the host never stops; its late answer settles nothing.
     var fileChannel = function (method, abortMethod) {
         abortMethod = abortMethod || 'fileAbort';
-        return function (request, bytes) {
+        return function (request, bytes, signal) {
             return new Promise(function (resolve, reject) {
                 refuseIfCancelled();
+                if (signal && signal.aborted) { reject(signal.reason); return; }
+                var closed = false;
+                var finish = function () {
+                    closed = true;
+                    if (signal) signal.removeEventListener('abort', onAbort);
+                };
                 var payload = {};
                 for (var key in request) if (Object.prototype.hasOwnProperty.call(request, key)) payload[key] = request[key];
                 if (bytes !== undefined) payload.base64 = toBase64(bytesOf(bytes));
+                var onAbort = function () { cancel(signal.reason); };
                 var cancel = function (reason) {
+                    if (closed) return;
+                    finish();
                     ioPending.delete(id);
                     try { native()[abortMethod](id); } catch (_error) { /* its late answer is dropped either way */ }
                     reject(reason);
                 };
                 var id = startIo(hostCall(native()[method](JSON.stringify(payload))), function (answer) {
-                    if (answer.error !== undefined) reject(new Error(answer.error));
+                    if (closed) return;
+                    finish();
+                    if (answer.error !== undefined) {
+                        var error = new Error(answer.error);
+                        if (typeof answer.code === 'string') error.code = answer.code;
+                        if (typeof answer.retryAfterSeconds === 'number' && Number.isFinite(answer.retryAfterSeconds)
+                            && answer.retryAfterSeconds >= 0) error.retryAfterSeconds = answer.retryAfterSeconds;
+                        reject(error);
+                    }
                     else resolve(answer.body ? fromBase64(answer.base64) : answer.value);
                 }, cancel);
+                if (signal) {
+                    signal.addEventListener('abort', onAbort);
+                    if (signal.aborted) onAbort();
+                }
             });
         };
     };
@@ -865,6 +886,28 @@
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarPushCall === 'function') {
         global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');
+    }
+
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.cloudKitCall === 'function') {
+        var cloudKitChannel = fileChannel('cloudKitCall', 'cloudKitAbort');
+        global.__mindwtrCloudKitCall = function (request, signal) { return cloudKitChannel(request, undefined, signal); };
+    }
+
+    // Private iOS-only one-time Dropbox grant. Public requests never supply OAuth URLs or PKCE material.
+    if (global.__mindwtrHostPlatform === 'ios' && global.__mindwtrNative && typeof global.__mindwtrNative.dropboxCall === 'function') {
+        var dropboxChannel = fileChannel('dropboxCall', 'dropboxCancel');
+        global.__mindwtrDropboxCall = function (request, signal) { return dropboxChannel(request, undefined, signal); };
+    }
+
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.gmailCall === 'function') {
+        global.__mindwtrGmailCall = function (request) {
+            return new Promise(function (resolve, reject) {
+                startIo(hostCall(native().gmailCall(JSON.stringify(request))), function (answer) {
+                    if (answer.error !== undefined) reject(new Error(answer.error));
+                    else resolve(answer.value);
+                });
+            });
+        };
     }
 
     // --- sync crypto --------------------------------------------------------

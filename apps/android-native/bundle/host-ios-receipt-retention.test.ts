@@ -31,24 +31,24 @@ describe('private iOS receipt retention bridge seam', () => {
         expect(await f.port.iosPruneReceipts(raw)).toEqual({ pruned: 7 });
         expect(f.calls).toHaveLength(1);
         expect(f.calls[0][2]).toEqual(raw === 'null'
-            ? { retainedCommands: ['reminderComplete', 'reminderSnooze'], retainedRequestIds: [] }
-            : { retainedRequestIds: JSON.parse(raw) });
+            ? { retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [] }
+            : { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: JSON.parse(raw) });
         expect(f.logs).toHaveLength(1);
         expect(f.logs[0]).toMatchObject({ scope: 'native-ios', message: 'Native iOS reminder receipt retention applied',
             context: { releaseCheck: 'v1.3.5/ios-reminder-receipt-retention', outcome: raw === 'null' ? 'conservative' : 'snapshot' } });
         expect(JSON.stringify(f.logs)).not.toContain(id);
     });
-    it.each([['null', { retainedCommands: ['reminderComplete', 'reminderSnooze'], retainedRequestIds: [owed] }],
-        ['[]', { retainedRequestIds: [owed] }], [JSON.stringify([id, owed]), { retainedRequestIds: [id, owed] }]])(
+    it.each([['null', { retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [owed] }],
+        ['[]', { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [owed] }], [JSON.stringify([id, owed]), { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [id, owed] }]])(
         'keeps the owed reminder request with %s', async (raw, policy) => {
         const f = fixture();
         expect(await f.port.iosPruneReceipts(raw, owed)).toEqual({ pruned: 7 });
         expect(f.calls[0][2]).toEqual(policy);
         expect(JSON.stringify(f.logs)).not.toContain(owed);
     });
-    it.each([['null', { retainedCommands: ['reminderComplete', 'reminderSnooze'], retainedRequestIds: [owed, undo, decision] }],
-        ['[]', { retainedRequestIds: [owed, undo, decision] }],
-        [JSON.stringify([id, undo]), { retainedRequestIds: [id, undo, owed, decision] }]])(
+    it.each([['null', { retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [owed, undo, decision] }],
+        ['[]', { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [owed, undo, decision] }],
+        [JSON.stringify([id, undo]), { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [id, undo, owed, decision] }]])(
         'keeps the owed Inbox Undo and decision requests with %s', async (raw, policy) => {
         const f = fixture();
         expect(await f.port.iosPruneReceipts(raw, owed, [undo, decision])).toEqual({ pruned: 7 });
@@ -58,7 +58,7 @@ describe('private iOS receipt retention bridge seam', () => {
     it('keeps a single owed Inbox decision without an owed reminder', async () => {
         const f = fixture();
         expect(await f.port.iosPruneReceipts('null', null, [undo])).toEqual({ pruned: 7 });
-        expect(f.calls[0][2]).toEqual({ retainedCommands: ['reminderComplete', 'reminderSnooze'], retainedRequestIds: [undo] });
+        expect(f.calls[0][2]).toEqual({ retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [undo] });
     });
     it.each([['object', {}], ['three ids', [undo, decision, owed]], ['duplicate', [undo, undo]],
         ['uppercase', [undo.toUpperCase()]], ['invalid UUID', ['not-a-uuid']], ['numeric entry', [1]]])(
@@ -77,7 +77,7 @@ describe('private iOS receipt retention bridge seam', () => {
         const ids = Array.from({ length: 128 }, (_, n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`);
         const f = fixture('ios', true);
         expect(await f.port.iosPruneReceipts(JSON.stringify(ids))).toEqual({ pruned: 7 });
-        expect(f.calls[0][2]).toEqual({ retainedRequestIds: ids }); expect(f.logs).toEqual([]);
+        expect(f.calls[0][2]).toEqual({ retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: ids }); expect(f.logs).toEqual([]);
     });
     it.each([['malformed', 'undefined'], ['object', '{}'], ['null entry', '[null]'], ['numeric entry', '[1]'],
         ['duplicate', JSON.stringify([id, id])], ['uppercase', JSON.stringify([id.toUpperCase()])],

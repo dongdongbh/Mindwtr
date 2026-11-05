@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { createNativeCloudKitAssets, type NativeCloudKitTransportRequest } from '../../ios-native/bundle/host-cloudkit-assets';
+import { defaultSyncCryptoPrimitives } from '../../../packages/core/src/sync-crypto';
+import { getAttachmentDownloadIdentity } from '../../../packages/core/src/mobile-attachment-availability';
 import {
-    createNativeAttachments, createNativeLocalAttachmentConfiguration,
+    createNativeAttachments, createNativeLocalAttachmentConfiguration, createNativeTaskAttachmentPreparation,
+    prepareNativeTaskAttachmentAvailabilityPreflight, prepareNativeTaskAttachmentAvailability, nativeTaskAttachmentPreparationUsesCloudKit,
+    type NativeTaskAttachmentPreparationBindings,
     type NativeAttachmentBindings, type NativeFileChannels,
 } from './host-attachments';
 import { setSha256HexProvider } from '../../../packages/core/src/attachment-hash';
@@ -193,5 +200,183 @@ describe('selected existing native attachment preparation adapter', () => {
         expect(await native.prepareAttachmentAvailableDetailed!({ ...selected, cloudKey: undefined }))
             .toEqual({ status: 'unavailable' });
         expect(calls).toEqual(['getInfo']); expect(network).not.toHaveBeenCalled(); expect(memory.read(uri)).toBeUndefined();
+    });
+});
+
+
+const CLOUD_REQUEST = '00000000-0000-4000-8000-000000000a10';
+const CLOUD_SESSION = '00000000-0000-4000-8000-000000000a11';
+const CLOUD_SOURCE = '00000000-0000-4000-8000-000000000a12';
+const selectedCloudAttachment = (): Attachment => ({ id: 'cloudkit-selected', kind: 'file', title: 'Selected.txt', uri: '',
+    cloudKey: 'cloudkit:legacy/é😀', localStatus: 'missing', createdAt: DATE, updatedAt: DATE });
+const selectedCloudInput = (selected = selectedCloudAttachment()) => ({ version: 1, taskID: 'selected-task',
+    beforePayloadJSON: JSON.stringify({ version: 2, taskID: 'selected-task', attachmentsOwned: true,
+        attachmentsBase: [selected], attachments: [selected], opaque: { notes: 'Keep draft' } }),
+    requestJSON: JSON.stringify({ version: 1, requestId: CLOUD_REQUEST, sessionID: CLOUD_SESSION, generation: 3,
+        attachmentId: selected.id, identity: getAttachmentDownloadIdentity(selected) }),
+});
+const selectedCloudRaw = () => JSON.stringify({ ...selectedCloudInput(), rawConfigJSON: '{"backend":"cloudkit"}' });
+const selectedCloudFixture = () => {
+    const memory = createMemoryFileSystem(), fileCalls: string[] = [], requests: NativeCloudKitTransportRequest[] = [];
+    const sources: { metadata: unknown; base64: string }[] = [], signals: (AbortSignal | undefined)[] = [];
+    let payload = new Uint8Array([0, 255, 1]);
+    setSha256HexProvider((bytes) => createHash('sha256').update(bytes).digest('hex'));
+    const cloudKit = createNativeCloudKitAssets(async (request, signal) => {
+        requests.push(request); signals.push(signal);
+        if (request.op !== 'fetchAttachmentAsset') throw new Error('Selected CloudKit may only fetch');
+        memory.put(request.targetPath, payload);
+        return JSON.stringify({ recordName: request.recordName, attachmentId: 'cloudkit-selected', ownerType: 'task',
+            ownerId: 'selected-task', title: 'Remote title must not overwrite draft', updatedAt: DATE });
+    });
+    const forbidden = async (): Promise<never> => { throw new Error('No HTTP, credentials, encryption or raw mutation'); };
+    const channels: NativeFileChannels = { directories: { document: DOCUMENTS, cache: CACHE },
+        files: async (request, bytes) => {
+            const op = String(request.op); fileCalls.push(op);
+            if (op === 'getInfo') return memory.fs.getInfo(String(request.uri));
+            if (op === 'readBytes') return memory.fs.readBytes(String(request.uri));
+            if (op === 'sha256' && bytes) return createHash('sha256').update(bytes).digest('hex');
+            return forbidden();
+        }, installer: forbidden, deleteNow: () => { throw new Error('No JS selected scratch cleanup'); } };
+    const bindings: NativeTaskAttachmentPreparationBindings = { rawConfigJSON: '{"backend":"cloudkit"}', cloudKit,
+        getLegacyValue: forbidden, getSecret: forbidden, fetch: forbidden, crypto: defaultSyncCryptoPrimitives,
+        prepareSource: (raw, base64) => { sources.push({ metadata: JSON.parse(raw), base64 });
+            return JSON.stringify({ kind: 'prepared-source', sourceToken: CLOUD_SOURCE }); } };
+    return { memory, fileCalls, requests, sources, signals, channels, bindings,
+        payload: (bytes: Uint8Array) => { payload = bytes; },
+        run: (signal = new AbortController().signal) => prepareNativeTaskAttachmentAvailability(selectedCloudRaw(), bindings, channels, signal) };
+};
+
+describe('selected CloudKit preparation JS binding', () => {
+    it('returns the closed native preflight with canonical CloudKit target naming and exact selected metadata', async () => {
+        const selected = selectedCloudAttachment();
+        const input = { ...selectedCloudInput(selected), cloudKit: true, managedDirectoryURI: MANAGED };
+        expect(await prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify(input))).toEqual({ version: 1,
+            requestId: CLOUD_REQUEST, attachmentJSON: JSON.stringify(selected), recordName: 'legacy/é😀',
+            targetURI: MANAGED + selected.id + '.txt' });
+        for (const bad of [{ ...input, cloudKit: false }, { ...input, cloudKit: 'true' }, { ...input, webdavURL: 'https://invalid.test' },
+            { ...input, cloudURL: 'https://invalid.test' }, { ...input, encryptionStateJSON: null }, { ...input, managedDirectoryURI: 'file:///no-trailing' }]) {
+            await expect(prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify(bad))).rejects.toThrow('INVALID_INPUT');
+        }
+        const httpKey = selectedCloudAttachment(); httpKey.cloudKey = 'attachments/file.txt';
+        await expect(prepareNativeTaskAttachmentAvailabilityPreflight(JSON.stringify({ ...selectedCloudInput(httpKey), cloudKit: true,
+            managedDirectoryURI: MANAGED }))).rejects.toThrow('INVALID_INPUT');
+    });
+
+    it('requires exact CloudKit config and explicit binding before any IO; retains old HTTP config routing', async () => {
+        const f = selectedCloudFixture();
+        expect(nativeTaskAttachmentPreparationUsesCloudKit(selectedCloudRaw())).toBe(true);
+        for (const raw of ['{"backend":"cloudkit","url":null}', '{"backend":"cloudkit","encryptionStateJSON":null}',
+            '{"backend":"cloudkit","provider":null}']) {
+            expect(() => createNativeTaskAttachmentPreparation({ ...f.bindings, rawConfigJSON: raw }, f.channels)).toThrow('INVALID_INPUT');
+            expect(() => nativeTaskAttachmentPreparationUsesCloudKit(JSON.stringify({ ...selectedCloudInput(), rawConfigJSON: raw }))).toThrow('INVALID_INPUT');
+        }
+        expect(() => createNativeTaskAttachmentPreparation({ ...f.bindings, cloudKit: undefined }, f.channels)).toThrow('INVALID_INPUT');
+        const rawConfigJSON = JSON.stringify({ backend: 'webdav', url: 'https://synthetic.invalid/dav', username: null,
+            allowInsecureHttp: null, encryptionStateJSON: null });
+        expect(nativeTaskAttachmentPreparationUsesCloudKit(JSON.stringify({ ...selectedCloudInput(), rawConfigJSON }))).toBe(false);
+        expect(f.fileCalls).toEqual([]); expect(f.requests).toEqual([]); expect(f.sources).toEqual([]);
+    });
+
+    it('prepares only SDK scratch bytes with one existing source callback and no credential, HTTP or installer access', async () => {
+        const f = selectedCloudFixture(), controller = new AbortController(), selected = selectedCloudAttachment();
+        const before = structuredClone(selected);
+        const result = await f.run(controller.signal);
+        expect(result.status).toBe('prepared');
+        if (result.status !== 'prepared') throw new Error('Prepared result required');
+        expect(result.sourceToken).toBe(CLOUD_SOURCE); expect(result.requestId).toBe(CLOUD_REQUEST);
+        expect(JSON.parse(result.attachmentJSON)).toMatchObject({ id: selected.id, title: selected.title,
+            cloudKey: selected.cloudKey, uri: MANAGED + selected.id + '.txt' });
+        expect(f.sources).toHaveLength(1); expect(f.sources[0].base64).toBe('AP8B');
+        expect(f.sources[0].metadata).toMatchObject({ version: 1, attachmentId: selected.id, targetURI: MANAGED + selected.id + '.txt' });
+        expect(f.requests).toHaveLength(1); expect(f.requests[0]).toMatchObject({ op: 'fetchAttachmentAsset', recordName: 'legacy/é😀' });
+        expect(f.signals).toEqual([controller.signal]);
+        expect(f.fileCalls.every((op) => op === 'getInfo' || op === 'readBytes' || op === 'sha256')).toBe(true);
+        expect(f.memory.read(MANAGED + selected.id + '.txt')).toBeUndefined();
+        expect(selected).toEqual(before);
+    });
+
+    it('does not create a source from oversized selected bytes or a cancelled invocation', async () => {
+        const f = selectedCloudFixture(); f.payload(new Uint8Array(8 * 1024 * 1024 + 1));
+        expect((await f.run()).status).toBe('unavailable'); expect(f.sources).toEqual([]);
+        const fresh = selectedCloudFixture(), controller = new AbortController(); controller.abort(new Error('retired'));
+        await expect(fresh.run(controller.signal)).rejects.toThrow('retired');
+        expect(fresh.requests).toEqual([]); expect(fresh.fileCalls).toEqual([]); expect(fresh.sources).toEqual([]);
+    });
+});
+
+const selectedCloudEntryFixture = (prepare: (bindings: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'>, signal: AbortSignal) => Promise<unknown>, platform = 'ios', capable = true) => {
+    const entry = readFileSync(import.meta.dir + '/host-entry.ts', 'utf8');
+    const queue = entry.slice(entry.indexOf('const iosCloudKitAvailable ='), entry.indexOf('const iosCloudKitRecords ='));
+    const handler = entry.slice(entry.indexOf('    iosTaskDraftPrepareAvailability('), entry.indexOf('    iosProjectFilePrepareAvailability('));
+    const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(queue + `
+globalThis.port = {${handler}};`);
+    const calls: NativeCloudKitTransportRequest[] = [];
+    const context = vm.createContext({ __mindwtrHostPlatform: platform,
+        native: () => ({ cloudKitAvailable: () => capable }), iosCleanupCallback: null,
+        bootAdapter: {}, localAttachments: {}, nativeSync: null, iosTaskAttachmentPreparation: false,
+        iosProjectFilePreparation: false, iosForegroundFailure: false,
+        submit: (work: (signal: AbortSignal) => unknown) => work(new AbortController().signal),
+        isSandboxMode: () => false, isWorkspaceTransitionActive: () => false, requireSaved: () => {},
+        nativeFileChannels: () => ({}), nativeTaskAttachmentPreparationUsesCloudKit, createNativeCloudKitAssets,
+        createHostSyncCrypto: () => defaultSyncCryptoPrimitives,
+        keyValue: { get: () => { throw new Error('No selected legacy credentials'); } },
+        prepareNativeTaskAttachmentAvailability: (_json: string, bindings: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'>,
+            _channels: unknown, signal: AbortSignal) => prepare(bindings, signal),
+        __mindwtrCloudKitCall: async (input: NativeCloudKitTransportRequest) => { calls.push(input);
+            if (input.op !== 'fetchAttachmentAsset') throw new Error('No selected record writes');
+            return JSON.stringify({ recordName: input.recordName, attachmentId: 'asset', ownerType: 'task', ownerId: 'task', title: 'Asset', updatedAt: DATE }); },
+    });
+    vm.runInContext(source, context);
+    const port: { iosTaskDraftPrepareAvailability(raw: string, callback: (metadata: string, bytes: string) => string): Promise<unknown> } = vm.runInContext('port', context);
+    return { port, calls, context };
+};
+
+describe('actual selected CloudKit host-entry owner', () => {
+    it('admits only capable iOS, does not require/read HTTP secrets, and clears the exact source owner after settlement', async () => {
+        let binding: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'> | undefined;
+        const prepare = async (value: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'>) => {
+            binding = value;
+            if (!value.cloudKit) throw new Error('Expected selected port');
+            await expect(value.cloudKit.deleteAttachmentAssets(['forbidden-record'])).rejects.toThrow('CloudKit requires an owned foreground invocation');
+            return value.cloudKit.fetchAttachmentAsset('selected-record', 'file:///owned/stage');
+        };
+        for (const [platform, capable] of [['android', true], ['ios', false]] as const) {
+            const refused = selectedCloudEntryFixture(prepare, platform, capable);
+            await expect(refused.port.iosTaskDraftPrepareAvailability(selectedCloudRaw(), () => '{}')).rejects.toThrow('NOT_READY');
+            expect(refused.calls).toEqual([]);
+        }
+        const f = selectedCloudEntryFixture(prepare);
+        await f.port.iosTaskDraftPrepareAvailability(selectedCloudRaw(), () => '{}');
+        expect(f.calls).toEqual([{ op: 'fetchAttachmentAsset', recordName: 'selected-record', targetPath: 'file:///owned/stage' }]);
+        expect(vm.runInContext('iosSelectedCloudKitSource', f.context)).toBeNull();
+        if (!binding?.cloudKit) throw new Error('Expected selected binding');
+        await expect(binding.cloudKit.fetchAttachmentAsset('late', 'file:///owned/stage')).rejects.toThrow('NOT_READY');
+        expect(() => binding?.prepareSource('{}', '')).toThrow('NOT_READY');
+        expect(f.calls).toHaveLength(1);
+    });
+
+    it('queued old work and a retained old port cannot borrow a later source owner', async () => {
+        let release!: () => void;
+        const hold = new Promise<void>((resolve) => { release = resolve; });
+        let turn = 0, old: Omit<NativeTaskAttachmentPreparationBindings, 'rawConfigJSON'> | undefined;
+        let oldPending: Promise<unknown> = Promise.resolve();
+        const f = selectedCloudEntryFixture(async (binding) => {
+            if (++turn === 1) {
+                old = binding;
+                oldPending = binding.cloudKit!.fetchAttachmentAsset('old-queued', 'file:///owned/old').catch((error: unknown) => error);
+                return { status: 'unavailable' };
+            }
+            if (!old?.cloudKit) throw new Error('Expected previous port');
+            await expect(old.cloudKit.fetchAttachmentAsset('old-late', 'file:///owned/old')).rejects.toThrow('NOT_READY');
+            return binding.cloudKit!.fetchAttachmentAsset('new-selected', 'file:///owned/new');
+        });
+        f.context.hold = hold; vm.runInContext('iosCloudKitTail = hold', f.context);
+        const callback1 = () => '{}', callback2 = () => '{}';
+        await f.port.iosTaskDraftPrepareAvailability(selectedCloudRaw(), callback1);
+        const current = f.port.iosTaskDraftPrepareAvailability(selectedCloudRaw(), callback2);
+        await Promise.resolve(); release(); await current;
+        expect(await oldPending).toHaveProperty('message', 'CloudKit requires an owned foreground invocation');
+        expect(f.calls).toEqual([{ op: 'fetchAttachmentAsset', recordName: 'new-selected', targetPath: 'file:///owned/new' }]);
+        expect(vm.runInContext('iosSelectedCloudKitSource', f.context)).toBeNull();
     });
 });

@@ -20,6 +20,7 @@ beforeAll(async () => {
                 sandbox: () => initializeSandboxRuntime(true),
                 transition: acquireWorkspaceTransitionLock,
                 enableLogging: () => useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, diagnostics: { loggingEnabled: true } } }),
+                disableLogging: () => useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, diagnostics: { loggingEnabled: false } } }),
             };
         `, resolveDir: import.meta.dir, loader: 'ts' },
         bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent',
@@ -96,6 +97,35 @@ const fixture = (platform: 'ios' | 'android' = 'ios') => {
 };
 
 describe('actual exported native diagnostic bridge', () => {
+    it.each(['Native Whisper model store initialized', 'Native Whisper model operation failed'])('persists %s with logging disabled', async (message) => {
+        const f = fixture(); await f.boot(); f.state.fixture.disableLogging();
+        const context = { releaseCheck: 'v1.3.8/ios-whisper-model-download', stage: 'writer', outcome: 'failed', reason: 'writerFile', errno: 13 };
+        expect(await f.poll(f.state.MindwtrHost.logLine(message, JSON.stringify(context)))).toEqual({ ok: true, value: {} });
+        expect(await f.poll(f.state.MindwtrHost.logLine('Unrelated diagnostic', '{}'))).toEqual({ ok: true, value: {} });
+        await f.poll(f.state.MindwtrHost.logShare());
+        const entries = f.logText().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        expect(entries.filter((entry) => entry.message === message).map((entry) => entry.context)).toEqual([{ ...context, errno: '13' }]);
+        expect(entries.some((entry) => entry.message === 'Unrelated diagnostic')).toBe(false);
+        expect(f.requests).toEqual([]); expect(f.writes).toEqual([]);
+    });
+    it('persists ordinary next-action proof with logging off without forcing unrelated lines', async () => {
+        const f = fixture(); await f.boot(); f.state.fixture.disableLogging();
+        const message = 'Native iOS ordinary project next action confirmed';
+        for (const outcome of ['eligible', 'choose', 'add', 'completeProject']) {
+            const context = { releaseCheck: 'v1.3.8/ios-ordinary-project-next-action', completionSource: 'completion', outcome, scope: 'project' };
+            expect(await f.poll(f.state.MindwtrHost.logLine(message, JSON.stringify(context)))).toEqual({ ok: true, value: {} });
+        }
+        expect(await f.poll(f.state.MindwtrHost.logLine('Unrelated diagnostic', '{}'))).toEqual({ ok: true, value: {} });
+        await f.poll(f.state.MindwtrHost.logShare());
+        const entries = f.logText().trim().split('\n').map((line) => JSON.parse(line));
+        expect(entries.filter((entry) => entry.message === message).map((entry) => entry.context)).toEqual(
+            ['eligible', 'choose', 'add', 'completeProject'].map((outcome) => ({
+                releaseCheck: 'v1.3.8/ios-ordinary-project-next-action', completionSource: 'completion', outcome, scope: 'project',
+            })),
+        );
+        expect(entries.some((entry) => entry.message === 'Unrelated diagnostic')).toBe(false);
+        expect(f.requests).toEqual([]); expect(f.writes).toEqual([]);
+    });
     it.each([['ios', 'native-ios'], ['android', 'native-android']] as const)('keeps the %s caller platform in the exported log', async (platform, scope) => {
         const f = fixture(platform); await f.boot(); f.state.fixture.enableLogging();
         const message = platform === 'ios' ? 'Native iOS Inbox filters applied' : 'Native Android queue drain';

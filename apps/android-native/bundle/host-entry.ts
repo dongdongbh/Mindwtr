@@ -1,6 +1,27 @@
+import { exact, record, isNativeJsonWithinBytes } from '../../../packages/core/src/native-json';
+import { readNativeIosDropboxConfiguration, type NativeIosDropboxCapability } from './host-ios-dropbox';
+import { createNativeGmail } from './host-gmail';
+import { discoverNativeAITextModels, discoverNativeVoiceModels } from '../../../packages/core/src/native-ai-model-discovery';
+import { readNativeAIExtraBodyInput } from '../../../packages/core/src/native-host-contract-ai';
+import { readWatchOpenAIRuntime, buildWatchOpenAITranscription, decodeWatchOpenAITranscription, buildWatchOpenAIParse, decodeWatchOpenAIParse } from './ios-watch-openai';
+import { ingestIOSWatchBatch, readIOSWatchBatchOutcome, ingestIOSWatchAudio, readIOSWatchAudioOutcome, readIOSWatchAudioNeedsTranscript } from './ios-watch-ingest';
+import { createNativeShareCaptureMethods } from '../../../packages/core/src/native-share-capture';
+import { readIOSShareCaptureDraft } from './ios-share-capture';
 import {
     DEFAULT_GLOBAL_SEARCH_FILTERS,
+    getOnboardingGuideUrl,
+    ONBOARDING_TOPIC_COPY,
+    formatOpenAIExtraBodyParams,
+    getSelectedMobileWhisperModel,
+    normalizeSpeechLanguage,
+    WHISPER_MODEL_BASE_URLS,
     buildNativePomodoroPanel,
+    buildWatchApplicationContext,
+    WATCH_FOCUS_TASK_LIMIT,
+    createPomodoroState,
+    sanitizePomodoroDurations,
+    isTaskActionable,
+    isTaskCancelled,
     readNativePomodoroPresentation,
     NativeReceiptSqliteAdapter,
     PENDING_CAPTURES_DIRECTORY,
@@ -34,6 +55,14 @@ import {
     buildFeedbackDiagnosticsSnapshot,
     buildImmediateNotificationDetails,
     buildShortcutsSnapshot,
+    createWidgetPayloadProjection,
+    createPublishedWidgetProjection,
+    iosWidgetProjectionOptions,
+    IOS_WIDGET_FAMILY_CACHE_ITEMS,
+    getFocusWidgetFilter,
+    setFocusWidgetFilter,
+    type NativeFocusView,
+    focusWidgetFilterKey,
     buildNativeBackupDocumentFailure,
     buildNativeBackupDocumentResult,
     buildNativeBackupSnapshotRestoreConfirmation,
@@ -132,13 +161,21 @@ import {
     webdavPutFile,
     webdavPutJson,
 } from '@mindwtr/core';
+import { countTasksForIconBadge } from '../../../packages/core/src/task-icon-badge';
 import { createNativeAbout } from './host-about';
 import { createNativeAI } from './host-ai';
+import { createIOSTaskAI } from './host-ios-task-ai';
+import { createIOSInboxAI } from './host-ios-inbox-ai';
+import { createIOSReviewAI } from './host-ios-review-ai';
+import { isAIKeyRequired } from '../../../packages/core/src/ai-config';
+import type { NativeAIHost } from '../../../packages/core/src/native-host-contract-ai';
 import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundle/host-calendar';
+import { createNativeCloudKitRecords } from '../../ios-native/bundle/host-cloudkit';
+import { createNativeCloudKitAssets, type NativeCloudKitTransportCall } from '../../ios-native/bundle/host-cloudkit-assets';
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
-    prepareNativeTaskAttachmentAvailability, prepareNativeProjectFileAvailability, nativeProjectFileAvailabilityInitialURL,
+    prepareNativeTaskAttachmentAvailability, nativeTaskAttachmentPreparationUsesCloudKit, prepareNativeProjectFileAvailability, nativeProjectFileAvailabilityInitialURL,
     createNativeReadOnlySelfHostedAttachments, assertNativeSelfHostedAttachmentEncryptionAdmission } from './host-attachments';
 import { PROJECT_SQLITE_COLUMNS } from '../../../packages/core/src/project-sync-schema';
 import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from '../../../packages/core/src/task-sync-schema';
@@ -153,11 +190,15 @@ import { prepareNativeAppleReminderImportItem, validatePreparedNativeAppleRemind
     type NativeAppleReminderImportRequest } from '../../../packages/core/src/native-apple-reminders-import-item';
 import { createNativeAppleReminderImportOwner } from '../../../packages/core/src/native-apple-reminders-import-owner';
 import { prepareNativePomodoroTransition, validatePreparedNativePomodoroTransition,
-    MAX_NATIVE_POMODORO_PLAN_BYTES, type NativePomodoroRequest } from '../../../packages/core/src/native-pomodoro-session';
+    MAX_NATIVE_POMODORO_PLAN_BYTES, parseNativeWatchPomodoroSource, type NativePomodoroRequest } from '../../../packages/core/src/native-pomodoro-session';
 import { NativePomodoroTransitionRefusal } from '../../../packages/core/src/native-request-receipts';
 import { buildNativePomodoroAlarmIntent } from '../../../packages/core/src/native-pomodoro-alarm';
 import { planNativePomodoroAlarmEffects, prepareNativePomodoroAlarmDispatch } from '../../../packages/core/src/native-pomodoro-alarm-effects';
 import { buildNativeAISettingsProjection } from '../../../packages/core/src/native-ai-settings-projection';
+import { createNativeAITextConfigurationMethods, nativeAITextConfigurationConsentTarget, readNativeAITextConfigurationRequestV2 } from '../../../packages/core/src/native-ai-text-configuration';
+import { createNativeVoiceMethods } from '../../../packages/core/src/native-voice';
+import { buildRemoteGeminiSpeechRequest, decodeRemoteGeminiSpeechResponse, type GeminiSpeechRequestConfig } from '../../../packages/core/src/speech-to-task';
+import { createDateFormatter } from '../../../packages/core/src/date';
 import { createNativeAIRequestTimeoutMethods } from '../../../packages/core/src/native-ai-request-timeout';
 import { createNativeAIReasoningEffortMethods } from '../../../packages/core/src/native-ai-reasoning-effort';
 import { createNativeAIGeminiThinkingBudgetMethods } from '../../../packages/core/src/native-ai-gemini-thinking-budget';
@@ -170,6 +211,7 @@ import { createIosDirectoryFileSync, createIosFileSync, createNativeSync, create
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
 type NativeBridge = {
+    cloudKitAvailable?(): boolean;
     sqlRun(sql: string, params: string): string | null;
     sqlAll(sql: string, params: string): string;
     sqlExec(sql: string): string | null;
@@ -222,6 +264,8 @@ type NativeBridge = {
     debugProp?(name: string): string;
     /** Android debug builds only (pass D1c step 0): logs QuickJS's memory at a named checkpoint. */
     memProbe?(label: string): string | null;
+    gmailFile?(op: string, name: string, to: string): string;
+    gmailSql?(name: string, sql: string, paramsJson: string): string;
 };
 
 declare const globalThis: Record<string, unknown> & { MindwtrHost?: unknown; fetch: typeof fetch };
@@ -568,7 +612,50 @@ const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
 let iosManualSync: NativeSync | null = null;
 let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
 let iosDirectorySync: ReturnType<typeof createIosDirectoryFileSync> | null = null;
-const ensureIosManualSync = (): NativeSync => iosManualSync ??= createNativeSync({ ...nativeSyncBindings,
+const iosCloudKitAvailable = () => globalThis.__mindwtrHostPlatform === 'ios'
+    && native().cloudKitAvailable?.() === true && typeof globalThis.__mindwtrCloudKitCall === 'function';
+let iosSelectedCloudKitSource: ((metadataJSON: string, plaintextBase64: string) => string) | null = null;
+let iosCloudKitTail: Promise<unknown> = Promise.resolve();
+const iosCloudKitCall: NativeCloudKitTransportCall = (request, signal) => {
+    const selectedOwner = iosSelectedCloudKitSource, cleanupOwner = iosCleanupCallback;
+    const result = iosCloudKitTail.then(() => {
+        const selected = selectedOwner !== null && iosSelectedCloudKitSource === selectedOwner;
+        const cleanup = cleanupOwner !== null && iosCleanupCallback === cleanupOwner;
+        if ((!selected && !cleanup) || !iosCloudKitAvailable()
+            || (selected && request.op !== 'fetchAttachmentAsset')) throw new Error('CloudKit requires an owned foreground invocation');
+        if (signal?.aborted) throw signal.reason ?? new Error('CloudKit operation cancelled');
+        return (globalThis.__mindwtrCloudKitCall as NativeCloudKitTransportCall)(request, signal);
+    });
+    iosCloudKitTail = result.catch(() => {});
+    return result;
+};
+const iosCloudKitRecords = createNativeCloudKitRecords(iosCloudKitCall);
+let iosDropboxControl: ((requestJSON: string) => unknown) | null = null;
+let iosDropboxRequestId: string | null = null;
+let iosDropboxSignal: AbortSignal | undefined;
+const iosDropboxReply = (phase: 'configuration' | 'assertCurrent'): unknown => {
+    const control = iosDropboxControl;
+    if (!control || iosDropboxSignal?.aborted) throw new Error('NOT_READY: Dropbox requires its current foreground owner');
+    const reply = control(JSON.stringify({ phase }));
+    if (typeof reply !== 'string' || new TextEncoder().encode(reply).length > 4096 || reply.startsWith('!MindwtrNativeError:'))
+        throw new Error('NOT_READY: Dropbox foreground ownership is unavailable');
+    try { return JSON.parse(reply) as unknown; } catch { throw new Error('NOT_READY: Dropbox foreground ownership is invalid'); }
+};
+const iosDropboxCapability: NativeIosDropboxCapability = {
+    configuration: () => readNativeIosDropboxConfiguration(iosDropboxControl ? iosDropboxReply('configuration') : null),
+    assertCurrent: () => { const reply = iosDropboxReply('assertCurrent');
+        if (!reply || typeof reply !== 'object' || Array.isArray(reply) || Object.keys(reply).length !== 1 || (reply as { current?: unknown }).current !== true)
+            throw new Error('NOT_READY: Dropbox foreground owner changed'); },
+    authorizationRequestId: () => { iosDropboxCapability.assertCurrent(); if (!iosDropboxRequestId) throw new Error('NOT_READY: Dropbox authorization requires its original Connect request'); return iosDropboxRequestId; },
+    authorize: request => { iosDropboxCapability.assertCurrent(); if (request.requestId !== iosDropboxRequestId) throw new Error('NOT_READY: Dropbox authorization request changed'); const call = (globalThis as { __mindwtrDropboxCall?: (input: unknown, signal?: AbortSignal) => Promise<unknown> }).__mindwtrDropboxCall;
+        if (!call) throw new Error('NOT_READY: Dropbox authorization is unavailable'); return call(request, iosDropboxSignal); },
+};
+const ensureIosManualSync = (): NativeSync => iosManualSync ??= createNativeSync({ ...nativeSyncBindings, dropbox: iosDropboxCapability,
+                    ...(iosCloudKitAvailable() ? { cloudKit: {
+                        ...iosCloudKitRecords, isAvailable: iosCloudKitAvailable,
+                        getAccountStatus: () => iosCloudKitRecords.accountStatus(),
+                        assets: createNativeCloudKitAssets(iosCloudKitCall),
+                    } } : {}),
                     performFileSync: (path, options) => {
                         if (!iosDirectorySync) throw new Error('Directory File Sync requires an explicit manual action');
                         return iosDirectorySync.performFileSync(path, options);
@@ -608,6 +695,7 @@ const requireSync = (): NativeSync => {
 
 /** The language Kotlin last passed to setLanguage (RN's `mindwtr-language`), which the widgets' language falls back on as RN's does. */
 let storedLanguage: string | null = null;
+let iosVoiceSystemLocale: string | null = null;
 /** The home-screen widgets (host-widgets.ts), on a host with RN's widget module (Android); none on iOS or the gates' bridge. */
 const widgets = typeof (globalThis.__mindwtrNative as { widgetPublish?: unknown } | undefined)?.widgetPublish === 'function'
     ? createWidgetPublisher({
@@ -619,8 +707,23 @@ const widgets = typeof (globalThis.__mindwtrNative as { widgetPublish?: unknown 
     })
     : null;
 
+/** iOS has no Android widget publisher; retain the successful canonical screen input for its read-only widget projection. */
+const cacheIOSFocusWidgetFilter = (focus: NativeFocusView): void => {
+    if (globalThis.__mindwtrHostPlatform !== 'ios') return;
+    const filter = focus.controls?.widgetFilter;
+    if (filter) setFocusWidgetFilter({ criteria: filter.criteria, sortBy: filter.sortBy, sortOrder: filter.sortOrder ?? undefined });
+};
+
 /** Settings › AI and the AI actions (host-ai.ts), on the same host: RN's AsyncStorage and SecureStore hold what RN's do. */
 const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwtrSecrets as HostSecrets, isFossBuild) : null;
+let iosCaptureAIHost: NativeAIHost | null = null;
+let iosTaskAI: ReturnType<typeof createIOSTaskAI> | null = null;
+let iosInboxAI: ReturnType<typeof createIOSInboxAI> | null = null;
+let iosReviewAI: ReturnType<typeof createIOSReviewAI> | null = null;
+let iosConfigurationAIHost: NativeAIHost | null = null;
+let iosConfigurationAIActive = false;
+let iosCaptureAIQuestion: { revision: string; request: { title: string; contexts: string[]; tags: string[] };
+    settings: ReturnType<typeof useTaskStore.getState>['settings']; language: string } | null = null;
 /** Settings › About, the heartbeat and the store review prompt (host-about.ts), on the host Kotlin describes in `__mindwtrAppInfo`. */
 const nativeAbout = nativeSync ? createNativeAbout(globalThis.__mindwtrAppInfo, keyValue, generateUUID, collectFeedbackDiagnostics) : null;
 
@@ -690,7 +793,7 @@ let readSyncSettingsRetirementStatus: (() => { pending: boolean; uncertain: bool
 const contract = createNativeHostContract({
     ...(globalThis.__mindwtrHostPlatform === 'ios' ? {
         registerSyncSettingsRetirementStatus: (read: () => { pending: boolean; uncertain: boolean }) => { readSyncSettingsRetirementStatus = read; },
-    } : {}), reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
+    } : {}), reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, get ai() { return nativeAI ?? iosTaskAI?.host ?? iosInboxAI?.host ?? iosReviewAI?.host ?? iosCaptureAIHost ?? iosConfigurationAIHost ?? undefined; },
     calendar: iosCalendar ?? nativeCalendar ?? undefined,
     get attachments() {
         const selected = iosProjectAttachmentDownload ? iosSelfHostedProjectAttachments?.contractHost ?? iosManualSync?.attachmentsHost : attachmentsHost;
@@ -734,10 +837,10 @@ const projectAvailabilityDeps = (projectId: string): Parameters<typeof createPre
     },
 });
 const preparedProjectAvailability = (projectId: string, backend: string = 'cloud') => {
-    if (backend !== 'cloud' && backend !== 'webdav') throw new Error('NOT_READY: Project download is unavailable');
+    if (backend !== 'cloud' && backend !== 'webdav' && backend !== 'dropbox') throw new Error('NOT_READY: Project download is unavailable');
     return createPreparedProjectAvailabilityMethods({
     ...projectAvailabilityDeps(projectId), translate: (key) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key,
-}, backend === 'webdav' ? 'webdav' : 'strict');
+}, backend === 'webdav' ? 'webdav' : backend === 'dropbox' ? 'dropbox' : 'strict');
 };
 
 /**
@@ -775,6 +878,22 @@ const completionJson = (json: string, limit: number): unknown => {
     try { if (json.length <= limit) return JSON.parse(json); }
     catch { /* Do not expose a parser excerpt of task text or a link. */ }
     throw new Error('Invalid bounded completion request');
+};
+const taskCompletionJson = (json: string, limit: number): unknown => {
+    const input = completionJson(json, limit);
+    if (globalThis.__mindwtrHostPlatform !== 'ios') {
+        const field = (value: unknown, name: string): unknown => value !== null && typeof value === 'object'
+            && !Array.isArray(value) ? Reflect.get(value, name) : undefined;
+        const prepared = field(input, 'prepared');
+        const requests = [input, field(input, 'request'), field(field(input, 'completion'), 'request'),
+            field(field(prepared, 'completion'), 'request'),
+            field(field(field(input, 'origin'), 'envelope'), 'request'),
+            field(field(field(prepared, 'origin'), 'envelope'), 'request')];
+        if (requests.some(request => field(request, 'source') === 'row')
+            || ['rowComplete', 'rowCompleteUndo'].includes(String(field(prepared, 'kind'))))
+            throw new Error('INVALID_INPUT: Row completion requires iOS');
+    }
+    return input;
 };
 const taskAttachmentInput = (json: string, fields: string[], optional: string[] = []): Record<string, unknown> => {
     const input = editorJson(json);
@@ -903,6 +1022,33 @@ const logLegacyImport = (plan: ReturnType<typeof planLegacyJsonImport>, rnState:
 const requireSaved = () => {
     const failure = useTaskStore.getState().persistenceFailure;
     if (failure) throw new Error('SAVE_FAILED: Previous changes could not be saved; retry before continuing');
+};
+
+const iosGmail = globalThis.__mindwtrHostPlatform === 'ios' && typeof globalThis.__mindwtrGmailCall === 'function'
+    && typeof native().gmailFile === 'function' && typeof native().gmailSql === 'function'
+    ? createNativeGmail({
+        platform: 'ios',
+        call: globalThis.__mindwtrGmailCall as (request: { op: string; path?: string }) => Promise<unknown>,
+        file: (op, name, to = '') => checked(native().gmailFile!(op, name, to)),
+        sql: (name, sql, params) => checked(native().gmailSql!(name, sql, params)),
+        addTasks: (items) => useTaskStore.getState().addTasks(items),
+        flushPendingSave,
+        requireSaved: () => requireSaved(),
+        sandbox: isSandboxMode,
+        logInfo,
+        logWarn,
+        statusChanged: () => {},
+        setTimer: (() => 0) as unknown as typeof setTimeout,
+        clearTimer: () => {},
+        maxRoundsPerCycle: 1,
+    })
+    : null;
+let iosGmailStarted = false;
+const requireIosGmail = () => {
+    if (!iosGmail || !bootAdapter || getStorageAdapter() !== bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) {
+        throw new Error('NOT_READY: Gmail capture is unavailable');
+    }
+    return iosGmail;
 };
 
 const deviceCalendarStorage = {
@@ -1180,6 +1326,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     trash: (input) => contract.getTrashView(input),
     review: (input) => contract.getReviewOverview(input),
     reviewOverview: (input) => contract.getReviewOverview(input),
+    reviewProjectCompletionOptions: (input) => contract.getReviewProjectCompletionOptions(input),
     // The reviews and the Calendar with each screen's external calendars (host-calendar.ts): Kotlin sends none of its own.
     weekly: (input) => contract.getWeeklyReview(withReview('weeklyReview', input)),
     weeklyReview: (input) => contract.getWeeklyReview(withReview('weeklyReview', input)),
@@ -1208,7 +1355,11 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     inboxTokens: (input) => contract.getInboxFilterTokens(input),
     archiveTokens: (input) => contract.getArchiveFilterTokens(input),
     bulk: (input) => contract.getBulkActions(input),
-    focus: (input) => contract.getFocus(input),
+    focus: (input) => {
+        const reply = contract.getFocus(input);
+        if (reply.ok) cacheIOSFocusWidgetFilter(reply.value);
+        return reply;
+    },
     focusSection: (input) => contract.getFocusSectionWindow(input),
     focusList: (input) => contract.getFocusControlsList(input),
     focusControls: (input) => contract.getFocusControlsList(input),
@@ -1479,7 +1630,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     // a journal keeps its receipts in memory, as before.
     traceStep('js:receipts');
     if (journaled) await adapter.withConnection(() => loadNativeRequestReceipts(sqlite), { write: true });
-    else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: ['appLock', 'notificationSetting', 'aiRequestTimeout', 'aiReasoningEffort', 'aiGeminiThinkingBudget', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'boardTaskCompletion', 'boardTaskCompletionUndo', 'boardTaskReactivate', 'boardTaskOrder', 'archivedTaskRestore', 'archivedTasksRestore', 'trashItemsRestore', 'trashItemsPurge', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'inboxTasksDelete', 'inboxTasksDeleteUndo', 'referenceTasksMove', 'inboxTasksMove', 'inboxTasksAddTag', 'inboxTasksRemoveTag', 'inboxTasksOrganize', 'inboxOrganizeDestinationCreate', 'inboxPreparedCommit', 'inboxUndo', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument', 'pomodoroTransition', 'appleReminderImportItem'] }), { write: true });
+    else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: [...(globalThis.__mindwtrHostPlatform === 'ios' ? ['rowTaskFocus', 'rowTaskDates', 'rowTaskDestination', 'taskChecklistMove', 'taskChecklistMoveUndo', 'rowTaskBackdate', 'projectTasksDelete', 'projectTasksDeleteUndo', 'projectOrganizeDestinationCreate', 'projectTasksOrganize', 'projectTasksRemoveTag', 'projectTasksAddTag', 'projectTasksMove', 'rowTaskCompletion', 'rowTaskCompletionUndo', 'iosRowQuickStatus', 'iosInlineChecklist', 'gettingStarted', 'voiceSettings', 'voiceCapture', 'voiceResult', 'review', 'weeklyReviewProjectTask', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem', 'somedaySectionBulkMove', 'somedaySectionBulkMoveUndo'] : []), 'appLock', 'notificationSetting', 'aiTextConfiguration', 'aiTextConfigurationV2', 'aiRequestTimeout', 'aiReasoningEffort', 'aiGeminiThinkingBudget', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'boardTaskCompletion', 'boardTaskCompletionUndo', 'boardTaskReactivate', 'boardTaskOrder', 'archivedTaskRestore', 'archivedTasksRestore', 'trashItemsRestore', 'trashItemsPurge', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'inboxTasksDelete', 'inboxTasksDeleteUndo', 'waitingTasksDelete', 'waitingTasksDeleteUndo', 'somedayTasksDelete', 'somedayTasksDeleteUndo', 'reviewTasksDelete', 'reviewTasksDeleteUndo', 'contextsTasksDelete', 'contextsTasksDeleteUndo', 'referenceTasksMove', 'inboxTasksMove', 'inboxTasksAddTag', 'inboxTasksRemoveTag', 'inboxTasksOrganize', 'inboxOrganizeDestinationCreate', 'inboxPreparedCommit', 'inboxUndo', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument', 'pomodoroTransition', 'appleReminderImportItem'] }), { write: true });
     // The legacy import plans from a validated full read. Any other boot needs only the schema here: the activation's own read
     // is validated before anything saves.
     traceStep('js:schema');
@@ -1493,6 +1644,16 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
     bootAdapter = adapter;
     return result;
 });
+
+iosTaskAI = createIOSTaskAI({ contract, adapter: () => bootAdapter,
+    isIOS: () => globalThis.__mindwtrHostPlatform === 'ios',
+    otherAIActive: () => Boolean(iosCaptureAIHost || iosConfigurationAIHost || iosConfigurationAIActive || iosInboxAI?.active || iosReviewAI?.active), isFossBuild });
+iosInboxAI = createIOSInboxAI({ contract, adapter: () => bootAdapter,
+    isIOS: () => globalThis.__mindwtrHostPlatform === 'ios',
+    otherAIActive: () => Boolean(iosCaptureAIHost || iosConfigurationAIHost || iosConfigurationAIActive || iosTaskAI?.active || iosReviewAI?.active), isFossBuild });
+iosReviewAI = createIOSReviewAI({ contract, adapter: () => bootAdapter,
+    isIOS: () => globalThis.__mindwtrHostPlatform === 'ios',
+    otherAIActive: () => Boolean(iosCaptureAIHost || iosConfigurationAIHost || iosConfigurationAIActive || iosTaskAI?.active || iosInboxAI?.active), isFossBuild });
 
 // Reference and Done use the RN list's single tag-input and count policy.
 const taskListBulkTagInput = (tag: string, changedCount: number): string => submit(async () => {
@@ -1527,6 +1688,421 @@ const inspectBackup = (read: () => string, metadataJSON: string, format: string)
     }
     if (format !== 'json' && format !== 'json-restore' && format !== 'csv' && format !== 'todoist' && format !== 'ticktick' && format !== 'dgt' && format !== 'omnifocus') throw new Error('INVALID_INPUT: Invalid backup document input');
     return inspectNativeBackupDocument(read(), backupJson(metadataJSON) as Parameters<typeof inspectNativeBackupDocument>[1], backupTranslate, format);
+};
+
+const iosWatchReadiness = () => {
+    if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+        || !bootAdapter.concurrentWritesGuarded || isSandboxMode() || isWorkspaceTransitionActive())
+        throw new Error('NOT_READY: Watch intake requires current personal storage');
+};
+const iosShareCaptureMethods = createNativeShareCaptureMethods({ contract, current: () => {
+    if (globalThis.__mindwtrHostPlatform !== 'ios' || isSandboxMode() || isWorkspaceTransitionActive())
+        throw new Error('ACTION_FAILED: Native share waits for its original workspace');
+    requireSaved();
+} });
+const iosVoiceReadiness: Parameters<typeof createNativeVoiceMethods>[0]['readiness'] = () => {
+    if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+        || !bootAdapter.concurrentWritesGuarded || isSandboxMode() || isWorkspaceTransitionActive())
+        return { ok: false, error: { code: 'NOT_READY', message: 'Voice requires current personal storage' } };
+    return { ok: true, value: null };
+};
+const iosVoiceMethods = createNativeVoiceMethods({
+    readiness: iosVoiceReadiness,
+    save: async () => {
+        try { await flushPendingSave(); requireSaved(); return { ok: true, value: null }; }
+        catch { return { ok: false, error: { code: 'SAVE_FAILED', message: 'Voice save could not be confirmed' } }; }
+    },
+    t: () => backupTranslate, revision: now => `voice:${now.toISOString()}`,
+    requestIdPattern: /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/,
+    formatDate: () => {
+        const settings = useTaskStore.getState().settings;
+        return createDateFormatter({ language: settings.language || unwrap(contract.getStrings({ keys: [] })).language,
+            dateFormat: settings.dateFormat, calendarSystem: settings.calendarSystem, timeFormat: settings.timeFormat,
+            systemLocale: iosVoiceSystemLocale });
+    },
+});
+const iosVoiceOwner = (owner: () => unknown, signal: AbortSignal) => {
+    unwrap(iosVoiceReadiness());
+    if (typeof owner !== 'function') throw new Error('INVALID_INPUT: Voice requires private owner authority');
+    const adapter = bootAdapter;
+    const current = () => {
+        unwrap(iosVoiceReadiness());
+        if (signal.aborted || bootAdapter !== adapter) throw new Error('STALE_REVISION: Voice owner is unavailable');
+        let reply: unknown;
+        try { reply = checked(owner()); } catch { throw new Error('STALE_REVISION: Voice owner is unavailable'); }
+        if (reply !== '') throw new Error('STALE_REVISION: Voice owner is unavailable');
+    };
+    current(); return current;
+};
+const iosVoiceJSON = (json: string, limit: number): unknown => {
+    if (typeof json !== 'string' || json.length > limit || new TextEncoder().encode(json).byteLength > limit)
+        throw new Error('INVALID_INPUT: Voice input exceeds its bound');
+    return completionJson(json, limit);
+};
+
+const aiTextConfigurationMethods = createNativeAITextConfigurationMethods({
+    readiness: () => {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || getStorageAdapter() !== bootAdapter
+            || !bootAdapter.concurrentWritesGuarded || isSandboxMode() || isWorkspaceTransitionActive())
+            return { ok: false, error: { code: 'NOT_READY', message: 'AI text configuration requires current personal storage' } };
+        return { ok: true, value: null };
+    },
+    save: async () => {
+        try { await flushPendingSave(); requireSaved(); return { ok: true, value: null }; }
+        catch { return { ok: false, error: { code: 'SAVE_FAILED', message: 'AI text configuration save could not be confirmed' } }; }
+    },
+    t: () => backupTranslate,
+});
+const aiTextConfigurationOwner = (owner: () => unknown, signal: AbortSignal) => {
+    if (typeof owner !== 'function') throw new Error('INVALID_INPUT: AI text configuration needs private owner authority');
+    return () => {
+        if (signal.aborted || checked(owner()) !== '') throw new Error('STALE_REVISION: AI text configuration owner is unavailable');
+    };
+};
+type AITextConfigurationSession = {
+    id: string; provider: 'openai' | 'gemini' | 'anthropic'; version: 1 | 2; adapter: NonNullable<ReturnType<typeof getStorageAdapter>>; generation: number;
+    settings: ReturnType<typeof useTaskStore.getState>['settings']; frozen: unknown;
+    extraBodyAttempts: Map<string, { expected: unknown; pending: { authority: unknown[]; frozen: unknown } | null }>;
+    acceptedAdvance: { generation: number; settings: ReturnType<typeof useTaskStore.getState>['settings']; frozen: unknown } | null;
+};
+let iosAITextConfigurationSession: AITextConfigurationSession | null = null;
+// A sensitive failed save retains only its process receipt UUID and scalar witness.
+// The endpoint remains solely in core's already accepted in-memory settings snapshot.
+type AIEndpointRetry = { session: string; requestId: string; expected: unknown; authority: unknown[]; frozen: unknown };
+let iosAITextEndpointRetry: AIEndpointRetry | null = null;
+const aiTextSnapshotReferences = () => {
+    const state = useTaskStore.getState();
+    return [state._allTasks, state._allProjects, state._allSections, state._allAreas, state._allPeople, state.settings];
+};
+const currentAITextConfigurationSession = (id: string, requireSettings = true, requirePersistence = true) => {
+    const session = iosAITextConfigurationSession, state = useTaskStore.getState(), status = getPersistenceStatus();
+    if (globalThis.__mindwtrHostPlatform !== 'ios' || !session || session.id !== id || bootAdapter !== session.adapter
+        || getStorageAdapter() !== session.adapter || status.generation !== session.generation || isSandboxMode()
+        || isWorkspaceTransitionActive() || state.isLoading || state.editLockCount > 0
+        || requireSettings && ((state.settings.ai?.provider ?? 'openai') !== session.provider || state.settings !== session.settings || !taskEditValuesEqual(state.settings, session.frozen))) {
+        iosAITextConfigurationSession = null;
+        throw new Error('STALE_REVISION: AI text configuration session changed');
+    }
+    if (requirePersistence) requireSaved(); return session;
+};
+// Only a selected setter/commit that returned a confirmed result may publish
+// this transition. Ordinary session checks never advance a save generation.
+const retainAITextConfigurationAdvance = (session: AITextConfigurationSession) => {
+    const state = useTaskStore.getState();
+    if (iosAITextConfigurationSession !== session || bootAdapter !== session.adapter || getStorageAdapter() !== session.adapter
+        || isSandboxMode() || isWorkspaceTransitionActive() || state.isLoading || state.editLockCount > 0)
+        throw new Error('STALE_REVISION: AI text configuration session changed');
+    session.acceptedAdvance = { generation: getPersistenceStatus().generation, settings: state.settings,
+        frozen: JSON.parse(JSON.stringify(state.settings)) };
+};
+const refreshAITextConfigurationSession = (id: string) => {
+    const retained = iosAITextConfigurationSession, advance = retained?.id === id ? retained.acceptedAdvance : null;
+    if (!retained || !advance) { currentAITextConfigurationSession(id); return; }
+    const state = useTaskStore.getState();
+    if (bootAdapter !== retained.adapter || getStorageAdapter() !== retained.adapter || isSandboxMode() || isWorkspaceTransitionActive()
+        || state.isLoading || state.editLockCount > 0 || getPersistenceStatus().generation !== advance.generation
+        || state.settings !== advance.settings || !taskEditValuesEqual(state.settings, advance.frozen)) {
+        iosAITextConfigurationSession = null;
+        throw new Error('STALE_REVISION: AI text configuration saved transition changed');
+    }
+    requireSaved();
+    retained.generation = advance.generation; retained.settings = advance.settings; retained.frozen = advance.frozen;
+    retained.acceptedAdvance = null;
+};
+
+const aiModelDiscoveryOwner = (owner: (json: string) => unknown) => {
+    const ask = (request: object): string => {
+        try {
+            const raw = checked(owner(JSON.stringify(request)));
+            if (typeof raw === 'string') return raw;
+        } catch { /* Native error text is private. */ }
+        throw new Error('NOT_READY: AI model discovery owner is unavailable');
+    };
+    const readReply = (request: object): unknown => {
+        try { return completionJson(ask(request), 32 * 1024); }
+        catch { throw new Error('NOT_READY: AI model discovery metadata is unavailable'); }
+    };
+    return { ask, readReply };
+};
+
+// Sensitive attempt identities live only for this original page session; never in a durable journal.
+const runAITextExtraBody = async (input: Record<string, unknown>, owner: (json: string) => unknown, signal: AbortSignal) => {
+    const saving = input.op === 'save-extra-body', sessionId = input.session as string;
+    const fields = saving ? ['session', 'op', 'expected', 'attempt', 'value'] : ['session', 'op', 'expected'];
+    if (!taskEditValuesEqual(Object.keys(input).sort(), fields.sort())
+        || saving && (typeof input.attempt !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.attempt)
+            || typeof input.value !== 'string' || !readNativeAIExtraBodyInput(input.value)))
+        throw new Error('INVALID_INPUT: AI extra body parameters are invalid');
+    const session = iosAITextConfigurationSession;
+    const admit = (phase = 'current') => {
+        const state = useTaskStore.getState();
+        if (signal.aborted || globalThis.__mindwtrHostPlatform !== 'ios' || !session || session.id !== sessionId
+            || session.version !== 2 || session.provider !== 'openai' || iosAITextConfigurationSession !== session
+            || bootAdapter !== session.adapter || getStorageAdapter() !== session.adapter
+            || isSandboxMode() || isWorkspaceTransitionActive() || state.isLoading || state.editLockCount > 0
+            || checked(owner(JSON.stringify({ phase }))) !== '')
+            throw new Error('STALE_REVISION: AI extra body editor changed');
+    };
+    admit();
+    if (!session) throw new Error('STALE_REVISION: AI extra body editor changed');
+    const attempt = input.attempt as string, value = input.value as string;
+    const retained = saving ? session.extraBodyAttempts.get(attempt) : undefined;
+    if (retained && !taskEditValuesEqual(retained.expected, input.expected))
+        throw new Error('STALE_REVISION: AI extra body attempt changed');
+    const unavailable = async (): Promise<never> => { throw new Error('NOT_READY: AI text configuration storage is private'); };
+    const host: NativeAIHost = { platform: { isFossBuild },
+        storage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable },
+        secrets: { get: unavailable, set: unavailable, delete: unavailable }, fetch: unavailable };
+    iosConfigurationAIHost = host;
+    try {
+        const intent = { requestId: attempt, text: value };
+        // A confirmed process receipt answers a lost reply even after a later edit; it never writes again.
+        if (saving) {
+            const saved = contract.probeAIExtraBodyParamsOutcome(intent);
+            if (saved) {
+                if (!saved.ok) throw new Error('INVALID_INPUT: AI extra body attempt changed');
+                if (!retained) throw new Error('STALE_REVISION: AI extra body attempt belongs to another editor');
+                admit(); return unwrap(saved);
+            }
+        }
+        const pending = retained?.pending;
+        const current = () => {
+            admit();
+            if (currentAITextConfigurationSession(sessionId, true, !pending) !== session
+                || pending && (!aiTextSnapshotReferences().every((value, index) => value === pending.authority[index])
+                    || !taskEditValuesEqual(pending.authority, pending.frozen)))
+                throw new Error('STALE_REVISION: AI extra body snapshot changed');
+        };
+        current();
+        if (retained && !pending) throw new Error('STALE_REVISION: AI extra body attempt has no saved proof');
+        if (!pending) {
+            const options = unwrap(await aiTextConfigurationMethods.optionsV2({}, current));
+            if (!taskEditValuesEqual(options.expected, input.expected))
+                throw new Error('STALE_REVISION: AI text configuration changed');
+        }
+        if (!saving) {
+            let parsed;
+            try { parsed = readNativeAIExtraBodyInput(formatOpenAIExtraBodyParams(session.settings.ai?.openAIExtraBodyParams)); }
+            catch { /* A stored value outside editor bounds is preserved, never truncated. */ }
+            if (!parsed) throw new Error('INVALID_INPUT: AI extra body parameters are unavailable');
+            current(); return { value: parsed.formatted };
+        }
+        if (!retained && session.extraBodyAttempts.size >= 128)
+            throw new Error('NOT_READY: Reopen the AI extra body editor');
+        const record = retained ?? { expected: input.expected, pending: null };
+        current(); admit('extra-body-save');
+        session.extraBodyAttempts.set(attempt, record);
+        try {
+            let written = await contract.setAIExtraBodyParams(intent);
+            if (pending && !written.ok && written.error.code === 'SAVE_FAILED') {
+                current(); await useTaskStore.getState().persistSnapshot(); await flushPendingSave(); requireSaved();
+                admit();
+                if (!aiTextSnapshotReferences().every((value, index) => value === pending.authority[index])
+                    || !taskEditValuesEqual(pending.authority, pending.frozen))
+                    throw new Error('STALE_REVISION: AI extra body snapshot changed');
+                written = await contract.setAIExtraBodyParams(intent);
+            }
+            if (!written.ok) {
+                if (written.error.code === 'SAVE_FAILED') {
+                    const authority = aiTextSnapshotReferences();
+                    record.pending = { authority, frozen: JSON.parse(JSON.stringify(authority)) };
+                    session.generation = getPersistenceStatus().generation; session.settings = useTaskStore.getState().settings;
+                    session.frozen = JSON.parse(JSON.stringify(session.settings)); session.acceptedAdvance = null;
+                }
+                throw new Error('ACTION_FAILED: AI extra body save could not be confirmed');
+            }
+            record.pending = null;
+            retainAITextConfigurationAdvance(session); refreshAITextConfigurationSession(sessionId);
+            admit(); return written.value;
+        } catch {
+            throw new Error('ACTION_FAILED: AI extra body save could not be confirmed');
+        }
+    } finally { if (iosConfigurationAIHost === host) iosConfigurationAIHost = null; }
+};
+
+const runAITextConfigurationSensitive = async (json: string, owner: (json: string) => unknown, signal: AbortSignal, version: 1 | 2) => {
+    if (iosConfigurationAIActive) throw new Error('NOT_READY: AI text configuration is already active');
+    iosConfigurationAIActive = true;
+    try {
+            const input = completionJson(json, 64 * 1024);
+            if (!input || typeof input !== 'object' || Array.isArray(input) || !('session' in input) || typeof input.session !== 'string'
+                || !('op' in input) || !['read-endpoint', 'save-endpoint', 'save-credential', 'clear-credential', ...(version === 2 ? ['read-extra-body', 'save-extra-body'] : [])].includes(String(input.op))
+                || !('expected' in input) || typeof owner !== 'function' || iosConfigurationAIHost || iosCaptureAIHost || iosTaskAI?.active || iosInboxAI?.active || iosReviewAI?.active)
+                throw new Error('INVALID_INPUT: AI text configuration request is invalid');
+            if (input.op === 'read-extra-body' || input.op === 'save-extra-body')
+                return await runAITextExtraBody(input as Record<string, unknown>, owner, signal);
+            const op = input.op, sessionId = input.session;
+            const writing = op === 'save-endpoint' || op === 'save-credential';
+            if (!taskEditValuesEqual(Object.keys(input).sort(), (writing ? ['session', 'op', 'expected', 'value'] : ['session', 'op', 'expected']).sort())
+                || writing && (!('value' in input) || typeof input.value !== 'string'))
+                throw new Error('INVALID_INPUT: AI text configuration request is invalid');
+            const retry = op === 'save-endpoint' && iosAITextEndpointRetry?.session === sessionId ? iosAITextEndpointRetry : null;
+            if (retry && (!taskEditValuesEqual(retry.expected, input.expected)
+                || !aiTextSnapshotReferences().every((value, index) => value === retry.authority[index])
+                || !taskEditValuesEqual(retry.authority, retry.frozen)))
+                throw new Error('STALE_REVISION: AI text endpoint retry changed');
+            const session = currentAITextConfigurationSession(sessionId, true, !retry);
+            if (session.version !== version || (op === 'read-endpoint' || op === 'save-endpoint') && session.provider !== 'openai')
+                throw new Error('STALE_REVISION: AI text configuration provider changed');
+            const admit = (request: object) => {
+                if (checked(owner(JSON.stringify(request))) !== '') throw new Error('STALE_REVISION: AI text configuration owner changed');
+            };
+            const current = () => {
+                if (signal.aborted || currentAITextConfigurationSession(sessionId, true, !retry) !== session)
+                    throw new Error('STALE_REVISION: AI text configuration owner changed');
+                admit({ phase: 'current' });
+            };
+            if (!retry) {
+                const options = version === 2 ? unwrap(await aiTextConfigurationMethods.optionsV2({}, current))
+                    : unwrap(await aiTextConfigurationMethods.options({}, current));
+                if (!taskEditValuesEqual(options.expected, input.expected)) throw new Error('STALE_REVISION: AI text configuration changed');
+            }
+            current();
+            if (op === 'read-endpoint') {
+                const value = session.settings.ai?.baseUrl;
+                if (value !== undefined && (typeof value !== 'string' || value.length > 2000))
+                    throw new Error('INVALID_INPUT: AI text endpoint is unavailable');
+                return { value: value ?? '' };
+            }
+            const value = writing && 'value' in input && typeof input.value === 'string' ? input.value : '';
+            if (op === 'save-credential' && !value.trim()) throw new Error('INVALID_INPUT: Enter a replacement credential');
+            const unavailable = async (): Promise<never> => { throw new Error('NOT_READY: AI text configuration storage is private'); };
+            const host: NativeAIHost = {
+                platform: { isFossBuild }, storage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable },
+                secrets: { get: unavailable, set: unavailable, delete: unavailable }, fetch: unavailable,
+                saveConfigurationKey: async (provider, replacement) => {
+                    current();
+                    if (provider !== session.provider) throw new Error('STALE_REVISION: AI text provider changed');
+                    admit({ phase: 'credential', value: replacement });
+                    current();
+                },
+            };
+            iosConfigurationAIHost = host;
+            const requestId = retry?.requestId ?? generateUUID();
+            try {
+                current();
+                let result;
+                if (op === 'save-endpoint') {
+                    const intent = { requestId, field: 'assistant', value } satisfies Parameters<typeof contract.setAIEndpoint>[0];
+                    let written = await contract.setAIEndpoint(intent);
+                    if (retry && !written.ok && written.error.code === 'SAVE_FAILED') {
+                        // The existing salted receipt matched this exact explicit input.
+                        // Requeue only the retained unchanged snapshot; no command is replayed.
+                        current();
+                        await useTaskStore.getState().persistSnapshot(); await flushPendingSave(); requireSaved();
+                        admit({ phase: 'current' });
+                        if (!aiTextSnapshotReferences().every((value, index) => value === retry.authority[index])
+                            || !taskEditValuesEqual(retry.authority, retry.frozen)) throw new Error('STALE_REVISION: AI text endpoint retry changed');
+                        retainAITextConfigurationAdvance(session); refreshAITextConfigurationSession(sessionId);
+                        current(); written = await contract.setAIEndpoint(intent);
+                    }
+                    result = unwrap(written);
+                } else result = unwrap(await contract.setAIKey({ requestId, field: 'assistant', provider: session.provider, value }));
+                admit({ phase: 'current' });
+                retainAITextConfigurationAdvance(session); refreshAITextConfigurationSession(sessionId);
+                if (op === 'save-endpoint') iosAITextEndpointRetry = null;
+                return op === 'save-endpoint' && 'changed' in result ? { changed: result.changed } : { completed: true };
+            } catch {
+                if (op === 'save-endpoint' && getPersistenceStatus().failed) {
+                    const authority = aiTextSnapshotReferences();
+                    iosAITextEndpointRetry = { session: sessionId, requestId, expected: input.expected, authority,
+                        frozen: JSON.parse(JSON.stringify(authority)) };
+                    session.generation = getPersistenceStatus().generation;
+                    session.settings = useTaskStore.getState().settings;
+                    session.frozen = JSON.parse(JSON.stringify(session.settings));
+                    session.acceptedAdvance = null;
+                }
+                // Secret text and endpoint errors never cross this private boundary.
+                throw new Error('ACTION_FAILED: AI text configuration could not be confirmed');
+            } finally { if (iosConfigurationAIHost === host) iosConfigurationAIHost = null; }
+    } finally { iosConfigurationAIActive = false; }
+};
+
+// Endpoint text stays in settings and this private editor, never a voice journal request.
+let iosVoiceEndpointSession: Omit<AITextConfigurationSession, 'provider' | 'version' | 'acceptedAdvance' | 'extraBodyAttempts'> | null = null;
+let iosVoiceEndpointRetry: AIEndpointRetry | null = null;
+const currentVoiceEndpointSession = (id: string, retry = false) => {
+    unwrap(iosVoiceReadiness());
+    const session = iosVoiceEndpointSession, state = useTaskStore.getState();
+    if (!session || session.id !== id || session.adapter !== bootAdapter || state.isLoading || state.editLockCount > 0
+        || state.settings.ai?.speechToText?.provider !== 'openai' || getPersistenceStatus().generation !== session.generation
+        || state.settings !== session.settings || !taskEditValuesEqual(state.settings, session.frozen))
+        throw new Error('STALE_REVISION: Voice endpoint session changed');
+    if (!retry) requireSaved();
+    return session;
+};
+const runVoiceEndpointSensitive = async (json: string, owner: (json: string) => unknown, signal: AbortSignal) => {
+    if (iosConfigurationAIActive || iosConfigurationAIHost || iosCaptureAIHost || iosTaskAI?.active || iosInboxAI?.active || iosReviewAI?.active)
+        throw new Error('NOT_READY: AI configuration is already active');
+    iosConfigurationAIActive = true;
+    try {
+        const input = iosVoiceJSON(json, 32 * 1024) as Record<string, unknown>;
+        if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.session !== 'string'
+            || typeof owner !== 'function' || !['read-endpoint', 'save-endpoint'].includes(String(input.op))
+            || !taskEditValuesEqual(Object.keys(input).sort(), (input.op === 'save-endpoint'
+                ? ['expected', 'op', 'session', 'value'] : ['expected', 'op', 'session']).sort())
+            || input.op === 'save-endpoint' && (typeof input.value !== 'string' || input.value.length > 2000))
+            throw new Error('INVALID_INPUT: Voice endpoint request is invalid');
+        const id = input.session;
+        const retry = input.op === 'save-endpoint' && iosVoiceEndpointRetry?.session === id ? iosVoiceEndpointRetry : null;
+        const unchangedRetry = () => !retry || taskEditValuesEqual(input.expected, retry.expected)
+            && aiTextSnapshotReferences().every((value, index) => value === retry.authority[index])
+            && taskEditValuesEqual(retry.authority, retry.frozen);
+        if (!unchangedRetry()) throw new Error('STALE_REVISION: Voice endpoint retry changed');
+        const session = currentVoiceEndpointSession(id, Boolean(retry));
+        const admit = () => {
+            if (signal.aborted || checked(owner(JSON.stringify({ phase: 'current' }))) !== '')
+                throw new Error('STALE_REVISION: Voice endpoint owner changed');
+        };
+        const current = () => { currentVoiceEndpointSession(id, Boolean(retry)); admit(); };
+        current();
+        if (!retry && !taskEditValuesEqual(unwrap(await iosVoiceMethods.settingsOptions({}, current)).expected, input.expected))
+            throw new Error('STALE_REVISION: Voice settings changed');
+        if (input.op === 'read-endpoint') {
+            const value = session.settings.ai?.speechToText?.baseUrl;
+            if (value !== undefined && (typeof value !== 'string' || value.length > 4096))
+                throw new Error('INVALID_INPUT: Voice endpoint is unavailable');
+            return { value: value ?? '' };
+        }
+        const unavailable = async (): Promise<never> => { throw new Error('NOT_READY: Voice endpoint storage is private'); };
+        const host: NativeAIHost = { platform: { isFossBuild },
+            storage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable },
+            secrets: { get: unavailable, set: unavailable, delete: unavailable }, fetch: unavailable };
+        const refresh = () => {
+            unwrap(iosVoiceReadiness()); admit();
+            if (iosVoiceEndpointSession !== session || bootAdapter !== session.adapter || useTaskStore.getState().editLockCount > 0
+                || useTaskStore.getState().isLoading || useTaskStore.getState().settings.ai?.speechToText?.provider !== 'openai')
+                throw new Error('STALE_REVISION: Voice endpoint session changed');
+            session.generation = getPersistenceStatus().generation;
+            session.settings = useTaskStore.getState().settings;
+            session.frozen = JSON.parse(JSON.stringify(session.settings));
+        };
+        const requestId = retry?.requestId ?? generateUUID();
+        iosConfigurationAIHost = host;
+        try {
+            current();
+            const intent = { requestId, field: 'speech', value: input.value as string } as const;
+            let written = await contract.setAIEndpoint(intent);
+            if (retry && !written.ok && written.error.code === 'SAVE_FAILED') {
+                current();
+                await useTaskStore.getState().persistSnapshot(); await flushPendingSave(); requireSaved(); admit();
+                if (!unchangedRetry()) throw new Error('STALE_REVISION: Voice endpoint retry changed');
+                refresh(); current(); written = await contract.setAIEndpoint(intent);
+            }
+            const result = unwrap(written);
+            refresh(); requireSaved(); iosVoiceEndpointRetry = null;
+            return { changed: result.changed };
+        } catch {
+            if (getPersistenceStatus().failed) {
+                const authority = aiTextSnapshotReferences();
+                iosVoiceEndpointRetry = { session: id, requestId, expected: input.expected, authority,
+                    frozen: JSON.parse(JSON.stringify(authority)) };
+                // Once a write was attempted, owner loss cannot become a pre-write refusal.
+                try { refresh(); } catch { /* The original session must remain uncertain. */ }
+            }
+            throw new Error('ACTION_FAILED: Voice endpoint could not be confirmed');
+        } finally { if (iosConfigurationAIHost === host) iosConfigurationAIHost = null; }
+    } finally { iosConfigurationAIActive = false; }
 };
 
 const aiRequestTimeoutMethods = createNativeAIRequestTimeoutMethods({
@@ -1622,6 +2198,82 @@ const readSavedNativePomodoro = async () => {
     if (pomodoroAdapter() !== adapter || current.tasks !== before.tasks || current.settings !== before.settings)
         throw new Error('STALE_REVISION: Pomodoro presentation changed; read again');
     return { raw: session.raw, current };
+};
+const preparePomodoroRequest = async (requestJSON: string, watchSourceJSON?: string) => {
+    pomodoroWarmAdmission = null;
+    const adapter = pomodoroAdapter();
+    const stale = () => new Error('STALE_REVISION: Pomodoro preparation is no longer current');
+    const ready = () => {
+        if (pomodoroAdapter() !== adapter) throw stale();
+        requireSaved(); unwrap(contract.getDataSettings());
+        const status = getPersistenceStatus();
+        if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+            || useTaskStore.getState().editLockCount > 0 || useTaskStore.getState().isLoading) throw stale();
+        return status;
+    };
+    ready();
+    if (watchSourceJSON !== undefined) {
+        parseNativeWatchPomodoroSource(watchSourceJSON);
+        const saved = await adapter.readWatchPomodoroPlan(watchSourceJSON);
+        ready();
+        if (saved) return { kind: 'prepared', planJSON: JSON.stringify(saved) };
+    }
+    const status = ready(), state = useTaskStore.getState();
+    const references = [state._allTasks, state._allProjects, state._allSections, state._allAreas, state._allPeople, state.settings];
+    const frozen = JSON.parse(JSON.stringify(references)) as unknown;
+    const assertCurrent = () => {
+        if (ready().generation !== status.generation) throw stale();
+        const current = useTaskStore.getState();
+        const values = [current._allTasks, current._allProjects, current._allSections, current._allAreas, current._allPeople, current.settings];
+        if (current.lastDataChangeAt !== state.lastDataChangeAt || !values.every((value, index) => value === references[index])
+            || !taskEditValuesEqual(values, frozen)) throw stale();
+    };
+    assertCurrent();
+    if (!await adapter.readRowBaseline()) throw stale();
+    assertCurrent();
+    const data = await adapter.getData({ rawTasks: true });
+    assertCurrent();
+    const canonical = [data.tasks, data.projects, data.sections ?? [], data.areas ?? [], data.people ?? [], stripSensitiveSettings(data.settings)];
+    // Normal startup projects legacy task fields; private recovery loads retain their raw shape.
+    if (!taskEditValuesEqual(references, canonical)
+        && !taskEditValuesEqual(references, [data.tasks.map((task) => normalizeTaskForLoad(task)), ...canonical.slice(1)])) throw stale();
+    const session = await adapter.readPomodoroSession();
+    assertCurrent();
+    // Native Engine alone augments an adoption intent with its checked
+    // fixed-cell read. The shared preparer validates that complete raw
+    // source; this parse only chooses the exact BEFORE task to read.
+    let request: NativePomodoroRequest;
+    if (watchSourceJSON !== undefined) {
+        const source = parseNativeWatchPomodoroSource(watchSourceJSON), now = new Date();
+        const options = data.settings.gtd?.pomodoro;
+        const wanted = source.taskId ?? session.state?.session.selectedTaskId;
+        const linked = options?.linkTask === true && wanted
+            ? data.tasks.find(task => task.id === wanted && !task.deletedAt && !isTaskCancelled(task) && isTaskActionable(task)) : undefined;
+        request = { action: 'watch', requestId: source.id, sourceJSON: watchSourceJSON,
+            observedAtMs: now.getTime(), localDayKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+            autoStart: { autoStartFocus: options?.autoStartFocus === true, autoStartBreaks: options?.autoStartBreaks === true },
+            durations: sanitizePomodoroDurations(options?.customDurations), selectedTaskId: linked?.id ?? null };
+    } else {
+        const parsed = pomodoroJSON(requestJSON) as NativePomodoroRequest;
+        request = parsed.action === 'adoptLegacy' ? parsed : pomodoroJSON(requestJSON, 8192) as NativePomodoroRequest;
+        if (request.action === 'watch') throw new Error('INVALID_INPUT: Watch timer requires its source owner');
+    }
+    const legacy = request.action === 'adoptLegacy' && typeof request.legacy?.sessionRaw === 'string'
+        ? JSON.parse(request.legacy.sessionRaw) as { selectedTaskId?: unknown } | null : null;
+    const selected = request.action === 'adoptLegacy'
+        ? typeof legacy?.selectedTaskId === 'string' ? legacy.selectedTaskId : undefined
+        : session.state?.session.selectedTaskId;
+    const matches = selected ? data.tasks.filter((task) => task.id === selected) : [];
+    if (matches.length > 1 || (matches.length === 1 && !hasRawReadRow(matches[0]))) throw stale();
+    const row = matches.length === 1 ? [...rawReadRow(matches[0], taskToSqliteRow(matches[0])).row] as (string | number | null)[] : null;
+    if (row && row.length !== TASK_SQLITE_COLUMNS.length) throw stale();
+    const plan = prepareNativePomodoroTransition({ request, session, target: selected ? { id: selected, row } : null,
+        deviceId: request.action === 'initialize' ? null : typeof data.settings.deviceId === 'string' ? data.settings.deviceId : null });
+    assertCurrent();
+    if (!plan) return { kind: 'noop' };
+    const planJSON = JSON.stringify(validatePreparedNativePomodoroTransition(plan));
+    pomodoroWarmAdmission = { planJSON, assertCurrent };
+    return { kind: 'prepared', planJSON };
 };
 // The native latch owns effects; this token binds every callback to the same saved JS state.
 let iosPomodoroAlarmTurn: { token: string; current: () => Promise<void> } | null = null;
@@ -1967,6 +2619,193 @@ const iosSearchSavedState = () => {
         || !contract.getDataSettings().ok) throw iosSearchUnavailable();
     return { adapter, generation: status.generation, state: useTaskStore.getState() };
 };
+const readIOSWidgetNext = (includeActions: boolean) => {
+    const unavailable = () => new Error('NOT_READY: Native iOS widget Next snapshot is unavailable');
+    const adapter = bootAdapter;
+    const assertReady = () => {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+            || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+        requireSaved();
+        const status = getPersistenceStatus();
+        if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+            || !contract.getDataSettings().ok) throw unavailable();
+        return status;
+    };
+    const before = assertReady(), state = useTaskStore.getState();
+    const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+        areas: state._allAreas, settings: state.settings };
+    const language = unwrap(contract.getStrings({ keys: [] })).language, locale = iosVoiceSystemLocale;
+    const focusFilter = getFocusWidgetFilter();
+    let focusFilterKey: string;
+    type Item = { id: string; title: string; contextLabel: string | null; dueLabel: string | null;
+        dueTone: 'overdue' | 'today' | 'normal' };
+    let actions: { tokens: (string | null)[]; completeLabel: string; undoLabel: string } | null = null;
+    let result: { version: 1; title: string; emptyMessage: string; totalCount: number; items: Item[] };
+    try {
+        focusFilterKey = focusWidgetFilterKey(focusFilter);
+        const payload = createWidgetPayloadProjection(data, language,
+            { listIds: ['next'], systemLocale: locale ?? undefined, focusFilter }).build(IOS_WIDGET_FAMILY_CACHE_ITEMS.medium);
+        const next = payload.lists.next;
+        const text = (value: unknown, limit: number, nonempty = false) =>
+            typeof value === 'string' && value.length <= limit && (!nonempty || value.length > 0);
+        if (!next || !text(next.title, 16_384) || !text(payload.emptyMessage, 16_384)
+            || !Array.isArray(next.items) || next.items.length > IOS_WIDGET_FAMILY_CACHE_ITEMS.medium
+            || !Number.isSafeInteger(next.totalCount) || next.totalCount < next.items.length) throw new Error();
+        const identities = new Set<string>();
+        const items = next.items.map((row): Item => {
+            if (!text(row.id, 500, true) || identities.has(row.id) || !text(row.title, 16_384)
+                || (row.contextLabel !== null && !text(row.contextLabel, 16_384))
+                || (row.dueLabel !== null && !text(row.dueLabel, 100))
+                || !['overdue', 'today', 'normal'].includes(row.dueTone)) throw new Error();
+            identities.add(row.id);
+            return { id: row.id, title: row.title, contextLabel: row.contextLabel,
+                dueLabel: row.dueLabel, dueTone: row.dueTone };
+        });
+        result = { version: 1, title: next.title, emptyMessage: payload.emptyMessage, totalCount: next.totalCount, items };
+        if (includeActions) {
+            if (!text(payload.completeLabel, 16_384, true) || !text(payload.undoLabel, 16_384, true)) throw new Error();
+            const tokens = next.items.map((row) => {
+                if (row.completionToken === undefined) return null;
+                if (typeof row.completionToken !== 'string'
+                    || new TextEncoder().encode(row.completionToken).byteLength > 8192) throw new Error();
+                const token: unknown = JSON.parse(row.completionToken);
+                if (!Array.isArray(token) || token.length !== 4 || token[0] !== row.id) throw new Error();
+                return row.completionToken;
+            });
+            actions = { tokens, completeLabel: payload.completeLabel, undoLabel: payload.undoLabel };
+        }
+        if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 1024 * 1024) throw new Error();
+    } catch { throw new Error('INVALID_INPUT: Native iOS widget Next snapshot is invalid'); }
+    const after = assertReady(), current = useTaskStore.getState();
+    let sameFilter = false;
+    try { sameFilter = focusWidgetFilterKey(getFocusWidgetFilter()) === focusFilterKey; } catch { /* Mutated filter is unavailable. */ }
+    if (!sameFilter || before.generation !== after.generation || current._allTasks !== data.tasks || current._allProjects !== data.projects
+        || current._allSections !== data.sections || current._allAreas !== data.areas || current.settings !== data.settings
+        || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
+    try {
+        logInfo('Native iOS Next widget snapshot', { scope: 'native-ios', force: true,
+            context: { releaseCheck: 'v1.3.8/ios-widget-next-snapshot', count: String(result.items.length) } });
+    } catch { /* Diagnostics cannot fail a successful readonly projection. */ }
+    return actions ? { snapshot: JSON.stringify(result), ...actions } : result;
+};
+
+
+type IOSWidgetFamilySnapshot = { version: 1; payloads: Record<keyof typeof IOS_WIDGET_FAMILY_CACHE_ITEMS, string> };
+const readIOSWidgetFamilies = (json: string): IOSWidgetFamilySnapshot => {
+    const invalid = () => new Error('INVALID_INPUT: Native iOS widget family snapshot is invalid');
+    const unavailable = () => new Error('NOT_READY: Native iOS widget family snapshot is unavailable');
+    let input: unknown;
+    try {
+        if (typeof json !== 'string' || json.length > 128) throw invalid();
+        input = JSON.parse(json);
+    } catch { throw invalid(); }
+    if (!record(input) || !exact(input, ['systemColorScheme'])
+        || (input.systemColorScheme !== 'light' && input.systemColorScheme !== 'dark')) throw invalid();
+    const systemColorScheme = input.systemColorScheme;
+    const adapter = bootAdapter;
+    const assertReady = () => {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+            || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+        requireSaved();
+        const status = getPersistenceStatus();
+        if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+            || !contract.getDataSettings().ok) throw unavailable();
+        return status;
+    };
+    const before = assertReady(), state = useTaskStore.getState();
+    const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+        areas: state._allAreas, settings: state.settings };
+    const language = unwrap(contract.getStrings({ keys: [] })).language, locale = iosVoiceSystemLocale;
+    const focusFilter = getFocusWidgetFilter();
+    let filterKey: string;
+    let result: IOSWidgetFamilySnapshot;
+    try {
+        filterKey = focusWidgetFilterKey(focusFilter);
+        const projection = createPublishedWidgetProjection(createWidgetPayloadProjection(data, language,
+            iosWidgetProjectionOptions({ systemColorScheme, systemLocale: locale ?? undefined, focusFilter })), language);
+        result = { version: 1, payloads: {
+            default: JSON.stringify(projection.build(IOS_WIDGET_FAMILY_CACHE_ITEMS.default)),
+            small: JSON.stringify(projection.build(IOS_WIDGET_FAMILY_CACHE_ITEMS.small)),
+            medium: JSON.stringify(projection.build(IOS_WIDGET_FAMILY_CACHE_ITEMS.medium)),
+            large: JSON.stringify(projection.build(IOS_WIDGET_FAMILY_CACHE_ITEMS.large)),
+            extraLarge: JSON.stringify(projection.build(IOS_WIDGET_FAMILY_CACHE_ITEMS.extraLarge)),
+        } };
+        if (!isNativeJsonWithinBytes({ ok: true, value: result })) throw invalid();
+    } catch { throw invalid(); }
+    const after = assertReady(), current = useTaskStore.getState();
+    let sameFilter = false;
+    try { sameFilter = focusWidgetFilterKey(getFocusWidgetFilter()) === filterKey; } catch {}
+    if (!sameFilter || before.generation !== after.generation || current._allTasks !== data.tasks || current._allProjects !== data.projects
+        || current._allSections !== data.sections || current._allAreas !== data.areas || current.settings !== data.settings
+        || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
+    try {
+        logInfo('Native iOS widget families read', { scope: 'native-ios', force: true,
+            context: { releaseCheck: 'v1.3.8/ios-widget-family-read', operation: 'read', outcome: 'ready' } });
+    } catch {}
+    return result;
+};
+
+
+const readIOSWatchSnapshot = async () => {
+    const unavailable = () => new Error('NOT_READY: Native iOS Watch snapshot is unavailable');
+    const adapter = bootAdapter;
+    const assertReady = () => {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+            || getStorageAdapter() !== adapter || !adapter.concurrentWritesGuarded
+            || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+        requireSaved();
+        const status = getPersistenceStatus();
+        if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+            || !contract.getDataSettings().ok) throw unavailable();
+        return status;
+    };
+    const before = assertReady(), state = useTaskStore.getState();
+    const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+        areas: state._allAreas, settings: state.settings };
+    const language = unwrap(contract.getStrings({ keys: [] })).language, locale = iosVoiceSystemLocale;
+    const focusFilter = getFocusWidgetFilter(), filterKey = focusWidgetFilterKey(focusFilter);
+    const requireBaseline = async () => {
+        assertReady();
+        if (!adapter || !await adapter.readRowBaseline())
+            throw new Error('STALE_REVISION: Watch saved data changed; reload before reading');
+    };
+    await requireBaseline();
+    if (!adapter) throw unavailable();
+    const saved = (await adapter.readPomodoroSession()).state?.session;
+    const now = new Date(), options = data.settings.gtd?.pomodoro;
+    // An elapsed display keeps the saved phase; only the durable transition may credit or advance it.
+    const timerState = saved ? { ...saved.timerState,
+        remainingSeconds: saved.timerState.isRunning
+            ? Math.max(0, Math.ceil((Date.parse(saved.phaseEndsAt ?? '') - now.getTime()) / 1000))
+            : saved.timerState.remainingSeconds,
+    } : createPomodoroState(sanitizePomodoroDurations(options?.customDurations));
+    const widget = createWidgetPayloadProjection(data, language,
+        { focusFilter, systemLocale: locale ?? undefined }).build(WATCH_FOCUS_TASK_LIMIT);
+    const byId = new Map(data.tasks.map((task) => [task.id, task]));
+    const focus = widget.sections.flatMap((section) => section.items.map(({ id, title }) => {
+        const task = byId.get(id);
+        return { id, title, createdAt: task?.createdAt, description: task?.description, checklist: task?.checklist };
+    }));
+    const linked = options?.linkTask === true && saved?.selectedTaskId
+        ? data.tasks.find((task) => task.id === saved.selectedTaskId && !task.deletedAt
+            && !isTaskCancelled(task) && isTaskActionable(task)) : undefined;
+    const result = buildWatchApplicationContext({ focus,
+        pomodoro: { timerState, phaseEndsAt: saved?.phaseEndsAt, selectedTaskId: saved?.selectedTaskId, isHydrating: false },
+        linkedTask: linked, completionAlertEnabled: options?.completionAlert !== false, now });
+    await requireBaseline();
+    const after = assertReady(), current = useTaskStore.getState();
+    if (before.generation !== after.generation || current.lastDataChangeAt !== state.lastDataChangeAt
+        || current._allTasks !== data.tasks || current._allProjects !== data.projects
+        || current._allSections !== data.sections || current._allAreas !== data.areas || current.settings !== data.settings
+        || focusWidgetFilterKey(getFocusWidgetFilter()) !== filterKey
+        || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
+    try {
+        logInfo('Native iOS Watch snapshot read', { scope: 'native-ios', force: true,
+            context: { releaseCheck: 'v1.3.8/ios-watch-snapshot', operation: 'read', outcome: 'ready' } });
+    } catch { /* Diagnostics cannot fail a successful readonly projection. */ }
+    return result;
+};
+
 let iosSearchPrevious: { inputs: unknown[]; ready: boolean; now: number; day: string; zone: string;
     revision: number; nextAt: number | null } | null = null;
 const requireReminderSignal = (signal: AbortSignal) => {
@@ -2150,6 +2989,7 @@ globalThis.MindwtrHost = {
             requireSaved();
             const focus = unwrap(contract.getFocus({ limit, ...(controls ? { controls: JSON.parse(controls) } : {}), ...(controlEdit ? { controlEdit: JSON.parse(controlEdit) } : {}) }));
             // The Focus screen's filter and sort, handed to the widget's Focus list as RN's Focus screen hands it (setFocusWidgetFilter).
+            cacheIOSFocusWidgetFilter(focus);
             widgets?.focusFilter(focus.controls?.widgetFilter);
             return focus;
         });
@@ -2350,6 +3190,7 @@ globalThis.MindwtrHost = {
         storedLanguage = stored || null;
         return submit(async () => {
             const resolved = unwrap(await contract.setLanguage({ storedLanguage: stored || null, systemLocale: system || null }));
+            if (globalThis.__mindwtrHostPlatform === 'ios') iosVoiceSystemLocale = system || null;
             iosReminderEffects.languageResolved(resolved.language); return resolved;
         });
     },
@@ -2374,6 +3215,7 @@ globalThis.MindwtrHost = {
             const synced = typeof raw === 'string' && isSupportedLanguage(raw) ? raw : null;
             const winner = synced ?? (stored || null);
             const resolved = unwrap(await contract.setLanguage({ storedLanguage: winner, systemLocale: system || null }));
+            if (globalThis.__mindwtrHostPlatform === 'ios') iosVoiceSystemLocale = system || null;
             iosReminderEffects.languageResolved(resolved.language);
             const after = getPersistenceStatus();
             const deviceWrites = synced !== null && synced === state.settings?.language
@@ -2381,6 +3223,22 @@ globalThis.MindwtrHost = {
                 && !after.failed && !after.queued && !after.inFlight && !after.immediate && !after.retrying
                 ? getGeneralSettingsDeviceWrites({ type: 'language', value: synced }) : [];
             return { language: resolved.language, deviceWrites };
+        });
+    },
+    taskEditorSectionHelp(): string {
+        return submit(async () => {
+            const copy = unwrap(contract.getStrings({ keys: [
+                'onboarding.help', 'onboarding.readGuide', 'onboarding.guideError',
+                ONBOARDING_TOPIC_COPY.scheduling.title, ONBOARDING_TOPIC_COPY.scheduling.body,
+                ONBOARDING_TOPIC_COPY.details.title, ONBOARDING_TOPIC_COPY.details.body,
+            ] }));
+            const topic = (id: 'scheduling' | 'details') => ({
+                title: copy.strings[ONBOARDING_TOPIC_COPY[id].title],
+                body: copy.strings[ONBOARDING_TOPIC_COPY[id].body],
+                url: getOnboardingGuideUrl(id, 'mobile', copy.language),
+            });
+            return { help: copy.strings['onboarding.help'], readGuide: copy.strings['onboarding.readGuide'],
+                guideError: copy.strings['onboarding.guideError'], scheduling: topic('scheduling'), details: topic('details') };
         });
     },
     /** `keysJson` is a JSON array of core i18n keys. */
@@ -2621,6 +3479,35 @@ globalThis.MindwtrHost = {
             return unwrap(contract.probePersonCreateOutcome(JSON.parse(json)));
         });
     },
+    iosWidgetFamilySnapshot(json: string): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 1) throw new Error('INVALID_INPUT: Widget family snapshot takes one appearance object');
+            return readIOSWidgetFamilies(json);
+        });
+    },
+    /** Read-only fixed Next list; its established five-key result remains unchanged. */
+    iosWidgetNextSnapshot(): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 0) throw new Error('INVALID_INPUT: Widget Next snapshot takes no arguments');
+            return readIOSWidgetNext(false);
+        });
+    },
+    iosWatchSnapshot(): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 0) throw new Error('INVALID_INPUT: Watch snapshot takes no arguments');
+            return readIOSWatchSnapshot();
+        });
+    },
+    iosWidgetNextActionSnapshot(): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 0) throw new Error('INVALID_INPUT: Widget Next actions snapshot takes no arguments');
+            return readIOSWidgetNext(true);
+        });
+    },
     /** Explicit rebuild; a future publisher owns coalescing and time-boundary invalidation. */
     iosSearchSnapshot(): string {
         const argumentCount = arguments.length;
@@ -2679,7 +3566,7 @@ globalThis.MindwtrHost = {
         if (globalThis.__mindwtrHostPlatform !== 'ios') throw iosSearchUnavailable();
         const state = useTaskStore.getState(), now = new Date(), nowMs = now.getTime();
         const inputs = [state._allTasks, state._allProjects, state._allSections, state._allAreas, state.settings,
-            bootAdapter, getStorageAdapter()];
+            bootAdapter, getStorageAdapter(), focusWidgetFilterKey(getFocusWidgetFilter())];
         const day = `${now.getFullYear()}/${now.getMonth()}/${now.getDate()}`;
         let zone = '', saved: ReturnType<typeof iosSearchSavedState> | null = null;
         try {
@@ -2710,6 +3597,33 @@ globalThis.MindwtrHost = {
         if (!Number.isSafeInteger(revision)) throw iosSearchUnavailable();
         iosSearchPrevious = { inputs, ready, now: nowMs, day, zone, revision, nextAt };
         return JSON.stringify({ ready, revision, nextAt });
+    },
+    iosGmailLifecycle(appState: string): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 1 || (appState !== 'active' && appState !== 'background')) throw new Error('INVALID_INPUT: Gmail lifecycle takes active or background');
+            const gmail = requireIosGmail();
+            if (iosGmailStarted) gmail.appState(appState);
+            else { iosGmailStarted = true; gmail.start(appState); }
+            return null;
+        });
+    },
+    iosGmailRequest(name: string, json: string): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 2 || typeof name !== 'string' || typeof json !== 'string' || json.length > 4096) throw new Error('INVALID_INPUT: Gmail request takes a name and bounded JSON');
+            const input: unknown = JSON.parse(json);
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INVALID_INPUT: Gmail request input must be an object');
+            return requireIosGmail().request(name, input as { labelId?: string; enabled?: boolean });
+        });
+    },
+    iosTaskIconBadgeCount(): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 0) throw new Error('INVALID_INPUT: Task icon badge count takes no arguments');
+            const { state } = iosSearchSavedState();
+            return countTasksForIconBadge(state._allTasks, state._allProjects, state._allSections);
+        });
     },
     iosSearchOpen(taskID: string): string {
         const argumentCount = arguments.length;
@@ -2769,6 +3683,9 @@ globalThis.MindwtrHost = {
     manageTaxonomyCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedTaxonomy(JSON.parse(json))));
     },
+    appLockDelayOptions(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(await contract.getAppLockDelayOptions(JSON.parse(json))); });
+    },
     generalPreferenceOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.getGeneralPreferenceOptions(JSON.parse(json))); });
     },
@@ -2814,6 +3731,9 @@ globalThis.MindwtrHost = {
     gtdCaptureParseOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.getGtdCaptureParseOptions(JSON.parse(json))); });
     },
+    gtdCaptureAudioOptions(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(await contract.getGtdCaptureAudioOptions(JSON.parse(json))); });
+    },
     gtdCaptureAreaOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.getGtdCaptureAreaOptions(JSON.parse(json))); });
     },
@@ -2831,6 +3751,65 @@ globalThis.MindwtrHost = {
     },
     gtdWorkflowCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedGtdWorkflow(JSON.parse(json))));
+    },
+    iosWidgetCompletionPrepare(json: string): string {
+        return submit(async () => {
+            iosSearchSavedState();
+            return unwrap(contract.prepareWidgetCompletion(completionJson(json, 65_536)));
+        });
+    },
+    iosWidgetCompletionValidate(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw iosSearchUnavailable();
+            return unwrap(contract.validatePreparedWidgetCompletion(completionJson(json, 2_100_000)));
+        });
+    },
+    iosWidgetCompletionCommit(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || isSandboxMode() || isWorkspaceTransitionActive()) throw iosSearchUnavailable();
+            return unwrap(await contract.commitPreparedWidgetCompletion(completionJson(json, 2_100_000)));
+        });
+    },
+    iosWidgetCompletionOutcome(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || isSandboxMode() || isWorkspaceTransitionActive()) throw iosSearchUnavailable();
+            return unwrap(contract.widgetCompletionOutcome(completionJson(json, 65_536)));
+        });
+    },
+    iosShareCapturePrepare(json: string): string {
+        return submit(async () => iosShareCaptureMethods.prepare(JSON.parse(json)));
+    },
+    iosShareCaptureCommit(json: string): string {
+        return submit(async () => iosShareCaptureMethods.commit(JSON.parse(json)));
+    },
+    iosShareCaptureOutcome(json: string): string {
+        return submit(async () => iosShareCaptureMethods.outcome(JSON.parse(json)));
+    },
+    iosShareCaptureDraft(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: iOS share unavailable');
+            requireSaved();
+            return readIOSShareCaptureDraft(json);
+        });
+    },
+    iosProductionWidgetTaskOpen(url: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof url !== 'string' || url.length > 16_000) {
+                throw new Error('INVALID_INPUT: Invalid production task URL');
+            }
+            const scheme = 'mindwtr';
+            if (url.slice(0, scheme.length + 1).toLowerCase() !== `${scheme}:`
+                || !isEntityOpenUrl(url) || parseEntityOpenUrl(url)?.kind !== 'task') return { type: 'none' };
+            const target = unwrap(contract.resolveNativeEntryPoint({ kind: 'link', url, scheme }));
+            const type = target.taskId && target.taskId.length <= 500 ? 'task' : target.route === '/inbox' ? 'inbox' : 'none';
+            if (type !== 'none') {
+                try {
+                    logInfo('Native iOS production task URL resolved', { scope: 'native-ios', force: true,
+                        context: { releaseCheck: 'v1.3.8/ios-production-task-url', outcome: type } });
+                } catch {}
+            }
+            return type === 'task' ? { type, taskId: target.taskId } : { type };
+        });
     },
     iosEntityOpen(url: string): string {
         return submit(async () => {
@@ -3282,6 +4261,33 @@ globalThis.MindwtrHost = {
     somedaySectionMoveUndoRetryOutcome(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.probeSomedaySectionMoveUndoOutcome(JSON.parse(json))); });
     },
+    somedaySectionBulkMoveOptions(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.getSomedaySectionBulkMoveOptions(JSON.parse(json))); });
+    },
+    somedaySectionBulkMovePrepare(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.prepareSomedaySectionBulkMove(JSON.parse(json))); });
+    },
+    somedaySectionBulkMoveValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedSomedaySectionBulkMove(JSON.parse(json))));
+    },
+    somedaySectionBulkMoveCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitPreparedSomedaySectionBulkMove(JSON.parse(json))));
+    },
+    somedaySectionBulkMoveRetryOutcome(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.probeSomedaySectionBulkMoveOutcome(JSON.parse(json))); });
+    },
+    somedaySectionBulkMoveUndoPrepare(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.prepareSomedaySectionBulkMoveUndo(JSON.parse(json))); });
+    },
+    somedaySectionBulkMoveUndoValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedSomedaySectionBulkMoveUndo(JSON.parse(json))));
+    },
+    somedaySectionBulkMoveUndoCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitPreparedSomedaySectionBulkMoveUndo(JSON.parse(json))));
+    },
+    somedaySectionBulkMoveUndoRetryOutcome(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.probeSomedaySectionBulkMoveUndoOutcome(JSON.parse(json))); });
+    },
     focusGroupOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.getFocusGroupOptions(JSON.parse(json))); });
     },
@@ -3373,6 +4379,21 @@ globalThis.MindwtrHost = {
     projectRenameCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedProjectRename(JSON.parse(json))));
     },
+    archiveRetentionOptions(): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.getArchiveRetentionOptions()); });
+    },
+    archiveRetentionReview(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.getArchiveRetentionReview(JSON.parse(json))); });
+    },
+    projectSectionFlowOptions(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.getProjectSectionFlowOptions(JSON.parse(json))); });
+    },
+    projectFlowModeOptions(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.getProjectFlowModeOptions(JSON.parse(json)));
+        });
+    },
     projectFlowOptions(json: string): string {
         return submit(async () => {
             requireSaved();
@@ -3452,6 +4473,12 @@ globalThis.MindwtrHost = {
     },
     focusSavedFilterCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedFocusSavedFilter(JSON.parse(json))));
+    },
+    savedSearchSortOptions(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.getSavedSearchSortOptions(JSON.parse(json)));
+        });
     },
     savedSearchOptions(json: string): string {
         return submit(async () => {
@@ -3704,17 +4731,18 @@ globalThis.MindwtrHost = {
         return submit(async () => unwrap(await contract.commitPreparedProjectFileRemoveWrite(editorJson(json) as Parameters<typeof contract.commitPreparedProjectFileRemoveWrite>[0])));
     },
     // Private native publisher calls; these are not ordinary CoreHost query mutations.
-    projectFileAvailabilityPreflight(json: string, encryptionStateJSON: unknown, cloudURL: string, backend: string = 'cloud'): string {
+    projectFileAvailabilityPreflight(json: string, encryptionStateJSON: unknown, cloudURL: string | null, backend: string = 'cloud'): string {
         return submit(async () => {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !localAttachments || nativeSync
                 || iosTaskAttachmentPreparation || iosProjectFilePreparation || iosCleanupCallback
                 || isSandboxMode() || isWorkspaceTransitionActive()) throw new Error('NOT_READY: Project download is unavailable');
             requireSaved(); await assertNativeSelfHostedAttachmentEncryptionAdmission(encryptionStateJSON);
+            if (backend === 'dropbox' && cloudURL !== null) throw new Error('INVALID_INPUT: Dropbox has no direct availability URL');
             const input = editorJson(json) as { projectId?: unknown };
             const id = typeof input.projectId === 'string' ? input.projectId : '';
             const preflight = unwrap(await preparedProjectAvailability(id, backend).getProjectFileAvailabilityPreflight(input));
             return { preflight, columns: PROJECT_SQLITE_COLUMNS,
-                initialURL: nativeProjectFileAvailabilityInitialURL(preflight.attachmentJSON, cloudURL, backend === 'webdav') };
+                initialURL: backend === 'dropbox' ? null : nativeProjectFileAvailabilityInitialURL(preflight.attachmentJSON, cloudURL!, backend === 'webdav') };
         });
     },
     projectFileAvailabilityEncryptionAdmission(encryptionStateJSON: unknown): string {
@@ -4013,6 +5041,39 @@ globalThis.MindwtrHost = {
     taskPromoteCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedTaskPromotion(editorJson(json) as Parameters<typeof contract.commitPreparedTaskPromotion>[0])));
     },
+    taskPromoteOptions(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(contract.getTaskPromotionOptions(completionJson(json, 4_096) as Parameters<typeof contract.getTaskPromotionOptions>[0])); });
+    },
+    taskPromoteUndoPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.prepareTaskPromotionUndo(editorJson(json) as Parameters<typeof contract.prepareTaskPromotionUndo>[0])); });
+    },
+    taskPromoteUndoValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(contract.validatePreparedTaskPromotionUndo(editorJson(json) as Parameters<typeof contract.validatePreparedTaskPromotionUndo>[0])); });
+    },
+    taskPromoteUndoCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(await contract.commitPreparedTaskPromotionUndo(editorJson(json) as Parameters<typeof contract.commitPreparedTaskPromotionUndo>[0])); });
+    },
+    projectToSectionOptions(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.getProjectToSectionOptions(completionJson(json, 4_096) as Parameters<typeof contract.getProjectToSectionOptions>[0])); });
+    },
+    projectToSectionPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.prepareProjectToSection(completionJson(json, 200_000) as Parameters<typeof contract.prepareProjectToSection>[0])); });
+    },
+    projectToSectionValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(contract.validatePreparedProjectToSection(editorJson(json) as Parameters<typeof contract.validatePreparedProjectToSection>[0])); });
+    },
+    projectToSectionCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(await contract.commitPreparedProjectToSection(editorJson(json) as Parameters<typeof contract.commitPreparedProjectToSection>[0])); });
+    },
+    projectToSectionUndoPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); requireSaved(); return unwrap(contract.prepareProjectToSectionUndo(editorJson(json) as Parameters<typeof contract.prepareProjectToSectionUndo>[0])); });
+    },
+    projectToSectionUndoValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(contract.validatePreparedProjectToSectionUndo(editorJson(json) as Parameters<typeof contract.validatePreparedProjectToSectionUndo>[0])); });
+    },
+    projectToSectionUndoCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Conversion requires iOS'); return unwrap(await contract.commitPreparedProjectToSectionUndo(editorJson(json) as Parameters<typeof contract.commitPreparedProjectToSectionUndo>[0])); });
+    },
     taskDeletePrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.prepareTaskDelete(editorJson(json) as Parameters<typeof contract.prepareTaskDelete>[0])); });
     },
@@ -4041,7 +5102,7 @@ globalThis.MindwtrHost = {
         return submit(async () => { requireSaved(); return unwrap(contract.getDoneTaskStatusOptions(completionJson(json, 4_096) as Parameters<typeof contract.getDoneTaskStatusOptions>[0])); });
     },
     referenceProjectNextActionOptions(json: string): string {
-        return submit(async () => { requireSaved(); return unwrap(await contract.getReferenceProjectNextActionOptions(completionJson(json, 2_100_000) as Parameters<typeof contract.getReferenceProjectNextActionOptions>[0])); });
+        return submit(async () => { requireSaved(); return unwrap(await contract.getReferenceProjectNextActionOptions(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.getReferenceProjectNextActionOptions>[0])); });
     },
     referenceProjectNextActionInput(text: string): string {
         return submit(async () => {
@@ -4050,16 +5111,58 @@ globalThis.MindwtrHost = {
         });
     },
     referenceProjectNextActionPrepare(json: string): string {
-        return submit(async () => { requireSaved(); return unwrap(await contract.prepareReferenceProjectNextAction(completionJson(json, 2_100_000) as Parameters<typeof contract.prepareReferenceProjectNextAction>[0])); });
+        return submit(async () => { requireSaved(); return unwrap(await contract.prepareReferenceProjectNextAction(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.prepareReferenceProjectNextAction>[0])); });
     },
     referenceProjectNextActionValidate(json: string): string {
-        return submit(async () => unwrap(contract.validatePreparedReferenceProjectNextAction(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedReferenceProjectNextAction>[0])));
+        return submit(async () => unwrap(contract.validatePreparedReferenceProjectNextAction(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedReferenceProjectNextAction>[0])));
     },
     referenceProjectNextActionCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedReferenceProjectNextAction(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedReferenceProjectNextAction>[0])));
+        return submit(async () => unwrap(await contract.commitPreparedReferenceProjectNextAction(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedReferenceProjectNextAction>[0])));
     },
     referenceProjectNextActionOutcome(json: string): string {
-        return submit(async () => unwrap(contract.referenceProjectNextActionOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.referenceProjectNextActionOutcome>[0])));
+        return submit(async () => unwrap(contract.referenceProjectNextActionOutcome(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.referenceProjectNextActionOutcome>[0])));
+    },
+    taskRowSwipeActions(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row swipe presentation requires iOS'); return unwrap(contract.getTaskRowSwipeActions(completionJson(json, 4_096) as Parameters<typeof contract.getTaskRowSwipeActions>[0])); });
+    },
+    rowTaskFocusPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Focus requires iOS'); requireSaved(); return unwrap(await contract.prepareRowTaskFocus(completionJson(json, 4_096) as Parameters<typeof contract.prepareRowTaskFocus>[0])); });
+    },
+    rowTaskFocusValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Focus requires iOS'); return unwrap(contract.validatePreparedRowTaskFocus(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedRowTaskFocus>[0])); });
+    },
+    rowTaskFocusCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Focus requires iOS'); return unwrap(await contract.commitPreparedRowTaskFocus(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedRowTaskFocus>[0])); });
+    },
+    rowTaskFocusOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Focus requires iOS'); return unwrap(contract.rowTaskFocusOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.rowTaskFocusOutcome>[0])); });
+    },
+    rowTaskDatesPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Dates requires iOS'); requireSaved(); return unwrap(await contract.prepareRowTaskDates(completionJson(json, 2_100_000) as Parameters<typeof contract.prepareRowTaskDates>[0])); });
+    },
+    rowTaskDatesValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Dates requires iOS'); return unwrap(contract.validatePreparedRowTaskDates(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedRowTaskDates>[0])); });
+    },
+    rowTaskDatesCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Dates requires iOS'); return unwrap(await contract.commitPreparedRowTaskDates(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedRowTaskDates>[0])); });
+    },
+    rowTaskDatesOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row Dates requires iOS'); return unwrap(contract.rowTaskDatesOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.rowTaskDatesOutcome>[0])); });
+    },
+    rowTaskDestinationOptions(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row destination requires iOS'); requireSaved(); return unwrap(await contract.getRowTaskDestinationOptions(completionJson(json, 16_384) as Parameters<typeof contract.getRowTaskDestinationOptions>[0])); });
+    },
+    rowTaskDestinationPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row destination requires iOS'); requireSaved(); return unwrap(await contract.prepareRowTaskDestination(completionJson(json, 4_096) as Parameters<typeof contract.prepareRowTaskDestination>[0])); });
+    },
+    rowTaskDestinationValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row destination requires iOS'); return unwrap(contract.validatePreparedRowTaskDestination(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedRowTaskDestination>[0])); });
+    },
+    rowTaskDestinationCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row destination requires iOS'); return unwrap(await contract.commitPreparedRowTaskDestination(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedRowTaskDestination>[0])); });
+    },
+    rowTaskDestinationOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row destination requires iOS'); return unwrap(contract.rowTaskDestinationOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.rowTaskDestinationOutcome>[0])); });
     },
     referenceTaskDestinationOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.getReferenceTaskDestinationOptions(completionJson(json, 4_096) as Parameters<typeof contract.getReferenceTaskDestinationOptions>[0])); });
@@ -4075,6 +5178,48 @@ globalThis.MindwtrHost = {
     },
     referenceTaskDestinationOutcome(json: string): string {
         return submit(async () => unwrap(contract.referenceTaskDestinationOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.referenceTaskDestinationOutcome>[0])));
+    },
+    taskChecklistMoveOptions(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); requireSaved(); return unwrap(await contract.getTaskChecklistMoveOptions(completionJson(json, 16_384) as Parameters<typeof contract.getTaskChecklistMoveOptions>[0])); });
+    },
+    taskChecklistMovePrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); requireSaved(); return unwrap(await contract.prepareTaskChecklistMove(completionJson(json, 4_096) as Parameters<typeof contract.prepareTaskChecklistMove>[0])); });
+    },
+    taskChecklistMoveValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); return unwrap(await contract.validatePreparedTaskChecklistMove(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedTaskChecklistMove>[0])); });
+    },
+    taskChecklistMoveCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); return unwrap(await contract.commitPreparedTaskChecklistMove(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedTaskChecklistMove>[0])); });
+    },
+    taskChecklistMoveOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); return unwrap(await contract.taskChecklistMoveOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.taskChecklistMoveOutcome>[0])); });
+    },
+    taskChecklistMoveUndoPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); requireSaved(); return unwrap(await contract.prepareTaskChecklistMoveUndo(completionJson(json, 2_100_000) as Parameters<typeof contract.prepareTaskChecklistMoveUndo>[0])); });
+    },
+    taskChecklistMoveUndoValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); return unwrap(await contract.validatePreparedTaskChecklistMoveUndo(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedTaskChecklistMoveUndo>[0])); });
+    },
+    taskChecklistMoveUndoCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); return unwrap(await contract.commitPreparedTaskChecklistMoveUndo(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedTaskChecklistMoveUndo>[0])); });
+    },
+    taskChecklistMoveUndoOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Checklist move requires iOS'); return unwrap(await contract.taskChecklistMoveUndoOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.taskChecklistMoveUndoOutcome>[0])); });
+    },
+    rowTaskBackdateOptions(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row backdate requires iOS'); requireSaved(); return unwrap(await contract.getRowTaskBackdateOptions(completionJson(json, 4_096) as Parameters<typeof contract.getRowTaskBackdateOptions>[0])); });
+    },
+    rowTaskBackdatePrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row backdate requires iOS'); requireSaved(); return unwrap(await contract.prepareRowTaskBackdate(completionJson(json, 4_096) as Parameters<typeof contract.prepareRowTaskBackdate>[0])); });
+    },
+    rowTaskBackdateValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row backdate requires iOS'); return unwrap(await contract.validatePreparedRowTaskBackdate(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedRowTaskBackdate>[0])); });
+    },
+    rowTaskBackdateCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row backdate requires iOS'); return unwrap(await contract.commitPreparedRowTaskBackdate(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedRowTaskBackdate>[0])); });
+    },
+    rowTaskBackdateOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row backdate requires iOS'); return unwrap(await contract.rowTaskBackdateOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.rowTaskBackdateOutcome>[0])); });
     },
     referenceTaskBackdateOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.getReferenceTaskBackdateOptions(completionJson(json, 4_096) as Parameters<typeof contract.getReferenceTaskBackdateOptions>[0])); });
@@ -4134,28 +5279,28 @@ globalThis.MindwtrHost = {
         return submit(async () => unwrap(contract.archiveTaskCompletedAtOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.archiveTaskCompletedAtOutcome>[0])));
     },
     taskCompletionPrepare(json: string): string {
-        return submit(async () => { requireSaved(); return unwrap(await contract.prepareTaskCompletion(completionJson(json, 4_096) as Parameters<typeof contract.prepareTaskCompletion>[0])); });
+        return submit(async () => { requireSaved(); return unwrap(await contract.prepareTaskCompletion(taskCompletionJson(json, 4_096) as Parameters<typeof contract.prepareTaskCompletion>[0])); });
     },
     taskCompletionValidate(json: string): string {
-        return submit(async () => unwrap(contract.validatePreparedTaskCompletion(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedTaskCompletion>[0])));
+        return submit(async () => unwrap(contract.validatePreparedTaskCompletion(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedTaskCompletion>[0])));
     },
     taskCompletionCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedTaskCompletion(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedTaskCompletion>[0])));
+        return submit(async () => unwrap(await contract.commitPreparedTaskCompletion(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedTaskCompletion>[0])));
     },
     taskCompletionOutcome(json: string): string {
-        return submit(async () => unwrap(contract.taskCompletionOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.taskCompletionOutcome>[0])));
+        return submit(async () => unwrap(contract.taskCompletionOutcome(taskCompletionJson(json, 2_100_000) as Parameters<typeof contract.taskCompletionOutcome>[0])));
     },
     taskCompletionUndoPrepare(json: string): string {
-        return submit(async () => { requireSaved(); return unwrap(await contract.prepareTaskCompletionUndo(completionJson(json, 4_500_000) as Parameters<typeof contract.prepareTaskCompletionUndo>[0])); });
+        return submit(async () => { requireSaved(); return unwrap(await contract.prepareTaskCompletionUndo(taskCompletionJson(json, 4_500_000) as Parameters<typeof contract.prepareTaskCompletionUndo>[0])); });
     },
     taskCompletionUndoValidate(json: string): string {
-        return submit(async () => unwrap(contract.validatePreparedTaskCompletionUndo(completionJson(json, 4_500_000) as Parameters<typeof contract.validatePreparedTaskCompletionUndo>[0])));
+        return submit(async () => unwrap(contract.validatePreparedTaskCompletionUndo(taskCompletionJson(json, 4_500_000) as Parameters<typeof contract.validatePreparedTaskCompletionUndo>[0])));
     },
     taskCompletionUndoCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedTaskCompletionUndo(completionJson(json, 4_500_000) as Parameters<typeof contract.commitPreparedTaskCompletionUndo>[0])));
+        return submit(async () => unwrap(await contract.commitPreparedTaskCompletionUndo(taskCompletionJson(json, 4_500_000) as Parameters<typeof contract.commitPreparedTaskCompletionUndo>[0])));
     },
     taskCompletionUndoOutcome(json: string): string {
-        return submit(async () => unwrap(contract.taskCompletionUndoOutcome(completionJson(json, 4_500_000) as Parameters<typeof contract.taskCompletionUndoOutcome>[0])));
+        return submit(async () => unwrap(contract.taskCompletionUndoOutcome(taskCompletionJson(json, 4_500_000) as Parameters<typeof contract.taskCompletionUndoOutcome>[0])));
     },
     trashTaskRestorePrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.prepareTrashTaskRestore(editorJson(json) as Parameters<typeof contract.prepareTrashTaskRestore>[0])); });
@@ -4165,6 +5310,30 @@ globalThis.MindwtrHost = {
     },
     trashTaskRestoreCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedTrashTaskRestore(editorJson(json) as Parameters<typeof contract.commitPreparedTrashTaskRestore>[0])));
+    },
+    projectTasksDeletePrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); requireSaved(); return unwrap(await contract.prepareProjectTasksDelete(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectTasksDelete>[0])); });
+    },
+    projectTasksDeleteValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); return unwrap(await contract.validatePreparedProjectTasksDelete(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectTasksDelete>[0])); });
+    },
+    projectTasksDeleteCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); return unwrap(await contract.commitPreparedProjectTasksDelete(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectTasksDelete>[0])); });
+    },
+    projectTasksDeleteOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); return unwrap(await contract.projectTasksDeleteOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectTasksDeleteOutcome>[0])); });
+    },
+    projectTasksDeleteUndoPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); requireSaved(); return unwrap(await contract.prepareProjectTasksDeleteUndo(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectTasksDeleteUndo>[0])); });
+    },
+    projectTasksDeleteUndoValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); return unwrap(await contract.validatePreparedProjectTasksDeleteUndo(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectTasksDeleteUndo>[0])); });
+    },
+    projectTasksDeleteUndoCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); return unwrap(await contract.commitPreparedProjectTasksDeleteUndo(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectTasksDeleteUndo>[0])); });
+    },
+    projectTasksDeleteUndoOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project Trash requires iOS'); return unwrap(await contract.projectTasksDeleteUndoOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectTasksDeleteUndoOutcome>[0])); });
     },
     archivedTasksDeletePrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.prepareArchivedTasksDelete(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareArchivedTasksDelete>[0])); });
@@ -4198,7 +5367,7 @@ globalThis.MindwtrHost = {
                 || Object.keys(result).sort().join(',') !== 'count,status'
                 || typeof result.count !== 'number' || !Number.isInteger(result.count)
                 || result.count < 1 || result.count > 10_000
-                || !getBulkMoveStatusOptions('inbox').includes(result.status as TaskStatus)) {
+                || !getBulkMoveStatusOptions('all').includes(result.status as TaskStatus)) {
                 throw new Error('INVALID_INPUT: Inbox move notice requires a bounded result');
             }
             const t = (key: string): string => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key;
@@ -4216,6 +5385,44 @@ globalThis.MindwtrHost = {
     },
     inboxTasksMoveOutcome(json: string): string {
         return submit(async () => unwrap(await contract.inboxTasksMoveOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.inboxTasksMoveOutcome>[0])));
+    },
+    projectTasksMovePrepare(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk status requires iOS');
+            requireSaved(); return unwrap(await contract.prepareProjectTasksMove(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectTasksMove>[0]));
+        });
+    },
+    projectTasksMoveNotice(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk status requires iOS');
+            requireSaved();
+            const result = completionJson(json, 2_000) as { count?: unknown; status?: unknown };
+            if (!result || typeof result !== 'object' || Array.isArray(result)
+                || Object.keys(result).sort().join(',') !== 'count,status'
+                || typeof result.count !== 'number' || !Number.isInteger(result.count) || result.count < 1 || result.count > 10_000
+                || !getBulkMoveStatusOptions('all').includes(result.status as TaskStatus))
+                throw new Error('INVALID_INPUT: Project move notice requires a bounded result');
+            const t = (key: string): string => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key;
+            return { message: formatListItemCount(result.count, 'task', t) };
+        });
+    },
+    projectTasksMoveValidate(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk status requires iOS');
+            return unwrap(contract.validatePreparedProjectTasksMove(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectTasksMove>[0]));
+        });
+    },
+    projectTasksMoveCommit(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk status requires iOS');
+            return unwrap(await contract.commitPreparedProjectTasksMove(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectTasksMove>[0]));
+        });
+    },
+    projectTasksMoveOutcome(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk status requires iOS');
+            return unwrap(contract.projectTasksMoveOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectTasksMoveOutcome>[0]));
+        });
     },
     referenceTasksMoveNotice(json: string): string {
         return submit(async () => {
@@ -4256,6 +5463,18 @@ globalThis.MindwtrHost = {
     inboxTasksAddTagOutcome(json: string): string {
         return submit(async () => unwrap(await contract.inboxTasksAddTagOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.inboxTasksAddTagOutcome>[0])));
     },
+    projectTasksAddTagPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); requireSaved(); return unwrap(await contract.prepareProjectTasksAddTag(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectTasksAddTag>[0])); });
+    },
+    projectTasksAddTagValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); return unwrap(contract.validatePreparedProjectTasksAddTag(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectTasksAddTag>[0])); });
+    },
+    projectTasksAddTagCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); return unwrap(await contract.commitPreparedProjectTasksAddTag(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectTasksAddTag>[0])); });
+    },
+    projectTasksAddTagOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); return unwrap(await contract.projectTasksAddTagOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectTasksAddTagOutcome>[0])); });
+    },
     inboxTasksRemoveTagPrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.prepareInboxTasksRemoveTag(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareInboxTasksRemoveTag>[0])); });
     },
@@ -4268,6 +5487,30 @@ globalThis.MindwtrHost = {
     inboxTasksRemoveTagOutcome(json: string): string {
         return submit(async () => unwrap(await contract.inboxTasksRemoveTagOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.inboxTasksRemoveTagOutcome>[0])));
     },
+    projectTasksRemoveTagPrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); requireSaved(); return unwrap(await contract.prepareProjectTasksRemoveTag(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectTasksRemoveTag>[0])); });
+    },
+    projectTasksRemoveTagValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); return unwrap(contract.validatePreparedProjectTasksRemoveTag(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectTasksRemoveTag>[0])); });
+    },
+    projectTasksRemoveTagCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); return unwrap(await contract.commitPreparedProjectTasksRemoveTag(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectTasksRemoveTag>[0])); });
+    },
+    projectTasksRemoveTagOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk tags require iOS'); return unwrap(await contract.projectTasksRemoveTagOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectTasksRemoveTagOutcome>[0])); });
+    },
+    projectTasksOrganizePrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk Organize requires iOS'); requireSaved(); return unwrap(await contract.prepareProjectTasksOrganize(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectTasksOrganize>[0])); });
+    },
+    projectTasksOrganizeValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk Organize requires iOS'); return unwrap(contract.validatePreparedProjectTasksOrganize(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectTasksOrganize>[0])); });
+    },
+    projectTasksOrganizeCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk Organize requires iOS'); return unwrap(await contract.commitPreparedProjectTasksOrganize(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectTasksOrganize>[0])); });
+    },
+    projectTasksOrganizeOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project bulk Organize requires iOS'); return unwrap(await contract.projectTasksOrganizeOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectTasksOrganizeOutcome>[0])); });
+    },
     inboxTasksOrganizePrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.prepareInboxTasksOrganize(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareInboxTasksOrganize>[0])); });
     },
@@ -4279,6 +5522,18 @@ globalThis.MindwtrHost = {
     },
     inboxTasksOrganizeOutcome(json: string): string {
         return submit(async () => unwrap(await contract.inboxTasksOrganizeOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.inboxTasksOrganizeOutcome>[0])));
+    },
+    projectOrganizeDestinationCreatePrepare(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project destination creation requires iOS'); requireSaved(); return unwrap(await contract.prepareProjectOrganizeDestinationCreate(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareProjectOrganizeDestinationCreate>[0])); });
+    },
+    projectOrganizeDestinationCreateValidate(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project destination creation requires iOS'); return unwrap(contract.validatePreparedProjectOrganizeDestinationCreate(completionJson(json, 2_000_000) as Parameters<typeof contract.validatePreparedProjectOrganizeDestinationCreate>[0])); });
+    },
+    projectOrganizeDestinationCreateCommit(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project destination creation requires iOS'); return unwrap(await contract.commitPreparedProjectOrganizeDestinationCreate(completionJson(json, 2_000_000) as Parameters<typeof contract.commitPreparedProjectOrganizeDestinationCreate>[0])); });
+    },
+    projectOrganizeDestinationCreateOutcome(json: string): string {
+        return submit(async () => { if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Project destination creation requires iOS'); return unwrap(await contract.projectOrganizeDestinationCreateOutcome(completionJson(json, 2_000_000) as Parameters<typeof contract.projectOrganizeDestinationCreateOutcome>[0])); });
     },
     inboxOrganizeDestinationCreatePrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(await contract.prepareInboxOrganizeDestinationCreate(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareInboxOrganizeDestinationCreate>[0])); });
@@ -4406,6 +5661,9 @@ globalThis.MindwtrHost = {
     projectLifecyclePrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.prepareProjectLifecycle(editorJson(json) as Parameters<typeof contract.prepareProjectLifecycle>[0])); });
     },
+    reviewProjectCompletionPrepare(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.prepareReviewProjectCompletion(editorJson(json) as Parameters<typeof contract.prepareReviewProjectCompletion>[0])); });
+    },
     projectLifecycleValidate(json: string): string {
         return submit(async () => unwrap(contract.validatePreparedProjectLifecycle(editorJson(json) as Parameters<typeof contract.validatePreparedProjectLifecycle>[0])));
     },
@@ -4436,6 +5694,60 @@ globalThis.MindwtrHost = {
     /** Commit only the exact prepared editor envelope; recovery never prepares again. */
     draftCommit(json: string): string {
         return submit(async () => taskResult('saveTaskDraft', await contract.commitPreparedTaskDraftSave(editorJson(json) as Parameters<typeof contract.commitPreparedTaskDraftSave>[0])));
+    },
+    rowQuickStatusOptions(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row quick status requires iOS');
+            requireSaved(); return unwrap(await contract.getRowQuickStatusOptions(completionJson(json, 4_096) as Parameters<typeof contract.getRowQuickStatusOptions>[0]));
+        });
+    },
+    rowQuickStatusPrepare(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row quick status requires iOS');
+            requireSaved(); return unwrap(await contract.prepareRowQuickStatusWrite(completionJson(json, 4_096) as Parameters<typeof contract.prepareRowQuickStatusWrite>[0]));
+        });
+    },
+    rowQuickStatusValidate(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row quick status requires iOS');
+            return unwrap(contract.validatePreparedRowQuickStatusWrite(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedRowQuickStatusWrite>[0]));
+        });
+    },
+    rowQuickStatusCommit(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row quick status requires iOS');
+            return unwrap(await contract.commitPreparedRowQuickStatusWrite(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedRowQuickStatusWrite>[0]));
+        });
+    },
+    rowQuickStatusOutcome(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Row quick status requires iOS');
+            return unwrap(contract.rowQuickStatusOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.rowQuickStatusOutcome>[0]));
+        });
+    },
+    inlineChecklistPrepare(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Inline checklist requires iOS');
+            requireSaved(); return unwrap(await contract.prepareInlineChecklistWrite(completionJson(json, 2_000_000) as Parameters<typeof contract.prepareInlineChecklistWrite>[0]));
+        });
+    },
+    inlineChecklistValidate(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Inline checklist requires iOS');
+            return unwrap(contract.validatePreparedInlineChecklistWrite(completionJson(json, 2_100_000) as Parameters<typeof contract.validatePreparedInlineChecklistWrite>[0]));
+        });
+    },
+    inlineChecklistCommit(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Inline checklist requires iOS');
+            return unwrap(await contract.commitPreparedInlineChecklistWrite(completionJson(json, 2_100_000) as Parameters<typeof contract.commitPreparedInlineChecklistWrite>[0]));
+        });
+    },
+    inlineChecklistOutcome(json: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('INVALID_INPUT: Inline checklist requires iOS');
+            return unwrap(contract.inlineChecklistOutcome(completionJson(json, 2_100_000) as Parameters<typeof contract.inlineChecklistOutcome>[0]));
+        });
     },
     /** Pure checklist edit and field model; only the host's prepared save writes. */
     checklistEdit(json: string): string {
@@ -4502,6 +5814,136 @@ globalThis.MindwtrHost = {
             return unwrap(contract.editQuickCapture(JSON.parse(json)));
         });
     },
+    /** Separate private Process Inbox AI entry; no generic AI or existing read shape grows. */
+    iosReviewAIWitness(json: string): string {
+        return submit(async () => { if (!iosReviewAI) throw new Error('NOT_READY: Review AI is unavailable'); return iosReviewAI.witness(json); });
+    },
+    iosReviewAIRequest(json: string, owner: (json: string) => unknown): string {
+        return submit(async signal => { if (!iosReviewAI) throw new Error('NOT_READY: Review AI is unavailable'); return iosReviewAI.request(json, owner, signal); });
+    },
+    iosReviewAIValidateApply(json: string, durableSQLJSON: string): string {
+        return submit(async () => { if (!iosReviewAI) throw new Error('NOT_READY: Review AI is unavailable'); return iosReviewAI.validateApply(json, durableSQLJSON); });
+    },
+    iosReviewAIOutcome(json: string): string {
+        return submit(async () => { if (!iosReviewAI) throw new Error('NOT_READY: Review AI is unavailable'); return iosReviewAI.outcome(json); });
+    },
+    iosReviewAIApply(json: string): string {
+        return submit(async () => { if (!iosReviewAI) throw new Error('NOT_READY: Review AI is unavailable'); return iosReviewAI.apply(json); });
+    },
+    iosInboxAIWitness(json: string): string {
+        return submit(async () => {
+            if (!iosInboxAI) throw new Error('NOT_READY: Inbox AI is unavailable');
+            return iosInboxAI.witness(json);
+        });
+    },
+    iosInboxAIRequest(json: string, owner: (json: string) => unknown): string {
+        return submit(async signal => {
+            if (!iosInboxAI) throw new Error('NOT_READY: Inbox AI is unavailable');
+            return iosInboxAI.request(json, owner, signal);
+        });
+    },
+    iosInboxAIApply(json: string, owner: () => unknown): string {
+        return submit(async () => {
+            if (!iosInboxAI) throw new Error('NOT_READY: Inbox AI is unavailable');
+            return iosInboxAI.apply(json, owner);
+        });
+    },
+    /** Private editor projection; existing core action choices and reads keep their shapes. */
+    iosTaskAIOptions(json: string): string {
+        return submit(async () => {
+            if (!iosTaskAI) throw new Error('NOT_READY: Task AI is unavailable');
+            return iosTaskAI.options(json);
+        });
+    },
+    /** Native starts/polls this ticket in short admissions and owns the selected editor callbacks. */
+    /** Private canonical read witness, consumed only by the native editor owner; no generic read shape grows. */
+    iosTaskAIWitness(json: string): string {
+        return submit(async () => {
+            if (!iosTaskAI) throw new Error('NOT_READY: Task AI is unavailable');
+            return iosTaskAI.witness(json);
+        });
+    },
+    iosTaskAIRequest(json: string, owner: (json: string) => unknown): string {
+        return submit(async signal => {
+            if (!iosTaskAI) throw new Error('NOT_READY: Task AI is unavailable');
+            return iosTaskAI.request(json, owner, signal);
+        });
+    },
+    /** Separate metadata-only projection; native supplies presence, never a credential. */
+    captureCopilotOptions(json: string, available: boolean): string {
+        return submit(async () => {
+            requireSaved();
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof available !== 'boolean') throw new Error('NOT_READY: Capture copilot is unavailable');
+            const settings = useTaskStore.getState().settings;
+            const value = unwrap(contract.getCaptureCopilotOptions({ ...JSON.parse(json), aiKey: { required: isAIKeyRequired(settings), available } }));
+            iosCaptureAIQuestion = value.request ? { revision: value.revision, request: value.request,
+                settings, language: unwrap(contract.getStrings({ keys: [] })).language } : null;
+            return value;
+        });
+    },
+    captureCopilotEdit(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.editCaptureCopilot(JSON.parse(json))); });
+    },
+    /** Private invocation callbacks retain native authority only for this selected question. */
+    iosCaptureCopilotRequest(json: string, owner: (json: string) => unknown): string {
+        return submit(async (signal) => {
+            const question = iosCaptureAIQuestion, adapter = bootAdapter;
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !question || !adapter || iosCaptureAIHost || iosConfigurationAIHost || iosConfigurationAIActive || iosTaskAI?.active || iosInboxAI?.active || iosReviewAI?.active || typeof owner !== 'function'
+                || !taskEditValuesEqual(completionJson(json, 2_000_000), { revision: question.revision, request: question.request })) {
+                throw new Error('STALE_REVISION: Capture copilot question changed');
+            }
+            const settings = question.settings, frozen = JSON.parse(JSON.stringify(settings));
+            const provider = settings.ai?.provider ?? 'openai';
+            if (!['openai', 'gemini', 'anthropic'].includes(provider)) throw new Error('NOT_READY: Capture copilot is unavailable');
+            const generation = getPersistenceStatus().generation;
+            const admit = (request: object) => {
+                if (checked(owner(JSON.stringify(request))) !== '') throw new Error('NOT_READY: Capture copilot owner is unavailable');
+            };
+            const current = () => {
+                const status = getPersistenceStatus(), state = useTaskStore.getState();
+                if (signal.aborted || iosCaptureAIQuestion !== question || bootAdapter !== adapter || getStorageAdapter() !== adapter
+                    || isSandboxMode() || isWorkspaceTransitionActive() || state.settings !== settings || !taskEditValuesEqual(state.settings, frozen)
+                    || unwrap(contract.getStrings({ keys: [] })).language !== question.language || status.generation !== generation
+                    || status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+                    || state.isLoading || state.editLockCount > 0) throw new Error('STALE_REVISION: Capture copilot owner changed');
+                requireSaved(); admit({ phase: 'current' });
+            };
+            admit({ phase: 'begin', provider, configuration: JSON.stringify(settings.ai ?? {}), language: question.language });
+            const unavailable = async (): Promise<never> => { throw new Error('NOT_READY: Capture copilot storage is read-only'); };
+            const host: NativeAIHost = {
+                platform: { isFossBuild },
+                storage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable },
+                secrets: { get: unavailable, set: unavailable, delete: unavailable },
+                loadRequestKey: async (selected) => {
+                    current();
+                    if (selected !== provider) throw new Error('STALE_REVISION: Capture copilot provider changed');
+                    const raw = checked(owner(JSON.stringify({ phase: 'credential', provider: selected })));
+                    if (typeof raw !== 'string') throw new Error('NOT_READY: Capture copilot credential is unavailable');
+                    const loaded = completionJson(raw, 32 * 1024);
+                    current();
+                    if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded) || Object.keys(loaded).length !== 1
+                        || !('value' in loaded) || (loaded.value !== null && (typeof loaded.value !== 'string' || loaded.value.length > 4000))) {
+                        throw new Error('NOT_READY: Capture copilot credential is unavailable');
+                    }
+                    return loaded.value;
+                },
+                fetch: async (input, init) => {
+                    current();
+                    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+                    admit({ phase: 'http', url });
+                    const response = await globalThis.fetch(input, init);
+                    current(); return response;
+                },
+            };
+            iosCaptureAIHost = host;
+            try {
+                current();
+                const value = unwrap(await contract.requestAICopilot({ request: question.request }, { signal }));
+                current();
+                return { suggestion: value.suggestion ? { ...value.suggestion, language: question.language } : null };
+            } finally { if (iosCaptureAIHost === host) iosCaptureAIHost = null; }
+        });
+    },
     /** `json` is `{ text, options, captureId, openAfterSave }`. Reusing captureId retries: the draft is written at most once. */
     captureSubmit(json: string): string {
         return submit(async () => taskResult('quickCapture', await contract.submitQuickCapture(JSON.parse(json))));
@@ -4512,6 +5954,9 @@ globalThis.MindwtrHost = {
             requireSaved();
             return unwrap(contract.prepareQuickCapture(JSON.parse(json)));
         });
+    },
+    captureCopilotPrepare(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.prepareQuickCaptureCopilot(JSON.parse(json))); });
     },
     /** The exact prepared journal; retries never reparse text or current defaults. */
     captureCommit(json: string): string {
@@ -4791,61 +6236,10 @@ globalThis.MindwtrHost = {
         return submit(async () => pomodoroAdapter().readPomodoroSession());
     },
     pomodoroTransitionPrepare(requestJSON: string): string {
-        return submit(async () => {
-            pomodoroWarmAdmission = null;
-            const adapter = pomodoroAdapter();
-            const stale = () => new Error('STALE_REVISION: Pomodoro preparation is no longer current');
-            const ready = () => {
-                if (pomodoroAdapter() !== adapter) throw stale();
-                requireSaved(); unwrap(contract.getDataSettings());
-                const status = getPersistenceStatus();
-                if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
-                    || useTaskStore.getState().editLockCount > 0 || useTaskStore.getState().isLoading) throw stale();
-                return status;
-            };
-            const status = ready(), state = useTaskStore.getState();
-            const references = [state._allTasks, state._allProjects, state._allSections, state._allAreas, state._allPeople, state.settings];
-            const frozen = JSON.parse(JSON.stringify(references)) as unknown;
-            const assertCurrent = () => {
-                if (ready().generation !== status.generation) throw stale();
-                const current = useTaskStore.getState();
-                const values = [current._allTasks, current._allProjects, current._allSections, current._allAreas, current._allPeople, current.settings];
-                if (current.lastDataChangeAt !== state.lastDataChangeAt || !values.every((value, index) => value === references[index])
-                    || !taskEditValuesEqual(values, frozen)) throw stale();
-            };
-            assertCurrent();
-            if (!await adapter.readRowBaseline()) throw stale();
-            assertCurrent();
-            const data = await adapter.getData({ rawTasks: true });
-            assertCurrent();
-            const canonical = [data.tasks, data.projects, data.sections ?? [], data.areas ?? [], data.people ?? [], stripSensitiveSettings(data.settings)];
-            // Normal startup projects legacy task fields; private recovery loads retain their raw shape.
-            if (!taskEditValuesEqual(references, canonical)
-                && !taskEditValuesEqual(references, [data.tasks.map((task) => normalizeTaskForLoad(task)), ...canonical.slice(1)])) throw stale();
-            const session = await adapter.readPomodoroSession();
-            assertCurrent();
-            // Native Engine alone augments an adoption intent with its checked
-            // fixed-cell read. The shared preparer validates that complete raw
-            // source; this parse only chooses the exact BEFORE task to read.
-            const parsed = pomodoroJSON(requestJSON) as NativePomodoroRequest;
-            const request = parsed.action === 'adoptLegacy' ? parsed : pomodoroJSON(requestJSON, 8192) as NativePomodoroRequest;
-            const legacy = request.action === 'adoptLegacy' && typeof request.legacy?.sessionRaw === 'string'
-                ? JSON.parse(request.legacy.sessionRaw) as { selectedTaskId?: unknown } | null : null;
-            const selected = request.action === 'adoptLegacy'
-                ? typeof legacy?.selectedTaskId === 'string' ? legacy.selectedTaskId : undefined
-                : session.state?.session.selectedTaskId;
-            const matches = selected ? data.tasks.filter((task) => task.id === selected) : [];
-            if (matches.length > 1 || (matches.length === 1 && !hasRawReadRow(matches[0]))) throw stale();
-            const row = matches.length === 1 ? [...rawReadRow(matches[0], taskToSqliteRow(matches[0])).row] as (string | number | null)[] : null;
-            if (row && row.length !== TASK_SQLITE_COLUMNS.length) throw stale();
-            const plan = prepareNativePomodoroTransition({ request, session, target: selected ? { id: selected, row } : null,
-                deviceId: request.action === 'initialize' ? null : typeof data.settings.deviceId === 'string' ? data.settings.deviceId : null });
-            assertCurrent();
-            if (!plan) return { kind: 'noop' };
-            const planJSON = JSON.stringify(validatePreparedNativePomodoroTransition(plan));
-            pomodoroWarmAdmission = { planJSON, assertCurrent };
-            return { kind: 'prepared', planJSON };
-        });
+        return submit(() => preparePomodoroRequest(requestJSON));
+    },
+    iosWatchPomodoroPrepare(sourceJSON: string): string {
+        return submit(() => preparePomodoroRequest('', sourceJSON));
     },
     pomodoroTransitionValidate(planJSON: string): string {
         return submit(async () => validatePreparedNativePomodoroTransition(pomodoroJSON(planJSON)).result);
@@ -4876,6 +6270,21 @@ globalThis.MindwtrHost = {
     /** Mind Sweep guide and its literal one-task Inbox add. The iOS host journals preparation before commit. */
     mindSweepGuide(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.getMindSweepGuide(JSON.parse(json))); });
+    },
+    weeklyReviewProjectTaskOptions(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(await contract.getWeeklyReviewProjectTaskOptions(JSON.parse(json))); });
+    },
+    weeklyReviewProjectTaskPrepare(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(await contract.prepareWeeklyReviewProjectTask(JSON.parse(json))); });
+    },
+    weeklyReviewProjectTaskValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedWeeklyReviewProjectTask(JSON.parse(json))));
+    },
+    weeklyReviewProjectTaskCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitPreparedWeeklyReviewProjectTask(JSON.parse(json))));
+    },
+    weeklyReviewProjectTaskOutcome(json: string): string {
+        return submit(async () => unwrap(contract.weeklyReviewProjectTaskOutcome(JSON.parse(json))));
     },
     mindSweepPrepare(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.prepareMindSweepAdd(JSON.parse(json))); });
@@ -5010,6 +6419,18 @@ globalThis.MindwtrHost = {
         });
     },
     /** `json` is `{ sessionId, taskId, step, edit?, mode? }`: one control's edit, passed to core unchanged. */
+    inboxStartDetailed(mode: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.startInboxProcessing({ mode: mode as 'guided' | 'quick', includeDetails: true }));
+        });
+    },
+    inboxEditorReload(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.reloadInboxProcessingTask(editorJson(json) as Parameters<typeof contract.reloadInboxProcessingTask>[0]));
+        });
+    },
     inboxStep(json: string): string {
         return submit(async () => {
             requireSaved();
@@ -5326,6 +6747,43 @@ globalThis.MindwtrHost = {
      * The pending-captures queue drained into the store (core's ingestPendingCaptures): at every boot after the journal's replay,
      * and for CoreWork's ingest job. A journaled write; its replay drains again.
      */
+    iosWatchOpenAIRuntime(): string {
+        const arity = arguments.length;
+        return submit(async () => {
+            if (arity !== 0) throw new Error('INVALID_INPUT: Watch speech runtime takes no arguments');
+            iosWatchReadiness();
+            const result = readWatchOpenAIRuntime(useTaskStore.getState().settings);
+            iosWatchReadiness(); return result;
+        });
+    },
+    iosWatchAudioOutcome(json: string): string {
+        return submit(async () => readIOSWatchAudioOutcome(json, iosWatchReadiness));
+    },
+    iosWatchAudioNeedsTranscript(json: string): string {
+        return submit(async () => readIOSWatchAudioNeedsTranscript(json, iosWatchReadiness));
+    },
+    iosWatchAudioIngest(json: string): string {
+        const arity = arguments.length;
+        return submit(async () => {
+            if (arity !== 1) throw new Error('INVALID_INPUT: Native Watch audio requires one argument');
+            requireSaved();
+            return ingestIOSWatchAudio(json, { contract, current: iosWatchReadiness, lastApplied: lastAppliedRecord });
+        });
+    },
+    iosWatchIngestOutcome(json: string): string {
+        return submit(async () => readIOSWatchBatchOutcome(json, iosWatchReadiness));
+    },
+    iosWatchIngest(json: string): string {
+        const arity = arguments.length;
+        return submit(async () => {
+            if (arity !== 1) throw new Error('INVALID_INPUT: Native Watch batch requires one argument');
+            requireSaved();
+            const result = await ingestIOSWatchBatch(json, { contract, current: iosWatchReadiness, lastApplied: lastAppliedRecord });
+            logInfo('Native iOS Watch command batch saved', { scope: 'native-ios', force: true,
+                context: { releaseCheck: 'v1.3.8/ios-watch-ingest', operation: 'ingest', outcome: 'saved' } });
+            return result;
+        });
+    },
     ingest(requestId: string): string {
         return submit(async () => taskResult('ingest', await contract.ingestPendingCaptures({ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord })));
     },
@@ -5371,19 +6829,23 @@ globalThis.MindwtrHost = {
         });
     },
     /** A line of Kotlin's runner (CoreWork, the queue drain) through core's logger, its fields in `context`. */
-    logLinkHandoff(outcome: string, surface: string): string {
+    logLinkHandoff(outcome: string, surface: string, scheme = 'upnote'): string {
         return submit(async () => {
-            if (!['opened', 'failed'].includes(outcome) || !['markdown', 'attachment'].includes(surface)) return {};
-            const meta = { scope: 'links', force: true, context: { outcome, surface, scheme: 'upnote' } };
-            if (outcome === 'failed') logWarn('Native UpNote handoff failed', meta);
-            else logInfo('Native UpNote handoff accepted', meta);
+            if (!['opened', 'failed'].includes(outcome) || !['markdown', 'attachment'].includes(surface)
+                || !['upnote', 'obsidian'].includes(scheme)) return {};
+            const meta = { scope: 'links', force: true, context: { outcome, surface, scheme,
+                ...(scheme === 'obsidian' ? { releaseCheck: 'v1.3.8/ios-native-obsidian-link' } : {}) } };
+            const noteApp = scheme === 'upnote' ? 'UpNote' : 'Obsidian';
+            if (outcome === 'failed') logWarn(`Native ${noteApp} handoff failed`, meta);
+            else logInfo(`Native ${noteApp} handoff accepted`, meta);
             return {};
         });
     },
     logLine(message: string, contextJson: string): string {
         return submit(async () => {
             try {
-                logInfo(message, { scope: globalThis.__mindwtrHostPlatform === 'ios' ? 'native-ios' : 'native-android', context: JSON.parse(contextJson) as Record<string, unknown> });
+                logInfo(message, { scope: globalThis.__mindwtrHostPlatform === 'ios' ? 'native-ios' : 'native-android',
+                    ...(['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed'].includes(message) ? { force: true } : {}), context: JSON.parse(contextJson) as Record<string, unknown> });
             } catch { /* a diagnostic line must never fail its caller */ }
             return {};
         });
@@ -5408,8 +6870,8 @@ globalThis.MindwtrHost = {
                 || retained.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))
                 || new Set(retained).size !== retained.length)) throw invalid();
             const pruned = await withHostConnection(() => pruneNativeRequestReceipts(sqlite, new Date(), retained === null
-                ? { retainedCommands: ['reminderComplete', 'reminderSnooze'], retainedRequestIds: [...new Set([...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }
-                : { retainedRequestIds: [...new Set([...(retained as string[]), ...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }));
+                ? { retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [...new Set([...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }
+                : { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [...new Set([...(retained as string[]), ...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }));
             try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                 message: 'Native iOS reminder receipt retention applied',
                 context: { releaseCheck: 'v1.3.5/ios-reminder-receipt-retention', outcome: retained === null ? 'conservative' : 'snapshot' },
@@ -5503,20 +6965,32 @@ globalThis.MindwtrHost = {
             return prepareNativeAttachmentDraftAvailability(attachmentDraftJson(json));
         });
     },
-    iosTaskDraftPrepareAvailability(json: string, prepareSource: unknown): string {
+    iosTaskDraftPrepareAvailability(json: string, prepareSource: unknown, dropboxControl?: unknown): string {
         return submit(async (signal) => {
             const unavailable = () => new Error('NOT_READY: Task attachment preparation is unavailable');
+            const cloudKit = nativeTaskAttachmentPreparationUsesCloudKit(json);
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !localAttachments || nativeSync
                 || iosTaskAttachmentPreparation || iosProjectFilePreparation || iosCleanupCallback || iosForegroundFailure
-                || typeof prepareSource !== 'function' || !globalThis.__mindwtrSyncSecrets
+                || typeof prepareSource !== 'function' || (cloudKit ? !iosCloudKitAvailable() : !globalThis.__mindwtrSyncSecrets)
                 || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
             requireSaved();
             const channels = nativeFileChannels();
             if (!channels) throw unavailable();
             let callback: ((metadataJSON: string, plaintextBase64: string) => string) | null = prepareSource as typeof callback;
+            const sourceOwner = callback;
+            if (dropboxControl !== undefined && typeof dropboxControl !== 'function') throw unavailable();
+            iosDropboxControl = typeof dropboxControl === 'function' ? dropboxControl as (requestJSON: string) => unknown : null;
+            iosDropboxSignal = signal;
             iosTaskAttachmentPreparation = true;
+            if (cloudKit) iosSelectedCloudKitSource = sourceOwner;
             try {
+                const dropbox = iosDropboxControl ? ensureIosManualSync().dropboxBinding : null;
                 return await prepareNativeTaskAttachmentAvailability(json, {
+                    ...(dropbox ? { dropbox } : {}),
+                    ...(cloudKit ? { cloudKit: createNativeCloudKitAssets((request, selectedSignal) => {
+                        if (!callback || iosSelectedCloudKitSource !== sourceOwner) throw unavailable();
+                        return iosCloudKitCall(request, selectedSignal);
+                    }) } : {}),
                     getLegacyValue: (name) => keyValue.get(name),
                     getSecret: (account) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(account),
                     crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: Parameters<typeof createHostSyncCrypto>[0] }).__mindwtrCryptoCall),
@@ -5525,10 +6999,13 @@ globalThis.MindwtrHost = {
                         return callback(metadata, bytes);
                     },
                 }, channels, signal);
-            } finally { callback = null; iosTaskAttachmentPreparation = false; }
+            } finally {
+                if (iosSelectedCloudKitSource === sourceOwner) iosSelectedCloudKitSource = null;
+                callback = null; iosTaskAttachmentPreparation = false; iosDropboxControl = null; iosDropboxSignal = undefined;
+            }
         });
     },
-    iosProjectFilePrepareAvailability(json: string, prepareSource: unknown): string {
+    iosProjectFilePrepareAvailability(json: string, prepareSource: unknown, dropboxControl?: unknown): string {
         return submit(async (signal) => {
             const unavailable = () => new Error('NOT_READY: Project download is unavailable');
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !localAttachments || nativeSync
@@ -5537,9 +7014,14 @@ globalThis.MindwtrHost = {
                 || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
             requireSaved(); const channels = nativeFileChannels(); if (!channels) throw unavailable();
             let callback: ((metadataJSON: string, plaintextBase64: string) => string) | null = prepareSource as typeof callback;
+            if (dropboxControl !== undefined && typeof dropboxControl !== 'function') throw unavailable();
+            iosDropboxControl = typeof dropboxControl === 'function' ? dropboxControl as (requestJSON: string) => unknown : null;
+            iosDropboxSignal = signal;
             iosProjectFilePreparation = true;
             try {
+                const dropbox = iosDropboxControl ? ensureIosManualSync().dropboxBinding : null;
                 const result = await prepareNativeProjectFileAvailability(json, {
+                    ...(dropbox ? { dropbox } : {}),
                     getLegacyValue: (name) => keyValue.get(name),
                     getSecret: (account) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(account),
                     crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: Parameters<typeof createHostSyncCrypto>[0] }).__mindwtrCryptoCall),
@@ -5552,7 +7034,7 @@ globalThis.MindwtrHost = {
                     return { ...result, result: { status: result.status, message: getAttachmentResolutionMessage(result, t), update: null } };
                 }
                 return result;
-            } finally { callback = null; iosProjectFilePreparation = false; }
+            } finally { callback = null; iosProjectFilePreparation = false; iosDropboxControl = null; iosDropboxSignal = undefined; }
         });
     },
     attachmentDraftValidateLineageV5(json: string): string {
@@ -5729,6 +7211,9 @@ globalThis.MindwtrHost = {
             const webdavProjectDownload = operation === 'webdav-project-download' && ['saved', 'unrecoverable', 'noop', 'abandoned', 'refused', 'cleanup-pending', 'decrypted'].includes(outcome);
             const projectDownload = webdavProjectDownload || operation === 'selfhosted-project-download' && ['saved', 'abandoned', 'refused', 'cleanup-pending', 'decrypted'].includes(outcome);
             const webdavTaskAvailability = operation === 'webdav-task-availability' && ['confirmed', 'source-retired'].includes(outcome);
+            const cloudKitTaskAvailability = operation === 'cloudkit-task-availability' && outcome === 'confirmed';
+            const dropboxAvailability = operation === 'dropbox-task-availability' && outcome === 'confirmed'
+                || operation === 'dropbox-project-download' && ['confirmed', 'cleanup-pending', 'decrypted'].includes(outcome);
             const taskDownloadMaterial = operation === 'task-download-material' && outcome === 'decrypted';
             const selfHostedAvailability = webdavTaskAvailability || ['selfhosted-task-availability', 'selfhosted-project-availability'].includes(operation) && outcome === 'confirmed';
             const preexistingReplay = operation === 'preexisting-journal-replay' && outcome === 'confirmed';
@@ -5745,10 +7230,10 @@ globalThis.MindwtrHost = {
             const taskFileHash = operation === 'task-file-hash' && outcome === 'saved';
             const ownedCleanup = operation === 'cleanup-owned-retirement' && ['removed', 'absent', 'retained'].includes(outcome);
             const editorAcknowledged = ['editor-add', 'editor-remove', 'editor-save', 'editor-discard', 'editor-recover'].includes(operation) && outcome === 'confirmed';
-            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !relocatedAvailability && !relocatedProjectAvailability && !cachedProjectAvailability && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer && !selfHostedAvailability && !projectDownload && !taskDownloadMaterial
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments && !finishedDiscard && !unstartedDiscard && !removedDraft && !mixedSave && !mixedDiscard && !mixedAdd && !providerAdd && !photoAdd && !audioPlayback && !completeSave && !completeUndo && !ownedResume && !editorAcknowledged && !preexistingReplay && !containerRecovery && !fileOpen && !projectFileOpen && !relocatedOpen && !relocatedAvailability && !relocatedProjectAvailability && !cachedProjectAvailability && !projectFileRemove && !projectFileAdd && !projectFileHash && !taskFileHash && !ownedCleanup && !availabilityConsumer && !selfHostedAvailability && !projectDownload && !taskDownloadMaterial && !cloudKitTaskAvailability && !dropboxAvailability
                 || !(['add', 'checkpoint', 'save'].includes(operation) && ['confirmed', 'replayed'].includes(outcome)
                     || operation === 'discard' && outcome === 'retained'
-                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || relocatedAvailability || relocatedProjectAvailability || cachedProjectAvailability || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer || selfHostedAvailability || projectDownload || taskDownloadMaterial)) return {};
+                    || operation === 'discard-capacity' && outcome === 'confirmed' || finishedDiscard || unstartedDiscard || removedDraft || mixedSave || mixedDiscard || mixedAdd || providerAdd || photoAdd || audioPlayback || completeSave || completeUndo || ownedResume || editorAcknowledged || preexistingReplay || containerRecovery || fileOpen || projectFileOpen || relocatedOpen || relocatedAvailability || relocatedProjectAvailability || cachedProjectAvailability || projectFileRemove || projectFileAdd || projectFileHash || taskFileHash || ownedCleanup || availabilityConsumer || selfHostedAvailability || projectDownload || taskDownloadMaterial || cloudKitTaskAvailability || dropboxAvailability)) return {};
             try {
                 if (completeSave && outcome === 'domainSaved') await diagnosticsLog.append({
                     ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -5763,6 +7248,8 @@ globalThis.MindwtrHost = {
                         : webdavProjectDownload ? { releaseCheck: 'v1.3.5/ios-webdav-project-download' }
                         : projectDownload ? { releaseCheck: 'v1.3.5/ios-selfhosted-project-download' }
                         : taskDownloadMaterial ? { releaseCheck: 'v1.3.5/ios-task-download-material' }
+                        : dropboxAvailability ? { releaseCheck: 'v1.3.8/ios-dropbox' }
+                        : cloudKitTaskAvailability ? { releaseCheck: 'v1.3.8/ios-cloudkit-selected-download' }
                         : webdavTaskAvailability ? { releaseCheck: 'v1.3.5/ios-webdav-task-availability' }
                         : selfHostedAvailability ? { releaseCheck: 'v1.3.5/ios-selfhosted-file-availability' }
                         : availabilityConsumer ? { releaseCheck: 'v1.3.5/ios-task-availability-consumers' }
@@ -6187,6 +7674,514 @@ globalThis.MindwtrHost = {
             return value;
         });
     },
+    iosVoiceEndpointSessionOpen(id: string): string {
+        return submit(async () => {
+            unwrap(iosVoiceReadiness()); requireSaved();
+            const state = useTaskStore.getState();
+            if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id) || state.isLoading || state.editLockCount > 0
+                || state.settings.ai?.speechToText?.provider !== 'openai')
+                throw new Error('NOT_READY: Voice endpoint is unavailable');
+            iosVoiceEndpointSession = { id, adapter: bootAdapter!, generation: getPersistenceStatus().generation,
+                settings: state.settings, frozen: JSON.parse(JSON.stringify(state.settings)) };
+            iosVoiceEndpointRetry = null;
+            return null;
+        });
+    },
+    iosVoiceEndpointSessionClose(id: string): string {
+        return submit(async () => {
+            if (iosVoiceEndpointSession?.id === id) iosVoiceEndpointSession = null;
+            if (iosVoiceEndpointRetry?.session === id) iosVoiceEndpointRetry = null;
+            return null;
+        });
+    },
+    iosVoiceEndpointSensitive(json: string, owner: (json: string) => unknown): string {
+        return submit(signal => runVoiceEndpointSensitive(json, owner, signal));
+    },
+    iosVoiceWhisperModel(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const runtime = unwrap(await iosVoiceMethods.runtimeOptions(iosVoiceJSON(json, 256), current));
+            if (runtime.provider !== 'whisper') return null;
+            const model = getSelectedMobileWhisperModel(runtime.model);
+            if (!model) throw new Error('NOT_READY: Local speech model is unavailable');
+            current();
+            return { version: 1, id: model.id, fileName: model.fileName, sizeBytes: model.sizeBytes, sha256: model.sha256,
+                urls: WHISPER_MODEL_BASE_URLS.map(root => `${root}/${model.fileName}`) };
+        });
+    },
+    iosVoiceWhisperLanguage(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const input = iosVoiceJSON(json, 4096);
+            if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 2
+                || !('model' in input) || !('language' in input)
+                || typeof input.model !== 'string' || getSelectedMobileWhisperModel(input.model)?.id !== input.model
+                || typeof input.language !== 'string' || input.language.length > 200)
+                throw new Error('INVALID_INPUT: Local speech language request is invalid');
+            const language = normalizeSpeechLanguage(input.language);
+            current(); return input.model.endsWith('.en') && language === 'auto' ? 'en' : language;
+        });
+    },
+    iosVoiceOpenAIRuntime(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const input = iosVoiceJSON(json, 256);
+            if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length)
+                throw new Error('INVALID_INPUT: Voice runtime request is invalid');
+            const result = readWatchOpenAIRuntime(useTaskStore.getState().settings);
+            current(); return result;
+        });
+    },
+    iosVoiceModelDiscovery(json: string, owner: (json: string) => unknown): string {
+        return submit(async signal => {
+            if (iosConfigurationAIActive || iosConfigurationAIHost || iosCaptureAIHost || iosTaskAI?.active || iosInboxAI?.active || iosReviewAI?.active)
+                throw new Error('NOT_READY: Voice model discovery is already active');
+            iosConfigurationAIActive = true;
+            try {
+                const input = completionJson(json, 32 * 1024);
+                if (!input || typeof input !== 'object' || Array.isArray(input)
+                    || !taskEditValuesEqual(Object.keys(input).sort(), ['expected', 'session'])
+                    || !('session' in input) || typeof input.session !== 'string'
+                    || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(input.session)
+                    || !('expected' in input) || typeof owner !== 'function')
+                    throw new Error('INVALID_INPUT: Voice model discovery request is invalid');
+                unwrap(iosVoiceReadiness()); requireSaved();
+                const adapter = bootAdapter, settings = useTaskStore.getState().settings;
+                const frozen = JSON.parse(JSON.stringify(settings)), generation = getPersistenceStatus().generation;
+                const { ask, readReply } = aiModelDiscoveryOwner(owner);
+                const current = () => {
+                    const state = useTaskStore.getState();
+                    if (signal.aborted || bootAdapter !== adapter || getStorageAdapter() !== adapter
+                        || state.settings !== settings || !taskEditValuesEqual(state.settings, frozen)
+                        || getPersistenceStatus().generation !== generation || state.isLoading || state.editLockCount > 0
+                        || ask({ phase: 'current' }) !== '')
+                        throw new Error('STALE_REVISION: Voice model discovery owner changed');
+                    unwrap(iosVoiceReadiness()); requireSaved();
+                };
+                current();
+                const options = unwrap(await iosVoiceMethods.settingsOptions({}, current));
+                if (!taskEditValuesEqual(options.expected, input.expected))
+                    throw new Error('STALE_REVISION: Voice model discovery settings changed');
+                const provider = options.provider;
+                if (provider !== 'openai' && provider !== 'gemini')
+                    throw new Error('NOT_READY: Voice model discovery is unavailable for this provider');
+                const metadata = readReply({ phase: 'metadata', provider });
+                if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || Object.keys(metadata).length !== 1
+                    || !('consent' in metadata) || typeof metadata.consent !== 'boolean')
+                    throw new Error('NOT_READY: Voice model discovery metadata is unavailable');
+                current();
+                const result = await discoverNativeVoiceModels({ provider, model: options.model, modelOptions: options.modelOptions,
+                    baseUrl: provider === 'openai' ? settings.ai?.speechToText?.baseUrl : undefined,
+                    consent: metadata.consent, aiEnabled: settings.ai?.enabled === true,
+                    aiProvider: settings.ai?.provider ?? 'openai', isFossBuild,
+                }, {
+                    current, signal,
+                    readCredential: async () => {
+                        current(); const loaded = readReply({ phase: 'credential', provider }); current();
+                        if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded) || Object.keys(loaded).length !== 1
+                            || !('value' in loaded) || loaded.value !== null && (typeof loaded.value !== 'string' || loaded.value.length > 4000))
+                            throw new Error('NOT_READY: Voice model discovery credential is unavailable');
+                        return loaded.value;
+                    },
+                    fetch: async (input, init) => {
+                        current();
+                        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+                        if (ask({ phase: 'http', url }) !== '') throw new Error('NOT_READY: Voice model discovery request is unavailable');
+                        const response = await globalThis.fetch(input, init); current(); return response;
+                    },
+                });
+                current();
+                let reply = { version: 1, provider, ...result, expected: options.expected };
+                if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 64 * 1024)
+                    reply = { version: 1, provider, status: 'fallback', modelOptions: options.modelOptions, expected: options.expected };
+                if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 64 * 1024)
+                    throw new Error('NOT_READY: Voice model discovery choices are unavailable');
+                return reply;
+            } finally { iosConfigurationAIActive = false; }
+        });
+    },
+    iosVoiceSettingsOptions(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.settingsOptions(iosVoiceJSON(json, 256), current));
+            current(); return result;
+        });
+    },
+    iosVoiceRuntimeOptions(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.runtimeOptions(iosVoiceJSON(json, 256), current));
+            current(); return result;
+        });
+    },
+    iosVoiceSettingsPrepare(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.prepareSettings(iosVoiceJSON(json, 32768), current));
+            current(); return result;
+        });
+    },
+    iosVoiceSettingsValidate(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(iosVoiceMethods.validateSettings(iosVoiceJSON(json, 4194304)));
+            current(); return result;
+        });
+    },
+    iosVoiceSettingsCommit(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.commitSettings(iosVoiceJSON(json, 4194304), current));
+            current(); return result;
+        });
+    },
+    iosVoiceSettingsRetryOutcome(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(iosVoiceMethods.settingsOutcome(iosVoiceJSON(json, 32768)));
+            current(); return result;
+        });
+    },
+    iosVoiceSettingsRecover(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.recoverSettings(iosVoiceJSON(json, 4194304), current));
+            current(); return result;
+        });
+    },
+    iosVoiceCapturePrepare(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.prepareCapture(iosVoiceJSON(json, 131072), current));
+            current(); return result;
+        });
+    },
+    iosVoiceCaptureValidate(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(iosVoiceMethods.validateCapture(iosVoiceJSON(json, 4194304)));
+            current(); return result;
+        });
+    },
+    iosVoiceCaptureCommit(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.commitCapture(iosVoiceJSON(json, 4194304), current));
+            current(); return result;
+        });
+    },
+    iosVoiceCaptureRetryOutcome(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(iosVoiceMethods.captureOutcome(iosVoiceJSON(json, 131072)));
+            current(); return result;
+        });
+    },
+    iosVoiceCaptureRecover(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.recoverCapture(iosVoiceJSON(json, 4194304), current));
+            current(); return result;
+        });
+    },
+    iosVoiceResultPrepare(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.prepareResult(iosVoiceJSON(json, 262144), current));
+            current(); return result;
+        });
+    },
+    iosVoiceResultValidate(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(iosVoiceMethods.validateResult(iosVoiceJSON(json, 4194304)));
+            current(); return result;
+        });
+    },
+    iosVoiceResultCommit(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.commitResult(iosVoiceJSON(json, 4194304), current));
+            current(); return result;
+        });
+    },
+    iosVoiceResultRetryOutcome(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(iosVoiceMethods.resultOutcome(iosVoiceJSON(json, 262144)));
+            current(); return result;
+        });
+    },
+    iosVoiceResultRecover(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const result = unwrap(await iosVoiceMethods.recoverResult(iosVoiceJSON(json, 4194304), current));
+            current(); return result;
+        });
+    },
+    iosVoiceOpenAITranscriptionBuild(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            let result;
+            try { result = buildWatchOpenAITranscription(iosVoiceJSON(json, 16 * 1024)); }
+            catch { throw new Error('INVALID_INPUT: OpenAI speech input is invalid'); }
+            current(); return result;
+        });
+    },
+    iosVoiceOpenAITranscriptionDecode(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            let result;
+            try { result = decodeWatchOpenAITranscription(iosVoiceJSON(json, 2 * 1024 * 1024)); }
+            catch { throw new Error('INVALID_INPUT: OpenAI speech input is invalid'); }
+            current(); return result;
+        });
+    },
+    iosVoiceOpenAIParseBuild(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            let result;
+            try { result = buildWatchOpenAIParse(iosVoiceJSON(json, 512 * 1024)); }
+            catch { throw new Error('INVALID_INPUT: OpenAI speech input is invalid'); }
+            current(); return result;
+        });
+    },
+    iosVoiceOpenAIParseDecode(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            let result;
+            try { result = decodeWatchOpenAIParse(iosVoiceJSON(json, 2 * 1024 * 1024)); }
+            catch { throw new Error('INVALID_INPUT: OpenAI speech input is invalid'); }
+            current(); return result;
+        });
+    },
+    iosVoiceGeminiRequestBuild(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const input = iosVoiceJSON(json, 8 * 1024 * 1024) as Record<string, unknown>;
+            const config = input && typeof input === 'object' && !Array.isArray(input) ? input.config : null;
+            if (!input || typeof input !== 'object' || Array.isArray(input)
+                || !taskEditValuesEqual(Object.keys(input).sort(), ['audioBase64', 'config', 'mimeType'])
+                || !config || typeof config !== 'object' || Array.isArray(config)
+                || !taskEditValuesEqual(Object.keys(config).sort(), ['fieldStrategy', 'language', 'mode', 'model', 'now', 'timeZone'])
+                || typeof input.audioBase64 !== 'string' || input.mimeType !== 'audio/mp4' && input.mimeType !== 'audio/wav')
+                throw new Error('INVALID_INPUT: Voice Gemini request is malformed');
+            const raw = config as Record<string, unknown>;
+            if (typeof raw.model !== 'string' || !raw.model.trim() || raw.model.length > 2000
+                || typeof raw.language !== 'string' || raw.language.length > 200
+                || raw.mode !== 'smart_parse' && raw.mode !== 'transcribe_only'
+                || raw.fieldStrategy !== 'smart' && raw.fieldStrategy !== 'title_only' && raw.fieldStrategy !== 'description_only'
+                || typeof raw.now !== 'string' || raw.now.length > 40 || !Number.isFinite(Date.parse(raw.now))
+                || new Date(raw.now).toISOString() !== raw.now
+                || raw.timeZone !== null && (typeof raw.timeZone !== 'string' || raw.timeZone.length > 200))
+                throw new Error('INVALID_INPUT: Voice Gemini configuration is malformed');
+            const selected: GeminiSpeechRequestConfig = { model: raw.model, language: raw.language, mode: raw.mode,
+                fieldStrategy: raw.fieldStrategy, now: new Date(raw.now), ...(raw.timeZone === null ? {} : { timeZone: raw.timeZone as string }) };
+            let result;
+            try { result = buildRemoteGeminiSpeechRequest(selected, input.audioBase64, input.mimeType); }
+            catch { throw new Error('INVALID_INPUT: Voice Gemini request is invalid'); }
+            current(); return result;
+        });
+    },
+    iosVoiceGeminiResponseDecode(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            let result;
+            try { result = decodeRemoteGeminiSpeechResponse(iosVoiceJSON(json, 2 * 1024 * 1024)); }
+            catch { throw new Error('INVALID_INPUT: Voice Gemini response is malformed'); }
+            current(); return result;
+        });
+    },
+    iosVoiceAcknowledged(stage: string, outcome: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const current = iosVoiceOwner(owner, signal);
+            const outcomes: Record<string, string[]> = {
+                settings: ['saved', 'failed'], capture: ['saved', 'save-pending', 'refused', 'failed', 'cancelled', 'permission-denied'],
+                speech: ['applied', 'discarded', 'empty', 'skipped', 'failed', 'cancelled'], credential: ['saved', 'cleared', 'failed'],
+            };
+            if (!Object.prototype.hasOwnProperty.call(outcomes, stage) || !outcomes[stage].includes(outcome))
+                throw new Error('INVALID_INPUT: Voice acknowledgment is invalid');
+            current();
+            try {
+                logInfo('Native iOS voice operation completed', { scope: 'native-ios', force: true,
+                    context: { releaseCheck: 'v1.3.8/ios-native-voice', provider: 'gemini', stage, outcome } });
+                await diagnosticsLog.serialize(async () => undefined);
+            } catch { /* Diagnostics cannot change native's already proved result. */ }
+            current(); return null;
+        });
+    },
+    iosAITextConfigurationSessionOpen(id: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !/^[0-9a-f-]{36}$/.test(id))
+                throw new Error('NOT_READY: AI text configuration is unavailable');
+            requireSaved();
+            const settings = useTaskStore.getState().settings;
+            iosAITextConfigurationSession = { id, provider: 'openai', version: 1, adapter: bootAdapter, generation: getPersistenceStatus().generation,
+                settings, frozen: JSON.parse(JSON.stringify(settings)), acceptedAdvance: null, extraBodyAttempts: new Map() };
+            return null;
+        });
+    },
+    iosAITextConfigurationSessionCheck(id: string): string {
+        return submit(async () => { currentAITextConfigurationSession(id); return null; });
+    },
+    iosAITextConfigurationSessionRefresh(id: string): string {
+        return submit(async () => { refreshAITextConfigurationSession(id); return null; });
+    },
+    iosAITextConfigurationSessionClose(id: string): string {
+        return submit(async () => { if (iosAITextConfigurationSession?.id === id) iosAITextConfigurationSession = null; if (iosAITextEndpointRetry?.session === id) iosAITextEndpointRetry = null; return null; });
+    },
+    iosAITextConfigurationSessionOpenV2(id: string, provider: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !/^[0-9a-f-]{36}$/.test(id)
+                || (provider !== 'openai' && provider !== 'gemini' && provider !== 'anthropic')
+                || (useTaskStore.getState().settings.ai?.provider ?? 'openai') !== provider)
+                throw new Error('NOT_READY: AI provider configuration is unavailable');
+            requireSaved();
+            const settings = useTaskStore.getState().settings;
+            iosAITextConfigurationSession = { id, provider, version: 2, adapter: bootAdapter, generation: getPersistenceStatus().generation,
+                settings, frozen: JSON.parse(JSON.stringify(settings)), acceptedAdvance: null, extraBodyAttempts: new Map() };
+            return null;
+        });
+    },
+    iosAITextConfigurationConsentTargetV2(json: string): string {
+        return submit(async () => {
+            const request = readNativeAITextConfigurationRequestV2(completionJson(json, 32 * 1024));
+            if (!request) throw new Error('INVALID_INPUT: AI provider request is malformed');
+            return { provider: nativeAITextConfigurationConsentTarget(request) };
+        });
+    },
+    iosAITextConfigurationOptionsV2(json: string, owner: () => unknown): string {
+        return submit(async signal => unwrap(await aiTextConfigurationMethods.optionsV2(completionJson(json, 256), aiTextConfigurationOwner(owner, signal))));
+    },
+    iosAITextModelDiscovery(json: string, owner: (json: string) => unknown): string {
+        return submit(async signal => {
+            if (iosConfigurationAIActive || iosConfigurationAIHost || iosCaptureAIHost || iosTaskAI?.active || iosInboxAI?.active || iosReviewAI?.active)
+                throw new Error('NOT_READY: AI model discovery is already active');
+            iosConfigurationAIActive = true;
+            try {
+                const input = completionJson(json, 32 * 1024);
+                if (!input || typeof input !== 'object' || Array.isArray(input)
+                    || !taskEditValuesEqual(Object.keys(input).sort(), ['expected', 'session'])
+                    || !('session' in input) || typeof input.session !== 'string' || !('expected' in input) || typeof owner !== 'function')
+                    throw new Error('INVALID_INPUT: AI model discovery request is invalid');
+                const session = currentAITextConfigurationSession(input.session);
+                if (session.version !== 2) throw new Error('NOT_READY: AI model discovery needs current provider setup');
+                const { ask, readReply } = aiModelDiscoveryOwner(owner);
+                const current = () => {
+                    if (signal.aborted || iosAITextConfigurationSession !== session
+                        || currentAITextConfigurationSession(session.id) !== session || ask({ phase: 'current' }) !== '')
+                        throw new Error('STALE_REVISION: AI model discovery owner changed');
+                };
+                current();
+                const options = unwrap(await aiTextConfigurationMethods.optionsV2({}, current));
+                if (!taskEditValuesEqual(options.expected, input.expected))
+                    throw new Error('STALE_REVISION: AI model discovery settings changed');
+                const metadata = readReply({ phase: 'metadata', provider: session.provider });
+                if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || Object.keys(metadata).length !== 1
+                    || !('consent' in metadata) || typeof metadata.consent !== 'boolean')
+                    throw new Error('NOT_READY: AI model discovery metadata is unavailable');
+                current();
+                const result = await discoverNativeAITextModels({
+                    provider: session.provider, enabled: options.enabled, model: options.model, copilotModel: options.copilotModel,
+                    modelOptions: options.modelOptions, copilotModelOptions: options.copilotModelOptions,
+                    baseUrl: session.provider === 'openai' ? session.settings.ai?.baseUrl : undefined,
+                    consent: metadata.consent, isFossBuild,
+                }, {
+                    current, signal,
+                    readCredential: async () => {
+                        current();
+                        const loaded = readReply({ phase: 'credential', provider: session.provider });
+                        current();
+                        if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded) || Object.keys(loaded).length !== 1
+                            || !('value' in loaded) || loaded.value !== null && (typeof loaded.value !== 'string' || loaded.value.length > 4000))
+                            throw new Error('NOT_READY: AI model discovery credential is unavailable');
+                        return loaded.value;
+                    },
+                    fetch: async (input, init) => {
+                        current();
+                        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+                        if (ask({ phase: 'http', url }) !== '') throw new Error('NOT_READY: AI model discovery request is unavailable');
+                        const response = await globalThis.fetch(input, init);
+                        current(); return response;
+                    },
+                });
+                current();
+                let reply = { version: 1, provider: session.provider, ...result, expected: options.expected };
+                if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 64 * 1024)
+                    reply = { version: 1, provider: session.provider, status: 'fallback', modelOptions: options.modelOptions,
+                        copilotModelOptions: options.copilotModelOptions, expected: options.expected };
+                if (new TextEncoder().encode(JSON.stringify(reply)).byteLength > 64 * 1024)
+                    throw new Error('NOT_READY: AI model discovery choices are unavailable');
+                return reply;
+            } finally { iosConfigurationAIActive = false; }
+        });
+    },
+    iosAIAnthropicThinkingOptions(json: string, owner: () => unknown): string {
+        return submit(async signal => unwrap(await aiTextConfigurationMethods.anthropicThinkingOptions(completionJson(json, 256), aiTextConfigurationOwner(owner, signal))));
+    },
+    iosAITextConfigurationPrepareV2(json: string, owner: () => unknown, recordedFor: string | null): string {
+        return submit(async signal => {
+            if (recordedFor !== null && recordedFor !== 'openai' && recordedFor !== 'gemini' && recordedFor !== 'anthropic')
+                throw new Error('INVALID_INPUT: AI provider consent observation is invalid');
+            return unwrap(await aiTextConfigurationMethods.prepareV2(completionJson(json, 32 * 1024), aiTextConfigurationOwner(owner, signal), recordedFor));
+        });
+    },
+    iosAITextConfigurationValidateV2(json: string): string {
+        return submit(async () => unwrap(aiTextConfigurationMethods.validateV2(completionJson(json, 64 * 1024))));
+    },
+    iosAITextConfigurationCommitV2(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const session = iosAITextConfigurationSession, current = aiTextConfigurationOwner(owner, signal);
+            const result = unwrap(await aiTextConfigurationMethods.commitV2(completionJson(json, 64 * 1024), current));
+            current();
+            if (session && !(result.changed && result.change.type === 'provider')) retainAITextConfigurationAdvance(session);
+            return result;
+        });
+    },
+    iosAITextConfigurationRetryOutcomeV2(json: string): string {
+        return submit(async () => unwrap(aiTextConfigurationMethods.outcomeV2(completionJson(json, 32 * 1024))));
+    },
+    iosAITextConfigurationOptions(json: string, owner: () => unknown): string {
+        return submit(async signal => unwrap(await aiTextConfigurationMethods.options(completionJson(json, 256), aiTextConfigurationOwner(owner, signal))));
+    },
+    iosAITextConfigurationPrepare(json: string, owner: () => unknown, consentRecorded: boolean): string {
+        return submit(async signal => {
+            if (typeof consentRecorded !== 'boolean') throw new Error('INVALID_INPUT: AI consent observation is invalid');
+            return unwrap(await aiTextConfigurationMethods.prepare(completionJson(json, 32 * 1024), aiTextConfigurationOwner(owner, signal), consentRecorded));
+        });
+    },
+    iosAITextConfigurationValidate(json: string): string {
+        return submit(async () => unwrap(aiTextConfigurationMethods.validate(completionJson(json, 64 * 1024))));
+    },
+    iosAITextConfigurationCommit(json: string, owner: () => unknown): string {
+        return submit(async signal => {
+            const session = iosAITextConfigurationSession, current = aiTextConfigurationOwner(owner, signal);
+            const result = unwrap(await aiTextConfigurationMethods.commit(completionJson(json, 64 * 1024), current));
+            current();
+            if (session) retainAITextConfigurationAdvance(session);
+            return result;
+        });
+    },
+    iosAITextConfigurationRetryOutcome(json: string): string {
+        return submit(async () => unwrap(aiTextConfigurationMethods.outcome(completionJson(json, 32 * 1024))));
+    },
+    iosAITextConfigurationSensitive(json: string, owner: (json: string) => unknown): string {
+        return submit(signal => runAITextConfigurationSensitive(json, owner, signal, 1));
+    },
+    iosAITextConfigurationSensitiveV2(json: string, owner: (json: string) => unknown): string {
+        return submit(signal => runAITextConfigurationSensitive(json, owner, signal, 2));
+    },
+    iosAITextConfigurationAcknowledged(outcome: string = 'settings-saved', provider: string = 'openai', kind: string = 'scalar'): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !['openai', 'gemini', 'anthropic'].includes(provider) || !['scalar', 'enabled', 'model', 'copilotModel', 'provider', 'anthropicThinking', 'thinkingBudget', 'extraBodyParams', 'credential', 'endpoint', 'consent'].includes(kind) || !['settings-saved', 'credential-saved', 'credential-cleared', 'endpoint-saved', 'consent-record-failed'].includes(outcome)) return null;
+            try {
+                logInfo('Native iOS AI text configuration completed', { scope: 'native-ios', force: true,
+                    context: { releaseCheck: 'v1.3.8/ios-ai-text-configuration', outcome, provider, kind } });
+                await diagnosticsLog.serialize(async () => undefined);
+            } catch { /* Diagnostics cannot change a verified durable reply. */ }
+            return null;
+        });
+    },
     iosAIRequestTimeoutOptions(json: string, owner: () => unknown): string {
         return submit(async signal => unwrap(await aiRequestTimeoutMethods.options(completionJson(json, 256), aiRequestTimeoutOwner(owner, signal))));
     },
@@ -6516,11 +8511,12 @@ globalThis.MindwtrHost = {
                 || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) throw unavailable();
             const input = JSON.parse(json) as Record<string, unknown>;
             if (!input || typeof input !== 'object' || Array.isArray(input)
-                || !['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'selectSyncBackend', 'pickSyncFolder', 'syncNow'].includes(name)) throw unavailable();
+                || !['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'selectSyncBackend', 'pickSyncFolder', 'syncNow', 'syncPull'].includes(name)) throw unavailable();
             if (name === 'selectSyncBackend' && !['off', 'file'].includes(input.option as string)) throw unavailable();
             if (['pickSyncFolder', 'syncNow'].includes(name)
                 && (typeof input.revision !== 'string' || !input.revision || input.revision.length > 100
                     || Object.keys(input).some((field) => !['requestId', 'revision'].includes(field)))) throw unavailable();
+            if (name === 'syncPull' && Object.keys(input).length !== 0) throw unavailable();
             requireSaved();
             const persistence = getPersistenceStatus();
             if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying) throw unavailable();
@@ -6528,6 +8524,15 @@ globalThis.MindwtrHost = {
             const directory = createIosDirectoryFileSync(nativeSyncBindings, channel, control as (request: string) => unknown);
             iosDirectorySync = directory;
             try {
+                if (name === 'syncPull') {
+                    const value = await ensureIosManualSync().performStoredManualSync();
+                    await flushPendingSave(); requireSaved();
+                    try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                        message: 'Native iOS pull Sync command settled',
+                        context: { releaseCheck: 'v1.3.8/ios-pull-sync', operation: name, outcome: 'settled' },
+                    }, { force: true }); } catch { /* Diagnostics cannot change the settled result. */ }
+                    return { ok: true as const, value };
+                }
                 const result = name === 'syncSettings' ? contract.getSyncSettings(input)
                     : name === 'pickSyncFolder' ? await contract.pickSyncFolder(input as { requestId: string; revision: string })
                     : await MENU_COMMANDS[name as SyncScreenCommand](input as never);
@@ -6540,15 +8545,15 @@ globalThis.MindwtrHost = {
         });
     },
     /** Only CoreHost.foregroundSync supplies this invocation-scoped physical cleanup callback. */
-    iosForegroundSync(name: string, json: string, cleanup: unknown, currentTargetURI?: unknown): string {
-        return submit(async () => {
+    iosForegroundSync(name: string, json: string, cleanup: unknown, currentTargetURI?: unknown, dropboxControl?: unknown): string {
+        return submit(async (signal) => {
             if (iosForegroundFailure) throw iosForegroundFailure;
             const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
-                || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw unavailable();
+                || typeof native().kvMultiGet !== 'function' || (name !== 'archiveRetention' && !globalThis.__mindwtrSyncSecrets)) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'projectAttachmentDownload', 'runSyncEncryptionAction'];
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox'];
             if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
                 || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
                 throw new Error('INVALID_INPUT: Invalid selected Project availability target');
@@ -6560,12 +8565,15 @@ globalThis.MindwtrHost = {
             try { input = JSON.parse(json) as Record<string, unknown>; }
             catch { throw new Error('INVALID_INPUT: Invalid foreground sync request'); }
             if (!input || typeof input !== 'object' || Array.isArray(input)
-                || ['syncStored', 'syncResume'].includes(name) && Object.keys(input).length !== 0) throw new Error('INVALID_INPUT: Invalid foreground sync request');
+                || ['syncStored', 'syncResume', 'syncPull'].includes(name) && Object.keys(input).length !== 0) throw new Error('INVALID_INPUT: Invalid foreground sync request');
             if (name === 'projectAttachmentDownload' && (Object.keys(input).length !== 3
                 || ['projectId', 'attachmentId', 'revision'].some((field) => {
                     const value = input[field];
                     return typeof value !== 'string' || !value || value.length > (field === 'revision' ? 200 : 500);
                 }))) throw new Error('INVALID_INPUT: Invalid Project attachment download request');
+            if (name === 'archiveRetention' && (Object.keys(input).length !== 1 || typeof input.editorOpen !== 'boolean')) {
+                throw new Error('INVALID_INPUT: Archive retention requires the editor state');
+            }
             if (name === 'runSyncEncryptionAction') {
                 const action = input.action;
                 const invalid = () => new Error('INVALID_INPUT: Invalid selected encryption request');
@@ -6583,10 +8591,28 @@ globalThis.MindwtrHost = {
                         : ['cancel', 'decline', 'retry', 'recheck'].includes(target.type as string) && Object.keys(target).length === 1;
                 if (!valid) throw invalid();
             }
+            if (dropboxControl !== undefined && typeof dropboxControl !== 'function') throw unavailable();
+            const dropboxConfig = typeof dropboxControl === 'function' ? (() => {
+                const raw = (dropboxControl as (json: string) => unknown)(JSON.stringify({ phase: 'configuration' }));
+                if (typeof raw !== 'string' || new TextEncoder().encode(raw).length > 4096 || raw.startsWith('!MindwtrNativeError:')) throw unavailable();
+                try { return readNativeIosDropboxConfiguration(JSON.parse(raw)); } catch { throw unavailable(); }
+            })() : null;
             const refused = { ok: false as const, error: { code: 'ACTION_FAILED' as const,
                 message: 'This sync provider is not available in native iOS yet; the stored configuration is unchanged' } };
-            if (name === 'selectSyncBackend' && !['off', 'webdav', 'selfhosted'].includes(input.option as string)) return refused;
-            if (['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name)) {
+            if (name === 'selectSyncBackend' && !['off', 'webdav', 'selfhosted', ...(iosCloudKitAvailable() ? ['cloudkit'] : []), ...(dropboxConfig ? ['dropbox'] : [])].includes(input.option as string)) return refused;
+            const shownDropbox = dropboxConfig && ['syncNow', 'testSyncConnection'].includes(name) ? contract.getSyncSettings({}) : null;
+            const dropboxPanelCall = shownDropbox?.ok === true && shownDropbox.value.panel?.kind === 'dropbox';
+            if (['connectDropbox', 'disconnectDropbox'].includes(name) || dropboxPanelCall) {
+                const fields = name === 'testSyncConnection' ? [] : ['requestId'];
+                if (Object.keys(input).length !== fields.length || fields.length && (typeof input.requestId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(input.requestId))) throw unavailable();
+                if (!dropboxConfig) throw unavailable();
+            }
+            const cloudKitSyncNow = !dropboxPanelCall && name === 'syncNow' && input.webdav === undefined && input.selfHosted === undefined && iosCloudKitAvailable();
+            if (cloudKitSyncNow && (Object.keys(input).length !== 1 || typeof input.requestId !== 'string'
+                || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.requestId))) {
+                throw new Error('INVALID_INPUT: CloudKit Sync requires a request UUID');
+            }
+            if (['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && !cloudKitSyncNow && !dropboxPanelCall) {
                 const webdav = input.webdav;
                 const selfHosted = input.selfHosted;
                 const fields = webdav !== undefined ? webdav : selfHosted;
@@ -6607,11 +8633,33 @@ globalThis.MindwtrHost = {
             const persistence = getPersistenceStatus();
             if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying) throw unavailable();
             iosCleanupCallback = cleanup as (requestJSON: string) => unknown;
+            iosDropboxControl = typeof dropboxControl === 'function' ? dropboxControl as (requestJSON: string) => unknown : null;
+            iosDropboxSignal = signal;
+            iosDropboxRequestId = name === 'connectDropbox' ? input.requestId as string : null;
             try {
+                if (name === 'archiveRetention') {
+                    let selectedBackend: string | null = null;
+                    try { selectedBackend = (await keyValue.get(SYNC_BACKEND_KEY))?.trim() || 'off'; }
+                    catch { /* Unknown configuration waits for this session's successful sync. */ }
+                    return await contract.runArchiveRetention({ editorOpen: input.editorOpen as boolean, selectedBackend });
+                }
                 const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
                 const selfHosted = stored === 'cloud' && isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY));
-                if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted) return refused;
-                if (['syncStored', 'syncResume'].includes(name) && stored !== 'webdav' && !selfHosted) return { ok: true as const, value: { success: true, skipped: true } };
+                const dropboxSelected = !!dropboxConfig && stored === 'cloud' && (await keyValue.get(CLOUD_PROVIDER_KEY))?.trim() === 'dropbox';
+                const cloudKitSelected = stored === 'cloudkit' && iosCloudKitAvailable();
+                const fileMetadata = stored === 'file' && ['openSyncSettings', 'syncSettings', 'closeSyncSettings'].includes(name);
+                if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted && !cloudKitSelected && !dropboxSelected && !fileMetadata) return refused;
+                if (cloudKitSyncNow && !cloudKitSelected) return refused;
+                if (['syncStored', 'syncResume', 'syncPull'].includes(name) && stored !== 'webdav' && !selfHosted
+                    && !(name === 'syncPull' && (cloudKitSelected || dropboxSelected))) {
+                    if (name === 'syncPull') try {
+                        await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                            message: 'Native iOS pull Sync command settled',
+                            context: { releaseCheck: 'v1.3.8/ios-pull-sync', operation: name, outcome: 'skipped' },
+                        }, { force: true });
+                    } catch { /* A diagnostic cannot change the skipped result. */ }
+                    return { ok: true as const, value: { success: true, skipped: true } };
+                }
                 if (name === 'projectAttachmentDownload' && stored !== 'webdav' && !selfHosted) return refused;
                 // Only native-owned relocated repair is admitted for cloud Projects.
                 if (name === 'projectAttachmentDownload' && selfHosted && typeof currentTargetURI !== 'string') return refused;
@@ -6629,10 +8677,14 @@ globalThis.MindwtrHost = {
                     }
                 }
                 if (!downloadResult) ensureIosManualSync();
-                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-or-local';
+                if (cloudKitSyncNow) {
+                    const shown = contract.getSyncSettings({});
+                    if (!shown.ok || shown.value.panel?.kind !== 'cloudkit') return refused;
+                }
+                if (iosManualSync) iosManualSync.settingsHost.encryption.mode = dropboxSelected ? 'saved-dropbox' : 'saved-webdav-or-local';
                 if (name === 'selectSyncBackend' && input.option === 'selfhosted'
                     || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && input.selfHosted !== undefined
-                    || ['syncStored', 'syncResume', 'projectAttachmentDownload'].includes(name) && selfHosted) {
+                    || ['syncStored', 'syncResume', 'syncPull', 'projectAttachmentDownload'].includes(name) && selfHosted) {
                     try { await iosManualSync!.assertSelfHostedSyncAdmission(); }
                     catch (error) {
                         if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
@@ -6670,8 +8722,9 @@ globalThis.MindwtrHost = {
                     if (after.failed || after.queued || after.inFlight || after.immediate || after.retrying) throw unavailable();
                 }
                 let storedResult: { success: boolean; skipped: boolean } | null = null;
-                if (name === 'syncStored' || name === 'syncResume') {
-                    const answer = await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup' : 'resume');
+                if (name === 'syncStored' || name === 'syncResume' || name === 'syncPull') {
+                    const answer = name === 'syncPull' ? await iosManualSync!.performStoredManualSync()
+                        : await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup' : 'resume');
                     await flushPendingSave();
                     requireSaved();
                     const after = getPersistenceStatus();
@@ -6686,13 +8739,15 @@ globalThis.MindwtrHost = {
                     // The command union includes non-view replies; only the two view commands reach this branch.
                     if (name === 'syncSettings' || name === 'openSyncSettings') {
                         const model = result.value as import('../../../packages/core/src/native-host-contract-settings-sync').NativeSyncSettings;
-                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'file' || option === 'webdav' || option === 'selfhosted');
+                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'file' || option === 'webdav' || option === 'selfhosted'
+                            || option === 'cloudkit' && iosCloudKitAvailable() || option === 'dropbox' && !!dropboxConfig);
                     }
                 }
                 if (currentTargetURI === undefined && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
                     && 'status' in result.value && result.value.status === 'available')) try {
                     const diagnostic = name === 'projectAttachmentDownload' ? { message: 'Native iOS Project file availability settled', releaseCheck: 'v1.3.5/ios-project-file-download' }
                         : name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
+                        : name === 'syncPull' ? { message: 'Native iOS pull Sync command settled', releaseCheck: 'v1.3.8/ios-pull-sync' }
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
                         : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -6704,10 +8759,13 @@ globalThis.MindwtrHost = {
             } catch (error) {
                 if (error instanceof NativeAttachmentCleanupUnconfirmedError) iosForegroundFailure = error;
                 throw error;
-            } finally { iosCleanupCallback = null; }
+            } finally { iosCleanupCallback = null; iosDropboxControl = null; iosDropboxSignal = undefined; iosDropboxRequestId = null; }
         });
     },
     /** `name` is one of MENU_COMMANDS; `json` is that command's input. Its request or capture UUID makes a retry exact. */
+    gettingStartedOutcome(json: string): string {
+        return submit(async () => unwrap(contract.probeGettingStartedOutcome(completionJson(json, 2048) as Parameters<typeof contract.probeGettingStartedOutcome>[0])));
+    },
     menuCommand(name: string, json: string): string {
         return submit(async () => {
             const command = MENU_COMMANDS[name as MenuCommand];

@@ -16,6 +16,7 @@ import {
     resetForTests,
     setSha256HexProvider,
     setLogger,
+    consoleLogger,
     type AppData,
 } from '@mindwtr/core';
 import { createDeadlineFetch, createIosDirectoryFileSync, createNativeSync } from './host-sync';
@@ -74,6 +75,7 @@ const host = (stored: Record<string, string> = {}, refuseSchedule = false, getDa
 
 it.each(['android', 'ios'] as const)('forwards the shared WebDAV setup failure receipt through the %s log binding', async (platform) => {
     resetForTests();
+    core.useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} } as never);
     if (platform === 'ios') iosFiles();
     globals.__mindwtrHostPlatform = platform;
     const data: AppData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
@@ -243,7 +245,7 @@ afterEach(() => {
     globalThis.fetch = realFetch;
     fetches.length = 0;
     delete globals.__mindwtrCryptoCall;
-    setLogger(null);
+    setLogger(consoleLogger);
     setSha256HexProvider(null);
     for (const name of nativeGlobals) {
         const original = originalGlobals.get(name);
@@ -629,6 +631,19 @@ describe('event-owned iOS stored/resume pacing', () => {
         })) as typeof fetch;
     };
     afterEach(() => resetForTests());
+
+    it('runs an explicit stored pull despite automatic resume pacing and preserves configuration', async () => {
+        resetForTests(); serve();
+        spyOn(Date, 'now').mockReturnValue(100_000);
+        const fixture = configured();
+        await fixture.sync.performStoredAutomaticSync('startup');
+        const before = [fixture.kv.get(SYNC_BACKEND_KEY), fixture.kv.get(WEBDAV_URL_KEY)];
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(await fixture.sync.performStoredManualSync()).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect([fixture.kv.get(SYNC_BACKEND_KEY), fixture.kv.get(WEBDAV_URL_KEY)]).toEqual(before);
+        expect(fixture.schedules).toEqual([]);
+    });
 
     it('seeds resume pacing from cold completion and uses the strict shared 30-second boundary', async () => {
         resetForTests(); serve();
@@ -1069,6 +1084,32 @@ describe('native background sync binding', () => {
 
 // D9b change 5 (design §2, §6): only the Android host slices its sync cycles. iOS keeps unsliced cycles, its recovery save
 // and its in-gate publish; a sliced cycle there would also need the token ports, which the binding passes on both platforms.
+it.each(['android', 'ios'] as const)('binds a complete CloudKit port only to an explicit iOS invocation on %s', async (platform) => {
+    if (platform === 'ios') iosFiles();
+    globals.__mindwtrHostPlatform = platform;
+    const fixture = host({}, false, undefined, async () => false);
+    const port = {
+        isAvailable: () => true,
+        getAccountStatus: async () => 'available' as const,
+        ensureReady: async () => {}, read: async () => null, write: async () => {},
+        assets: { saveAttachmentAsset: async () => {}, fetchAttachmentAsset: async () => { throw new Error('no asset'); },
+            deleteAttachmentAssets: async () => {}, isAttachmentNotFoundError: () => false },
+    };
+    const create = core.createMobileSyncService;
+    let serviceHost: Parameters<typeof core.createMobileSyncService>[0] | undefined;
+    spyOn(core, 'createMobileSyncService').mockImplementation((options) => {
+        serviceHost = options; return create(options);
+    });
+    const sync = createNativeSync({ ...fixture.bindings, cloudKit: port });
+    if (platform === 'ios') {
+        expect(serviceHost!.cloudKit?.read).toBe(port.read);
+        expect(typeof serviceHost!.cloudKit?.syncAttachments).toBe('function');
+    } else expect(serviceHost!.cloudKit).toBeUndefined();
+    expect(sync.settingsHost.platform.cloudKitAvailable).toBe(platform === 'ios');
+    expect(await sync.settingsHost.cloudKit?.getAccountStatus()).toBe(platform === 'ios' ? 'available' : undefined);
+    expect(fixture.sync.settingsHost.platform.cloudKitAvailable).toBe(false);
+});
+
 it.each(['android', 'ios'] as const)('binds sliceYield on %s only when the host is Android, with the token ports', async (platform) => {
     if (platform === 'ios') iosFiles();
     globals.__mindwtrHostPlatform = platform;
@@ -1183,8 +1224,14 @@ it('runs picked activation through two fresh real shared File cycles, then one s
     expect((await contract.syncNow({ requestId: crypto.randomUUID(), revision: fresh.value.configRevision })).ok).toBe(true);
     expect(turn).toBe(3); expect(opens).toBe(3); expect(core.bytesToBase64(files.get(path)!)).toBe(first);
     expect(requests.filter((op) => op === 'prepare')).toHaveLength(3);
+    await contract.closeSyncSettings({});
+    expect(await sync.performStoredManualSync()).toEqual({ success: true, skipped: false });
+    expect(turn).toBe(4); expect(opens).toBe(4); expect(active).toBeNull();
+    expect(core.bytesToBase64(files.get(path)!)).toBe(first);
+    expect(fixture.kv.get('@mindwtr_sync_path_bookmark')).toBe(bookmark);
+    await contract.openSyncSettings({});
     expect((await contract.selectSyncBackend({ requestId: crypto.randomUUID(), option: 'off' })).ok).toBe(true);
-    expect(turn).toBe(3); expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off');
+    expect(turn).toBe(4); expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off');
     directory.close(); resetForTests();
 });
 

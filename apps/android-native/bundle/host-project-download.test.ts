@@ -86,21 +86,21 @@ describe('private selected Project plaintext producer', () => {
         expect(f.secrets).toEqual(['mindwtr_webdav_password']); expect(f.sources).toHaveLength(1); expect(f.memory.files.size).toBe(0);
         expect(original.fileHash).toBeUndefined(); expect(original.size).toBeUndefined();
     });
-    it('returns the exact WebDAV shared 404 copy without source or publication work', async () => {
-        const f = fixture(), original = attachment();
+    it.each(['webdav', 'cloud'])('keeps selected Project %s not-found unavailable and recovers the same row', async (backend) => {
+        const f = fixture(), original = Object.freeze(attachment()), before = JSON.stringify(original);
+        let status = 404;
         globalThis.fetch = (async (url, init) => {
             f.requests.push(String(url)); expect(init?.method).toBe('GET');
-            expect(new Headers(init?.headers).get('authorization')).toBe('Basic ' + btoa('synthetic:synthetic-token'));
-            return new Response(null, { status: 404 });
+            return new Response(status === 404 ? null : BYTES.slice(), { status });
         }) as typeof fetch;
-        const result = await f.run(original, { backend: 'webdav', provider: undefined, username: 'synthetic', url: 'https://synthetic.invalid/v1/data.json' });
-        expect(result.status).toBe('unrecoverable');
-        if (result.status !== 'unrecoverable') throw new Error('Expected shared terminal404');
-        const copy = JSON.parse(result.attachmentJSON);
-        expect(copy.deletedAt).toBe(copy.updatedAt); expect(new Date(copy.updatedAt).toISOString()).toBe(copy.updatedAt);
-        const expected = { ...original, deletedAt: copy.updatedAt, updatedAt: copy.updatedAt }; delete expected.cloudKey; delete expected.fileHash;
-        expect(copy).toEqual(expected); expect(original.deletedAt).toBeUndefined(); expect(original.cloudKey).toBe(`attachments/${ID}.txt`);
-        expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0); expect(f.requests).toHaveLength(1);
+        const config = backend === 'webdav'
+            ? { backend, provider: undefined, username: 'synthetic', url: 'https://synthetic.invalid/v1/data.json' }
+            : {};
+        expect(await f.run(original, config)).toEqual({ version: 1, requestId: REQUEST, status: 'unavailable' });
+        expect(JSON.stringify(original)).toBe(before); expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0);
+        status = 200;
+        expect((await f.run(original, config)).status).toBe('prepared');
+        expect(f.requests).toHaveLength(2); expect(f.sources).toHaveLength(1); expect(JSON.stringify(original)).toBe(before);
     });
 
 });

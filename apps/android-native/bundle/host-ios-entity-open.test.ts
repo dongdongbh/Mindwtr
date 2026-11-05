@@ -8,10 +8,11 @@ import { flushPendingSave, resetForTests, useTaskStore } from '../../../packages
 import type { Project, Task } from '../../../packages/core/src/types';
 
 const entry = readFileSync(new URL('./host-entry.ts', import.meta.url), 'utf8');
+const productionStart = entry.indexOf('    iosProductionWidgetTaskOpen(url: string): string {');
 const start = entry.indexOf('    iosEntityOpen(url: string): string {');
 const end = entry.indexOf('    iosNotificationOpen(', start);
-if (start < 0 || end < 0) throw new Error('Entity Open bridge unavailable');
-const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(`globalThis.port = {${entry.slice(start, end)}};`);
+if (productionStart < 0 || start < 0 || end < 0) throw new Error('Entity Open bridge unavailable');
+const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(`globalThis.port = {${entry.slice(productionStart, end)}};`);
 const nativeParserSource = new Bun.Transpiler({ loader: 'ts' }).transformSync(
     readFileSync(new URL('../../../packages/core/src/capture-deeplink.ts', import.meta.url), 'utf8').replace(/^export /gm, '')
     + '\nglobalThis.isEntityOpenUrl = isEntityOpenUrl; globalThis.parseEntityOpenUrl = parseEntityOpenUrl;',
@@ -26,7 +27,7 @@ const project = (id: string, extra: Partial<Project> = {}): Project => ({
     createdAt: at, updatedAt: at, ...extra,
 });
 const fixture = async (platform = 'ios', ready = true, hostURL = false) => {
-    const writes: unknown[] = [], calls: unknown[] = [];
+    const writes: unknown[] = [], calls: unknown[] = [], diagnostics: unknown[] = [];
     const host = ready ? await openScreenHost({ data: {
         tasks: [task(taskId), task('deleted-task', { deletedAt: at }), task('reference-task', { status: 'reference' }),
             task('😀'.repeat(250)), task('😀'.repeat(250) + 'x')],
@@ -36,7 +37,8 @@ const fixture = async (platform = 'ios', ready = true, hostURL = false) => {
     }, record: {}, log: [], saveData: async (data) => { writes.push(data); } }) : createNativeHostContract();
     writes.length = 0;
     const state = { __mindwtrHostPlatform: platform, isEntityOpenUrl, parseEntityOpenUrl,
-        port: undefined as unknown as { iosEntityOpen(url: unknown): Promise<unknown> },
+        port: undefined as unknown as { iosEntityOpen(url: unknown): Promise<unknown>; iosProductionWidgetTaskOpen(url: unknown): Promise<unknown> },
+        logInfo: (message: string, options: unknown) => { diagnostics.push({ message, options }); },
         submit: (work: () => Promise<unknown>) => work(),
         unwrap: (reply: NativeHostResult<unknown>) => { if (!reply.ok) throw new Error(reply.error.code); return reply.value; },
         contract: { resolveNativeEntryPoint: (input: Parameters<typeof host.resolveNativeEntryPoint>[0]) => {
@@ -48,7 +50,7 @@ const fixture = async (platform = 'ios', ready = true, hostURL = false) => {
         vm.runInNewContext(nativeParserSource, state);
     }
     vm.runInNewContext(source, state);
-    return { port: state.port, calls, writes };
+    return { port: state.port, calls, writes, diagnostics };
 };
 const link = (query: string) => `mindwtr-native-dev://open?${query}`;
 
@@ -148,5 +150,75 @@ describe('iOS entity Open bridge with actual shared parser and canonical lookup'
         const child = Bun.spawn([process.execPath, '--eval', script], { stdout: 'pipe', stderr: 'pipe' });
         const [exit, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
         expect({ exit, stderr }).toEqual({ exit: 0, stderr: '' });
+    });
+});
+
+
+describe('closed production widget task URL read', () => {
+    const production = (query: string) => `mindwtr://open?${query}`;
+    it.each([
+        ['opaque task', production(`task=${encodeURIComponent(taskId)}`), { type: 'task', taskId }],
+        ['reference task', production('task=reference-task'), { type: 'task', taskId: 'reference-task' }],
+        ['case and triple slash', `MINDWTR:///OPEN?task=${encodeURIComponent(taskId)}`, { type: 'task', taskId }],
+        ['missing task', production('task=missing'), { type: 'inbox' }],
+        ['deleted task', production('task=deleted-task'), { type: 'inbox' }],
+        ['first duplicate task', production(`task=${encodeURIComponent(taskId)}&task=missing`), { type: 'task', taskId }],
+        ['task wins project', production(`project=${encodeURIComponent(projectId)}&task=${encodeURIComponent(taskId)}`), { type: 'task', taskId }],
+        ['missing task never opens project', production(`task=missing&project=${encodeURIComponent(projectId)}`), { type: 'inbox' }],
+        ['URL hints cannot change library', production(`task=${encodeURIComponent(taskId)}&library=other&mode=rehearsal`), { type: 'task', taskId }],
+        ['exact UTF16 task ID', production(`task=${encodeURIComponent('😀'.repeat(250))}`), { type: 'task', taskId: '😀'.repeat(250) }],
+    ])('resolves actual current-library %s without domain writes', async (_label, url, expected) => {
+        const f = await fixture(), before = useTaskStore.getState();
+        expect(await f.port.iosProductionWidgetTaskOpen(url)).toEqual(expected);
+        expect(f.calls).toEqual([{ kind: 'link', url, scheme: 'mindwtr' }]);
+        await flushPendingSave();
+        const after = useTaskStore.getState();
+        for (const field of ['_allTasks', '_allProjects', 'settings'] as const) expect(after[field]).toBe(before[field]);
+        expect(f.writes).toEqual([]);
+        expect(f.diagnostics).toEqual([{ message: 'Native iOS production task URL resolved', options: { scope: 'native-ios', force: true,
+            context: { releaseCheck: 'v1.3.8/ios-production-task-url', outcome: expected.type } } }]);
+    });
+    it.each(['mindwtr-native-dev://open?task=reference-task', 'https://open?task=reference-task',
+        'mindwtr:///focus', 'mindwtr:///inbox', 'mindwtr:///waiting', 'mindwtr:///someday',
+        'mindwtr:///capture-quick?mode=text', 'mindwtr:///widget-list/next', 'mindwtr:///widget-list/filter%3Alegacy',
+        'mindwtr://global-search?q=PRIVATE', 'mindwtr://capture?title=PRIVATE', 'mindwtr://share', 'mindwtr://oauth',
+        production(`project=${encodeURIComponent(projectId)}`), production('area=a'), '', 'PRIVATE_BAD_URL'])
+    ('keeps foreign schemes and other capabilities closed: %s', async url => {
+        const f = await fixture();
+        expect(await f.port.iosProductionWidgetTaskOpen(url)).toEqual({ type: 'none' });
+        expect(f.calls).toEqual([]); expect(f.writes).toEqual([]); expect(f.diagnostics).toEqual([]);
+    });
+    it('uses the native host URL/parser binding for the actual task lookup', async () => {
+        const f = await fixture('ios', true, true), url = production(`task=${encodeURIComponent(taskId)}`);
+        expect(await f.port.iosProductionWidgetTaskOpen(url)).toEqual({ type: 'task', taskId });
+        expect(f.calls).toEqual([{ kind: 'link', url, scheme: 'mindwtr' }]);
+        expect(f.writes).toEqual([]);
+    });
+    it('keeps the existing dev read closed to the production scheme', async () => {
+        const f = await fixture();
+        expect(await f.port.iosEntityOpen(production('task=reference-task'))).toEqual({ type: 'none' });
+        expect(f.calls).toEqual([]); expect(f.diagnostics).toEqual([]);
+    });
+    it('requires loaded canonical data and refuses Android before resolution', async () => {
+        const cold = await fixture('ios', false), url = production('task=reference-task');
+        await expect(cold.port.iosProductionWidgetTaskOpen(url)).rejects.toThrow('NOT_READY');
+        expect(cold.diagnostics).toEqual([]);
+        const android = await fixture('android');
+        await expect(android.port.iosProductionWidgetTaskOpen(url)).rejects.toThrow('INVALID_INPUT');
+        expect(android.calls).toEqual([]); expect(android.diagnostics).toEqual([]);
+    });
+    it('retains the exact 16000 UTF16 URL bound and closed result size', async () => {
+        const f = await fixture(), prefix = production('task=reference-task&ignored=');
+        const exact = prefix + '😀'.repeat(Math.floor((16_000 - prefix.length) / 2)) + 'x'.repeat((16_000 - prefix.length) % 2);
+        expect(exact.length).toBe(16_000);
+        expect(await f.port.iosProductionWidgetTaskOpen(exact)).toEqual({ type: 'task', taskId: 'reference-task' });
+        await expect(f.port.iosProductionWidgetTaskOpen(exact + 'x')).rejects.toThrow('INVALID_INPUT');
+        expect(await f.port.iosProductionWidgetTaskOpen(production(`task=${encodeURIComponent('😀'.repeat(250) + 'x')}`)))
+            .toEqual({ type: 'none' });
+    });
+    it.each([null, undefined, 1, true, {}, []])('rejects nonstring input: %s', async url => {
+        const f = await fixture();
+        await expect(f.port.iosProductionWidgetTaskOpen(url)).rejects.toThrow('INVALID_INPUT');
+        expect(f.calls).toEqual([]); expect(f.diagnostics).toEqual([]);
     });
 });

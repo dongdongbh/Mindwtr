@@ -1,4 +1,5 @@
-import { base64ToBytes, bytesToBase64, createMobileFileSync, FileSyncPathOwnerTerminatedError, type AppData, type MobileFileSyncFullHost, type MobileSyncFileSyncPort } from '@mindwtr/core';
+import { base64ToBytes, bytesToBase64, createMobileFileSync, FileSyncPathOwnerTerminatedError, type MobileFileSyncFullHost, type MobileSyncFileSyncPort } from '@mindwtr/core';
+import type { NativeFileChannels, NativeFileSyncAttachments } from './host-attachments';
 
 export type NativeFileSyncLease = { readonly turn: string };
 export type NativeFileSyncSelection = { readonly turn: string; readonly canonicalPath: string; readonly rootURI: string };
@@ -55,16 +56,30 @@ export const prepareNativeFileSync = async (turn: string, call: NativeFileSyncCa
     return { turn, rootURI: reply.value.rootURI, canonicalPath: reply.value.canonicalPath };
 };
 
-/** The first native app binding admits metadata documents only, before either side can merge. */
-export const assertNativeFileSyncData = (data: AppData): void => {
-    if (data.tasks.some((task) => (task.attachments?.length ?? 0) !== 0)
-        || data.projects.some((project) => (project.attachments?.length ?? 0) !== 0)) {
-        throw new Error('Native iOS File Sync attachments are unavailable');
-    }
+const identity = (value: unknown): boolean => typeof value === 'string' && /^\d{1,20}:\d{1,20}$/.test(value);
+const attachmentReplies: Record<string, (value: unknown) => boolean> = {
+    attachmentInfo: (value) => record(value) && (value.exists === false ? Object.keys(value).length === 1
+        : value.exists === true && Object.keys(value).length === 4 && typeof value.isDirectory === 'boolean'
+            && Number.isSafeInteger(value.size) && Number(value.size) >= 0
+            && typeof value.modificationTime === 'number' && Number.isFinite(value.modificationTime) && value.modificationTime >= 0),
+    attachmentList: (value) => Array.isArray(value) && value.length <= 10_000
+        && value.every((name) => typeof name === 'string' && name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\0')),
+    attachmentDirectory: (value) => value === null,
+    attachmentWrite: (value) => value === null,
+    attachmentPrepare: (value) => record(value) && Object.keys(value).length === 3
+        && identity(value.stagedIdentity) && identity(value.directoryIdentity) && identity(value.privateDirectoryIdentity),
+    attachmentSnapshot: (value) => record(value) && Object.keys(value).length === 2
+        && identity(value.stagedIdentity) && identity(value.directoryIdentity),
+    attachmentPublish: (value) => value === 'published' || value === 'alreadyExists',
+    attachmentCleanup: (value) => value === 'removed' || value === 'missing' || value === 'conflict',
 };
+const missingAttachment = (): Error => Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+const unavailableAttachment = (): Error => new Error('File Sync attachment operation is unavailable');
+
+export type NativeFileSyncPort = MobileSyncFileSyncPort<NativeFileSyncLease> & { readonly attachments: NativeFileSyncAttachments };
 
 export const createNativeFileSync = (selection: NativeFileSyncSelection, call: NativeFileSyncCall,
-    host: Pick<MobileFileSyncFullHost, 'encryption' | 'crypto' | 'log'>): MobileSyncFileSyncPort<NativeFileSyncLease> => {
+    host: Pick<MobileFileSyncFullHost, 'encryption' | 'crypto' | 'log'>): NativeFileSyncPort => {
     let opened = false;
     let terminal = false;
     const request = async (op: string, fields: Record<string, unknown> = {}): Promise<Reply> => {
@@ -76,9 +91,10 @@ export const createNativeFileSync = (selection: NativeFileSyncSelection, call: N
             if (reply.error !== undefined) return refused();
             const allowed = new Set(['id', 'value', 'events', 'body', 'base64']);
             if (Object.keys(reply).some((name) => !allowed.has(name)) || typeof reply.id !== 'string') return refused();
-            if (op === 'read') {
+            if (op === 'read' || op === 'attachmentRead') {
                 if (reply.value === 'bytes') { if (reply.body !== true) return refused(); decode(reply.base64); }
-                else if (reply.value !== 'absent' || reply.body !== undefined || reply.base64 !== undefined) return refused();
+                else if ((reply.value !== 'absent' && (op !== 'attachmentRead' || reply.value !== 'tooLarge'))
+                    || reply.body !== undefined || reply.base64 !== undefined) return refused();
             } else {
                 if (reply.body !== undefined || reply.base64 !== undefined) return refused();
                 if (op === 'info') {
@@ -91,6 +107,8 @@ export const createNativeFileSync = (selection: NativeFileSyncSelection, call: N
                     if (reply.value !== 'created' && reply.value !== 'exists') return refused();
                 } else if (op === 'renameObserved') {
                     if (reply.value !== selection.rootURI + encodeURIComponent(String(fields.name))) return refused();
+                } else if (attachmentReplies[op]) {
+                    if (!attachmentReplies[op](reply.value)) return refused();
                 } else if (reply.value !== null) return refused();
             }
 
@@ -159,11 +177,89 @@ export const createNativeFileSync = (selection: NativeFileSyncSelection, call: N
         isBookmarksAvailable: () => false, resolveBookmark: async () => refused(),
         readVersioned: (uri, options) => owned(async () => {
             path(uri); if (options.material || options.bookmark) return refused();
-            const result = await mobile.readSyncFileVersioned(uri, options); assertNativeFileSyncData(result.data); return result;
+            return mobile.readSyncFileVersioned(uri, options);
         }),
         write: (uri, data, options) => owned(async () => {
-            path(uri); if (options.material || options.bookmark) return refused(); assertNativeFileSyncData(data);
+            path(uri); if (options.material || options.bookmark) return refused();
             await mobile.writeSyncFile(uri, data, options);
         }),
+        attachments: createNativeFileSyncAttachments(selection, () => opened && !terminal, request),
+    };
+};
+
+const createNativeFileSyncAttachments = (selection: NativeFileSyncSelection, admitted: () => boolean,
+    request: (op: string, fields?: Record<string, unknown>) => Promise<Reply>): NativeFileSyncAttachments => {
+    const directory = selection.rootURI + 'attachments/';
+    const inFolder = (uri: unknown): uri is string => typeof uri === 'string' && uri.startsWith(directory);
+    let published = 0;
+    let downloaded = 0;
+    const value = async (op: string, fields: Record<string, unknown>) => {
+        if (!admitted() || !inFolder(fields.uri)) throw unavailableAttachment();
+        return (await request(op, fields)).value;
+    };
+    const read = async (uri: string, position: number, length: number | null): Promise<Uint8Array> => {
+        if (!Number.isSafeInteger(position) || position < 0 || (length !== null && (!Number.isSafeInteger(length) || length < 0))) throw unavailableAttachment();
+        if (length !== null && length > maximumBytes) throw new Error('File Sync attachment read exceeds the 8 MiB transfer limit');
+        if (!admitted()) throw unavailableAttachment();
+        const answer = await request('attachmentRead', { uri, position, length });
+        if (answer.value === 'absent') throw missingAttachment();
+        if (answer.value === 'tooLarge') throw new Error('File Sync attachment exceeds the 8 MiB transfer limit');
+        return decode(answer.base64);
+    };
+    const stagePath = (target: string, operationId: string) => `${target.slice(0, target.lastIndexOf('/') + 1)}.mindwtr-install-${operationId}.candidate/stage`;
+    return {
+        channels: (local: NativeFileChannels): NativeFileChannels => ({ ...local, files: async (input, bytes) => {
+            const { op, uri } = input;
+            if (op === 'copy' && inFolder(input.to)) throw unavailableAttachment();
+            if (!inFolder(uri)) return local.files(input, bytes);
+            switch (op) {
+                case 'getInfo': return value('attachmentInfo', { uri });
+                case 'makeDirectory':
+                    if (uri !== directory) throw unavailableAttachment();
+                    await value('attachmentDirectory', { uri });
+                    return null;
+                case 'readDirectory': return value('attachmentList', { uri });
+                case 'readBytes': return read(uri, 0, null);
+                case 'readBytesRange': return read(uri, Number(input.position), Number(input.length));
+                case 'writeBytes':
+                    if (!(bytes instanceof Uint8Array)) throw unavailableAttachment();
+                    await value('attachmentWrite', { uri, base64: encode(bytes) });
+                    return null;
+                case 'copy': {
+                    if (typeof input.to !== 'string') throw unavailableAttachment();
+                    const copied = await read(uri, 0, null);
+                    await local.files({ op: 'writeBytes', uri: input.to }, copied);
+                    downloaded += 1;
+                    return null;
+                }
+                default: throw unavailableAttachment();
+            }
+        } }),
+        immutable: {
+            prepareImmutableStageAsync: async (targetPath, operationId) => {
+                const prepared = await value('attachmentPrepare', { uri: targetPath, operationId });
+                return { ...(prepared as Record<string, string>), stagedPath: stagePath(targetPath, operationId) };
+            },
+            snapshotImmutableStageAsync: (stagedPath, targetPath, expectedStagedSha256) => {
+                if (!inFolder(targetPath)) throw unavailableAttachment();
+                return value('attachmentSnapshot', { uri: stagedPath, target: targetPath, sha256: expectedStagedSha256 });
+            },
+            publishImmutableAsync: async (stagedPath, targetPath, sha256, stagedIdentity, directoryIdentity, privateDirectoryIdentity) => {
+                if (!inFolder(targetPath)) throw unavailableAttachment();
+                const status = await value('attachmentPublish', { uri: stagedPath, target: targetPath, sha256, stagedIdentity, directoryIdentity, privateDirectoryIdentity });
+                if (status === 'published') published += 1;
+                return { status };
+            },
+            cleanupImmutableStageAsync: async (stagedPath, targetPath, operationId, sha256, stagedIdentity, directoryIdentity, privateDirectoryIdentity) => {
+                if (!inFolder(targetPath)) throw unavailableAttachment();
+                return { status: await value('attachmentCleanup', { uri: stagedPath, target: targetPath, operationId, sha256, stagedIdentity, directoryIdentity, privateDirectoryIdentity }) };
+            },
+        },
+        drainCounts: () => {
+            const counts = { published, downloaded };
+            published = 0;
+            downloaded = 0;
+            return counts;
+        },
     };
 };

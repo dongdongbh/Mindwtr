@@ -1,3 +1,4 @@
+import { createNativeIosDropbox, type NativeIosDropboxCapability } from './host-ios-dropbox';
 /**
  * Native Sync: core's mobile sync service and Settings › Sync's device, bound to this
  * host's ports as React Native's lib/sync-service.ts, the root layout's sync effects and the Sync screen bind them. Every rule
@@ -21,7 +22,7 @@
  * iOS construction is explicit and foreground-only; the entry admits Off, WebDAV and self-hosted settings. Both admission
  * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
  */
-import { assertNativeFileSyncData, createNativeFileSync, prepareNativeFileSync, type NativeFileSyncCall, type NativeFileSyncSelection, type NativeFileSyncLease } from './host-file-sync';
+import { createNativeFileSync, prepareNativeFileSync, type NativeFileSyncCall, type NativeFileSyncSelection, type NativeFileSyncLease, type NativeFileSyncPort } from './host-file-sync';
 import { DOMParser } from '@xmldom/xmldom';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
@@ -68,7 +69,7 @@ import {
     type DiagnosticsLogEntry,
     type MobileBackgroundSyncTrigger,
     type MobileSyncNetworkState,
-    type MobileSyncFileSyncPort,
+    type MobileSyncCloudKitPort,
     type MobileSyncTriggers,
     type NativeSyncSettingsHost,
     type SyncBadgeState,
@@ -76,6 +77,7 @@ import {
     type SyncSecretStoragePort,
     type SyncSecretAccessibility,
 } from '@mindwtr/core';
+
 
 /** host-entry.ts's AsyncStorage over RnKeyValue.kt. */
 export type HostKeyValue = {
@@ -87,9 +89,15 @@ export type HostKeyValue = {
 };
 
 export type NativeSyncBindings = {
+    /** Explicit personal iOS foreground capability; Android ignores this optional binding. */
+    dropbox?: NativeIosDropboxCapability;
     keyValue: HostKeyValue;
+    /** Complete records and attachment transport, owned by one native iOS foreground invocation. */
+    cloudKit?: Omit<MobileSyncCloudKitPort, 'syncAttachments'> & NonNullable<NativeSyncSettingsHost['cloudKit']> & {
+        assets: NonNullable<NativeAttachmentBindings['cloudKit']>;
+    };
     /** Explicit, single-turn injection; never a saved provider capability. */
-    fileSync?: { canonicalPath: string; port: MobileSyncFileSyncPort<NativeFileSyncLease> };
+    fileSync?: { canonicalPath: string; port: NativeFileSyncPort };
     /** Present only on the explicit native directory Settings lane; each call opens a fresh owner. */
     performFileSync?: NativeSyncSettingsHost['performSync'];
     pickSyncFolder?: NativeSyncSettingsHost['pickSyncFolder'];
@@ -185,6 +193,7 @@ export const isNativeIosSelfHostedProvider = (value: string | null | undefined):
 
 export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionState?: ReturnType<typeof createSyncEncryptionStateStore>) => {
     const platform = (globalThis as typeof globalThis & { __mindwtrHostPlatform?: unknown }).__mindwtrHostPlatform === 'ios' ? 'ios' : 'android';
+    const cloudKitBinding = platform === 'ios' ? bindings.cloudKit : undefined;
     if (platform === 'ios' && typeof bindings.retireLocalAttachment !== 'function') {
         throw new Error('Foreground sync requires owned attachment cleanup on this iOS build');
     }
@@ -214,7 +223,10 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             : bindings.secrets.setSecret(key, value),
         deleteItem: (key) => bindings.secrets.deleteSecret(key),
     };
-    const secureConfig = createSecureSyncConfigStore({ storage, secrets: secretStorage, vault: createSyncSecretVault(secretStorage) });
+    const vault = createSyncSecretVault(secretStorage);
+    const secureConfig = createSecureSyncConfigStore({ storage, secrets: secretStorage, vault });
+    const dropbox = platform === 'ios' && !bindings.isFossBuild && bindings.dropbox
+        ? createNativeIosDropbox(bindings.dropbox, { storage, secrets: secretStorage, vault, fetch: (input, init) => fetch(input, init) }) : null;
     const encryptionState = fileEncryptionState ?? createSyncEncryptionStateStore({
         storage,
         secureConfig,
@@ -242,15 +254,17 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         },
         loadWebDavConfig: () => loadWebDavSyncConfig(storage, (key) => secureConfig.getSecureConfigValue(key)),
         webDavRequestOptions: (allowInsecureHttp) => getMobileWebDavRequestOptions(allowInsecureHttp),
-        getDropboxClientId: async () => '',
-        runDropboxAuthorized: unavailable('Dropbox'),
+        getDropboxClientId: async () => { dropbox?.assertCurrent(); return dropbox?.configuration.clientId ?? ''; },
+        runDropboxAuthorized: dropbox ? dropbox.runAuthorized : unavailable('Dropbox'),
     });
 
     const networkListeners = new Set<(state: MobileSyncNetworkState) => void>();
 
     // Attachments (host-attachments.ts) on the host's files, with sync's own stores, keystore, log and encryption state.
     const attachments = channels ? createNativeAttachments({
+        ...(cloudKitBinding ? { cloudKit: cloudKitBinding.assets } : {}),
         storage,
+        ...(dropbox ? { dropboxAuth: dropbox.auth, getDropboxClientId: async () => { dropbox.assertCurrent(); return dropbox.configuration.clientId; }, maxDropboxBufferedUploadBytes: 8 * 1024 * 1024 } : {}),
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
         log: {
             info: (message, context) => logLine('info', message, context),
@@ -259,6 +273,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         },
         crypto,
         retireLocalAttachment: bindings.retireLocalAttachment,
+        ...(bindings.fileSync ? { fileSync: bindings.fileSync.port.attachments } : {}),
         maxWebdavBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         maxCloudBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         encryption: {
@@ -266,14 +281,17 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             getSyncEncryptionMaterial: () => encryptionState.getSyncEncryptionMaterial(),
         },
     }, channels) : null;
+    const cloudKit = cloudKitBinding && attachments?.syncCloudKitAttachments
+        ? { ...cloudKitBinding, syncAttachments: attachments.syncCloudKitAttachments } : undefined;
 
     const syncFetch = createDeadlineFetch((input, init) => fetch(input, init));
     const service = createMobileSyncService<NativeFileSyncLease>({
+        ...(cloudKit ? { cloudKit } : {}),
         // iOS cleanup authority lasts for one admitted foreground invocation.
         allowQueuedFollowUp: platform !== 'ios',
         storage,
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
-        platform: { os: () => platform, isFossBuild: bindings.isFossBuild, dropboxAppKey: () => '' },
+        platform: { os: () => platform, isFossBuild: bindings.isFossBuild, dropboxAppKey: () => dropbox?.configuration.clientId ?? '' },
         network: {
             getState: async () => bindings.networkState(),
             subscribe: (listener) => {
@@ -282,11 +300,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             },
         },
         localData: {
-            getData: async (options) => {
-                const data = await bindings.localData().getData(options);
-                if (bindings.fileSync) assertNativeFileSyncData(data);
-                return data;
-            },
+            getData: (options) => bindings.localData().getData(options),
             saveData: (data, options) => bindings.localData().saveData(data, options),
             readTokenOf: (data) => bindings.localData().readTokenOf(data),
             prepareSave: (data) => bindings.localData().prepareSaveRows(data),
@@ -352,7 +366,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             probeLocationCiphertext: (target) => transitions.probeSyncLocationCiphertext(target),
         },
         ensureWebdavCapabilityProof: (config, probe, options) => capabilityProof.ensureWebdavCapabilityProof(config, probe, options),
-        dropboxAuth: {
+        dropboxAuth: dropbox?.auth ?? {
             isConnected: async () => false,
             getValidAccessToken: unavailable('Dropbox'),
             forceRefreshAccessToken: unavailable('Dropbox'),
@@ -371,7 +385,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         },
         // Core's attachment passes on the host's files; a host without app files (the gates' stand-in) syncs metadata only.
         attachments: attachments ? { ...attachments.syncPort,
-            ...(bindings.fileSync ? { syncFile: async (data: AppData) => { assertNativeFileSyncData(data); return null; } } : {}),
+            ...(bindings.fileSync ? { runCleanup: async ({ appData }: { appData: AppData }) => ({ appData, shouldInvalidateFastSyncState: false }) } : {}),
         } : {
             syncWebdav: async () => null,
             syncCloud: async () => null,
@@ -456,6 +470,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     };
     const readIosForegroundBackend = async (override?: Parameters<NativeSyncSettingsHost['performSync']>[1]['configOverride']) => {
         const backend = override?.backend ?? ((await keyValue.get(SYNC_BACKEND_KEY))?.trim() || 'off');
+        if (backend === 'cloudkit' && cloudKit?.isAvailable()) return backend;
         if (backend === 'file' && bindings.fileSync && override?.backend === 'file'
             && override.syncPath === bindings.fileSync.canonicalPath) {
             await assertSelfHostedSyncAdmission();
@@ -468,8 +483,15 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         if (backend !== 'off' && backend !== 'webdav' && backend !== 'cloud') throw new Error('This sync provider is not available in native iOS yet');
         if (backend === 'cloud') {
             const provider = override?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY);
-            if (!isNativeIosSelfHostedProvider(provider)) throw new Error('This sync provider is not available in native iOS yet');
-            await assertSelfHostedSyncAdmission();
+            if (provider?.trim() === 'dropbox' && dropbox) {
+                dropbox.assertCurrent();
+                const status = await encryptionState.getSyncEncryptionStatus(), incomplete = await encryptionState.getIncompleteSyncEncryptionTransition();
+                if ((status.incompleteTransition ?? null) !== incomplete) throw new Error('Dropbox encryption transition state is inconsistent');
+                if (incomplete) throw new SyncEncryptionTransitionIncompleteError(incomplete);
+            } else {
+                if (!isNativeIosSelfHostedProvider(provider)) throw new Error('This sync provider is not available in native iOS yet');
+                await assertSelfHostedSyncAdmission();
+            }
         }
         return backend;
     };
@@ -481,7 +503,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             && (options.configOverride?.backend ?? await keyValue.get(SYNC_BACKEND_KEY)) === 'file') {
             return bindings.performFileSync(syncPathOverride, options);
         }
-        if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
+        const iosBackend = platform === 'ios' ? await readIosForegroundBackend(options.configOverride) : null;
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
                 ? useTaskStore.getState().settings : null;
@@ -494,6 +516,15 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
                     iosAutomaticController?.notifyExternalSyncSuccess();
                 }
             }
+            if (dropbox && iosBackend === 'cloud' && answer.success && !answer.skipped
+                && (options.configOverride?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY)) === 'dropbox') try {
+                await logLine('info', 'Native iOS Dropbox shared cycle completed', { scope: 'native-ios', force: true,
+                    extra: { releaseCheck: 'v1.3.8/ios-dropbox', operation: options.activationProbe ? 'verify' : 'sync', outcome: 'completed' } });
+            } catch { /* A diagnostic cannot change a completed candidate or stored cycle. */ }
+            if (iosBackend === 'cloudkit' && answer.success && !answer.skipped) try {
+                await logLine('info', 'Native iOS CloudKit foreground cycle completed', { scope: 'native-ios', force: true,
+                    extra: { releaseCheck: 'v1.3.8/ios-cloudkit-foreground', operation: 'foreground', outcome: 'completed' } });
+            } catch { /* Diagnostics cannot change the settled sync result. */ }
             return answer;
         } catch (error) {
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
@@ -534,6 +565,12 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             return answer;
         },
     });
+    const performStoredManualSync = async () => {
+        if (platform !== 'ios') throw new Error('Stored manual sync is unavailable on this host');
+        if (iosAutomaticFrame) throw new Error('An automatic foreground sync is already in progress');
+        const answer = await performSync(undefined, { manual: true });
+        return { success: answer.success === true, skipped: Boolean(answer.skipped) };
+    };
     const performStoredAutomaticSync = async (reason: 'startup' | 'resume') => {
         if (fatalCleanupError) throw fatalCleanupError;
         if (platform !== 'ios' || (reason !== 'startup' && reason !== 'resume')) {
@@ -545,6 +582,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         try {
             const backend = await readIosForegroundBackend();
             if (fatalCleanupError) throw fatalCleanupError;
+            if (backend === 'cloud' && (await keyValue.get(CLOUD_PROVIDER_KEY))?.trim() === 'dropbox')
+                throw new Error('Automatic Dropbox sync is unavailable on this iOS build');
             if (backend !== 'webdav' && backend !== 'cloud') throw new Error('Stored automatic sync requires a remote provider');
             iosAutomaticBackend = backend;
             const controller = automaticController();
@@ -624,7 +663,10 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         } catch { /* A failed diagnostic cannot turn a completed transition into a failure. */ }
     };
     const settingsHost: NativeSyncSettingsHost = {
-        platform: { os: platform, cloudKitAvailable: false, isFossBuild: bindings.isFossBuild, dropboxAppKey: '' },
+        platform: { os: platform, cloudKitAvailable: cloudKit?.isAvailable() === true, isFossBuild: bindings.isFossBuild, dropboxAppKey: dropbox?.configuration.clientId ?? '' },
+        ...(dropbox ? { dropbox: dropbox.settings,
+            beforeDropboxPromotion: async () => dropbox.assertCurrent(), beforeActivation: async () => dropbox.assertCurrent() } : {}),
+        ...(cloudKit ? { cloudKit: { getAccountStatus: () => cloudKit.getAccountStatus() } } : {}),
         storage: {
             multiGet: (keys) => keyValue.multiGet(keys),
             setItem: (key, value) => keyValue.set(key, value),
@@ -722,9 +764,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     };
 
     return {
+        dropboxBinding: dropbox,
         settingsHost,
         assertSelfHostedSyncAdmission,
         performStoredAutomaticSync,
+        performStoredManualSync,
         /** The editor's and the project screen's attachment IO (core's NativeAttachmentsHost); null without app files. */
         attachmentsHost: attachments?.contractHost ?? null,
         prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,

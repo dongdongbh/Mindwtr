@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { build } from 'esbuild';
 import {
+    createNativeAttachments, createNativeLocalAttachmentConfiguration,
     createNativeTaskAttachmentPreparation, prepareNativeTaskAttachmentAvailability,
     prepareNativeTaskAttachmentAvailabilityPreflight, type NativeFileChannels,
 } from './host-attachments';
@@ -11,8 +12,8 @@ import { computeSha256Hex, setSha256HexProvider } from '../../../packages/core/s
 import { getAttachmentDownloadIdentity, getAttachmentDownloadFileName } from '../../../packages/core/src/mobile-attachment-availability';
 import { bytesToBase64 } from '../../../packages/core/src/base64-bytes';
 import { defaultSyncCryptoPrimitives, encryptSyncArtifact, SYNC_CRYPTO_DEFAULT_KDF_PARAMS } from '../../../packages/core/src/sync-crypto';
-import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
-import type { Attachment } from '../../../packages/core/src/types';
+import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
+import type { AppData, Attachment } from '../../../packages/core/src/types';
 
 const AT = '2026-10-07T00:00:00.000Z';
 const REQUEST = '00000000-0000-4000-8000-000000000362';
@@ -204,11 +205,50 @@ describe('selected Task Download private JS producer', () => {
         expect(f.sources).toEqual([]); expect(f.requests).toEqual([]); expect(f.memory.read(MANAGED + 'baseline362.txt')).toEqual(BYTES);
     });
 
-    it('serializes terminal404 lifecycle removals without an installed/source claim', async () => {
-        const f = fixture(); f.status(404); const result = await f.run(attachment({ fileHash: digest(BYTES) }));
-        expect(result.status).toBe('unrecoverable'); const resolved = JSON.parse((result as { attachmentJSON: string }).attachmentJSON);
-        expect(Object.hasOwn(resolved, 'cloudKey')).toBe(false); expect(Object.hasOwn(resolved, 'fileHash')).toBe(false);
-        expect(resolved.localStatus).toBe('missing'); expect(resolved.deletedAt).toBe(resolved.updatedAt); expect(f.sources).toEqual([]);
+    it('the native automatic WebDAV port keeps a 404 live and configuration invalidation releases backoff', async () => {
+        const memory = createMemoryFileSystem(), { storage } = createMemoryStorage(), { log, lines } = createRecordingLog();
+        const requests: string[] = [];
+        globalThis.fetch = (async (url) => { requests.push(String(url)); return new Response(null, { status: 404 }); }) as typeof fetch;
+        const channels: NativeFileChannels = { directories: { document: DOCUMENTS, cache: CACHE },
+            files: async (request) => {
+                const uri = String(request.uri ?? '');
+                if (request.op === 'getInfo') return memory.fs.getInfo(uri);
+                if (request.op === 'makeDirectory') return memory.fs.makeDirectory(uri);
+                if (request.op === 'readDirectory') return memory.fs.readDirectory(uri);
+                throw new Error('Unexpected file mutation');
+            },
+            installer: async () => { throw new Error('No install for a missing response'); },
+            deleteNow: () => { throw new Error('No deletion for a missing response'); },
+        };
+        const native = createNativeAttachments({ ...createNativeLocalAttachmentConfiguration(), storage, log }, channels);
+        const selected = attachment({ fileHash: digest(BYTES) });
+        const data: AppData = { tasks: [{ id: 'task362', title: 'Fixture', status: 'inbox', tags: [], contexts: [],
+            createdAt: AT, updatedAt: AT, attachments: [selected] }], projects: [], sections: [], areas: [], settings: {} };
+        const before = structuredClone(data), signal = new AbortController().signal;
+        const config = { url: 'https://synthetic.invalid/dav/data.json', username: 'fixture', password: 'synthetic' };
+        expect(await native.syncPort.syncWebdav(data, config, signal, { activationProbe: false })).toBe(false);
+        expect(data).toEqual(before); expect(requests).toHaveLength(1);
+        expect(await native.syncPort.hasPendingWork(data, {})).toBe(false);
+        expect(await native.syncPort.syncWebdav(data, config, signal, { activationProbe: false })).toBe(false);
+        expect(requests).toHaveLength(1);
+        native.syncPort.clearDownloadBackoff?.();
+        expect(await native.syncPort.hasPendingWork(data, {})).toBe(true);
+        expect(await native.syncPort.syncWebdav(data, config, signal, { activationProbe: false })).toBe(false);
+        expect(requests).toHaveLength(2); expect(data).toEqual(before);
+        expect(lines).toContainEqual(expect.objectContaining({
+            level: 'info', extra: { id: selected.id, releaseCheck: 'v1.3.8/attachment-not-found-kept' },
+        }));
+    });
+
+    it.each(['webdav', 'cloud'])('keeps selected %s not-found unavailable and recovers the same row on retry', async (backend) => {
+        const f = fixture(), selected = Object.freeze(attachment({ fileHash: digest(BYTES) }));
+        const before = JSON.stringify(selected), captured = backend === 'webdav' ? rawConfig() : cloudConfig();
+        f.status(404);
+        expect(await f.runConfig(captured, selected)).toEqual({ version: 1, requestId: REQUEST, status: 'unavailable' });
+        expect(JSON.stringify(selected)).toBe(before); expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0);
+        f.status(200);
+        expect((await f.runConfig(captured, selected)).status).toBe('prepared');
+        expect(f.requests).toHaveLength(2); expect(f.sources).toHaveLength(1); expect(JSON.stringify(selected)).toBe(before);
     });
 
     it('refuses wrong plaintext integrity before the callback', async () => {

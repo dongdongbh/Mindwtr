@@ -10,7 +10,7 @@ import { computeSha256Hex, setSha256HexProvider } from '../../../packages/core/s
 import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
 import { openScreenHost, value } from '../../../packages/core/src/screen-parity.replay';
 import { taskRevisionOf } from '../../../packages/core/src/native-request-receipts';
-import { setLogger } from '../../../packages/core/src/logger';
+import { consoleLogger, setLogger } from '../../../packages/core/src/logger';
 import { useTaskStore } from '../../../packages/core/src/store';
 import * as keys from '../../../packages/core/src/sync-storage-keys';
 import type { Attachment, Project, Task } from '../../../packages/core/src/types';
@@ -68,7 +68,7 @@ const installGlobalChannels = (channels: NativeFileChannels) => {
 afterEach(() => {
     for (const name of ['__mindwtrHostPlatform', '__mindwtrNative', '__mindwtrFileCall', '__mindwtrInstallerCall']) delete globals[name];
     setSha256HexProvider(null);
-    setLogger(null);
+    setLogger(consoleLogger);
 });
 
 describe('iOS independent local attachment binding', () => {
