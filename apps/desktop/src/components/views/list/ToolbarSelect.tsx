@@ -14,8 +14,7 @@ import { useDropdownPosition } from '../../ui/use-dropdown-position';
 
 const TOOLBAR_SELECT_TRIGGER =
     'relative flex h-9 items-center rounded-lg border pl-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40';
-const TOOLBAR_SELECT_LABEL = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground';
-const TOOLBAR_SELECT_VALUE = 'min-w-0 flex-1 truncate pl-2 pr-8 text-left';
+const TOOLBAR_SELECT_VALUE = 'min-w-0 flex-1 truncate pr-8 text-left';
 
 export type ToolbarSelectOption = {
     value: string;
@@ -141,6 +140,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
                 aria-expanded={open}
                 aria-controls={open ? listboxId : undefined}
                 aria-label={label}
+                title={label}
                 onClick={() => setOpen((prev) => !prev)}
                 onKeyDown={(event) => {
                     if (event.key === 'Escape' && open) {
@@ -173,7 +173,6 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
             >
                 {pill ? <span className="truncate">{selected?.label ?? ''}</span> : <>
                     {icon}
-                    <span className={TOOLBAR_SELECT_LABEL}>{label}</span>
                     <span className={TOOLBAR_SELECT_VALUE}>{selected?.label ?? ''}</span>
                     <ChevronDown
                         className={cn(

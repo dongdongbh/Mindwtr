@@ -91,7 +91,7 @@ export function SortBySelect<Sort extends SortField = TaskSortBy>({ value, defau
     return (
         <ToolbarSelect
             active={defaultValue !== undefined && value !== defaultValue}
-            className={cn('w-[160px] min-w-0 max-w-full', className)}
+            className={cn('w-auto max-w-full min-w-0', className)}
             label={sortLabel}
             icon={(
                 <ArrowUpDown
