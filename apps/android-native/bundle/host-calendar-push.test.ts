@@ -7,7 +7,7 @@ import { openSqliteHost } from '../../../packages/core/src/screen-parity.replay'
 import { flushPendingSave, getStorageAdapter, useTaskStore } from '../../../packages/core/src/store';
 import type { SqliteAdapter } from '../../../packages/core/src/sqlite-adapter';
 import type { Task } from '../../../packages/core/src/types';
-import { createNativeCalendar, UNMARKED_EVENT } from './host-calendar';
+import { createNativeCalendar, EVENT_READ_FAILED, UNMARKED_EVENT } from './host-calendar';
 
 
 const KEY = {
@@ -30,8 +30,9 @@ const MARKER = '0f0e0d0c-0b0a-4908-8706-050403020100';
 function phone(calendars: Calendar[], events: Record<string, { calendarId: string; title: string }> = {}, pushedFor: Record<string, string> = {}) {
     const state = { calendars: calendars.map((entry) => structuredClone(entry)), events: new Map(Object.entries(events)), next: 500,
         notes: new Map(Object.entries(pushedFor).map(([eventId, taskId]) => [eventId, calendarPushTaskMarkerLine(taskId)!])),
-        calls: [] as Record<string, unknown>[], refuse: new Set<string>(), unreadable: false };
+        calls: [] as Record<string, unknown>[], refuse: new Set<string>(), unreadable: false, unanswered: new Set<string>() };
     const requireOwn = (request: Record<string, unknown>, event: { calendarId: string } | undefined) => {
+        if (state.unanswered.has(request.eventId as string)) throw new Error(EVENT_READ_FAILED);
         if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
         if (request.taskMarker && !(state.notes.get(request.eventId as string) ?? '').split('\n').includes(request.taskMarker as string)) {
             throw new Error(UNMARKED_EVENT);
@@ -398,4 +399,26 @@ describe('the push queue', () => {
 it('the harness store holds the seeded tasks', async () => {
     await upgrade({ tasks: [task('t1')], kv: {}, device: phone([]) });
     expect(useTaskStore.getState()._allTasks.map((entry) => entry.id)).toEqual(['t1']);
+});
+
+describe('an event read the calendar provider does not answer (9541eec09, F note 1)', () => {
+    it('writes nothing by the bare ID, keeps both rows for the next push, and logs why', async () => {
+        const device = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}` })],
+            { 70: { calendarId: '7', title: 'old' }, 71: { calendarId: '7', title: 'old' } }, { 70: 't1', 71: 't2' });
+        device.state.unanswered.add('70');
+        device.state.unanswered.add('71');
+        const app = await upgrade({ tasks: [task('t1'), task('t2', { status: 'done', completedAt: at })], kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7' },
+            device, rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }, { taskId: 't2', eventId: '71', calendarId: '7' }] });
+        await app.host.startPush();
+        expect(device.writes().filter((op) => op === 'createEvent')).toEqual([]);
+        expect(device.state.events.get('70')).toEqual({ calendarId: '7', title: 'old' });
+        expect(device.state.events.get('71')).toEqual({ calendarId: '7', title: 'old' });
+        expect(await app.rows()).toEqual([['t1', '70', '7'], ['t2', '71', '7']]);
+        expect(lines.filter((line) => line.message === 'Calendar push kept a row whose event it could not read').map((line) => line.context))
+            .toEqual(expect.arrayContaining(['update', 'delete'].map((outcome) => ({ releaseCheck: 'v1.3.9/calendar-push-read-failed', outcome }))));
+        device.state.unanswered.clear();
+        await app.host.startPush();
+        expect(await app.rows()).toEqual([['t1', '70', '7']]);
+        expect(device.state.events.get('70')!.title).toBe('PRIVATE t1');
+    });
 });

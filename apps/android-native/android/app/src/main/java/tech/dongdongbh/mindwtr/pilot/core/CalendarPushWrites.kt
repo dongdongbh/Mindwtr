@@ -89,6 +89,7 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
     companion object {
         const val MISSING_EVENT = "Calendar event not found"
         const val UNMARKED_EVENT = "Calendar event not found: not made by Mindwtr"
+        const val EVENT_READ_FAILED = "Calendar provider gave no answer to the event read"
         private const val MANAGED_NAME = "mindwtr"
 
         private val ACCESS = mapOf(

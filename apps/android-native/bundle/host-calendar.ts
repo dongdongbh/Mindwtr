@@ -43,6 +43,7 @@ const eventDetails = (details: CalendarPushEventDetails) => ({
 });
 
 export const UNMARKED_EVENT = 'Calendar event not found: not made by Mindwtr';
+export const EVENT_READ_FAILED = 'Calendar provider gave no answer to the event read';
 
 const owner = (context?: { taskId: string; calendarId: string }) => {
     if (!context) return {};
@@ -50,13 +51,16 @@ const owner = (context?: { taskId: string; calendarId: string }) => {
     return { calendarId: context.calendarId, ...(taskMarker ? { taskMarker } : {}) };
 };
 
-const reportUnmarked = (write: Promise<unknown>, outcome: 'recreated' | 'cleared') => write.catch((error: unknown) => {
-    if (error instanceof Error && error.message === UNMARKED_EVENT) {
-        try {
+const reportRefusal = (write: Promise<unknown>, outcome: 'recreated' | 'cleared', attempt: 'update' | 'delete') => write.catch((error: unknown) => {
+    try {
+        if (error instanceof Error && error.message === UNMARKED_EVENT) {
             logWarn('Calendar push left an event it did not make', { scope: 'calendar-push', force: true,
                 context: { releaseCheck: 'v1.3.8/calendar-push-unmarked-event', outcome } });
-        } catch {}
-    }
+        } else if (error instanceof Error && error.message === EVENT_READ_FAILED) {
+            logWarn('Calendar push kept a row whose event it could not read', { scope: 'calendar-push', force: true,
+                context: { releaseCheck: 'v1.3.9/calendar-push-read-failed', outcome: attempt } });
+        }
+    } catch {}
     throw error;
 });
 
@@ -91,8 +95,8 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
             createCalendar: (details) => call()({ op: 'createCalendar', details }) as Promise<string>,
             deleteCalendar: (calendarId) => call()({ op: 'deleteCalendar', calendarId }),
             createEvent: (calendarId, details) => call()({ op: 'createEvent', calendarId, details: eventDetails(details) }) as Promise<string>,
-            updateEvent: (eventId, details, context) => reportUnmarked(call()({ op: 'updateEvent', eventId, ...owner(context), details: eventDetails(details) }), 'recreated'),
-            deleteEvent: (eventId, context) => reportUnmarked(call()({ op: 'deleteEvent', eventId, ...owner(context) }), 'cleared'),
+            updateEvent: (eventId, details, context) => reportRefusal(call()({ op: 'updateEvent', eventId, ...owner(context), details: eventDetails(details) }), 'recreated', 'update'),
+            deleteEvent: (eventId, context) => reportRefusal(call()({ op: 'deleteEvent', eventId, ...owner(context) }), 'cleared', 'delete'),
         },
         ...(sync ? {
             syncEntries: {

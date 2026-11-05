@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'bun:test';
 import { useTaskStore } from '@mindwtr/core';
-import { createCalendarFeeds, createNativeCalendar, UNMARKED_EVENT } from './host-calendar';
+import { createCalendarFeeds, createNativeCalendar, EVENT_READ_FAILED, UNMARKED_EVENT } from './host-calendar';
 
 
 type Load = { input: { slot: string; start: string; end: string; timeoutMs?: number; refresh?: boolean }; settle: (value: unknown) => void };
@@ -186,5 +186,6 @@ describe('the unmarked-event answer', () => {
     it('is the text CalendarPushWrites.kt answers', () => {
         const kotlin = readFileSync(new URL('../android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWrites.kt', import.meta.url), 'utf8');
         expect(kotlin).toContain(`const val UNMARKED_EVENT = "${UNMARKED_EVENT}"`);
+        expect(kotlin).toContain(`const val EVENT_READ_FAILED = "${EVENT_READ_FAILED}"`);
     });
 });

@@ -132,6 +132,9 @@ class HostCalendars(context: Context) {
     }
 }
 
+internal fun <C : AutoCloseable> C?.liveDescription(first: C.() -> Boolean, description: C.() -> String?): String? =
+    (this ?: throw IllegalStateException(CalendarPushWrites.EVENT_READ_FAILED)).use { if (it.first()) it.description() ?: "" else null }
+
 private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
     private val resolver = context.contentResolver
 
@@ -157,7 +160,7 @@ private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
     override fun liveEventDescription(id: Long, calendarId: Long?): String? = resolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
         arrayOf(CalendarContract.Events.DESCRIPTION),
         "(${CalendarContract.Events.DELETED} != 1)" + (calendarId?.let { " AND ${CalendarContract.Events.CALENDAR_ID} = $it" } ?: ""),
-        null, null)?.use { if (it.moveToFirst()) it.getString(0) ?: "" else null }
+        null, null).liveDescription(Cursor::moveToFirst) { getString(0) }
 
     override fun updateEvent(id: Long, values: Map<String, Any>): Int =
         resolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), values.toContentValues(), null, null)
