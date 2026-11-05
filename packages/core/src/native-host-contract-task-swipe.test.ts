@@ -120,4 +120,19 @@ describe('native host contract: swipe tray', () => {
         value(await host.saveTaskDates({ requestId: generateUUID(), taskId: 'a', base: sheet.base, draft: { startTime: '', dueDate: noDate.value } }));
         expect(stored('a').dueDate).toBeUndefined();
     });
+
+    it('a draft date that is neither empty nor a date is refused, and nothing is written', async () => {
+        const host = await openHost({ tasks: [task('a', 'next', { dueDate: '2030-05-10' })] });
+        const { sheet } = value(host.getTaskDatesSheet({ taskId: 'a' }));
+        const before = taskRevisionOf(stored('a'));
+        for (const dueDate of ['tomorrow', '2030-13-40', 'x'.repeat(20)]) {
+            const read = host.getTaskDatesSheet({ taskId: 'a', base: sheet.base, draft: { startTime: '', dueDate } });
+            expect(read.ok ? '' : read.error.code).toBe('INVALID_INPUT');
+            const saved = await host.saveTaskDates({ requestId: generateUUID(), taskId: 'a', base: sheet.base, draft: { startTime: '', dueDate } });
+            expect(saved.ok ? '' : saved.error.code).toBe('INVALID_INPUT');
+        }
+        expect(taskRevisionOf(stored('a'))).toBe(before);
+        expect(value(host.getTaskDatesSheet({ taskId: 'a', base: sheet.base, draft: { startTime: '2030-05-01T09:30', dueDate: '' } })).sheet.draft)
+            .toEqual({ startTime: '2030-05-01T09:30', dueDate: '' });
+    });
 });

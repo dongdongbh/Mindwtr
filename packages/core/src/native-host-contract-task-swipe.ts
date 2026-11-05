@@ -49,6 +49,10 @@ const readDates = (value: unknown): NativeTaskDates | null => {
     if (!DATE_FIELDS.every((field) => typeof value[field] === 'string' && (value[field] as string).length <= 100)) return null;
     return { startTime: value.startTime as string, dueDate: value.dueDate as string };
 };
+const readDraftDates = (value: unknown): NativeTaskDates | null => {
+    const dates = readDates(value);
+    return dates && DATE_FIELDS.every((field) => dates[field] === '' || safeParseDate(dates[field])) ? dates : null;
+};
 const datesOf = (draft: TaskDraft): NativeTaskDates => ({ startTime: draft.startTime ?? '', dueDate: draft.dueDate ?? '' });
 const sameDates = (a: NativeTaskDates, b: NativeTaskDates) => a.startTime === b.startTime && a.dueDate === b.dueDate;
 
@@ -112,7 +116,7 @@ export function createTaskSwipeMethods(deps: {
             if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
             const opened = datesOf(createTaskDraft(task));
             const base = input.base === undefined ? opened : readDates(input.base);
-            let dates = input.draft === undefined ? base : readDates(input.draft);
+            let dates = input.draft === undefined ? base : readDraftDates(input.draft);
             if (!base || !dates || (input.base === undefined) !== (input.draft === undefined)) {
                 return fail('INVALID_INPUT', 'base and draft must both hold startTime and dueDate');
             }
@@ -153,7 +157,7 @@ export function createTaskSwipeMethods(deps: {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const base = isObjectRecord(input) ? readDates(input.base) : null;
-            const dates = isObjectRecord(input) ? readDates(input.draft) : null;
+            const dates = isObjectRecord(input) ? readDraftDates(input.draft) : null;
             if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
                 || !id(input.taskId) || !base || !dates) {
                 return fail('INVALID_INPUT', 'A request UUID, a task and its base and new dates are required');
