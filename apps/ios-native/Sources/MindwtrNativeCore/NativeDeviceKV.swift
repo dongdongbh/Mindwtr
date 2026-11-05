@@ -19,13 +19,13 @@ final class NativeDeviceKV {
         "@mindwtr_webdav_url", "@mindwtr_webdav_username", "@mindwtr_webdav_allow_insecure_http",
         "@mindwtr_webdav_allow_weak_fingerprint", "@mindwtr_cloud_provider", "@mindwtr_cloud_url",
         "@mindwtr_cloud_allow_insecure_http", "@mindwtr_sync_encryption_state_v1",
-        "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1",
+        "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1", "@mindwtr_dropbox_last_rev",
         "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
         "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars", "mindwtr-system-calendar-settings",
         "mindwtr-update-available", "mindwtr-update-last-check", "mindwtr-update-latest",
     ].map { Data($0.utf8) })
     private static let removableSecrets: Set<Data> = Set([
-        "@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1",
+        "@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1", "@mindwtr_dropbox_tokens",
     ].map { Data($0.utf8) })
     private static var failure: HostFailure { HostFailure("Device settings storage is unavailable") }
     private static var invalid: HostFailure { HostFailure("Device settings input is invalid") }
@@ -298,6 +298,48 @@ final class NativeDeviceKV {
         _ = try checkedRead()
     }
 
+    private static let aiConsentName = "mindwtr-ai-provider-consent-v1"
+    private var aiConsentPendingProvider: NativeAISettingsProjection.Provider?
+
+    func readOpenAIConsentRecorded() throws -> Bool { try readAIConsentRecorded(provider: .openai) }
+    func recordOpenAIConsent() throws { try recordAIConsent(provider: .openai) }
+    func retireOpenAILegacyCredential() throws { try retireAILegacyCredential(provider: .openai) }
+
+    func readAIConsentRecorded(provider: NativeAISettingsProjection.Provider) throws -> Bool {
+        try readAIProviderDeviceMetadata(provider: provider).consentRecorded
+    }
+    /// A retained consent mutation belongs to its original agreed provider.
+    func recordAIConsent(provider: NativeAISettingsProjection.Provider) throws {
+        try requireUsable()
+        if let pending {
+            guard aiConsentPendingProvider == provider, pending.changes.count == 1,
+                  pending.changes[0].key == Self.aiConsentName, pending.changes[0].value != nil else { throw Self.failure }
+            try mutate(pending.changes, skipUnchanged: true)
+            aiConsentPendingProvider = nil
+            return
+        }
+        let current = try checkedRead()
+        var consent: [String: Any] = [:]
+        if let raw = current.values[Data(Self.aiConsentName.utf8)] {
+            guard raw.utf8.count <= Self.valueLimit, Self.strictAIConsentJSON(raw),
+                  let parsed = try? NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { throw Self.invalid }
+            consent = parsed
+        }
+        if let value = consent[provider.rawValue] as? NSNumber, CFGetTypeID(value) == CFBooleanGetTypeID(), value.boolValue { return }
+        consent[provider.rawValue] = true
+        let data = try JSONSerialization.data(withJSONObject: consent, options: [.sortedKeys])
+        guard data.count <= Self.valueLimit else { throw Self.invalid }
+        aiConsentPendingProvider = provider
+        try mutate([Change(key: Self.aiConsentName, bytes: Data(Self.aiConsentName.utf8),
+            value: String(decoding: data, as: UTF8.self))], skipUnchanged: true)
+        aiConsentPendingProvider = nil
+    }
+    /// Selected explicit Save/Clear only; generic JS storage remains restricted.
+    func retireAILegacyCredential(provider: NativeAISettingsProjection.Provider) throws {
+        let name = "mindwtr-ai-key:" + provider.rawValue
+        try mutate([Change(key: name, bytes: Data(name.utf8), value: nil)], retiringAILegacy: provider)
+    }
+
     func readSearchConsent() throws -> Bool {
         switch try get(Self.searchConsentName) {
         case nil, "false": return false
@@ -382,6 +424,20 @@ final class NativeDeviceKV {
         try mutate(changes, skipUnchanged: true)
     }
 
+    static let watchOrderingName = "mindwtr:pending-captures:last-applied:v1"
+    func settledWatchOrderingRecord() throws -> String? {
+        if let pending {
+            guard pending.changes.count == 1, pending.changes[0].key == Self.watchOrderingName else { throw Self.failure }
+            try mutate(pending.changes, skipUnchanged: true)
+        }
+        return try get(Self.watchOrderingName)
+    }
+    func writeWatchOrderingRecord(_ value: String) throws {
+        guard value.utf8.count <= Self.valueLimit else { throw Self.invalid }
+        let name = Self.watchOrderingName
+        try mutate([Change(key: name, bytes: Data(name.utf8), value: value)], skipUnchanged: true)
+    }
+
     private static let pomodoroAlarmName = "mindwtr:native:pomodoro-alarms:v1"
     func readPomodoroAlarmState() throws -> String? {
         let value = try get(Self.pomodoroAlarmName)
@@ -442,7 +498,10 @@ final class NativeDeviceKV {
               value <= 9_007_199_254_740_991, String(value) == timestamp else { throw invalid }
     }
 
-    private func mutate(_ changes: [Change], skipUnchanged: Bool = false) throws {
+    private func mutate(_ changes: [Change], skipUnchanged: Bool = false, retiringAILegacy: NativeAISettingsProjection.Provider? = nil) throws {
+        if let provider = retiringAILegacy {
+            guard changes.count == 1, changes[0].key == "mindwtr-ai-key:" + provider.rawValue, changes[0].value == nil else { throw Self.invalid }
+        }
         try requireUsable()
         if let pending {
             guard pending.changes == changes else { throw Self.failure }
@@ -461,7 +520,7 @@ final class NativeDeviceKV {
             } else { object = NSMutableDictionary() }
             var retirement: SecretRetirement?
             var orphanInputBytes = 0
-            if Self.isLegacySecretRemoval(changes.map(\.key)) {
+            if retiringAILegacy != nil || Self.isLegacySecretRemoval(changes.map(\.key)) {
                 let selected = changes[0]
                 let name = Self.externalName(selected.key)
                 // A different live manifest reference never grants permission

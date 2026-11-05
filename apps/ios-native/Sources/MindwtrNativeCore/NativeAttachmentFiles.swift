@@ -33,6 +33,19 @@ final class NativeAttachmentFiles {
         let cacheRootIdentity: String
         let parentIdentity: String
     }
+    /// Native recorder creation authority. Its URL is only borrowed while the
+    /// anchored inode is checked; a path alone can never mint a source receipt.
+    final class VoiceRecordingReservation {
+        fileprivate let owner: NativeAttachmentFiles
+        fileprivate let leaf: String
+        fileprivate let output: Int32
+        fileprivate let created: Identity
+        fileprivate var finished = false
+        fileprivate init(owner: NativeAttachmentFiles, leaf: String, output: Int32, created: Identity) {
+            self.owner = owner; self.leaf = leaf; self.output = output; self.created = created
+        }
+        deinit { Darwin.close(output) } // Never infer permission to unlink here.
+    }
     /// Creation authority is minted here, never decoded from a borrowed proof.
     struct ProviderCacheCopyReceipt: Sendable {
         fileprivate let proof: CacheSourceProof
@@ -100,8 +113,11 @@ final class NativeAttachmentFiles {
     }
     static let maximumBytes = 16 * 1024 * 1024
     static let maximumPlaintextSourceBytes = 8 * 1024 * 1024
+    static let maximumVoiceRecordingBytes = 4 * 1024 * 1024
     static let maximumProviderBytes: Int64 = 50 * 1024 * 1024
     private static let chunkBytes = 64 * 1024
+    private enum Layout { case native, rnCandidate }
+    private let layout: Layout
     private let libraryRoot: URL
     private let documents: URL
     private let cache: URL
@@ -110,8 +126,11 @@ final class NativeAttachmentFiles {
     private let documentsIdentity: Identity
     private let cacheIdentity: Identity
     private var calendarDirectoryIdentity: Identity?
+    private let calendarIdentityLock = NSLock()
 
     var managedRoot: URL { documents.appendingPathComponent("attachments", isDirectory: true) }
+    var cacheRoot: URL { cache }
+    var isRNCandidate: Bool { layout == .rnCandidate }
     var sourceRoots: [URL] { [documents, cache] }
     var directoriesJSON: String {
         // URLs are native-owned strings; JSON serialization cannot fail.
@@ -121,6 +140,7 @@ final class NativeAttachmentFiles {
     #if DEBUG
     var beforeProviderOutputNamedStat: ((Bool) throws -> Void)?
     var afterSourceOpened: (() throws -> Void)?
+    var afterCloudKitStagePublished: (() throws -> Void)?
     var beforePublish: (() throws -> Void)?
     var beforeStageSync: (() throws -> Void)?
     var beforeRetirementUnlink: (() throws -> Void)?
@@ -134,6 +154,7 @@ final class NativeAttachmentFiles {
         let path = try Self.filePath(libraryRoot.absoluteString)
         let root = URL(fileURLWithPath: path, isDirectory: true)
         let ownerURL = root.appendingPathComponent("attachment-files", isDirectory: true)
+        layout = .native
         self.libraryRoot = root
         documents = ownerURL.appendingPathComponent("documents", isDirectory: true)
         cache = ownerURL.appendingPathComponent("cache", isDirectory: true)
@@ -153,7 +174,54 @@ final class NativeAttachmentFiles {
         cacheIdentity = try Self.identity(cacheFD)
     }
 
-    func call(_ json: String, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void = {}) throws -> Reply {
+    init(rnAdoptionContainerURL: URL) throws {
+        let path = try Self.filePath(rnAdoptionContainerURL.absoluteString)
+        let root = URL(fileURLWithPath: path, isDirectory: true)
+        layout = .rnCandidate
+        libraryRoot = root
+        documents = root.appendingPathComponent("Documents", isDirectory: true)
+        cache = root.appendingPathComponent("Library/Caches", isDirectory: true)
+        let container = try Self.openAbsoluteDirectory(path)
+        defer { Darwin.close(container) }
+        libraryIdentity = try Self.identity(container)
+        let documentFD = try Self.childDirectory(container, "Documents", create: false)
+        defer { Darwin.close(documentFD) }
+        documentsIdentity = try Self.identity(documentFD)
+        let library = try Self.childDirectory(container, "Library", create: false)
+        defer { Darwin.close(library) }
+        namespaceIdentity = try Self.identity(library)
+        let cacheFD = try Self.childDirectory(library, "Caches", create: true)
+        defer { Darwin.close(cacheFD) }
+        cacheIdentity = try Self.identity(cacheFD)
+        let verified = try openRoot(false)
+        Darwin.close(verified)
+    }
+
+    func verifyCandidateRoots() throws {
+        guard layout == .rnCandidate else { return }
+        let root = try openRoot(false)
+        Darwin.close(root)
+    }
+
+    func withCandidateManagedDirectory<T>(_ operation: (Int32, () throws -> Void) throws -> T) throws -> T {
+        guard isRNCandidate else { throw NativeAttachmentFilesError.invalidRequest }
+        let path = Reference(cache: false, components: ["attachments"])
+        let directory = try openDirectory(path)
+        defer { Darwin.close(directory) }
+        let identity = try Self.identity(directory)
+        func check() throws {
+            let current = try openDirectory(path)
+            defer { Darwin.close(current) }
+            guard try Self.identity(current) == identity else { throw NativeAttachmentFilesError.unavailable }
+        }
+        try check()
+        let result = try operation(directory, check)
+        try check()
+        return result
+    }
+
+    func call(_ json: String, maximumReadBytes: Int? = nil, expectedBaselineProof: BaselineAttachmentProof? = nil,
+              checkCancellation: () throws -> Void = {}) throws -> Reply {
         if let maximumReadBytes { guard (0...Self.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFilesError.invalidRequest } }
         guard json.utf8.count <= 24 * 1024 * 1024,
               let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)),
@@ -173,6 +241,12 @@ final class NativeAttachmentFiles {
         }
         guard Set(request.keys) == Set(fields), ["writeBytes", "sha256"].contains(op) || json.utf8.count <= 64 * 1024 else {
             throw NativeAttachmentFilesError.invalidRequest
+        }
+        if let proof = expectedBaselineProof {
+            guard ["getInfo", "readBytes", "sha256File"].contains(op),
+                  let uri = request["uri"] as? String, Array(uri.utf8) == Array(proof.targetURI.utf8),
+                  maximumReadBytes == 8_388_608 else { throw NativeAttachmentFilesError.invalidRequest }
+            return try readProvenBaseline(reference(uri), operation: op, proof: proof, checkCancellation: checkCancellation)
         }
         try checkCancellation()
         if op == "barrier" { return Reply(value: nil, bytes: nil) }
@@ -239,6 +313,7 @@ final class NativeAttachmentFiles {
     /// Captures a shared-selected baseline candidate's current local generation.
     /// This never creates directories, reads unmanaged targets, or retires bytes.
     func snapshotBaselineAttachment(attachmentID: String, targetURI: String, maximumReadBytes: Int? = nil,
+                                    publishedGeneration: stat? = nil,
                                     checkCancellation: () throws -> Void = {}) throws -> BaselineAttachmentObservation {
         guard Self.validBaselineAttachmentID(attachmentID), !targetURI.isEmpty,
               targetURI.utf8.count <= 16 * 1024, !targetURI.utf8.contains(0),
@@ -304,6 +379,9 @@ final class NativeAttachmentFiles {
         }
         let fd = try openFile(parent); defer { Darwin.close(fd) }
         let before = try Self.regular(fd)
+        if let publishedGeneration {
+            guard Self.unchanged(publishedGeneration, before) else { throw NativeAttachmentFilesError.unavailable }
+        }
         if let maximumReadBytes { guard maximumReadBytes >= 0, before.st_size <= Int64(maximumReadBytes) else { throw NativeAttachmentFilesError.tooLarge } }
         guard Self.unchanged(named, before), before.st_nlink == 1,
               before.st_size <= 9_007_199_254_740_991 else { throw NativeAttachmentFilesError.unavailable }
@@ -348,8 +426,30 @@ final class NativeAttachmentFiles {
         return Self.token(identity)
     }
 
-    func copyProviderSource(_ selectedURL: URL, checkCancellation: () throws -> Void) throws -> ProviderCacheCopyReceipt {
-        try copyProviderSource(selectedURL, photo: nil, checkCancellation: checkCancellation)
+    func copyProviderSource(_ selectedURL: URL, maximumProviderBytes: Int64 = NativeAttachmentFiles.maximumProviderBytes,
+                            checkCancellation: () throws -> Void) throws -> ProviderCacheCopyReceipt {
+        try copyProviderSource(selectedURL, photo: nil, maximumProviderBytes: maximumProviderBytes, checkCancellation: checkCancellation)
+    }
+    func copyCloudKitStage(_ receipt: ProviderCacheCopyReceipt, targetURI: String, maximumBytes: Int?,
+                           checkCancellation: () throws -> Void) throws -> BaselineAttachmentProof? {
+        try requireProviderSource(receipt)
+        if let maximumBytes {
+            guard maximumBytes == 8_388_608, receipt.size <= Int64(maximumBytes) else { throw NativeAttachmentFilesError.tooLarge }
+        }
+        let source = try reference(receipt.sourceURI), target = try reference(targetURI)
+        guard let generation = try copy(source, to: target, exclusive: true, checkCancellation: checkCancellation) else {
+            throw NativeAttachmentFilesError.unavailable
+        }
+        try requireProviderSource(receipt)
+        guard maximumBytes != nil else { return nil }
+        #if DEBUG
+        try afterCloudKitStagePublished?()
+        #endif
+        guard let url = URL(string: targetURI),
+              case .present(let proof) = try snapshotBaselineAttachment(attachmentID: url.lastPathComponent, targetURI: targetURI,
+                  maximumReadBytes: 8_388_608, publishedGeneration: generation, checkCancellation: {}),
+              proof.sha256 == receipt.proof.sha256, proof.size == receipt.size else { throw NativeAttachmentFilesError.unavailable }
+        return proof
     }
     /// One imported snapshot. A returned final belongs to this library for its
     /// lifetime, including after its subscription is removed or restored.
@@ -423,9 +523,11 @@ final class NativeAttachmentFiles {
         let directory = try Self.childDirectory(parent, "calendar-files", create: create)
         do {
             let identity = try Self.identity(directory)
-            if let captured = calendarDirectoryIdentity {
-                guard captured == identity else { throw NativeAttachmentFilesError.unavailable }
-            } else { calendarDirectoryIdentity = identity }
+            calendarIdentityLock.lock()
+            let captured = calendarDirectoryIdentity
+            if captured == nil { calendarDirectoryIdentity = identity }
+            calendarIdentityLock.unlock()
+            guard captured == nil || captured == identity else { throw NativeAttachmentFilesError.unavailable }
             let named = try Self.childDirectory(parent, "calendar-files", create: false)
             defer { Darwin.close(named) }
             guard try Self.identity(named) == identity else { throw NativeAttachmentFilesError.unavailable }
@@ -643,6 +745,119 @@ final class NativeAttachmentFiles {
         // Return the actual minted receipt even if cancellation arrives after
         // completion; the caller must retain it before fencing late delivery.
         return (receipt, receipt.proof)
+    }
+
+    func reserveVoiceRecording() throws -> VoiceRecordingReservation {
+        let leaf = UUID().uuidString.lowercased() + ".m4a"
+        let path = Reference(cache: true, components: [leaf])
+        let parent = try openParent(path); defer { Darwin.close(parent.fd) }
+        let fd = Darwin.openat(parent.fd, leaf, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
+        guard fd >= 0 else { throw NativeAttachmentFilesError.unavailable }
+        let reservation: VoiceRecordingReservation
+        do { reservation = .init(owner: self, leaf: leaf, output: fd, created: try Self.identity(fd)) }
+        catch { Darwin.close(fd); throw error }
+        do {
+            try requireVoiceRecording(reservation)
+            let url = cache.appendingPathComponent(leaf)
+            #if os(iOS)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                                                  ofItemAtPath: url.path)
+            #endif
+            var privateURL = url, attributes = URLResourceValues()
+            attributes.isExcludedFromBackup = true
+            try privateURL.setResourceValues(attributes)
+            try requireVoiceRecording(reservation)
+            return reservation
+        } catch {
+            _ = try? cancelVoiceRecording(reservation)
+            throw error
+        }
+    }
+
+    func withVoiceRecordingURL<T>(_ reservation: VoiceRecordingReservation, discard: (T) -> Void,
+                                 _ body: (URL) throws -> T) throws -> T {
+        try requireVoiceRecording(reservation)
+        let result = try body(cache.appendingPathComponent(reservation.leaf))
+        do { try requireVoiceRecording(reservation) }
+        catch { discard(result); throw error }
+        return result
+    }
+
+    /// While recording, size/times may change. Creation identity, parent and
+    /// single-link ownership may not. Callers serialize writer close/cancel.
+    private func requireVoiceRecording(_ reservation: VoiceRecordingReservation) throws {
+        guard reservation.owner === self, !reservation.finished else { throw NativeAttachmentFilesError.invalidRequest }
+        let path = Reference(cache: true, components: [reservation.leaf])
+        let parent = try openParent(path); defer { Darwin.close(parent.fd) }
+        try verify(parent, path: path)
+        let retained = try Self.regular(reservation.output), named = try Self.named(parent)
+        guard Identity(retained) == reservation.created, Identity(named) == reservation.created,
+              retained.st_nlink == 1, named.st_nlink == 1,
+              retained.st_mode == named.st_mode, retained.st_mode & 0o777 == 0o600 else {
+            throw NativeAttachmentFilesError.unavailable
+        }
+    }
+
+    func voiceRecordingSize(_ reservation: VoiceRecordingReservation) throws -> Int64 {
+        try requireVoiceRecording(reservation)
+        return try Self.regular(reservation.output).st_size
+    }
+
+    /// The adapter must already be closed. Hashing is bounded before allocation
+    /// and throughout the read; the existing immutable source receipt is reused.
+    func finishVoiceRecording(_ reservation: VoiceRecordingReservation, maximumBytes: Int) throws
+        -> (receipt: ProviderCacheCopyReceipt, source: CacheSourceProof) {
+        guard (1...Self.maximumVoiceRecordingBytes).contains(maximumBytes) else {
+            throw NativeAttachmentFilesError.invalidRequest
+        }
+        try requireVoiceRecording(reservation)
+        let path = Reference(cache: true, components: [reservation.leaf])
+        let parent = try openParent(path); defer { Darwin.close(parent.fd) }
+        guard Darwin.fsync(reservation.output) == 0, Darwin.fcntl(reservation.output, F_FULLFSYNC) == 0 else {
+            throw NativeAttachmentFilesError.unavailable
+        }
+        let before = try Self.regular(reservation.output)
+        guard before.st_size <= Int64(maximumBytes) else { throw NativeAttachmentFilesError.tooLarge }
+        guard Darwin.lseek(reservation.output, 0, SEEK_SET) >= 0 else { throw NativeAttachmentFilesError.unavailable }
+        let content = try hashContents(reservation.output, maximumReadBytes: maximumBytes, checkCancellation: {
+            try self.requireVoiceRecording(reservation)
+            try self.stable(reservation.output, before: before, parent: parent, path: path)
+        })
+        try stable(reservation.output, before: before, parent: parent, path: path)
+        try requireVoiceRecording(reservation)
+        guard Darwin.fsync(parent.fd) == 0 else { throw NativeAttachmentFilesError.unavailable }
+        try stable(reservation.output, before: before, parent: parent, path: path)
+        let proof = CacheSourceProof(sourceURI: cache.appendingPathComponent(reservation.leaf).absoluteString,
+            sha256: content.sha256, size: content.size, identity: Self.token(reservation.created),
+            cacheRootIdentity: Self.token(cacheIdentity), parentIdentity: try Self.token(Self.identity(parent.fd)))
+        let receipt = ProviderCacheCopyReceipt(proof: proof, generation: before,
+                                              fileName: reservation.leaf, mimeType: "audio/mp4")
+        reservation.finished = true
+        return (receipt, proof)
+    }
+
+    /// Close all recorder writers first. A changed inode/ancestor is retained,
+    /// including on error; no directory-wide or arbitrary-path cleanup exists.
+    func cancelVoiceRecording(_ reservation: VoiceRecordingReservation) throws -> BaselineAttachmentRetirementOutcome {
+        try requireVoiceRecording(reservation)
+        let path = Reference(cache: true, components: [reservation.leaf])
+        let parent = try openParent(path); defer { Darwin.close(parent.fd) }
+        let before = try Self.regular(reservation.output)
+        try stable(reservation.output, before: before, parent: parent, path: path)
+        #if DEBUG
+        try beforeRetirementUnlink?()
+        #endif
+        try requireVoiceRecording(reservation)
+        try stable(reservation.output, before: before, parent: parent, path: path)
+        guard Darwin.unlinkat(parent.fd, parent.leaf, 0) == 0 else { throw NativeAttachmentFilesError.unavailable }
+        reservation.finished = true
+        guard Darwin.fsync(parent.fd) == 0 else { throw NativeAttachmentFilesError.unavailable }
+        try verify(parent, path: path)
+        var named = stat()
+        guard Darwin.fstatat(parent.fd, parent.leaf, &named, AT_SYMLINK_NOFOLLOW) != 0, errno == ENOENT else {
+            throw NativeAttachmentFilesError.unavailable
+        }
+        return .removed
     }
 
     /// The provider and buffered creator share one anchored output lifecycle.
@@ -1169,7 +1384,7 @@ final class NativeAttachmentFiles {
         value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
-    private struct Identity: Equatable {
+    fileprivate struct Identity: Equatable {
         let device: dev_t; let inode: ino_t
         init(_ value: stat) { device = value.st_dev; inode = value.st_ino }
     }
@@ -1253,6 +1468,24 @@ final class NativeAttachmentFiles {
         catch { throw NativeAttachmentFilesError.unavailable }
         defer { Darwin.close(library) }
         guard try Self.identity(library) == libraryIdentity else { throw NativeAttachmentFilesError.unavailable }
+        if layout == .rnCandidate {
+            let documents = try Self.childDirectory(library, "Documents", create: false)
+            let owner: Int32
+            do { owner = try Self.childDirectory(library, "Library", create: false) }
+            catch { Darwin.close(documents); throw error }
+            defer { Darwin.close(owner) }
+            let cache: Int32
+            do { cache = try Self.childDirectory(owner, "Caches", create: false) }
+            catch { Darwin.close(documents); throw error }
+            do {
+                guard try Self.identity(documents) == documentsIdentity,
+                      try Self.identity(owner) == namespaceIdentity, try Self.identity(cache) == cacheIdentity else {
+                    throw NativeAttachmentFilesError.unavailable
+                }
+                Darwin.close(isCache ? documents : cache)
+                return isCache ? cache : documents
+            } catch { Darwin.close(documents); Darwin.close(cache); throw error }
+        }
         let owner: Int32
         do { owner = try Self.childDirectory(library, "attachment-files", create: false) }
         catch { throw NativeAttachmentFilesError.unavailable }
@@ -1308,10 +1541,16 @@ final class NativeAttachmentFiles {
     private func openFile(_ parent: Parent) throws -> Int32 {
         let fd = Darwin.openat(parent.fd, parent.leaf, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else { throw Self.failure() }
-        do { _ = try Self.regular(fd); return fd } catch { Darwin.close(fd); throw error }
+        do {
+            let value = try Self.regular(fd)
+            guard layout != .rnCandidate || value.st_nlink == 1 else { throw NativeAttachmentFilesError.unavailable }
+            return fd
+        } catch { Darwin.close(fd); throw error }
     }
     private func stable(_ fd: Int32, before: stat, parent: Parent, path: Reference) throws {
-        guard try Self.unchanged(before, Self.regular(fd)), try Self.unchanged(before, Self.named(parent)) else {
+        let current = try Self.regular(fd), named = try Self.named(parent)
+        guard Self.unchanged(before, current), Self.unchanged(before, named),
+              layout != .rnCandidate || current.st_nlink == 1 && named.st_nlink == 1 else {
             throw NativeAttachmentFilesError.unavailable
         }
         try verify(parent, path: path)
@@ -1329,6 +1568,7 @@ final class NativeAttachmentFiles {
             }
             let kind = value.st_mode & mode_t(S_IFMT)
             guard kind == mode_t(S_IFREG) || kind == mode_t(S_IFDIR) else { throw NativeAttachmentFilesError.unavailable }
+            guard layout != .rnCandidate || kind != mode_t(S_IFREG) || value.st_nlink == 1 else { throw NativeAttachmentFilesError.unavailable }
             return ["exists": true, "isDirectory": kind == mode_t(S_IFDIR), "size": kind == mode_t(S_IFDIR) ? 0 : value.st_size,
                     "modificationTime": Double(value.st_mtimespec.tv_sec) + Double(value.st_mtimespec.tv_nsec) / 1_000_000_000]
         } catch NativeAttachmentFilesError.missing { return ["exists": false] }
@@ -1352,6 +1592,37 @@ final class NativeAttachmentFiles {
         let current = try openDirectory(path); defer { Darwin.close(current) }
         guard try Self.identity(fd) == Self.identity(current) else { throw NativeAttachmentFilesError.unavailable }
         return names
+    }
+    /// Native-only proof: the descriptor returning bytes must be the captured
+    /// generation, and its complete bytes must match the captured digest.
+    private func readProvenBaseline(_ path: Reference, operation: String, proof: BaselineAttachmentProof,
+                                    checkCancellation: () throws -> Void) throws -> Reply {
+        try checkCancellation()
+        guard !path.cache, path.components.count == 2, path.components.first == "attachments",
+              Self.validDigest(proof.sha256), (0...8_388_608).contains(proof.size) else { throw NativeAttachmentFilesError.invalidRequest }
+        let parent = try openParent(path); defer { Darwin.close(parent.fd) }
+        let fd = try openFile(parent); defer { Darwin.close(fd) }
+        let before = try Self.regular(fd)
+        #if DEBUG
+        try afterSourceOpened?()
+        #endif
+        guard Self.token(Identity(before)) == proof.identity, before.st_size == proof.size, before.st_nlink == 1,
+              try Self.token(Self.identity(parent.fd)) == proof.directoryIdentity else { throw NativeAttachmentFilesError.unavailable }
+        func check() throws {
+            try stable(fd, before: before, parent: parent, path: path)
+            try checkCancellation()
+            try stable(fd, before: before, parent: parent, path: path)
+        }
+        var bytes = Data()
+        let content = try hashContents(fd, maximumReadBytes: 8_388_608, checkCancellation: check) { chunk in
+            if operation == "readBytes" { bytes.append(chunk) }
+        }
+        try check()
+        guard content.sha256 == proof.sha256, content.size == proof.size else { throw NativeAttachmentFilesError.unavailable }
+        if operation == "readBytes" { return Reply(value: nil, bytes: bytes) }
+        if operation == "sha256File" { return Reply(value: content.sha256, bytes: nil) }
+        return Reply(value: ["exists": true, "isDirectory": false, "size": before.st_size,
+                             "modificationTime": Double(before.st_mtimespec.tv_sec) + Double(before.st_mtimespec.tv_nsec) / 1_000_000_000], bytes: nil)
     }
     private func read(_ path: Reference, position: Int, length: Int?, maximumReadBytes: Int? = nil, checkCancellation: () throws -> Void) throws -> Data {
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
@@ -1401,7 +1672,7 @@ final class NativeAttachmentFiles {
         }
         return AttachmentStageContent(sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(), size: size)
     }
-    @discardableResult private func copy(_ from: Reference, to: Reference, calendar: Bool = false,
+    @discardableResult private func copy(_ from: Reference, to: Reference, calendar: Bool = false, exclusive: Bool = false,
                                         checkCancellation: () throws -> Void) throws -> stat? {
         let source = try openParent(from); defer { Darwin.close(source.fd) }
         let fd = try openFile(source); defer { Darwin.close(fd) }
@@ -1413,7 +1684,7 @@ final class NativeAttachmentFiles {
         #if DEBUG
         try afterSourceOpened?()
         #endif
-        return try publish(to, calendar: calendar, checkCancellation: checkCancellation,
+        return try publish(to, calendar: calendar, exclusive: exclusive, checkCancellation: checkCancellation,
                     beforePromotionValidation: { try self.stable(fd, before: before, parent: source, path: from) }) { output in
             var total = 0
             try consume(fd, checkCancellation: checkCancellation) { bytes in
@@ -1430,12 +1701,14 @@ final class NativeAttachmentFiles {
     }
     private func validTarget(_ parent: Parent) throws {
         do {
-            guard try Self.named(parent).st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            let named = try Self.named(parent)
+            guard named.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+                  layout != .rnCandidate || named.st_nlink == 1 else {
                 throw NativeAttachmentFilesError.unavailable
             }
         } catch NativeAttachmentFilesError.missing { }
     }
-    @discardableResult private func publish(_ path: Reference, calendar: Bool = false, checkCancellation: () throws -> Void,
+    @discardableResult private func publish(_ path: Reference, calendar: Bool = false, exclusive: Bool = false, checkCancellation: () throws -> Void,
                          beforePromotionValidation: () throws -> Void = {}, fill: (Int32) throws -> Void) throws -> stat? {
         let parent = try openParent(path, create: true); defer { Darwin.close(parent.fd) }
         try validTarget(parent)
@@ -1487,7 +1760,7 @@ final class NativeAttachmentFiles {
         // Run it before the complete publication proof, never after that proof.
         try checkCancellation()
         try verify(parent, path: path)
-        if calendar {
+        if calendar || exclusive {
             do { _ = try Self.named(parent); throw NativeAttachmentFilesError.unavailable }
             catch NativeAttachmentFilesError.missing { }
         } else { try validTarget(parent) }
@@ -1498,7 +1771,7 @@ final class NativeAttachmentFiles {
               try Self.unchanged(written, Self.regular(output)), Self.unchanged(written, staged) else {
             throw NativeAttachmentFilesError.unavailable
         }
-        if calendar {
+        if calendar || exclusive {
             guard staged.st_nlink == 1,
                   Darwin.renameatx_np(parent.fd, pending, parent.fd, parent.leaf, UInt32(RENAME_EXCL)) == 0 else {
                 throw NativeAttachmentFilesError.unavailable
@@ -1507,7 +1780,7 @@ final class NativeAttachmentFiles {
             guard Darwin.renameat(parent.fd, pending, parent.fd, parent.leaf) == 0 else { throw NativeAttachmentFilesError.unavailable }
         }
         promoted = true
-        if calendar { generation = try Self.regular(output) }
+        if calendar || exclusive { generation = try Self.regular(output) }
         guard Darwin.fsync(parent.fd) == 0 else { throw NativeAttachmentFilesError.unavailable }
         try verify(parent, path: path)
         completed = true

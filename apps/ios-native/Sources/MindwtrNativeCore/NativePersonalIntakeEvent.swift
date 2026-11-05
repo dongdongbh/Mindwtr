@@ -3,15 +3,16 @@ import Foundation
 
 /// Native callback bytes only. Decoding, presentation and Core mutation require later route admission.
 public struct NativePersonalIntakeEvent: Sendable, Equatable, Codable {
-    public enum Kind: String, Sendable, Codable { case reminder, url, spotlight }
+    public enum Kind: String, Sendable, Codable { case reminder, url, spotlight, share }
     public let id: String
     public let kind: Kind
     public let receivedAtMs: Int64
     public let text: String?
     public let response: NativeReminderResponse?
+    public let share: NativeShareEnvelope?
 
-    private init(id: String, kind: Kind, receivedAtMs: Int64, text: String?, response: NativeReminderResponse?) {
-        self.id = id; self.kind = kind; self.receivedAtMs = receivedAtMs; self.text = text; self.response = response
+    private init(id: String, kind: Kind, receivedAtMs: Int64, text: String?, response: NativeReminderResponse?, share: NativeShareEnvelope? = nil) {
+        self.id = id; self.kind = kind; self.receivedAtMs = receivedAtMs; self.text = text; self.response = response; self.share = share
     }
 
     public static func reminder(_ response: NativeReminderResponse) -> Self {
@@ -19,6 +20,10 @@ public struct NativePersonalIntakeEvent: Sendable, Equatable, Codable {
     }
     public static func url(_ text: String, id: UUID = UUID(), receivedAt: Date = Date()) throws -> Self {
         try navigation(text, id: id, receivedAt: receivedAt, kind: .url)
+    }
+    public static func shared(_ envelope: NativeShareEnvelope) throws -> Self {
+        try envelope.validate()
+        return Self(id: envelope.id, kind: .share, receivedAtMs: envelope.receivedAtMs, text: nil, response: nil, share: envelope)
     }
     public static func spotlight(_ identifier: String, id: UUID = UUID(), receivedAt: Date = Date()) throws -> Self {
         try navigation(identifier, id: id, receivedAt: receivedAt, kind: .spotlight)
@@ -37,13 +42,18 @@ public struct NativePersonalIntakeEvent: Sendable, Equatable, Codable {
         }
         switch kind {
         case .reminder:
-            guard text == nil, let response, response.requestID == id, response.requestedAtMs == receivedAtMs else {
+            guard share == nil, text == nil, let response, response.requestID == id, response.requestedAtMs == receivedAtMs else {
                 throw NativePersonalIntakeError.unavailable
             }
             try NativeReminderInbox.validateForPersonalIntake(response, namespace: namespace)
         case .url, .spotlight:
-            guard response == nil, let text, !text.isEmpty,
+            guard share == nil, response == nil, let text, !text.isEmpty,
                   text.utf16.count <= (kind == .url ? 16_000 : 8_000) else { throw NativePersonalIntakeError.unavailable }
+        case .share:
+            guard text == nil, response == nil, let share, share.id == id, share.receivedAtMs == receivedAtMs else {
+                throw NativePersonalIntakeError.unavailable
+            }
+            try share.validate()
         }
     }
     var notificationIdentity: IntakeNotificationIdentity? {

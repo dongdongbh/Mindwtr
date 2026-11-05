@@ -191,24 +191,25 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     }
     private enum Work: Sendable {
         case raw(String, installer: Bool, maximumReadBytes: Int?)
+        case cloudKitStage(String, NativeAttachmentFiles.BaselineAttachmentProof)
         case draft(NativeAttachmentDraftFileRequest, maximumReadBytes: Int?)
         case ownedBaseline(String, NativeAttachmentFiles.BaselineAttachmentProof, @Sendable () throws -> Void)
         var isInstaller: Bool {
             switch self {
             case .raw(_, let installer, _): return installer
             case .draft(let request, _): return request.isInstaller
-            case .ownedBaseline: return false
+            case .ownedBaseline, .cloudKitStage: return false
             }
         }
         var isDraft: Bool {
             switch self {
-            case .raw: return false
+            case .raw, .cloudKitStage: return false
             case .draft: return true
             case .ownedBaseline: return true
             }
         }
     }
-    private let files: NativeAttachmentFiles
+    let files: NativeAttachmentFiles
     private let installer: NativeAttachmentInstaller
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.attachment-files", qos: .userInitiated)
     private let lock = NSLock()
@@ -227,6 +228,12 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     var beforeProviderOutputNamedStat: ((Bool) throws -> Void)? {
         get { files.beforeProviderOutputNamedStat }
         set { files.beforeProviderOutputNamedStat = newValue }
+    }
+    var beforeCloudKitStageRead: ((String) throws -> Void)?
+    var afterCloudKitStageRead: ((String) throws -> Void)?
+    var afterCloudKitStagePublished: (() throws -> Void)? {
+        get { files.afterCloudKitStagePublished }
+        set { files.afterCloudKitStagePublished = newValue }
     }
     var beforeFilePublish: (() throws -> Void)? {
         get { files.beforePublish }
@@ -257,10 +264,16 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
         files = try NativeAttachmentFiles(libraryRoot: libraryRoot)
         installer = try NativeAttachmentInstaller(managedRoot: files.managedRoot, sourceRoots: files.sourceRoots)
     }
+    init(rnAdoptionContainerURL: URL) throws {
+        files = try NativeAttachmentFiles(rnAdoptionContainerURL: rnAdoptionContainerURL)
+        installer = try NativeAttachmentInstaller(managedRoot: files.managedRoot, sourceRoots: files.sourceRoots, filePort: files)
+        try files.verifyCandidateRoots()
+    }
     var directoriesJSON: String { files.directoriesJSON }
     func setWake(_ callback: (@Sendable () -> Void)?) { lock.lock(); wake = callback; lock.unlock() }
 
-    func submit(_ json: String, installer isInstaller: Bool = false, maximumReadBytes: Int? = nil) throws -> String {
+    func submit(_ json: String, installer isInstaller: Bool = false, maximumReadBytes: Int? = nil,
+                cloudKitStageProof: NativeAttachmentFiles.BaselineAttachmentProof? = nil) throws -> String {
         if let maximumReadBytes { guard !isInstaller, (0...NativeAttachmentFiles.maximumBytes).contains(maximumReadBytes) else { throw NativeAttachmentFileJobsError.capacity } }
         let count = json.utf8.count
         guard count <= (isInstaller ? 64 * 1024 : 24 * 1024 * 1024) else { throw NativeAttachmentFileJobsError.capacity }
@@ -271,6 +284,10 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
            let value = try? NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
            let op = value["op"] as? String, ["readBytes", "readBytesRange", "readDirectory"].contains(op) {
             replyReservation = NativeAttachmentFiles.maximumBytes
+        }
+        if let proof = cloudKitStageProof {
+            guard !isInstaller, maximumReadBytes == 8_388_608 else { throw NativeAttachmentFileJobsError.capacity }
+            return try enqueue(.cloudKitStage(json, proof), inputBytes: count, replyReservation: replyReservation)
         }
         return try enqueue(.raw(json, installer: isInstaller, maximumReadBytes: maximumReadBytes), inputBytes: count, replyReservation: replyReservation)
     }
@@ -316,10 +333,25 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
                 case .raw(let json, true, _):
                     // Once begun the RN installer must finish; cancellation
                     // cannot undo publication or release the library early.
+                    try files.verifyCandidateRoots()
                     value = try NativeJSON.jsonObject(with: Data(installer.handle(json).utf8))
+                    try files.verifyCandidateRoots()
                     bytes = nil
                 case .raw(let json, false, let cap):
                     let reply = try files.call(json, maximumReadBytes: cap, checkCancellation: token.check)
+                    value = reply.value ?? NSNull(); bytes = reply.bytes
+                case .cloudKitStage(let json, let proof):
+                    guard let request = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
+                          Set(request.keys) == Set(["op", "uri"]),
+                          let op = request["op"] as? String, ["getInfo", "readBytes", "sha256File"].contains(op),
+                          let uri = request["uri"] as? String, uri.utf8.elementsEqual(proof.targetURI.utf8) else {
+                        throw NativeAttachmentFilesError.invalidRequest
+                    }
+                    #if DEBUG
+                    try beforeCloudKitStageRead?(op)
+                    defer { try? afterCloudKitStageRead?(op) }
+                    #endif
+                    let reply = try files.call(json, maximumReadBytes: 8_388_608, expectedBaselineProof: proof, checkCancellation: token.check)
                     value = reply.value ?? NSNull(); bytes = reply.bytes
                 case .draft(let request, let cap):
                     value = try executeDraft(request, maximumReadBytes: cap, token: token); bytes = nil
@@ -386,7 +418,9 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             case .unsafeEntry(let targetURI): return ["kind": "unsafeEntry", "targetURI": targetURI]
             }
         case .prepareStage(let targetURI, let operationID):
+            try files.verifyCandidateRoots()
             let proof = try installer.prepareStage(targetURI: targetURI, operationID: operationID)
+            try files.verifyCandidateRoots()
             return ["stageURI": proof.stageURI, "stagedIdentity": proof.stagedIdentity,
                     "directoryIdentity": proof.directoryIdentity, "privateDirectoryIdentity": proof.privateDirectoryIdentity]
         case .fillStage(let source, let stage):
@@ -395,7 +429,10 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             // Task221 proves successful fill retains the reserved inode.
             return ["sha256": content.sha256, "size": content.size, "identity": stage.stagedIdentity]
         case .publishStage(let stage, let targetURI, let sha256):
-            return ["status": try installer.publishStage(stage: stage, targetURI: targetURI, sha256: sha256)]
+            try files.verifyCandidateRoots()
+            let status = try installer.publishStage(stage: stage, targetURI: targetURI, sha256: sha256)
+            try files.verifyCandidateRoots()
+            return ["status": status]
         case .observeFilledStage(let stage, let sha256, let size):
             let content = try files.observeFilledAttachmentStage(stageProof: stage, sha256: sha256, size: size,
                                                                  checkCancellation: token.check)
@@ -417,7 +454,10 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             try token.check()
             // Once entered, the existing installer finishes durability even if
             // cancellation arrives. Keep its actual result for the owner.
-            return ["status": try installer.retirePrivateStage(stage: stage, targetURI: targetURI, operationID: operationID)]
+            try files.verifyCandidateRoots()
+            let status = try installer.retirePrivateStage(stage: stage, targetURI: targetURI, operationID: operationID)
+            try files.verifyCandidateRoots()
+            return ["status": status]
         }
     }
 
@@ -454,13 +494,14 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
     }
     /// Native-only object transport. Never round-trip creation authority through
     /// the JSON mailbox or call these synchronous wrappers from the file queue.
-    func copyProviderSource(_ url: URL, cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
+    func copyProviderSource(_ url: URL, cancellation: NativeAttachmentCancellation,
+                            maximumProviderBytes: Int64 = NativeAttachmentFiles.maximumProviderBytes) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
         try queue.sync {
             lock.lock(); let ready = accepting; lock.unlock()
             guard ready else { throw NativeAttachmentFileJobsError.unavailable }
             try cancellation.check()
             mutationLock.lock(); defer { mutationLock.unlock() }
-            return try files.copyProviderSource(url, checkCancellation: cancellation.check)
+            return try files.copyProviderSource(url, maximumProviderBytes: maximumProviderBytes, checkCancellation: cancellation.check)
         }
     }
     /// Native-only Calendar capture. Provider coordination runs on the owned
@@ -509,6 +550,69 @@ final class NativeAttachmentFileJobs: @unchecked Sendable {
             guard ready else { throw NativeAttachmentFileJobsError.unavailable }
             mutationLock.lock(); defer { mutationLock.unlock() }
             try files.requireProviderSource(receipt)
+        }
+    }
+    /// Freeze an already-authorized local file before CloudKit reads its asset URL asynchronously.
+    func prepareCloudKitUpload(_ uri: String, expectedHash: String?, expectedSize: Int64?,
+                               cancellation: NativeAttachmentCancellation) throws -> NativeAttachmentFiles.ProviderCacheCopyReceipt {
+        try queue.sync {
+            lock.lock(); let ready = accepting; lock.unlock()
+            guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+            try cancellation.check()
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            let request = try JSONSerialization.data(withJSONObject: ["op": "getInfo", "uri": uri])
+            // The ordinary file parser grants only this library's document/cache paths.
+            let info = try files.call(String(decoding: request, as: UTF8.self), checkCancellation: cancellation.check)
+            guard let object = info.value as? [String: Any], object["exists"] as? Bool == true,
+                  let url = URL(string: uri), url.isFileURL else { throw NativeAttachmentFilesError.invalidRequest }
+            let receipt = try files.copyProviderSource(url, checkCancellation: cancellation.check)
+            do {
+                let proof = try files.snapshotCacheSource(receipt.sourceURI, checkCancellation: cancellation.check)
+                guard receipt.matches(proof), expectedHash == nil || expectedHash?.lowercased() == proof.sha256,
+                      expectedSize == nil || expectedSize == proof.size else { throw NativeAttachmentFilesError.unavailable }
+                return receipt
+            } catch {
+                _ = try? files.retireProviderSource(receipt, checkCancellation: {})
+                throw error
+            }
+        }
+    }
+    private func cloudKitStageLeaf(_ uri: String) throws -> String {
+        guard (try? NativeAttachmentFiles.filePath(uri)) != nil,
+              let url = URL(string: uri), url.isFileURL, url.absoluteString.utf8.elementsEqual(uri.utf8),
+              Data(url.deletingLastPathComponent().standardizedFileURL.path.utf8) == Data(files.managedRoot.standardizedFileURL.path.utf8),
+              url.lastPathComponent.range(of: #"^\.mindwtr-download-[0-9]+-[0-9]+-[0-9a-f]{0,8}-[A-Za-z0-9_-]{1,64}\.staged$"#,
+                                          options: .regularExpression) != nil else { throw NativeAttachmentFilesError.invalidRequest }
+        return url.lastPathComponent
+    }
+    func isCloudKitDownloadStage(_ uri: String) -> Bool { (try? cloudKitStageLeaf(uri)) != nil }
+    /// SDK bytes first enter an owned cache receipt; only fresh core download scratch can receive them.
+    @discardableResult
+    func stageCloudKitSource(_ receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt, targetURI: String,
+                             cancellation: NativeAttachmentCancellation, maximumBytes: Int? = nil) throws -> NativeAttachmentFiles.BaselineAttachmentProof? {
+        try queue.sync {
+            lock.lock(); let ready = accepting; lock.unlock()
+            guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+            try cancellation.check()
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            _ = try cloudKitStageLeaf(targetURI)
+            try files.requireProviderSource(receipt)
+            let read = try JSONSerialization.data(withJSONObject: ["op": "getInfo", "uri": targetURI])
+            let info = try files.call(String(decoding: read, as: UTF8.self), checkCancellation: cancellation.check)
+            guard let object = info.value as? [String: Any], object["exists"] as? Bool == false else {
+                throw NativeAttachmentFilesError.unavailable
+            }
+            return try files.copyCloudKitStage(receipt, targetURI: targetURI, maximumBytes: maximumBytes,
+                                              checkCancellation: cancellation.check)
+        }
+    }
+    func retireCloudKitStage(_ proof: NativeAttachmentFiles.BaselineAttachmentProof) throws {
+        try queue.sync {
+            lock.lock(); let ready = accepting; lock.unlock()
+            guard ready else { throw NativeAttachmentFileJobsError.unavailable }
+            mutationLock.lock(); defer { mutationLock.unlock() }
+            let leaf = try cloudKitStageLeaf(proof.targetURI)
+            _ = try files.retireBaselineAttachment(attachmentID: leaf, proof: proof, checkCancellation: {})
         }
     }
     /// After drain, retirement stays on the off-main Engine turn so its final

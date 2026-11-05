@@ -6,6 +6,7 @@ public enum NativePersonalIntakeError: Error, Sendable, Equatable {
     case pendingPublication
     case ambiguousPublication
     case legacyHeld
+    case ambiguousReminderFloor
     case staleItem
 }
 
@@ -30,6 +31,10 @@ public struct NativePersonalIntakeRoute: Sendable {
             supportURL: normalizedSupport, homeURL: normalizedHome, mode: mode)
         let database: URL, container: URL, namespace: String, kind: String, leaf: String, identifier: String
         switch chosen {
+        case let .production(owner):
+            database = owner.appendingPathComponent("Documents/SQLite/mindwtr.db")
+            container = owner; namespace = NativeLaunchSelection.productionNamespace
+            kind = "standard"; leaf = namespace; identifier = ""
         case let .standard(db, owner, name):
             guard name != ".", name != "..", name != "NativePersonalIntake" else { throw NativePersonalIntakeError.unavailable }
             database = db; container = owner; namespace = name; kind = "standard"; leaf = name; identifier = ""
@@ -55,15 +60,63 @@ public struct NativePersonalIntakeRoute: Sendable {
         self.fingerprint = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Descriptor comparison only. Saved paths never open files or select a library.
+    /// Header admission separately requires every original physical intake/lease witness.
+    func matchesStoredOrigin(_ saved: Data) -> Bool {
+        if saved == descriptor { return true } // Exact current resolver bytes already have the canonical eight-field shape.
+        do {
+            guard saved.count <= 64 * 1024,
+                  let origin = try JSONSerialization.jsonObject(with: saved) as? [String: String],
+                  Set(origin.keys) == Set(["version", "kind", "namespace", "identifier", "home", "support", "database", "container"]),
+                  try JSONSerialization.data(withJSONObject: origin, options: [.sortedKeys, .withoutEscapingSlashes]) == saved,
+                  let previousHome = origin["home"], Self.canonicalStoredHome(previousHome) else { return false }
+            let kind: String, identifier: String, database: URL, container: URL
+            switch selection {
+            case let .production(owner):
+                kind = "standard"; identifier = ""
+                database = owner.appendingPathComponent("Documents/SQLite/mindwtr.db"); container = owner
+            case let .standard(selectedDatabase, selectedContainer, _):
+                kind = "standard"; identifier = ""; database = selectedDatabase; container = selectedContainer
+            case let .isolated(selectedDatabase, selectedContainer, _, selectedIdentifier):
+                kind = "isolated"; identifier = selectedIdentifier.uuidString.lowercased()
+                database = selectedDatabase; container = selectedContainer
+            case .rehearsal: return false
+            }
+            guard Self.samePath(origin["version"]!, "1"), Self.samePath(origin["kind"]!, kind),
+                  Self.samePath(origin["namespace"]!, namespace), Self.samePath(origin["identifier"]!, identifier) else { return false }
+            let currentHome = try Self.normalizedPath(home), prefix = Data(currentHome.utf8)
+            let paths = [("support", currentHome + "/Library/Application Support"),
+                         ("database", try Self.normalizedPath(database)), ("container", try Self.normalizedPath(container))]
+            for (field, currentPath) in paths {
+                let bytes = Data(currentPath.utf8)
+                guard bytes.starts(with: prefix),
+                      bytes.count == prefix.count || bytes[prefix.count] == 47 else { return false }
+                var expected = Data(previousHome.utf8)
+                expected.append(contentsOf: bytes.dropFirst(prefix.count))
+                guard Data(origin[field]!.utf8) == expected else { return false }
+            }
+            return true
+        } catch { return false }
+    }
+    private static func canonicalStoredHome(_ path: String) -> Bool {
+        let parts = path.split(separator: "/")
+        return path.utf8.count <= 16 * 1024 && !path.utf8.contains(0) && !parts.isEmpty
+            && !parts.contains(".") && !parts.contains("..")
+            && samePath(path, "/" + parts.joined(separator: "/"))
+    }
+
     /// Uses the same compile-selected availability as the existing native launch snapshot; no production fallback.
     public static func current() throws -> Self {
-        #if targetEnvironment(simulator) || (DEBUG && NATIVE_DEVICE_TEST)
-        #if !targetEnvironment(simulator)
-        let mode = NativeLaunchSelection.BuildMode.deviceTest
-        #elseif DEBUG
+        #if targetEnvironment(simulator)
+        #if DEBUG
         let mode = NativeLaunchSelection.BuildMode.simulatorDebug
         #else
         let mode = NativeLaunchSelection.BuildMode.simulatorRelease
+        #endif
+        #elseif DEBUG && NATIVE_DEVICE_TEST
+        let mode = NativeLaunchSelection.BuildMode.deviceTest
+        #else
+        let mode = NativeLaunchSelection.BuildMode.production
         #endif
         do {
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
@@ -71,9 +124,6 @@ public struct NativePersonalIntakeRoute: Sendable {
             return try Self(arguments: ProcessInfo.processInfo.arguments, bundleIdentifier: Bundle.main.bundleIdentifier,
                 support: support, home: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: mode)
         } catch { throw NativePersonalIntakeError.unavailable }
-        #else
-        throw NativePersonalIntakeError.unavailable
-        #endif
     }
 
     #if DEBUG

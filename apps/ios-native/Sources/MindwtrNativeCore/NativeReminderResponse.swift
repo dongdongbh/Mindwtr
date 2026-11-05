@@ -43,6 +43,8 @@ public struct NativeReminderResponse: Codable, Equatable, Sendable {
                                               selection: NativeLaunchSelection?) -> UNNotificationPresentationOptions {
         let namespace: String
         switch selection {
+        case .production:
+            namespace = NativeLaunchSelection.productionNamespace
         case let .standard(_, _, selectedNamespace), let .isolated(_, _, selectedNamespace, _):
             namespace = selectedNamespace
         case nil, .rehearsal:

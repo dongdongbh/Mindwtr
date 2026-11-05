@@ -20,6 +20,7 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     private var invalidated = false
     private var wake: (() -> Void)?
     private var byteLimit = NativeHTTPJobs.maximumBytes
+    private var responseLimit = NativeHTTPJobs.maximumBytes
     private var localHTTPLogged = false
     #if DEBUG
     var beforeCompletion: (() -> Void)?
@@ -60,10 +61,13 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
                   limit: (1...Self.maximumBytes).contains(limit) ? limit : Self.maximumBytes, timeout: faults?.httpTimeout ?? 300)
     }
     #endif
-    private init(registry: NativeAttachmentLocalRequests, configuration: URLSessionConfiguration, limit: Int, timeout: TimeInterval) {
+    convenience init(voiceRegistry registry: NativeAttachmentLocalRequests, configuration: URLSessionConfiguration = .ephemeral) {
+        self.init(registry: registry, configuration: configuration, limit: Self.maximumBytes, timeout: 30, responseLimit: 2 * 1024 * 1024)
+    }
+    private init(registry: NativeAttachmentLocalRequests, configuration: URLSessionConfiguration, limit: Int, timeout: TimeInterval, responseLimit: Int? = nil) {
         self.registry = registry
         super.init()
-        byteLimit = limit
+        byteLimit = limit; self.responseLimit = responseLimit ?? limit
         configuration.urlCache = nil; configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -187,7 +191,7 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         if let error = job.error {
             input = ["id": job.id, "error": error]
             if job.responseTooLarge {
-                input["errorCode"] = "response-too-large"; input["limitBytes"] = byteLimit
+                input["errorCode"] = "response-too-large"; input["limitBytes"] = responseLimit
             }
             jobs.removeValue(forKey: job.id)
         } else if let response = job.response, let url = response.url {
@@ -250,8 +254,8 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
             }
             let encoding = value("content-encoding", in: response)?.trimmingCharacters(in: .whitespaces).lowercased()
             job.unsupportedEncoding = encoding != nil && encoding != "identity"
-            if !job.bodyless, let length = job.expectedLength, length > Int64(byteLimit) {
-                job.error = "Response exceeds the \(byteLimit) byte download limit"; job.responseTooLarge = true
+            if !job.bodyless, let length = job.expectedLength, length > Int64(responseLimit) {
+                job.error = "Response exceeds the \(responseLimit) byte download limit"; job.responseTooLarge = true
             }
             if job.error == nil { disposition = .allow }
         }
@@ -263,8 +267,8 @@ final class NativeHTTPJobs: NSObject, URLSessionDataDelegate, @unchecked Sendabl
         var cancel = false
         if let job = job(dataTask), !job.finished, !job.cancelled, job.error == nil, !job.bodyless {
             if job.unsupportedEncoding { job.error = "HTTP response encoding is unsupported"; cancel = true }
-            else if data.count > byteLimit - job.data.count {
-                job.error = "Response exceeds the \(byteLimit) byte download limit"; job.responseTooLarge = true; cancel = true
+            else if data.count > responseLimit - job.data.count {
+                job.error = "Response exceeds the \(responseLimit) byte download limit"; job.responseTooLarge = true; cancel = true
             }
             else { job.data.append(data) }
         }

@@ -14,6 +14,7 @@ final class NativeFileSyncJobs: @unchecked Sendable {
     private func root() throws -> URL { try withLock { guard let selectedRoot else { throw Failure.unavailable }; return selectedRoot } }
     private let condition = NSCondition()
     private var session: NativeFileSyncSession!
+    private var attachments: NativeFileSyncAttachments?
     private var tail: Task<Void, Never>?
     private var closing: Task<Void, Error>?
     private var closeFinished = false
@@ -120,6 +121,13 @@ final class NativeFileSyncJobs: @unchecked Sendable {
         case "read", "info", "list", "create": fields = ["turn", "op", "uri"]
         case "writeCreated", "deleteOwned": fields = ["turn", "op", "uri", "base64"]
         case "renameObserved": fields = ["turn", "op", "uri", "name", "base64"]
+        case "attachmentInfo", "attachmentList", "attachmentDirectory": fields = ["turn", "op", "uri"]
+        case "attachmentRead": fields = ["turn", "op", "uri", "position", "length"]
+        case "attachmentPrepare": fields = ["turn", "op", "uri", "operationId"]
+        case "attachmentWrite": fields = ["turn", "op", "uri", "base64"]
+        case "attachmentSnapshot": fields = ["turn", "op", "uri", "target", "sha256"]
+        case "attachmentPublish": fields = ["turn", "op", "uri", "target", "sha256", "stagedIdentity", "directoryIdentity", "privateDirectoryIdentity"]
+        case "attachmentCleanup": fields = ["turn", "op", "uri", "target", "operationId", "sha256", "stagedIdentity", "directoryIdentity", "privateDirectoryIdentity"]
         default: throw Failure.unavailable
         }
         guard Set(request.keys) == fields else { throw Failure.unavailable }
@@ -135,6 +143,18 @@ final class NativeFileSyncJobs: @unchecked Sendable {
             return (["rootURI": rootURI, "canonicalPath": canonicalPath], nil)
         }
         if op != "open" { guard acquired else { throw Failure.unavailable } }
+        if op.hasPrefix("attachment") {
+            try await session.revalidate()
+            let owner = try withLock { () throws -> NativeFileSyncAttachments in
+                guard accepting else { throw Failure.unavailable }
+                if let attachments { return attachments }
+                guard let selectedRoot else { throw Failure.unavailable }
+                let created = NativeFileSyncAttachments(root: selectedRoot, rootURI: selectedRoot.absoluteString)
+                attachments = created
+                return created
+            }
+            return try await owner.perform(op, request)
+        }
         switch op {
         case "open":
             guard !acquired else { throw Failure.unavailable }
@@ -185,7 +205,9 @@ final class NativeFileSyncJobs: @unchecked Sendable {
             accepting = false
             if let closing { return closing }
             let session = self.session!
+            let attachments = self.attachments
             let task = Task { [self] in
+                await attachments?.close()
                 do {
                     try await session.close()
                     withLock { closeFinished = true; condition.broadcast() }

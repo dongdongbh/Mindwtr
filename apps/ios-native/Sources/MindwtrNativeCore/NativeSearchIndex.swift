@@ -98,6 +98,8 @@ public final class NativeSearchIndex {
     private static func scope(_ selection: NativeLaunchSelection) throws -> String {
         let namespace: String
         switch selection {
+        case .production:
+            namespace = NativeLaunchSelection.productionNamespace
         case let .standard(_, _, value):
             guard value == "tech.dongdongbh.mindwtr.native.dev" else { throw unavailable }
             namespace = value

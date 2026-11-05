@@ -1,14 +1,89 @@
 import Foundation
 import Darwin
 
-struct HostFailure: LocalizedError {
-    let message: String
-    init(_ message: String) { self.message = message }
-    var errorDescription: String? { message }
-}
-
 // All callers, including teardown, run on CoreHost's serial queue.
 enum DurableFile {
+    enum ProtectionStage: String, Sendable { case source, set, readback }
+    #if (DEBUG || NATIVE_DEVICE_TEST) && !MINDWTR_SHARE_EXTENSION
+    struct ProtectionFailure: Error {
+        let stage: ProtectionStage
+        let sourceClass: Int32
+        let targetClass: Int32
+        let errorNumber: Int32
+    }
+    #endif
+
+    private static func protectionFailure(_ stage: ProtectionStage, source: Int32, target: Int32 = -1, number: Int32) -> Error {
+        #if (DEBUG || NATIVE_DEVICE_TEST) && !MINDWTR_SHARE_EXTENSION
+        return ProtectionFailure(stage: stage, sourceClass: source, targetClass: target, errorNumber: number)
+        #else
+        return HostFailure("Cannot preserve recovery data protection")
+        #endif
+    }
+
+    struct ProtectionSnapshot {
+        let source: stat
+        let directory: stat
+        let sourceClass: Int32
+        let destinationClass: Int32?
+    }
+    struct ProtectedFile {
+        let policy: ProtectionSnapshot
+        let file: stat
+        let fileClass: Int32
+    }
+    static func protectionSnapshot(source: Int32, directory: Int32, readClass: (Int32) -> Int32) throws -> ProtectionSnapshot {
+        var sourceInfo = stat(), directoryInfo = stat()
+        guard fstat(source, &sourceInfo) == 0, fstat(directory, &directoryInfo) == 0,
+              directoryInfo.st_mode & S_IFMT == S_IFDIR,
+              sourceInfo.st_mode & S_IFMT == S_IFDIR || sourceInfo.st_mode & S_IFMT == S_IFREG else {
+            throw HostFailure("Cannot preserve recovery data protection")
+        }
+        let sourceClass = readClass(source)
+        guard sourceClass >= 0 else { throw protectionFailure(.source, source: sourceClass, number: errno) }
+        if sourceClass == 0 {
+            guard sourceInfo.st_mode & S_IFMT == S_IFDIR else { throw protectionFailure(.source, source: 0, number: 0) }
+            let destinationClass = readClass(directory)
+            guard destinationClass == 0, sourceInfo.st_dev == directoryInfo.st_dev else {
+                throw protectionFailure(.source, source: 0, target: destinationClass, number: destinationClass < 0 ? errno : 0)
+            }
+            return .init(source: sourceInfo, directory: directoryInfo, sourceClass: 0, destinationClass: 0)
+        }
+        guard (1...7).contains(sourceClass) else { throw protectionFailure(.source, source: sourceClass, number: 0) }
+        return .init(source: sourceInfo, directory: directoryInfo, sourceClass: sourceClass, destinationClass: nil)
+    }
+    static func protectFreshFile(_ policy: ProtectionSnapshot, source: Int32, directory: Int32, file: Int32,
+                                readClass: (Int32) -> Int32, setClass: (Int32, Int32) -> Int32) throws -> ProtectedFile {
+        var info = stat()
+        guard fstat(file, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1, info.st_size == 0 else {
+            throw HostFailure("Cannot preserve recovery data protection")
+        }
+        if policy.sourceClass != 0 {
+            let changed = setClass(file, policy.sourceClass)
+            guard changed == 0 else { throw protectionFailure(.set, source: policy.sourceClass, number: errno) }
+        }
+        let fileClass = readClass(file)
+        guard (1...7).contains(fileClass), policy.sourceClass == 0 || fileClass == policy.sourceClass else {
+            throw protectionFailure(.readback, source: policy.sourceClass, target: fileClass, number: fileClass < 0 ? errno : 0)
+        }
+        let protected = ProtectedFile(policy: policy, file: info, fileClass: fileClass)
+        try verifyProtection(protected, source: source, directory: directory, file: file, readClass: readClass)
+        return protected
+    }
+    static func verifyProtection(_ protected: ProtectedFile, source: Int32, directory: Int32, file: Int32,
+                                 readClass: (Int32) -> Int32) throws {
+        let current = try protectionSnapshot(source: source, directory: directory, readClass: readClass)
+        let policy = protected.policy
+        var actual = stat()
+        guard current.source.st_dev == policy.source.st_dev, current.source.st_ino == policy.source.st_ino,
+              current.source.st_mode & S_IFMT == policy.source.st_mode & S_IFMT,
+              current.directory.st_dev == policy.directory.st_dev, current.directory.st_ino == policy.directory.st_ino,
+              current.sourceClass == policy.sourceClass, current.destinationClass == policy.destinationClass,
+              fstat(file, &actual) == 0, actual.st_mode & S_IFMT == S_IFREG, actual.st_nlink == 1,
+              actual.st_dev == protected.file.st_dev, actual.st_ino == protected.file.st_ino,
+              readClass(file) == protected.fileClass else { throw HostFailure("Cannot preserve recovery data protection") }
+    }
+
     static func sync(_ url: URL, directory: Bool = false) throws {
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW)
         guard fd >= 0 else { throw HostFailure("Cannot open recovery data for synchronization") }
@@ -48,6 +123,9 @@ enum DurableFile {
                       exclusive: Bool = false) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.utf8.contains(0),
               retainingFile < 0 else { throw HostFailure("Invalid anchored recovery publication") }
+        #if os(iOS)
+        let policy = try sourceFD.map { try protectionSnapshot(source: $0, directory: directoryFD, readClass: { fcntl($0, F_GETPROTECTIONCLASS) }) }
+        #endif
         let temporary = ".pending-\(UUID().uuidString)"
         let fd = openat(directoryFD, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw HostFailure("Cannot create pending command journal") }
@@ -62,15 +140,18 @@ enum DurableFile {
         retainingFile = dup(fd)
         guard retainingFile >= 0 else { throw HostFailure("Cannot retain recovery publication") }
         #if os(iOS)
-        if let sourceFD {
-            let protection = fcntl(sourceFD, F_GETPROTECTIONCLASS)
-            guard protection >= 0, fcntl(fd, F_SETPROTECTIONCLASS, protection) == 0,
-                  fcntl(fd, F_GETPROTECTIONCLASS) == protection else {
-                throw HostFailure("Cannot preserve recovery data protection")
-            }
-        }
+        let protected: ProtectedFile?
+        if let policy, let sourceFD {
+            protected = try protectFreshFile(policy, source: sourceFD, directory: directoryFD, file: fd,
+                readClass: { fcntl($0, F_GETPROTECTIONCLASS) }, setClass: { fcntl($0, F_SETPROTECTIONCLASS, $1) })
+        } else { protected = nil }
         #endif
         try fillAndSync(data, fd: fd)
+        #if os(iOS)
+        if let protected, let sourceFD {
+            try verifyProtection(protected, source: sourceFD, directory: directoryFD, file: fd, readClass: { fcntl($0, F_GETPROTECTIONCLASS) })
+        }
+        #endif
         let promoted = exclusive
             ? renameatx_np(directoryFD, temporary, directoryFD, name, UInt32(RENAME_EXCL))
             : renameat(directoryFD, temporary, directoryFD, name)
@@ -101,7 +182,7 @@ enum DurableFile {
     }
 }
 
-#if DEBUG
+#if DEBUG && !MINDWTR_SHARE_EXTENSION
 // IO boundary only; no fixtures, domain mutation hooks, or release-build knobs.
 final class HostIOFaults {
     // Weak lifetime observation only; the selected test must not retain these runtime owners.
@@ -136,6 +217,9 @@ final class HostIOFaults {
     var appleRemindersProviderFactory: (() -> NativeAppleRemindersProvider)?
     var calendarReaderFactory: (() -> any NativeCalendarReading)?
     var configureCalendarJobs: ((NativeCalendarJobs) -> Void)?
+    var cloudKitRequest: (@Sendable (String) async throws -> String)?
+    var cloudKitCancel: (@Sendable () async -> Void)?
+    var selectedCloudKitBridge: (@Sendable (NativeAttachmentFileJobs, String) throws -> NativeCloudKitBridge)?
     var cryptoBeforeOperation: ((String) -> Void)?
     var cryptoAfterOperation: ((String) -> Void)?
     var cryptoArgon2Unavailable: (() -> Bool)?

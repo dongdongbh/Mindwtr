@@ -3,6 +3,7 @@ import CryptoKit
 import JavaScriptCore
 import Security
 import Darwin
+import MindwtrWatchPayloadValidation
 
 #if DEBUG
 // Private fixture primitives only. Production cannot construct or invoke this evidence seam.
@@ -475,6 +476,324 @@ public struct NativeAIGeminiThinkingBudgetResult: Decodable, Sendable, Equatable
     }
 }
 
+public enum NativeAITextConfigurationChange: Sendable, Equatable {
+    case enabled(Bool), model(String), copilotModel(String)
+    var object: [String: Any] {
+        switch self {
+        case .enabled(let value): return ["type": "enabled", "value": value]
+        case .model(let value): return ["type": "model", "value": value]
+        case .copilotModel(let value): return ["type": "copilotModel", "value": value]
+        }
+    }
+    static func validated(_ input: Any?) throws -> Self {
+        guard let object = input as? [String: Any], Set(object.keys) == Set(["type", "value"]), let type = object["type"] as? String else {
+            throw HostFailure("INVALID_INPUT: AI text change is malformed")
+        }
+        if type == "enabled", let number = object["value"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID(), let value = object["value"] as? Bool { return .enabled(value) }
+        if let value = object["value"] as? String, value.utf16.count <= 2000 {
+            if type == "model" { return .model(value) }
+            if type == "copilotModel" { return .copilotModel(value) }
+        }
+        throw HostFailure("INVALID_INPUT: AI text change is malformed")
+    }
+}
+public struct NativeAITextConfigurationWitness: Sendable, Equatable {
+    let aiPresent: Bool, providerPresent: Bool, enabledPresent: Bool, modelPresent: Bool, copilotModelPresent: Bool, stampPresent: Bool
+    let provider: String?, enabled: Bool?, model: String?, copilotModel: String?, stamp: String?
+    var object: [String: Any] { ["aiPresent": aiPresent, "providerPresent": providerPresent, "provider": provider.map { $0 as Any } ?? NSNull(),
+        "enabledPresent": enabledPresent, "enabled": enabled.map { $0 as Any } ?? NSNull(), "modelPresent": modelPresent, "model": model.map { $0 as Any } ?? NSNull(),
+        "copilotModelPresent": copilotModelPresent, "copilotModel": copilotModel.map { $0 as Any } ?? NSNull(), "stampPresent": stampPresent, "stamp": stamp.map { $0 as Any } ?? NSNull()] }
+    private struct Payload: Decodable {
+        let aiPresent: Bool, providerPresent: Bool, enabledPresent: Bool, modelPresent: Bool, copilotModelPresent: Bool, stampPresent: Bool
+        let provider: String?, enabled: Bool?, model: String?, copilotModel: String?, stamp: String?
+    }
+    static func validated(_ input: Any?) throws -> Self {
+        guard let object = input as? [String: Any], Set(object.keys) == Set(["aiPresent", "providerPresent", "provider", "enabledPresent", "enabled", "modelPresent", "model", "copilotModelPresent", "copilotModel", "stampPresent", "stamp"]),
+              let value = try? JSONDecoder().decode(Payload.self, from: JSONSerialization.data(withJSONObject: object)),
+              value.aiPresent || (!value.providerPresent && !value.enabledPresent && !value.modelPresent && !value.copilotModelPresent),
+              value.providerPresent ? value.provider == "openai" : value.provider == nil,
+              value.enabledPresent ? value.enabled != nil : value.enabled == nil,
+              value.modelPresent ? value.model.map({ $0.utf16.count <= 2000 }) == true : value.model == nil,
+              value.copilotModelPresent ? value.copilotModel.map({ $0.utf16.count <= 2000 }) == true : value.copilotModel == nil,
+              value.stampPresent ? value.stamp != nil : value.stamp == nil else { throw HostFailure("INVALID_INPUT: AI text witness is malformed") }
+        if let stamp = value.stamp {
+            let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            guard stamp.utf8.count <= 40, let date = formatter.date(from: stamp), formatter.string(from: date) == stamp else { throw HostFailure("INVALID_INPUT: AI text stamp is malformed") }
+        }
+        return .init(aiPresent: value.aiPresent, providerPresent: value.providerPresent, enabledPresent: value.enabledPresent,
+            modelPresent: value.modelPresent, copilotModelPresent: value.copilotModelPresent, stampPresent: value.stampPresent,
+            provider: value.provider, enabled: value.enabled, model: value.model, copilotModel: value.copilotModel, stamp: value.stamp)
+    }
+}
+public struct NativeAITextConfigurationRequest: Sendable, Equatable {
+    let requestId: String
+    public let change: NativeAITextConfigurationChange
+    let expected: NativeAITextConfigurationWitness
+    let consent: Bool
+    public init(requestId: String, change: NativeAITextConfigurationChange, expected: NativeAITextConfigurationWitness, consent: Bool = false) {
+        self.requestId = requestId; self.change = change; self.expected = expected; self.consent = consent
+    }
+    func json() throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: ["requestId": requestId, "change": change.object, "expected": expected.object, "consent": consent], options: [.sortedKeys]), as: UTF8.self)
+    }
+}
+public struct NativeAITextConfigurationOptions: Sendable, Equatable {
+    public let enabled: Bool
+    public let model: String, copilotModel: String
+    public let modelOptions: [String], copilotModelOptions: [String]
+    public let expected: NativeAITextConfigurationWitness
+    private struct Payload: Decodable { let enabled: Bool; let model: String, copilotModel: String; let modelOptions: [String], copilotModelOptions: [String] }
+    static func validated(_ raw: String) throws -> Self {
+        guard raw.utf8.count <= 64 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["enabled", "model", "copilotModel", "modelOptions", "copilotModelOptions", "expected"]),
+              let value = try? JSONDecoder().decode(Payload.self, from: Data(raw.utf8)), value.model.utf16.count <= 2000, value.copilotModel.utf16.count <= 2000,
+              value.modelOptions.count <= 100, value.copilotModelOptions.count <= 100,
+              (value.modelOptions + value.copilotModelOptions).allSatisfy({ $0.utf16.count <= 2000 }),
+              value.modelOptions.contains(value.model), value.copilotModelOptions.contains(value.copilotModel) else { throw HostFailure("INVALID_INPUT: AI text options are malformed") }
+        return .init(enabled: value.enabled, model: value.model, copilotModel: value.copilotModel, modelOptions: value.modelOptions,
+            copilotModelOptions: value.copilotModelOptions, expected: try NativeAITextConfigurationWitness.validated(object["expected"]))
+    }
+}
+public struct NativeAITextConfigurationResult: Sendable, Equatable {
+    public let change: NativeAITextConfigurationChange
+    public let changed: Bool
+    static func validated(_ raw: String) throws -> Self {
+        guard raw.utf8.count <= 16 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["change", "changed"]),
+              let number = object["changed"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID(), let changed = object["changed"] as? Bool else { throw HostFailure("INVALID_INPUT: AI text reply is malformed") }
+        return .init(change: try NativeAITextConfigurationChange.validated(object["change"]), changed: changed)
+    }
+}
+public struct NativeAIConsentPrompt: Decodable, Sendable, Equatable { public let title: String; public let message: String; public let cancel: String; public let agree: String }
+public enum NativeAITextConfigurationOutcome: Sendable, Equatable {
+    case consent(NativeAIConsentPrompt)
+    case saved(NativeAITextConfigurationResult, consentRecorded: Bool)
+    static func validated(_ raw: String, consentRecorded: Bool) throws -> Self {
+        if let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], object["kind"] as? String == "consent" {
+            guard raw.utf8.count <= 16 * 1024, try NativeJSON.hasUniqueObjectKeys(raw), Set(object.keys) == Set(["kind", "prompt"]),
+                  let prompt = object["prompt"] as? [String: Any], Set(prompt.keys) == Set(["title", "message", "cancel", "agree"]),
+                  let value = try? JSONDecoder().decode(NativeAIConsentPrompt.self, from: JSONSerialization.data(withJSONObject: prompt)),
+                  [value.title, value.message, value.cancel, value.agree].allSatisfy({ $0.utf16.count <= 8000 }) else { throw HostFailure("INVALID_INPUT: AI consent prompt is malformed") }
+            return .consent(value)
+        }
+        return .saved(try NativeAITextConfigurationResult.validated(raw), consentRecorded: consentRecorded)
+    }
+}
+public struct NativeAITextConfigurationSession: Sendable {
+    public let id: UUID
+    public let options: NativeAITextConfigurationOptions
+    public let credentialAvailable: Bool
+    public let consentRecorded: Bool
+}
+
+public enum NativeAITextConfigurationChangeV2: Sendable, Equatable {
+    case enabled(Bool), model(String), copilotModel(String), provider(NativeAISettingsProjection.Provider)
+    case anthropicThinking(Bool), thinkingBudget(Int)
+    var object: [String: Any] {
+        switch self {
+        case .enabled(let value): return ["type": "enabled", "value": value]
+        case .model(let value): return ["type": "model", "value": value]
+        case .copilotModel(let value): return ["type": "copilotModel", "value": value]
+        case .provider(let value): return ["type": "provider", "value": value.rawValue]
+        case .anthropicThinking(let value): return ["type": "anthropicThinking", "value": value]
+        case .thinkingBudget(let value): return ["type": "thinkingBudget", "value": value]
+        }
+    }
+    static func validated(_ input: Any?) throws -> Self {
+        if let object = input as? [String: Any], Set(object.keys) == Set(["type", "value"]), let type = object["type"] as? String {
+            if type == "provider", let value = object["value"] as? String, let provider = NativeAISettingsProjection.Provider(rawValue: value) { return .provider(provider) }
+            if type == "anthropicThinking", let number = object["value"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() { return .anthropicThinking(number.boolValue) }
+            // The shared request parser owns the current preset catalog; native only admits bounded integers.
+            if type == "thinkingBudget", let number = object["value"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+               number.doubleValue == Double(number.intValue), (1...32768).contains(number.intValue) { return .thinkingBudget(number.intValue) }
+        }
+        switch try NativeAITextConfigurationChange.validated(input) {
+        case .enabled(let value): return .enabled(value)
+        case .model(let value): return .model(value)
+        case .copilotModel(let value): return .copilotModel(value)
+        }
+    }
+}
+public struct NativeAITextConfigurationWitnessV2: Sendable, Equatable {
+    private let base: NativeAITextConfigurationWitness
+    let provider: NativeAISettingsProjection.Provider?
+    let effortPresent: Bool, effort: String?, budgetPresent: Bool, budget: Int?
+    var object: [String: Any] {
+        var value = base.object; value["provider"] = provider.map { $0.rawValue as Any } ?? NSNull()
+        value["effortPresent"] = effortPresent; value["effort"] = effort.map { $0 as Any } ?? NSNull()
+        value["budgetPresent"] = budgetPresent; value["budget"] = budget.map { $0 as Any } ?? NSNull()
+        return value
+    }
+    static func validated(_ input: Any?) throws -> Self {
+        guard var value = input as? [String: Any], Set(value.keys) == Set(["aiPresent", "providerPresent", "provider", "enabledPresent", "enabled", "modelPresent", "model", "copilotModelPresent", "copilotModel", "effortPresent", "effort", "budgetPresent", "budget", "stampPresent", "stamp"]),
+              let effortFlag = value["effortPresent"] as? NSNumber, CFGetTypeID(effortFlag) == CFBooleanGetTypeID(),
+              let budgetFlag = value["budgetPresent"] as? NSNumber, CFGetTypeID(budgetFlag) == CFBooleanGetTypeID() else { throw HostFailure("INVALID_INPUT: AI provider witness is malformed") }
+        let effortPresent = effortFlag.boolValue, budgetPresent = budgetFlag.boolValue
+        let effort = value["effort"] as? String, budget = value["budget"] as? Int
+        let provider: NativeAISettingsProjection.Provider?
+        if let raw = value["provider"] as? String {
+            guard let selected = NativeAISettingsProjection.Provider(rawValue: raw) else { throw HostFailure("INVALID_INPUT: AI provider witness is malformed") }; provider = selected
+        } else { guard value["provider"] is NSNull else { throw HostFailure("INVALID_INPUT: AI provider witness is malformed") }; provider = nil }
+        guard effortPresent ? effort.map({ ["minimal", "low", "medium", "high"].contains($0) }) == true : value["effort"] is NSNull,
+              budgetPresent ? (value["budget"] as? NSNumber).map({ CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue.rounded() == $0.doubleValue && (0...32768).contains($0.intValue) }) == true : value["budget"] is NSNull,
+              value["aiPresent"] as? Bool == true || (!effortPresent && !budgetPresent) else { throw HostFailure("INVALID_INPUT: AI provider witness is malformed") }
+        value.removeValue(forKey: "effortPresent"); value.removeValue(forKey: "effort"); value.removeValue(forKey: "budgetPresent"); value.removeValue(forKey: "budget")
+        value["provider"] = provider == nil ? NSNull() : "openai" as Any
+        let base = try NativeAITextConfigurationWitness.validated(value)
+        return .init(base: base, provider: provider, effortPresent: effortPresent, effort: effort, budgetPresent: budgetPresent, budget: budget)
+    }
+}
+public struct NativeAITextConfigurationRequestV2: Sendable, Equatable {
+    let requestId: String
+    public let change: NativeAITextConfigurationChangeV2
+    let expected: NativeAITextConfigurationWitnessV2
+    let consent: Bool
+    public init(requestId: String, change: NativeAITextConfigurationChangeV2, expected: NativeAITextConfigurationWitnessV2, consent: Bool = false) {
+        self.requestId = requestId; self.change = change; self.expected = expected; self.consent = consent
+    }
+    func json() throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: ["version": 2, "requestId": requestId, "change": change.object, "expected": expected.object, "consent": consent], options: [.sortedKeys]), as: UTF8.self) }
+}
+public struct NativeAITextProviderOption: Decodable, Sendable, Equatable { public let value: NativeAISettingsProjection.Provider; public let label: String }
+public struct NativeAITextConfigurationOptionsV2: Sendable, Equatable {
+    public let version: Int
+    public let provider: NativeAISettingsProjection.Provider
+    public let providerOptions: [NativeAITextProviderOption]
+    public let enabled: Bool
+    public let model: String, copilotModel: String
+    public let modelOptions: [String], copilotModelOptions: [String]
+    public let expected: NativeAITextConfigurationWitnessV2
+    static func validated(_ raw: String) throws -> Self {
+        guard raw.utf8.count <= 64 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              var object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["version", "provider", "providerOptions", "enabled", "model", "copilotModel", "modelOptions", "copilotModelOptions", "expected"]),
+              let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue == 2,
+              let rawProvider = object["provider"] as? String, let provider = NativeAISettingsProjection.Provider(rawValue: rawProvider),
+              let entries = object["providerOptions"] as? [[String: Any]], entries.count == 3,
+              entries.allSatisfy({ Set($0.keys) == Set(["value", "label"]) }),
+              let options = try? JSONDecoder().decode([NativeAITextProviderOption].self, from: JSONSerialization.data(withJSONObject: entries)),
+              Set(options.map { $0.value.rawValue }) == Set(["openai", "gemini", "anthropic"]), options.allSatisfy({ !$0.label.isEmpty && $0.label.utf16.count <= 2000 }) else { throw HostFailure("INVALID_INPUT: AI provider options are malformed") }
+        let expected = try NativeAITextConfigurationWitnessV2.validated(object["expected"])
+        guard provider == (expected.provider ?? .openai) else { throw HostFailure("INVALID_INPUT: AI provider options disagree") }
+        object.removeValue(forKey: "version"); object.removeValue(forKey: "provider"); object.removeValue(forKey: "providerOptions")
+        var witness = expected.object
+        witness.removeValue(forKey: "effortPresent"); witness.removeValue(forKey: "effort"); witness.removeValue(forKey: "budgetPresent"); witness.removeValue(forKey: "budget")
+        witness["provider"] = expected.provider == nil ? NSNull() : "openai" as Any
+        object["expected"] = witness
+        let base = try NativeAITextConfigurationOptions.validated(String(decoding: JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+        return .init(version: 2, provider: provider, providerOptions: options, enabled: base.enabled, model: base.model, copilotModel: base.copilotModel,
+            modelOptions: base.modelOptions, copilotModelOptions: base.copilotModelOptions, expected: expected)
+    }
+}
+public struct NativeAIAnthropicThinkingOption: Decodable, Sendable, Equatable {
+    public let value: Int
+    public let label: String
+}
+public struct NativeAITextModelChoices: Sendable, Equatable {
+    public enum Status: String, Sendable { case loaded, fallback, unavailable }
+    public let provider: NativeAISettingsProjection.Provider
+    public let status: Status
+    public let modelOptions: [String], copilotModelOptions: [String]
+    public let expected: NativeAITextConfigurationWitnessV2
+    static func validated(_ raw: String) throws -> Self {
+        guard raw.utf8.count <= 64 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(object.keys) == Set(["version", "provider", "status", "modelOptions", "copilotModelOptions", "expected"]),
+              let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue == 1,
+              let provider = (object["provider"] as? String).flatMap(NativeAISettingsProjection.Provider.init(rawValue:)),
+              let status = (object["status"] as? String).flatMap(Status.init(rawValue:)),
+              let models = object["modelOptions"] as? [String], let copilots = object["copilotModelOptions"] as? [String],
+              [models, copilots].allSatisfy({ values in
+                  (1...100).contains(values.count) && Set(values.map { Data($0.utf8) }).count == values.count
+                      && values.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf16.count <= 2000 }
+              }) else { throw HostFailure("INVALID_INPUT: AI model choices are malformed") }
+        let expected = try NativeAITextConfigurationWitnessV2.validated(object["expected"])
+        guard provider == (expected.provider ?? .openai) else { throw HostFailure("INVALID_INPUT: AI model choices disagree") }
+        return .init(provider: provider, status: status, modelOptions: models, copilotModelOptions: copilots, expected: expected)
+    }
+}
+fileprivate enum NativeModelDiscoveryRequest: Sendable {
+    case text(session: UUID, expected: NativeAITextConfigurationWitnessV2)
+    case voice(session: UUID, expected: NativeVoiceSettingsWitness)
+    var session: UUID { switch self { case .text(let session, _), .voice(let session, _): return session } }
+    var voice: Bool { if case .voice = self { return true }; return false }
+    var json: String {
+        get throws {
+            let expected: [String: Any]
+            switch self { case .text(_, let witness): expected = witness.object; case .voice(_, let witness): expected = try witness.object }
+            return try NativeVoiceJSON.encode(["session": session.uuidString.lowercased(), "expected": expected])
+        }
+    }
+    func validate(_ raw: String) throws -> (provider: String, outcome: String) {
+        switch self {
+        case .text(_, let expected):
+            let choices = try NativeAITextModelChoices.validated(raw)
+            guard choices.expected == expected else { throw HostFailure("NOT_READY: AI model discovery settings changed") }
+            return (choices.provider.rawValue, choices.status.rawValue)
+        case .voice(_, let expected):
+            let choices = try NativeVoiceModelChoices.validated(raw)
+            guard choices.expected == expected else { throw HostFailure("NOT_READY: Speech model discovery settings changed") }
+            return (choices.provider.rawValue, choices.status.rawValue)
+        }
+    }
+}
+public struct NativeAIAnthropicThinkingOptions: Sendable, Equatable {
+    public let enabled: Bool
+    public let value: Int
+    public let options: [NativeAIAnthropicThinkingOption]
+    public let expected: NativeAITextConfigurationWitnessV2
+    static func validated(_ raw: String) throws -> Self {
+        guard raw.utf8.count <= 32 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(object.keys) == Set(["version", "enabled", "value", "options", "expected"]),
+              let version = object["version"] as? NSNumber, CFGetTypeID(version) != CFBooleanGetTypeID(), version.doubleValue == 1,
+              let enabled = object["enabled"] as? NSNumber, CFGetTypeID(enabled) == CFBooleanGetTypeID(),
+              let value = object["value"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
+              value.doubleValue == Double(value.intValue), (0...32768).contains(value.intValue), enabled.boolValue == (value.intValue > 0),
+              let entries = object["options"] as? [[String: Any]], (1...32).contains(entries.count),
+              entries.allSatisfy({ entry in
+                  guard Set(entry.keys) == Set(["value", "label"]), let number = entry["value"] as? NSNumber,
+                        CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
+                        (1...32768).contains(number.intValue), let label = entry["label"] as? String else { return false }
+                  return !label.isEmpty && label.utf16.count <= 2000
+              }),
+              let options = try? JSONDecoder().decode([NativeAIAnthropicThinkingOption].self, from: JSONSerialization.data(withJSONObject: entries)),
+              Set(options.map { $0.value }).count == options.count else { throw HostFailure("INVALID_INPUT: Anthropic thinking options are malformed") }
+        let expected = try NativeAITextConfigurationWitnessV2.validated(object["expected"])
+        guard expected.provider == .anthropic, !expected.budgetPresent || expected.budget == value.intValue else {
+            throw HostFailure("INVALID_INPUT: Anthropic thinking options disagree")
+        }
+        return .init(enabled: enabled.boolValue, value: value.intValue, options: options, expected: expected)
+    }
+}
+public struct NativeAITextConfigurationResultV2: Sendable, Equatable {
+    public let change: NativeAITextConfigurationChangeV2
+    public let changed: Bool
+    static func validated(_ raw: String) throws -> Self {
+        guard raw.utf8.count <= 16 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["change", "changed"]),
+              let number = object["changed"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { throw HostFailure("INVALID_INPUT: AI provider result is malformed") }
+        return .init(change: try NativeAITextConfigurationChangeV2.validated(object["change"]), changed: number.boolValue)
+    }
+}
+public enum NativeAITextConfigurationOutcomeV2: Sendable, Equatable {
+    case consent(provider: NativeAISettingsProjection.Provider, prompt: NativeAIConsentPrompt)
+    case saved(NativeAITextConfigurationResultV2, consentRecorded: Bool)
+    static func validated(_ raw: String, consentRecorded: Bool) throws -> Self {
+        if var object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], object["kind"] as? String == "consent" {
+            guard raw.utf8.count <= 16 * 1024, try NativeJSON.hasUniqueObjectKeys(raw), Set(object.keys) == Set(["kind", "provider", "prompt"]),
+                  let selected = object.removeValue(forKey: "provider") as? String, let provider = NativeAISettingsProjection.Provider(rawValue: selected),
+                  case .consent(let prompt) = try NativeAITextConfigurationOutcome.validated(String(decoding: JSONSerialization.data(withJSONObject: object), as: UTF8.self), consentRecorded: consentRecorded) else { throw HostFailure("INVALID_INPUT: AI provider consent is malformed") }
+            return .consent(provider: provider, prompt: prompt)
+        }
+        return .saved(try NativeAITextConfigurationResultV2.validated(raw), consentRecorded: consentRecorded)
+    }
+}
+public struct NativeAITextConfigurationSessionV2: Sendable {
+    public let id: UUID
+    public let options: NativeAITextConfigurationOptionsV2
+    public let credentialAvailable: Bool
+    public let consentRecorded: Bool
+}
+
 public struct NativeAIRequestTimeoutWitness: Sendable, Equatable {
     let aiPresent: Bool
     let timeoutPresent: Bool
@@ -626,6 +945,7 @@ public final class CoreHost: @unchecked Sendable {
     #endif
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.native-core", qos: .userInitiated)
     private let engine: Engine
+    private let whisperJobs = NativeWhisperInferenceJobs()
     public let workspaceMode: NativeWorkspaceMode
     private enum Admission { case open, retiring, retired, unavailable }
     private let admissionLock = NSLock()
@@ -692,6 +1012,9 @@ public final class CoreHost: @unchecked Sendable {
         return CoreHostRetirementReceipt(identity: retirementIdentity)
     }
     private func retireOriginalHost() async throws -> CoreHostRetirementReceipt {
+        await drainAIModelDiscovery()
+        await drainTaskAIOperations(fence: false)
+        await drainVoiceOperations(fence: false)
         await waitForAdmittedCalls()
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -712,6 +1035,7 @@ public final class CoreHost: @unchecked Sendable {
     public func retireForWorkspaceTransition() async throws -> CoreHostRetirementReceipt {
         try await retirementOperation().value
     }
+    private let taskAIRequests = NativeTaskAIRequests()
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
     private let reminderEffects = NativeReminderEffects()
     private let notificationAuthorization = NativeNotificationAuthorization()
@@ -720,35 +1044,69 @@ public final class CoreHost: @unchecked Sendable {
 
     public init(databaseURL: URL, bundleURL: URL,
                 deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
-                workspaceMode: NativeWorkspaceMode = .personal) {
+                workspaceMode: NativeWorkspaceMode = .personal,
+                dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) {
         self.workspaceMode = workspaceMode
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL,
-                        deviceStorage: deviceStorage, workspaceMode: workspaceMode, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
+                        deviceStorage: deviceStorage, workspaceMode: workspaceMode, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects,
+                        dropboxAuthorization: dropboxAuthorization)
+    }
+
+    /// Production-layout candidate only; the caller owns a quiescent RN container.
+    public init(rnAdoptionContainerURL: URL, bundleURL: URL,
+                dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) throws {
+        let path: String
+        do { path = try NativeAttachmentFiles.filePath(rnAdoptionContainerURL.absoluteString) }
+        catch { throw HostFailure("Invalid RN adoption container") }
+        let container = URL(fileURLWithPath: path, isDirectory: true)
+        self.workspaceMode = .personal
+        engine = Engine(queue: queue, databaseURL: container.appendingPathComponent("Documents/SQLite/mindwtr.db"),
+                        bundleURL: bundleURL, rnAdoptionContainerURL: container,
+                        deviceStorage: (container, "tech.dongdongbh.mindwtr"), workspaceMode: .personal,
+                        localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects,
+                        dropboxAuthorization: dropboxAuthorization)
     }
 
     #if DEBUG
+    convenience init(rnAdoptionContainerURL: URL, bundleURL: URL, faults: HostIOFaults) throws {
+        try self.init(rnAdoptionContainerURL: rnAdoptionContainerURL, bundleURL: bundleURL)
+        engine.faults = faults
+    }
+
     /// UI fixtures must isolate Keychain accounts as well as their database and device settings.
     public convenience init(databaseURL: URL, bundleURL: URL,
                             deviceStorage: (containerURL: URL, bundleIdentifier: String), isolatedTestID: UUID,
-                            workspaceMode: NativeWorkspaceMode = .personal) {
+                            workspaceMode: NativeWorkspaceMode = .personal, cloudKitAccountFixture: String? = nil,
+                            dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) {
         let faults = HostIOFaults()
         faults.secretService = "mindwtr.native-keychain.fixture." + isolatedTestID.uuidString.lowercased()
-        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: faults, deviceStorage: deviceStorage, workspaceMode: workspaceMode)
+        #if targetEnvironment(simulator)
+        if let account = cloudKitAccountFixture, ["available", "noAccount"].contains(account) {
+            let fixture = NativeCloudKitFixture(account: account)
+            faults.cloudKitRequest = { try await fixture.call($0) }
+        }
+        #endif
+        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: faults, deviceStorage: deviceStorage, workspaceMode: workspaceMode,
+                  dropboxAuthorization: dropboxAuthorization)
     }
 
     public convenience init(databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage,
                             deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
-                            workspaceMode: NativeWorkspaceMode = .personal) {
+                            workspaceMode: NativeWorkspaceMode = .personal,
+                            dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) {
         self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: HostIOFaults(),
-                  legacyStorage: legacyStorage, deviceStorage: deviceStorage, workspaceMode: workspaceMode)
+                  legacyStorage: legacyStorage, deviceStorage: deviceStorage, workspaceMode: workspaceMode,
+                  dropboxAuthorization: dropboxAuthorization)
     }
 
     init(databaseURL: URL, bundleURL: URL, faults: HostIOFaults, legacyStorage: LegacyRNStorage? = nil,
          deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
-         workspaceMode: NativeWorkspaceMode = .personal, restrictedFixtureRoot: URL? = nil) {
+         workspaceMode: NativeWorkspaceMode = .personal, restrictedFixtureRoot: URL? = nil,
+         dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) {
         self.workspaceMode = workspaceMode
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, legacyStorage: legacyStorage,
-                        deviceStorage: deviceStorage, workspaceMode: workspaceMode, restrictedFixtureRoot: restrictedFixtureRoot, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
+                        deviceStorage: deviceStorage, workspaceMode: workspaceMode, restrictedFixtureRoot: restrictedFixtureRoot, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects,
+                        dropboxAuthorization: dropboxAuthorization)
         engine.faults = faults
     }
     #endif
@@ -763,6 +1121,501 @@ public final class CoreHost: @unchecked Sendable {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
         return try await perform { try $0.readAISettingsProjection() }
+    }
+
+    public func beginAITextConfiguration() async throws -> NativeAITextConfigurationSession {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.openAITextConfigurationSession() }
+    }
+    public func readAITextSetupOptions(session: UUID) async throws -> NativeAITextConfigurationOptions {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform {
+            try $0.checkAITextConfigurationSession(session)
+            return try NativeAITextConfigurationOptions.validated($0.readAITextConfigurationOptions())
+        }
+    }
+    public func readAITextCredentialAvailable(session: UUID) async throws -> Bool {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.aiTextCredentialAvailable(session) }
+    }
+    public func retryAITextConsentRecord(session: UUID) async throws -> Bool {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.retryAITextConsentRecord(session) }
+    }
+    public func retireAITextConfiguration(session: UUID) async {
+        await drainAIModelDiscovery(session: session, voice: false)
+        _ = try? await perform(reminderOwned: true) { $0.retireAITextConfigurationSession(session) }
+    }
+    public func retireReferenceProjectNextActionOrigin(_ originJSON: String) async {
+        _ = try? await perform(reminderOwned: true, appleRemindersOwned: true) { $0.retireReferenceProjectNextActionOrigin(originJSON) }
+    }
+    public func readVoiceRuntime() async throws -> NativeVoiceRuntime {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        if let local = try await perform({ try $0.prepareWhisperRead() }) {
+            let state = try await local.model.store.inspect(local.model.spec)
+            return try await perform { try $0.whisperRuntime(local, state: state) }
+        }
+        return try await perform { try $0.readVoiceRuntime() }
+    }
+    public func readVoiceLocalModel(session: UUID) async throws -> NativeVoiceLocalModelState {
+        try await voiceLocalModel(session: session, operation: "read", progress: { _, _ in })
+    }
+    public func downloadVoiceLocalModel(session: UUID, progress: @escaping @Sendable (Int64, Int64) -> Void) async throws -> NativeVoiceLocalModelState {
+        try await voiceLocalModel(session: session, operation: "install", progress: progress)
+    }
+    public func removeVoiceLocalModel(session: UUID) async throws -> NativeVoiceLocalModelState {
+        try await voiceLocalModel(session: session, operation: "remove", progress: { _, _ in })
+    }
+    private func voiceLocalModel(session: UUID, operation: String, progress: @escaping @Sendable (Int64, Int64) -> Void) async throws -> NativeVoiceLocalModelState {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let cancellation = NativeAttachmentCancellation(), id = UUID()
+        localAttachmentRequests.register(cancellation, id: id); defer { localAttachmentRequests.remove(id) }
+        return try await withTaskCancellationHandler {
+            guard let local = try await perform({ try $0.prepareWhisperRead(session: session) }) else { throw NativeVoiceJSON.invalid }
+            try cancellation.check(); try Task.checkCancellation()
+            if operation == "install" { try await local.model.store.install(local.model.spec, cancellation: cancellation, progress: progress) }
+            else if operation == "remove" { try await local.model.store.remove(local.model.spec) }
+            let state = try await local.model.store.inspect(local.model.spec)
+            try cancellation.check(); try Task.checkCancellation()
+            return try await perform {
+                try $0.checkWhisperRead(local)
+                return NativeVoiceLocalModelState(modelID: local.model.spec.id, sizeBytes: local.model.spec.sizeBytes,
+                    availability: NativeVoiceLocalModelState.Availability(rawValue: state.rawValue)!)
+            }
+        } onCancel: { cancellation.cancel() }
+    }
+    public func beginVoiceSettings() async throws -> NativeVoiceSettingsSession {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.openVoiceSettings() }
+    }
+    public func readVoiceSettings(session: UUID) async throws -> NativeVoiceSettingsOptions {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.readVoiceSettings(session) }
+    }
+    public func retireVoiceSettings(session: UUID) async {
+        await drainAIModelDiscovery(session: session, voice: true)
+        _ = try? await perform(reminderOwned: true) { $0.retireVoiceSettings(session) }
+    }
+    public func setVoiceSettings(session: UUID, request: NativeVoiceSettingsRequest,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeVoiceSettingsOutcome {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let raw = try request.json(), cancellation = NativeAttachmentCancellation(), id = UUID()
+        localAttachmentRequests.register(cancellation, id: id); defer { localAttachmentRequests.remove(id) }
+        return try await withTaskCancellationHandler {
+            do {
+                guard !Task.isCancelled, await readmission(), !cancellation.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Speech settings edit is no longer current") }
+                let value = try await perform {
+                    if let replay = try $0.prepareVoiceSettings(session, raw: raw, cancellation: cancellation) { return replay }
+                    return try $0.commitVoiceSettings(session, cancellation: cancellation)
+                }
+                return try await perform(reminderOwned: true) { try $0.completeVoiceSettings(session, value: value) }
+            } catch {
+                if let value = try? await perform(reminderOwned: true, { try $0.probeVoiceSettings(session, raw: raw) }) {
+                    return try await perform(reminderOwned: true) { try $0.completeVoiceSettings(session, value: value) }
+                }
+                let retryOwed = (try? await perform(reminderOwned: true) { $0.voiceSettingsRetryOwed(session) }) ?? true
+                _ = try? await perform(reminderOwned: true) { $0.acknowledgeVoiceSettingsFailure(session) }
+                if retryOwed { throw error }
+                throw CoreHostRejection(message: "STALE_REVISION: Speech settings edit is no longer current")
+            }
+        } onCancel: { cancellation.cancel() }
+    }
+    private func voiceCredential(session: UUID, value: String?, expected: NativeVoiceCredentialWitness) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let cancellation = NativeAttachmentCancellation(), id = UUID()
+        localAttachmentRequests.register(cancellation, id: id); defer { localAttachmentRequests.remove(id) }
+        try await withTaskCancellationHandler {
+            try await perform { try $0.editVoiceCredential(session: session, value: value, expected: expected, cancellation: cancellation) }
+        } onCancel: { cancellation.cancel() }
+    }
+    public func saveVoiceCredential(session: UUID, value: String, expected: NativeVoiceCredentialWitness) async throws {
+        try await voiceCredential(session: session, value: value, expected: expected)
+    }
+    public func clearVoiceCredential(session: UUID, expected: NativeVoiceCredentialWitness) async throws {
+        try await voiceCredential(session: session, value: nil, expected: expected)
+    }
+    public func readVoiceEndpoint(session: UUID, expected: NativeVoiceSettingsWitness) async throws -> String {
+        let raw = try await voiceEndpoint(session: session, value: nil, expected: expected)
+        let reply = try NativeVoiceJSON.object(raw, maximum: 32768)
+        guard Set(reply.keys) == ["value"], let value = reply["value"] as? String, value.utf16.count <= 4096 else { throw NativeVoiceJSON.invalid }
+        return value
+    }
+    public func saveVoiceEndpoint(session: UUID, value: String, expected: NativeVoiceSettingsWitness) async throws -> Bool {
+        let admitted = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.utf16.count <= 2000, admitted.isEmpty || URL(string: admitted).map(NativeHTTPJobs.allowedURL) == true else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Speech endpoint is unsupported")
+        }
+        let raw = try await voiceEndpoint(session: session, value: value, expected: expected)
+        let reply = try NativeVoiceJSON.object(raw, maximum: 1024)
+        guard Set(reply.keys) == ["changed"], let changed = NativeVoiceJSON.boolean(reply["changed"]) else { throw NativeVoiceJSON.invalid }
+        return changed
+    }
+    private func voiceEndpoint(session: UUID, value: String?, expected: NativeVoiceSettingsWitness) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let cancellation = NativeAttachmentCancellation(), id = UUID()
+        localAttachmentRequests.register(cancellation, id: id); defer { localAttachmentRequests.remove(id) }
+        return try await withTaskCancellationHandler {
+            try await perform { try $0.voiceEndpoint(session: session, value: value, expected: expected, cancellation: cancellation) }
+        } onCancel: { cancellation.cancel() }
+    }
+    public func beginVoiceCapture(presentationID: UUID, captureID: UUID) async throws -> NativeVoiceCaptureHandle {
+        #if os(iOS)
+        return try await beginVoiceCapture(presentationID: presentationID, captureID: captureID, backend: NativeAVAudioRecorderBackend())
+        #else
+        return try await beginVoiceCapture(presentationID: presentationID, captureID: captureID, backend: NativeVoiceUnavailableBackend())
+        #endif
+    }
+    // Package fixture seam uses the real host/file/journal path without a microphone.
+    func beginVoiceCapture(presentationID: UUID, captureID: UUID, backend: any NativeVoiceRecorderBackend) async throws -> NativeVoiceCaptureHandle {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let capture = try await perform { try $0.createVoiceCapture(presentationID: presentationID, captureID: captureID, backend: backend) }
+        let session = try await capture.recorder.begin(presentationID: presentationID, captureID: captureID)
+        return try await perform { try $0.bindVoiceCapture(capture, session: session) }
+    }
+    public func voiceRecordingEvents(_ handle: NativeVoiceCaptureHandle) async throws -> AsyncStream<NativeVoiceRecordingEvent> {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let capture = try await perform { try $0.voiceCapture(handle) }
+        guard let session = capture.session else { throw NativeVoiceJSON.invalid }
+        let events = try await capture.recorder.events(session)
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let task = Task {
+                for await state in events { if Task.isCancelled { break }; continuation.yield(.init(handle: handle, state: state)) }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+    public func startVoiceRecording(_ handle: NativeVoiceCaptureHandle) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let capture = try await perform { try $0.voiceCapture(handle) }
+        guard let session = capture.session else { throw NativeVoiceJSON.invalid }
+        try await withTaskCancellationHandler { try await capture.recorder.start(session) }
+        onCancel: { Task { try? await capture.recorder.cancel(session) } }
+    }
+    public func cancelVoiceRecording(_ handle: NativeVoiceCaptureHandle) async {
+        guard let capture = try? await perform(reminderOwned: true, { try $0.cancelVoiceCapture(handle) }), let session = capture.session else { return }
+        try? await capture.recorder.cancel(session)
+    }
+    public func stopVoiceCapture(_ handle: NativeVoiceCaptureHandle, requestJSON: String,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeVoiceCaptureOutcome {
+        try await saveVoiceCapture(handle, requestJSON: requestJSON, readmission: readmission)
+    }
+    public func retryVoiceCapture(_ handle: NativeVoiceCaptureHandle,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeVoiceCaptureOutcome {
+        try await saveVoiceCapture(handle, requestJSON: nil, readmission: readmission)
+    }
+    private func saveVoiceCapture(_ handle: NativeVoiceCaptureHandle, requestJSON: String?,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeVoiceCaptureOutcome {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let capture = try await perform { try $0.freezeVoiceStop(handle, raw: requestJSON) }
+        let outcome: NativeVoiceCaptureOutcome
+        do {
+            guard let session = capture.session else { throw NativeVoiceJSON.invalid }
+            let source = try await capture.recorder.stop(session)
+            try await perform(reminderOwned: true) { try $0.recordVoiceSource(capture, source: source) }
+            guard !Task.isCancelled, await readmission() else { throw CancellationError() }
+            let local = try await perform { try $0.prepareWhisperCaptureRead(capture) }
+            let localState: NativeWhisperModelState?
+            if let local { localState = try await local.model.store.inspect(local.model.spec) } else { localState = nil }
+            let saved = try await perform {
+                if let replay = try $0.prepareVoiceCapture(capture, source: source, local: local, localState: localState) { return replay }
+                return try $0.commitVoiceCapture(capture)
+            }
+            outcome = try await perform(reminderOwned: true) { try $0.savedVoiceCapture(capture, result: saved) }
+            if case .saved(_, nil) = outcome { _ = try? await capture.recorder.retire(source) }
+        } catch {
+            if let saved = try? await perform(reminderOwned: true, { try $0.probeVoiceCapture(capture) }) { outcome = saved }
+            else {
+                outcome = (try? await perform(reminderOwned: true) { $0.voiceSavePending(capture) }) == true ? .savePending : .refused
+                let marker = outcome == .savePending ? "save-pending" : "refused"
+                _ = try? await perform(reminderOwned: true) { $0.acknowledgeVoice("capture", marker, binding: capture.binding) }
+            }
+        }
+        _ = try? await perform(reminderOwned: true) { $0.releaseVoiceStop(capture) }
+        return outcome
+    }
+    public func completeVoiceSpeech(jobID: UUID,
+        readmission: @escaping @Sendable (String) async -> Bool) async throws -> NativeVoiceSpeechOutcome {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let job = try await perform { try $0.claimVoiceSpeech(jobID) }
+        if let outcome = job.outcome { _ = try? await perform(reminderOwned: true) { $0.releaseVoiceSpeech(job) }; return outcome }
+        localAttachmentRequests.register(job.cancellation, id: jobID); defer { localAttachmentRequests.remove(jobID) }
+        let outcome: NativeVoiceSpeechOutcome = await withTaskCancellationHandler {
+            do {
+                if job.decoded == nil {
+                    guard let source = job.capture.source else { throw NativeVoiceJSON.invalid }
+                    let bytes = try job.capture.files.read(source, cancellation: job.cancellation)
+                    if let remote = job.capture.remote, case .whisper(let model) = remote {
+                        let transcript = try await whisperJobs.transcribe(model, bytes: bytes, canonicalWave: false, cancellation: job.cancellation)
+                        try await perform { try $0.storeVoiceWhisperDecoded(job, transcript: transcript) }
+                    } else if let remote = job.capture.remote, case .openai = remote {
+                        try await completeOpenAIVoiceSpeech(job, bytes: bytes)
+                    } else {
+                        let raw = try await perform { try $0.buildVoiceSpeechHTTP(job, audio: bytes.base64EncodedString()) }
+                        let response = try await voiceSpeechHTTP(job, request: raw)
+                        try await perform { try $0.decodeVoiceSpeech(job, response: response) }
+                    }
+                }
+                // The decoded value stays native while its editor closes. This
+                // wait owns no Engine turn and never re-uploads the recording.
+                guard !job.cancellation.isCancelled, await readmission(job.capture.captureID.uuidString.lowercased()), !job.cancellation.isCancelled else { job.cancel(); throw CancellationError() }
+                let result = try await perform {
+                    if let replay = try $0.prepareVoiceResult(job) { return replay }
+                    return try $0.commitVoiceResult(job)
+                }
+                return try await perform(reminderOwned: true) { try $0.finishVoiceSpeech(job, result: result) }
+            } catch {
+                if let saved = try? await perform(reminderOwned: true, { try $0.probeVoiceResult(job) }) { return saved }
+                return (try? await perform(reminderOwned: true) { try $0.finishVoiceSpeech(job, result: nil) }) ?? .failed
+            }
+        } onCancel: { job.cancel() }
+        if let source = job.capture.source { _ = try? await job.capture.recorder.retire(source) }
+        if (try? await perform(reminderOwned: true) { $0.voiceResultPending(job) }) == true { throw NativeVoiceSpeechSavePending() }
+        return outcome
+    }
+    private func voiceSpeechHTTP(_ job: Engine.VoiceSpeech, request: String) async throws -> String {
+        let http = try await perform { try $0.voiceSpeechHTTP(job) }
+        let waiter = NativeVoiceHTTPWait(http); job.install(waiter)
+        let response: String
+        do { response = try await waiter.run(request) }
+        catch { await Task.detached { http.shutdown() }.value; throw error }
+        await Task.detached { http.shutdown() }.value
+        return response
+    }
+    private func completeOpenAIVoiceSpeech(_ job: Engine.VoiceSpeech, bytes: Data) async throws {
+        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote else { throw NativeVoiceJSON.invalid }
+        let request = try await perform { try $0.buildVoiceOpenAITranscription(job, bytes: bytes) }
+        let response = try await voiceSpeechHTTP(job, request: request)
+        let initial = try await perform { try $0.decodeVoiceOpenAITranscription(job, response: response) }
+        if !initial.isEmpty, config.mode == .smartParse, credential != nil {
+            for model in [config.parseModel, config.retryModel] {
+                for api in NativeOpenAISpeechAPI.allCases {
+                    let decoded: String
+                    do {
+                        let request = try await perform { try $0.buildVoiceOpenAIParse(job, transcript: initial, model: model, api: api) }
+                        let response = try await voiceSpeechHTTP(job, request: request)
+                        decoded = try await perform { try $0.decodeVoiceOpenAIParse(job, initial: initial, response: response, api: api) }
+                    } catch {
+                        if error is CancellationError || error is NativeWatchAudioInvalidParsedTranscript || job.cancellation.isCancelled { throw error }
+                        try await perform { try $0.checkVoiceSpeech(job) }
+                        continue
+                    }
+                    try await perform { try $0.storeVoiceOpenAIDecoded(job, json: decoded) }
+                    return
+                }
+            }
+        }
+        let decoded = try NativeVoiceJSON.encode(["transcript": initial])
+        try await perform { try $0.storeVoiceOpenAIDecoded(job, json: decoded) }
+    }
+    public func cancelVoiceSpeech(jobID: UUID) async {
+        guard let job = try? await perform(reminderOwned: true, { $0.cancelVoiceSpeech(jobID) }), !job.running, let source = job.capture.source else { return }
+        _ = try? await job.capture.recorder.retire(source)
+    }
+
+    public func beginAITextConfigurationV2() async throws -> NativeAITextConfigurationSessionV2 {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.openAITextConfigurationSessionV2() }
+    }
+    public func readAITextSetupOptionsV2(session: UUID) async throws -> NativeAITextConfigurationOptionsV2 {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform {
+            try $0.checkAITextConfigurationSession(session)
+            return try NativeAITextConfigurationOptionsV2.validated($0.readAITextConfigurationOptions(version: 2))
+        }
+    }
+    public func readAIAnthropicThinkingOptions(session: UUID) async throws -> NativeAIAnthropicThinkingOptions {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try NativeAIAnthropicThinkingOptions.validated($0.readAIAnthropicThinkingOptions(session)) }
+    }
+    public func discoverAITextModels(session: UUID, expected: NativeAITextConfigurationWitnessV2) async throws -> NativeAITextModelChoices {
+        try NativeAITextModelChoices.validated(await discoverModels(.text(session: session, expected: expected)))
+    }
+    public func discoverVoiceModels(session: UUID, expected: NativeVoiceSettingsWitness) async throws -> NativeVoiceModelChoices {
+        try NativeVoiceModelChoices.validated(await discoverModels(.voice(session: session, expected: expected)))
+    }
+    private func discoverModels(_ request: NativeModelDiscoveryRequest) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let id = UUID(), cancellation = NativeAttachmentCancellation()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            let http = try await perform { try $0.beginAIModelDiscovery(id, request: request, cancellation: cancellation) }
+            var result: Result<String, Error>
+            do {
+                try await perform { try $0.startAIModelDiscovery(id) }
+                var raw: String?
+                while raw == nil {
+                    try cancellation.check()
+                    raw = try await perform { try $0.pollAIModelDiscovery(id, requireCurrent: true) }
+                    if raw == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+                }
+                result = .success(raw!)
+            } catch { result = .failure(error) }
+            _ = try? await perform(reminderOwned: true) { $0.abortAIModelDiscovery(id) }
+            await Task.detached { http.shutdown() }.value
+            while (try? await perform(reminderOwned: true, { try $0.pollAIModelDiscovery(id, requireCurrent: false) == nil })) == true {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            if case .success(let raw) = result {
+                do {
+                    try cancellation.check()
+                    try await perform { try $0.completeAIModelDiscovery(id, result: raw) }
+                } catch { result = .failure(error) }
+            }
+            _ = try? await perform(reminderOwned: true) { $0.finishAIModelDiscovery(id, result: nil) }
+            return try result.get()
+        } onCancel: { cancellation.cancel() }
+    }
+    private func drainAIModelDiscovery(session: UUID? = nil, voice: Bool? = nil) async {
+        guard let selected = try? await perform(reminderOwned: true, { $0.cancelAIModelDiscovery(session: session, voice: voice) }) else { return }
+        await Task.detached { selected.http.shutdown() }.value
+        while (try? await perform(reminderOwned: true, { try $0.pollAIModelDiscovery(selected.id, requireCurrent: false) == nil })) == true {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        _ = try? await perform(reminderOwned: true) { $0.finishAIModelDiscovery(selected.id, result: nil) }
+    }
+    public func setAITextConfigurationV2(session: UUID, request: NativeAITextConfigurationRequestV2,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAITextConfigurationOutcomeV2 {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            let result: Result<(String, Bool), Error>
+            var retry = false
+            do {
+                try await perform { try $0.checkAITextConfigurationSession(session, exactRetryAllowed: true) }
+                let admission = try await perform { try $0.beginAITextConfiguration(id, requestJSON: raw, cancellation: cancellation) }
+                retry = admission.retry
+                let value: String
+                if let replay = admission.replay { value = replay }
+                else {
+                    guard !cancellation.isCancelled, await notificationAuthorization.readmit(id, check: readmission), !cancellation.isCancelled else {
+                        if retry { throw HostFailure("AI text configuration save still requires exact retry") }
+                        throw CoreHostRejection(message: "STALE_REVISION: AI text configuration edit is no longer current")
+                    }
+                    value = try await perform { try $0.commitAITextConfiguration(id) }
+                }
+                let recorded = try await perform { try $0.completeAITextConfigurationSession(session, result: value, version: 2, requestJSON: raw) }
+                result = .success((value, recorded))
+            } catch {
+                let retryOwed = (try? await perform(reminderOwned: true) { $0.aiTextConfigurationRetryOwed }) ?? true
+                result = .failure(retryOwed ? error : CoreHostRejection(message: "STALE_REVISION: AI text configuration edit is no longer current"))
+            }
+            _ = try? await perform(reminderOwned: true) { $0.finishAITextConfiguration(id) }
+            let (value, recorded) = try result.get()
+            return try NativeAITextConfigurationOutcomeV2.validated(value, consentRecorded: recorded)
+        } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(id) }
+    }
+    public func setAITextConfiguration(session: UUID, request: NativeAITextConfigurationRequest,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAITextConfigurationOutcome {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            let result: Result<(String, Bool), Error>
+            var retry = false
+            do {
+                try await perform { try $0.checkAITextConfigurationSession(session, exactRetryAllowed: true) }
+                let admission = try await perform { try $0.beginAITextConfiguration(id, requestJSON: raw, cancellation: cancellation) }
+                retry = admission.retry
+                let value: String
+                if let replay = admission.replay { value = replay }
+                else {
+                    guard !cancellation.isCancelled, await notificationAuthorization.readmit(id, check: readmission), !cancellation.isCancelled else {
+                        if retry { throw HostFailure("AI text configuration save still requires exact retry") }
+                        throw CoreHostRejection(message: "STALE_REVISION: AI text configuration edit is no longer current")
+                    }
+                    value = try await perform { try $0.commitAITextConfiguration(id) }
+                }
+                let recorded = try await perform { try $0.completeAITextConfigurationSession(session, result: value, requestJSON: raw) }
+                result = .success((value, recorded))
+            } catch {
+                let retryOwed = (try? await perform(reminderOwned: true) { $0.aiTextConfigurationRetryOwed }) ?? true
+                result = .failure(retryOwed ? error : CoreHostRejection(message: "STALE_REVISION: AI text configuration edit is no longer current"))
+            }
+            _ = try? await perform(reminderOwned: true) { $0.finishAITextConfiguration(id) }
+            let (value, recorded) = try result.get()
+            return try NativeAITextConfigurationOutcome.validated(value, consentRecorded: recorded)
+        } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(id) }
+    }
+    private func aiTextSensitive(session: UUID, op: String, value: String? = nil, attempt: UUID? = nil,
+        expected: NativeAITextConfigurationWitnessV2) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let cancellation = NativeAttachmentCancellation(), id = UUID()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            try await perform { try $0.aiTextSensitive(session: session, op: op, value: value, attempt: attempt, expected: expected.object, version: 2, cancellation: cancellation) }
+        } onCancel: { cancellation.cancel() }
+    }
+    private func aiTextSensitive(session: UUID, op: String, value: String? = nil,
+        expected: NativeAITextConfigurationWitness) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let cancellation = NativeAttachmentCancellation(), id = UUID()
+        localAttachmentRequests.register(cancellation, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { cancellation.cancel() }
+        return try await withTaskCancellationHandler {
+            try await perform { try $0.aiTextSensitive(session: session, op: op, value: value, expected: expected.object, cancellation: cancellation) }
+        } onCancel: { cancellation.cancel() }
+    }
+    public func readAITextEndpoint(session: UUID, expected: NativeAITextConfigurationWitnessV2) async throws -> String {
+        let raw = try await aiTextSensitive(session: session, op: "read-endpoint", expected: expected)
+        guard let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["value"]),
+              let value = object["value"] as? String, value.utf16.count <= 2000 else { throw HostFailure("AI text endpoint is unavailable") }
+        return value
+    }
+    public func saveAITextEndpoint(session: UUID, value: String, expected: NativeAITextConfigurationWitnessV2) async throws -> Bool {
+        let raw = try await aiTextSensitive(session: session, op: "save-endpoint", value: value, expected: expected)
+        guard let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["changed"]),
+              let changed = object["changed"] as? Bool else { throw HostFailure("AI text endpoint save could not be confirmed") }
+        return changed
+    }
+    public func readAITextExtraBody(session: UUID, expected: NativeAITextConfigurationWitnessV2) async throws -> String {
+        let raw = try await aiTextSensitive(session: session, op: "read-extra-body", expected: expected)
+        guard let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["value"]),
+              let value = object["value"] as? String, value.utf16.count <= 4000 else { throw HostFailure("AI extra body parameters are unavailable") }
+        return value
+    }
+    public func saveAITextExtraBody(session: UUID, attempt: UUID, value: String, expected: NativeAITextConfigurationWitnessV2) async throws -> Bool {
+        let raw = try await aiTextSensitive(session: session, op: "save-extra-body", value: value, attempt: attempt, expected: expected)
+        guard let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["changed"]),
+              let changed = object["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID() else {
+            throw HostFailure("AI extra body parameters save could not be confirmed")
+        }
+        return changed.boolValue
+    }
+    public func saveAITextKey(session: UUID, value: String, expected: NativeAITextConfigurationWitnessV2) async throws {
+        _ = try await aiTextSensitive(session: session, op: "save-credential", value: value, expected: expected)
+    }
+    public func clearAITextKey(session: UUID, expected: NativeAITextConfigurationWitnessV2) async throws {
+        _ = try await aiTextSensitive(session: session, op: "clear-credential", expected: expected)
+    }
+
+    public func readAITextEndpoint(session: UUID, expected: NativeAITextConfigurationWitness) async throws -> String {
+        let raw = try await aiTextSensitive(session: session, op: "read-endpoint", expected: expected)
+        guard let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["value"]),
+              let value = object["value"] as? String, value.utf16.count <= 2000 else { throw HostFailure("AI text endpoint is unavailable") }
+        return value
+    }
+    public func saveAITextEndpoint(session: UUID, value: String, expected: NativeAITextConfigurationWitness) async throws -> Bool {
+        let raw = try await aiTextSensitive(session: session, op: "save-endpoint", value: value, expected: expected)
+        guard let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(object.keys) == Set(["changed"]),
+              let changed = object["changed"] as? Bool else { throw HostFailure("AI text endpoint save could not be confirmed") }
+        return changed
+    }
+    public func saveAITextKey(session: UUID, value: String, expected: NativeAITextConfigurationWitness) async throws {
+        _ = try await aiTextSensitive(session: session, op: "save-credential", value: value, expected: expected)
+    }
+    public func clearAITextKey(session: UUID, expected: NativeAITextConfigurationWitness) async throws {
+        _ = try await aiTextSensitive(session: session, op: "clear-credential", expected: expected)
     }
 
     public func readAIRequestTimeoutOptions() async throws -> NativeAIRequestTimeoutOptions {
@@ -936,6 +1789,18 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { cancellation.cancel(); self.appleRemindersAuthorization.cancelReadmission(owner) })
     }
 
+    public func gmail(_ name: String, inputJSON: String = "{}") async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.gmail("iosGmailRequest", arguments: [name, inputJSON]) }
+    }
+
+    public func gmailLifecycle(_ appState: String) async throws {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        _ = try await perform { try $0.gmail("iosGmailLifecycle", arguments: [appState]) }
+    }
+
     public func readAppleRemindersSettings() async throws -> String {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -998,6 +1863,160 @@ public final class CoreHost: @unchecked Sendable {
         return try await perform { try $0.pomodoroFacade("pomodoroTransitionRetryOutcome", requestJSON: requestJSON) }
     }
 
+    public func ingestWatchBatch(_ batch: NativeWatchBatch, lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
+                                 readmit: @escaping @Sendable () async -> Bool = { true }) async throws -> NativeWatchBatchResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        guard await readmit(), lease.isCurrent, !Task.isCancelled else {
+            throw CoreHostRejection(message: "NOT_READY: Watch intake owner changed")
+        }
+        return try batch.result(await perform { try $0.ingestWatchBatch(batch, lease: lease) })
+    }
+
+    #if os(iOS)
+    public func ingestWatchAudio(_ command: MindwtrWatchPendingCommand, receiver: MindwtrWatchConnectivityReceiver,
+                                 lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
+                                 readmit: @escaping @Sendable () async -> Bool = { true }) async throws {
+        let source: NativeWatchAudio
+        do { source = try NativeWatchAudio(name: command.name, body: command.body) }
+        catch { throw CoreHostRejection(message: NativeWatchAudio.invalid.message) }
+        try await ingestWatchAudio(source, lease: lease, load: {
+            let audio = try await receiver.pendingAudio(for: command)
+            return NativeWatchAudioBytes(bytes: audio.bytes, validate: { try receiver.validatePendingAudio(audio) })
+        }, readmit: readmit)
+    }
+    #endif
+
+    // Package tests use this same orchestration without constructing a WatchConnectivity session.
+    func ingestWatchAudio(_ source: NativeWatchAudio, lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
+                          load: @escaping @Sendable () async throws -> NativeWatchAudioBytes,
+                          readmit: @escaping @Sendable () async -> Bool = { true }) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw NativeWatchAudio.ownerChanged }
+        guard let job = try await perform({ try $0.beginWatchAudio(source, lease: lease) }) else { return }
+        let id = UUID(), cancellation = job.cancellation
+        localAttachmentRequests.register(cancellation, id: id); defer { localAttachmentRequests.remove(id) }
+        try await withTaskCancellationHandler {
+            let transcript: String?, audio: NativeWatchAudioBytes?
+            do {
+                if let runtime = job.runtime {
+                    guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw NativeWatchAudio.ownerChanged }
+                    if case .whisper(let model) = runtime {
+                        guard try await model.store.inspect(model.spec) == .installed else { throw NativeWatchAudioRetryable() }
+                        try await perform { try $0.checkWatchAudio(job) }
+                    }
+                    let selected = try await load()
+                    guard !selected.bytes.isEmpty, selected.bytes.count <= 4 * 1024 * 1024 else { throw NativeWatchAudio.invalid }
+                    audio = selected
+                    if case .whisper(let model) = runtime {
+                        try selected.validate()
+                        transcript = try await whisperJobs.transcribe(model, bytes: selected.bytes, canonicalWave: true, cancellation: cancellation)
+                        try await perform { try $0.checkWatchAudio(job); $0.acknowledgeWhisperTranscription() }
+                    } else {
+                        let request: String
+                        switch runtime {
+                        case .gemini: request = try await perform { try $0.buildWatchAudioHTTP(job, audio: selected.bytes.base64EncodedString()) }
+                        case .openai: request = try await perform { try $0.buildWatchOpenAITranscription(job, bytes: selected.bytes) }
+                        case .whisper: throw NativeWatchAudio.invalid
+                        }
+                        let response = try await watchAudioHTTP(job, request: request, readmit: readmit)
+                        switch runtime {
+                        case .gemini: transcript = try await perform { try $0.decodeWatchAudio(job, response: response) }
+                        case .openai:
+                            let initial = try await perform { try $0.decodeWatchOpenAITranscription(job, response: response) }
+                            transcript = try await parseWatchOpenAIAudio(job, initial: initial, readmit: readmit)
+                        case .whisper: throw NativeWatchAudio.invalid
+                        }
+                    }
+                } else { transcript = nil; audio = nil }
+            } catch {
+                if error is CoreHostRejection { throw error }
+                if error is CancellationError || cancellation.isCancelled || Task.isCancelled { throw NativeWatchAudio.ownerChanged }
+                throw NativeWatchAudioRetryable()
+            }
+            guard await readmit(), lease.isCurrent, !Task.isCancelled, !cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
+            try await perform { try $0.commitWatchAudio(job, transcript: transcript, audio: audio) }
+        } onCancel: { cancellation.cancel() }
+    }
+
+    private func watchAudioHTTP(_ job: Engine.WatchAudio, request: String,
+                                readmit: @escaping @Sendable () async -> Bool) async throws -> String {
+        guard await readmit(), job.lease.isCurrent, !Task.isCancelled, !job.cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
+        let http = try await perform { engine in
+            try engine.checkWatchAudio(job)
+            return try engine.voiceHTTP(binding: job.binding, cancellation: job.cancellation)
+        }
+        let waiter = NativeVoiceHTTPWait(http)
+        job.cancellation.setCancellationHandler { waiter.cancel() }
+        defer { job.cancellation.setCancellationHandler(nil) }
+        let response: String
+        do { response = try await waiter.run(request) }
+        catch { await Task.detached { http.shutdown() }.value; throw error }
+        await Task.detached { http.shutdown() }.value
+        return response
+    }
+
+    private func parseWatchOpenAIAudio(_ job: Engine.WatchAudio, initial: String,
+                                      readmit: @escaping @Sendable () async -> Bool) async throws -> String {
+        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime else { throw NativeWatchAudio.invalid }
+        if config.mode == .smartParse, credential != nil {
+            for model in [config.parseModel, config.retryModel] {
+                for api in NativeOpenAISpeechAPI.allCases {
+                    guard await readmit(), job.lease.isCurrent, !Task.isCancelled, !job.cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
+                    let request = try await perform { try $0.buildWatchOpenAIParse(job, transcript: initial, model: model, api: api) }
+                    let parsed: String
+                    do {
+                        let response = try await watchAudioHTTP(job, request: request, readmit: readmit)
+                        parsed = try await perform { try $0.decodeWatchOpenAIParse(job, response: response, api: api) }
+                    } catch {
+                        if error is CoreHostRejection || error is CancellationError || error is NativeWatchAudioInvalidParsedTranscript { throw error }
+                        guard await readmit(), job.lease.isCurrent, !Task.isCancelled, !job.cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
+                        try await perform { try $0.checkWatchAudio(job) }
+                        continue
+                    }
+                    // Shared policy chooses parsed.transcript || initial before Watch trims it.
+                    return try await perform { try $0.finishWatchOpenAITranscript(job, value: parsed.isEmpty ? initial : parsed) }
+                }
+            }
+        }
+        return try await perform { try $0.finishWatchOpenAITranscript(job, value: initial) }
+    }
+
+    public func submitWatchPomodoro(_ source: NativeWatchPomodoro, lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
+                                     readmit: @escaping @Sendable () async -> Bool = { true }) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        guard await readmit(), lease.isCurrent, !Task.isCancelled else {
+            throw CoreHostRejection(message: "NOT_READY: Watch timer owner changed")
+        }
+        try await perform { try $0.submitWatchPomodoro(source, lease: lease) }
+    }
+
+    public func watchSnapshot() async throws -> NativeWatchSnapshot {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try NativeWatchSnapshot(json: await perform { try $0.call("iosWatchSnapshot", argumentsJSON: "[]") })
+    }
+
+    public func widgetNextSnapshot() async throws -> NativeWidgetNextSnapshot {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try NativeWidgetNextSnapshot(json: await perform { try $0.call("iosWidgetNextSnapshot", argumentsJSON: "[]") })
+    }
+
+    public func widgetFamilySnapshot(systemColorScheme: NativeWidgetFamilySnapshot.SystemColorScheme) async throws -> NativeWidgetFamilySnapshot {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        let input = String(decoding: try JSONSerialization.data(withJSONObject: ["systemColorScheme": systemColorScheme.rawValue], options: [.sortedKeys]), as: UTF8.self)
+        let arguments = String(decoding: try JSONSerialization.data(withJSONObject: [input]), as: UTF8.self)
+        return try NativeWidgetFamilySnapshot(json: await perform { try $0.call("iosWidgetFamilySnapshot", argumentsJSON: arguments) })
+    }
+
+    public func widgetNextActionSnapshot() async throws -> NativeWidgetNextActionSnapshot {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try NativeWidgetNextActionSnapshot(json: await perform { try $0.call("iosWidgetNextActionSnapshot", argumentsJSON: "[]") })
+    }
+
     public func searchSnapshot() async throws -> NativeSearchSnapshot {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -1039,6 +2058,256 @@ public final class CoreHost: @unchecked Sendable {
         if Task.isCancelled { token.cancel() }
         return try await withTaskCancellationHandler(operation: {
             try await perform { try $0.foregroundSync(command: command, requestJSON: requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    public func readTaskAIOptions(requestJSON: String, lease: NativeTaskAIEditorLease) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        return try await perform { try $0.readTaskAIOptions(requestJSON, lease: lease) }
+    }
+
+    public func beginTaskAI(requestJSON: String, editor: EditorDraftSnapshot?, lease: NativeTaskAIEditorLease,
+                            readmit: @escaping @Sendable () async -> Bool) async throws -> NativeTaskAIHandle {
+        try await beginManualAI(requestJSON: requestJSON, editor: editor, lease: lease, scope: .task, readmit: readmit)
+    }
+
+    public func beginInboxAI(requestJSON: String, lease: NativeTaskAIEditorLease,
+                             readmit: @escaping @Sendable () async -> Bool) async throws -> NativeTaskAIHandle {
+        try await beginManualAI(requestJSON: requestJSON, editor: nil, lease: lease, scope: .inbox, readmit: readmit)
+    }
+    public func awaitInboxAI(_ handle: NativeTaskAIHandle) async throws -> String {
+        guard handle.inbox else { throw NativeTaskAIJSON.invalid }; return try await awaitTaskAI(handle)
+    }
+    public func validateInboxAIAnswer(_ handle: NativeTaskAIHandle) async throws {
+        guard handle.inbox else { throw NativeTaskAIJSON.invalid }; try await validateTaskAIAnswer(handle)
+    }
+    public func cancelInboxAI(_ handle: NativeTaskAIHandle) async { if handle.inbox { await cancelTaskAI(handle) } }
+    public func applyInboxAIChoice(_ handle: NativeTaskAIHandle, index: Int) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        guard handle.inbox, handle.host == taskAIRequests.identity else { throw NativeTaskAIJSON.invalid }
+        return try await perform { try $0.applyInboxAIChoice(handle, index: index) }
+    }
+
+    public func beginReviewAI(requestJSON: String, lease: NativeTaskAIEditorLease,
+                              readmit: @escaping @Sendable () async -> Bool) async throws -> NativeTaskAIHandle {
+        try await beginManualAI(requestJSON: requestJSON, editor: nil, lease: lease, scope: .review, readmit: readmit)
+    }
+    public func awaitReviewAI(_ handle: NativeTaskAIHandle) async throws -> String {
+        guard handle.review else { throw NativeTaskAIJSON.invalid }; return try await awaitTaskAI(handle)
+    }
+    public func cancelReviewAI(_ handle: NativeTaskAIHandle) async { if handle.review { await cancelTaskAI(handle) } }
+    private final class ShortWriteEntry: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entered = false
+        func mark() { lock.lock(); entered = true; lock.unlock() }
+        var value: Bool { lock.lock(); defer { lock.unlock() }; return entered }
+    }
+    #if DEBUG
+    var beforeReviewAIApplyEngine: (@Sendable () -> Void)?
+    #endif
+    public func submitWidgetCompletion(action: NativeWidgetPendingAction, lease: NativeTaskAIEditorLease,
+                                       readmit: @escaping @Sendable () async -> Bool) async throws -> String {
+        let entry = ShortWriteEntry()
+        do {
+            try beginOuterAdmission(); defer { finishOuterAdmission() }
+            let source = try NativeWidgetCompletionJSON.source(action)
+            guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Widget completion changed") }
+            return try await perform { engine in
+                entry.mark(); return try engine.submitWidgetCompletion(source, lease: lease)
+            }
+        } catch {
+            if !entry.value, !(error is CoreHostRejection) { throw CoreHostRejection(message: "INVALID_INPUT: Widget completion was not admitted") }
+            throw error
+        }
+    }
+
+    public func submitWidgetCompletion(source: NativeProductionWidgetCompletionSource, lease: NativeTaskAIEditorLease,
+                                       readmit: @escaping @Sendable () async -> Bool) async throws -> String {
+        let entry = ShortWriteEntry()
+        do {
+            try beginOuterAdmission(); defer { finishOuterAdmission() }
+            guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Widget completion changed") }
+            return try await perform { engine in
+                entry.mark(); return try engine.submitWidgetCompletion(source.json, lease: lease)
+            }
+        } catch {
+            if !entry.value, !(error is CoreHostRejection) { throw CoreHostRejection(message: "INVALID_INPUT: Widget completion was not admitted") }
+            throw error
+        }
+    }
+
+    public func submitShareCapture(source: NativeShareEnvelope, method: String, requestJSON: String,
+                                   lease: NativeTaskAIEditorLease, readmit: @escaping @Sendable () async -> Bool) async throws -> String {
+        let entry = ShortWriteEntry()
+        do {
+            try beginOuterAdmission(); defer { finishOuterAdmission() }
+            let request = try NativeShareCaptureJSON.makeRequest(source, method: method, requestJSON: requestJSON)
+            _ = try NativeShareCaptureJSON.request(request)
+            guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Share capture changed") }
+            return try await perform { engine in
+                entry.mark()
+                return try engine.submitShareCapture(request, lease: lease)
+            }
+        } catch {
+            if !entry.value, !(error is CoreHostRejection) { throw CoreHostRejection(message: "INVALID_INPUT: Share capture was not admitted") }
+            throw error
+        }
+    }
+    public func probeShareCapture(source: NativeShareEnvelope) async throws -> String {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let identity = try NativeShareCaptureJSON.identity(source)
+        return try await perform { try $0.probeShareCapture(identity) }
+    }
+    public func applyReviewAISuggestions(requestJSON: String, lease: NativeTaskAIEditorLease,
+                                        readmit: @escaping @Sendable () async -> Bool) async throws -> String {
+        let entry = ShortWriteEntry()
+        do {
+            try beginOuterAdmission(); defer { finishOuterAdmission() }
+            do { _ = try NativeReviewAIJSON.apply(requestJSON) }
+            catch { throw CoreHostRejection(message: "INVALID_INPUT: Review AI selection is invalid") }
+            guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Review AI page changed") }
+            #if DEBUG
+            beforeReviewAIApplyEngine?()
+            #endif
+            return try await perform { engine in
+                entry.mark()
+                return try engine.applyReviewAISuggestions(requestJSON, lease: lease)
+            }
+        } catch {
+            // This invocation cannot have journaled intent until its Engine closure starts.
+            // A caller retrying already-owed intent must retain it and use retryPending().
+            if !entry.value, !(error is CoreHostRejection) {
+                throw CoreHostRejection(message: "STALE_REVISION: Review AI submission was not admitted")
+            }
+            throw error
+        }
+    }
+
+    private func beginManualAI(requestJSON: String, editor: EditorDraftSnapshot?, lease: NativeTaskAIEditorLease, scope: NativeTaskAIHandle.Scope,
+                                readmit: @escaping @Sendable () async -> Bool) async throws -> NativeTaskAIHandle {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        if scope == .review { try NativeReviewAIJSON.request(requestJSON) }
+        else if scope == .inbox { _ = try NativeInboxAIJSON.request(requestJSON) }
+        else { _ = try NativeTaskAIJSON.request(requestJSON, operation: true) }
+        let handle = try taskAIRequests.reserve(lease, scope: scope)
+        if Task.isCancelled { handle.cancel() }
+        // Admission retires an old displayed answer before any asynchronous new-owner readmission.
+        do { try await perform { $0.retireTaskAIAnswer(nil) } }
+        catch { taskAIRequests.finish(handle); handle.settle(.failure(error)); throw error }
+        // Retained independently of the caller: cancellation and close await the same owned drain.
+        Task { await self.runTaskAI(handle, requestJSON: requestJSON, editor: editor, readmit: readmit) }
+        return handle
+    }
+
+    public func awaitTaskAI(_ handle: NativeTaskAIHandle) async throws -> String {
+        guard handle.host == taskAIRequests.identity else { throw NativeTaskAIJSON.unavailable }
+        return try await withTaskCancellationHandler {
+            let value = try await handle.value() // Completion includes owned transport drain, even for a cancelled waiter.
+            try handle.cancellation.check()
+            guard handle.lease.isCurrent, !Task.isCancelled else { throw CancellationError() }
+            return value
+        } onCancel: { handle.cancel() }
+    }
+
+    /// Rechecks the original immutable durable/editor witness immediately before an unsaved choice is applied.
+    public func validateTaskAIAnswer(_ handle: NativeTaskAIHandle) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        guard handle.host == taskAIRequests.identity else { throw NativeTaskAIJSON.unavailable }
+        try await perform { try $0.validateTaskAIAnswer(handle) }
+    }
+
+    public func cancelTaskAI(_ handle: NativeTaskAIHandle) async {
+        guard handle.host == taskAIRequests.identity else { return }
+        handle.cancel(); _ = try? await handle.value()
+        _ = try? await perform(reminderOwned: true) { $0.retireTaskAIAnswer(handle) }
+    }
+
+    private func runTaskAI(_ handle: NativeTaskAIHandle, requestJSON: String, editor: EditorDraftSnapshot?,
+                           readmit: @escaping @Sendable () async -> Bool) async {
+        var resources: TaskAIPreload?
+        var result: Result<String, Error>
+        do {
+            guard await readmit() else { throw NativeTaskAIJSON.unavailable }
+            try handle.cancellation.check()
+            let prepared = try await perform {
+                try handle.review ? $0.prepareReviewAI(handle, requestJSON: requestJSON)
+                    : handle.inbox ? $0.prepareInboxAI(handle, requestJSON: requestJSON) : $0.prepareTaskAI(handle, requestJSON: requestJSON, editor: editor)
+            }
+            resources = prepared
+            let credential = try await Task.detached {
+                try handle.cancellation.check()
+                let secure = try prepared.secrets.readAIRequestKey(provider: prepared.provider, cancellation: handle.cancellation)
+                try handle.cancellation.check()
+                let value = secure ?? prepared.legacy
+                guard value.map({ $0.utf16.count <= 4000 }) ?? true else { throw NativeTaskAIJSON.unavailable }
+                return value
+            }.value
+            guard await readmit() else { throw NativeTaskAIJSON.unavailable }
+            try handle.cancellation.check()
+            try await perform { try $0.startTaskAI(handle, requestJSON: requestJSON, credential: credential) }
+            var answer: String?
+            while answer == nil {
+                guard await readmit() else { throw NativeTaskAIJSON.unavailable }
+                try handle.cancellation.check()
+                answer = try await perform { try $0.pollTaskAI(handle, requireCurrent: true) }
+                if answer == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+            }
+            guard await readmit(), handle.lease.isCurrent else { throw NativeTaskAIJSON.unavailable }
+            try handle.cancellation.check()
+            result = .success(answer!)
+        } catch { result = .failure(error) }
+        // Abort the selected JS ticket first. Transport completion may lag JS settlement: always drain it.
+        _ = try? await perform(reminderOwned: true) { $0.abortTaskAI(handle) }
+        if let resources { await Task.detached { resources.http.shutdown() }.value }
+        // AbortSignal/canonical finally must settle before the next private owner is admitted.
+        while (try? await perform(reminderOwned: true, { try $0.pollTaskAI(handle, requireCurrent: false) == nil })) == true {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        if case .success = result {
+            do {
+                guard await readmit(), handle.lease.isCurrent else { throw NativeTaskAIJSON.unavailable }
+                try handle.cancellation.check()
+                try await perform { try $0.validateTaskAI(handle) }
+            } catch { result = .failure(error) }
+        }
+        let outcome: String
+        switch result {
+        case .success(let raw):
+            outcome = handle.review ? ((try? NativeTaskAIJSON.object(raw)["suggestions"] as? [Any])?.isEmpty == false ? "suggested" : "empty")
+                : (try? NativeTaskAIJSON.object(raw)["kind"] as? String) == "dialog" ? "suggested" : "empty"
+        case .failure: outcome = handle.cancellation.isCancelled ? "cancelled" : "refused"
+        }
+        _ = try? await perform(reminderOwned: true) { $0.finishTaskAI(handle, outcome: outcome) }
+        taskAIRequests.finish(handle); handle.settle(result)
+    }
+
+    private func drainTaskAIOperations(fence: Bool = true) async {
+        if let handle = taskAIRequests.takeForDrain(fence: fence) { _ = try? await handle.value() }
+        _ = try? await perform(reminderOwned: true) { $0.retireTaskAIAnswer(nil) }
+    }
+
+    public func readCaptureCopilotOptions(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.readCaptureCopilotOptions(requestJSON: requestJSON, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
+    /// Cancelling and awaiting this task settles its selected JS request and native workers.
+    public func requestCaptureCopilot(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.requestCaptureCopilot(requestJSON: requestJSON, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
 
@@ -1357,9 +2626,13 @@ public final class CoreHost: @unchecked Sendable {
         if workspaceMode == .restricted {
             guard ["window", "captureOpen", "captureSubmit", "inboxView"].contains(method) else { throw Self.restrictedFailure }
         }
+        guard !["iosGmailRequest", "iosGmailLifecycle"].contains(method) else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Gmail capture requires its explicit facade")
+        }
         guard method != "iosWorkspaceRetirementStatus" else {
             throw CoreHostRejection(message: "INVALID_INPUT: Workspace retirement health requires original native authority")
         }
+        guard !["iosTaskAIOptions", "iosTaskAIRequest", "iosTaskAIWitness", "iosInboxAIWitness", "iosInboxAIRequest", "iosInboxAIApply", "iosReviewAIWitness", "iosReviewAIRequest", "iosReviewAIApply", "iosReviewAIOutcome", "iosReviewAIValidateApply", "reviewAISuggestionsWrite", "widgetCompletionSubmit", "shareCaptureSubmit", "iosShareCapturePrepare", "iosShareCaptureCommit", "iosShareCaptureOutcome", "iosWidgetCompletionPrepare", "iosWidgetCompletionValidate", "iosWidgetCompletionCommit", "iosWidgetCompletionOutcome"].contains(method) else { throw NativeTaskAIJSON.invalid }
         guard method != "iosAISummaryCheckpointSettled" else { throw CoreHostRejection(message: "INVALID_INPUT: AI summary checkpoint requires fixture authority") }
         guard !Engine.pomodoroFacadeMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade") }
         guard method != "iosPruneReceipts" else {
@@ -1372,6 +2645,8 @@ public final class CoreHost: @unchecked Sendable {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
         }
         guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard !Engine.voiceMethods.contains(method) else { throw NativeVoiceJSON.invalid }
+        guard !Engine.aiTextConfigurationMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade") }
         guard !Engine.aiRequestTimeoutMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade") }
         guard !Engine.aiReasoningEffortMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade") }
         guard !Engine.aiGeminiThinkingBudgetMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade") }
@@ -1511,6 +2786,14 @@ public final class CoreHost: @unchecked Sendable {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
         return try await perform { try $0.configureIsolatedBoardMoveCommitFailureOnce() }
+    }
+    public func configureIsolatedCaptureAIFixture(baseURL: String) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        try await perform { try $0.configureIsolatedCaptureAIFixture(baseURL: baseURL) }
+    }
+    public func restoreIsolatedCaptureAIFixture() async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        try await perform { try $0.restoreIsolatedCaptureAIFixture() }
     }
     public func configureIsolatedAIRequestTimeoutCommitFailureOnce() async throws {
         try beginOuterAdmission()
@@ -2406,11 +3689,30 @@ public final class CoreHost: @unchecked Sendable {
         await closeRuntime()
     }
 
+    private func drainVoiceOperations(fence: Bool = true) async {
+        guard let operations = try? await perform(reminderOwned: true, { $0.retireVoiceOperations(fence: fence) }) else { return }
+        await whisperJobs.cancelAndDrain(terminal: fence)
+        if let store = try? await perform(reminderOwned: true, { $0.whisperStoreForDrain() }) { await store.cancelAndDrain() }
+        for job in operations.jobs { await Task.detached { job.drain() }.value }
+        for capture in operations.captures {
+            if let session = capture.session { try? await capture.recorder.cancel(session) }
+            await Task.detached { capture.files.drain() }.value
+            if capture.savedResult != nil, let source = capture.source { _ = try? await capture.recorder.retire(source) }
+        }
+    }
+
     private func closeRuntime() async {
         // This primitive flag reaches a running local invoke immediately; an
         // ordinary durable command remains governed by its existing journal.
         localAttachmentRequests.close()
-        _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(nil) }
+        await drainAIModelDiscovery()
+        await drainTaskAIOperations()
+        await drainVoiceOperations()
+        if let store = try? await perform(reminderOwned: true, { $0.whisperStoreForDrain() }) { try? await store.close() }
+        _ = try? await perform(reminderOwned: true) {
+            $0.removeReminderObserver(nil)
+            $0.recordCloseCancellationOrder()
+        }
         await reminderEffects.closeAndDrain()
         await notificationAuthorization.closeAndDrain()
         await calendarAuthorization.closeAndDrain()
@@ -2453,6 +3755,7 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     deinit {
+        whisperJobs.cancel()
         localAttachmentRequests.close()
         queue.async { [engine] in engine.shutdown() }
     }
@@ -2464,6 +3767,7 @@ private struct PendingCommand: Codable {
     let argumentsJSON: String
     var terminal: TerminalResult? = nil
     var editorDraft: EditorDraftAttempt? = nil
+    var voiceFiles: NativeVoiceFileSettlement? = nil
 }
 
 private enum TerminalResult: Codable {
@@ -2636,6 +3940,7 @@ private final class Engine: @unchecked Sendable {
         var cancellation = NativeAttachmentCancellation()
         var targetURI = ""
         var initialURL = ""
+        var dropboxCloudKey: String?
         var attachmentID = ""
         var projectID = ""
         init(runtime: JSContext, jobs: NativeAttachmentFileJobs, storage: NativeDeviceKV, generation: UInt64, started: Bool, activation: Bool,
@@ -2677,6 +3982,53 @@ private final class Engine: @unchecked Sendable {
         guard turn.live else { throw Self.foregroundSyncFailure }
         try turn.requireOwner()
     }
+    private final class CaptureAITurn {
+        let id: UUID
+        let provider: NativeAISettingsProjection.Provider
+        let requireOwner: () throws -> Void
+        var live = true, began = false, loaded = false
+        var httpURL: String?
+        var configuration: String?, language: String?
+        init(id: UUID, provider: NativeAISettingsProjection.Provider, requireOwner: @escaping () throws -> Void) {
+            self.id = id; self.provider = provider; self.requireOwner = requireOwner
+        }
+    }
+    private var captureAITurn: CaptureAITurn?
+    private final class TaskAITurn {
+        let handle: NativeTaskAIHandle
+        let operation: String
+        let http: NativeHTTPJobs
+        let provider: NativeAISettingsProjection.Provider
+        let configuration: Any
+        let canonicalWitness: Any
+        let witnessRequestJSON: String
+        let requireOwner: () throws -> Void
+        var began = false, loaded = false, terminal = false
+        var credential: String?, httpURL: String?, ticket: String?, answerJSON: String?
+        var httpIDs: Set<String> = []
+        init(handle: NativeTaskAIHandle, operation: String, http: NativeHTTPJobs,
+             provider: NativeAISettingsProjection.Provider, configuration: Any, canonicalWitness: Any,
+             witnessRequestJSON: String, requireOwner: @escaping () throws -> Void) {
+            self.canonicalWitness = canonicalWitness; self.witnessRequestJSON = witnessRequestJSON
+            self.handle = handle; self.operation = operation; self.http = http; self.provider = provider
+            self.configuration = configuration; self.requireOwner = requireOwner
+        }
+    }
+    private var taskAITurn: TaskAITurn?
+    private var taskAIRuntimeLanguage: String?
+    private var reviewAIApplyLease: NativeTaskAIEditorLease?
+    // Result ownership has no ticket, transport or private active slot. Only its immutable witness remains.
+    private var taskAIAnswer: (handle: NativeTaskAIHandle, current: () throws -> Void, durable: () throws -> Void,
+                               requestJSON: String, canonical: Any, answerJSON: String)?
+
+
+    #if DEBUG
+    private enum CaptureAIFixtureChange { case configure(String), restore }
+    private var captureAIFixtureChange: CaptureAIFixtureChange?
+    #if targetEnvironment(simulator)
+    private var voiceUIFixtureSyntheticAudio = false
+    #endif
+    #endif
     #if DEBUG
     var projectFileAddHooks: ProjectFileAddHostHooks?
     #endif
@@ -2729,7 +4081,7 @@ private final class Engine: @unchecked Sendable {
             return ["kind": kind, "requestId": requestId, "phase": phase]
         }
     }
-    private struct OwnedDiscardIdentity: Equatable, Sendable {
+    fileprivate struct OwnedDiscardIdentity: Equatable, Sendable {
         let device: dev_t
         let inode: ino_t
     }
@@ -2862,7 +4214,9 @@ private final class Engine: @unchecked Sendable {
     private var calendarPushDatabaseBinding: OwnedDiscardIdentity?
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
-    private let legacyStorage: LegacyRNStorage?
+    private var legacyStorage: LegacyRNStorage?
+    private let rnAdoptionContainerURL: URL?
+    private var rnAdoptionDirectories: [(url: URL, fd: Int32)] = []
     private let workspaceMode: NativeWorkspaceMode
     private let restrictedFixtureRoot: URL?
     private let deviceStorageLocation: (containerURL: URL, bundleIdentifier: String)?
@@ -2874,7 +4228,22 @@ private final class Engine: @unchecked Sendable {
     private let reminderAdmissions: NativeReminderEffects
     private var httpJobs: NativeHTTPJobs?
     private var secretJobs: NativeSecretJobs?
+    private let dropboxAuthorization: NativeDropboxAuthorizationBinding?
+    private var dropboxTurn: DropboxTurn?
+    private var gmailJobs: NativeGmailJobs?
+    private var gmailReceipts: NativeGmailReceiptFiles?
+    private var gmailTurn = false
+    private final class DropboxTurn {
+        let runtime: JSContext
+        let generation: UInt64
+        let cancellation: NativeAttachmentCancellation
+        let jobs: NativeDropboxAuthorizationJobs
+        init(runtime: JSContext, generation: UInt64, cancellation: NativeAttachmentCancellation, jobs: NativeDropboxAuthorizationJobs) {
+            self.runtime = runtime; self.generation = generation; self.cancellation = cancellation; self.jobs = jobs
+        }
+    }
     private var calendarJobs: NativeCalendarJobs?
+    private var cloudKitJobs: NativeCloudKitJobs?
     private var cryptoJobs: NativeCryptoJobs?
     private final class FileSyncTurn {
         let runtime: JSContext, generation: UInt64, databaseURL: URL
@@ -2886,7 +4255,7 @@ private final class Engine: @unchecked Sendable {
     }
     private var fileSyncTurn: FileSyncTurn?
     private var fileSyncCloseFailed = false
-    private enum IOBodySource { case file, http, crypto, calendar, fileSync }
+    private enum IOBodySource { case file, http, taskAI, aiModelDiscovery, crypto, calendar, fileSync }
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
@@ -2949,6 +4318,160 @@ private final class Engine: @unchecked Sendable {
     }
     private var notificationSettingTurn: NotificationSettingTurn?
     private var notificationSettingOwnerAccess = false
+    private struct AIConfigurationSession {
+        let id: UUID
+        let provider: NativeAISettingsProjection.Provider
+        let version: Int
+        let runtime: JSContext
+        let connection: SQLiteBridge
+        let storage: NativeDeviceKV
+        let library: OwnedDiscardIdentity
+        let generation: UInt64
+        let epoch: Int64
+    }
+    private final class AIConfigurationTurn {
+        let session: AIConfigurationSession
+        let cancellation: NativeAttachmentCancellation
+        let op: String
+        var live = true
+        var credentialAccepted = false
+        var extraBodyAccepted = false
+        var discovery: AIModelDiscovery?
+        var usesSecretJobs: Bool { op != "read-extra-body" && op != "save-extra-body" && op != "model-discovery" }
+        init(session: AIConfigurationSession, cancellation: NativeAttachmentCancellation, op: String) {
+            self.session = session; self.cancellation = cancellation; self.op = op
+        }
+    }
+    private final class AIModelDiscovery {
+        let id: UUID
+        let http: NativeHTTPJobs
+        let request: NativeModelDiscoveryRequest
+        let voiceBinding: VoiceBinding?
+        var ticket: String?, httpURL: String?
+        var httpIDs: Set<String> = []
+        var terminal = false, credentialLoaded = false
+        var consent: Bool?, secure: String?, legacy: String?
+        init(id: UUID, http: NativeHTTPJobs, request: NativeModelDiscoveryRequest, voiceBinding: VoiceBinding? = nil) {
+            self.id = id; self.http = http; self.request = request; self.voiceBinding = voiceBinding
+        }
+    }
+    private var aiConfigurationConsentRetry: (owner: AIConfigurationSession, provider: NativeAISettingsProjection.Provider)?
+    private var aiConfigurationSession: AIConfigurationSession?
+    private var aiConfigurationTurn: AIConfigurationTurn?
+    private final class AITextConfigurationTurn {
+        let id: UUID
+        let runtime: JSContext
+        let storage: NativeDeviceKV
+        let connection: SQLiteBridge
+        let library: OwnedDiscardIdentity
+        let generation: UInt64
+        let epoch: Int64
+        let cancellation: NativeAttachmentCancellation
+        let requestJSON: String?
+        let retry: Bool
+        let version: Int
+        let consentTarget: NativeAISettingsProjection.Provider?
+        init(id: UUID, runtime: JSContext, storage: NativeDeviceKV, connection: SQLiteBridge, library: OwnedDiscardIdentity, generation: UInt64,
+             epoch: Int64, cancellation: NativeAttachmentCancellation, requestJSON: String?, retry: Bool, version: Int, consentTarget: NativeAISettingsProjection.Provider?) {
+            self.version = version; self.consentTarget = consentTarget
+            self.id = id; self.runtime = runtime; self.storage = storage; self.connection = connection; self.library = library
+            self.generation = generation; self.epoch = epoch; self.cancellation = cancellation; self.requestJSON = requestJSON; self.retry = retry
+        }
+    }
+    private var aiTextConfigurationTurn: AITextConfigurationTurn?
+    private var aiTextConfigurationOwnerAccess = false
+    private var aiTextConfigurationRetired = false
+    private var aiTextConfigurationConsentRecorded = false
+    fileprivate enum VoiceAction: String, Sendable {
+        case settings = "Settings", capture = "Capture", result = "Result"
+        var prefix: String { "iosVoice" + rawValue }
+        var commit: String { prefix + "Commit" }
+        var requestLimit: Int { self == .settings ? 32768 : self == .capture ? 131072 : 262144 }
+        init?(commit: String) {
+            switch commit { case "iosVoiceSettingsCommit": self = .settings; case "iosVoiceCaptureCommit": self = .capture; case "iosVoiceResultCommit": self = .result; default: return nil }
+        }
+    }
+    fileprivate static let voiceMethods: Set<String> = Set(["Settings", "Capture", "Result"].flatMap { action in
+        ["Prepare", "Validate", "Commit", "Recover", "RetryOutcome"].map { "iosVoice" + action + $0 }
+    } + ["iosVoiceModelDiscovery", "iosVoiceSettingsOptions", "iosVoiceRuntimeOptions", "iosVoiceWhisperModel", "iosVoiceWhisperLanguage", "iosVoiceOpenAIRuntime", "iosVoiceEndpointSessionOpen", "iosVoiceEndpointSessionClose", "iosVoiceEndpointSensitive", "iosVoiceGeminiRequestBuild", "iosVoiceGeminiResponseDecode",
+         "iosVoiceOpenAITranscriptionBuild", "iosVoiceOpenAITranscriptionDecode", "iosVoiceOpenAIParseBuild", "iosVoiceOpenAIParseDecode", "iosVoiceAcknowledged"])
+    fileprivate final class VoiceBinding: @unchecked Sendable {
+        let runtime: JSContext, connection: SQLiteBridge, storage: NativeDeviceKV, library: OwnedDiscardIdentity, generation: UInt64
+        var live = true
+        init(runtime: JSContext, connection: SQLiteBridge, storage: NativeDeviceKV, library: OwnedDiscardIdentity, generation: UInt64) {
+            self.runtime = runtime; self.connection = connection; self.storage = storage; self.library = library; self.generation = generation
+        }
+    }
+    private struct VoiceSettingsSession {
+        let binding: VoiceBinding
+        let provider: NativeVoiceProvider
+        var credential: NativeVoiceCredentialWitness
+        var retired = false
+        var endpointEdit: (expected: NativeVoiceSettingsWitness, value: String)? = nil
+    }
+    fileprivate final class VoiceCapture: @unchecked Sendable {
+        let binding: VoiceBinding, files: NativeVoiceFiles, recorder: NativeVoiceRecorder
+        let presentationID: UUID, captureID: UUID
+        let cancellation = NativeAttachmentCancellation()
+        var session: NativeVoiceRecordingSession?
+        var source: NativeVoiceRecordingSource?
+        var stopIntent: String?, captureRequest: String?, savedResult: String?
+        var runtime: NativeVoiceRuntime?, jobID: UUID?
+        var remote: VoiceRemoteRuntime?
+        var busy = false
+        init(binding: VoiceBinding, files: NativeVoiceFiles, backend: any NativeVoiceRecorderBackend, presentationID: UUID, captureID: UUID) {
+            self.binding = binding; self.files = files; recorder = NativeVoiceRecorder(files: files.files, backend: backend)
+            self.presentationID = presentationID; self.captureID = captureID
+        }
+        var handle: NativeVoiceCaptureHandle? { session.map { .init(id: $0.recordingID, presentationID: presentationID, captureID: captureID) } }
+    }
+    fileprivate final class VoiceSpeech: @unchecked Sendable {
+        let id = UUID(), capture: VoiceCapture
+        let cancellation = NativeAttachmentCancellation()
+        var decoded: String?, request: String?, running = false, outcome: NativeVoiceSpeechOutcome?
+        let speechNow: String, timeZone: String
+        private let lock = NSLock()
+        private var waiter: NativeVoiceHTTPWait?
+        init(capture: VoiceCapture, speechNow: String, timeZone: String) { self.capture = capture; self.speechNow = speechNow; self.timeZone = timeZone }
+        func install(_ selected: NativeVoiceHTTPWait) { lock.lock(); waiter = selected; let cancel = cancellation.isCancelled; lock.unlock(); if cancel { selected.cancel() } }
+        func cancel() { cancellation.cancel(); lock.lock(); let selected = waiter; lock.unlock(); selected?.cancel() }
+        func drain() { lock.lock(); let selected = waiter; lock.unlock(); selected?.drain() }
+    }
+    private var voiceWhisperStore: NativeWhisperModelStore?
+    fileprivate struct VoiceWhisperRead: @unchecked Sendable {
+        let binding: VoiceBinding
+        let session: UUID?
+        let expected: NativeVoiceSettingsWitness
+        let rawRuntime: String
+        let model: NativeWhisperVoiceModel
+    }
+    private var voiceSettingsSessions: [UUID: VoiceSettingsSession] = [:]
+    private var voiceSettingsPendingSession: UUID?
+    private var voiceCaptures: [UUID: VoiceCapture] = [:]
+    private var voiceSpeech: [UUID: VoiceSpeech] = [:]
+    private var voiceCommitAllowed = false
+    private var voiceWarmEnvelope: (method: String, json: String)?
+    private var voiceEndpointTurn: UUID?
+    fileprivate enum VoiceRemoteRuntime: Sendable {
+        case gemini(NativeVoiceRuntime)
+        case whisper(NativeWhisperVoiceModel)
+        case openai(NativeWatchOpenAIRuntime, credential: String?)
+    }
+    fileprivate struct WatchAudio: @unchecked Sendable {
+        let source: NativeWatchAudio
+        let binding: VoiceBinding
+        let runtime: VoiceRemoteRuntime?
+        let lease: NativeTaskAIEditorLease
+        let cancellation: NativeAttachmentCancellation
+        let speechNow: String
+        let timeZone: String
+    }
+    private var watchAudioCommitCheck: (() throws -> Void)?
+
+    private static let aiTextConfigurationCommitMethods: Set<String> = ["iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2"]
+    private static func aiTextConfigurationMethod(_ suffix: String, version: Int) -> String { "iosAITextConfiguration" + suffix + (version == 2 ? "V2" : "") }
+    private static func aiTextConfigurationVersion(_ command: PendingCommand) -> Int { command.method == "iosAITextConfigurationCommitV2" ? 2 : 1 }
+    fileprivate static let aiTextConfigurationMethods: Set<String> = ["iosAITextModelDiscovery", "iosAIAnthropicThinkingOptions", "iosAITextConfiguration", "iosAITextConfigurationOptions", "iosAITextConfigurationPrepare", "iosAITextConfigurationValidate", "iosAITextConfigurationCommit", "iosAITextConfigurationRetryOutcome", "iosAITextConfigurationAcknowledged", "iosAITextConfigurationSensitive", "iosAITextConfigurationSessionOpen", "iosAITextConfigurationSessionCheck", "iosAITextConfigurationSessionRefresh", "iosAITextConfigurationSessionClose", "iosAITextConfigurationV2", "iosAITextConfigurationOptionsV2", "iosAITextConfigurationPrepareV2", "iosAITextConfigurationValidateV2", "iosAITextConfigurationCommitV2", "iosAITextConfigurationRetryOutcomeV2", "iosAITextConfigurationConsentTargetV2", "iosAITextConfigurationSensitiveV2", "iosAITextConfigurationSessionOpenV2"]
     private final class AIRequestTimeoutTurn {
         let id: UUID
         let runtime: JSContext
@@ -3232,6 +4755,11 @@ private final class Engine: @unchecked Sendable {
         var receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt?
         var source: NativeAttachmentFiles.CacheSourceProof?
         var sourceToken: String?
+        var cloudKitRecordName: String?
+        var dropboxCloudKey: String?
+        var cloudKitBridge: NativeCloudKitBridge?
+        var cloudKitJobs: NativeCloudKitJobs?
+        var cloudKitFetchID: String?
         init(generation: UInt64, runtime: JSContext, jobs: NativeAttachmentFileJobs, storage: NativeDeviceKV,
              request: NativeAttachmentDraftCoordinator.AvailabilityDownloadRequest, cancellation: NativeAttachmentCancellation,
              editor: EditorDraftStore.OwnedCheckpoint,
@@ -3326,13 +4854,26 @@ private final class Engine: @unchecked Sendable {
     // The UI owns the offer deadline; a journal or settled Undo owns exact retry.
     private var confirmedInboxDecisionEnvelope: String?
     private var confirmedInboxUndoEnvelope: String?
+    private var confirmedRowQuickStatusEnvelope: String?
+    private var confirmedInlineChecklistEnvelope: String?
     private var confirmedDoneTaskStatusEnvelope: String?
     private var confirmedReferenceTaskBackdateEnvelope: String?
+    private var confirmedChecklistMoveEnvelope: String?
+    private var confirmedChecklistMoveUndoEnvelope: String?
+    private var startupChecklistMoveResult: (method: String, result: String)?
+    private var startupConversionResult: (method: String, result: String)?
+    private var confirmedProjectToSectionEnvelope: String?
+    private var confirmedTaskPromoteEnvelope: String?
+    private var confirmedRowTaskFocusEnvelope: String?
+    private var confirmedRowTaskDatesEnvelope: String?
+    private var confirmedRowTaskDestinationEnvelope: String?
+    private var confirmedRowTaskBackdateEnvelope: String?
     private var confirmedReferenceTaskDestinationEnvelope: String?
     // Independent of the mutable completion/Undo notice cache.
     private var referenceProjectNextActionOrigin: [String: Any]?
     private var confirmedReferenceProjectNextActionEnvelope: String?
     private var startupReferenceProjectNextActionResult: String?
+    private var startupReferenceProjectNextActionSource: String?
     private var confirmedDoneTaskCompletedAtEnvelope: String?
     private var confirmedArchiveTaskCompletedAtEnvelope: String?
     private var confirmedTaskCompletionUndoEnvelope: String?
@@ -3344,21 +4885,27 @@ private final class Engine: @unchecked Sendable {
     private var lastPomodoroProjectionReloaded = false
     private var startupPomodoroResult: String?
     private var confirmedInboxTasksMoveEnvelope: String?
+    private var confirmedProjectTasksMoveEnvelope: String?
     private var confirmedReferenceTasksMoveEnvelope: String?
     private var confirmedInboxTasksAddTagEnvelope: String?
+    private var confirmedProjectTasksAddTagEnvelope: String?
     private var confirmedInboxTasksRemoveTagEnvelope: String?
+    private var confirmedProjectTasksRemoveTagEnvelope: String?
     private var confirmedInboxTasksOrganizeEnvelope: String?
+    private var confirmedProjectTasksOrganizeEnvelope: String?
     private var confirmedInboxOrganizeDestinationCreateEnvelope: String?
+    private var confirmedProjectOrganizeDestinationCreateEnvelope: String?
     private var confirmedReferenceTasksAddTagEnvelope: String?
     private var confirmedReferenceTasksRemoveTagEnvelope: String?
     private var confirmedArchivedTasksDeleteEnvelope: String?
     private var confirmedArchivedTasksDeleteUndoEnvelope: String?
+    private var confirmedProjectTasksDeleteEnvelope: String?
+    private var confirmedProjectTasksDeleteUndoEnvelope: String?
     private var confirmedProjectLifecycleEnvelope: String?
     private var confirmedTaskDeleteEnvelope: String?
     private var confirmedTaskDeleteUndoEnvelope: String?
     private var confirmedProjectDeleteEnvelope: String?
-    private var confirmedSomedaySectionMoveEnvelope: String?
-    private var confirmedSomedaySectionUndoEnvelope: String?
+    private var confirmedSomedayMoveEnvelopes: [String: String] = [:]
     private var boardReadLogged = false
     private var boardActionLogged = false
     private var boardMoveLogged = false
@@ -3380,20 +4927,33 @@ private final class Engine: @unchecked Sendable {
     private var startupTrashItemsRestoreResult: String?
     private var startupTrashItemsPurgeResult: String?
     private var startupInboxTasksMoveResult: String?
+    private var startupProjectTasksMoveResult: String?
     private var startupReferenceTasksMoveResult: String?
     private var startupInboxTasksAddTagResult: String?
+    private var startupProjectTasksAddTagResult: String?
     private var startupInboxTasksRemoveTagResult: String?
+    private var startupProjectTasksRemoveTagResult: String?
     private var startupInboxTasksOrganizeResult: String?
+    private var startupProjectTasksOrganizeResult: String?
     private var startupInboxOrganizeDestinationCreateResult: String?
+    private var startupProjectOrganizeDestinationCreateResult: String?
     private var startupReferenceTasksAddTagResult: String?
     private var startupReferenceTasksRemoveTagResult: String?
     private var startupArchivedTasksDeleteResult: String?
     private var startupArchivedTasksDeleteUndoResult: String?
+    private var startupProjectTasksDeleteResult: String?
+    private var startupProjectTasksDeleteUndoResult: String?
     private var startupTaskCompletionResult: String?
     private var startupTaskCompletionSource: String?
     private var startupTaskCompletionRequestID: String?
+    private var startupRowQuickStatusResult: String?
+    private var startupInlineChecklistResult: String?
     private var startupDoneTaskStatusResult: String?
     private var startupReferenceTaskBackdateResult: String?
+    private var startupRowTaskFocusResult: String?
+    private var startupRowTaskDatesResult: String?
+    private var startupRowTaskDestinationResult: String?
+    private var startupRowTaskBackdateResult: String?
     private var startupReferenceTaskDestinationResult: String?
     private var startupDoneTaskStatusSource: String?
     private var startupDoneTaskCompletedAtResult: String?
@@ -3408,6 +4968,7 @@ private final class Engine: @unchecked Sendable {
     private var startupTaskPromoteResult: String?
     private var startupCalendarResult: String?
     private var startupMindSweepResult: String?
+    private var startupReviewProjectTaskResult: String?
     private var startupProjectCreateResult: String?
     private var startupProjectSectionCreateResult: String?
     private var startupProjectSectionRenameResult: String?
@@ -3418,7 +4979,10 @@ private final class Engine: @unchecked Sendable {
     private var backupUnreturnedReply: String?
     private var startupBackupDocumentResult: String?
     private var startupDataSettingResult: String?
+    private var startupGettingStartedResult: String?
     private var startupGeneralPreferenceResult: String?
+    private var startupAITextConfigurationResult: String?
+    private var startupAITextConfigurationMethod: String?
     private var startupAIRequestTimeoutResult: String?
     private var startupAIReasoningEffortResult: String?
     private var startupAIGeminiThinkingBudgetResult: String?
@@ -3466,8 +5030,7 @@ private final class Engine: @unchecked Sendable {
     private var startupSomedaySectionDeleteResult: String?
     private var startupSomedaySectionOrderResult: String?
     private var startupSomedaySectionTaskResult: String?
-    private var startupSomedaySectionMoveResult: String?
-    private var startupSomedaySectionUndoResult: String?
+    private var startupSomedaySectionMoveResult: (method: String, value: String)?
     #if DEBUG
     var faults: HostIOFaults?
     #endif
@@ -3475,19 +5038,20 @@ private final class Engine: @unchecked Sendable {
     private static let methods: [String: Int] = [
         "pomodoroPanelReadHost": 1, "pomodoroAlarmReadHost": 0, "pomodoroSessionReadHost": 0, "pomodoroTransitionWrite": 1, "pomodoroTransitionRetryOutcome": 1, "pomodoroTasks": 1,
         "logLine": 2,
-        "dataSetting": 1,
+        "dataSetting": 1, "gettingStarted": 1,
+        "archiveRetentionOptions": 0, "archiveRetentionReview": 1,
         "window": 3, "inboxView": 1, "focus": 1, "focusWindow": 4, "theme": 1, "areaFilter": 0, "setAreaFilter": 1,
-        "captureOpen": 0, "captureView": 1, "captureEdit": 1, "captureSubmit": 1, "captureLinesSubmit": 1,
-        "language": 2, "languageSaved": 2, "strings": 1, "complete": 1, "taskView": 1, "taskShare": 1, "taskOpenTab": 1, "taskViewReferenceTarget": 1, "editorModel": 1, "taskEditorDraftDirection": 1, "taskEditorResumeCheck": 1, "taskAttachmentList": 1, "taskAttachmentOpen": 1, "taskAttachmentLinks": 1, "taskAttachmentRemove": 1, "editDraft": 1, "saveDraft": 1, "search": 1,
+        "captureOpen": 0, "captureView": 1, "captureEdit": 1, "captureSubmit": 1, "captureCopilotSubmit": 1, "captureCopilotEdit": 1, "captureLinesSubmit": 1,
+        "language": 2, "languageSaved": 2, "strings": 1, "complete": 1, "taskView": 1, "taskShare": 1, "taskOpenTab": 1, "taskViewReferenceTarget": 1, "editorModel": 1, "taskEditorDraftDirection": 1, "taskEditorResumeCheck": 1, "taskEditorSectionHelp": 0, "taskAttachmentList": 1, "taskAttachmentOpen": 1, "taskAttachmentLinks": 1, "taskAttachmentRemove": 1, "editDraft": 1, "saveDraft": 1, "search": 1,
         "projects": 0, "projectDetail": 4, "projectNotes": 4, "projectAttachmentList": 1, "projectAttachmentOpen": 1, "projectCreateOptions": 0, "projectCreate": 1, "projectCreateRetryOutcome": 1,
         "projectSectionOptions": 1, "projectSectionCreate": 1, "projectSectionCreateRetryOutcome": 1,
         "projectSectionRenameOptions": 1, "projectSectionRename": 1, "projectSectionRenameRetryOutcome": 1,
         "projectSectionDeleteOptions": 1, "projectSectionDelete": 1, "projectSectionDeleteRetryOutcome": 1,
         "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
         "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
-        "gtdWorkflowOptions": 1, "gtdPomodoroOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "iosEntityOpen": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "iosAIRequestTimeout": 1, "iosAIReasoningEffort": 1, "iosAIGeminiThinkingBudget": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
-        "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1, "calendarSubscriptionSetting": 1, "calendarSubscriptionAdd": 1,
+        "gtdWorkflowOptions": 1, "gtdPomodoroOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdCaptureAudioOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
+        "shareCaptureSubmit": 1, "iosShareCaptureDraft": 1, "iosEntityOpen": 1, "iosProductionWidgetTaskOpen": 1, "iosWatchSnapshot": 0, "iosWatchIngest": 1, "iosWatchAudioIngest": 1, "watchPomodoroSubmit": 1, "iosWidgetNextSnapshot": 0, "iosWidgetNextActionSnapshot": 0, "iosWidgetFamilySnapshot": 1, "widgetCompletionSubmit": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "iosAITextConfigurationV2": 1, "iosAITextConfiguration": 1, "iosAIRequestTimeout": 1, "iosAIReasoningEffort": 1, "iosAIGeminiThinkingBudget": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
+        "appLockDelayOptions": 1, "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1, "calendarSubscriptionSetting": 1, "calendarSubscriptionAdd": 1,
         "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
         "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
         "managePersonDeleteOptions": 1, "managePersonDelete": 1, "managePersonDeleteRetryOutcome": 1,
@@ -3514,35 +5078,55 @@ private final class Engine: @unchecked Sendable {
         "archivedTasksRestoreWrite": 1, "archivedTasksRestoreRetryOutcome": 1,
         "trashItemsRestoreWrite": 1, "trashItemsRestoreRetryOutcome": 1, "trashItemsPurgeWrite": 1, "trashItemsPurgeRetryOutcome": 1, "trashSelection": 1,
         "inboxTasksMoveWrite": 1, "inboxTasksMoveRetryOutcome": 1, "inboxTasksMoveNotice": 1,
+        "projectTasksMoveWrite": 1, "projectTasksMoveRetryOutcome": 1, "projectTasksMoveNotice": 1,
         "referenceTasksMoveWrite": 1, "referenceTasksMoveRetryOutcome": 1, "referenceTasksMoveNotice": 1,
         "inboxTasksRemoveTagWrite": 1, "inboxTasksRemoveTagRetryOutcome": 1,
+        "projectTasksRemoveTagWrite": 1, "projectTasksRemoveTagRetryOutcome": 1,
         "inboxTasksOrganizeWrite": 1, "inboxTasksOrganizeRetryOutcome": 1,
+        "projectTasksOrganizeWrite": 1, "projectTasksOrganizeRetryOutcome": 1,
         "inboxOrganizeDestinationCreateWrite": 1, "inboxOrganizeDestinationCreateRetryOutcome": 1,
-        "inboxTasksAddTagWrite": 1, "inboxTasksAddTagRetryOutcome": 1, "inboxBulkTagInput": 2,
+        "projectOrganizeDestinationCreateWrite": 1, "projectOrganizeDestinationCreateRetryOutcome": 1,
+        "inboxTasksAddTagWrite": 1, "inboxTasksAddTagRetryOutcome": 1,
+        "projectTasksAddTagWrite": 1, "projectTasksAddTagRetryOutcome": 1, "inboxBulkTagInput": 2,
         "referenceTasksAddTagWrite": 1, "referenceTasksAddTagRetryOutcome": 1,
         "referenceTasksRemoveTagWrite": 1, "referenceTasksRemoveTagRetryOutcome": 1, "referenceBulkTagInput": 2,
         "archivedTasksDeleteWrite": 1, "archivedTasksDeleteRetryOutcome": 1,
         "archivedTasksDeleteUndoWrite": 1, "archivedTasksDeleteUndoRetryOutcome": 1,
+        "projectTasksDeleteWrite": 1, "projectTasksDeleteRetryOutcome": 1,
+        "projectTasksDeleteUndoWrite": 1, "projectTasksDeleteUndoRetryOutcome": 1,
         "taskDelete": 1, "taskDeleteReceiptOutcome": 1, "taskDeleteUndo": 1, "taskDeleteUndoReceiptOutcome": 1, "taskPromote": 1, "trashTaskRestoreWrite": 1, "trashTaskRestoreRetryOutcome": 1,
         "trashProjectRestoreWrite": 1, "trashProjectRestoreRetryOutcome": 1,
         "projectDeleteWrite": 1, "projectDeleteRetryOutcome": 1, "projectDeleteReceiptOutcome": 1, "projectDeleteUndo": 1, "projectDeleteUndoRetryOutcome": 1,
         "projectDuplicateWrite": 1, "projectDuplicateRetryOutcome": 1,
         "projectLifecycleWrite": 1, "projectLifecycleRetryOutcome": 1, "projectLifecycleReceiptOutcome": 1,
         "reviewTaskWrite": 1,
+        "rowQuickStatusOptions": 1, "rowQuickStatusWrite": 1, "rowQuickStatusRetryOutcome": 1,
+        "inlineChecklistWrite": 1, "inlineChecklistRetryOutcome": 1,
         "doneTaskStatusOptions": 1, "doneTaskStatusWrite": 1, "doneTaskStatusRetryOutcome": 1,
         "referenceTaskBackdateOptions": 1, "referenceTaskBackdate": 1, "referenceTaskBackdateRetryOutcome": 1,
+        "taskChecklistMoveOptions": 1, "taskChecklistMove": 1, "taskChecklistMoveRetryOutcome": 1,
+        "taskChecklistMoveUndo": 1, "taskChecklistMoveUndoRetryOutcome": 1,
+        "taskPromoteOptions": 1, "taskPromoteUndoWrite": 1, "taskPromoteUndoRetryOutcome": 1,
+        "projectToSectionOptions": 1, "projectToSectionWrite": 1, "projectToSectionRetryOutcome": 1,
+        "projectToSectionUndoWrite": 1, "projectToSectionUndoRetryOutcome": 1,
+        "taskRowSwipeActions": 1, "rowTaskFocus": 1, "rowTaskFocusRetryOutcome": 1,
+        "rowTaskDates": 1, "rowTaskDatesRetryOutcome": 1,
+        "rowTaskDestinationOptions": 1, "rowTaskDestination": 1, "rowTaskDestinationRetryOutcome": 1,
+        "rowTaskBackdateOptions": 1, "rowTaskBackdate": 1, "rowTaskBackdateRetryOutcome": 1,
         "referenceTaskDestinationOptions": 1, "referenceTaskDestination": 1, "referenceTaskDestinationRetryOutcome": 1,
         "referenceProjectNextActionOptions": 1, "referenceProjectNextActionInput": 1, "referenceProjectNextAction": 1, "referenceProjectNextActionRetryOutcome": 1,
         "doneTaskCompletedAtOptions": 1, "doneTaskCompletedAtWrite": 1, "doneTaskCompletedAtRetryOutcome": 1,
         "archiveTaskCompletedAtOptions": 1, "archiveTaskCompletedAtWrite": 1, "archiveTaskCompletedAtRetryOutcome": 1,
         "somedaySectionMoveOptions": 1, "somedaySectionMoveWrite": 1, "somedaySectionMoveUndo": 1,
         "somedaySectionMoveRetryOutcome": 1, "somedaySectionMoveUndoRetryOutcome": 1,
+        "somedaySectionBulkMoveOptions": 1, "somedaySectionBulkMoveWrite": 1, "somedaySectionBulkMoveUndo": 1,
+        "somedaySectionBulkMoveRetryOutcome": 1, "somedaySectionBulkMoveUndoRetryOutcome": 1,
         "taskFocusOptions": 1, "taskFocusWrite": 1, "taskFocusRetryOutcome": 1,
         "focusOrderOptions": 1, "focusOrderWrite": 1, "focusOrderRetryOutcome": 1,
         "focusSavedFilterOptions": 1, "focusSavedFilterWrite": 1, "focusSavedFilterRetryOutcome": 1,
-        "savedSearchOptions": 1, "savedSearchWrite": 1, "savedSearchRetryOutcome": 1,
+        "savedSearchSortOptions": 1, "savedSearchOptions": 1, "savedSearchWrite": 1, "savedSearchRetryOutcome": 1,
         "projectRenameOptions": 1, "projectRenameWrite": 1, "projectRenameRetryOutcome": 1,
-        "projectFlowOptions": 1, "projectFlowWrite": 1, "projectFlowRetryOutcome": 1,
+        "projectFlowOptions": 1, "projectFlowModeOptions": 1, "projectSectionFlowOptions": 1, "projectFlowWrite": 1, "projectFlowRetryOutcome": 1,
         "projectTaskSortOptions": 1, "projectTaskSortWrite": 1, "projectTaskSortRetryOutcome": 1,
         "projectTaskOrderWrite": 1, "projectTaskOrderRetryOutcome": 1,
         "projectNotesEditOptions": 1, "projectNotesReferenceTarget": 1, "projectNotesDraftDirection": 1, "projectNotesWrite": 1, "projectNotesWriteRetryOutcome": 1,
@@ -3554,13 +5138,13 @@ private final class Engine: @unchecked Sendable {
         "projectAreaOptions": 1, "projectAreaWrite": 1, "projectAreaRetryOutcome": 1,
         "menuRead": 2, "archiveTaskSelection": 1, "doneBulkTagInput": 2, "destinationPicker": 1, "editorSuggestions": 4, "calendarPreference": 1, "calendarUnschedule": 1, "calendarDelete": 1, "boardAction": 1,
         "calendarComposerOpen": 1, "calendarComposerEdit": 1, "calendarComposerSave": 1, "calendarEventTaskCreate": 1,
-        "mindSweepGuide": 1, "mindSweepAdd": 1,
-        "inboxStart": 1, "inboxStep": 1, "inboxEnd": 1,
+        "mindSweepGuide": 1, "mindSweepAdd": 1, "weeklyReviewProjectTaskOptions": 1, "weeklyReviewProjectTaskWrite": 1, "reviewAISuggestionsWrite": 1,
+        "inboxStart": 1, "inboxStartDetailed": 1, "inboxStep": 1, "inboxEditorReload": 1, "inboxEnd": 1,
         "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
         "inboxUndo": 1, "inboxUndoRetryOutcome": 1,
         "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
     ]
-    private static let mutations: Set<String> = ["iosAIRequestTimeout", "iosAIReasoningEffort", "iosAIGeminiThinkingBudget", "pomodoroTransitionWrite", "calendarSubscriptionAdd", "calendarSubscriptionSetting", "deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "inboxTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "referenceTasksMoveWrite", "inboxTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "captureLinesSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
+    private static let mutations: Set<String> = ["taskPromoteUndoWrite", "projectToSectionWrite", "projectToSectionUndoWrite", "rowTaskFocus", "rowTaskDates", "rowTaskDestination", "taskChecklistMove", "taskChecklistMoveUndo", "rowQuickStatusWrite", "inlineChecklistWrite", "watchPomodoroSubmit", "iosWatchIngest", "iosWatchAudioIngest", "widgetCompletionSubmit", "shareCaptureSubmit", "reviewAISuggestionsWrite", "iosAITextConfigurationV2", "iosAITextConfiguration", "iosAIRequestTimeout", "iosAIReasoningEffort", "iosAIGeminiThinkingBudget", "pomodoroTransitionWrite", "calendarSubscriptionAdd", "calendarSubscriptionSetting", "deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "gettingStarted", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "projectTasksAddTagWrite", "inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "projectTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite", "referenceTasksMoveWrite", "inboxTasksMoveWrite", "projectTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "rowTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "captureCopilotSubmit", "captureLinesSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "somedaySectionBulkMoveWrite", "somedaySectionBulkMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -3593,9 +5177,11 @@ private final class Engine: @unchecked Sendable {
     }
 
     init(queue: DispatchQueue, databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage? = nil,
+         rnAdoptionContainerURL: URL? = nil,
          deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
          workspaceMode: NativeWorkspaceMode = .personal, restrictedFixtureRoot: URL? = nil, localRequests: NativeAttachmentLocalRequests,
-         reminderAdmissions: NativeReminderEffects) {
+         reminderAdmissions: NativeReminderEffects, dropboxAuthorization: NativeDropboxAuthorizationBinding? = nil) {
+        self.dropboxAuthorization = dropboxAuthorization
         self.queue = queue
         self.workspaceMode = workspaceMode
         self.restrictedFixtureRoot = restrictedFixtureRoot
@@ -3608,6 +5194,7 @@ private final class Engine: @unchecked Sendable {
         backupImportFile = NativeBackupImportFile(libraryRoot: databaseURL.deletingLastPathComponent())
         backupOperationFiles = NativeBackupOperationFiles(libraryRoot: databaseURL.deletingLastPathComponent())
         self.legacyStorage = legacyStorage
+        self.rnAdoptionContainerURL = rnAdoptionContainerURL
         self.deviceStorageLocation = deviceStorage
         journalURL = databaseURL.appendingPathExtension("pending.json")
         editorDrafts = EditorDraftStore(databaseURL: databaseURL)
@@ -3620,7 +5207,9 @@ private final class Engine: @unchecked Sendable {
         guard let journalData = try readJournalBytes(maximumBytes: nil,
             failure: HostFailure("Invalid pending command journal"), singleLink: false) else { return nil }
         guard let raw = try NativeJSON.jsonObject(with: journalData) as? [String: Any],
-              Set(raw.keys).isSubset(of: ["version", "method", "argumentsJSON", "terminal", "editorDraft"]),
+              Set(raw.keys).isSubset(of: (raw["method"] as? String).flatMap(VoiceAction.init(commit:)) == nil
+                ? ["version", "method", "argumentsJSON", "terminal", "editorDraft"]
+                : ["version", "method", "argumentsJSON", "terminal", "voiceFiles"]),
               raw["editorDraft"] == nil || (raw["editorDraft"] as? [String: Any]).map({
                   Set($0.keys) == Set(["id", "sessionID", "taskID", "generation", "method", "argumentsJSON"])
               }) == true,
@@ -3746,13 +5335,13 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if saved.method == "inboxTasksAddTagCommit" {
+        if ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(saved.method) {
             guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)),
                   Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
                     || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
                 throw HostFailure("INVALID_INPUT: Malformed Inbox bulk Add tag journal")
             }
-            _ = try inboxTasksAddTagJournalArguments(saved)
+            _ = try taskListAddTagJournalArguments(saved)
             if let terminal = raw["terminal"] {
                 guard let encoded = terminal as? [String: Any], encoded.count == 1,
                       let name = encoded.keys.first, ["success", "rejected"].contains(name),
@@ -3769,13 +5358,13 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if saved.method == "inboxTasksRemoveTagCommit" {
+        if ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(saved.method) {
             guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)),
                   Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
                     || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
                 throw HostFailure("INVALID_INPUT: Malformed Inbox bulk Remove tag journal")
             }
-            _ = try inboxTasksRemoveTagJournalArguments(saved)
+            _ = try taskListRemoveTagJournalArguments(saved)
             if let terminal = raw["terminal"] {
                 guard let encoded = terminal as? [String: Any], encoded.count == 1,
                       let name = encoded.keys.first, ["success", "rejected"].contains(name),
@@ -3793,13 +5382,35 @@ private final class Engine: @unchecked Sendable {
             }
         }
 
-        if saved.method == "inboxTasksOrganizeCommit" {
+        if ["projectTasksDeleteCommit", "projectTasksDeleteUndoCommit"].contains(saved.method) {
+            guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)),
+                  Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
+                    || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
+                throw HostFailure("INVALID_INPUT: Malformed Project bulk Delete journal")
+            }
+            _ = try taskListDeleteJournalArguments(saved)
+            if let terminal = raw["terminal"] {
+                guard let encoded = terminal as? [String: Any], encoded.count == 1,
+                      let name = encoded.keys.first, ["success", "rejected"].contains(name),
+                      let payload = encoded[name] as? [String: Any], Set(payload.keys) == Set(["_0"]),
+                      let value = payload["_0"] as? String else {
+                    throw HostFailure("INVALID_INPUT: Malformed Project bulk Delete terminal")
+                }
+                if name == "success" { try validatePreparedAcknowledgment(saved, value: value) }
+                else {
+                    guard value.utf8.count <= 4096, isDefiniteRejection(value, method: saved.method) else {
+                        throw HostFailure("INVALID_INPUT: Malformed Project bulk Delete refusal")
+                    }
+                }
+            }
+        }
+        if ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(saved.method) {
             guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)),
                   Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
                     || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
                 throw HostFailure("INVALID_INPUT: Malformed Inbox bulk Organize journal")
             }
-            _ = try inboxTasksOrganizeJournalArguments(saved)
+            _ = try taskListOrganizeJournalArguments(saved)
             if let terminal = raw["terminal"] {
                 guard let encoded = terminal as? [String: Any], encoded.count == 1,
                       let name = encoded.keys.first, ["success", "rejected"].contains(name),
@@ -3816,13 +5427,13 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if saved.method == "inboxOrganizeDestinationCreateCommit" {
+        if ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(saved.method) {
             guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)),
                   Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
                     || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
                 throw HostFailure("INVALID_INPUT: Malformed Inbox Organize destination creation journal")
             }
-            _ = try inboxOrganizeDestinationCreateJournalArguments(saved)
+            _ = try taskListOrganizeDestinationCreateJournalArguments(saved)
             if let terminal = raw["terminal"] {
                 guard let encoded = terminal as? [String: Any], encoded.count == 1,
                       let name = encoded.keys.first, ["success", "rejected"].contains(name),
@@ -3839,13 +5450,13 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if saved.method == "inboxTasksMoveCommit" {
+        if ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(saved.method) {
             guard try NativeJSON.hasUniqueObjectKeys(String(decoding: journalData, as: UTF8.self)),
                   Set(raw.keys) == Set(["version", "method", "argumentsJSON"])
                     || Set(raw.keys) == Set(["version", "method", "argumentsJSON", "terminal"]) else {
                 throw HostFailure("INVALID_INPUT: Malformed Inbox bulk Move journal")
             }
-            _ = try inboxTasksMoveJournalArguments(saved)
+            _ = try taskListMoveJournalArguments(saved)
             if let terminal = raw["terminal"] {
                 guard let encoded = terminal as? [String: Any], encoded.count == 1,
                       let name = encoded.keys.first, ["success", "rejected"].contains(name),
@@ -3939,6 +5550,7 @@ private final class Engine: @unchecked Sendable {
         case .success(let value):
             _ = try NativeJSON.jsonObject(with: Data(value.utf8), options: [.fragmentsAllowed])
             if saved.method == "dataSetting" { try validateDataSettingAcknowledgment(value) }
+            if saved.method == "gettingStarted" { try validateGettingStartedAcknowledgment(value) }
             if saved.method == "reminderCompletionCommit" { try validateReminderCompletionResult(value) }
             if saved.method == "reminderSnoozeCommit" {
                 let args = try reminderSnoozeJournalArguments(saved)
@@ -3955,6 +5567,60 @@ private final class Engine: @unchecked Sendable {
         return saved
     }
 
+    private static var rnAdoptionFailure: HostFailure { HostFailure("RN adoption storage requires recovery") }
+
+    private func prepareRNAdoptionDirectories() throws {
+        guard let container = rnAdoptionContainerURL, rnAdoptionDirectories.isEmpty else { throw Self.rnAdoptionFailure }
+        let root = Darwin.open(container.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+        guard root >= 0 else { throw Self.rnAdoptionFailure }
+        rnAdoptionDirectories.append((container, root))
+        var parent = root, path = container
+        for component in ["Documents", "SQLite"] {
+            if mkdirat(parent, component, 0o700) == 0 {
+                guard fsync(parent) == 0 else { throw Self.rnAdoptionFailure }
+            } else if errno != EEXIST { throw Self.rnAdoptionFailure }
+            let child = openat(parent, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard child >= 0 else { throw Self.rnAdoptionFailure }
+            path.appendPathComponent(component, isDirectory: true)
+            rnAdoptionDirectories.append((path, child))
+            parent = child
+        }
+        try verifyRNAdoptionDirectories()
+        try verifyRNAdoptionDatabaseFiles()
+        lockFD = openat(parent, databaseURL.appendingPathExtension("host-lock").lastPathComponent,
+                        O_CREAT | O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
+        guard lockFD >= 0, fsync(parent) == 0 else { throw Self.rnAdoptionFailure }
+        try verifyRNAdoptionDirectories()
+    }
+
+    private func verifyRNAdoptionDirectories() throws {
+        guard rnAdoptionDirectories.count == 3 else { throw Self.rnAdoptionFailure }
+        for directory in rnAdoptionDirectories {
+            let namedFD = Darwin.open(directory.url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+            guard namedFD >= 0 else { throw Self.rnAdoptionFailure }
+            defer { Darwin.close(namedFD) }
+            var descriptor = stat(), named = stat()
+            guard fstat(directory.fd, &descriptor) == 0, fstat(namedFD, &named) == 0,
+                  descriptor.st_dev == named.st_dev, descriptor.st_ino == named.st_ino else { throw Self.rnAdoptionFailure }
+        }
+        if lockFD >= 0, let parent = rnAdoptionDirectories.last {
+            var descriptor = stat(), named = stat()
+            guard fstat(lockFD, &descriptor) == 0,
+                  descriptor.st_mode & S_IFMT == S_IFREG, descriptor.st_nlink == 1,
+                  fstatat(parent.fd, databaseURL.appendingPathExtension("host-lock").lastPathComponent, &named, AT_SYMLINK_NOFOLLOW) == 0,
+                  named.st_mode & S_IFMT == S_IFREG, named.st_nlink == 1,
+                  descriptor.st_dev == named.st_dev, descriptor.st_ino == named.st_ino else { throw Self.rnAdoptionFailure }
+        }
+    }
+
+    private func verifyRNAdoptionDatabaseFiles() throws {
+        do {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                _ = try Self.bindingIdentity(URL(fileURLWithPath: databaseURL.path + suffix))
+            }
+        } catch { throw Self.rnAdoptionFailure }
+    }
+
     func start(retainingReminderResponseIDs: [String]?) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         let retentionJSON: String
@@ -3969,21 +5635,33 @@ private final class Engine: @unchecked Sendable {
         guard reminderEffectsTurn == nil, pomodoroAlarmTurn == nil else { throw NativeReminderEffects.unavailable }
         do {
             if started {
+                if rnAdoptionContainerURL != nil { try verifyRNAdoptionDirectories() }
                 try denyCleanupOwner()
                 return try startupWindow(retentionJSON: retentionJSON)
             }
             try validateRestrictedFixtureStorage()
             let source = try String(contentsOf: bundleURL, encoding: .utf8)
             guard !source.isEmpty else { throw HostFailure("Core bundle is empty") }
-            try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            try DurableFile.sync(databaseURL.deletingLastPathComponent().deletingLastPathComponent(), directory: true)
-            lockFD = open(databaseURL.appendingPathExtension("host-lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+            if rnAdoptionContainerURL != nil {
+                try prepareRNAdoptionDirectories()
+            } else {
+                try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+                try DurableFile.sync(databaseURL.deletingLastPathComponent().deletingLastPathComponent(), directory: true)
+                lockFD = open(databaseURL.appendingPathExtension("host-lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+            }
             guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw HostFailure("Native database is already in use or cannot be locked") }
+            if let container = rnAdoptionContainerURL {
+                guard let location = deviceStorageLocation else { throw Self.rnAdoptionFailure }
+                try verifyRNAdoptionDirectories()
+                let snapshot = try LegacyRNStorage(containerURL: container, bundleIdentifier: location.bundleIdentifier)
+                guard !snapshot.deviceNamespaceSnapshot().hasPopulatedLegacyCopy else { throw Self.rnAdoptionFailure }
+                legacyStorage = snapshot
+            }
             if workspaceMode == .personal {
             // Device storage is explicitly opted in; an unavailable namespace
             // leaves a refusing port, never an empty fallback or failed boot.
-            if let location = deviceStorageLocation {
+            if rnAdoptionContainerURL == nil, let location = deviceStorageLocation {
                 deviceStorage = try? NativeDeviceKV(containerURL: location.containerURL, bundleIdentifier: location.bundleIdentifier)
                 #if DEBUG
                 if let deviceStorage { faults?.configureDeviceStorage?(deviceStorage) }
@@ -3991,8 +5669,17 @@ private final class Engine: @unchecked Sendable {
             }
             // Optional platform capability: failure leaves attachments unbound,
             // never prevents database recovery or leaks the exclusive lock.
-            attachmentJobs = try? NativeAttachmentFileJobs(libraryRoot: databaseURL.deletingLastPathComponent())
-            let calendarFiles = try? NativeAttachmentFiles(libraryRoot: databaseURL.deletingLastPathComponent())
+            let calendarFiles: NativeAttachmentFiles?
+            if let container = rnAdoptionContainerURL {
+                attachmentJobs = try? NativeAttachmentFileJobs(rnAdoptionContainerURL: container)
+                calendarFiles = attachmentJobs?.files
+                if attachmentJobs != nil {
+                    NSLog("Native iOS RN candidate attachment roots bound releaseCheck=v1.3.8/ios-rn-candidate-attachment-roots outcome=bound")
+                }
+            } else {
+                attachmentJobs = try? NativeAttachmentFileJobs(libraryRoot: databaseURL.deletingLastPathComponent())
+                calendarFiles = try? NativeAttachmentFiles(libraryRoot: databaseURL.deletingLastPathComponent())
+            }
             let readCalendarFile: (String, NativeAttachmentCancellation) throws -> Data = { uri, cancellation in
                 guard let calendarFiles else { throw NativeCalendarReadError.unavailable }
                 return try calendarFiles.readCalendarFile(uri, checkCancellation: cancellation.check)
@@ -4098,367 +5785,11 @@ private final class Engine: @unchecked Sendable {
             guard let host = runtime.objectForKeyedSubscript("MindwtrHost"), !host.isUndefined, !host.isNull else {
                 throw HostFailure("Core bundle has no host contract")
             }
-            if let command = pending, command.method == "captureLinesCommit" {
-                _ = try captureLinesArguments(command)
-                if case .success(let value) = command.terminal { try validateCaptureLinesSuccess(command, value: value) }
-                try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
-                try? backupExportFile.discardInterruptedExports()
-                try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
-            }
-            if let command = pending, command.method == Self.appleReminderMethod {
-                _ = try validateAppleReminderItem(command)
-                try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
-                try? backupExportFile.discardInterruptedExports()
-                try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
-            }
-            if let command = pending, command.method == Self.pomodoroMethod {
-                _ = try invoke("pomodoroTransitionValidate", arguments: pomodoroJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePomodoroResult(command, value: value) }
-                try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
-                try? backupExportFile.discardInterruptedExports()
-                try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
-            }
-            if let command = pending, command.method == Self.ownedSaveMethod {
-                if case .success(let value) = command.terminal { _ = try validateOwnedSaveAcknowledgement(command, value: value) }
-                else { _ = try validateOwnedSaveAcknowledgement(command) }
-            }
-            if let command = pending, command.method == Self.mixedSaveMethod { _ = try validateMixedSave(command) }
-            if let command = pending, command.method == Self.projectDownloadMethod {
-                let state = try projectDownloadJournal(command)
-                _ = try captureProjectDownloadTurn(command: command)
-                _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, state.config[0] ?? "cloud"])
-                try requireProjectDownloadTurn()
-            }
-            if let command = pending, command.method == Self.projectFileAddMethod {
-                let state = try projectFileAddJournal(command)
-                _ = try captureProjectFileAddTurn(command: command)
-                _ = try invoke("projectFileAddWriteValidate", arguments: [state.envelopeJSON])
-                try requireProjectFileAddTurn()
-        try requireProjectDownloadTurn()
-            }
-            if let command = pending, command.method == "draftCommit" {
-                if case .success(let value) = command.terminal { try validateDraftAcknowledgment(command, value: value) }
-                else { try validateDraftAcknowledgment(command) }
-            }
-            if let command = pending, command.method == "boardCommit" {
-                // Full immutable authority is checked before opening SQLite, even
-                // for terminal journals whose remaining work is only cleanup.
-                _ = try invoke("boardValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateBoardAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "taskDeleteCommit" {
-                _ = try invoke("taskDeleteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, let prefix = Self.historyTaskWritePrefix(command.method), command.method == prefix + "Commit" {
-                _ = try invoke(prefix + "Validate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "referenceTasksMoveCommit" {
-                _ = try invoke("referenceTasksMoveValidate", arguments: referenceTasksMoveJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "inboxTasksMoveCommit" {
-                _ = try invoke("inboxTasksMoveValidate", arguments: inboxTasksMoveJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "inboxTasksAddTagCommit" {
-                _ = try invoke("inboxTasksAddTagValidate", arguments: inboxTasksAddTagJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "inboxTasksRemoveTagCommit" {
-                _ = try invoke("inboxTasksRemoveTagValidate", arguments: inboxTasksRemoveTagJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-
-            if let command = pending, command.method == "inboxTasksOrganizeCommit" {
-                _ = try invoke("inboxTasksOrganizeValidate", arguments: inboxTasksOrganizeJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "inboxOrganizeDestinationCreateCommit" {
-                _ = try invoke("inboxOrganizeDestinationCreateValidate", arguments: inboxOrganizeDestinationCreateJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "referenceTasksAddTagCommit" {
-                _ = try invoke("referenceTasksAddTagValidate", arguments: referenceTasksAddTagJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "referenceTasksRemoveTagCommit" {
-                _ = try invoke("referenceTasksRemoveTagValidate", arguments: referenceTasksRemoveTagJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, let prefix = Self.archivedRestorePrefix(command.method) {
-                _ = try invoke(prefix + "Validate", arguments: archivedRestoreJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-                if recoveringTrashItemsPurge {
-                    // A structurally closed purge plan may still have a forged effect.
-                    // Shared pure validation must succeed before optional GC touches bytes.
-                    try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
-                    try? backupExportFile.discardInterruptedExports()
-                    try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
-                }
-            }
-            if let command = pending, let prefix = Self.archivedTasksDeletePrefix(command.method) {
-                _ = try invoke(prefix + "Validate", arguments: archivedTasksDeleteJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(command.method) {
-                _ = try invoke(command.method == "taskCompletionCommit" ? "taskCompletionValidate" : "taskCompletionUndoValidate",
-                               arguments: taskCompletionJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "taskPromoteCommit" {
-                _ = try invoke("validatePreparedTaskPromotion", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "taskDeleteUndoCommit" {
-                _ = try invoke("taskDeleteUndoValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["projectDeleteCommit", "projectDeleteUndoCommit"].contains(command.method) {
-                _ = try invoke(command.method == "projectDeleteCommit" ? "projectDeleteValidate" : "projectDeleteUndoValidate",
-                               arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectDuplicateCommit" {
-                _ = try invoke("projectDuplicateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectLifecycleCommit" {
-                _ = try invoke("projectLifecycleValidate", arguments: projectLifecycleJournalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectLifecycleAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "trashTaskRestoreCommit" {
-                _ = try invoke("trashTaskRestoreValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "trashProjectRestoreCommit" {
-                _ = try invoke("trashProjectRestoreValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "calendarDeleteCommit" {
-                _ = try invoke("calendarDeleteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateCalendarDeleteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "calendarUnscheduleCommit" {
-                _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "calendarEventTaskCommit" {
-                _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
-                _ = try invoke(command.method == "calendarComposerCommit" ? "calendarComposerValidate" : "calendarComposerCreateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "mindSweepCommit" {
-                _ = try invoke("mindSweepValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateMindSweepAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "inboxPreparedCommit" {
-                _ = try invoke("inboxPreparedValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "inboxUndoCommit" {
-                _ = try invoke("inboxUndoValidate", arguments: inboxUndoJournalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "taskCancellationUndoCommit" {
-                _ = try invoke("taskCancellationUndoValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "checklistPreparedCommit" {
-                _ = try invoke("checklistPreparedValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectCreateCommit" {
-                _ = try invoke("projectCreateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectCreateAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectSectionCreateCommit" {
-                _ = try invoke("projectSectionCreateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectSectionCreateAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectSectionRenameCommit" {
-                _ = try invoke("projectSectionRenameValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectSectionRenameAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectSectionDeleteCommit" {
-                _ = try invoke("projectSectionDeleteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectSectionDeleteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectSectionOrderCommit" {
-                _ = try invoke("projectSectionOrderValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectSectionOrderAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "appLockCommit" {
-                _ = try invoke("appLockValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAppLockAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "gtdWorkflowCommit" {
-                _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateGtdWorkflowAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "notificationSettingCommit" {
-                _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateNotificationSettingAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "iosAIRequestTimeoutCommit" {
-                _ = try invoke("iosAIRequestTimeoutValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAIRequestTimeoutAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "iosAIReasoningEffortCommit" {
-                _ = try invoke("iosAIReasoningEffortValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAIReasoningEffortAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "iosAIGeminiThinkingBudgetCommit" {
-                _ = try invoke("iosAIGeminiThinkingBudgetValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAIGeminiThinkingBudgetAcknowledgment(command, value: value) }
-            }
-            if let command = pending, let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
-                _ = try invoke(operation.rawValue + "Validate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateCalendarSubscriptionSettingAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "deviceCalendarSettingCommit" {
-                _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateDeviceCalendarSettingAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "generalPreferenceCommit" {
-                _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateGeneralPreferenceAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "manageTaxonomyCommit" {
-                _ = try invoke("manageTaxonomyValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateTaxonomyAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "managePersonEditCommit" {
-                _ = try invoke("managePersonEditValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePersonEditAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "managePersonDeleteCommit" {
-                _ = try invoke("managePersonDeleteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePersonDeleteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "managePersonCreateCommit" {
-                _ = try invoke("managePersonCreateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validatePersonCreateAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["areaCreateCommit", "manageAreaCreateCommit"].contains(command.method) {
-                _ = try invoke("areaCreateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAreaCreateAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "areaColorCommit" {
-                _ = try invoke("areaColorValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAreaColorAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["areaRenameCommit", "manageAreaEditCommit"].contains(command.method) {
-                _ = try invoke("areaRenameValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAreaRenameAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "areaOrderCommit" {
-                _ = try invoke("areaOrderValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAreaOrderAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["areaDeleteCommit", "manageAreaDeleteCommit"].contains(command.method) {
-                _ = try invoke("areaDeleteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateAreaDeleteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectFocusCommit" {
-                _ = try invoke("projectFocusValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectFocusAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "taskFocusCommit" {
-                _ = try invoke("taskFocusValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateTaskFocusAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "focusOrderCommit" {
-                _ = try invoke("focusOrderValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateFocusOrderAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "focusSavedFilterCommit" {
-                _ = try invoke("focusSavedFilterValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateFocusSavedFilterAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "savedSearchCommit" {
-                _ = try invoke("savedSearchValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateSavedSearchAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectRenameCommit" {
-                _ = try invoke("projectRenameValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectRenameAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectFlowCommit" {
-                _ = try invoke("projectFlowValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectFlowAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectTaskSortCommit" {
-                _ = try invoke("projectTaskSortValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectTaskSortAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectTaskOrderCommit" {
-                _ = try invoke("projectTaskOrderValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectTaskOrderAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectNotesWriteCommit" {
-                _ = try invoke("projectNotesWriteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectNotesWriteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectTagsWriteCommit" {
-                _ = try invoke("projectTagsWriteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectTagsWriteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["projectAttachmentWriteCommit", "projectFileRemoveWriteCommit"].contains(command.method) {
-                _ = try invoke(command.method == "projectFileRemoveWriteCommit" ? "projectFileRemoveWriteValidate" : "projectAttachmentWriteValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectAttachmentWriteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectStatusCommit" {
-                _ = try invoke("projectStatusValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectStatusAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectDateCommit" {
-                _ = try invoke("projectDateValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectDateAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "projectAreaCommit" {
-                _ = try invoke("projectAreaValidate", arguments: journalArguments(command))
-                if case .success(let value) = command.terminal { try validateProjectAreaAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "focusGroupWrite" {
-                try validateFocusGroupJournal(command)
-                if case .success(let value) = command.terminal { try validateFocusGroupAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "taskListSortWrite" {
-                try validateTaskListSortJournal(command)
-                if case .success(let value) = command.terminal { try validateTaskListSortAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "unassignedAreaColorWrite" {
-                try validateUnassignedAreaColorJournal(command)
-                if case .success(let value) = command.terminal { try validateUnassignedAreaColorAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "somedaySectionCreateWrite" {
-                try validateSomedaySectionCreateJournal(command)
-                if case .success(let value) = command.terminal { try validateSomedaySectionCreateAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "somedaySectionRenameWrite" {
-                try validateSomedaySectionRenameJournal(command)
-                if case .success(let value) = command.terminal { try validateSomedaySectionRenameAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "somedaySectionDeleteWrite" {
-                try validateSomedaySectionDeleteJournal(command)
-                if case .success(let value) = command.terminal { try validateSomedaySectionDeleteAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "somedaySectionOrderWrite" {
-                try validateSomedaySectionOrderJournal(command)
-                if case .success(let value) = command.terminal { try validateSomedaySectionOrderAcknowledgment(command, value: value) }
-            }
-            if let command = pending, command.method == "somedaySectionTaskCommit" {
-                try validateSomedaySectionTaskJournal(command)
-                if case .success(let value) = command.terminal { try validateSomedaySectionTaskAcknowledgment(command, value: value) }
-            }
-            if let command = pending, ["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(command.method) {
-                try validateSomedaySectionMoveJournal(command)
-                if case .success(let value) = command.terminal { try validateSomedaySectionMoveAcknowledgment(command, value: value) }
+            try validatePendingStartupContent(retainedBackup: retainedBackup, recoveringTrashItemsPurge: recoveringTrashItemsPurge)
+            try validatePendingStartupWorkflow()
+            try validatePendingStartupSettings()
+            if pending != nil {
+                NSLog("Native iOS startup validation phase completed releaseCheck=v1.3.8/ios-startup-validation-frame outcome=checked")
             }
             var legacy = cleanupRecovery ? nil : try legacyStorage?.bootState()
             if let legacy {
@@ -4473,6 +5804,10 @@ private final class Engine: @unchecked Sendable {
                         throw HostFailure("Legacy library database is missing; recovery is required")
                     }
                 }
+            }
+            if rnAdoptionContainerURL != nil {
+                try verifyRNAdoptionDirectories()
+                try verifyRNAdoptionDatabaseFiles()
             }
             let sqlite = try SQLiteBridge(url: databaseURL)
             database = sqlite
@@ -4525,9 +5860,23 @@ private final class Engine: @unchecked Sendable {
             recoveryActivationPending = pending != nil
             projectFileAddTurn?.activationPending = recoveryActivationPending
             projectDownloadTurn?.activationPending = recoveryActivationPending
+            #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            try applyCaptureAIFixtureBeforeBoot()
+            #endif
             _ = try invoke(recoveryActivationPending ? "bootRecovery" : "boot", arguments: [legacy?.stateJSON ?? "", legacy?.backupJSON ?? ""])
             try requireProjectFileAddTurn()
         try requireProjectDownloadTurn()
+            if rnAdoptionContainerURL != nil {
+                guard let location = deviceStorageLocation else { throw Self.rnAdoptionFailure }
+                try verifyRNAdoptionDirectories()
+                // RN marker promotion must finish before this owner captures its exact manifest baseline.
+                deviceStorage = try NativeDeviceKV(containerURL: location.containerURL, bundleIdentifier: location.bundleIdentifier)
+                #if DEBUG
+                if let deviceStorage { faults?.configureDeviceStorage?(deviceStorage) }
+                #endif
+                try verifyRNAdoptionDirectories()
+                NSLog("Native iOS RN candidate storage admitted releaseCheck=v1.3.8/ios-rn-candidate-storage outcome=ready")
+            }
             started = true
             emitCleanupAcknowledgement()
             projectFileAddTurn?.expectedStarted = true
@@ -4549,6 +5898,388 @@ private final class Engine: @unchecked Sendable {
         _ = try finish(command, with: .rejected("STALE_REVISION: App lock outcome unknown; pending change cancelled"))
         unresolvedAppLockRecovery = false
         NSLog("Native iOS App lock recovery cancelled releaseCheck=v1.3.4/ios-app-lock outcome=cancelled")
+    }
+
+    // Separate phases keep unrelated command temporaries out of the same
+    // native stack frame while JavaScriptCore validates a retained journal.
+    @inline(never)
+    private func validatePendingStartupContent(retainedBackup: String?, recoveringTrashItemsPurge: Bool) throws {
+        try validatePendingChecklistMoveStartup()
+        try validatePendingConversionStartup()
+        if let command = pending, command.method == "captureLinesCommit" {
+            _ = try captureLinesArguments(command)
+            if case .success(let value) = command.terminal { try validateCaptureLinesSuccess(command, value: value) }
+            try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
+            try? backupExportFile.discardInterruptedExports()
+            try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
+        }
+        if let command = pending, command.method == Self.appleReminderMethod {
+            _ = try validateAppleReminderItem(command)
+            try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
+            try? backupExportFile.discardInterruptedExports()
+            try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
+        }
+        if let command = pending, command.method == Self.pomodoroMethod {
+            _ = try invoke("pomodoroTransitionValidate", arguments: pomodoroJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePomodoroResult(command, value: value) }
+            try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
+            try? backupExportFile.discardInterruptedExports()
+            try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
+        }
+        if let command = pending, command.method == Self.ownedSaveMethod {
+            if case .success(let value) = command.terminal { _ = try validateOwnedSaveAcknowledgement(command, value: value) }
+            else { _ = try validateOwnedSaveAcknowledgement(command) }
+        }
+        if let command = pending, command.method == Self.mixedSaveMethod { _ = try validateMixedSave(command) }
+        if let command = pending, command.method == Self.projectDownloadMethod {
+            let state = try projectDownloadJournal(command)
+            _ = try captureProjectDownloadTurn(command: command)
+            _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, Self.projectDownloadBackend(state.config)])
+            try requireProjectDownloadTurn()
+        }
+        if let command = pending, command.method == Self.projectFileAddMethod {
+            let state = try projectFileAddJournal(command)
+            _ = try captureProjectFileAddTurn(command: command)
+            _ = try invoke("projectFileAddWriteValidate", arguments: [state.envelopeJSON])
+            try requireProjectFileAddTurn()
+    try requireProjectDownloadTurn()
+        }
+        if let command = pending, command.method == "draftCommit" {
+            if case .success(let value) = command.terminal { try validateDraftAcknowledgment(command, value: value) }
+            else { try validateDraftAcknowledgment(command) }
+        }
+        if let command = pending, command.method == "boardCommit" {
+            // Full immutable authority is checked before opening SQLite, even
+            // for terminal journals whose remaining work is only cleanup.
+            _ = try invoke("boardValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateBoardAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "taskDeleteCommit" {
+            _ = try invoke("taskDeleteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, let prefix = Self.historyTaskWritePrefix(command.method), command.method == prefix + "Commit" {
+            _ = try invoke(prefix + "Validate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "referenceTasksMoveCommit" {
+            _ = try invoke("referenceTasksMoveValidate", arguments: referenceTasksMoveJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListMoveJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListAddTagJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListRemoveTagJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+
+        if let command = pending, ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListOrganizeJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListOrganizeDestinationCreateJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "referenceTasksAddTagCommit" {
+            _ = try invoke("referenceTasksAddTagValidate", arguments: referenceTasksAddTagJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "referenceTasksRemoveTagCommit" {
+            _ = try invoke("referenceTasksRemoveTagValidate", arguments: referenceTasksRemoveTagJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, let prefix = Self.archivedRestorePrefix(command.method) {
+            _ = try invoke(prefix + "Validate", arguments: archivedRestoreJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+            if recoveringTrashItemsPurge {
+                // A structurally closed purge plan may still have a forged effect.
+                // Shared pure validation must succeed before optional GC touches bytes.
+                try? backupOperationFiles.discardUnreferencedOperations(retaining: Set(retainedBackup.map { [$0] } ?? []))
+                try? backupExportFile.discardInterruptedExports()
+                try? backupImportFile.discardUnreferencedCopies(retaining: Set(backupSelections.values.map { $0.selection.reference.id }))
+            }
+        }
+        if let command = pending, let prefix = Self.taskListDeletePrefix(command.method) {
+            _ = try invoke(prefix + "Validate", arguments: taskListDeleteJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(command.method) {
+            _ = try invoke(command.method == "taskCompletionCommit" ? "taskCompletionValidate" : "taskCompletionUndoValidate",
+                           arguments: taskCompletionJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "taskPromoteCommit" {
+            _ = try invoke("validatePreparedTaskPromotion", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "taskDeleteUndoCommit" {
+            _ = try invoke("taskDeleteUndoValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+    }
+
+    @inline(never)
+    private func validatePendingStartupWorkflow() throws {
+        if let command = pending, ["projectDeleteCommit", "projectDeleteUndoCommit"].contains(command.method) {
+            _ = try invoke(command.method == "projectDeleteCommit" ? "projectDeleteValidate" : "projectDeleteUndoValidate",
+                           arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectDuplicateCommit" {
+            _ = try invoke("projectDuplicateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectLifecycleCommit" {
+            _ = try invoke("projectLifecycleValidate", arguments: projectLifecycleJournalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectLifecycleAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "trashTaskRestoreCommit" {
+            _ = try invoke("trashTaskRestoreValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "trashProjectRestoreCommit" {
+            _ = try invoke("trashProjectRestoreValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "calendarDeleteCommit" {
+            _ = try invoke("calendarDeleteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateCalendarDeleteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "calendarUnscheduleCommit" {
+            _ = try invoke("calendarUnscheduleValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "calendarEventTaskCommit" {
+            _ = try invoke("calendarEventTaskValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["calendarComposerCommit", "calendarComposerCreateCommit"].contains(command.method) {
+            _ = try invoke(command.method == "calendarComposerCommit" ? "calendarComposerValidate" : "calendarComposerCreateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateCalendarAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["mindSweepCommit", "weeklyReviewProjectTaskCommit"].contains(command.method) {
+            _ = try invoke(command.method == "mindSweepCommit" ? "mindSweepValidate" : "weeklyReviewProjectTaskValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateMindSweepAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "inboxPreparedCommit" {
+            _ = try invoke("inboxPreparedValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "inboxUndoCommit" {
+            _ = try invoke("inboxUndoValidate", arguments: inboxUndoJournalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "taskCancellationUndoCommit" {
+            _ = try invoke("taskCancellationUndoValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "checklistPreparedCommit" {
+            _ = try invoke("checklistPreparedValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePreparedAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectCreateCommit" {
+            _ = try invoke("projectCreateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectCreateAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectSectionCreateCommit" {
+            _ = try invoke("projectSectionCreateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectSectionCreateAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectSectionRenameCommit" {
+            _ = try invoke("projectSectionRenameValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectSectionRenameAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectSectionDeleteCommit" {
+            _ = try invoke("projectSectionDeleteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectSectionDeleteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectSectionOrderCommit" {
+            _ = try invoke("projectSectionOrderValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectSectionOrderAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "appLockCommit" {
+            _ = try invoke("appLockValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAppLockAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "gtdWorkflowCommit" {
+            _ = try invoke("gtdWorkflowValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateGtdWorkflowAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "notificationSettingCommit" {
+            _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateNotificationSettingAcknowledgment(command, value: value) }
+        }
+        if let command = pending, Self.aiTextConfigurationCommitMethods.contains(command.method) {
+            _ = try invoke(Self.aiTextConfigurationMethod("Validate", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAITextConfigurationAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "iosAIRequestTimeoutCommit" {
+            _ = try invoke("iosAIRequestTimeoutValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAIRequestTimeoutAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "iosAIReasoningEffortCommit" {
+            _ = try invoke("iosAIReasoningEffortValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAIReasoningEffortAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "iosAIGeminiThinkingBudgetCommit" {
+            _ = try invoke("iosAIGeminiThinkingBudgetValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAIGeminiThinkingBudgetAcknowledgment(command, value: value) }
+        }
+        if let command = pending, let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
+            _ = try invoke(operation.rawValue + "Validate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateCalendarSubscriptionSettingAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "deviceCalendarSettingCommit" {
+            _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateDeviceCalendarSettingAcknowledgment(command, value: value) }
+        }
+    }
+
+    @inline(never)
+    private func validatePendingStartupSettings() throws {
+        if let command = pending, command.method == "generalPreferenceCommit" {
+            _ = try invoke("generalPreferenceValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateGeneralPreferenceAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "manageTaxonomyCommit" {
+            _ = try invoke("manageTaxonomyValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateTaxonomyAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "managePersonEditCommit" {
+            _ = try invoke("managePersonEditValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePersonEditAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "managePersonDeleteCommit" {
+            _ = try invoke("managePersonDeleteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePersonDeleteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "managePersonCreateCommit" {
+            _ = try invoke("managePersonCreateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validatePersonCreateAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["areaCreateCommit", "manageAreaCreateCommit"].contains(command.method) {
+            _ = try invoke("areaCreateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAreaCreateAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "areaColorCommit" {
+            _ = try invoke("areaColorValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAreaColorAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["areaRenameCommit", "manageAreaEditCommit"].contains(command.method) {
+            _ = try invoke("areaRenameValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAreaRenameAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "areaOrderCommit" {
+            _ = try invoke("areaOrderValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAreaOrderAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["areaDeleteCommit", "manageAreaDeleteCommit"].contains(command.method) {
+            _ = try invoke("areaDeleteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAreaDeleteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectFocusCommit" {
+            _ = try invoke("projectFocusValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectFocusAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "taskFocusCommit" {
+            _ = try invoke("taskFocusValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateTaskFocusAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "focusOrderCommit" {
+            _ = try invoke("focusOrderValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateFocusOrderAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "focusSavedFilterCommit" {
+            _ = try invoke("focusSavedFilterValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateFocusSavedFilterAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "savedSearchCommit" {
+            _ = try invoke("savedSearchValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateSavedSearchAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectRenameCommit" {
+            _ = try invoke("projectRenameValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectRenameAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectFlowCommit" {
+            _ = try invoke("projectFlowValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectFlowAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectTaskSortCommit" {
+            _ = try invoke("projectTaskSortValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectTaskSortAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectTaskOrderCommit" {
+            _ = try invoke("projectTaskOrderValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectTaskOrderAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectNotesWriteCommit" {
+            _ = try invoke("projectNotesWriteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectNotesWriteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectTagsWriteCommit" {
+            _ = try invoke("projectTagsWriteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectTagsWriteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, ["projectAttachmentWriteCommit", "projectFileRemoveWriteCommit"].contains(command.method) {
+            _ = try invoke(command.method == "projectFileRemoveWriteCommit" ? "projectFileRemoveWriteValidate" : "projectAttachmentWriteValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectAttachmentWriteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectStatusCommit" {
+            _ = try invoke("projectStatusValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectStatusAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectDateCommit" {
+            _ = try invoke("projectDateValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectDateAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "projectAreaCommit" {
+            _ = try invoke("projectAreaValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectAreaAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "focusGroupWrite" {
+            try validateFocusGroupJournal(command)
+            if case .success(let value) = command.terminal { try validateFocusGroupAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "taskListSortWrite" {
+            try validateTaskListSortJournal(command)
+            if case .success(let value) = command.terminal { try validateTaskListSortAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "unassignedAreaColorWrite" {
+            try validateUnassignedAreaColorJournal(command)
+            if case .success(let value) = command.terminal { try validateUnassignedAreaColorAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "somedaySectionCreateWrite" {
+            try validateSomedaySectionCreateJournal(command)
+            if case .success(let value) = command.terminal { try validateSomedaySectionCreateAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "somedaySectionRenameWrite" {
+            try validateSomedaySectionRenameJournal(command)
+            if case .success(let value) = command.terminal { try validateSomedaySectionRenameAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "somedaySectionDeleteWrite" {
+            try validateSomedaySectionDeleteJournal(command)
+            if case .success(let value) = command.terminal { try validateSomedaySectionDeleteAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "somedaySectionOrderWrite" {
+            try validateSomedaySectionOrderJournal(command)
+            if case .success(let value) = command.terminal { try validateSomedaySectionOrderAcknowledgment(command, value: value) }
+        }
+        if let command = pending, command.method == "somedaySectionTaskCommit" {
+            try validateSomedaySectionTaskJournal(command)
+            if case .success(let value) = command.terminal { try validateSomedaySectionTaskAcknowledgment(command, value: value) }
+        }
+        if let command = pending, Self.somedayMoveCommits.contains(command.method) {
+            try validateSomedaySectionMoveJournal(command)
+            if case .success(let value) = command.terminal { try validateSomedaySectionMoveAcknowledgment(command, value: value) }
+        }
     }
 
     private func startupWindow(retentionJSON: String) throws -> String {
@@ -4577,17 +6308,26 @@ private final class Engine: @unchecked Sendable {
         }
         let recoveringBackupDocument = pending?.method == "backupDocumentCommit"
         if pending == nil, let backupUnreturnedReply { startupBackupDocumentResult = backupUnreturnedReply }
+        let recoveringChecklistMove = pending.flatMap { Self.checklistMovePrefix($0.method) != nil ? $0 : nil }
+        let recoveringConversion = pending.flatMap { Self.conversionPrefix($0.method) != nil ? $0 : nil }
         let recoveringBoard = pending?.method == "boardCommit"
         let recoveringTaskDelete = pending?.method == "taskDeleteCommit"
         let recoveringTaskDeleteCommand = recoveringTaskDelete ? pending : nil
         let recoveringTaskDeleteUndoCommand = pending?.method == "taskDeleteUndoCommit" ? pending : nil
         let recoveringArchivedTaskRestore = pending?.method == "archivedTaskRestoreCommit"
         let recoveringInboxTasksMove = pending?.method == "inboxTasksMoveCommit"
+        let recoveringInboxTasksMoveCommand = recoveringInboxTasksMove ? pending : nil
+        let recoveringProjectTasksMove = pending?.method == "projectTasksMoveCommit"
         let recoveringReferenceTasksMove = pending?.method == "referenceTasksMoveCommit"
         let recoveringInboxTasksAddTag = pending?.method == "inboxTasksAddTagCommit"
+        let recoveringInboxTasksAddTagCommand = recoveringInboxTasksAddTag ? pending : nil
+        let recoveringProjectTasksAddTag = pending?.method == "projectTasksAddTagCommit"
         let recoveringInboxTasksRemoveTag = pending?.method == "inboxTasksRemoveTagCommit"
+        let recoveringProjectTasksRemoveTag = pending?.method == "projectTasksRemoveTagCommit"
         let recoveringInboxTasksOrganize = pending?.method == "inboxTasksOrganizeCommit"
+        let recoveringProjectTasksOrganize = pending?.method == "projectTasksOrganizeCommit"
         let recoveringInboxOrganizeDestinationCreate = pending?.method == "inboxOrganizeDestinationCreateCommit"
+        let recoveringProjectOrganizeDestinationCreate = pending?.method == "projectOrganizeDestinationCreateCommit"
         let recoveringReferenceTasksAddTag = pending?.method == "referenceTasksAddTagCommit"
         let recoveringReferenceTasksRemoveTag = pending?.method == "referenceTasksRemoveTagCommit"
         let recoveringArchivedTasksRestore = pending?.method == "archivedTasksRestoreCommit"
@@ -4596,12 +6336,17 @@ private final class Engine: @unchecked Sendable {
         let recoveringTrashItemsPurge = pending?.method == "trashItemsPurgeCommit"
         let recoveringArchivedTasksDelete = pending?.method == "archivedTasksDeleteCommit"
         let recoveringArchivedTasksDeleteUndo = pending?.method == "archivedTasksDeleteUndoCommit"
-        let recoveringArchivedTasksDeleteCommand = recoveringArchivedTasksDelete || recoveringArchivedTasksDeleteUndo ? pending : nil
+        let recoveringProjectTasksDelete = pending?.method == "projectTasksDeleteCommit"
+        let recoveringProjectTasksDeleteUndo = pending?.method == "projectTasksDeleteUndoCommit"
+        let recoveringArchivedTasksDeleteCommand = recoveringArchivedTasksDelete || recoveringArchivedTasksDeleteUndo || recoveringProjectTasksDelete || recoveringProjectTasksDeleteUndo ? pending : nil
         let recoveringArchivedTaskRestoreCommand = recoveringArchivedTaskRestore ? pending : nil
         let recoveringTaskCompletion = pending?.method == "taskCompletionCommit"
-        let recoveringReferenceTaskBackdate = pending?.method == "referenceTaskBackdateCommit"
-        let recoveringReferenceTaskDestination = pending?.method == "referenceTaskDestinationCommit"
+        let recoveringBackdateMethod = ["referenceTaskBackdateCommit", "rowTaskBackdateCommit"].first { $0 == pending?.method }
+        let recoveringRowEditMethod = ["referenceTaskDestinationCommit", "rowTaskDestinationCommit", "rowTaskDatesCommit", "rowTaskFocusCommit"].first { $0 == pending?.method }
         let recoveringReferenceProjectNextAction = pending?.method == "referenceProjectNextActionCommit"
+        let recoveringReferenceProjectNextActionCommand = recoveringReferenceProjectNextAction ? pending : nil
+        let recoveringRowQuickStatus = pending?.method == "rowQuickStatusCommit"
+        let recoveringInlineChecklist = pending?.method == "inlineChecklistCommit"
         let recoveringDoneTaskStatus = pending?.method == "doneTaskStatusCommit"
         let recoveringDoneTaskStatusCommand = recoveringDoneTaskStatus ? pending : nil
         let recoveringDoneTaskCompletedAt = pending?.method == "doneTaskCompletedAtCommit"
@@ -4619,6 +6364,7 @@ private final class Engine: @unchecked Sendable {
         let recoveringTaskPromote = pending?.method == "taskPromoteCommit"
         let recoveringCalendarMethod = ["calendarComposerCreateCommit", "calendarComposerCommit", "calendarEventTaskCommit"].first { $0 == pending?.method }
         let recoveringMindSweep = pending?.method == "mindSweepCommit"
+        let recoveringReviewProjectTask = pending?.method == "weeklyReviewProjectTaskCommit"
         let recoveringProjectCreate = pending?.method == "projectCreateCommit"
         let recoveringProjectSectionCreate = pending?.method == "projectSectionCreateCommit"
         let recoveringProjectSectionRename = pending?.method == "projectSectionRenameCommit"
@@ -4627,7 +6373,10 @@ private final class Engine: @unchecked Sendable {
         let recoveringAppLock = pending?.method == "appLockCommit"
         let recoveringGtdWorkflow = pending?.method == "gtdWorkflowCommit"
         let recoveringDataSetting = pending?.method == "dataSetting"
+        let recoveringGettingStarted = pending?.method == "gettingStarted"
         let recoveringGeneralPreference = pending?.method == "generalPreferenceCommit"
+        let recoveringAITextConfiguration = pending.map { Self.aiTextConfigurationCommitMethods.contains($0.method) } ?? false
+        let recoveringAITextConfigurationMethod = recoveringAITextConfiguration ? pending?.method : nil
         let recoveringAIRequestTimeout = pending?.method == "iosAIRequestTimeoutCommit"
         let recoveringAIReasoningEffort = pending?.method == "iosAIReasoningEffortCommit"
         let recoveringAIGeminiThinkingBudget = pending?.method == "iosAIGeminiThinkingBudgetCommit"
@@ -4676,9 +6425,14 @@ private final class Engine: @unchecked Sendable {
         let recoveringSomedaySectionDelete = pending?.method == "somedaySectionDeleteWrite"
         let recoveringSomedaySectionOrder = pending?.method == "somedaySectionOrderWrite"
         let recoveringSomedaySectionTask = pending?.method == "somedaySectionTaskCommit"
-        let recoveringSomedaySectionMove = pending?.method == "somedaySectionMoveCommit"
-        let recoveringSomedaySectionUndo = pending?.method == "somedaySectionMoveUndoCommit"
+        let recoveringSomedaySectionMove = pending.flatMap { Self.somedayMoveCommits.contains($0.method) ? $0.method : nil }
         let terminal = try resolvePending()
+        if let recoveringChecklistMove, let terminal, case .success(let value) = terminal {
+            startupChecklistMoveResult = (recoveringChecklistMove.method, value)
+        }
+        if let recoveringConversion, let terminal, case .success(let value) = terminal {
+            startupConversionResult = (recoveringConversion.method, value)
+        }
         if recoveringPomodoroCommand != nil, let terminal, case .success(let value) = terminal { startupPomodoroResult = value }
         if let method = recoveringAttachmentSaveMethod, let terminal, case .success(let result) = terminal {
             // Both existing owners return only their validated domain result,
@@ -4712,11 +6466,16 @@ private final class Engine: @unchecked Sendable {
         if recoveringTaskDelete, let terminal, case .success(let value) = terminal { startupTaskDeleteResult = value }
         if recoveringArchivedTaskRestore, let terminal, case .success(let value) = terminal { startupArchivedTaskRestoreResult = value }
         if recoveringInboxTasksMove, let terminal, case .success(let value) = terminal { startupInboxTasksMoveResult = value }
+        if recoveringProjectTasksMove, let terminal, case .success(let value) = terminal { startupProjectTasksMoveResult = value }
         if recoveringReferenceTasksMove, let terminal, case .success(let value) = terminal { startupReferenceTasksMoveResult = value }
         if recoveringInboxTasksAddTag, let terminal, case .success(let value) = terminal { startupInboxTasksAddTagResult = value }
+        if recoveringProjectTasksAddTag, let terminal, case .success(let value) = terminal { startupProjectTasksAddTagResult = value }
         if recoveringInboxTasksRemoveTag, let terminal, case .success(let value) = terminal { startupInboxTasksRemoveTagResult = value }
+        if recoveringProjectTasksRemoveTag, let terminal, case .success(let value) = terminal { startupProjectTasksRemoveTagResult = value }
         if recoveringInboxTasksOrganize, let terminal, case .success(let value) = terminal { startupInboxTasksOrganizeResult = value }
+        if recoveringProjectTasksOrganize, let terminal, case .success(let value) = terminal { startupProjectTasksOrganizeResult = value }
         if recoveringInboxOrganizeDestinationCreate, let terminal, case .success(let value) = terminal { startupInboxOrganizeDestinationCreateResult = value }
+        if recoveringProjectOrganizeDestinationCreate, let terminal, case .success(let value) = terminal { startupProjectOrganizeDestinationCreateResult = value }
         if recoveringReferenceTasksAddTag, let terminal, case .success(let value) = terminal { startupReferenceTasksAddTagResult = value }
         if recoveringReferenceTasksRemoveTag, let terminal, case .success(let value) = terminal { startupReferenceTasksRemoveTagResult = value }
         if recoveringArchivedTasksRestore, let terminal, case .success(let value) = terminal { startupArchivedTasksRestoreResult = value }
@@ -4724,15 +6483,30 @@ private final class Engine: @unchecked Sendable {
         if recoveringTrashItemsPurge, let terminal, case .success(let value) = terminal { startupTrashItemsPurgeResult = value }
         if recoveringArchivedTasksDelete, let terminal, case .success(let value) = terminal { startupArchivedTasksDeleteResult = value }
         if recoveringArchivedTasksDeleteUndo, let terminal, case .success(let value) = terminal { startupArchivedTasksDeleteUndoResult = value }
+        if recoveringProjectTasksDelete, let terminal, case .success(let value) = terminal { startupProjectTasksDeleteResult = value }
+        if recoveringProjectTasksDeleteUndo, let terminal, case .success(let value) = terminal { startupProjectTasksDeleteUndoResult = value }
         if recoveringTaskCompletion, let terminal, case .success(let value) = terminal { startupTaskCompletionResult = value }
+        if recoveringRowQuickStatus, let terminal, case .success(let value) = terminal { startupRowQuickStatusResult = value }
+        if recoveringInlineChecklist, let terminal, case .success(let value) = terminal { startupInlineChecklistResult = value }
         if recoveringDoneTaskStatus, let terminal, case .success(let value) = terminal {
             startupDoneTaskStatusResult = value
             // resolvePending has validated this captured command and proven its exact receipt.
             startupDoneTaskStatusSource = recoveringDoneTaskStatusCommand.flatMap(historyTaskStatusSource)
         }
-        if recoveringReferenceTaskBackdate, let terminal, case .success(let value) = terminal { startupReferenceTaskBackdateResult = value }
-        if recoveringReferenceTaskDestination, let terminal, case .success(let value) = terminal { startupReferenceTaskDestinationResult = value }
-        if recoveringReferenceProjectNextAction, let terminal, case .success(let value) = terminal { startupReferenceProjectNextActionResult = value }
+        if let recoveringBackdateMethod, let terminal, case .success(let value) = terminal {
+            if recoveringBackdateMethod == "rowTaskBackdateCommit" { startupRowTaskBackdateResult = value }
+            else { startupReferenceTaskBackdateResult = value }
+        }
+        if let recoveringRowEditMethod, let terminal, case .success(let value) = terminal {
+            if recoveringRowEditMethod == "rowTaskFocusCommit" { startupRowTaskFocusResult = value }
+            else if recoveringRowEditMethod == "rowTaskDatesCommit" { startupRowTaskDatesResult = value }
+            else if recoveringRowEditMethod == "rowTaskDestinationCommit" { startupRowTaskDestinationResult = value }
+            else { startupReferenceTaskDestinationResult = value }
+        }
+        if recoveringReferenceProjectNextAction, let terminal, case .success(let value) = terminal {
+            startupReferenceProjectNextActionResult = value
+            startupReferenceProjectNextActionSource = recoveringReferenceProjectNextActionCommand.flatMap(referenceProjectNextActionSource)
+        }
         if recoveringDoneTaskCompletedAt, let terminal, case .success(let value) = terminal { startupDoneTaskCompletedAtResult = value }
         if recoveringArchiveTaskCompletedAt, let terminal, case .success(let value) = terminal { startupArchiveTaskCompletedAtResult = value }
         if recoveringTaskCompletionUndo, let terminal, case .success(let value) = terminal { startupTaskCompletionUndoResult = value }
@@ -4748,6 +6522,7 @@ private final class Engine: @unchecked Sendable {
         if recoveringTaskPromote, let terminal, case .success(let value) = terminal { startupTaskPromoteResult = value }
         if recoveringCalendarMethod != nil, let terminal, case .success(let value) = terminal { startupCalendarResult = value }
         if recoveringMindSweep, let terminal, case .success(let value) = terminal { startupMindSweepResult = value }
+        if recoveringReviewProjectTask, let terminal, case .success(let value) = terminal { startupReviewProjectTaskResult = value }
         if recoveringProjectCreate, let terminal, case .success(let value) = terminal { startupProjectCreateResult = value }
         if recoveringProjectSectionCreate, let terminal, case .success(let value) = terminal { startupProjectSectionCreateResult = value }
         if recoveringProjectSectionRename, let terminal, case .success(let value) = terminal { startupProjectSectionRenameResult = value }
@@ -4756,7 +6531,9 @@ private final class Engine: @unchecked Sendable {
         if recoveringAppLock, let terminal, case .success(let value) = terminal { startupAppLockResult = value }
         if recoveringGtdWorkflow, let terminal, case .success(let value) = terminal { startupGtdWorkflowResult = value }
         if recoveringDataSetting, let terminal, case .success(let value) = terminal { startupDataSettingResult = value }
+        if recoveringGettingStarted, let terminal, case .success(let value) = terminal { startupGettingStartedResult = value }
         if recoveringGeneralPreference, let terminal, case .success(let value) = terminal { startupGeneralPreferenceResult = value }
+        if recoveringAITextConfiguration, let terminal, case .success(let value) = terminal { startupAITextConfigurationResult = value; startupAITextConfigurationMethod = recoveringAITextConfigurationMethod }
         if recoveringAIRequestTimeout, let terminal, case .success(let value) = terminal { startupAIRequestTimeoutResult = value }
         if recoveringAIReasoningEffort, let terminal, case .success(let value) = terminal { startupAIReasoningEffortResult = value }
         if recoveringAIGeminiThinkingBudget, let terminal, case .success(let value) = terminal { startupAIGeminiThinkingBudgetResult = value }
@@ -4802,8 +6579,9 @@ private final class Engine: @unchecked Sendable {
         if recoveringSomedaySectionDelete, let terminal, case .success(let value) = terminal { startupSomedaySectionDeleteResult = value }
         if recoveringSomedaySectionOrder, let terminal, case .success(let value) = terminal { startupSomedaySectionOrderResult = value }
         if recoveringSomedaySectionTask, let terminal, case .success(let value) = terminal { startupSomedaySectionTaskResult = value }
-        if recoveringSomedaySectionMove, let terminal, case .success(let value) = terminal { startupSomedaySectionMoveResult = value }
-        if recoveringSomedaySectionUndo, let terminal, case .success(let value) = terminal { startupSomedaySectionUndoResult = value }
+        if let recoveringSomedaySectionMove, let terminal, case .success(let value) = terminal {
+            startupSomedaySectionMoveResult = (recoveringSomedaySectionMove, value)
+        }
         try resumeActivationIfNeeded()
         _ = try invoke("iosPruneReceipts", arguments: [retentionJSON, (owedAppleReminderRequestID ?? owedPomodoroRequestID).map { $0 as Any } ?? NSNull(), owedInboxRequestIDs])
         let value = try invoke("window", arguments: [0, 50, ""])
@@ -4820,10 +6598,10 @@ private final class Engine: @unchecked Sendable {
         let recoveredSomedaySections = startupSomedaySectionCreateResult ?? startupSomedaySectionRenameResult
             ?? startupSomedaySectionDeleteResult ?? startupSomedaySectionOrderResult
             ?? startupSomedaySectionTaskResult
-        let recoveredAISettings = startupAIRequestTimeoutResult ?? startupAIReasoningEffortResult ?? startupAIGeminiThinkingBudgetResult
+        let recoveredAISettings = startupAITextConfigurationResult ?? startupAIRequestTimeoutResult ?? startupAIReasoningEffortResult ?? startupAIGeminiThinkingBudgetResult
         let recoveredCalendarSettings = startupNotificationSettingResult ?? startupDeviceCalendarSettingResult
             ?? startupCalendarSubscriptionSettingResult ?? startupCalendarSubscriptionAddResult
-        let recoveredSettings = startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
+        let recoveredSettings = startupGettingStartedResult ?? startupBackupDocumentResult ?? startupDataSettingResult ?? startupGtdWorkflowResult
             ?? startupAppLockResult ?? startupGeneralPreferenceResult ?? recoveredAISettings ?? recoveredCalendarSettings
         let recoveredManage = recoveredSettings ?? startupUnassignedAreaColorResult ?? startupPersonCreateResult
             ?? startupPersonDeleteResult ?? startupPersonEditResult ?? startupTaxonomyResult
@@ -4833,23 +6611,27 @@ private final class Engine: @unchecked Sendable {
         let recoveredTaskCompletion = recoveredHistoryRows ?? recoveredReference
         let recoveredReminderCommands = startupReminderCompletionResult ?? startupReminderSnoozeResult
         let recoveredCompletion = recoveredTaskCompletion ?? recoveredReminderCommands
-        let recoveredLists = recoveredCompletion
+        let recoveredRowChanges = startupRowTaskFocusResult ?? startupRowTaskDatesResult ?? startupRowTaskDestinationResult ?? startupRowTaskBackdateResult ?? startupRowQuickStatusResult ?? startupInlineChecklistResult
+        let recoveredLists = recoveredRowChanges ?? recoveredCompletion
             ?? startupInboxUndoResult ?? startupInboxResult ?? startupChecklistResult ?? startupTaskListSortResult
             ?? recoveredManage ?? recoveredSomedaySections
-            ?? startupSomedaySectionMoveResult ?? startupSomedaySectionUndoResult
-        let recoveredArchiveDelete = startupArchivedTasksDeleteResult ?? startupArchivedTasksDeleteUndoResult
+            ?? startupSomedaySectionMoveResult?.value
+        let recoveredProjectDelete = startupProjectTasksDeleteResult ?? startupProjectTasksDeleteUndoResult
+        let recoveredArchiveDelete = recoveredProjectDelete ?? startupArchivedTasksDeleteResult ?? startupArchivedTasksDeleteUndoResult
         let recoveredInboxOrganize = startupInboxTasksOrganizeResult ?? startupInboxOrganizeDestinationCreateResult
-        let recoveredBulkTags = startupReferenceTasksRemoveTagResult ?? startupInboxTasksRemoveTagResult
+        let recoveredProjectOrganize = startupProjectOrganizeDestinationCreateResult ?? startupProjectTasksOrganizeResult
+        let recoveredProjectTags = startupProjectTasksAddTagResult ?? startupProjectTasksRemoveTagResult
+        let recoveredBulkTags = recoveredProjectTags ?? startupReferenceTasksRemoveTagResult ?? startupInboxTasksRemoveTagResult
             ?? startupInboxTasksAddTagResult ?? startupReferenceTasksAddTagResult
-        let recoveredBulkMoves = startupInboxTasksMoveResult ?? startupReferenceTasksMoveResult
+        let recoveredBulkMoves = startupProjectTasksMoveResult ?? startupInboxTasksMoveResult ?? startupReferenceTasksMoveResult
             ?? recoveredArchiveDelete ?? startupArchivedTasksRestoreResult ?? startupArchivedTaskRestoreResult
         let recoveredArchiveRestore = startupTrashItemsPurgeResult ?? startupTrashItemsRestoreResult
-            ?? recoveredInboxOrganize ?? recoveredBulkTags ?? recoveredBulkMoves
+            ?? recoveredProjectOrganize ?? recoveredInboxOrganize ?? recoveredBulkTags ?? recoveredBulkMoves
         let recoveredDeleteRestore = recoveredArchiveRestore ?? startupTaskDeleteResult ?? startupProjectDeleteResult
             ?? startupProjectDeleteUndoResult ?? startupProjectDuplicateResult ?? startupProjectLifecycleResult
             ?? startupTrashTaskRestoreResult ?? startupTrashProjectRestoreResult
-        let recoveredTaskActions = recoveredDeleteRestore ?? startupTaskPromoteResult ?? startupBoardResult
-            ?? startupCalendarResult ?? startupMindSweepResult
+        let recoveredTaskActions = startupChecklistMoveResult?.result ?? startupConversionResult?.result ?? recoveredDeleteRestore ?? startupTaskPromoteResult ?? startupBoardResult
+            ?? startupCalendarResult ?? startupMindSweepResult ?? startupReviewProjectTaskResult
         guard let recovered = startupAttachmentSaveResult?.resultJSON ?? recoveredTaskActions
             ?? recoveredProjects ?? recoveredFocus ?? recoveredLists ?? startupPomodoroResult else { return value }
         guard var window = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any] else {
@@ -4879,7 +6661,13 @@ private final class Engine: @unchecked Sendable {
             (startupProjectDateResult, "projectDateCommit"),
             (startupProjectAreaResult, "projectAreaCommit"),
         ].first(where: { $0.0 != nil })?.1
-        let completionRecoveryMethod = startupReferenceProjectNextActionResult != nil ? "referenceProjectNextActionCommit"
+        let completionRecoveryMethod = startupRowTaskFocusResult != nil ? "rowTaskFocusCommit"
+            : startupRowTaskDatesResult != nil ? "rowTaskDatesCommit"
+            : startupRowTaskDestinationResult != nil ? "rowTaskDestinationCommit"
+            : startupRowTaskBackdateResult != nil ? "rowTaskBackdateCommit"
+            : startupRowQuickStatusResult != nil ? "rowQuickStatusCommit"
+            : startupInlineChecklistResult != nil ? "inlineChecklistCommit"
+            : startupReferenceProjectNextActionResult != nil ? "referenceProjectNextActionCommit"
             : startupArchiveTaskCompletedAtResult != nil ? "archiveTaskCompletedAtCommit"
             : startupDoneTaskCompletedAtResult != nil ? "doneTaskCompletedAtCommit"
             : startupDoneTaskStatusResult != nil ? "doneTaskStatusCommit"
@@ -4889,12 +6677,17 @@ private final class Engine: @unchecked Sendable {
             : startupTaskCompletionUndoResult != nil ? "taskCompletionUndoCommit"
             : startupReminderCompletionResult != nil ? "reminderCompletionCommit"
             : startupReminderSnoozeResult != nil ? "reminderSnoozeCommit" : nil
-        let archiveMutationRecoveryMethod = startupArchivedTasksDeleteResult != nil ? "archivedTasksDeleteCommit"
+        let archiveMutationRecoveryMethod = startupProjectTasksDeleteResult != nil ? "projectTasksDeleteCommit"
+            : startupProjectTasksDeleteUndoResult != nil ? "projectTasksDeleteUndoCommit"
+            : startupArchivedTasksDeleteResult != nil ? "archivedTasksDeleteCommit"
             : startupArchivedTasksDeleteUndoResult != nil ? "archivedTasksDeleteUndoCommit" : nil
-        let organizeRecoveryMethod = startupInboxTasksOrganizeResult != nil ? "inboxTasksOrganizeCommit"
+        let organizeRecoveryMethod = startupProjectOrganizeDestinationCreateResult != nil ? "projectOrganizeDestinationCreateCommit"
+            : startupProjectTasksOrganizeResult != nil ? "projectTasksOrganizeCommit"
+            : startupInboxTasksOrganizeResult != nil ? "inboxTasksOrganizeCommit"
             : startupInboxOrganizeDestinationCreateResult != nil ? "inboxOrganizeDestinationCreateCommit" : nil
-        let historyRecoveryMethod = organizeRecoveryMethod ?? (startupTrashItemsPurgeResult != nil ? "trashItemsPurgeCommit" : startupTrashItemsRestoreResult != nil ? "trashItemsRestoreCommit" : startupReferenceTasksRemoveTagResult != nil ? "referenceTasksRemoveTagCommit" : startupInboxTasksRemoveTagResult != nil ? "inboxTasksRemoveTagCommit" : startupInboxTasksAddTagResult != nil ? "inboxTasksAddTagCommit" : startupReferenceTasksAddTagResult != nil ? "referenceTasksAddTagCommit" : startupInboxTasksMoveResult != nil ? "inboxTasksMoveCommit" : startupReferenceTasksMoveResult != nil ? "referenceTasksMoveCommit" : archiveMutationRecoveryMethod ?? (startupArchivedTasksRestoreResult != nil ? "archivedTasksRestoreCommit" : completionRecoveryMethod))
-        let aiSettingsRecoveryMethod: String? = startupAIRequestTimeoutResult != nil ? "iosAIRequestTimeoutCommit"
+        let historyRecoveryMethod = organizeRecoveryMethod ?? (startupTrashItemsPurgeResult != nil ? "trashItemsPurgeCommit" : startupTrashItemsRestoreResult != nil ? "trashItemsRestoreCommit" : startupReferenceTasksRemoveTagResult != nil ? "referenceTasksRemoveTagCommit" : startupProjectTasksRemoveTagResult != nil ? "projectTasksRemoveTagCommit" : startupInboxTasksRemoveTagResult != nil ? "inboxTasksRemoveTagCommit" : startupProjectTasksAddTagResult != nil ? "projectTasksAddTagCommit" : startupInboxTasksAddTagResult != nil ? "inboxTasksAddTagCommit" : startupReferenceTasksAddTagResult != nil ? "referenceTasksAddTagCommit" : startupProjectTasksMoveResult != nil ? "projectTasksMoveCommit" : startupInboxTasksMoveResult != nil ? "inboxTasksMoveCommit" : startupReferenceTasksMoveResult != nil ? "referenceTasksMoveCommit" : archiveMutationRecoveryMethod ?? (startupArchivedTasksRestoreResult != nil ? "archivedTasksRestoreCommit" : completionRecoveryMethod))
+        let aiSettingsRecoveryMethod: String? = startupAITextConfigurationResult != nil ? startupAITextConfigurationMethod
+            : startupAIRequestTimeoutResult != nil ? "iosAIRequestTimeoutCommit"
             : startupAIReasoningEffortResult != nil ? "iosAIReasoningEffortCommit"
             : startupAIGeminiThinkingBudgetResult != nil ? "iosAIGeminiThinkingBudgetCommit" : nil
         window["recovery"] = ["method": historyRecoveryMethod ?? (startupArchivedTaskRestoreResult != nil ? "archivedTaskRestoreCommit"
@@ -4909,6 +6702,7 @@ private final class Engine: @unchecked Sendable {
             : startupBoardResult != nil ? "boardCommit"
             : startupCalendarResult != nil ? (recoveringCalendarMethod ?? "calendarComposerCommit")
             : startupMindSweepResult != nil ? "mindSweepCommit"
+            : startupReviewProjectTaskResult != nil ? "weeklyReviewProjectTaskCommit"
             : projectRecoveryMethod ?? (startupTaskFocusResult != nil ? "taskFocusCommit"
                 : startupFocusOrderResult != nil ? "focusOrderCommit"
                 : startupCalendarDeleteResult != nil ? "calendarDeleteCommit"
@@ -4922,6 +6716,7 @@ private final class Engine: @unchecked Sendable {
                 : startupGtdWorkflowResult != nil ? "gtdWorkflowCommit"
                 : startupBackupDocumentResult != nil ? "backupDocumentCommit"
                 : startupDataSettingResult != nil ? "dataSetting"
+                : startupGettingStartedResult != nil ? "gettingStarted"
                 : startupGeneralPreferenceResult != nil ? "generalPreferenceCommit"
                 : aiSettingsRecoveryMethod != nil ? aiSettingsRecoveryMethod!
                 : startupNotificationSettingResult != nil ? "notificationSettingCommit"
@@ -4937,19 +6732,41 @@ private final class Engine: @unchecked Sendable {
                 : startupSomedaySectionDeleteResult != nil ? "somedaySectionDeleteWrite"
                 : startupSomedaySectionOrderResult != nil ? "somedaySectionOrderWrite"
                 : startupSomedaySectionTaskResult != nil ? "somedaySectionTaskCommit"
-                : startupSomedaySectionMoveResult != nil ? "somedaySectionMoveCommit"
-                : startupSomedaySectionUndoResult != nil ? "somedaySectionMoveUndoCommit" : "focusGroupWrite")),
+                : startupSomedaySectionMoveResult?.method ?? "focusGroupWrite")),
                               "result": try NativeJSON.jsonObject(with: Data(recovered.utf8))]
+        if let conversion = startupConversionResult {
+            window["recovery"] = ["method": conversion.method,
+                "result": try NativeJSON.jsonObject(with: Data(conversion.result.utf8))]
+        }
+        if let move = startupChecklistMoveResult {
+            window["recovery"] = ["method": move.method,
+                "source": move.method == "taskChecklistMoveCommit" ? "checklistMove" : "checklistMoveUndo",
+                "result": try NativeJSON.jsonObject(with: Data(move.result.utf8))]
+        }
+        if startupRowQuickStatusResult != nil, var recovery = window["recovery"] as? [String: Any] {
+            recovery["source"] = "rowQuickStatus"
+            window["recovery"] = recovery
+        }
+        if startupInlineChecklistResult != nil, var recovery = window["recovery"] as? [String: Any] {
+            recovery["source"] = "inlineChecklist"
+            window["recovery"] = recovery
+        }
         if startupReferenceTasksMoveResult != nil || startupReferenceTasksAddTagResult != nil || startupReferenceTasksRemoveTagResult != nil, var recovery = window["recovery"] as? [String: Any] {
             recovery["source"] = "reference"
             window["recovery"] = recovery
         }
+        if startupProjectTasksMoveResult != nil || recoveredProjectTags != nil || startupProjectTasksOrganizeResult != nil || startupProjectOrganizeDestinationCreateResult != nil, var recovery = window["recovery"] as? [String: Any] {
+            recovery["source"] = "project"
+            window["recovery"] = recovery
+        }
         if startupInboxTasksMoveResult != nil || startupInboxTasksAddTagResult != nil || startupInboxTasksRemoveTagResult != nil || recoveredInboxOrganize != nil, var recovery = window["recovery"] as? [String: Any] {
-            recovery["source"] = "inbox"
+            let statusListCommand = startupInboxTasksMoveResult != nil ? recoveringInboxTasksMoveCommand
+                : startupInboxTasksAddTagResult != nil ? recoveringInboxTasksAddTagCommand : nil
+            recovery["source"] = statusListCommand.map { statusListMoveSource($0) } ?? "inbox"
             window["recovery"] = recovery
         }
         if let command = recoveringArchivedTasksDeleteCommand, archiveMutationRecoveryMethod != nil,
-           ["done", "reference", "inbox"].contains(historyBulkSource(command)), var recovery = window["recovery"] as? [String: Any] {
+           ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(historyBulkSource(command)), var recovery = window["recovery"] as? [String: Any] {
             recovery["source"] = historyBulkSource(command)
             window["recovery"] = recovery
         }
@@ -4963,10 +6780,25 @@ private final class Engine: @unchecked Sendable {
             recovery["source"] = "reference"
             window["recovery"] = recovery
         }
-        if startupReferenceProjectNextActionResult != nil,
+        if startupReferenceProjectNextActionResult != nil, let source = startupReferenceProjectNextActionSource,
            var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "referenceProjectNextActionCommit" {
             // This route is established only by the validated captured command's proven result.
-            recovery["source"] = "reference"
+            recovery["source"] = source
+            window["recovery"] = recovery
+        }
+        if startupRowTaskFocusResult != nil,
+           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "rowTaskFocusCommit" {
+            recovery["source"] = "rowFocus"
+            window["recovery"] = recovery
+        }
+        if startupRowTaskDatesResult != nil,
+           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "rowTaskDatesCommit" {
+            recovery["source"] = "rowDates"
+            window["recovery"] = recovery
+        }
+        if startupRowTaskDestinationResult != nil,
+           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "rowTaskDestinationCommit" {
+            recovery["source"] = "rowDestination"
             window["recovery"] = recovery
         }
         if startupReferenceTaskDestinationResult != nil,
@@ -4975,10 +6807,10 @@ private final class Engine: @unchecked Sendable {
             recovery["source"] = "reference"
             window["recovery"] = recovery
         }
-        if startupReferenceTaskBackdateResult != nil,
-           var recovery = window["recovery"] as? [String: Any], recovery["method"] as? String == "referenceTaskBackdateCommit" {
+        if startupReferenceTaskBackdateResult != nil || startupRowTaskBackdateResult != nil,
+           var recovery = window["recovery"] as? [String: Any], ["referenceTaskBackdateCommit", "rowTaskBackdateCommit"].contains(recovery["method"] as? String ?? "") {
             // Only a validated captured command with its exact proven result reaches this marker.
-            recovery["source"] = "reference"
+            recovery["source"] = startupRowTaskBackdateResult != nil ? "row" : "reference"
             window["recovery"] = recovery
         }
         if startupTaskCompletionSource == "reference",
@@ -4987,11 +6819,11 @@ private final class Engine: @unchecked Sendable {
             recovery["source"] = "reference"
             window["recovery"] = recovery
         }
-        if startupTaskCompletionSource == "board", let requestID = startupTaskCompletionRequestID,
+        if let source = startupTaskCompletionSource, ["board", "row"].contains(source), let requestID = startupTaskCompletionRequestID,
            let recovery = window["recovery"] as? [String: Any],
            let method = recovery["method"] as? String,
            ["taskCompletionCommit", "taskCompletionUndoCommit"].contains(method), let result = recovery["result"] {
-            window["recovery"] = ["method": method, "source": "board", "requestId": requestID, "result": result]
+            window["recovery"] = ["method": method, "source": source, "requestId": requestID, "result": result]
         }
         if let saved = startupAttachmentSaveResult {
             var recovery: [String: Any] = ["method": saved.method, "result": try NativeJSON.jsonObject(with: Data(saved.resultJSON.utf8))]
@@ -5011,23 +6843,39 @@ private final class Engine: @unchecked Sendable {
         startupTrashItemsPurgeResult = nil
         startupPomodoroResult = nil
         startupInboxTasksMoveResult = nil
+        startupProjectTasksMoveResult = nil
         startupReferenceTasksMoveResult = nil
         startupInboxTasksAddTagResult = nil
+        startupProjectTasksAddTagResult = nil
         startupInboxTasksRemoveTagResult = nil
+        startupProjectTasksRemoveTagResult = nil
         startupInboxTasksOrganizeResult = nil
+        startupProjectTasksOrganizeResult = nil
         startupInboxOrganizeDestinationCreateResult = nil
+        startupProjectOrganizeDestinationCreateResult = nil
         startupReferenceTasksAddTagResult = nil
         startupReferenceTasksRemoveTagResult = nil
         startupArchivedTasksDeleteResult = nil
         startupArchivedTasksDeleteUndoResult = nil
+        startupProjectTasksDeleteResult = nil
+        startupProjectTasksDeleteUndoResult = nil
         startupTaskDeleteResult = nil
         startupTaskCompletionResult = nil
         startupTaskCompletionSource = nil
         startupTaskCompletionRequestID = nil
+        startupRowQuickStatusResult = nil
+        startupInlineChecklistResult = nil
         startupDoneTaskStatusResult = nil
         startupReferenceTaskBackdateResult = nil
+        startupChecklistMoveResult = nil
+        startupConversionResult = nil
+        startupRowTaskFocusResult = nil
+        startupRowTaskDatesResult = nil
+        startupRowTaskDestinationResult = nil
+        startupRowTaskBackdateResult = nil
         startupReferenceTaskDestinationResult = nil
         startupReferenceProjectNextActionResult = nil
+        startupReferenceProjectNextActionSource = nil
         startupDoneTaskStatusSource = nil
         startupDoneTaskCompletedAtResult = nil
         startupArchiveTaskCompletedAtResult = nil
@@ -5041,6 +6889,7 @@ private final class Engine: @unchecked Sendable {
         startupTaskPromoteResult = nil
         startupCalendarResult = nil
         startupMindSweepResult = nil
+        startupReviewProjectTaskResult = nil
         startupProjectCreateResult = nil
         startupProjectSectionCreateResult = nil
         startupProjectSectionRenameResult = nil
@@ -5051,7 +6900,9 @@ private final class Engine: @unchecked Sendable {
         if startupBackupDocumentResult != nil { backupUnreturnedReply = nil }
         startupBackupDocumentResult = nil
         startupDataSettingResult = nil
+        startupGettingStartedResult = nil
         startupGeneralPreferenceResult = nil
+        startupAITextConfigurationResult = nil; startupAITextConfigurationMethod = nil
         startupAIRequestTimeoutResult = nil
         startupAIReasoningEffortResult = nil
         startupAIGeminiThinkingBudgetResult = nil
@@ -5099,7 +6950,6 @@ private final class Engine: @unchecked Sendable {
         startupSomedaySectionOrderResult = nil
         startupSomedaySectionTaskResult = nil
         startupSomedaySectionMoveResult = nil
-        startupSomedaySectionUndoResult = nil
         return encoded
     }
 
@@ -7028,6 +8878,565 @@ private final class Engine: @unchecked Sendable {
         return String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
     }
 
+    private func requireAIConfigurationIdentity(_ session: AIConfigurationSession) throws {
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        guard started, !closed, !localRequests.isClosing, workspaceMode == .personal, !recoveryActivationPending, lockFD >= 0,
+              context === session.runtime, database === session.connection, deviceStorage === session.storage,
+              attachmentGeneration == session.generation, try Self.bindingIdentity(databaseURL) == session.library,
+              try captureLinesDataVersion() == session.epoch else { throw HostFailure("STALE_REVISION: AI text configuration session changed") }
+    }
+    private func requireAIConfigurationSession(_ id: UUID) throws -> AIConfigurationSession {
+        guard let session = aiConfigurationSession, session.id == id else { throw HostFailure("STALE_REVISION: AI text configuration session changed") }
+        do { try requireAIConfigurationIdentity(session) } catch { aiConfigurationSession = nil; throw error }
+        return session
+    }
+    func checkAITextConfigurationSession(_ id: UUID, exactRetryAllowed: Bool = false) throws {
+        if exactRetryAllowed, let pending, Self.aiTextConfigurationCommitMethods.contains(pending.method) { return }
+        _ = try requireAIConfigurationSession(id)
+        _ = try invoke("iosAITextConfigurationSessionCheck", arguments: [id.uuidString.lowercased()])
+    }
+    func openAITextConfigurationSession() throws -> NativeAITextConfigurationSession {
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        try requireCalendarAdmission()
+        let options = try NativeAITextConfigurationOptions.validated(readAITextConfigurationOptions())
+        let metadata = try readAIProviderDeviceState(cancellation: NativeAttachmentCancellation())
+        guard metadata.provider == .openai, metadata.secureItem != .unavailable, let runtime = context, let connection = database,
+              let storage = deviceStorage, let library = calendarPushDatabaseBinding else { throw HostFailure("NOT_READY: AI text configuration is unavailable") }
+        let id = UUID()
+        aiConfigurationSession = .init(id: id, provider: .openai, version: 1, runtime: runtime, connection: connection, storage: storage,
+            library: library, generation: attachmentGeneration, epoch: try captureLinesDataVersion())
+        _ = try invoke("iosAITextConfigurationSessionOpen", arguments: [id.uuidString.lowercased()])
+        return .init(id: id, options: options, credentialAvailable: metadata.secureItem == .present || metadata.secureItem == .absent && metadata.legacyItemPresent,
+            consentRecorded: metadata.consentRecorded)
+    }
+    func openAITextConfigurationSessionV2() throws -> NativeAITextConfigurationSessionV2 {
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        try requireCalendarAdmission()
+        let options = try NativeAITextConfigurationOptionsV2.validated(readAITextConfigurationOptions(version: 2))
+        let metadata = try readAIProviderDeviceState(cancellation: NativeAttachmentCancellation())
+        guard metadata.provider == options.provider, metadata.secureItem != .unavailable, let runtime = context, let connection = database,
+              let storage = deviceStorage, let library = calendarPushDatabaseBinding else { throw HostFailure("NOT_READY: AI provider configuration is unavailable") }
+        let id = UUID()
+        aiConfigurationSession = .init(id: id, provider: options.provider, version: 2, runtime: runtime, connection: connection, storage: storage,
+            library: library, generation: attachmentGeneration, epoch: try captureLinesDataVersion())
+        _ = try invoke("iosAITextConfigurationSessionOpenV2", arguments: [id.uuidString.lowercased(), options.provider.rawValue])
+        return .init(id: id, options: options, credentialAvailable: metadata.secureItem == .present || metadata.secureItem == .absent && metadata.legacyItemPresent,
+            consentRecorded: metadata.consentRecorded)
+    }
+    func retryAITextConsentRecord(_ id: UUID) throws -> Bool {
+        guard let retained = aiConfigurationConsentRetry, retained.owner.id == id else { throw HostFailure("NOT_READY: AI consent recording has no pending agreement") }
+        try requireAIConfigurationIdentity(retained.owner)
+        guard aiConfigurationTurn == nil, aiTextConfigurationTurn == nil, pending == nil else { throw Self.deviceStorageUnavailable }
+        try retained.owner.storage.recordAIConsent(provider: retained.provider)
+        aiTextConfigurationConsentRecorded = true; aiConfigurationConsentRetry = nil
+        return true
+    }
+    func retireAITextConfigurationSession(_ id: UUID) {
+        guard aiConfigurationSession?.id == id else { return }
+        aiConfigurationTurn?.live = false
+        aiConfigurationSession = nil
+        _ = try? invoke("iosAITextConfigurationSessionClose", arguments: [id.uuidString.lowercased()])
+    }
+    func aiTextCredentialAvailable(_ id: UUID) throws -> Bool {
+        try checkAITextConfigurationSession(id)
+        let session = try requireAIConfigurationSession(id)
+        let metadata = try readAIProviderDeviceState(cancellation: NativeAttachmentCancellation())
+        guard metadata.provider == session.provider, metadata.secureItem != .unavailable else { throw HostFailure("AI credential presence is unavailable") }
+        return metadata.secureItem == .present || metadata.legacyItemPresent
+    }
+    func completeAITextConfigurationSession(_ id: UUID, result: String, version: Int = 1, requestJSON: String? = nil) throws -> Bool {
+        let selected: NativeAISettingsProjection.Provider
+        if version == 2, let requestJSON {
+            let request = try Self.aiTextConfigurationRequestV2(requestJSON), change = try NativeAITextConfigurationChangeV2.validated(request["change"])
+            if case .provider(let target) = change { selected = target }
+            else { selected = try NativeAITextConfigurationWitnessV2.validated(request["expected"]).provider ?? .openai }
+        } else { selected = .openai }
+        let recorded = (try? deviceStorage?.readAIConsentRecorded(provider: selected)) ?? aiTextConfigurationConsentRecorded
+        if aiConfigurationSession?.id == id {
+            _ = try requireAIConfigurationSession(id)
+            if version == 2 {
+                if case .saved(let outcome, _) = try NativeAITextConfigurationOutcomeV2.validated(result, consentRecorded: recorded) {
+                    if case .provider = outcome.change, outcome.changed { retireAITextConfigurationSession(id) }
+                    else { _ = try invoke("iosAITextConfigurationSessionRefresh", arguments: [id.uuidString.lowercased()]) }
+                }
+            } else if case .saved = try NativeAITextConfigurationOutcome.validated(result, consentRecorded: recorded) {
+                _ = try invoke("iosAITextConfigurationSessionRefresh", arguments: [id.uuidString.lowercased()])
+            }
+        }
+        return recorded
+    }
+    private func requireAIConfigurationTurn(checkCancellation: Bool = true) throws {
+        guard let turn = aiConfigurationTurn, turn.live else { throw HostFailure("STALE_REVISION: AI text configuration owner changed") }
+        if let discovery = turn.discovery, let binding = discovery.voiceBinding {
+            guard discovery.request.voice, let selected = voiceSettingsSessions[discovery.request.session],
+                  selected.binding === binding, !selected.retired, selected.endpointEdit == nil,
+                  selected.provider.rawValue == turn.session.provider.rawValue,
+                  try captureLinesDataVersion() == turn.session.epoch else { throw Self.aiModelDiscoveryUnavailable }
+            try requireVoiceBinding(binding)
+            guard try selectedVoiceProvider(binding).rawValue == turn.session.provider.rawValue else { throw Self.aiModelDiscoveryUnavailable }
+        } else { _ = try requireAIConfigurationSession(turn.session.id) }
+        guard captureAITurn == nil, aiTextConfigurationTurn == nil, aiRequestTimeoutTurn == nil,
+              aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, pending == nil,
+              retainedOrdinaryTurn == nil, providerCopy == nil, ordinaryMutationDepth == 0, !cleanupOwed,
+              !foregroundCleanupActive, foregroundCleanupCancellation == nil,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+              !attachmentDraftEvidence else { throw HostFailure("NOT_READY: AI text configuration owner is unavailable") }
+        if checkCancellation { try turn.cancellation.check() }
+    }
+    func beginAIModelDiscovery(_ id: UUID, request: NativeModelDiscoveryRequest,
+                               cancellation: NativeAttachmentCancellation) throws -> NativeHTTPJobs {
+        guard aiConfigurationTurn == nil, aiConfigurationConsentRetry == nil else { throw Self.aiModelDiscoveryUnavailable }
+        try requireCalendarAdmission(); try cancellation.check()
+        let session: AIConfigurationSession, voiceBinding: VoiceBinding?
+        switch request {
+        case .text(let sessionID, let expected):
+            try checkAITextConfigurationSession(sessionID)
+            session = try requireAIConfigurationSession(sessionID); voiceBinding = nil
+            guard session.version == 2, session.provider == (expected.provider ?? .openai) else { throw Self.aiModelDiscoveryUnavailable }
+        case .voice(let sessionID, let expected):
+            let binding = try voiceSettingsBinding(sessionID)
+            guard voiceEndpointTurn == nil, !voiceSettingsSessions.values.contains(where: { $0.endpointEdit != nil }),
+                  let selected = voiceSettingsSessions[sessionID], selected.provider == .openai || selected.provider == .gemini,
+                  try selectedVoiceProvider(binding) == selected.provider,
+                  selected.provider.rawValue == (try expected.object["provider"] as? String ?? "gemini"),
+                  let provider = NativeAISettingsProjection.Provider(rawValue: selected.provider.rawValue) else { throw Self.aiModelDiscoveryUnavailable }
+            // Common native identity only; no text session or JS endpoint session is registered.
+            session = .init(id: sessionID, provider: provider, version: 2, runtime: binding.runtime, connection: binding.connection,
+                storage: binding.storage, library: binding.library, generation: binding.generation, epoch: try captureLinesDataVersion())
+            voiceBinding = binding
+        }
+        guard secretJobs != nil else { throw Self.aiModelDiscoveryUnavailable }
+        let registry = NativeAttachmentLocalRequests()
+        #if DEBUG
+        let http = NativeHTTPJobs(registry: registry, faults: faults); faults?.configureHTTPJobs?(http)
+        #else
+        let http = NativeHTTPJobs(registry: registry)
+        #endif
+        let turn = AIConfigurationTurn(session: session, cancellation: cancellation, op: "model-discovery")
+        turn.discovery = AIModelDiscovery(id: id, http: http, request: request, voiceBinding: voiceBinding); aiConfigurationTurn = turn
+        return http
+    }
+    private static var aiModelDiscoveryUnavailable: HostFailure { HostFailure("NOT_READY: AI model discovery is unavailable") }
+    private func requireAIModelDiscovery(_ id: UUID) throws -> (AIConfigurationTurn, AIModelDiscovery) {
+        try requireAIConfigurationTurn()
+        guard let turn = aiConfigurationTurn, let discovery = turn.discovery, discovery.id == id else { throw Self.aiModelDiscoveryUnavailable }
+        try turn.session.storage.validateAIProviderDeviceMetadataRead()
+        return (turn, discovery)
+    }
+    private func aiModelDiscoveryCredential(_ turn: AIConfigurationTurn) throws -> (secure: String?, legacy: String?) {
+        guard let jobs = secretJobs else { throw Self.aiModelDiscoveryUnavailable }
+        let secure = try jobs.readAIRequestKey(provider: turn.session.provider, cancellation: turn.cancellation)
+        try requireAIConfigurationTurn()
+        let legacy = try turn.session.storage.get("mindwtr-ai-key:" + turn.session.provider.rawValue)
+        guard [secure, legacy].allSatisfy({ $0.map { $0.utf16.count <= 4000 } ?? true }) else { throw Self.aiModelDiscoveryUnavailable }
+        try requireAIConfigurationTurn()
+        return (secure, legacy)
+    }
+    func startAIModelDiscovery(_ id: UUID) throws {
+        let (turn, discovery) = try requireAIModelDiscovery(id)
+        let runtime = turn.session.runtime
+        guard discovery.ticket == nil, !invoking, let host = runtime.objectForKeyedSubscript("MindwtrHost") else { throw Self.aiModelDiscoveryUnavailable }
+        let owner: @convention(block) (JSValue) -> String = { [weak self, weak turn, weak discovery] argument in
+            guard let self, let turn, let discovery, argument.context === runtime, argument.isString, let raw = argument.toString() else { return "!MindwtrNativeError:AI model discovery owner unavailable" }
+            do {
+                let (selected, active) = try self.requireAIModelDiscovery(id)
+                guard self.invoking, selected === turn, active === discovery else { throw Self.aiModelDiscoveryUnavailable }
+                let request = try Self.projectObject(raw, maximum: 32 * 1024)
+                switch request["phase"] as? String {
+                case "current": guard Set(request.keys) == Set(["phase"]) else { throw Self.aiModelDiscoveryUnavailable }
+                case "metadata":
+                    guard Set(request.keys) == Set(["phase", "provider"]), request["provider"] as? String == turn.session.provider.rawValue,
+                          discovery.consent == nil else { throw Self.aiModelDiscoveryUnavailable }
+                    let metadata = try turn.session.storage.readAIProviderDeviceMetadata(provider: turn.session.provider)
+                    discovery.consent = metadata.consentRecorded
+                    return try Self.ownedJSON(["consent": metadata.consentRecorded])
+                case "credential":
+                    guard Set(request.keys) == Set(["phase", "provider"]), request["provider"] as? String == turn.session.provider.rawValue,
+                          discovery.consent != nil, !discovery.credentialLoaded else { throw Self.aiModelDiscoveryUnavailable }
+                    let credential = try self.aiModelDiscoveryCredential(turn)
+                    discovery.secure = credential.secure; discovery.legacy = credential.legacy; discovery.credentialLoaded = true
+                    return try Self.ownedJSON(["value": (credential.secure ?? credential.legacy).map { $0 as Any } ?? NSNull()])
+                case "http":
+                    guard Set(request.keys) == Set(["phase", "url"]), discovery.credentialLoaded, discovery.httpURL == nil,
+                          let rawURL = request["url"] as? String, rawURL.utf8.count <= 16_384,
+                          let url = URL(string: rawURL), NativeHTTPJobs.allowedURL(url) else { throw Self.aiModelDiscoveryUnavailable }
+                    discovery.httpURL = rawURL
+                default: throw Self.aiModelDiscoveryUnavailable
+                }
+                return ""
+            } catch { return "!MindwtrNativeError:AI model discovery owner unavailable" }
+        }
+        guard let callback = JSValue(object: owner, in: runtime) else { throw Self.aiModelDiscoveryUnavailable }
+        let input = try discovery.request.json
+        invoking = true; defer { invoking = false }
+        runtime.exception = nil
+        let ticket = host.invokeMethod(discovery.request.voice ? "iosVoiceModelDiscovery" : "iosAITextModelDiscovery", withArguments: [input, callback])
+        if let ticket, ticket.isString, let value = ticket.toString(), Int(value).map({ $0 > 0 }) == true { discovery.ticket = value }
+        try checkException(); guard discovery.ticket != nil else { throw Self.aiModelDiscoveryUnavailable }
+    }
+    func pollAIModelDiscovery(_ id: UUID, requireCurrent: Bool) throws -> String? {
+        guard let turn = aiConfigurationTurn, let discovery = turn.discovery, discovery.id == id,
+              let ticket = discovery.ticket, !discovery.terminal else { return "null" }
+        let runtime = turn.session.runtime
+        guard context === runtime, let host = runtime.objectForKeyedSubscript("MindwtrHost"), !invoking else { throw Self.aiModelDiscoveryUnavailable }
+        if requireCurrent { _ = try requireAIModelDiscovery(id) }
+        invoking = true; defer { invoking = false }
+        runtime.exception = nil; _ = runtime.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: []); try checkException()
+        let reply = host.invokeMethod("poll", withArguments: [ticket]); try checkException()
+        guard let reply, !reply.isNull, !reply.isUndefined else { return nil }
+        discovery.terminal = true
+        guard requireCurrent else { return "null" }
+        guard reply.isString, let raw = reply.toString() else { throw Self.aiModelDiscoveryUnavailable }
+        let envelope = try Self.projectObject(raw, maximum: 70 * 1024)
+        guard Set(envelope.keys) == Set(["ok", "value"]), Self.isBoolean(envelope["ok"]), envelope["ok"] as? Bool == true,
+              let value = envelope["value"] else { throw Self.aiModelDiscoveryUnavailable }
+        _ = try requireAIModelDiscovery(id)
+        let result = try Self.ownedJSON(value); _ = try discovery.request.validate(result); return result
+    }
+    func validateAIModelDiscovery(_ id: UUID, result: String) throws {
+        let (turn, discovery) = try requireAIModelDiscovery(id), choices = try discovery.request.validate(result)
+        guard choices.provider == turn.session.provider.rawValue, let consent = discovery.consent,
+              try turn.session.storage.readAIProviderDeviceMetadata(provider: turn.session.provider).consentRecorded == consent else { throw Self.aiModelDiscoveryUnavailable }
+        if discovery.credentialLoaded {
+            let current = try aiModelDiscoveryCredential(turn)
+            guard current.secure.map({ Data($0.utf8) }) == discovery.secure.map({ Data($0.utf8) }),
+                  current.legacy.map({ Data($0.utf8) }) == discovery.legacy.map({ Data($0.utf8) }) else { throw Self.aiModelDiscoveryUnavailable }
+        }
+    }
+    func abortAIModelDiscovery(_ id: UUID) {
+        guard let turn = aiConfigurationTurn, let discovery = turn.discovery, discovery.id == id,
+              let ticket = discovery.ticket, !discovery.terminal, context === turn.session.runtime else { return }
+        let runtime = turn.session.runtime
+        runtime.exception = nil; _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("abort", withArguments: [ticket]); runtime.exception = nil
+    }
+    func completeAIModelDiscovery(_ id: UUID, result: String) throws {
+        try validateAIModelDiscovery(id, result: result)
+        finishAIModelDiscovery(id, result: result)
+    }
+    func cancelAIModelDiscovery(session: UUID?, voice: Bool?) -> (id: UUID, http: NativeHTTPJobs)? {
+        guard let turn = aiConfigurationTurn, let discovery = turn.discovery,
+              session == nil || session == discovery.request.session, voice == nil || voice == discovery.request.voice else { return nil }
+        turn.cancellation.cancel(); abortAIModelDiscovery(discovery.id)
+        return (discovery.id, discovery.http)
+    }
+    func finishAIModelDiscovery(_ id: UUID, result: String?) {
+        guard let turn = aiConfigurationTurn, let discovery = turn.discovery, discovery.id == id else { return }
+        turn.live = false; aiConfigurationTurn = nil
+        if let result, let choices = try? discovery.request.validate(result) {
+            if discovery.request.voice {
+                if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-voice-model-discovery", "provider": choices.provider, "outcome": choices.outcome]) {
+                    _ = try? invoke("logLine", arguments: ["Native iOS speech model discovery settled", context])
+                }
+            } else if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-ai-model-discovery", "provider": choices.provider, "outcome": choices.outcome]) {
+                _ = try? invoke("logLine", arguments: ["Native iOS AI model discovery settled", context])
+            }
+        }
+    }
+    func aiTextSensitive(session id: UUID, op: String, value: String?, attempt: UUID? = nil, expected: [String: Any], version: Int = 1,
+        cancellation: NativeAttachmentCancellation) throws -> String {
+        let extraBody = op == "read-extra-body" || op == "save-extra-body"
+        guard aiConfigurationConsentRetry == nil else { throw HostFailure("NOT_READY: AI consent recording requires its selected retry") }
+        let session = try requireAIConfigurationSession(id)
+        guard session.version == version, (op != "read-endpoint" && op != "save-endpoint") || session.provider == .openai else { throw Self.deviceStorageInvalid }
+        if extraBody {
+            guard version == 2, session.provider == .openai, ((try NativeAITextConfigurationWitnessV2.validated(expected)).provider ?? .openai) == .openai,
+                  op == "save-extra-body" ? attempt != nil && value != nil : attempt == nil && value == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: OpenAI extra body parameters require their selected configuration session")
+            }
+            if let value, value.utf16.count > 4000 { throw CoreHostRejection(message: "INVALID_INPUT: AI extra body parameters are too large") }
+        } else if attempt != nil { throw Self.deviceStorageInvalid }
+        try requireCalendarAdmission()
+        let secrets = secretJobs
+        guard aiConfigurationTurn == nil, (extraBody || secrets != nil),
+              ["read-endpoint", "save-endpoint", "save-credential", "clear-credential", "read-extra-body", "save-extra-body"].contains(op) else { throw HostFailure("NOT_READY: AI text configuration is unavailable") }
+        if op == "save-endpoint" {
+            guard let value, value.utf16.count <= 2000,
+                  value.isEmpty || URL(string: value).map(NativeHTTPJobs.allowedURL) == true else { throw HostFailure("INVALID_INPUT: AI text endpoint is unsupported") }
+        } else if op == "save-credential" {
+            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, value.utf16.count <= 4000 else { throw HostFailure("INVALID_INPUT: Enter a replacement credential") }
+        }
+        let turn = AIConfigurationTurn(session: session, cancellation: cancellation, op: op)
+        aiConfigurationTurn = turn
+        var confirmed = false, changedExtraBody = false
+        defer {
+            if !extraBody { secrets?.drain() }
+            turn.live = false; aiConfigurationTurn = nil
+            if confirmed, op == "save-extra-body", changedExtraBody {
+                _ = try? invoke("iosAITextConfigurationAcknowledged", arguments: ["settings-saved", "openai", "extraBodyParams"])
+            } else if confirmed, !extraBody, op != "read-endpoint" {
+                let outcome = op == "save-endpoint" ? "endpoint-saved" : op == "save-credential" ? "credential-saved" : "credential-cleared"
+                _ = try? invoke("iosAITextConfigurationAcknowledged", arguments: [outcome, session.provider.rawValue, op == "save-endpoint" ? "endpoint" : "credential"])
+            }
+        }
+        let owner: @convention(block) (JSValue) -> String = { [weak self, weak turn] argument in
+            guard let self, let turn, argument.context === session.runtime, argument.isString, let raw = argument.toString() else { return "!MindwtrNativeError:AI text configuration owner is unavailable" }
+            do {
+                try self.requireAIConfigurationTurn()
+                guard self.invoking, raw.utf8.count <= 32 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+                      let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { throw Self.deviceStorageInvalid }
+                if request["phase"] as? String == "current", Set(request.keys) == Set(["phase"]) { return "" }
+                if request["phase"] as? String == "extra-body-save", Set(request.keys) == Set(["phase"]),
+                   op == "save-extra-body", !turn.extraBodyAccepted {
+                    turn.extraBodyAccepted = true; return ""
+                }
+                guard request["phase"] as? String == "credential", Set(request.keys) == Set(["phase", "value"]),
+                      let secrets, let replacement = request["value"] as? String, !turn.credentialAccepted,
+                      (op == "save-credential" && replacement == value && !replacement.isEmpty) || (op == "clear-credential" && replacement.isEmpty) else { throw Self.deviceStorageInvalid }
+                turn.credentialAccepted = true
+                if op == "save-credential" {
+                    try secrets.replaceAIConfigurationCredential(provider: session.provider, value: replacement, cancellation: cancellation)
+                    try session.storage.retireAILegacyCredential(provider: session.provider)
+                } else {
+                    try session.storage.retireAILegacyCredential(provider: session.provider)
+                    try secrets.clearAIConfigurationCredential(provider: session.provider, cancellation: cancellation)
+                }
+                try self.requireAIConfigurationTurn()
+                return ""
+            } catch { return "!MindwtrNativeError:AI text configuration could not be confirmed" }
+        }
+        let runtime = session.runtime
+        runtime.exception = nil
+        guard let callback = JSValue(object: owner, in: runtime), runtime.exception == nil else { throw HostFailure("AI text configuration is unavailable") }
+        var input: [String: Any] = ["session": id.uuidString.lowercased(), "op": op, "expected": expected]
+        if let value { input["value"] = value }
+        if let attempt { input["attempt"] = attempt.uuidString.lowercased() }
+        do {
+            try requireAIConfigurationTurn()
+            let result = try invoke(Self.aiTextConfigurationMethod("Sensitive", version: version), arguments: [Self.ownedJSON(input), callback], localCancellation: cancellation)
+            try requireAIConfigurationTurn()
+            let object = try Self.projectObject(result, maximum: 16 * 1024)
+            if op == "read-endpoint" || op == "read-extra-body" {
+                guard Set(object.keys) == Set(["value"]), let value = object["value"] as? String,
+                      op != "read-extra-body" || value.utf16.count <= 4000 else { throw Self.deviceStorageInvalid }
+            } else if op == "save-endpoint" || op == "save-extra-body" {
+                guard Set(object.keys) == Set(["changed"]), Self.isBoolean(object["changed"]) else { throw Self.deviceStorageInvalid }
+                changedExtraBody = op == "save-extra-body" && object["changed"] as? Bool == true
+            }
+            else { guard turn.credentialAccepted, Set(object.keys) == Set(["completed"]), object["completed"] as? Bool == true else { throw Self.deviceStorageInvalid } }
+            confirmed = true; return result
+        } catch {
+            if extraBody, !turn.extraBodyAccepted, let failure = error as? HostFailure,
+               ["INVALID_INPUT:", "NOT_READY:", "STALE_REVISION:"].contains(where: { failure.message.hasPrefix($0) }) {
+                throw CoreHostRejection(message: "INVALID_INPUT: AI extra body parameters were refused before saving")
+            }
+            throw HostFailure("ACTION_FAILED: AI text configuration could not be confirmed")
+        }
+    }
+
+    private static func aiTextConfigurationRequestV2(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 32 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(request.keys) == Set(["version", "requestId", "change", "expected", "consent"]),
+              Self.isInteger(request["version"], equalTo: 2), let id = request["requestId"] as? String,
+              let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id, Self.isBoolean(request["consent"]) else { throw HostFailure("INVALID_INPUT: AI provider request is malformed") }
+        _ = try NativeAITextConfigurationChangeV2.validated(request["change"])
+        _ = try NativeAITextConfigurationWitnessV2.validated(request["expected"])
+        return request
+    }
+    private static func aiTextConfigurationAnyRequest(_ raw: String) throws -> [String: Any] {
+        let object = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+        return object?["version"] != nil ? try aiTextConfigurationRequestV2(raw) : try aiTextConfigurationRequest(raw)
+    }
+    private static func aiTextConfigurationRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 32 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(request.keys) == Set(["requestId", "change", "expected", "consent"]),
+              let id = request["requestId"] as? String, let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id,
+              Self.isBoolean(request["consent"]), let consent = request["consent"] as? Bool else { throw HostFailure("INVALID_INPUT: A bounded AI text configuration request is required") }
+        let change = try NativeAITextConfigurationChange.validated(request["change"])
+        guard !consent || change == .enabled(true) else { throw HostFailure("INVALID_INPUT: AI consent intent is invalid") }
+        _ = try NativeAITextConfigurationWitness.validated(request["expected"])
+        return request
+    }
+    private func makeAITextConfigurationTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool, version: Int = 1) throws {
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        guard !aiTextConfigurationRetired, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiTextConfigurationTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+              let runtime = context, let storage = deviceStorage, let connection = database, let library = calendarPushDatabaseBinding,
+              try Self.bindingIdentity(databaseURL) == library else {
+            throw CoreHostRejection(message: "STALE_REVISION: AI text configuration owner is unavailable; reload before editing")
+        }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        guard calendarAccessTurn == nil, calendarPushTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
+              deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, encryptionUnlockTurn == nil,
+              providerCopy == nil, retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
+              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
+            throw CoreHostRejection(message: "NOT_READY: AI text configuration edit is unavailable")
+        }
+        let target: NativeAISettingsProjection.Provider?
+        if version == 2, let requestJSON {
+            let value = try invoke("iosAITextConfigurationConsentTargetV2", arguments: [requestJSON])
+            let object = try Self.projectObject(value, maximum: 1024)
+            guard Set(object.keys) == Set(["provider"]), object["provider"] is NSNull || (object["provider"] as? String).flatMap(NativeAISettingsProjection.Provider.init(rawValue:)) != nil else { throw Self.deviceStorageInvalid }
+            target = (object["provider"] as? String).flatMap(NativeAISettingsProjection.Provider.init(rawValue:))
+        } else { target = version == 1 ? .openai : nil }
+        aiTextConfigurationConsentRecorded = target.map { (try? storage.readAIConsentRecorded(provider: $0)) ?? false } ?? false
+        aiTextConfigurationTurn = .init(id: id, runtime: runtime, storage: storage, connection: connection, library: library, generation: attachmentGeneration,
+            epoch: try captureLinesDataVersion(), cancellation: cancellation, requestJSON: requestJSON, retry: retry, version: version, consentTarget: target)
+    }
+    private func requireAITextConfigurationTurn(checkCancellation: Bool = true) throws {
+        guard let turn = aiTextConfigurationTurn, !aiTextConfigurationRetired, started, !closed, lockFD >= 0,
+              context === turn.runtime, database === turn.connection, deviceStorage === turn.storage, attachmentGeneration == turn.generation,
+              try Self.bindingIdentity(databaseURL) == turn.library, try captureLinesDataVersion() == turn.epoch else {
+            aiTextConfigurationRetired = true
+            throw HostFailure("STALE_REVISION: AI text configuration owner changed; reload before editing")
+        }
+        if checkCancellation && turn.cancellation.isCancelled {
+            throw HostFailure("CANCELLED: AI text configuration edit is no longer current")
+        }
+    }
+    private func invokeAITextConfigurationRead(_ method: String, arguments: [Any]) throws -> String {
+        try requireAITextConfigurationTurn()
+        guard let runtime = aiTextConfigurationTurn?.runtime else { throw HostFailure("NOT_READY: AI text configuration owner is unavailable") }
+        let owner: @convention(block) () -> String = { [unowned self] in
+            self.guarded { try self.requireAITextConfigurationTurn(); return "" } ?? "!MindwtrNativeError:AI text configuration owner is unavailable"
+        }
+        do {
+            runtime.exception = nil
+            guard let ownerValue = JSValue(object: owner, in: runtime), runtime.exception == nil else {
+                throw HostFailure("NOT_READY: AI text configuration owner callback is unavailable")
+            }
+            var selectedArguments = arguments + [ownerValue]
+            if method == "iosAITextConfigurationPrepare" { selectedArguments.append(aiTextConfigurationConsentRecorded) }
+            if method == "iosAITextConfigurationPrepareV2" { selectedArguments.append(aiTextConfigurationConsentRecorded ? (aiTextConfigurationTurn?.consentTarget?.rawValue as Any? ?? NSNull()) : NSNull()) }
+            let value = try invoke(method, arguments: selectedArguments, localCancellation: aiTextConfigurationTurn?.cancellation)
+            // A published commit's validated terminal result wins caller cancellation.
+            try requireAITextConfigurationTurn(checkCancellation: !Self.aiTextConfigurationCommitMethods.contains(method))
+            return value
+        } catch {
+            // JS may have advanced the adapter epoch before refusal; do not reuse this native admission.
+            let message = (error as? HostFailure)?.message
+            let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
+                || message?.hasPrefix("CANCELLED:") == true
+            if !Self.aiTextConfigurationCommitMethods.contains(method) || !uncertainSave {
+                aiTextConfigurationRetired = true
+            }
+            throw error
+        }
+    }
+    func readAITextConfigurationOptions(version: Int = 1) throws -> String {
+        try requireCalendarAdmission()
+        let id = UUID()
+        try makeAITextConfigurationTurn(id, requestJSON: nil, cancellation: NativeAttachmentCancellation(), retry: false, version: version)
+        defer { finishAITextConfiguration(id) }
+        aiTextConfigurationOwnerAccess = true; defer { aiTextConfigurationOwnerAccess = false }
+        let raw = try invokeAITextConfigurationRead(Self.aiTextConfigurationMethod("Options", version: version), arguments: ["{}"])
+        if version == 2 { _ = try NativeAITextConfigurationOptionsV2.validated(raw) } else { _ = try NativeAITextConfigurationOptions.validated(raw) }; return raw
+    }
+    func readAIAnthropicThinkingOptions(_ sessionID: UUID) throws -> String {
+        try checkAITextConfigurationSession(sessionID)
+        let session = try requireAIConfigurationSession(sessionID)
+        guard session.version == 2, session.provider == .anthropic else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Anthropic thinking requires its selected configuration session")
+        }
+        try requireCalendarAdmission()
+        let id = UUID()
+        try makeAITextConfigurationTurn(id, requestJSON: nil, cancellation: NativeAttachmentCancellation(), retry: false, version: 2)
+        defer { finishAITextConfiguration(id) }
+        aiTextConfigurationOwnerAccess = true; defer { aiTextConfigurationOwnerAccess = false }
+        let raw = try invokeAITextConfigurationRead("iosAIAnthropicThinkingOptions", arguments: ["{}"])
+        _ = try NativeAIAnthropicThinkingOptions.validated(raw)
+        try checkAITextConfigurationSession(sessionID)
+        return raw
+    }
+    func probeAITextConfigurationOutcome(requestJSON: String) throws -> String {
+        try requireCalendarAdmission()
+        let request = try Self.aiTextConfigurationRequest(requestJSON)
+        do {
+            let value = try invoke("iosAITextConfigurationRetryOutcome", arguments: [requestJSON])
+            try validateAITextConfigurationResult(value, request: request, changed: true); return value
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
+            throw CoreHostRejection(message: error.message)
+        }
+    }
+    func beginAITextConfiguration(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
+        guard aiConfigurationConsentRetry == nil || pending != nil else {
+            throw CoreHostRejection(message: "NOT_READY: AI consent recording requires its selected retry")
+        }
+        guard aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiTextConfigurationTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+            throw CoreHostRejection(message: "NOT_READY: AI text configuration edit is unavailable")
+        }
+        try requireNoAttachmentDraft(); try denyCleanupOwner()
+        let request = try Self.aiTextConfigurationAnyRequest(requestJSON)
+        let version = request["version"] as? Int == 2 ? 2 : 1
+        if let command = pending {
+            guard command.method == Self.aiTextConfigurationMethod("Commit", version: version), let raw = try journalArguments(command).first as? String,
+                  let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Self.equalJSON(envelope["request"], request) else {
+                throw HostFailure("Previous changes require their exact retry")
+            }
+        } else {
+            try requireCalendarAdmission()
+            do {
+                let replay = try invoke(Self.aiTextConfigurationMethod("RetryOutcome", version: version), arguments: [requestJSON])
+                try validateAITextConfigurationResult(replay, request: request, changed: true); return (replay, false)
+            } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
+            catch let error as HostFailure where error.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: error.message) }
+        }
+        if cancellation.isCancelled {
+            if pending != nil { throw HostFailure("AI text configuration save still requires exact retry") }
+            throw CoreHostRejection(message: "STALE_REVISION: AI text configuration edit is no longer current")
+        }
+        try makeAITextConfigurationTurn(id, requestJSON: requestJSON, cancellation: cancellation, retry: pending != nil, version: version)
+        return (nil, pending != nil)
+    }
+    func commitAITextConfiguration(_ id: UUID) throws -> String {
+        guard let turn = aiTextConfigurationTurn, turn.id == id else { throw HostFailure("AI text configuration owner is unavailable") }
+        aiTextConfigurationOwnerAccess = true; defer { aiTextConfigurationOwnerAccess = false }
+        do { try requireAITextConfigurationTurn() }
+        catch { if turn.retry { throw HostFailure("AI text configuration save still requires exact retry") }; throw CoreHostRejection(message: error.localizedDescription) }
+        if turn.retry {
+            guard let terminal = try resolvePending() else { throw HostFailure("AI text configuration save still requires exact retry") }
+            return try terminal.value()
+        }
+        guard let request = turn.requestJSON else { throw HostFailure("AI text configuration request is unavailable") }
+        return try call(Self.aiTextConfigurationMethod("", version: turn.version), argumentsJSON: Self.ownedJSON([request]))
+    }
+    var aiTextConfigurationRetryOwed: Bool { pending.map { Self.aiTextConfigurationCommitMethods.contains($0.method) } ?? false }
+    func finishAITextConfiguration(_ id: UUID) { if aiTextConfigurationTurn?.id == id { aiTextConfigurationTurn = nil } }
+    private func validateAITextConfigurationResult(_ value: String, request: [String: Any], changed: Bool) throws {
+        if request["version"] as? Int == 2 {
+            let result = try NativeAITextConfigurationResultV2.validated(value), change = try NativeAITextConfigurationChangeV2.validated(request["change"])
+            guard result.change == change, result.changed == changed else { throw HostFailure("Malformed AI provider acknowledgment") }
+            if !changed {
+                let witness = try NativeAITextConfigurationWitnessV2.validated(request["expected"]), expected = witness.object
+                let same: Bool
+                switch change {
+                case .provider(let value): same = (witness.provider ?? .openai) == value
+                case .enabled(let value): same = expected["enabledPresent"] as? Bool == true && expected["enabled"] as? Bool == value
+                case .model(let value): same = expected["modelPresent"] as? Bool == true && expected["model"] as? String == value
+                case .copilotModel(let value): same = expected["copilotModelPresent"] as? Bool == true && expected["copilotModel"] as? String == value
+                case .anthropicThinking(let value): same = witness.provider == .anthropic && value == ((witness.budget ?? 0) > 0)
+                case .thinkingBudget(let value): same = witness.provider == .anthropic && witness.budgetPresent && witness.budget == value
+                }
+                guard same else { throw HostFailure("Malformed AI provider no-write acknowledgment") }
+            }
+            return
+        }
+        let result = try NativeAITextConfigurationResult.validated(value)
+        guard result.change == (try NativeAITextConfigurationChange.validated(request["change"])), result.changed == changed else { throw HostFailure("Malformed AI text configuration acknowledgment") }
+        if !changed {
+            let witness = try NativeAITextConfigurationWitness.validated(request["expected"])
+            let same: Bool
+            switch result.change {
+            case .enabled(let value): same = witness.enabledPresent && witness.enabled == value
+            case .model(let value): same = witness.modelPresent && witness.model == value
+            case .copilotModel(let value): same = witness.copilotModelPresent && witness.copilotModel == value
+            }
+            guard same else { throw HostFailure("Malformed AI text configuration no-write acknowledgment") }
+        }
+    }
+    private func aiTextConfigurationJournalRequest(_ command: PendingCommand) throws -> String {
+        guard let raw = try journalArguments(command).first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed AI text configuration journal") }
+        return try Self.ownedJSON(request)
+    }
+    private func validateAITextConfigurationAcknowledgment(_ command: PendingCommand, value: String) throws {
+        let request = try Self.aiTextConfigurationAnyRequest(aiTextConfigurationJournalRequest(command))
+        try validateAITextConfigurationResult(value, request: request, changed: true)
+    }
+    private func invokeAITextConfigurationCommit(_ command: PendingCommand) throws -> String {
+        try invokeAITextConfigurationRead(Self.aiTextConfigurationMethod("Commit", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
+    }
+
     private static func aiRequestTimeoutRequest(_ raw: String) throws -> [String: Any] {
         guard raw.utf8.count <= 2048, try NativeJSON.hasUniqueObjectKeys(raw),
               let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -7040,7 +9449,8 @@ private final class Engine: @unchecked Sendable {
         return request
     }
     private func makeAIRequestTimeoutTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool) throws {
-        guard !aiRequestTimeoutRetired, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiRequestTimeoutRetired, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
               let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
               try Self.bindingIdentity(databaseURL) == library else {
             throw CoreHostRejection(message: "STALE_REVISION: AI timeout owner is unavailable; reload before editing")
@@ -7113,7 +9523,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
     func beginAIRequestTimeout(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
-        guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
             throw CoreHostRejection(message: "NOT_READY: AI timeout edit is unavailable")
         }
         try requireNoAttachmentDraft(); try denyCleanupOwner()
@@ -7183,7 +9593,8 @@ private final class Engine: @unchecked Sendable {
         return request
     }
     private func makeAIReasoningEffortTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool) throws {
-        guard !aiReasoningEffortRetired, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiReasoningEffortRetired, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
               let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
               try Self.bindingIdentity(databaseURL) == library else {
             throw CoreHostRejection(message: "STALE_REVISION: AI reasoning effort owner is unavailable; reload before editing")
@@ -7257,7 +9668,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
     func beginAIReasoningEffort(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
-        guard aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
             throw CoreHostRejection(message: "NOT_READY: AI reasoning effort edit is unavailable")
         }
         try requireNoAttachmentDraft(); try denyCleanupOwner()
@@ -7327,7 +9738,8 @@ private final class Engine: @unchecked Sendable {
         return request
     }
     private func makeAIGeminiThinkingBudgetTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool) throws {
-        guard !aiGeminiThinkingBudgetRetired, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiGeminiThinkingBudgetRetired, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
               let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
               try Self.bindingIdentity(databaseURL) == library else {
             throw CoreHostRejection(message: "STALE_REVISION: AI Gemini thinking budget owner is unavailable; reload before editing")
@@ -7401,7 +9813,7 @@ private final class Engine: @unchecked Sendable {
         }
     }
     func beginAIGeminiThinkingBudget(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
-        guard aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
             throw CoreHostRejection(message: "NOT_READY: AI Gemini thinking budget edit is unavailable")
         }
         try requireNoAttachmentDraft(); try denyCleanupOwner()
@@ -7482,6 +9894,663 @@ private final class Engine: @unchecked Sendable {
         let raw = try invoke("iosAISettingsProjection", arguments: ["{}", ownerValue])
         try current()
         return try NativeAISettingsProjection.validated(raw)
+    }
+
+    func retireVoiceOperations(fence: Bool = true) -> (captures: [VoiceCapture], jobs: [VoiceSpeech]) {
+        let captures = Array(voiceCaptures.values), jobs = Array(voiceSpeech.values)
+        for job in jobs { job.cancel() }
+        if fence {
+            for capture in captures { capture.cancellation.cancel(); capture.binding.live = false }
+            for session in voiceSettingsSessions.values { session.binding.live = false }
+        }
+        return (captures, jobs)
+    }
+    private func newVoiceFiles() throws -> NativeVoiceFiles {
+        if rnAdoptionContainerURL != nil {
+            guard let jobs = attachmentJobs else { throw NativeAttachmentFilesError.unavailable }
+            return try NativeVoiceFiles(files: jobs.files)
+        }
+        return try NativeVoiceFiles(libraryRoot: databaseURL.deletingLastPathComponent())
+    }
+    func createVoiceCapture(presentationID: UUID, captureID: UUID, backend: any NativeVoiceRecorderBackend) throws -> VoiceCapture {
+        guard voiceCaptures[captureID] == nil, !voiceCaptures.values.contains(where: { $0.source == nil }) else { throw HostFailure("NOT_READY: A recording is already active") }
+        let binding = try newVoiceBinding(), files = try newVoiceFiles()
+        #if DEBUG && targetEnvironment(simulator)
+        let selectedBackend: any NativeVoiceRecorderBackend = voiceUIFixtureSyntheticAudio ? NativeVoiceUIFixtureBackend() : backend
+        #else
+        let selectedBackend = backend
+        #endif
+        let capture = VoiceCapture(binding: binding, files: files, backend: selectedBackend, presentationID: presentationID, captureID: captureID)
+        voiceCaptures[captureID] = capture; return capture
+    }
+    func bindVoiceCapture(_ capture: VoiceCapture, session: NativeVoiceRecordingSession) throws -> NativeVoiceCaptureHandle {
+        try requireVoiceBinding(capture.binding)
+        guard voiceCaptures[capture.captureID] === capture, session.presentationID == capture.presentationID, session.captureID == capture.captureID, capture.session == nil else { throw NativeVoiceJSON.invalid }
+        capture.session = session; return capture.handle!
+    }
+    func voiceCapture(_ handle: NativeVoiceCaptureHandle) throws -> VoiceCapture {
+        guard let capture = voiceCaptures[handle.captureID], capture.handle == handle else { throw HostFailure("STALE_REVISION: Recording closed") }
+        try requireVoiceBinding(capture.binding); return capture
+    }
+    func cancelVoiceCapture(_ handle: NativeVoiceCaptureHandle) throws -> VoiceCapture {
+        let capture = try voiceCapture(handle)
+        if capture.source == nil { voiceCaptures.removeValue(forKey: handle.captureID) }
+        return capture
+    }
+    func freezeVoiceStop(_ handle: NativeVoiceCaptureHandle, raw: String?) throws -> VoiceCapture {
+        let capture = try voiceCapture(handle)
+        guard !capture.busy else { throw HostFailure("NOT_READY: Recording save is already active") }
+        if let raw {
+            let value = try NativeVoiceJSON.object(raw, maximum: 131072)
+            guard Set(value.keys) == Set(["text", "options", "openAfterSave", "applied"]), value["text"] is String,
+                  value["options"] is [String: Any], NativeVoiceJSON.boolean(value["openAfterSave"]) != nil,
+                  value["applied"] is NSNull || value["applied"] is [String: Any] else { throw NativeVoiceJSON.invalid }
+            let exact = try NativeVoiceJSON.encode(value)
+            if let frozen = capture.stopIntent { guard frozen == exact else { throw HostFailure("STALE_REVISION: Retry the accepted recording unchanged") } }
+            else { capture.stopIntent = exact }
+        }
+        guard capture.stopIntent != nil else { throw NativeVoiceJSON.invalid }
+        capture.busy = true; return capture
+    }
+    func recordVoiceSource(_ capture: VoiceCapture, source: NativeVoiceRecordingSource) throws {
+        try requireVoiceBinding(capture.binding)
+        guard source.session == capture.session else { throw NativeVoiceJSON.invalid }
+        if let prior = capture.source { guard prior.receipt.matches(source.proof) else { throw NativeVoiceJSON.invalid } }
+        else { capture.source = source }
+    }
+    func releaseVoiceStop(_ capture: VoiceCapture) { capture.busy = false }
+    func voiceSavePending(_ capture: VoiceCapture) -> Bool { pending?.method == VoiceAction.capture.commit && capture.captureRequest != nil }
+    func releaseVoiceSpeech(_ job: VoiceSpeech) { job.running = false }
+    private static func voiceNow() -> String {
+        let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return format.string(from: Date())
+    }
+    func prepareVoiceCapture(_ capture: VoiceCapture, source: NativeVoiceRecordingSource,
+                             local: VoiceWhisperRead?, localState: NativeWhisperModelState?) throws -> String? {
+        try requireVoiceBinding(capture.binding)
+        guard source.session == capture.session, let intent = capture.stopIntent else { throw NativeVoiceJSON.invalid }
+        if let selected = capture.source { guard selected.receipt.matches(source.proof) else { throw NativeVoiceJSON.invalid } }
+        else { capture.source = source }
+        if capture.captureRequest == nil {
+            let resolved: (runtime: NativeVoiceRuntime, remote: VoiceRemoteRuntime?)
+            if let local, let localState {
+                guard local.binding === capture.binding else { throw NativeVoiceJSON.invalid }
+                let ready = try whisperRuntime(local, state: localState)
+                resolved = (ready, ready.available ? .whisper(local.model) : nil)
+            } else { resolved = try resolveVoiceRuntime(capture.binding, cancellation: capture.cancellation, freeze: true) }
+            let runtime = resolved.runtime
+            capture.runtime = runtime; capture.remote = resolved.remote
+            var request = try NativeVoiceJSON.object(intent, maximum: 131072)
+            let id = capture.captureID.uuidString.lowercased(), now = Self.voiceNow()
+            request["version"] = 1; request["requestId"] = id; request["recordedAt"] = now
+            if runtime.saveAudioAttachments || !runtime.available {
+                let uri = capture.files.managedRoot.appendingPathComponent(id + ".m4a").absoluteString
+                request["attachment"] = ["id": id, "kind": "file", "title": source.fileName, "uri": uri, "mimeType": "audio/mp4", "size": source.size, "fileHash": source.sha256, "localStatus": "available", "createdAt": now, "updatedAt": now]
+            } else { request["attachment"] = NSNull() }
+            capture.captureRequest = try NativeVoiceJSON.encode(request)
+        }
+        let raw = capture.captureRequest!, request = try NativeVoiceJSON.object(raw, maximum: 131072)
+        let settlement = (request["attachment"] as? [String: Any]).map { attachment in
+            NativeVoiceFileSettlement(source: .init(source.proof), targetURI: attachment["uri"] as! String,
+                operationID: capture.captureID.uuidString.lowercased().replacingOccurrences(of: "-", with: ""), stage: nil)
+        }
+        return try prepareVoice(.capture, request: raw, binding: capture.binding, files: settlement, cancellation: capture.cancellation)
+    }
+    func commitVoiceCapture(_ capture: VoiceCapture) throws -> String {
+        guard let command = pending, command.method == VoiceAction.capture.commit else { throw NativeVoiceJSON.invalid }
+        return try executeVoice(command, binding: capture.binding, cancellation: capture.cancellation)
+    }
+    func savedVoiceCapture(_ capture: VoiceCapture, result: String) throws -> NativeVoiceCaptureOutcome {
+        try requireVoiceBinding(capture.binding)
+        guard let raw = capture.captureRequest else { throw NativeVoiceJSON.invalid }
+        let request = try NativeVoiceJSON.object(raw, maximum: 131072)
+        try validateVoiceResult(.capture, result, request: request)
+        capture.savedResult = result
+        if capture.jobID == nil, capture.runtime?.available == true {
+            let job = VoiceSpeech(capture: capture, speechNow: Self.voiceNow(), timeZone: TimeZone.current.identifier)
+            voiceSpeech[job.id] = job; capture.jobID = job.id
+        }
+        return .saved(taskId: capture.captureID.uuidString.lowercased(), speechJobID: capture.jobID)
+    }
+    func claimVoiceSpeech(_ id: UUID) throws -> VoiceSpeech {
+        guard let job = voiceSpeech[id], !job.running else { throw HostFailure("NOT_READY: Speech result is unavailable") }
+        try requireVoiceBinding(job.capture.binding)
+        job.running = true; return job
+    }
+    func voiceSpeechHTTP(_ job: VoiceSpeech) throws -> NativeHTTPJobs {
+        try voiceHTTP(binding: job.capture.binding, cancellation: job.cancellation)
+    }
+    func voiceHTTP(binding: VoiceBinding, cancellation: NativeAttachmentCancellation) throws -> NativeHTTPJobs {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        #if DEBUG
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = faults?.httpConfiguration?.protocolClasses ?? configuration.protocolClasses
+        return NativeHTTPJobs(voiceRegistry: localRequests, configuration: configuration)
+        #else
+        return NativeHTTPJobs(voiceRegistry: localRequests)
+        #endif
+    }
+    func buildVoiceSpeechHTTP(_ job: VoiceSpeech, audio: String) throws -> String {
+        let capture = job.capture
+        try requireVoiceBinding(capture.binding, cancellation: job.cancellation)
+        guard capture.savedResult != nil, let runtime = capture.runtime else { throw NativeVoiceJSON.invalid }
+        return try buildVoiceHTTP(binding: capture.binding, runtime: runtime, cancellation: job.cancellation, audio: audio, mimeType: "audio/mp4")
+    }
+    private func buildVoiceHTTP(binding: VoiceBinding, runtime: NativeVoiceRuntime, cancellation: NativeAttachmentCancellation,
+                                audio: String, mimeType: String) throws -> String {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        guard runtime.available, runtime.provider == .gemini, ["audio/mp4", "audio/wav"].contains(mimeType), let secrets = secretJobs else { throw NativeVoiceJSON.invalid }
+        let config: [String: Any] = ["model": runtime.model, "language": runtime.language, "mode": runtime.mode.rawValue, "fieldStrategy": runtime.fieldStrategy.rawValue, "now": Self.voiceNow(), "timeZone": TimeZone.current.identifier]
+        let input = try NativeVoiceJSON.encode(["config": config, "audioBase64": audio, "mimeType": mimeType])
+        let built = try NativeVoiceJSON.object(invokeVoice("iosVoiceGeminiRequestBuild", [input], binding: binding, cancellation: cancellation), maximum: 8 * 1024 * 1024)
+        guard Set(built.keys) == Set(["url", "method", "headers", "body", "timeoutMs"]), built["method"] as? String == "POST", built["timeoutMs"] as? Int == 30000,
+              let url = built["url"] as? String, let parts = URLComponents(string: url), parts.scheme == "https", parts.host == "generativelanguage.googleapis.com", parts.port == nil, parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+              parts.path.hasPrefix("/v1beta/models/"), parts.path.hasSuffix(":generateContent"), parts.path.split(separator: "/").count == 3,
+              let body = built["body"] as? String, body.utf8.count <= 8 * 1024 * 1024,
+              let headers = built["headers"] as? [[String]], headers == [["Content-Type", "application/json"]] else { throw NativeVoiceJSON.invalid }
+        let secure = try secrets.readAIRequestKey(provider: .gemini, cancellation: cancellation)
+        let credential = try secure ?? binding.storage.get("mindwtr-ai-key:gemini")
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        guard let credential, !credential.isEmpty, credential.utf16.count <= 4000 else { throw HostFailure("NOT_READY: Speech credential is unavailable") }
+        return try NativeVoiceJSON.encode(["url": url, "method": "POST", "redirect": "error", "headers": headers + [["x-goog-api-key", credential]], "text": body])
+    }
+    func decodeVoiceSpeech(_ job: VoiceSpeech, response: String) throws {
+        try requireVoiceBinding(job.capture.binding, cancellation: job.cancellation)
+        guard job.decoded == nil else { throw NativeVoiceJSON.invalid }
+        job.decoded = try invokeVoice("iosVoiceGeminiResponseDecode", [response], binding: job.capture.binding, cancellation: job.cancellation)
+    }
+    func checkVoiceSpeech(_ job: VoiceSpeech) throws {
+        try requireVoiceBinding(job.capture.binding, cancellation: job.cancellation)
+        guard voiceSpeech[job.id] === job, job.running else { throw NativeVoiceJSON.invalid }
+    }
+    func buildVoiceOpenAITranscription(_ job: VoiceSpeech, bytes: Data) throws -> String {
+        try checkVoiceSpeech(job)
+        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote else { throw NativeVoiceJSON.invalid }
+        return try buildOpenAITranscription(binding: job.capture.binding, config: config, credential: credential, bytes: bytes,
+            sourceID: job.capture.captureID.uuidString.lowercased(), format: .m4a, cancellation: job.cancellation)
+    }
+    func decodeVoiceOpenAITranscription(_ job: VoiceSpeech, response: String) throws -> String {
+        try checkVoiceSpeech(job)
+        let raw = try invokeVoice("iosVoiceOpenAITranscriptionDecode", [response], binding: job.capture.binding, cancellation: job.cancellation)
+        let decoded = try NativeVoiceJSON.object(raw, maximum: 512 * 1024)
+        guard Set(decoded.keys) == ["transcript"], let text = decoded["transcript"] as? String else { throw NativeVoiceJSON.invalid }
+        let transcript = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard transcript.utf16.count <= 64000 else { throw NativeVoiceJSON.invalid }
+        return transcript
+    }
+    func buildVoiceOpenAIParse(_ job: VoiceSpeech, transcript: String, model: String, api: NativeOpenAISpeechAPI) throws -> String {
+        try checkVoiceSpeech(job)
+        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote, let credential else { throw NativeVoiceJSON.invalid }
+        return try buildOpenAIParse(binding: job.capture.binding, config: config, credential: credential, transcript: transcript, model: model,
+                                   api: api, now: job.speechNow, timeZone: job.timeZone, cancellation: job.cancellation)
+    }
+    func decodeVoiceOpenAIParse(_ job: VoiceSpeech, initial: String, response: String, api: NativeOpenAISpeechAPI) throws -> String {
+        try checkVoiceSpeech(job)
+        let provider = try NativeJSON.jsonObject(with: Data(response.utf8), options: [.fragmentsAllowed])
+        let input = try NativeVoiceJSON.encode(["api": api.rawValue, "response": provider])
+        let raw = try invokeVoice("iosVoiceOpenAIParseDecode", [input], binding: job.capture.binding, cancellation: job.cancellation)
+        var decoded = try NativeVoiceJSON.object(raw, maximum: 262144)
+        let transcript = decoded["transcript"]
+        if transcript == nil || transcript is NSNull || (transcript as? NSNumber)?.doubleValue == 0 || transcript as? String == "" {
+            decoded["transcript"] = initial
+        } else if !(transcript is String) { throw NativeWatchAudioInvalidParsedTranscript() }
+        return try NativeVoiceJSON.encode(decoded)
+    }
+    func storeVoiceOpenAIDecoded(_ job: VoiceSpeech, json: String) throws {
+        try checkVoiceSpeech(job)
+        guard job.decoded == nil else { throw NativeVoiceJSON.invalid }
+        _ = try NativeVoiceJSON.object(json, maximum: 262144)
+        job.decoded = json
+    }
+    func prepareVoiceResult(_ job: VoiceSpeech) throws -> String? {
+        try requireVoiceBinding(job.capture.binding, cancellation: job.cancellation)
+        guard let capture = job.capture.captureRequest, let decoded = job.decoded else { throw NativeVoiceJSON.invalid }
+        if job.request == nil {
+            job.request = try NativeVoiceJSON.encode(["version": 1, "requestId": UUID().uuidString.lowercased(), "capture": NativeVoiceJSON.object(capture, maximum: 131072), "result": NativeVoiceJSON.object(decoded, maximum: 262144), "at": Self.voiceNow()])
+        }
+        return try prepareVoice(.result, request: job.request!, binding: job.capture.binding, cancellation: job.cancellation)
+    }
+    func commitVoiceResult(_ job: VoiceSpeech) throws -> String {
+        guard let command = pending, command.method == VoiceAction.result.commit else { throw NativeVoiceJSON.invalid }
+        return try executeVoice(command, binding: job.capture.binding, cancellation: job.cancellation)
+    }
+    func voiceResultPending(_ job: VoiceSpeech) -> Bool {
+        guard let raw = job.request, let command = pending, command.method == VoiceAction.result.commit,
+              let envelope = try? NativeVoiceJSON.object(voiceJournalEnvelope(command), maximum: 4 * 1024 * 1024),
+              let request = try? NativeVoiceJSON.object(raw, maximum: 262144) else { return false }
+        return Self.equalJSON(envelope["request"], request)
+    }
+    func finishVoiceSpeech(_ job: VoiceSpeech, result: String?) throws -> NativeVoiceSpeechOutcome {
+        job.running = false
+        if let result, let raw = job.request {
+            try validateVoiceResult(.result, result, request: NativeVoiceJSON.object(raw, maximum: 262144))
+            let value = try NativeVoiceJSON.object(result, maximum: 4096)
+            guard let outcome = (value["outcome"] as? String).flatMap(NativeVoiceSpeechOutcome.init(rawValue:)) else { throw NativeVoiceJSON.invalid }
+            job.outcome = outcome; acknowledgeVoice("speech", outcome.rawValue, binding: job.capture.binding)
+            if job.capture.runtime?.provider == .openai {
+                if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-phone-openai-speech", "provider": "openai", "stage": "result", "outcome": outcome.rawValue]) {
+                    _ = try? invoke("logLine", arguments: ["Native iOS OpenAI phone speech result confirmed", context])
+                }
+            }
+            return outcome
+        }
+        let outcome: NativeVoiceSpeechOutcome = job.cancellation.isCancelled ? .cancelled : .failed
+        if !voiceResultPending(job) { job.outcome = outcome }
+        acknowledgeVoice("speech", outcome.rawValue, binding: job.capture.binding); return outcome
+    }
+    func cancelVoiceSpeech(_ id: UUID) -> VoiceSpeech? { let selected = voiceSpeech[id]; selected?.cancel(); return selected }
+
+    private func newVoiceBinding(recovery: Bool = false) throws -> VoiceBinding {
+        if !recovery { try requireCalendarAdmission() }
+        guard workspaceMode == .personal, started, !closed, !localRequests.isClosing, lockFD >= 0,
+              let runtime = context, let connection = database, let storage = deviceStorage,
+              let library = calendarPushDatabaseBinding, try Self.bindingIdentity(databaseURL) == library else {
+            throw HostFailure("NOT_READY: Native voice is unavailable")
+        }
+        return .init(runtime: runtime, connection: connection, storage: storage, library: library, generation: attachmentGeneration)
+    }
+    private func requireVoiceBinding(_ binding: VoiceBinding, cancellation: NativeAttachmentCancellation? = nil) throws {
+        guard binding.live, started, !closed, !localRequests.isClosing, workspaceMode == .personal, lockFD >= 0,
+              context === binding.runtime, database === binding.connection, deviceStorage === binding.storage,
+              attachmentGeneration == binding.generation, try Self.bindingIdentity(databaseURL) == binding.library else {
+            throw HostFailure("STALE_REVISION: Native voice owner changed")
+        }
+        try cancellation?.check()
+    }
+    private func invokeVoice(_ method: String, _ arguments: [Any], binding: VoiceBinding,
+        cancellation: NativeAttachmentCancellation = NativeAttachmentCancellation()) throws -> String {
+        guard Self.voiceMethods.contains(method) else { throw NativeVoiceJSON.invalid }
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        let owner: @convention(block) () -> String = { [unowned self] in
+            self.guarded { try self.requireVoiceBinding(binding, cancellation: cancellation); return "" }
+                ?? "!MindwtrNativeError:Native voice owner is unavailable"
+        }
+        binding.runtime.exception = nil
+        guard let callback = JSValue(object: owner, in: binding.runtime), binding.runtime.exception == nil else { throw NativeVoiceJSON.invalid }
+        let value = try invoke(method, arguments: arguments + [callback], localCancellation: cancellation)
+        try requireVoiceBinding(binding, cancellation: VoiceAction(commit: method) == nil ? cancellation : nil)
+        return value
+    }
+    func acknowledgeVoice(_ stage: String, _ outcome: String, binding: VoiceBinding) {
+        _ = try? invokeVoice("iosVoiceAcknowledged", [stage, outcome], binding: binding)
+    }
+    private func voiceCredential(_ binding: VoiceBinding, id: UUID = UUID(), cancellation: NativeAttachmentCancellation,
+                                 provider: NativeAISettingsProjection.Provider = .gemini) throws -> NativeVoiceCredentialWitness {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        try binding.storage.validateAIProviderDeviceMetadataRead()
+        guard let secrets = secretJobs else { throw HostFailure("NOT_READY: Speech credential is unavailable") }
+        let state = try secrets.inspectAIProviderItem(account: "mindwtr-ai-key_" + provider.rawValue, cancellation: cancellation)
+        let metadata = try binding.storage.readAIProviderDeviceMetadata(provider: provider)
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        guard ["present", "absent"].contains(state) else { throw HostFailure("NOT_READY: Speech credential is unavailable") }
+        return .init(id: id, secureItem: state, legacyPresent: metadata.legacyItemPresent)
+    }
+    func whisperStoreForDrain() -> NativeWhisperModelStore? { voiceWhisperStore }
+    private func acknowledgeWhisperModelFailure(_ failure: NativeWhisperModelDiagnostic) {
+        var fields: [String: Any] = ["releaseCheck": "v1.3.8/ios-whisper-model-download", "stage": failure.stage.rawValue,
+            "outcome": "failed", "reason": failure.reason.rawValue]
+        if let value = failure.errorNumber { fields["errno"] = value }
+        if let context = try? Self.ownedJSON(fields) {
+            _ = try? invoke("logLine", arguments: ["Native Whisper model operation failed", context])
+        }
+    }
+    private func whisperModel(_ binding: VoiceBinding) throws -> NativeWhisperVoiceModel {
+        let spec = try NativeWhisperModelSpec.validated(invokeVoice("iosVoiceWhisperModel", ["{}"], binding: binding))
+        let options = try NativeVoiceSettingsOptions.validated(invokeVoice("iosVoiceSettingsOptions", ["{}"], binding: binding))
+        let input = try NativeVoiceJSON.encode(["model": spec.id, "language": options.language])
+        let raw = try invokeVoice("iosVoiceWhisperLanguage", [input], binding: binding)
+        guard let language = try NativeJSON.jsonObject(with: Data(raw.utf8), options: [.fragmentsAllowed]) as? String,
+              !language.isEmpty, language.utf8.count <= 200 else { throw NativeVoiceJSON.invalid }
+        if voiceWhisperStore == nil {
+            let configuration = URLSessionConfiguration.ephemeral
+            #if DEBUG
+            configuration.protocolClasses = faults?.httpConfiguration?.protocolClasses ?? configuration.protocolClasses
+            #endif
+            voiceWhisperStore = try NativeWhisperModelStore(root: databaseURL.deletingLastPathComponent().appendingPathComponent("whisper-models", isDirectory: true), sessionConfiguration: configuration, onFailure: { [weak self] failure in
+                self?.queue.async { [weak self] in self?.acknowledgeWhisperModelFailure(failure) }
+            })
+            if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-whisper-model-root", "operation": "prepare", "outcome": "ready"]) {
+                _ = try? invoke("logLine", arguments: ["Native Whisper model store initialized", context])
+            }
+        }
+        return NativeWhisperVoiceModel(store: voiceWhisperStore!, spec: spec, language: language)
+    }
+    func prepareWhisperRead(session: UUID? = nil, binding selected: VoiceBinding? = nil) throws -> VoiceWhisperRead? {
+        let binding: VoiceBinding
+        if let session {
+            binding = try voiceSettingsBinding(session)
+            guard voiceSettingsSessions[session]?.provider == .whisper else { throw NativeVoiceJSON.invalid }
+        } else { binding = try selected ?? newVoiceBinding() }
+        let options = try NativeVoiceSettingsOptions.validated(invokeVoice("iosVoiceSettingsOptions", ["{}"], binding: binding))
+        guard options.provider == .whisper else { return nil }
+        return VoiceWhisperRead(binding: binding, session: session, expected: options.expected,
+            rawRuntime: try invokeVoice("iosVoiceRuntimeOptions", ["{}"], binding: binding), model: try whisperModel(binding))
+    }
+    func prepareWhisperCaptureRead(_ capture: VoiceCapture) throws -> VoiceWhisperRead? {
+        try requireVoiceBinding(capture.binding, cancellation: capture.cancellation)
+        guard capture.captureRequest == nil else { return nil }
+        return try prepareWhisperRead(binding: capture.binding)
+    }
+    func checkWhisperRead(_ local: VoiceWhisperRead) throws {
+        try requireVoiceBinding(local.binding)
+        if let session = local.session {
+            guard try voiceSettingsBinding(session) === local.binding,
+                  voiceSettingsSessions[session]?.provider == .whisper else { throw NativeVoiceJSON.invalid }
+        }
+        let options = try NativeVoiceSettingsOptions.validated(invokeVoice("iosVoiceSettingsOptions", ["{}"], binding: local.binding))
+        guard options.provider == .whisper, options.expected == local.expected else { throw HostFailure("STALE_REVISION: Speech model selection changed") }
+    }
+    func whisperRuntime(_ local: VoiceWhisperRead, state: NativeWhisperModelState) throws -> NativeVoiceRuntime {
+        try checkWhisperRead(local)
+        return try NativeVoiceRuntime.validated(local.rawRuntime, credentialAvailable: false, credentialRequired: false,
+            modelAvailable: state == .installed && NativeWhisperInferenceJobs.supported)
+    }
+    func storeVoiceWhisperDecoded(_ job: VoiceSpeech, transcript: String) throws {
+        try storeVoiceOpenAIDecoded(job, json: NativeVoiceJSON.encode(["transcript": transcript]))
+        acknowledgeWhisperTranscription()
+    }
+    func acknowledgeWhisperTranscription() {
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-offline-whisper", "provider": "whisper", "stage": "transcription", "outcome": "completed"]) {
+            _ = try? invoke("logLine", arguments: ["Native offline speech completed", context])
+        }
+    }
+    func readVoiceRuntime() throws -> NativeVoiceRuntime {
+        let binding = try newVoiceBinding()
+        return try resolveVoiceRuntime(binding, cancellation: NativeAttachmentCancellation(), freeze: false).runtime
+    }
+    private func resolveVoiceRuntime(_ binding: VoiceBinding, cancellation: NativeAttachmentCancellation,
+                                     freeze: Bool) throws -> (runtime: NativeVoiceRuntime, remote: VoiceRemoteRuntime?) {
+        let raw = try invokeVoice("iosVoiceRuntimeOptions", ["{}"], binding: binding, cancellation: cancellation)
+        let base = try NativeVoiceRuntime.validated(raw, credentialAvailable: false)
+        if base.provider == .whisper {
+            return (try NativeVoiceRuntime.validated(raw, credentialAvailable: false, credentialRequired: false, modelAvailable: false), nil)
+        }
+        if base.provider == .openai {
+            do {
+                let config = try NativeWatchOpenAIRuntime.validated(invokeVoice("iosVoiceOpenAIRuntime", ["{}"], binding: binding, cancellation: cancellation))
+                let metadata = try voiceCredential(binding, cancellation: cancellation, provider: .openai)
+                var available = metadata.secureItem == "present" || metadata.legacyPresent
+                var credential: String?
+                if freeze, base.enabled {
+                    credential = try openAISpeechCredential(binding, cancellation: cancellation)
+                    available = credential != nil
+                }
+                let runtime = try NativeVoiceRuntime.validated(raw, credentialAvailable: available, credentialRequired: config.credentialRequired)
+                return (runtime, freeze && runtime.available ? .openai(config, credential: credential) : nil)
+            } catch {
+                try requireVoiceBinding(binding, cancellation: cancellation)
+                return (try NativeVoiceRuntime.validated(raw, credentialAvailable: false, endpointAvailable: false), nil)
+            }
+        }
+        guard base.provider == .gemini else { return (base, nil) }
+        let credential = try? voiceCredential(binding, cancellation: cancellation, provider: .gemini)
+        let runtime = try NativeVoiceRuntime.validated(raw, credentialAvailable: credential.map { $0.secureItem == "present" || $0.legacyPresent } ?? false)
+        return (runtime, freeze && runtime.available ? .gemini(runtime) : nil)
+    }
+    private func openAISpeechCredential(_ binding: VoiceBinding, cancellation: NativeAttachmentCancellation) throws -> String? {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        guard let secrets = secretJobs else { throw NativeVoiceJSON.invalid }
+        let secure = try secrets.readAIRequestKey(provider: .openai, cancellation: cancellation)
+        let credential = try secure ?? binding.storage.get("mindwtr-ai-key:openai")
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        guard credential.map({ $0.utf16.count <= 4000 }) ?? true else { throw NativeVoiceJSON.invalid }
+        return credential.flatMap { $0.isEmpty ? nil : $0 }
+    }
+    func openVoiceSettings() throws -> NativeVoiceSettingsSession {
+        guard !voiceSettingsSessions.values.contains(where: { $0.endpointEdit != nil }) else { throw HostFailure("NOT_READY: Speech endpoint requires its original retry") }
+        let binding = try newVoiceBinding(), id = UUID()
+        let options = try NativeVoiceSettingsOptions.validated(invokeVoice("iosVoiceSettingsOptions", ["{}"], binding: binding))
+        let provider = NativeAISettingsProjection.Provider(rawValue: options.provider.rawValue)
+        let credential = try provider.map { try voiceCredential(binding, cancellation: NativeAttachmentCancellation(), provider: $0) }
+            ?? NativeVoiceCredentialWitness(id: UUID(), secureItem: "absent", legacyPresent: false)
+        voiceSettingsSessions[id] = .init(binding: binding, provider: options.provider, credential: credential)
+        if options.provider == .openai {
+            do { _ = try invoke("iosVoiceEndpointSessionOpen", arguments: [id.uuidString.lowercased()]) }
+            catch { voiceSettingsSessions.removeValue(forKey: id)?.binding.live = false; throw error }
+        }
+        return .init(id: id, options: options, credentialAvailable: credential.secureItem == "present" || credential.legacyPresent, credentialWitness: credential)
+    }
+    private func voiceSettingsBinding(_ id: UUID, exactRetryAllowed: Bool = false) throws -> VoiceBinding {
+        guard let selected = voiceSettingsSessions[id], !selected.retired || (exactRetryAllowed && voiceSettingsPendingSession == id && pending?.method == VoiceAction.settings.commit) else { throw HostFailure("STALE_REVISION: Speech settings closed") }
+        try requireVoiceBinding(selected.binding); return selected.binding
+    }
+    private func selectedVoiceProvider(_ binding: VoiceBinding) throws -> NativeVoiceProvider {
+        try requireVoiceBinding(binding)
+        let settings = try taskAISettings(), ai = settings["ai"] as? [String: Any]
+        let speech = ai?["speechToText"] as? [String: Any]
+        guard let provider = NativeVoiceProvider(rawValue: speech?["provider"] as? String ?? "gemini") else { throw NativeVoiceJSON.invalid }
+        return provider
+    }
+    func voiceEndpoint(session id: UUID, value: String?, expected: NativeVoiceSettingsWitness,
+                       cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireCalendarAdmission()
+        let binding = try voiceSettingsBinding(id)
+        guard voiceEndpointTurn == nil, let session = voiceSettingsSessions[id], session.provider == .openai,
+              try selectedVoiceProvider(binding) == .openai else { throw CoreHostRejection(message: "STALE_REVISION: Speech endpoint owner changed") }
+        if let edit = session.endpointEdit {
+            guard let value, Self.ownedEqual(value, edit.value), Self.ownedEqual(expected.json, edit.expected.json) else {
+                throw CoreHostRejection(message: "STALE_REVISION: Retry the accepted speech endpoint unchanged")
+            }
+        }
+        var request: [String: Any] = ["session": id.uuidString.lowercased(), "op": value == nil ? "read-endpoint" : "save-endpoint", "expected": try expected.object]
+        if let value { request["value"] = value; voiceSettingsSessions[id]?.endpointEdit = (expected, value) }
+        let raw = try NativeVoiceJSON.encode(request)
+        voiceEndpointTurn = id; defer { voiceEndpointTurn = nil }
+        let owner: @convention(block) (JSValue) -> String = { [unowned self] argument in
+            self.guarded {
+                guard argument.context === binding.runtime, argument.isString, let text = argument.toString(),
+                      self.voiceEndpointTurn == id, self.voiceSettingsSessions[id]?.binding === binding,
+                      self.voiceSettingsSessions[id]?.retired == false, self.voiceSettingsSessions[id]?.provider == .openai else { throw NativeVoiceJSON.invalid }
+                let phase = try NativeVoiceJSON.object(text, maximum: 256)
+                guard Set(phase.keys) == ["phase"], phase["phase"] as? String == "current" else { throw NativeVoiceJSON.invalid }
+                try self.requireVoiceBinding(binding, cancellation: cancellation)
+                guard try self.selectedVoiceProvider(binding) == .openai else { throw NativeVoiceJSON.invalid }
+                return ""
+            } ?? "!MindwtrNativeError:Speech endpoint owner changed"
+        }
+        binding.runtime.exception = nil
+        guard let callback = JSValue(object: owner, in: binding.runtime), binding.runtime.exception == nil else { throw NativeVoiceJSON.invalid }
+        let result: String
+        do { result = try invoke("iosVoiceEndpointSensitive", arguments: [raw, callback], localCancellation: cancellation) }
+        catch let failure as HostFailure where session.endpointEdit == nil && ["INVALID_INPUT:", "NOT_READY:", "STALE_REVISION:"].contains(where: { failure.message.hasPrefix($0) }) {
+            voiceSettingsSessions[id]?.endpointEdit = nil
+            throw CoreHostRejection(message: "STALE_REVISION: Speech endpoint edit was not admitted")
+        }
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        if value != nil {
+            let reply = try NativeVoiceJSON.object(result, maximum: 1024)
+            guard Set(reply.keys) == ["changed"], NativeVoiceJSON.boolean(reply["changed"]) != nil else { throw NativeVoiceJSON.invalid }
+            voiceSettingsSessions[id]?.endpointEdit = nil
+        }
+        return result
+    }
+    func readVoiceSettings(_ id: UUID) throws -> NativeVoiceSettingsOptions {
+        try requireCalendarAdmission()
+        return try NativeVoiceSettingsOptions.validated(invokeVoice("iosVoiceSettingsOptions", ["{}"], binding: voiceSettingsBinding(id)))
+    }
+    func retireVoiceSettings(_ id: UUID) {
+        if voiceSettingsPendingSession == id, pending?.method == VoiceAction.settings.commit { voiceSettingsSessions[id]?.retired = true }
+        else {
+            if voiceSettingsSessions[id]?.provider == .openai { _ = try? invoke("iosVoiceEndpointSessionClose", arguments: [id.uuidString.lowercased()]) }
+            voiceSettingsSessions.removeValue(forKey: id)?.binding.live = false
+        }
+    }
+    func editVoiceCredential(session: UUID, value: String?, expected: NativeVoiceCredentialWitness,
+        cancellation: NativeAttachmentCancellation) throws {
+        let binding = try voiceSettingsBinding(session)
+        try requireCalendarAdmission()
+        guard let selected = voiceSettingsSessions[session], selected.endpointEdit == nil,
+              let provider = NativeAISettingsProjection.Provider(rawValue: selected.provider.rawValue),
+              try selectedVoiceProvider(binding) == selected.provider, selected.credential == expected,
+              try voiceCredential(binding, id: expected.id, cancellation: cancellation, provider: provider) == expected,
+              let secrets = secretJobs else { throw HostFailure("STALE_REVISION: Speech credential changed") }
+        do {
+            if let value {
+                guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, value.utf16.count <= 4000 else { throw NativeVoiceJSON.invalid }
+                try secrets.replaceAIConfigurationCredential(provider: provider, value: value, cancellation: cancellation)
+                try binding.storage.retireAILegacyCredential(provider: provider)
+            } else {
+                try binding.storage.retireAILegacyCredential(provider: provider)
+                try secrets.clearAIConfigurationCredential(provider: provider, cancellation: cancellation)
+            }
+            try requireVoiceBinding(binding)
+            voiceSettingsSessions[session]?.credential = try voiceCredential(binding, cancellation: NativeAttachmentCancellation(), provider: provider)
+            acknowledgeVoice("credential", value == nil ? "cleared" : "saved", binding: binding)
+        } catch { acknowledgeVoice("credential", "failed", binding: binding); throw HostFailure("ACTION_FAILED: Speech credential could not be confirmed") }
+    }
+    private func voiceJournalEnvelope(_ command: PendingCommand) throws -> String {
+        guard let action = VoiceAction(commit: command.method), command.version == 2, command.editorDraft == nil,
+              command.argumentsJSON.utf8.count <= 8 * 1024 * 1024, try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else { throw NativeVoiceJSON.invalid }
+        let envelope = try NativeVoiceJSON.object(args[0], maximum: 4 * 1024 * 1024)
+        guard Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any], Self.equalJSON(prepared["request"], request),
+              try NativeVoiceJSON.encode(request).utf8.count <= action.requestLimit,
+              try NativeVoiceJSON.encode(prepared).utf8.count <= 2 * 1024 * 1024,
+              prepared["kind"] as? String == action.rawValue.lowercased() else { throw NativeVoiceJSON.invalid }
+        if let file = command.voiceFiles {
+            guard action == .capture, let attachment = request["attachment"] as? [String: Any],
+                  attachment["uri"] as? String == file.targetURI, attachment["fileHash"] as? String == file.source.sha256,
+                  attachment["size"] as? Int64 == file.source.size, file.source.size > 0, file.source.size <= 4 * 1024 * 1024,
+                  let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+                  file.operationID.utf8.count == 32, file.operationID.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  file.targetURI == URL(string: try projectManagedURI())?.appendingPathComponent(id + ".m4a").absoluteString else { throw NativeVoiceJSON.invalid }
+        } else if action == .capture { guard request["attachment"] is NSNull else { throw NativeVoiceJSON.invalid } }
+        return args[0]
+    }
+    private func probeVoice(_ action: VoiceAction, raw: String, binding: VoiceBinding) throws -> String {
+        let request = try NativeVoiceJSON.object(raw, maximum: action.requestLimit)
+        let value = try invokeVoice(action.prefix + "RetryOutcome", [raw], binding: binding)
+        try validateVoiceResult(action, value, request: request)
+        if let command = pending, command.method == action.commit {
+            let envelope = try NativeVoiceJSON.object(voiceJournalEnvelope(command), maximum: 4 * 1024 * 1024)
+            guard Self.equalJSON(envelope["request"], request) else { throw NativeVoiceJSON.invalid }
+            return try finishVoice(command, value: value, binding: binding)
+        }
+        return value
+    }
+    func probeVoiceCapture(_ capture: VoiceCapture) throws -> NativeVoiceCaptureOutcome {
+        guard let raw = capture.captureRequest else { throw NativeVoiceJSON.invalid }
+        return try savedVoiceCapture(capture, result: probeVoice(.capture, raw: raw, binding: capture.binding))
+    }
+    func probeVoiceResult(_ job: VoiceSpeech) throws -> NativeVoiceSpeechOutcome {
+        guard let raw = job.request else { throw NativeVoiceJSON.invalid }
+        return try finishVoiceSpeech(job, result: probeVoice(.result, raw: raw, binding: job.capture.binding))
+    }
+    private func validateVoiceResult(_ action: VoiceAction, _ raw: String, request: [String: Any]) throws {
+        let value = try NativeVoiceJSON.object(raw, maximum: 2 * 1024 * 1024)
+        switch action {
+        case .settings: guard Set(value.keys) == Set(["changed"]), NativeVoiceJSON.boolean(value["changed"]) != nil else { throw NativeVoiceJSON.invalid }
+        case .capture:
+            guard Set(value.keys) == Set(["kind", "taskId", "titleAtSave", "generated", "taskAtSave"]), value["kind"] as? String == "saved",
+                  value["taskId"] as? String == request["requestId"] as? String, value["titleAtSave"] is String,
+                  NativeVoiceJSON.boolean(value["generated"]) != nil, let task = value["taskAtSave"] as? [String: Any], task["id"] as? String == request["requestId"] as? String else { throw NativeVoiceJSON.invalid }
+        case .result:
+            guard Set(value.keys) == Set(["taskId", "outcome"]), value["taskId"] as? String == (request["capture"] as? [String: Any])?["requestId"] as? String,
+                  let outcome = value["outcome"] as? String, ["applied", "discarded", "empty", "skipped"].contains(outcome) else { throw NativeVoiceJSON.invalid }
+        }
+    }
+    func voiceSettingsRetryOwed(_ id: UUID) -> Bool { voiceSettingsPendingSession == id && pending?.method == VoiceAction.settings.commit }
+    func acknowledgeVoiceSettingsFailure(_ id: UUID) { if let binding = voiceSettingsSessions[id]?.binding { acknowledgeVoice("settings", "failed", binding: binding) } }
+    func completeVoiceSettings(_ id: UUID, value: String) throws -> NativeVoiceSettingsOutcome {
+        let result = try NativeVoiceJSON.object(value, maximum: 4096)
+        guard Set(result.keys) == Set(["changed"]), let changed = NativeVoiceJSON.boolean(result["changed"]), let session = voiceSettingsSessions[id] else { throw NativeVoiceJSON.invalid }
+        acknowledgeVoice("settings", "saved", binding: session.binding)
+        let providerChanged = try selectedVoiceProvider(session.binding) != session.provider
+        if session.retired || providerChanged { retireVoiceSettings(id) }
+        return .saved(changed: changed)
+    }
+    func probeVoiceSettings(_ id: UUID, raw: String) throws -> String {
+        try probeVoice(.settings, raw: raw, binding: voiceSettingsBinding(id, exactRetryAllowed: true))
+    }
+    func prepareVoiceSettings(_ id: UUID, raw: String, cancellation: NativeAttachmentCancellation) throws -> String? {
+        let binding = try voiceSettingsBinding(id, exactRetryAllowed: true)
+        guard voiceSettingsSessions[id]?.endpointEdit == nil else { throw CoreHostRejection(message: "NOT_READY: Speech endpoint requires its original retry") }
+        guard pending?.method != VoiceAction.settings.commit || voiceSettingsPendingSession == nil || voiceSettingsPendingSession == id else { throw HostFailure("STALE_REVISION: Speech settings require their original exact retry") }
+        defer {
+            if let command = pending, command.method == VoiceAction.settings.commit,
+               let envelope = try? NativeVoiceJSON.object(voiceJournalEnvelope(command), maximum: 4 * 1024 * 1024),
+               let request = try? NativeVoiceJSON.object(raw, maximum: 32768), Self.equalJSON(envelope["request"], request) { voiceSettingsPendingSession = id }
+        }
+        return try prepareVoice(.settings, request: raw, binding: binding, cancellation: cancellation)
+    }
+    private func prepareVoice(_ action: VoiceAction, request raw: String, binding: VoiceBinding,
+        files: NativeVoiceFileSettlement? = nil, cancellation: NativeAttachmentCancellation) throws -> String? {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        let request = try NativeVoiceJSON.object(raw, maximum: action.requestLimit)
+        if let command = pending {
+            guard command.method == action.commit, let frozen = try NativeVoiceJSON.object(voiceJournalEnvelope(command), maximum: 4 * 1024 * 1024)["request"], Self.equalJSON(frozen, request) else { throw HostFailure("Previous changes require their exact retry") }
+            return nil
+        }
+        try requireCalendarAdmission()
+        do {
+            let saved = try invokeVoice(action.prefix + "RetryOutcome", [raw], binding: binding, cancellation: cancellation)
+            try validateVoiceResult(action, saved, request: request); return saved
+        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
+        let response = try NativeVoiceJSON.object(invokeVoice(action.prefix + "Prepare", [raw], binding: binding, cancellation: cancellation), maximum: 4 * 1024 * 1024)
+        if response["kind"] as? String == "noop", Set(response.keys) == Set(["kind", "result"]), let result = response["result"] {
+            let encoded = try NativeVoiceJSON.encode(result); try validateVoiceResult(action, encoded, request: request); return encoded
+        }
+        guard Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared", let prepared = response["prepared"] as? [String: Any], Self.equalJSON(prepared["request"], request) else { throw NativeVoiceJSON.invalid }
+        let envelope = try NativeVoiceJSON.encode(["request": request, "prepared": prepared])
+        let prospective = try invokeVoice(action.prefix + "Validate", [envelope], binding: binding, cancellation: cancellation)
+        try validateVoiceResult(action, prospective, request: request)
+        var command = PendingCommand(version: 2, method: action.commit, argumentsJSON: try Self.ownedJSON([envelope]))
+        command.voiceFiles = files
+        _ = try voiceJournalEnvelope(command)
+        pending = command; voiceWarmEnvelope = (action.commit, envelope)
+        try persist(command)
+        return nil
+    }
+    func commitVoiceSettings(_ id: UUID, cancellation: NativeAttachmentCancellation) throws -> String {
+        guard let command = pending, command.method == VoiceAction.settings.commit else { throw NativeVoiceJSON.invalid }
+        return try executeVoice(command, binding: voiceSettingsBinding(id, exactRetryAllowed: true), cancellation: cancellation)
+    }
+    private func executeVoice(_ original: PendingCommand, binding: VoiceBinding, cancellation: NativeAttachmentCancellation) throws -> String {
+        guard let action = VoiceAction(commit: original.method) else { throw NativeVoiceJSON.invalid }
+        var command = original
+        let envelope = try voiceJournalEnvelope(command)
+        _ = try invokeVoice(action.prefix + "Validate", [envelope], binding: binding, cancellation: cancellation)
+        if let terminal = command.terminal { return try finishVoice(command, value: terminal.value(), binding: binding) }
+        if voiceWarmEnvelope?.method != action.commit || voiceWarmEnvelope?.json != envelope {
+            // Only a cold owner needs reconstruction. Warm failed saves retain
+            // core's original authority and must reach its exact save retry.
+            let recovered = try NativeVoiceJSON.object(invokeVoice(action.prefix + "Recover", [envelope], binding: binding, cancellation: cancellation), maximum: 2 * 1024 * 1024)
+            if recovered["kind"] as? String == "saved", Set(recovered.keys) == Set(["kind", "result"]), let value = recovered["result"] {
+                return try finishVoice(command, value: NativeVoiceJSON.encode(value), binding: binding)
+            }
+            guard Set(recovered.keys) == Set(["kind"]), recovered["kind"] as? String == "authorized" else { throw NativeVoiceJSON.invalid }
+            voiceWarmEnvelope = (action.commit, envelope)
+        }
+        if var file = command.voiceFiles {
+            let port = try newVoiceFiles()
+            if file.stage == nil {
+                // An unacknowledged reservation may already exist. Never adopt
+                // its path; retain it and reserve a fresh private operation.
+                file.operationID = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
+                command.voiceFiles = file; pending = command; try persist(command)
+                file.stage = try port.reserve(file)
+                command.voiceFiles = file; pending = command; try persist(command)
+            }
+            try port.publish(file)
+            try requireVoiceBinding(binding, cancellation: cancellation)
+            try port.verify(file)
+        }
+        try persist(command)
+        let value = try invokeVoice(action.commit, [envelope], binding: binding, cancellation: cancellation)
+        return try finishVoice(command, value: value, binding: binding)
+    }
+    private func finishVoice(_ command: PendingCommand, value: String, binding: VoiceBinding) throws -> String {
+        guard let action = VoiceAction(commit: command.method) else { throw NativeVoiceJSON.invalid }
+        let envelope = try voiceJournalEnvelope(command), request = try NativeVoiceJSON.object(envelope, maximum: 4 * 1024 * 1024)["request"] as! [String: Any]
+        try validateVoiceResult(action, value, request: request)
+        let proven = try invokeVoice(action.prefix + "RetryOutcome", [NativeVoiceJSON.encode(request)], binding: binding)
+        try validateVoiceResult(action, proven, request: request)
+        guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(value.utf8)), try NativeJSON.jsonObject(with: Data(proven.utf8))) else { throw HostFailure("SAVE_FAILED: Native voice outcome cannot be verified") }
+        var terminal = command; terminal.terminal = .success(value); pending = terminal; try persist(terminal)
+        if let file = command.voiceFiles { (try? newVoiceFiles())?.retireStage(file) }
+        try clearPending(); voiceWarmEnvelope = nil
+        acknowledgeVoice(action == .settings ? "settings" : action == .capture ? "capture" : "speech", action == .result ? ((try NativeVoiceJSON.object(value, maximum: 2 * 1024 * 1024)["outcome"] as? String) ?? "failed") : "saved", binding: binding)
+        return value
     }
 
     func readAIProviderDeviceState(cancellation: NativeAttachmentCancellation) throws -> NativeAIProviderDeviceState {
@@ -7580,6 +10649,846 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private static func captureCopilotObject(_ raw: String, fields: Set<String>) throws -> [String: Any] {
+        guard raw.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(raw),
+              let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(input.keys) == fields else {
+            throw HostFailure("INVALID_INPUT: Capture copilot request is malformed")
+        }
+        return input
+    }
+
+    private static func taskAIEqual(_ lhs: Any, _ rhs: Any) throws -> Bool {
+        Data(try ownedJSON(lhs).utf8) == Data(try ownedJSON(rhs).utf8)
+    }
+    private static func taskAIEditorEqual(_ lhs: EditorDraftSnapshot?, _ rhs: EditorDraftSnapshot?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none): return true
+        case (.some(let lhs), .some(let rhs)): return ownedEqual(lhs, rhs)
+        default: return false
+        }
+    }
+
+    private func taskAISettings() throws -> [String: Any] {
+        let rows = try NativeTaskAIJSON.object("{\"rows\":" + requireDatabase().execute("SELECT data FROM settings WHERE id=1") + "}")
+        guard let values = rows["rows"] as? [[String: Any]], values.count == 1,
+              let raw = values[0]["data"] as? String else { throw NativeTaskAIJSON.unavailable }
+        return try NativeTaskAIJSON.object(raw)
+    }
+
+    private func readTaskAICanonicalWitness(_ raw: String) throws -> [String: Any] {
+        let value = try NativeTaskAIJSON.object(invoke("iosTaskAIWitness", arguments: [raw]))
+        guard Set(value.keys) == Set(["language", "projectContext", "contextTaskIDs"]),
+              NativeTaskAIJSON.text(value["language"], maximum: 100, nonempty: true),
+              let ids = value["contextTaskIDs"] as? [String], ids.count <= 20, Set(ids.map { Data($0.utf8) }).count == ids.count,
+              ids.allSatisfy({ NativeTaskAIJSON.text($0, maximum: 500, nonempty: true) }) else { throw NativeTaskAIJSON.invalid }
+        if !(value["projectContext"] is NSNull) {
+            guard let project = value["projectContext"] as? [String: Any], Set(project.keys) == Set(["projectTitle", "projectTasks"]),
+                  NativeTaskAIJSON.text(project["projectTitle"]), let tasks = project["projectTasks"] as? [String],
+                  tasks.count <= 20, tasks.allSatisfy({ NativeTaskAIJSON.text($0) }) else { throw NativeTaskAIJSON.invalid }
+        }
+        return value
+    }
+
+    private func taskAIWitness(_ request: [String: Any], contextIDs: [String]) throws -> Any {
+        guard let id = request["id"] as? String, let draft = request["draft"] as? [String: Any] else { throw NativeTaskAIJSON.invalid }
+        let sqlite = try requireDatabase()
+        let rows = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT rowid AS _rowid,* FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id])).utf8)) as? [[String: Any]]
+        guard let rows, rows.count == 1, let task = rows.first, task["deletedAt"] is NSNull, task["purgedAt"] is NSNull else { throw NativeTaskAIJSON.unavailable }
+        let settings = try taskAISettings()
+        let projectIDs = Set([task["projectId"] as? String, draft["projectId"] as? String].compactMap { $0 }.filter { !$0.isEmpty }).sorted()
+        var projects: [Any] = []
+        for project in projectIDs {
+            let raw = try sqlite.execute("SELECT rowid AS _rowid,* FROM projects WHERE id=?", parametersJSON: Self.ownedJSON([project]))
+            projects.append(try NativeJSON.jsonObject(with: Data(raw.utf8)))
+        }
+        var siblings: [Any] = []
+        for contextID in contextIDs {
+            let raw = try sqlite.execute("SELECT id,title,status,projectId,deletedAt,purgedAt FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([contextID]))
+            siblings.append(try NativeJSON.jsonObject(with: Data(raw.utf8)))
+        }
+        let features = settings["features"] as? [String: Any] ?? [:]
+        return ["task": task, "projects": projects, "siblings": siblings, "ai": settings["ai"] ?? [:],
+                "timeEstimates": features["timeEstimates"] ?? NSNull(), "language": settings["language"] ?? NSNull()] as [String: Any]
+    }
+
+    private func requireTaskAIPreflight(lease: NativeTaskAIEditorLease) throws {
+        try requireCalendarAdmission()
+        guard lease.isCurrent, taskAITurn == nil, aiConfigurationSession == nil, aiConfigurationTurn == nil,
+              aiTextConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil,
+              aiGeminiThinkingBudgetTurn == nil else { throw NativeTaskAIJSON.unavailable }
+    }
+
+    func readTaskAIOptions(_ raw: String, lease: NativeTaskAIEditorLease) throws -> String {
+        try requireTaskAIPreflight(lease: lease)
+        _ = try NativeTaskAIJSON.request(raw, operation: false)
+        let result = try NativeTaskAIJSON.options(invoke("iosTaskAIOptions", arguments: [raw]))
+        guard lease.isCurrent else { throw NativeTaskAIJSON.unavailable }
+        return result
+    }
+
+    func prepareTaskAI(_ handle: NativeTaskAIHandle, requestJSON: String, editor: EditorDraftSnapshot?) throws -> TaskAIPreload {
+        try requireTaskAIPreflight(lease: handle.lease); try handle.cancellation.check()
+        retireTaskAIAnswer(nil)
+        let input = try NativeTaskAIJSON.request(requestJSON, operation: true)
+        let id = input["id"] as? String
+        let checkpoint = try editorDrafts.readOwnedCheckpoint()
+        guard checkpoint?.attempt == nil, Self.taskAIEditorEqual(checkpoint?.snapshot, editor), editor == nil || id.map({ Self.ownedEqual(editor!.taskID, $0) }) == true,
+              let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
+              let secrets = secretJobs, let storage = deviceStorage else { throw NativeTaskAIJSON.unavailable }
+        // Validate canonical draft/eligibility before touching the selected secret worker.
+        let optionsRaw = try Self.ownedJSON(["id": input["id"]!, "draft": input["draft"]!])
+        _ = try NativeTaskAIJSON.options(invoke("iosTaskAIOptions", arguments: [optionsRaw]))
+        let settings = try taskAISettings(), configuration = settings["ai"] as? [String: Any] ?? [:]
+        guard let provider = NativeAISettingsProjection.Provider(rawValue: configuration["provider"] as? String ?? "openai") else { throw NativeTaskAIJSON.unavailable }
+        let canonical = try readTaskAICanonicalWitness(optionsRaw)
+        let contextIDs = canonical["contextTaskIDs"] as! [String]
+        let language = canonical["language"] as! String
+        taskAIRuntimeLanguage = language
+        let witness = try taskAIWitness(input, contextIDs: contextIDs), generation = attachmentGeneration
+        let legacy = try storage.get("mindwtr-ai-key:" + provider.rawValue)
+        let registry = NativeAttachmentLocalRequests()
+        #if DEBUG
+        let http = NativeHTTPJobs(registry: registry, faults: faults)
+        faults?.configureHTTPJobs?(http)
+        #else
+        let http = NativeHTTPJobs(registry: registry)
+        #endif
+        let turn = TaskAITurn(handle: handle, operation: input["operation"] as! String, http: http,
+            provider: provider, configuration: configuration, canonicalWitness: canonical, witnessRequestJSON: optionsRaw, requireOwner: { [unowned self, weak runtime, weak connection, weak storage] in
+                try handle.cancellation.check()
+                guard let runtime, let connection, let storage, handle.lease.isCurrent, (self.taskAITurn?.handle === handle || self.taskAIAnswer?.handle === handle),
+                      self.context === runtime, self.database === connection, self.deviceStorage === storage,
+                      self.workspaceMode == .personal, self.started, !self.closed, !self.localRequests.isClosing,
+                      self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
+                      self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true,
+                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil,
+                      self.aiRequestTimeoutTurn == nil, self.aiReasoningEffortTurn == nil, self.aiGeminiThinkingBudgetTurn == nil,
+                      self.captureAITurn == nil, !self.cleanupOwed, !self.foregroundCleanupActive,
+                      try Self.bindingIdentity(self.databaseURL) == library,
+                      try Self.taskAIEqual(self.taskAIWitness(input, contextIDs: contextIDs), witness) else { throw NativeTaskAIJSON.unavailable }
+                let current = try self.editorDrafts.readOwnedCheckpoint()
+                guard current?.attempt == nil, Self.taskAIEditorEqual(current?.snapshot, editor),
+                      checkpoint.map({ before in current.map { before.matches($0) } ?? false }) ?? (current == nil) else { throw NativeTaskAIJSON.unavailable }
+                try storage.validateAIProviderDeviceMetadataRead()
+            })
+        taskAITurn = turn
+        // No wake callback enters JSC; the retained operation polls in short queue admissions.
+        return TaskAIPreload(secrets: secrets, provider: provider, legacy: legacy, http: http)
+    }
+
+    private func reviewAIDurableWitness(_ canonical: [String: Any]) throws -> Any {
+        let sqlite = try requireDatabase(), settings = try taskAISettings()
+        // Eligibility cells detect a changed stale bucket without pinning the global store revision.
+        let tasks = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,status,projectId,sectionId,orderNum,deletedAt,purgedAt,createdAt,updatedAt,startTime,reviewAt FROM tasks WHERE status IN ('next','waiting') ORDER BY rowid").utf8))
+        let projects = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,title,status,isSequential,perSectionFlow,sequentialScope,deletedAt,purgedAt,createdAt,updatedAt,dueDate,reviewAt FROM projects ORDER BY rowid").utf8))
+        let sections = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,projectId,title,orderNum,isSequential,deletedAt FROM sections WHERE projectId IN (SELECT id FROM projects WHERE status='active' AND deletedAt IS NULL) ORDER BY rowid").utf8))
+        var offered: [Any] = []
+        for id in ((canonical["taskRevisions"] as? [String: String]) ?? [:]).keys.sorted() {
+            offered.append(try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT rowid AS _rowid,* FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id])).utf8)))
+        }
+        return ["tasks": tasks, "projects": projects, "sections": sections, "offered": offered, "ai": settings["ai"] ?? [:],
+                "review": (settings["gtd"] as? [String: Any])?["weeklyReview"] ?? NSNull(), "weekStart": settings["weekStart"] ?? NSNull(),
+                "language": settings["language"] ?? NSNull()] as [String: Any]
+    }
+
+    func prepareReviewAI(_ handle: NativeTaskAIHandle, requestJSON: String) throws -> TaskAIPreload {
+        try requireTaskAIPreflight(lease: handle.lease); try handle.cancellation.check()
+        retireTaskAIAnswer(nil); try NativeReviewAIJSON.request(requestJSON)
+        guard handle.review, try editorDrafts.read() == nil,
+              let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
+              let secrets = secretJobs, let storage = deviceStorage else { throw NativeTaskAIJSON.unavailable }
+        let canonical = try NativeReviewAIJSON.witness(invoke("iosReviewAIWitness", arguments: [requestJSON]))
+        let language = canonical["language"] as! String; taskAIRuntimeLanguage = language
+        let configuration = try taskAISettings()["ai"] as? [String: Any] ?? [:]
+        guard let provider = NativeAISettingsProjection.Provider(rawValue: configuration["provider"] as? String ?? "openai") else { throw NativeTaskAIJSON.unavailable }
+        let witness = try reviewAIDurableWitness(canonical), generation = attachmentGeneration
+        let legacy = try storage.get("mindwtr-ai-key:" + provider.rawValue), registry = NativeAttachmentLocalRequests()
+        #if DEBUG
+        let http = NativeHTTPJobs(registry: registry, faults: faults); faults?.configureHTTPJobs?(http)
+        #else
+        let http = NativeHTTPJobs(registry: registry)
+        #endif
+        taskAITurn = TaskAITurn(handle: handle, operation: "review", http: http, provider: provider,
+            configuration: configuration, canonicalWitness: canonical, witnessRequestJSON: requestJSON,
+            requireOwner: { [unowned self, weak runtime, weak connection, weak storage] in
+                try handle.cancellation.check()
+                guard let runtime, let connection, let storage, handle.lease.isCurrent,
+                      self.taskAITurn?.handle === handle || self.taskAIAnswer?.handle === handle,
+                      self.context === runtime, self.database === connection, self.deviceStorage === storage,
+                      self.workspaceMode == .personal, self.started, !self.closed, !self.localRequests.isClosing,
+                      self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
+                      self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true,
+                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil, self.aiRequestTimeoutTurn == nil,
+                      self.aiReasoningEffortTurn == nil, self.aiGeminiThinkingBudgetTurn == nil, self.captureAITurn == nil,
+                      !self.cleanupOwed, !self.foregroundCleanupActive, try self.editorDrafts.read() == nil,
+                      try Self.bindingIdentity(self.databaseURL) == library,
+                      try Self.taskAIEqual(self.reviewAIDurableWitness(canonical), witness) else { throw NativeTaskAIJSON.unavailable }
+                try storage.validateAIProviderDeviceMetadataRead()
+            })
+        return TaskAIPreload(secrets: secrets, provider: provider, legacy: legacy, http: http)
+    }
+
+    private var widgetCompletionLease: NativeTaskAIEditorLease?
+    func submitWidgetCompletion(_ raw: String, lease: NativeTaskAIEditorLease) throws -> String {
+        guard lease.isCurrent else { throw CoreHostRejection(message: "STALE_REVISION: Widget completion changed") }
+        let source = try NativeWidgetCompletionJSON.source(raw)
+        if let command = pending {
+            guard command.method == "iosWidgetCompletionCommit", let encoded = try journalArguments(command).first as? String,
+                  try NativeWidgetCompletionJSON.sameSource(NativeWidgetCompletionJSON.plan(encoded)["source"], source) else { throw NativeWidgetCompletionJSON.invalid }
+            guard let result = try retryPending() else { throw NativeWidgetCompletionJSON.invalid }; return result
+        }
+        do {
+            guard lease.isCurrent, try editorDrafts.read() == nil else { throw NativeWidgetCompletionJSON.invalid }
+            widgetCompletionLease = lease; defer { widgetCompletionLease = nil }
+            return try call("widgetCompletionSubmit", argumentsJSON: Self.ownedJSON([raw]), editorAttempt: nil)
+        } catch {
+            if pending == nil { throw CoreHostRejection(message: error.localizedDescription) }; throw error
+        }
+    }
+    private func prepareWidgetCompletionCommand(_ args: [Any]) throws -> CallPreparationResult {
+        try allowRetainedOrdinaryPreparation()
+        do {
+            guard let raw = args.first as? String else { throw NativeWidgetCompletionJSON.invalid }
+            let source = try NativeWidgetCompletionJSON.source(raw)
+            let value = try invoke("iosWidgetCompletionPrepare", arguments: args)
+            let response = try NativeWidgetCompletionJSON.object(value, limit: 2_100_000)
+            if response["kind"] as? String == "settled", Set(response.keys) == ["kind", "result"],
+               let result = response["result"] as? [String: Any] {
+                let encoded = try NativeWidgetCompletionJSON.encoded(result)
+                try NativeWidgetCompletionJSON.result(encoded, source: source); return .result(encoded)
+            }
+            guard Set(response.keys) == ["kind", "prepared"], response["kind"] as? String == "prepared",
+                  let prepared = response["prepared"] as? [String: Any],
+                  try NativeWidgetCompletionJSON.sameSource(prepared["source"], source), widgetCompletionLease?.isCurrent == true else { throw NativeWidgetCompletionJSON.invalid }
+            let plan = try NativeWidgetCompletionJSON.encoded(prepared); _ = try NativeWidgetCompletionJSON.plan(plan)
+            _ = try invoke("iosWidgetCompletionValidate", arguments: [plan])
+            return .command(PendingCommand(version: 2, method: "iosWidgetCompletionCommit", argumentsJSON: try Self.ownedJSON([plan])))
+        } catch { throw CoreHostRejection(message: error.localizedDescription) }
+    }
+
+    private var shareCaptureLease: NativeTaskAIEditorLease?
+    func probeShareCapture(_ identity: String) throws -> String {
+        guard started, !closed, pending == nil else { throw NativeShareError.unavailable }
+        return try invoke("iosShareCaptureOutcome", arguments: [identity])
+    }
+    func submitShareCapture(_ raw: String, lease: NativeTaskAIEditorLease) throws -> String {
+        let request = try NativeShareCaptureJSON.request(raw)
+        if let command = pending {
+            guard command.method == "iosShareCaptureCommit", let encoded = try journalArguments(command).first as? String,
+                  Self.equalJSON(try NativeShareCaptureJSON.plan(encoded)["request"], request) else { throw NativeShareError.unavailable }
+            guard let result = try retryPending() else { throw NativeShareError.unavailable }; return result
+        }
+        do {
+            guard lease.isCurrent, try editorDrafts.read() == nil else { throw NativeShareError.unavailable }
+            shareCaptureLease = lease; defer { shareCaptureLease = nil }
+            return try call("shareCaptureSubmit", argumentsJSON: Self.ownedJSON([raw]), editorAttempt: nil)
+        } catch {
+            if pending == nil { throw CoreHostRejection(message: error.localizedDescription) }; throw error
+        }
+    }
+    func ingestWatchBatch(_ batch: NativeWatchBatch, lease: NativeTaskAIEditorLease) throws -> String {
+        guard lease.isCurrent else { throw CoreHostRejection(message: "NOT_READY: Watch intake owner changed") }
+        try requirePersonalWorkspace()
+        if let command = pending {
+            guard command.method == "iosWatchIngest", let prior = try journalArguments(command).first as? String,
+                  Self.equalJSON(try NativeJSON.jsonObject(with: Data(prior.utf8)),
+                                 try NativeJSON.jsonObject(with: Data(batch.json.utf8))),
+                  let value = try retryPending() else { throw NativeWatchBatch.invalid }
+            return value
+        }
+        _ = try requireDeviceStorageAdmission()
+        guard try editorDrafts.read() == nil else { throw HostFailure("NOT_READY: Watch intake waits for the task editor") }
+        return try call("iosWatchIngest", argumentsJSON: Self.ownedJSON([batch.json]), editorAttempt: nil, watchOwned: true)
+    }
+
+    func beginWatchAudio(_ source: NativeWatchAudio, lease: NativeTaskAIEditorLease) throws -> WatchAudio? {
+        try requirePersonalWorkspace()
+        guard lease.isCurrent else { throw NativeWatchAudio.ownerChanged }
+        if let command = pending {
+            guard command.method == "iosWatchAudioIngest", let raw = try journalArguments(command).first as? String else { throw NativeWatchAudio.invalid }
+            let prior = try NativeWatchAudio.readEnvelope(raw).source
+            guard Self.ownedEqual(prior.name, source.name), Self.ownedEqual(prior.body, source.body),
+                  let result = try retryPending() else { throw NativeWatchAudio.invalid }
+            try source.validateResult(result); acknowledgeWatchAudio(); return nil
+        }
+        do {
+            let binding = try newVoiceBinding(), cancellation = NativeAttachmentCancellation()
+            guard try editorDrafts.read() == nil else { throw NativeWatchAudioRetryable() }
+            if try probeWatchAudio(source) { acknowledgeWatchAudio(); return nil }
+            let needsTranscript = try watchAudioNeedsTranscript(source)
+            let runtime: VoiceRemoteRuntime?
+            if needsTranscript {
+                let selectedProvider = try selectedVoiceProvider(binding)
+                let openAI = selectedProvider == .openai ? try invoke("iosWatchOpenAIRuntime", arguments: []) : "null"
+                if selectedProvider == .whisper {
+                    let selected = try NativeVoiceRuntime.validated(invokeVoice("iosVoiceRuntimeOptions", ["{}"], binding: binding), credentialAvailable: false, credentialRequired: false)
+                    guard selected.enabled, NativeWhisperInferenceJobs.supported else { throw NativeWatchAudioRetryable() }
+                    runtime = .whisper(try whisperModel(binding))
+                } else if openAI != "null" {
+                    // Validate the configured destination before touching its selected provider credential.
+                    let selected = try NativeWatchOpenAIRuntime.validated(openAI)
+                    guard selected.enabled else { throw NativeWatchAudioRetryable() }
+                    _ = try voiceCredential(binding, cancellation: cancellation, provider: .openai)
+                    guard let secrets = secretJobs else { throw NativeWatchAudioRetryable() }
+                    let secure = try secrets.readAIRequestKey(provider: .openai, cancellation: cancellation)
+                    let credential = try secure ?? binding.storage.get("mindwtr-ai-key:openai")
+                    guard credential.map({ $0.utf16.count <= 4000 }) ?? true else { throw NativeWatchAudio.invalid }
+                    let available = credential.flatMap { $0.isEmpty ? nil : $0 }
+                    guard available != nil || !selected.credentialRequired else { throw NativeWatchAudioRetryable() }
+                    runtime = .openai(selected, credential: available)
+                } else {
+                    let credential = try voiceCredential(binding, cancellation: cancellation)
+                    let selected = try NativeVoiceRuntime.validated(invokeVoice("iosVoiceRuntimeOptions", ["{}"], binding: binding, cancellation: cancellation),
+                        credentialAvailable: credential.secureItem == "present" || credential.legacyPresent)
+                    guard selected.available, selected.provider == .gemini else { throw NativeWatchAudioRetryable() }
+                    runtime = .gemini(selected)
+                }
+            } else { runtime = nil }
+            try requireVoiceBinding(binding, cancellation: cancellation)
+            guard lease.isCurrent else { throw NativeWatchAudio.ownerChanged }
+            return WatchAudio(source: source, binding: binding, runtime: runtime, lease: lease, cancellation: cancellation,
+                              speechNow: Self.voiceNow(), timeZone: TimeZone.current.identifier)
+        } catch {
+            if error is CancellationError || error is CoreHostRejection { throw error }
+            throw NativeWatchAudioRetryable()
+        }
+    }
+
+    private func requireWatchAudio(_ job: WatchAudio) throws {
+        guard job.lease.isCurrent, !job.cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
+        try requireVoiceBinding(job.binding, cancellation: job.cancellation)
+        guard try editorDrafts.read() == nil else { throw NativeWatchAudioRetryable() }
+    }
+    func checkWatchAudio(_ job: WatchAudio) throws {
+        try requireCalendarAdmission(); try requireWatchAudio(job)
+    }
+    private func probeWatchAudio(_ source: NativeWatchAudio) throws -> Bool {
+        let result = try invoke("iosWatchAudioOutcome", arguments: [source.body])
+        guard result != "null" else { return false }
+        try source.validateResult(result); return true
+    }
+    private func watchAudioNeedsTranscript(_ source: NativeWatchAudio) throws -> Bool {
+        let raw = try invoke("iosWatchAudioNeedsTranscript", arguments: [source.body])
+        guard let needed = NativeVoiceJSON.boolean(try NativeJSON.jsonObject(with: Data(raw.utf8), options: [.fragmentsAllowed])) else { throw NativeWatchAudio.invalid }
+        return needed
+    }
+    func buildWatchAudioHTTP(_ job: WatchAudio, audio: String) throws -> String {
+        try requireCalendarAdmission(); try requireWatchAudio(job)
+        guard let selected = job.runtime, case .gemini(let runtime) = selected else { throw NativeWatchAudio.invalid }
+        return try buildVoiceHTTP(binding: job.binding, runtime: runtime, cancellation: job.cancellation, audio: audio, mimeType: "audio/wav")
+    }
+    func decodeWatchAudio(_ job: WatchAudio, response: String) throws -> String {
+        try requireWatchAudio(job)
+        let raw = try invokeVoice("iosVoiceGeminiResponseDecode", [response], binding: job.binding, cancellation: job.cancellation)
+        let decoded = try NativeVoiceJSON.object(raw, maximum: 262144)
+        guard let value = decoded["transcript"] as? String else { throw NativeWatchAudio.invalid }
+        let transcript = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        try NativeWatchAudio.validateTranscript(transcript)
+        return transcript
+    }
+
+    func buildWatchOpenAITranscription(_ job: WatchAudio, bytes: Data) throws -> String {
+        try checkWatchAudio(job)
+        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime else { throw NativeWatchAudio.invalid }
+        return try buildOpenAITranscription(binding: job.binding, config: config, credential: credential, bytes: bytes,
+                                           sourceID: job.source.id, format: .wave, cancellation: job.cancellation)
+    }
+    private func buildOpenAITranscription(binding: VoiceBinding, config: NativeWatchOpenAIRuntime, credential: String?,
+                                         bytes: Data, sourceID: String, format: NativeVoiceAudioFormat,
+                                         cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        let input = try NativeVoiceJSON.encode(["model": config.model, "language": config.language, "endpoint": config.endpoint])
+        let built = try NativeVoiceJSON.object(invokeVoice("iosVoiceOpenAITranscriptionBuild", [input], binding: binding, cancellation: cancellation), maximum: 32768)
+        guard Set(built.keys) == ["url", "method", "fields", "timeoutMs"], built["method"] as? String == "POST",
+              Self.isInteger(built["timeoutMs"], equalTo: 30000), let url = built["url"] as? String,
+              Self.ownedEqual(url, config.endpoint), let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed),
+              let fields = built["fields"] as? [[String]] else { throw NativeWatchAudio.invalid }
+        let multipart = try config.multipart(fields: fields, bytes: bytes, sourceID: sourceID, format: format)
+        var headers = [["Content-Type", multipart.contentType]]
+        if let credential { headers.append(["Authorization", "Bearer " + credential]) }
+        return try NativeVoiceJSON.encode(["url": url, "method": "POST", "redirect": "error", "headers": headers,
+                                          "base64": multipart.body.base64EncodedString()])
+    }
+
+    func decodeWatchOpenAITranscription(_ job: WatchAudio, response: String) throws -> String {
+        try checkWatchAudio(job)
+        let raw = try invokeVoice("iosVoiceOpenAITranscriptionDecode", [response], binding: job.binding, cancellation: job.cancellation)
+        let decoded = try NativeVoiceJSON.object(raw, maximum: 512 * 1024)
+        guard Set(decoded.keys) == ["transcript"], let value = decoded["transcript"] as? String else { throw NativeWatchAudio.invalid }
+        let transcript = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        try NativeWatchAudio.validateTranscript(transcript)
+        return transcript
+    }
+
+    func buildWatchOpenAIParse(_ job: WatchAudio, transcript: String, model: String, api: NativeOpenAISpeechAPI) throws -> String {
+        try checkWatchAudio(job)
+        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime, let credential else { throw NativeWatchAudio.invalid }
+        return try buildOpenAIParse(binding: job.binding, config: config, credential: credential, transcript: transcript, model: model,
+                                   api: api, now: job.speechNow, timeZone: job.timeZone, cancellation: job.cancellation)
+    }
+    private func buildOpenAIParse(binding: VoiceBinding, config: NativeWatchOpenAIRuntime, credential: String,
+                                 transcript: String, model: String, api: NativeOpenAISpeechAPI, now: String, timeZone: String,
+                                 cancellation: NativeAttachmentCancellation) throws -> String {
+        try requireVoiceBinding(binding, cancellation: cancellation)
+        guard Self.ownedEqual(model, config.parseModel) || Self.ownedEqual(model, config.retryModel) else { throw NativeWatchAudio.invalid }
+        let requestConfig: [String: Any] = ["language": config.language, "fieldStrategy": config.fieldStrategy.rawValue,
+                                           "now": now, "timeZone": timeZone]
+        let input = try NativeVoiceJSON.encode(["config": requestConfig, "transcript": transcript, "model": model, "api": api.rawValue])
+        let built = try NativeVoiceJSON.object(invokeVoice("iosVoiceOpenAIParseBuild", [input], binding: binding, cancellation: cancellation), maximum: 8 * 1024 * 1024)
+        guard Set(built.keys) == ["url", "method", "headers", "body", "timeoutMs"], built["method"] as? String == "POST",
+              Self.isInteger(built["timeoutMs"], equalTo: 30000), let url = built["url"] as? String,
+              Self.ownedEqual(url, api.endpoint), let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed),
+              let headers = built["headers"] as? [[String]], headers == [["Content-Type", "application/json"]],
+              let body = built["body"] as? String, body.utf8.count <= 8 * 1024 * 1024 else { throw NativeWatchAudio.invalid }
+        return try NativeVoiceJSON.encode(["url": url, "method": "POST", "redirect": "error",
+            "headers": headers + [["Authorization", "Bearer " + credential]], "text": body])
+    }
+
+    func decodeWatchOpenAIParse(_ job: WatchAudio, response: String, api: NativeOpenAISpeechAPI) throws -> String {
+        try checkWatchAudio(job)
+        let provider = try NativeJSON.jsonObject(with: Data(response.utf8), options: [.fragmentsAllowed])
+        let input = try NativeVoiceJSON.encode(["api": api.rawValue, "response": provider])
+        let raw = try invokeVoice("iosVoiceOpenAIParseDecode", [input], binding: job.binding, cancellation: job.cancellation)
+        let decoded = try NativeVoiceJSON.object(raw, maximum: 512 * 1024)
+        if decoded["transcript"] == nil || decoded["transcript"] is NSNull { return "" }
+        if let number = decoded["transcript"] as? NSNumber, number.doubleValue == 0 { return "" }
+        guard let transcript = decoded["transcript"] as? String else { throw NativeWatchAudioInvalidParsedTranscript() }
+        return transcript
+    }
+
+    func finishWatchOpenAITranscript(_ job: WatchAudio, value: String) throws -> String {
+        try requireWatchAudio(job)
+        let transcript = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        try NativeWatchAudio.validateTranscript(transcript)
+        _ = try? invoke("logLine", arguments: ["Native iOS OpenAI Watch speech is ready",
+            #"{"releaseCheck":"v1.3.8/ios-watch-openai-speech","provider":"openai","stage":"transcribed","outcome":"ready"}"#])
+        return transcript
+    }
+
+    func commitWatchAudio(_ job: WatchAudio, transcript: String?, audio: NativeWatchAudioBytes?) throws {
+        guard pending == nil else { throw HostFailure("SAVE_FAILED: A pending command requires exact retry") }
+        let envelope: String
+        do {
+            try requireCalendarAdmission(); try requireWatchAudio(job)
+            if try probeWatchAudio(job.source) { acknowledgeWatchAudio(); return }
+            if transcript == nil {
+                let needed = try watchAudioNeedsTranscript(job.source)
+                guard audio == nil, !needed else { throw NativeWatchAudio.invalid }
+            } else { guard audio != nil else { throw NativeWatchAudio.invalid } }
+            envelope = try job.source.envelope(transcript: transcript)
+        } catch {
+            if error is CoreHostRejection { throw error }
+            if error is CancellationError || job.cancellation.isCancelled { throw NativeWatchAudio.ownerChanged }
+            throw NativeWatchAudioRetryable()
+        }
+        watchAudioCommitCheck = { [unowned self] in
+            try self.requireWatchAudio(job)
+            try audio?.validate()
+        }
+        defer { watchAudioCommitCheck = nil }
+        do {
+            let result = try call("iosWatchAudioIngest", argumentsJSON: Self.ownedJSON([envelope]), editorAttempt: nil, watchOwned: true)
+            try job.source.validateResult(result); acknowledgeWatchAudio()
+        } catch {
+            if pending == nil {
+                if error is CoreHostRejection { throw error }
+                if error is CancellationError || job.cancellation.isCancelled { throw NativeWatchAudio.ownerChanged }
+                throw NativeWatchAudioRetryable()
+            }
+            throw error
+        }
+    }
+    private func acknowledgeWatchAudio() {
+        _ = try? invoke("logLine", arguments: ["Native iOS Watch audio command confirmed",
+            #"{"releaseCheck":"v1.3.8/ios-watch-audio","outcome":"confirmed"}"#])
+    }
+
+    func submitWatchPomodoro(_ source: NativeWatchPomodoro, lease: NativeTaskAIEditorLease) throws {
+        guard lease.isCurrent else { throw CoreHostRejection(message: "NOT_READY: Watch timer owner changed") }
+        try requirePersonalWorkspace()
+        let raw = try call("watchPomodoroSubmit", argumentsJSON: Self.ownedJSON([source.body]),
+                           editorAttempt: nil, pomodoroOwned: true, watchOwned: true)
+        let result = try Self.pomodoroObject(raw, maximum: 16_384)
+        guard Set(result.keys) == ["kind", "result", "projectionReloaded"], result["kind"] as? String == "confirmed",
+              result["projectionReloaded"] as? Bool == true else { throw Self.pomodoroFailure }
+        _ = try? invoke("logLine", arguments: ["Native iOS Watch timer command confirmed",
+            #"{"releaseCheck":"v1.3.8/ios-watch-pomodoro","outcome":"confirmed"}"#])
+    }
+
+    private func requireWatchOrderingStorage() throws -> NativeDeviceKV {
+        try requirePersonalWorkspace()
+        try requireEncryptionUnlockTurn()
+        try denyCleanupOwner()
+        try requireNoAttachmentDraft()
+        guard !closed, context != nil, lockFD >= 0, ["iosWatchIngest", "iosWatchAudioIngest"].contains(pending?.method ?? ""),
+              retainedOrdinaryTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
+              projectFileAddTurn == nil, projectDownloadTurn == nil, let deviceStorage else { throw Self.deviceStorageUnavailable }
+        return deviceStorage
+    }
+
+    @inline(never)
+    private func prepareShareCaptureCommand(_ args: [Any]) throws -> CallPreparationResult {
+        try allowRetainedOrdinaryPreparation()
+        do {
+            let value = try invoke("iosShareCapturePrepare", arguments: args), response = try NativeShareCaptureJSON.object(value)
+            switch response["kind"] as? String {
+            case "refused", "confirmLines": return .result(value)
+            case "alreadySaved":
+                guard let result = response["result"] as? [String: Any] else { throw NativeShareError.invalidInput }
+                return .result(try NativeShareCaptureJSON.encoded(result))
+            case "prepared":
+                guard let prepared = response["prepared"] as? [String: Any], let raw = args.first as? String,
+                      Self.equalJSON(prepared["request"], try NativeShareCaptureJSON.request(raw)), shareCaptureLease?.isCurrent == true else { throw NativeShareError.invalidInput }
+                let plan = try NativeShareCaptureJSON.encoded(prepared); _ = try NativeShareCaptureJSON.plan(plan)
+                return .command(PendingCommand(version: 2, method: "iosShareCaptureCommit", argumentsJSON: try Self.ownedJSON([plan])))
+            default: throw NativeShareError.invalidInput
+            }
+        } catch { throw CoreHostRejection(message: error.localizedDescription) }
+    }
+    func applyReviewAISuggestions(_ raw: String, lease: NativeTaskAIEditorLease) throws -> String {
+        let request = try NativeReviewAIJSON.apply(raw)
+        if let command = pending {
+            guard command.method == "iosReviewAIApply", let prior = try journalArguments(command).first as? String,
+                  Self.equalJSON(try NativeReviewAIJSON.apply(prior), request) else { throw NativeTaskAIJSON.unavailable }
+            guard let result = try retryPending() else { throw NativeTaskAIJSON.unavailable }; return result
+        }
+        do {
+            try requireTaskAIPreflight(lease: lease)
+            guard try editorDrafts.read() == nil else { throw NativeTaskAIJSON.unavailable }
+            let prior = try invoke("iosReviewAIOutcome", arguments: [raw])
+            if prior != "null" { try NativeReviewAIJSON.result(prior); return prior }
+            let validation = try invoke("iosReviewAIValidateApply", arguments: [raw, Self.ownedJSON(try reviewAIDurableWitness([:]))])
+            guard validation == "null" else { throw NativeTaskAIJSON.unavailable }
+            let sqlite = try requireDatabase(), revisions = request["taskRevisions"] as! [String: String]
+            for id in revisions.keys.sorted() {
+                let data = try sqlite.execute("SELECT rev,revBy,updatedAt FROM tasks WHERE id=? AND deletedAt IS NULL AND purgedAt IS NULL", parametersJSON: Self.ownedJSON([id]))
+                guard let rows = try NativeJSON.jsonObject(with: Data(data.utf8)) as? [[String: Any]], rows.count == 1, let row = rows.first,
+                      let updated = row["updatedAt"] as? String else { throw NativeTaskAIJSON.unavailable }
+                let revision = "\((row["rev"] as? NSNumber)?.intValue ?? 0):\(row["revBy"] as? String ?? ""):\(updated)"
+                guard Self.ownedEqual(revision, revisions[id]!) else { throw NativeTaskAIJSON.unavailable }
+            }
+            reviewAIApplyLease = lease; defer { reviewAIApplyLease = nil }
+            return try call("reviewAISuggestionsWrite", argumentsJSON: Self.ownedJSON([raw]), editorAttempt: nil)
+        } catch {
+            if pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            throw error
+        }
+    }
+
+    private func readInboxAICanonicalWitness(_ raw: String) throws -> [String: Any] {
+        try NativeInboxAIJSON.witness(invoke("iosInboxAIWitness", arguments: [raw]))
+    }
+
+    private func inboxAIDurableWitness(_ id: String) throws -> Any {
+        let sqlite = try requireDatabase()
+        let raw = try sqlite.execute("SELECT rowid AS _rowid,* FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id]))
+        guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], rows.count == 1,
+              let task = rows.first, task["deletedAt"] is NSNull, task["purgedAt"] is NSNull,
+              task["status"] as? String != "archived" else { throw NativeTaskAIJSON.unavailable }
+        var project: Any = []
+        if let projectID = task["projectId"] as? String, !projectID.isEmpty {
+            project = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,status,deletedAt,purgedAt FROM projects WHERE id=?", parametersJSON: Self.ownedJSON([projectID])).utf8))
+        }
+        let settings = try taskAISettings()
+        // Only context cells can change the context pool. Unrelated title/note/revision writes remain admissible.
+        let contexts = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,contexts FROM tasks WHERE deletedAt IS NULL AND purgedAt IS NULL AND status<>'archived' AND contexts IS NOT NULL AND contexts<>'[]' ORDER BY id").utf8))
+        return ["task": task, "project": project, "contexts": contexts, "ai": settings["ai"] ?? [:],
+                "features": (settings["features"] as? [String: Any])?["timeEstimates"] ?? NSNull(),
+                "language": settings["language"] ?? NSNull()] as [String: Any]
+    }
+
+    func prepareInboxAI(_ handle: NativeTaskAIHandle, requestJSON: String) throws -> TaskAIPreload {
+        try requireTaskAIPreflight(lease: handle.lease); try handle.cancellation.check()
+        retireTaskAIAnswer(nil)
+        let input = try NativeInboxAIJSON.request(requestJSON)
+        guard handle.inbox, try editorDrafts.read() == nil, let id = input["taskId"] as? String,
+              let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
+              let secrets = secretJobs, let storage = deviceStorage else { throw NativeTaskAIJSON.unavailable }
+        let canonical = try readInboxAICanonicalWitness(requestJSON)
+        let language = canonical["language"] as! String; taskAIRuntimeLanguage = language
+        let settings = try taskAISettings(), configuration = settings["ai"] as? [String: Any] ?? [:]
+        guard let provider = NativeAISettingsProjection.Provider(rawValue: configuration["provider"] as? String ?? "openai") else { throw NativeTaskAIJSON.unavailable }
+        let witness = try inboxAIDurableWitness(id), generation = attachmentGeneration
+        let legacy = try storage.get("mindwtr-ai-key:" + provider.rawValue)
+        let registry = NativeAttachmentLocalRequests()
+        #if DEBUG
+        let http = NativeHTTPJobs(registry: registry, faults: faults); faults?.configureHTTPJobs?(http)
+        #else
+        let http = NativeHTTPJobs(registry: registry)
+        #endif
+        taskAITurn = TaskAITurn(handle: handle, operation: "clarify", http: http, provider: provider,
+            configuration: configuration, canonicalWitness: canonical, witnessRequestJSON: requestJSON,
+            requireOwner: { [unowned self, weak runtime, weak connection, weak storage] in
+                try handle.cancellation.check()
+                guard let runtime, let connection, let storage, handle.lease.isCurrent,
+                      self.taskAITurn?.handle === handle || self.taskAIAnswer?.handle === handle,
+                      self.context === runtime, self.database === connection, self.deviceStorage === storage,
+                      self.workspaceMode == .personal, self.started, !self.closed, !self.localRequests.isClosing,
+                      self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
+                      self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true,
+                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil, self.aiRequestTimeoutTurn == nil,
+                      self.aiReasoningEffortTurn == nil, self.aiGeminiThinkingBudgetTurn == nil, self.captureAITurn == nil,
+                      !self.cleanupOwed, !self.foregroundCleanupActive, try self.editorDrafts.read() == nil,
+                      try Self.bindingIdentity(self.databaseURL) == library,
+                      try Self.taskAIEqual(self.inboxAIDurableWitness(id), witness) else { throw NativeTaskAIJSON.unavailable }
+                try storage.validateAIProviderDeviceMetadataRead()
+            })
+        return TaskAIPreload(secrets: secrets, provider: provider, legacy: legacy, http: http)
+    }
+
+    func applyInboxAIChoice(_ handle: NativeTaskAIHandle, index: Int) throws -> String {
+        guard handle.inbox, let answer = taskAIAnswer, answer.handle === handle,
+              let runtime = context else { throw NativeTaskAIJSON.unavailable }
+        try answer.current()
+        let value = try NativeTaskAIJSON.object(NativeInboxAIJSON.answer(answer.answerJSON))
+        guard value["kind"] as? String == "dialog", let choices = value["choices"] as? [[String: Any]],
+              choices.indices.contains(index), let edits = choices[index]["apply"] as? [[String: Any]],
+              NativeInboxAIJSON.edits(edits) else { throw NativeTaskAIJSON.invalid }
+        let request = try Self.ownedJSON(["request": NativeInboxAIJSON.request(answer.requestJSON), "expected": answer.canonical, "edits": edits])
+        let owner: @convention(block) () -> String = {
+            do { try answer.durable(); return "" } catch { return "!MindwtrNativeError:Inbox AI Apply owner unavailable" }
+        }
+        guard let callback = JSValue(object: owner, in: runtime) else { throw NativeTaskAIJSON.unavailable }
+        // The selected batch has no awaits between its canonical pure session edits.
+        let raw = try invoke("iosInboxAIApply", arguments: [request, callback])
+        try answer.durable()
+        let view = try NativeTaskAIJSON.object(raw), original = try NativeInboxAIJSON.request(answer.requestJSON)
+        guard view["sessionId"] as? String == original["sessionId"] as? String,
+              view["taskId"] as? String == original["taskId"] as? String, view["step"] as? String == original["step"] as? String,
+              view["draft"] is [String: Any], view["version"] as? Int == 1 else { throw NativeTaskAIJSON.invalid }
+        retireTaskAIAnswer(handle)
+        return raw
+    }
+
+    func validateTaskAI(_ handle: NativeTaskAIHandle) throws {
+        guard let turn = taskAITurn, turn.handle === handle else { throw NativeTaskAIJSON.unavailable }
+        try turn.requireOwner()
+    }
+
+    func startTaskAI(_ handle: NativeTaskAIHandle, requestJSON: String, credential: String?) throws {
+        guard let turn = taskAITurn, turn.handle === handle, turn.ticket == nil, let runtime = context,
+              let host = runtime.objectForKeyedSubscript("MindwtrHost"), !invoking else { throw NativeTaskAIJSON.unavailable }
+        try turn.requireOwner(); turn.credential = credential
+        let owner: @convention(block) (JSValue) -> String = { [weak self, weak turn] value in
+            guard let self, let turn, value.context === runtime, value.isString, let raw = value.toString() else { return "!MindwtrNativeError:Task AI owner unavailable" }
+            do {
+                try turn.requireOwner()
+                let request = try NativeTaskAIJSON.object(raw, maximum: 128 * 1024)
+                switch request["phase"] as? String {
+                case "begin":
+                    guard !turn.began, Set(request.keys) == Set(["phase", "provider", "configuration", "language"]),
+                          request["provider"] as? String == turn.provider.rawValue,
+                          let configuration = request["configuration"] as? String,
+                          try Self.taskAIEqual(NativeTaskAIJSON.object(configuration, maximum: 100_000), turn.configuration),
+                          let language = request["language"] as? String,
+                          self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true else { throw NativeTaskAIJSON.unavailable }
+                    turn.began = true
+                case "current": guard turn.began, Set(request.keys) == Set(["phase"]) else { throw NativeTaskAIJSON.unavailable }
+                case "credential":
+                    guard turn.began, !turn.loaded, Set(request.keys) == Set(["phase", "provider"]), request["provider"] as? String == turn.provider.rawValue else { throw NativeTaskAIJSON.unavailable }
+                    turn.loaded = true
+                    return try Self.ownedJSON(["value": turn.credential.map { $0 as Any } ?? NSNull()])
+                case "http":
+                    guard turn.began, turn.loaded, turn.httpURL == nil, Set(request.keys) == Set(["phase", "url"]),
+                          let url = request["url"] as? String, url.utf8.count <= 16_384,
+                          let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed) else { throw NativeTaskAIJSON.unavailable }
+                    turn.httpURL = url
+                default: throw NativeTaskAIJSON.unavailable
+                }
+                return ""
+            } catch { return "!MindwtrNativeError:Task AI owner unavailable" }
+        }
+        guard let callback = JSValue(object: owner, in: runtime) else { throw NativeTaskAIJSON.unavailable }
+        invoking = true; defer { invoking = false }
+        runtime.exception = nil
+        let ticket = host.invokeMethod(handle.review ? "iosReviewAIRequest" : handle.inbox ? "iosInboxAIRequest" : "iosTaskAIRequest", withArguments: [requestJSON, callback])
+        if let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true { turn.ticket = id }
+        try checkException()
+        guard turn.ticket != nil else { throw NativeTaskAIJSON.invalid }
+    }
+
+    func pollTaskAI(_ handle: NativeTaskAIHandle, requireCurrent: Bool) throws -> String? {
+        guard let turn = taskAITurn, turn.handle === handle else { return "null" }
+        guard let ticket = turn.ticket, !turn.terminal else { return "null" }
+        guard let runtime = context, let host = runtime.objectForKeyedSubscript("MindwtrHost"), !invoking else { throw NativeTaskAIJSON.unavailable }
+        if requireCurrent { try turn.requireOwner() }
+        invoking = true; defer { invoking = false }
+        runtime.exception = nil
+        _ = runtime.objectForKeyedSubscript("__pumpTimers")?.call(withArguments: [])
+        try checkException()
+        let reply = host.invokeMethod("poll", withArguments: [ticket]); try checkException()
+        guard let reply, !reply.isNull, !reply.isUndefined else { return nil }
+        turn.terminal = true
+        guard reply.isString, let raw = reply.toString() else { throw NativeTaskAIJSON.invalid }
+        let envelope = try NativeTaskAIJSON.object(raw)
+        guard let ok = envelope["ok"] as? NSNumber, CFGetTypeID(ok) == CFBooleanGetTypeID() else { throw NativeTaskAIJSON.invalid }
+        if !requireCurrent { return "null" }
+        guard ok.boolValue, Set(envelope.keys) == Set(["ok", "value"]), let value = envelope["value"] else { throw NativeTaskAIJSON.unavailable }
+        try turn.requireOwner()
+        let rawAnswer = try Self.ownedJSON(value)
+        let answer = try handle.review ? NativeReviewAIJSON.answer(rawAnswer) : handle.inbox ? NativeInboxAIJSON.answer(rawAnswer) : NativeTaskAIJSON.answer(rawAnswer, operation: turn.operation)
+        turn.answerJSON = answer
+        return answer
+    }
+
+    func abortTaskAI(_ handle: NativeTaskAIHandle) {
+        guard let turn = taskAITurn, turn.handle === handle, let ticket = turn.ticket, !turn.terminal,
+              let runtime = context else { return }
+        runtime.exception = nil
+        _ = runtime.objectForKeyedSubscript("MindwtrHost")?.invokeMethod("abort", withArguments: [ticket])
+        runtime.exception = nil
+    }
+
+    func validateTaskAIAnswer(_ handle: NativeTaskAIHandle) throws {
+        guard let answer = taskAIAnswer, answer.handle === handle else { throw NativeTaskAIJSON.unavailable }
+        try answer.current()
+    }
+
+    func retireTaskAIAnswer(_ handle: NativeTaskAIHandle?) {
+        guard let answer = taskAIAnswer, handle == nil || answer.handle === handle else { return }
+        answer.handle.lease.invalidate(); taskAIAnswer = nil
+    }
+
+    func finishTaskAI(_ handle: NativeTaskAIHandle, outcome: String) {
+        guard let turn = taskAITurn, turn.handle === handle else { return }
+        if outcome == "suggested" || outcome == "empty" {
+            let current = turn.requireOwner, raw = turn.witnessRequestJSON, canonical = turn.canonicalWitness
+            taskAIAnswer = (handle, { [unowned self] in
+                try current()
+                let next = try handle.review ? NativeReviewAIJSON.witness(self.invoke("iosReviewAIWitness", arguments: [raw]))
+                    : handle.inbox ? self.readInboxAICanonicalWitness(raw) : self.readTaskAICanonicalWitness(raw)
+                try current()
+                guard try Self.taskAIEqual(next, canonical) else { throw NativeTaskAIJSON.unavailable }
+            }, current, raw, canonical, turn.answerJSON ?? "")
+        }
+        taskAITurn = nil
+        // Fixed, content-free marker. Suggestions are unsaved editor choices.
+        if handle.review {
+            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-review-ai", "outcome": outcome]) {
+                _ = try? invoke("logLine", arguments: ["Native iOS Weekly Review AI settled", diagnostic])
+            }
+        } else if handle.inbox {
+            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-inbox-ai", "outcome": outcome]) {
+                _ = try? invoke("logLine", arguments: ["Native iOS Inbox AI settled", diagnostic])
+            }
+        } else if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-task-editor-ai", "operation": turn.operation, "outcome": outcome]) {
+            _ = try? invoke("logLine", arguments: ["Native iOS task editor AI settled", diagnostic])
+        }
+    }
+
+    func readCaptureCopilotOptions(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        let input = try Self.captureCopilotObject(requestJSON, fields: ["text", "options", "applied"])
+        guard input["text"] is String, input["options"] is [String: Any], input["applied"] is [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Capture copilot options are malformed")
+        }
+        let metadata = try readAIProviderDeviceState(cancellation: cancellation)
+        let available = metadata.secureItem == .present || metadata.secureItem == .absent && metadata.legacyItemPresent
+        return try invoke("captureCopilotOptions", arguments: [requestJSON, available], localCancellation: cancellation)
+    }
+
+    func requestCaptureCopilot(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
+        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
+        let input = try Self.captureCopilotObject(requestJSON, fields: ["revision", "request"])
+        guard let revision = input["revision"] as? String, !revision.isEmpty, revision.utf16.count <= 5000,
+              let request = input["request"] as? [String: Any], Set(request.keys) == Set(["title", "contexts", "tags"]),
+              let title = request["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.utf16.count <= 4000,
+              ["contexts", "tags"].allSatisfy({ field in
+                  guard let values = request[field] as? [String], values.count <= 1000 else { return false }
+                  return values.allSatisfy { $0.utf16.count <= 200 }
+              }) else { throw HostFailure("INVALID_INPUT: Capture copilot question is malformed") }
+        try requireCalendarAdmission()
+        guard captureAITurn == nil, try editorDrafts.read() == nil else { throw HostFailure("NOT_READY: Capture copilot is unavailable") }
+        let metadata = try readAIProviderDeviceState(cancellation: cancellation)
+        let storage = try requireDeviceStorageAdmission()
+        guard let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
+              let secrets = secretJobs, let http = httpJobs else { throw HostFailure("NOT_READY: Capture copilot is unavailable") }
+        let generation = attachmentGeneration, epoch = try captureLinesDataVersion(), ownership = UUID()
+        let turn = CaptureAITurn(id: ownership, provider: metadata.provider, requireOwner: { [unowned self, weak runtime, weak connection, weak storage] in
+            try cancellation.check()
+            guard let runtime, let connection, let storage, self.captureAITurn?.id == ownership, self.captureAITurn?.live == true,
+                  self.workspaceMode == .personal, self.started, !self.closed, !self.localRequests.isClosing,
+                  self.context === runtime, self.database === connection, self.deviceStorage === storage,
+                  self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
+                  self.pending == nil, self.retainedOrdinaryTurn == nil, self.projectFileAddTurn == nil,
+                  self.projectDownloadTurn == nil, self.taskDownloadTurn == nil, self.projectAvailabilityTurn == nil,
+                  self.encryptionUnlockTurn == nil, self.providerCopy == nil, self.ordinaryMutationDepth == 0,
+                  !self.cleanupOwed, !self.foregroundCleanupActive, self.foregroundCleanupCancellation == nil,
+                  try Self.bindingIdentity(self.databaseURL) == library, try self.captureLinesDataVersion() == epoch,
+                  try self.editorDrafts.read() == nil,
+                  try self.mixedSaveFileBinding(self.journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+                  !self.attachmentDraftEvidence else { throw HostFailure("STALE_REVISION: Capture copilot owner changed") }
+            try storage.validateAIProviderDeviceMetadataRead()
+        })
+        captureAITurn = turn
+        var outcome = "stopped", partCount = 0
+        defer {
+            http.cancelAndDrain(); secrets.drain()
+            turn.live = false; captureAITurn = nil
+            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-capture-copilot",
+                "outcome": outcome, "provider": turn.provider.rawValue, "partCount": partCount]) {
+                _ = try? invoke("logLine", arguments: ["Native iOS capture copilot completed", diagnostic])
+            }
+        }
+        let owner: @convention(block) (JSValue) -> String = { [weak self, weak turn] value in
+            guard let self, let turn, value.context === runtime, value.isString, let raw = value.toString() else {
+                return "!MindwtrNativeError:Capture copilot owner is unavailable"
+            }
+            do {
+                try turn.requireOwner()
+                guard self.invoking, raw.utf8.count <= 128 * 1024, try NativeJSON.hasUniqueObjectKeys(raw),
+                      let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], let phase = request["phase"] as? String else {
+                    throw HostFailure("Capture copilot owner is unavailable")
+                }
+                switch phase {
+                case "begin":
+                    guard !turn.began, Set(request.keys) == Set(["phase", "provider", "configuration", "language"]),
+                          request["provider"] as? String == turn.provider.rawValue,
+                          let configuration = request["configuration"] as? String, configuration.utf8.count <= 100_000,
+                          let language = request["language"] as? String, !language.isEmpty, language.utf8.count <= 100 else {
+                        throw HostFailure("Capture copilot owner is unavailable")
+                    }
+                    turn.began = true; turn.configuration = configuration; turn.language = language
+                case "current":
+                    guard turn.began, Set(request.keys) == Set(["phase"]) else { throw HostFailure("Capture copilot owner is unavailable") }
+                case "credential":
+                    guard turn.began, !turn.loaded, Set(request.keys) == Set(["phase", "provider"]),
+                          request["provider"] as? String == turn.provider.rawValue else { throw HostFailure("Capture copilot owner is unavailable") }
+                    turn.loaded = true
+                    let secure = try secrets.readAIRequestKey(provider: turn.provider, cancellation: cancellation)
+                    try turn.requireOwner()
+                    let credential = try secure ?? storage.get("mindwtr-ai-key:" + turn.provider.rawValue)
+                    try turn.requireOwner()
+                    guard credential.map({ $0.utf16.count <= 4000 }) ?? true else { throw HostFailure("Capture copilot credential is unavailable") }
+                    return try Self.ownedJSON(["value": credential.map { $0 as Any } ?? NSNull()])
+                case "http":
+                    guard turn.began, turn.loaded, Set(request.keys) == Set(["phase", "url"]), let url = request["url"] as? String,
+                          url.utf8.count <= 16_384, let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed) else {
+                        throw HostFailure("Capture copilot HTTP request is unavailable")
+                    }
+                    turn.httpURL = url
+                default: throw HostFailure("Capture copilot owner is unavailable")
+                }
+                return ""
+            } catch { return "!MindwtrNativeError:Capture copilot owner is unavailable" }
+        }
+        guard let callback = JSValue(object: owner, in: runtime) else { throw HostFailure("Capture copilot owner is unavailable") }
+        try turn.requireOwner()
+        let raw = try invoke("iosCaptureCopilotRequest", arguments: [requestJSON, callback], localCancellation: cancellation)
+        try turn.requireOwner()
+        let answer = try Self.captureCopilotObject(raw, fields: ["suggestion"])
+        if let suggestion = answer["suggestion"] as? [String: Any] {
+            guard Set(suggestion.keys).isSubset(of: ["language", "context", "timeEstimate", "tags"]),
+                  suggestion["language"] as? String == turn.language else { throw HostFailure("Capture copilot answer is unavailable") }
+            partCount = (suggestion["context"] is String ? 1 : 0) + (suggestion["timeEstimate"] is String ? 1 : 0)
+                + ((suggestion["tags"] as? [String])?.count ?? 0)
+            outcome = "suggested"
+        } else {
+            guard answer["suggestion"] is NSNull else { throw HostFailure("Capture copilot answer is unavailable") }
+            outcome = "empty"
+        }
+        return raw
+    }
+
     func call(_ method: String, argumentsJSON: String) throws -> String {
         try call(method, argumentsJSON: argumentsJSON, editorAttempt: nil)
     }
@@ -7588,7 +11497,10 @@ private final class Engine: @unchecked Sendable {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
     private func requireNoAttachmentDraft() throws {
+        guard captureAITurn == nil else { throw HostFailure("Capture copilot request is still active") }
         guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
+        guard aiTextConfigurationTurn == nil || aiTextConfigurationOwnerAccess else { throw HostFailure("AI text configuration edit is still awaiting its owner") }
+        guard aiConfigurationTurn == nil else { throw HostFailure("AI text configuration operation is active") }
         guard aiRequestTimeoutTurn == nil || aiRequestTimeoutOwnerAccess else { throw HostFailure("AI timeout edit is still awaiting its owner") }
         guard aiReasoningEffortTurn == nil || aiReasoningEffortOwnerAccess else { throw HostFailure("AI reasoning effort edit is still awaiting its owner") }
         guard aiGeminiThinkingBudgetTurn == nil || aiGeminiThinkingBudgetOwnerAccess else { throw HostFailure("AI Gemini thinking budget edit is still awaiting its owner") }
@@ -7832,7 +11744,8 @@ private final class Engine: @unchecked Sendable {
             }
             guard ["getInfo", "readBytes", "sha256File"].contains(op), Set(raw.keys) == Set(["op", "uri"]),
                   let uri = raw["uri"] as? String, !uri.isEmpty,
-                  Self.ownedEqual(uri, turn.originalURI) || Self.ownedEqual(uri, turn.targetURI) else { throw Self.taskDownloadFailure }
+                  Self.ownedEqual(uri, turn.originalURI) || Self.ownedEqual(uri, turn.targetURI)
+                    || turn.cloudKitBridge?.selectedStageProof(for: uri) != nil else { throw Self.taskDownloadFailure }
             // The selected native cap is carried into the actual opened
             // descriptor and accumulation; no separate stat grants a read.
             return
@@ -7937,6 +11850,58 @@ private final class Engine: @unchecked Sendable {
     func addAttachmentDraftV3(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         try attachmentDraftOperation { try attachmentDraftCoordinatorV3(cancellation: cancellation).addV3(requestJSON, cancellation: cancellation) }
     }
+    private static func taskDownloadDropbox(_ config: [(String, String?)]) -> Bool {
+        config.count == taskDownloadConfigKeys.count && config[0].1 == "cloud"
+            && config[6].1?.trimmingCharacters(in: .whitespacesAndNewlines) == "dropbox"
+    }
+    private static func projectDownloadBackend(_ config: [String?]) -> String {
+        if taskDownloadDropbox(Array(zip(taskDownloadConfigKeys, config))) { return "dropbox" }
+        return config.first.flatMap { $0 } == "webdav" ? "webdav" : "cloud"
+    }
+    private static func selectedDownloadLegacyKeys(_ config: [(String, String?)]) -> Set<String> {
+        if taskDownloadDropbox(config) { return [NativeDropboxSelectedAdmission.legacyTokens, "@mindwtr_sync_encryption_key_v1"] }
+        return taskDownloadSelfHosted(config) ? taskDownloadCloudLegacyKeys : taskDownloadLegacyKeys
+    }
+    private func requireSelectedDropboxConfiguration() throws -> NativeDropboxConfiguration {
+        try requirePersonalWorkspace(); try denyCleanupOwner()
+        guard started, !closed, !recoveryActivationPending, lockFD >= 0,
+              let binding = dropboxAuthorization, binding.isCurrent() else { throw NativeDropboxSelectedAdmission.unavailable }
+        return binding.configuration
+    }
+    private func selectedDropboxControl(runtime: JSContext, requireOwner: @escaping () throws -> Void) throws -> (NativeDropboxAuthorizationJobs, JSValue) {
+        _ = try requireSelectedDropboxConfiguration()
+        guard let binding = dropboxAuthorization else { throw NativeDropboxSelectedAdmission.unavailable }
+        let jobs = NativeDropboxAuthorizationJobs(registry: localRequests, binding: binding, expectedRequestID: nil)
+        let control: @convention(block) (JSValue) -> String = { [weak self, weak jobs, weak runtime] value in
+            guard let self, let jobs, let runtime else { return "!MindwtrNativeError:Selected Dropbox capability is unavailable" }
+            do {
+                try requireOwner()
+                guard self.invoking, value.context === runtime, value.isString, let input = value.toString() else { throw NativeDropboxSelectedAdmission.unavailable }
+                _ = try self.requireSelectedDropboxConfiguration()
+                return try jobs.control(input)
+            } catch { return "!MindwtrNativeError:Selected Dropbox capability is unavailable" }
+        }
+        guard let callback = JSValue(object: control, in: runtime) else { jobs.closeAndDrain(); throw NativeDropboxSelectedAdmission.unavailable }
+        return (jobs, callback)
+    }
+    private func removeSelectedDropboxLegacy(_ names: [String]) throws {
+        guard names.count == 1, names[0] == NativeDropboxSelectedAdmission.legacyTokens else { throw Self.deviceStorageUnavailable }
+        _ = try requireSelectedDropboxConfiguration()
+        if let turn = taskDownloadTurn {
+            guard turn.preparing, Self.taskDownloadDropbox(turn.config) else { throw Self.taskDownloadFailure }
+            _ = try taskDownloadLegacyRead(names)
+            try turn.storage.multiRemove(names)
+            turn.legacy.removeAll { $0.0 == names[0] }; turn.legacy.append((names[0], nil))
+            try requireTaskDownloadTurn(before: true)
+        } else if let turn = projectDownloadTurn {
+            guard turn.preparing, Self.taskDownloadDropbox(turn.config) else { throw Self.projectDownloadFailure }
+            _ = try projectDownloadLegacyRead(names)
+            try turn.storage.multiRemove(names)
+            turn.legacy.removeAll { $0.0 == names[0] }; turn.legacy.append((names[0], nil))
+            try requireProjectDownloadTurn(strict: true)
+        } else { throw Self.deviceStorageUnavailable }
+    }
+
     private static let taskDownloadConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url", "@mindwtr_webdav_username",
         "@mindwtr_webdav_allow_insecure_http", "@mindwtr_sync_encryption_state_v1", "@mindwtr_cloud_url",
         "@mindwtr_cloud_provider", "@mindwtr_cloud_allow_insecure_http"]
@@ -7963,7 +11928,10 @@ private final class Engine: @unchecked Sendable {
                                          secureReadCancellation: NativeAttachmentCancellation? = nil) throws {
         guard let turn = taskDownloadTurn else { return }
         dispatchPrecondition(condition: .onQueue(queue))
-        if turn.preparing { try turn.cancellation.check() }
+        if turn.preparing {
+            try turn.cancellation.check()
+            if Self.taskDownloadDropbox(turn.config) { _ = try requireSelectedDropboxConfiguration() }
+        }
         guard started, !closed, pending == nil, !recoveryActivationPending, lockFD >= 0,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil, providerCopy == nil,
               context === turn.runtime, attachmentJobs === turn.jobs, deviceStorage === turn.storage,
@@ -8102,6 +12070,31 @@ private final class Engine: @unchecked Sendable {
         try owner(); try turn.jobs.retireProviderSource(receipt, requireOwner: owner); try owner()
         if !completed && turn.webdavObserved { turn.unadoptedSourceRetired = true }
     }
+    private var selectedCloudKitAvailable: Bool {
+        guard workspaceMode == .personal else { return false }
+        #if DEBUG
+        if faults?.selectedCloudKitBridge != nil { return true }
+        #endif
+        return NativeCloudKitBridge.configuredContainer != nil
+    }
+    private func beginSelectedCloudKitDownload(_ turn: TaskDownloadTurn, recordName: String) throws {
+        try requireTaskDownloadTurn(before: true)
+        guard taskDownloadTurn === turn, selectedCloudKitAvailable, cloudKitJobs == nil,
+              foregroundCleanupCancellation == nil, turn.cloudKitJobs == nil else { throw Self.taskDownloadFailure }
+        let bridge: NativeCloudKitBridge
+        #if DEBUG
+        if let factory = faults?.selectedCloudKitBridge { bridge = try factory(turn.jobs, recordName) }
+        else {
+            guard let container = NativeCloudKitBridge.configuredContainer else { throw Self.taskDownloadFailure }
+            bridge = try NativeCloudKitBridge(containerIdentifier: container, files: turn.jobs, selectedRecordName: recordName)
+        }
+        #else
+        guard let container = NativeCloudKitBridge.configuredContainer else { throw Self.taskDownloadFailure }
+        bridge = try NativeCloudKitBridge(containerIdentifier: container, files: turn.jobs, selectedRecordName: recordName)
+        #endif
+        let jobs = NativeCloudKitJobs(registry: localRequests, perform: { try await bridge.call($0) }, cancel: { await bridge.cancel() })
+        turn.cloudKitBridge = bridge; turn.cloudKitJobs = jobs; cloudKitJobs = jobs
+    }
     func downloadTaskAttachmentV5(requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         return try attachmentDraftOperation {
@@ -8114,8 +12107,14 @@ private final class Engine: @unchecked Sendable {
                   Self.ownedEqual(editor.snapshot.sessionID, request.session), editor.snapshot.generation == request.generation else { throw Self.taskDownloadFailure }
             let config = try storage.multiGet(Self.taskDownloadConfigKeys)
             guard config.count == Self.taskDownloadConfigKeys.count else { throw Self.taskDownloadFailure }
-            let cloud = Self.taskDownloadSelfHosted(config)
-            guard config[0].1 == "webdav" || cloud, let url = config[cloud ? 5 : 1].1, !url.isEmpty else { return try taskDownloadKnown("unavailable", request) }
+            let cloud = Self.taskDownloadSelfHosted(config), cloudKit = config[0].1 == "cloudkit", dropbox = Self.taskDownloadDropbox(config)
+            if dropbox { _ = try requireSelectedDropboxConfiguration() }
+            if cloudKit {
+                guard selectedCloudKitAvailable else { return try taskDownloadKnown("unavailable", request) }
+            } else {
+                guard dropbox || config[0].1 == "webdav" || cloud else { return try taskDownloadKnown("unavailable", request) }
+                if !dropbox { guard let url = config[cloud ? 5 : 1].1, !url.isEmpty else { return try taskDownloadKnown("unavailable", request) } }
+            }
             let legacyToken = cloud ? try storage.get("@mindwtr_cloud_token") : nil
             let cloudToken = cloud ? try taskDownloadCloudToken(cancellation) : nil
             let turn = TaskDownloadTurn(generation: attachmentGeneration, runtime: runtime, jobs: jobs, storage: storage,
@@ -8125,7 +12124,11 @@ private final class Engine: @unchecked Sendable {
             if cloud { turn.legacy.append(("@mindwtr_cloud_token", legacyToken)) }
             taskDownloadTurn = turn
             defer {
-                turn.preparing = false; taskDownloadTurn = nil
+                turn.preparing = false
+                turn.cloudKitJobs?.closeAndDrain()
+                turn.cloudKitBridge?.retireSelectedStage()
+                if cloudKitJobs === turn.cloudKitJobs { cloudKitJobs = nil }
+                taskDownloadTurn = nil
                 // Cleanup already proved this exact receipt; delivery no longer belongs to the revoked download.
                 if turn.unadoptedSourceRetired {
                     _ = try? invoke("attachmentDraftAcknowledged", arguments: ["webdav-task-availability", "source-retired"])
@@ -8139,8 +12142,12 @@ private final class Engine: @unchecked Sendable {
                 try requireTaskDownloadTurn(before: true); try cancellation.check()
                 let managed = try taskDownloadManagedURI(jobs)
                 var preflightInput: [String: Any] = ["version": 1, "taskID": editor.snapshot.taskID,
-                    "beforePayloadJSON": editor.snapshot.payloadJSON, "requestJSON": request.json,
-                    (cloud ? "cloudURL" : "webdavURL"): url, "managedDirectoryURI": managed]
+                    "beforePayloadJSON": editor.snapshot.payloadJSON, "requestJSON": request.json, "managedDirectoryURI": managed]
+                if dropbox {
+                    preflightInput["dropbox"] = true; preflightInput["cloudProvider"] = "dropbox"
+                    preflightInput["encryptionStateJSON"] = config[4].1.map { $0 as Any } ?? NSNull()
+                } else if cloudKit { preflightInput["cloudKit"] = true }
+                else { preflightInput[cloud ? "cloudURL" : "webdavURL"] = config[cloud ? 5 : 1].1! }
                 if cloud {
                     preflightInput["cloudProvider"] = config[6].1.map { $0 as Any } ?? NSNull()
                     preflightInput["encryptionStateJSON"] = config[4].1.map { $0 as Any } ?? NSNull()
@@ -8149,12 +12156,12 @@ private final class Engine: @unchecked Sendable {
                 let preflightRaw = try invoke("attachmentDraftAvailabilityPreflight", arguments: [preflightJSON], localCancellation: cancellation)
                 try requireTaskDownloadTurn(before: true)
                 guard let preflight = try NativeJSON.jsonObject(with: Data(preflightRaw.utf8)) as? [String: Any],
-                      Set(preflight.keys) == Set(["version", "requestId", "attachmentJSON", "initialURL", "targetURI"]),
+                      Set(preflight.keys) == Set(["version", "requestId", "attachmentJSON", cloudKit ? "recordName" : "initialURL", "targetURI"]),
                       Self.isInteger(preflight["version"]), (preflight["version"] as? NSNumber)?.intValue == 1,
                       (preflight["requestId"] as? String).map({ Self.ownedEqual($0, request.id) }) == true,
                       let attachmentJSON = preflight["attachmentJSON"] as? String, attachmentJSON.utf8.count <= 1_000_000,
                       let selected = try NativeJSON.jsonObject(with: Data(attachmentJSON.utf8)) as? [String: Any],
-                      let initialURL = preflight["initialURL"] as? String, !initialURL.isEmpty,
+                      dropbox ? preflight["initialURL"] is NSNull : (preflight[cloudKit ? "recordName" : "initialURL"] as? String)?.isEmpty == false,
                       let target = preflight["targetURI"] as? String, taskDownloadManagedPath(target, root: managed),
                       let original = selected["uri"] as? String else { throw Self.taskDownloadFailure }
                 var relocatedProof: NativeAttachmentFiles.BaselineAttachmentProof?
@@ -8170,7 +12177,13 @@ private final class Engine: @unchecked Sendable {
                     relocatedProof = proof
                     try requireTaskDownloadTurn(before: true); try cancellation.check()
                 }
-                turn.initialURL = initialURL; turn.originalURI = original; turn.targetURI = target
+                let remote = preflight[cloudKit ? "recordName" : "initialURL"] as? String ?? ""
+                turn.initialURL = cloudKit || dropbox ? "" : remote; turn.originalURI = original; turn.targetURI = target
+                if cloudKit { turn.cloudKitRecordName = remote }
+                if dropbox {
+                    guard let key = selected["cloudKey"] as? String else { throw Self.taskDownloadFailure }
+                    _ = try NativeDropboxSelectedAdmission.path(key); turn.dropboxCloudKey = key
+                }
                 try coordinator.preflightDownloadV5(request, selectedJSON: attachmentJSON, targetURI: target, cancellation: cancellation)
                 try coordinator.beginV5(request, cancellation: cancellation)
                 turn.record = try NativeAttachmentDraftStore(databaseURL: databaseURL).readVersioned()
@@ -8182,9 +12195,13 @@ private final class Engine: @unchecked Sendable {
                     replyRaw = try Self.ownedJSON(["version": 1, "requestId": request.id, "status": "available",
                         "attachmentJSON": Self.ownedJSON(resolved)])
                 } else {
-                    let rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[cloud ? 5 : 1].1.map { $0 as Any } ?? NSNull(),
+                    let rawConfig: String
+                    if cloudKit { rawConfig = try Self.ownedJSON(["backend": "cloudkit"]) }
+                    else if dropbox { rawConfig = try Self.ownedJSON(["backend": "cloud", "url": NSNull(), "provider": "dropbox", "allowInsecureHttp": NSNull(), "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()]) }
+                    else { rawConfig = try Self.ownedJSON(["backend": config[0].1.map { $0 as Any } ?? NSNull(), "url": config[cloud ? 5 : 1].1.map { $0 as Any } ?? NSNull(),
                         (cloud ? "provider" : "username"): config[cloud ? 6 : 2].1.map { $0 as Any } ?? NSNull(), "allowInsecureHttp": config[cloud ? 7 : 3].1.map { $0 as Any } ?? NSNull(),
-                        "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()])
+                        "encryptionStateJSON": config[4].1.map { $0 as Any } ?? NSNull()]) }
+                    if cloudKit { try beginSelectedCloudKitDownload(turn, recordName: remote) }
                     let input = try Self.ownedJSON(["version": 1, "taskID": editor.snapshot.taskID, "beforePayloadJSON": editor.snapshot.payloadJSON,
                         "requestJSON": request.json, "rawConfigJSON": rawConfig])
                     let block: @convention(block) (JSValue, JSValue) -> String = { [weak self, weak turn] metadata, bytes in
@@ -8199,7 +12216,13 @@ private final class Engine: @unchecked Sendable {
                     }
                     guard let callback = JSValue(object: block, in: runtime), runtime.exception == nil else { throw Self.taskDownloadFailure }
                     turn.preparing = true
-                    do { replyRaw = try invoke("iosTaskDraftPrepareAvailability", arguments: [input, callback], localCancellation: cancellation) }
+                    do {
+                        if dropbox {
+                            let capability = try selectedDropboxControl(runtime: runtime, requireOwner: { [unowned self] in try self.requireTaskDownloadTurn(before: true) })
+                            defer { capability.0.closeAndDrain() }
+                            replyRaw = try invoke("iosTaskDraftPrepareAvailability", arguments: [input, callback, capability.1], localCancellation: cancellation)
+                        } else { replyRaw = try invoke("iosTaskDraftPrepareAvailability", arguments: [input, callback], localCancellation: cancellation) }
+                    }
                     catch { turn.preparing = false; jobs.drain(); throw error }
                     turn.preparing = false; jobs.drain()
                 }
@@ -8251,6 +12274,11 @@ private final class Engine: @unchecked Sendable {
                     "resolvedAttachmentJSON": resolvedJSON])], localCancellation: cancellation)
                 try requireTaskDownloadTurn(before: true)
                 let result = try coordinator.acceptPreparedAvailabilityV5(request: request, preparedJSON: frozen, resource: resource, cancellation: cancellation)
+                if cloudKit {
+                    do { try requireTaskDownloadTurn()
+                        _ = try? invoke("attachmentDraftAcknowledged", arguments: ["cloudkit-task-availability", "confirmed"])
+                    } catch { }
+                }
                 // Optional scratch cleanup cannot revoke the durable checkpoint ACK.
                 try? finishTaskDownloadSource(turn, completed: true)
                 if cloud && status != "unrecoverable" {
@@ -8258,6 +12286,11 @@ private final class Engine: @unchecked Sendable {
                     // availability when captured authority is no longer current.
                     do { try requireTaskDownloadTurn()
                         _ = try? invoke("attachmentDraftAcknowledged", arguments: ["selfhosted-task-availability", "confirmed"])
+                    } catch { }
+                }
+                if dropbox && status != "unrecoverable" {
+                    do { try requireTaskDownloadTurn()
+                        _ = try? invoke("attachmentDraftAcknowledged", arguments: ["dropbox-task-availability", "confirmed"])
                     } catch { }
                 }
                 if turn.webdavObserved && status != "unrecoverable" {
@@ -8288,6 +12321,7 @@ private final class Engine: @unchecked Sendable {
                 return result
             } catch {
                 turn.preparing = false
+                turn.cloudKitJobs?.closeAndDrain()
                 jobs.drain(); httpJobs?.cancelAndDrain(); secretJobs?.drain(); calendarJobs?.drain(); cryptoJobs?.drain()
                 try? finishTaskDownloadSource(turn, completed: false)
                 throw error
@@ -11652,15 +15686,23 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
-        reminderCompletionOwned: Bool = false, pomodoroOwned: Bool = false) throws -> String {
+        reminderCompletionOwned: Bool = false, pomodoroOwned: Bool = false, watchOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard method != "gettingStartedOutcome" else { throw CoreHostRejection(message: "INVALID_INPUT: Getting Started outcome requires its journal") }
+        guard !["iosWatchIngestOutcome", "iosWatchPomodoroPrepare", "iosWatchAudioOutcome", "iosWatchAudioNeedsTranscript", "iosWatchOpenAIRuntime"].contains(method), !["iosWatchIngest", "iosWatchAudioIngest", "watchPomodoroSubmit"].contains(method) || watchOwned else { throw NativeWatchBatch.invalid }
         guard method != "iosAISummaryCheckpointSettled" else { throw CoreHostRejection(message: "INVALID_INPUT: AI summary checkpoint requires fixture authority") }
         guard method != "iosAISettingsProjection" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI projection requires its private read facade")
         }
+        guard !Self.voiceMethods.contains(method) else { throw NativeVoiceJSON.invalid }
+        guard !Self.aiTextConfigurationMethods.contains(method) || (["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) && aiTextConfigurationOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade") }
         guard !Self.aiRequestTimeoutMethods.contains(method) || (method == "iosAIRequestTimeout" && aiRequestTimeoutOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade") }
         guard !Self.aiReasoningEffortMethods.contains(method) || (method == "iosAIReasoningEffort" && aiReasoningEffortOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade") }
         guard !Self.aiGeminiThinkingBudgetMethods.contains(method) || (method == "iosAIGeminiThinkingBudget" && aiGeminiThinkingBudgetOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade") }
+        guard !["iosTaskAIOptions", "iosTaskAIRequest", "iosTaskAIWitness", "iosInboxAIWitness", "iosInboxAIRequest", "iosInboxAIApply", "iosReviewAIWitness", "iosReviewAIRequest", "iosReviewAIApply", "iosReviewAIOutcome", "iosReviewAIValidateApply"].contains(method), method != "reviewAISuggestionsWrite" || reviewAIApplyLease?.isCurrent == true else { throw NativeTaskAIJSON.invalid }
+        guard !["iosShareCapturePrepare", "iosShareCaptureCommit", "iosShareCaptureOutcome", "iosWidgetCompletionPrepare", "iosWidgetCompletionValidate", "iosWidgetCompletionCommit", "iosWidgetCompletionOutcome"].contains(method),
+              method != "shareCaptureSubmit" || shareCaptureLease?.isCurrent == true else { throw NativeShareError.unavailable }
+        guard method != "widgetCompletionSubmit" || widgetCompletionLease?.isCurrent == true else { throw NativeWidgetCompletionJSON.invalid }
         guard method != "iosAIProviderDeviceState" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI provider device metadata requires its private read facade")
         }
@@ -11717,7 +15759,7 @@ private final class Engine: @unchecked Sendable {
             return value
         }
         guard started, !closed, !recoveryActivationPending || pomodoroOwned && pending?.method == Self.pomodoroMethod else { throw HostFailure("Core host is not ready; retry startup") }
-        if method == "pomodoroTransitionWrite", pending == nil, try editorDrafts.read() != nil {
+        if ["pomodoroTransitionWrite", "watchPomodoroSubmit"].contains(method), pending == nil, try editorDrafts.read() != nil {
             throw CoreHostRejection(message: "NOT_READY: Pomodoro cannot replace a saved editor draft")
         }
         // Fresh source capture must precede the ordinary mutation turn: the
@@ -11732,6 +15774,13 @@ private final class Engine: @unchecked Sendable {
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else { freshPomodoroRequest = nil }
         let mutation = Self.mutations.contains(method)
+        if method == "gettingStarted" {
+            guard editorAttempt == nil, try editorDrafts.read() == nil, aiConfigurationTurn == nil, aiTextConfigurationTurn == nil,
+                  aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, taskAITurn == nil else {
+                throw CoreHostRejection(message: "NOT_READY: Getting Started requires the current ready Data page")
+            }
+            if pending == nil { try requireCalendarAdmission() }
+        }
         let ownsRetainedTurn = mutation ? try beginRetainedOrdinaryTurn(command: pomodoroOwned ? pending : nil, attempt: editorAttempt) : false
         if mutation { ordinaryMutationDepth += 1 }
         defer {
@@ -11750,8 +15799,26 @@ private final class Engine: @unchecked Sendable {
             if let completionRequest, Self.isReferenceTaskCompletionRequest(completionRequest), try editorDrafts.read() != nil {
                 throw CoreHostRejection(message: "INVALID_INPUT: Reference completion cannot replace a saved editor draft")
             }
+            if let completionRequest, Self.isRowTaskCompletionRequest(completionRequest), try editorDrafts.read() != nil {
+                throw CoreHostRejection(message: "INVALID_INPUT: Row completion cannot replace a saved editor draft")
+            }
             if let completionRequest, Self.isBoardTaskCompletionRequest(completionRequest), try editorDrafts.read() != nil {
                 throw CoreHostRejection(message: "INVALID_INPUT: Board completion cannot replace a saved editor draft")
+            }
+        }
+        if method == "rowTaskFocus" {
+            guard editorAttempt == nil, try editorDrafts.read() == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Row Focus cannot carry an editor draft")
+            }
+        }
+        if method == "rowTaskDates" {
+            guard editorAttempt == nil, try editorDrafts.read() == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Row dates cannot carry an editor draft")
+            }
+        }
+        if method == "rowTaskDestination" {
+            guard editorAttempt == nil, try editorDrafts.read() == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Row destination cannot carry an editor draft")
             }
         }
         if ["referenceTaskDestination", "referenceProjectNextAction"].contains(method) {
@@ -11771,28 +15838,28 @@ private final class Engine: @unchecked Sendable {
                 throw CoreHostRejection(message: "INVALID_INPUT: Reference bulk Move cannot carry an editor draft")
             }
         }
-        if method == "inboxTasksMoveWrite" {
+        if ["inboxTasksMoveWrite", "projectTasksMoveWrite"].contains(method) {
             guard editorAttempt == nil, try editorDrafts.read() == nil else {
                 throw CoreHostRejection(message: "INVALID_INPUT: Inbox bulk Move cannot carry an editor draft")
             }
         }
-        if method == "inboxTasksAddTagWrite" {
+        if ["inboxTasksAddTagWrite", "projectTasksAddTagWrite"].contains(method) {
             guard editorAttempt == nil, try editorDrafts.read() == nil else {
                 throw CoreHostRejection(message: "INVALID_INPUT: Inbox bulk Add tag cannot carry an editor draft")
             }
         }
-        if method == "inboxTasksRemoveTagWrite" {
+        if ["inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite"].contains(method) {
             guard editorAttempt == nil, try editorDrafts.read() == nil else {
                 throw CoreHostRejection(message: "INVALID_INPUT: Inbox bulk Remove tag cannot carry an editor draft")
             }
         }
 
-        if method == "inboxTasksOrganizeWrite" {
+        if ["inboxTasksOrganizeWrite", "projectTasksOrganizeWrite"].contains(method) {
             guard editorAttempt == nil, try editorDrafts.read() == nil else {
                 throw CoreHostRejection(message: "INVALID_INPUT: Inbox bulk Organize cannot carry an editor draft")
             }
         }
-        if method == "inboxOrganizeDestinationCreateWrite" {
+        if ["inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite"].contains(method) {
             guard editorAttempt == nil, try editorDrafts.read() == nil else {
                 throw CoreHostRejection(message: "INVALID_INPUT: Inbox Organize destination creation cannot carry an editor draft")
             }
@@ -11807,21 +15874,36 @@ private final class Engine: @unchecked Sendable {
                 throw CoreHostRejection(message: "INVALID_INPUT: Reference bulk Remove tag cannot carry an editor draft")
             }
         }
-        if method == "referenceTaskBackdate" {
-            let savedEditor = try editorDrafts.read()
-            guard editorAttempt == nil, savedEditor == nil else {
-                throw CoreHostRejection(message: "INVALID_INPUT: Reference completion time cannot carry an editor draft")
+        if ["taskChecklistMove", "taskChecklistMoveUndo"].contains(method) {
+            guard editorAttempt == nil, try editorDrafts.read() == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Add to checklist cannot carry an editor draft")
             }
         }
-        if editorAttempt == nil, ["saveDraft", "reviewTaskWrite", "checklistSave", "taskDelete", "taskPromote", "archivedTaskRestoreWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "doneTaskStatusWrite", "doneTaskCompletedAtWrite", "archiveTaskCompletedAtWrite", "referenceTaskBackdate", "referenceTaskDestination"].contains(method), try editorDrafts.read() != nil {
-            if ["doneTaskStatusWrite", "doneTaskCompletedAtWrite", "archiveTaskCompletedAtWrite", "referenceTaskBackdate", "referenceTaskDestination"].contains(method) {
+        if let prefix = Self.conversionPrefix(method), method == prefix + "Write" {
+            guard editorAttempt == nil, try editorDrafts.read() == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Conversion cannot carry an editor draft")
+            }
+        }
+        if ["referenceTaskBackdate", "rowTaskBackdate"].contains(method) {
+            let savedEditor = try editorDrafts.read()
+            guard editorAttempt == nil, savedEditor == nil else {
+                throw CoreHostRejection(message: method == "rowTaskBackdate" ? "INVALID_INPUT: Row completion time cannot carry an editor draft" : "INVALID_INPUT: Reference completion time cannot carry an editor draft")
+            }
+        }
+        if ["rowQuickStatusWrite", "inlineChecklistWrite"].contains(method) {
+            guard editorAttempt == nil, try editorDrafts.read() == nil else {
+                throw CoreHostRejection(message: "INVALID_INPUT: Row change cannot carry an editor draft")
+            }
+        }
+        if editorAttempt == nil, ["saveDraft", "reviewTaskWrite", "checklistSave", "taskDelete", "taskPromote", "archivedTaskRestoreWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksDeleteUndoWrite", "doneTaskStatusWrite", "doneTaskCompletedAtWrite", "archiveTaskCompletedAtWrite", "referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination"].contains(method), try editorDrafts.read() != nil {
+            if ["doneTaskStatusWrite", "doneTaskCompletedAtWrite", "archiveTaskCompletedAtWrite", "referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination"].contains(method) {
                 let action = method == "doneTaskStatusWrite" ? "Done status" : "Done completion time"
                 throw CoreHostRejection(message: "INVALID_INPUT: \(action) cannot replace a saved editor draft")
             }
             if method == "reviewTaskWrite" {
                 throw CoreHostRejection(message: "INVALID_INPUT: Review row action cannot replace a saved editor draft")
             }
-            if ["archivedTaskRestoreWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite"].contains(method) {
+            if ["archivedTaskRestoreWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksDeleteUndoWrite"].contains(method) {
                 throw CoreHostRejection(message: "INVALID_INPUT: Archived Task restore cannot replace a saved editor draft")
             }
             throw HostFailure("Editor draft must use its exact Save attempt")
@@ -11831,17 +15913,20 @@ private final class Engine: @unchecked Sendable {
             if method == "reviewTaskWrite" {
                 args = try reviewTaskRequestArguments(argumentsJSON)
             } else if ["projectLifecycleWrite", "projectLifecycleRetryOutcome", "projectLifecycleReceiptOutcome"].contains(method) {
-                args = try projectLifecycleRequestArguments(argumentsJSON)
+                args = try projectLifecycleRequestArguments(argumentsJSON, allowReviewScope: method == "projectLifecycleWrite")
             } else {
                 args = try arguments(method, argumentsJSON)
             }
         }
         catch {
-            if method == "captureLinesSubmit", pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
-            if (Self.historyTaskWritePrefix(method) != nil || ["referenceTasksRemoveTagWrite", "referenceTasksRemoveTagRetryOutcome", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "inboxTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "referenceTasksAddTagRetryOutcome", "inboxTasksAddTagRetryOutcome", "inboxTasksRemoveTagRetryOutcome", "inboxTasksOrganizeRetryOutcome", "inboxOrganizeDestinationCreateRetryOutcome", "referenceTasksMoveWrite", "referenceTasksMoveRetryOutcome", "referenceTasksMoveNotice", "inboxTasksMoveWrite", "inboxTasksMoveRetryOutcome", "inboxTasksMoveNotice"].contains(method)), pending == nil {
+            if (method == "captureLinesSubmit" || Self.checklistMovePrefix(method) != nil), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if (Self.conversionPrefix(method) != nil || ["taskPromoteOptions", "projectToSectionOptions"].contains(method)), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
-            if ["archivedTaskRestoreWrite", "archivedTaskRestoreRetryOutcome", "archivedTasksRestoreWrite", "archivedTasksRestoreRetryOutcome", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "trashItemsRestoreRetryOutcome", "trashItemsPurgeRetryOutcome", "archivedTasksDeleteWrite", "archivedTasksDeleteRetryOutcome", "archivedTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome", "reviewTaskWrite", "taskCancellationUndo", "taskCompletion", "taskCompletionUndo", "taskCompletionRetryOutcome", "taskCompletionUndoRetryOutcome", "inboxUndo", "inboxUndoRetryOutcome", "taskDelete", "taskDeleteReceiptOutcome", "taskDeleteUndo", "taskDeleteUndoReceiptOutcome", "taskPromote", "trashTaskRestoreWrite", "trashTaskRestoreRetryOutcome", "trashProjectRestoreWrite", "trashProjectRestoreRetryOutcome", "projectDeleteWrite", "projectDeleteRetryOutcome", "projectDeleteReceiptOutcome", "projectDeleteUndo", "projectDeleteUndoRetryOutcome", "projectDuplicateWrite", "projectDuplicateRetryOutcome", "projectLifecycleWrite", "projectLifecycleRetryOutcome"].contains(method), pending == nil {
+            if (Self.historyTaskWritePrefix(method) != nil || ["referenceTasksRemoveTagWrite", "referenceTasksRemoveTagRetryOutcome", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "projectTasksAddTagWrite", "inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "projectTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite", "referenceTasksAddTagRetryOutcome", "inboxTasksAddTagRetryOutcome", "projectTasksAddTagRetryOutcome", "inboxTasksRemoveTagRetryOutcome", "projectTasksRemoveTagRetryOutcome", "inboxTasksOrganizeRetryOutcome", "projectTasksOrganizeRetryOutcome", "inboxOrganizeDestinationCreateRetryOutcome", "projectOrganizeDestinationCreateRetryOutcome", "referenceTasksMoveWrite", "referenceTasksMoveRetryOutcome", "referenceTasksMoveNotice", "inboxTasksMoveWrite", "projectTasksMoveWrite", "inboxTasksMoveRetryOutcome", "projectTasksMoveRetryOutcome", "inboxTasksMoveNotice", "projectTasksMoveNotice"].contains(method)), pending == nil {
+                throw CoreHostRejection(message: error.localizedDescription)
+            }
+            if ["archivedTaskRestoreWrite", "archivedTaskRestoreRetryOutcome", "archivedTasksRestoreWrite", "archivedTasksRestoreRetryOutcome", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "trashItemsRestoreRetryOutcome", "trashItemsPurgeRetryOutcome", "archivedTasksDeleteWrite", "archivedTasksDeleteRetryOutcome", "archivedTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome", "projectTasksDeleteRetryOutcome", "projectTasksDeleteUndoRetryOutcome", "reviewTaskWrite", "taskCancellationUndo", "taskCompletion", "taskCompletionUndo", "taskCompletionRetryOutcome", "taskCompletionUndoRetryOutcome", "inboxUndo", "inboxUndoRetryOutcome", "taskDelete", "taskDeleteReceiptOutcome", "taskDeleteUndo", "taskDeleteUndoReceiptOutcome", "taskPromote", "trashTaskRestoreWrite", "trashTaskRestoreRetryOutcome", "trashProjectRestoreWrite", "trashProjectRestoreRetryOutcome", "projectDeleteWrite", "projectDeleteRetryOutcome", "projectDeleteReceiptOutcome", "projectDeleteUndo", "projectDeleteUndoRetryOutcome", "projectDuplicateWrite", "projectDuplicateRetryOutcome", "projectLifecycleWrite", "projectLifecycleRetryOutcome"].contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
             if ["unassignedAreaColorOptions", "unassignedAreaColorWrite", "unassignedAreaColorRetryOutcome"].contains(method), pending == nil {
@@ -11850,26 +15935,26 @@ private final class Engine: @unchecked Sendable {
             if ["somedaySectionOrderOptions", "somedaySectionOrderWrite", "somedaySectionOrderRetryOutcome"].contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
-            if ["somedaySectionMoveOptions", "somedaySectionMoveWrite", "somedaySectionMoveUndo",
-                "somedaySectionMoveRetryOutcome", "somedaySectionMoveUndoRetryOutcome"].contains(method), pending == nil {
+            if Self.somedayMovePublicMethods.contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
-            if ["gtdArchiveOptions", "gtdTaskEditorFieldOptions", "taskOpenTab"].contains(method), pending == nil {
+            if ["gtdArchiveOptions", "gtdTaskEditorFieldOptions", "taskOpenTab", "archiveRetentionOptions", "archiveRetentionReview", "captureCopilotEdit", "captureCopilotSubmit"].contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
             // Mind Sweep has no journal or write before argument validation.
             // Its UI may release an oversized draft only on a definite refusal.
             // With an older command still owed, keep every error uncertain.
-            if ["mindSweepAdd", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if ["mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
         if pomodoroOwned {
             if method == "pomodoroTransitionRetryOutcome", let raw = args.first as? String { return try pomodoroOutcome(requestJSON: raw) }
             if method == "pomodoroSessionReadHost", pending == nil || pending?.method == Self.pomodoroMethod { return try invoke("pomodoroSessionRead", arguments: []) }
-            if method == "pomodoroTransitionWrite", let command = pending {
+            if ["pomodoroTransitionWrite", "watchPomodoroSubmit"].contains(method), let command = pending {
                 guard command.method == Self.pomodoroMethod, let raw = args.first as? String,
-                      let planJSON = try pomodoroJournalArguments(command).first as? String,
-                      try Self.pomodoroIntentMatches(raw, planJSON: planJSON) else { throw Self.pomodoroFailure }
+                      let planJSON = try pomodoroJournalArguments(command).first as? String else { throw Self.pomodoroFailure }
+                if method == "watchPomodoroSubmit" { try Self.watchPomodoroPlanMatches(raw, planJSON: planJSON) }
+                else if try !Self.pomodoroIntentMatches(raw, planJSON: planJSON) { throw Self.pomodoroFailure }
                 if case .rejected(let message) = command.terminal { return try finish(command, with: .rejected(message)).value() }
                 try allowRetainedOrdinaryPreparation()
                 try persist(command)
@@ -11907,9 +15992,18 @@ private final class Engine: @unchecked Sendable {
                     return result
                 } catch { throw CoreHostRejection(message: error.localizedDescription) }
             }
+            if let prefix = Self.conversionPrefix(method), method == prefix + "RetryOutcome" {
+                throw CoreHostRejection(message: "STALE_REVISION: Conversion has no pending journal")
+            }
+            if let prefix = Self.checklistMovePrefix(method) {
+                if method == prefix + "RetryOutcome" { return try checklistMoveReceiptOutcome(prefix: prefix, arguments: args) }
+                if method == "taskChecklistMoveOptions" { return try checklistMoveOptions(arguments: args) }
+            }
             if method == "taskDeleteReceiptOutcome" {
                 return try taskDeleteReceiptOutcome(arguments: args)
             }
+            if method == "taskRowSwipeActions" { return try taskRowSwipeActions(arguments: args) }
+            if method == "rowTaskDestinationOptions" { return try rowTaskDestinationOptions(arguments: args) }
             if let prefix = Self.historyTaskWritePrefix(method), method == prefix + "RetryOutcome" {
                 return try historyTaskReceiptOutcome(prefix: prefix, arguments: args)
             }
@@ -11922,21 +16016,21 @@ private final class Engine: @unchecked Sendable {
             if method == "referenceTasksMoveRetryOutcome" {
                 return try referenceTasksMoveReceiptOutcome(arguments: args)
             }
-            if method == "inboxTasksMoveRetryOutcome" {
-                return try inboxTasksMoveReceiptOutcome(arguments: args)
+            if ["inboxTasksMoveRetryOutcome", "projectTasksMoveRetryOutcome"].contains(method) {
+                return try taskListMoveReceiptOutcome(arguments: args, source: method == "projectTasksMoveRetryOutcome" ? "project" : "inbox")
             }
-            if method == "inboxTasksAddTagRetryOutcome" {
-                return try inboxTasksAddTagReceiptOutcome(arguments: args)
+            if ["inboxTasksAddTagRetryOutcome", "projectTasksAddTagRetryOutcome"].contains(method) {
+                return try taskListAddTagReceiptOutcome(arguments: args, source: method == "projectTasksAddTagRetryOutcome" ? "project" : "inbox")
             }
-            if method == "inboxTasksRemoveTagRetryOutcome" {
-                return try inboxTasksRemoveTagReceiptOutcome(arguments: args)
+            if ["inboxTasksRemoveTagRetryOutcome", "projectTasksRemoveTagRetryOutcome"].contains(method) {
+                return try taskListRemoveTagReceiptOutcome(arguments: args, source: method == "projectTasksRemoveTagRetryOutcome" ? "project" : "inbox")
             }
 
-            if method == "inboxTasksOrganizeRetryOutcome" {
-                return try inboxTasksOrganizeReceiptOutcome(arguments: args)
+            if ["inboxTasksOrganizeRetryOutcome", "projectTasksOrganizeRetryOutcome"].contains(method) {
+                return try taskListOrganizeReceiptOutcome(arguments: args, source: method == "projectTasksOrganizeRetryOutcome" ? "project" : "inbox")
             }
-            if method == "inboxOrganizeDestinationCreateRetryOutcome" {
-                return try inboxOrganizeDestinationCreateReceiptOutcome(arguments: args)
+            if ["inboxOrganizeDestinationCreateRetryOutcome", "projectOrganizeDestinationCreateRetryOutcome"].contains(method) {
+                return try taskListOrganizeDestinationCreateReceiptOutcome(arguments: args, source: method == "projectOrganizeDestinationCreateRetryOutcome" ? "project" : "inbox")
             }
             if method == "referenceTasksAddTagRetryOutcome" {
                 return try referenceTasksAddTagReceiptOutcome(arguments: args)
@@ -11947,8 +16041,8 @@ private final class Engine: @unchecked Sendable {
             if let prefix = Self.archivedRestorePrefix(method), method == prefix + "RetryOutcome" {
                 return try archivedRestoreReceiptOutcome(prefix: prefix, arguments: args)
             }
-            if let prefix = Self.archivedTasksDeletePrefix(method), method == prefix + "RetryOutcome" {
-                return try archivedTasksDeleteReceiptOutcome(prefix: prefix, arguments: args)
+            if let prefix = Self.taskListDeletePrefix(method), method == prefix + "RetryOutcome" {
+                return try taskListDeleteReceiptOutcome(prefix: prefix, arguments: args)
             }
             if ["taskCompletionRetryOutcome", "taskCompletionUndoRetryOutcome"].contains(method) {
                 return try taskCompletionReceiptOutcome(method: method, arguments: args)
@@ -11976,7 +16070,8 @@ private final class Engine: @unchecked Sendable {
             if method == "projectLifecycleReceiptOutcome" {
                 return try projectLifecycleReceiptOutcome(arguments: args)
             }
-            if ["somedaySectionMoveRetryOutcome", "somedaySectionMoveUndoRetryOutcome"].contains(method) {
+            if ["somedaySectionMoveRetryOutcome", "somedaySectionMoveUndoRetryOutcome",
+                "somedaySectionBulkMoveRetryOutcome", "somedaySectionBulkMoveUndoRetryOutcome"].contains(method) {
                 let envelope = try confirmedSomedayMoveEnvelope(for: method, publicArguments: args)
                 do {
                     let value = try invoke(method, arguments: [envelope])
@@ -12311,6 +16406,24 @@ private final class Engine: @unchecked Sendable {
                           return true
                       }) else { throw HostFailure("Malformed Capture parsing options") }
             }
+            if method == "gtdCaptureAudioOptions" {
+                guard value.utf8.count <= 65_536,
+                      let options = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      Set(options.keys) == Set(["capture", "expected"]),
+                      let capture = options["capture"] as? [String: Any],
+                      Set(capture.keys) == Set(["title", "description", "saveAudio"]),
+                      capture["title"] is String, capture["description"] is String,
+                      let expected = options["expected"] as? [String: Any], Set(expected.keys) == Set(["saveAudioAttachments"]),
+                      Self.validGtdWorkflowExpected(expected["saveAudioAttachments"], type: "saveAudioAttachments"),
+                      let row = capture["saveAudio"] as? [String: Any],
+                      Set(row.keys) == Set(["label", "description", "value", "edit"]),
+                      row["label"] is String, row["description"] is String || row["description"] is NSNull,
+                      Self.isBoolean(row["value"]), Self.validGtdWorkflowEdit(row["edit"]),
+                      let edit = row["edit"] as? [String: Any], edit["type"] as? String == "saveAudioAttachments",
+                      Self.equalJSON(edit["value"], !(row["value"] as? Bool ?? false)) else {
+                    throw HostFailure("Malformed Capture audio options")
+                }
+            }
             if method == "gtdPomodoroOptions" {
                 guard value.utf8.count <= 65_536,
                       let options = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
@@ -12510,7 +16623,7 @@ private final class Engine: @unchecked Sendable {
                let projectID = request["projectId"] as? String {
                 try validateProjectAttachmentEditOptions(value, projectID: projectID)
             }
-            if method == "inboxStart" {
+            if ["inboxStart", "inboxStartDetailed"].contains(method) {
 #if DEBUG
                 faults?.commandDiagnostic?("processInboxRead")
 #endif
@@ -12632,6 +16745,10 @@ private final class Engine: @unchecked Sendable {
                 throw CoreHostRejection(message: "STALE_REVISION: Notification edit is no longer current")
             }
         }
+        if ["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) {
+            guard aiTextConfigurationOwnerAccess else { throw HostFailure("AI text configuration owner is unavailable") }
+            try requireAITextConfigurationTurn()
+        }
         if method == "iosAIRequestTimeout" {
             guard aiRequestTimeoutOwnerAccess else { throw HostFailure("AI timeout owner is unavailable") }
             try requireAIRequestTimeoutTurn()
@@ -12647,6 +16764,19 @@ private final class Engine: @unchecked Sendable {
         if command.method == "backupDocumentCommit" {
             try requireBackupDocumentMutationAllowed(command, arguments: backupDocumentArguments(command))
         }
+        if method == "reviewAISuggestionsWrite" {
+            guard reviewAIApplyLease?.isCurrent == true else { throw CoreHostRejection(message: "STALE_REVISION: Review AI page changed") }
+        }
+        if method == "widgetCompletionSubmit" {
+            guard widgetCompletionLease?.isCurrent == true else { throw CoreHostRejection(message: "STALE_REVISION: Widget completion changed") }
+        }
+        if method == "shareCaptureSubmit" {
+            guard shareCaptureLease?.isCurrent == true else { throw CoreHostRejection(message: "STALE_REVISION: Share capture changed") }
+        }
+        if method == "iosWatchAudioIngest" {
+            guard let check = watchAudioCommitCheck else { throw NativeWatchAudio.invalid }
+            try check()
+        }
         pending = command
         try persist(command)
         if command.method == Self.pomodoroMethod {
@@ -12659,7 +16789,8 @@ private final class Engine: @unchecked Sendable {
             else if command.method == "captureLinesCommit" { replay = try captureLinesArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            if command.method == "iosAIRequestTimeoutCommit" { terminal = .success(try invokeAIRequestTimeoutCommit(command)) }
+            if Self.aiTextConfigurationCommitMethods.contains(command.method) { terminal = .success(try invokeAITextConfigurationCommit(command)) }
+            else if command.method == "iosAIRequestTimeoutCommit" { terminal = .success(try invokeAIRequestTimeoutCommit(command)) }
             else if command.method == "iosAIReasoningEffortCommit" { terminal = .success(try invokeAIReasoningEffortCommit(command)) }
             else if command.method == "iosAIGeminiThinkingBudgetCommit" { terminal = .success(try invokeAIGeminiThinkingBudgetCommit(command)) }
             else if CalendarSubscriptionOperation(commitMethod: command.method) != nil { terminal = .success(try invokeCalendarSubscriptionSettingCommit(command)) }
@@ -12687,8 +16818,17 @@ private final class Engine: @unchecked Sendable {
         guard !commandPreparationStackLogged else { return }
         commandPreparationStackLogged = true
         // Best effort, once per Engine; this marks preparation, never a saved command.
-        _ = try? invoke("logLine", arguments: ["Native iOS command preparation frame returned",
-            "{\"releaseCheck\":\"v1.3.5/ios-native-command-stack\",\"outcome\":\"prepared\"}"])
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-native-command-stack", "outcome": "prepared"]) {
+            _ = try? invoke("logLine", arguments: ["Native iOS command preparation frame returned", context])
+        }
+    }
+    func recordCloseCancellationOrder() {
+        guard started, !closed, context != nil else { return }
+        // The primitive cancellation and AI/voice drains reached this queued
+        // finalization; the runtime and remaining native drains still follow.
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-close-cancellation-order", "operation": "close", "outcome": "drained"]) {
+            _ = try? invoke("logLine", arguments: ["Native iOS close cancellation reached finalization", context])
+        }
     }
 
     // Keep preparation locals off the stack while commit acknowledgment enters JavaScriptCore.
@@ -12697,11 +16837,45 @@ private final class Engine: @unchecked Sendable {
         case command(PendingCommand)
     }
 
+    // Each bounded group returns before the next starts, so preparation frames do not accumulate.
     @inline(never)
     private func prepareCallCommand(_ method: String, argumentsJSON: String, args: [Any],
         editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult {
+        if method == "widgetCompletionSubmit" { return try prepareWidgetCompletionCommand(args) }
+        if method == "shareCaptureSubmit" { return try prepareShareCaptureCommand(args) }
+        if let result = try prepareFocusAndPomodoroCommand(method, argumentsJSON: argumentsJSON, args: args,
+                editorAttempt: editorAttempt, freshPomodoroRequest: freshPomodoroRequest) { return result }
+        if let result = try prepareProjectPropertyCommand(method, argumentsJSON: argumentsJSON, args: args,
+                editorAttempt: editorAttempt, freshPomodoroRequest: freshPomodoroRequest) { return result }
+        if let result = try prepareSettingsCommand(method, argumentsJSON: argumentsJSON, args: args,
+                editorAttempt: editorAttempt, freshPomodoroRequest: freshPomodoroRequest) { return result }
+        if let result = try prepareTaxonomyAndProjectStructureCommand(method, argumentsJSON: argumentsJSON, args: args,
+                editorAttempt: editorAttempt, freshPomodoroRequest: freshPomodoroRequest) { return result }
+        if let result = try prepareTaskLifecycleCommand(method, argumentsJSON: argumentsJSON, args: args,
+                editorAttempt: editorAttempt, freshPomodoroRequest: freshPomodoroRequest) { return result }
+        if let result = try prepareCaptureAndCalendarCommand(method, argumentsJSON: argumentsJSON, args: args,
+                editorAttempt: editorAttempt, freshPomodoroRequest: freshPomodoroRequest) { return result }
+        let command = PendingCommand(version: 2, method: method == "reviewAISuggestionsWrite" ? "iosReviewAIApply" : method, argumentsJSON: argumentsJSON)
+        if retainedOrdinaryTurn != nil { _ = try ordinaryJournalArguments(command); try allowRetainedOrdinaryPreparation() }
+        return .command(command)
+    }
+
+    @inline(never)
+    private func prepareFocusAndPomodoroCommand(_ method: String, argumentsJSON: String, args: [Any],
+        editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult? {
         let command: PendingCommand
-        if method == "pomodoroTransitionWrite" {
+        if method == "watchPomodoroSubmit" {
+            try allowRetainedOrdinaryPreparation()
+            do {
+                guard let source = args.first as? String else { throw NativeWatchPomodoro.invalid }
+                let response = try Self.pomodoroObject(invoke("iosWatchPomodoroPrepare", arguments: [source]), maximum: Self.pomodoroJournalLimit)
+                guard Set(response.keys) == ["kind", "planJSON"], response["kind"] as? String == "prepared",
+                      let planJSON = response["planJSON"] as? String else { throw Self.pomodoroFailure }
+                try Self.watchPomodoroPlanMatches(source, planJSON: planJSON)
+                command = PendingCommand(version: 2, method: Self.pomodoroMethod, argumentsJSON: try Self.ownedJSON([planJSON]))
+                _ = try invoke("pomodoroTransitionValidate", arguments: pomodoroJournalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "pomodoroTransitionWrite" {
             try allowRetainedOrdinaryPreparation()
             do {
                 guard let request = freshPomodoroRequest else { throw Self.pomodoroFailure }
@@ -12717,7 +16891,7 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: Self.pomodoroMethod, argumentsJSON: try Self.ownedJSON([planJSON]))
                 _ = try invoke("pomodoroTransitionValidate", arguments: pomodoroJournalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if ["somedaySectionMoveWrite", "somedaySectionMoveUndo"].contains(method) {
+        } else if ["somedaySectionMoveWrite", "somedaySectionMoveUndo", "somedaySectionBulkMoveWrite", "somedaySectionBulkMoveUndo"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
                 switch try prepareSomedaySectionMove(method: method, arguments: args) {
@@ -12904,7 +17078,15 @@ private final class Engine: @unchecked Sendable {
                 _ = try journalArguments(command)
                 _ = try invoke("savedSearchValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "projectRenameWrite" {
+        } else { return nil }
+        return .command(command)
+    }
+
+    @inline(never)
+    private func prepareProjectPropertyCommand(_ method: String, argumentsJSON: String, args: [Any],
+        editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult? {
+        let command: PendingCommand
+        if method == "projectRenameWrite" {
             try allowRetainedOrdinaryPreparation()
             do {
                 let value = try invoke("projectRenamePrepare", arguments: args)
@@ -13315,7 +17497,15 @@ private final class Engine: @unchecked Sendable {
                 _ = try journalArguments(command)
                 _ = try invoke("projectAreaValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "appLock" {
+        } else { return nil }
+        return .command(command)
+    }
+
+    @inline(never)
+    private func prepareSettingsCommand(_ method: String, argumentsJSON: String, args: [Any],
+        editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult? {
+        let command: PendingCommand
+        if method == "appLock" {
             do {
                 let value = try invoke("appLockPrepare", arguments: args)
                 guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
@@ -13405,6 +17595,52 @@ private final class Engine: @unchecked Sendable {
                 guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared Notification setting write journal is too large") }
                 command = PendingCommand(version: 2, method: "notificationSettingCommit", argumentsJSON: encoded)
                 _ = try invoke("notificationSettingValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if ["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) {
+            do {
+                let version = method == "iosAITextConfigurationV2" ? 2 : 1
+                let value = try invokeAITextConfigurationRead(Self.aiTextConfigurationMethod("Prepare", version: version), arguments: args)
+                guard aiTextConfigurationTurn?.cancellation.isCancelled == false else {
+                    throw CoreHostRejection(message: "STALE_REVISION: AI text configuration edit is no longer current")
+                }
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      let kind = response["kind"] as? String,
+                      let original = args.first as? String,
+                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
+                    throw HostFailure("Malformed AI text configuration write preparation")
+                }
+                if kind == "consent" {
+                    if version == 2 { _ = try NativeAITextConfigurationOutcomeV2.validated(value, consentRecorded: aiTextConfigurationConsentRecorded) }
+                    else { _ = try NativeAITextConfigurationOutcome.validated(value, consentRecorded: aiTextConfigurationConsentRecorded) }
+                    return .result(value)
+                }
+                if kind == "noop" {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
+                        throw HostFailure("Malformed no-write AI text configuration result")
+                    }
+                    try validateAITextConfigurationResult(Self.ownedJSON(result), request: submitted, changed: false)
+                    return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
+                }
+                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"] as? [String: Any], Self.equalJSON(request, submitted) else {
+                    throw HostFailure("Malformed prepared AI text configuration write")
+                }
+                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                guard commit.utf8.count <= 65_536 else { throw HostFailure("INVALID_INPUT: Prepared AI text configuration write is too large") }
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
+                guard encoded.utf8.count <= 786_432 else { throw HostFailure("INVALID_INPUT: Prepared AI text configuration write journal is too large") }
+                if submitted["consent"] as? Bool == true {
+                    guard let target = aiTextConfigurationTurn?.consentTarget else { throw Self.deviceStorageInvalid }
+                    do { guard let deviceStorage else { throw Self.deviceStorageUnavailable }; try deviceStorage.recordAIConsent(provider: target); aiTextConfigurationConsentRecorded = true; aiConfigurationConsentRetry = nil }
+                    catch {
+                        aiTextConfigurationConsentRecorded = false
+                        if let owner = aiConfigurationSession { aiConfigurationConsentRetry = (owner, target) }
+                        _ = try? invoke("iosAITextConfigurationAcknowledged", arguments: ["consent-record-failed", target.rawValue, "consent"])
+                    }
+                }
+                command = PendingCommand(version: 2, method: Self.aiTextConfigurationMethod("Commit", version: version), argumentsJSON: encoded)
+                _ = try invoke(Self.aiTextConfigurationMethod("Validate", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "iosAIRequestTimeout" {
             do {
@@ -13544,7 +17780,15 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "deviceCalendarSettingCommit", argumentsJSON: try Self.ownedJSON([commit]))
                 _ = try invoke("deviceCalendarSettingValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "generalPreference" {
+        } else { return nil }
+        return .command(command)
+    }
+
+    @inline(never)
+    private func prepareTaxonomyAndProjectStructureCommand(_ method: String, argumentsJSON: String, args: [Any],
+        editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult? {
+        let command: PendingCommand
+        if method == "generalPreference" {
             do {
                 let value = try invoke("generalPreferencePrepare", arguments: args)
                 guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
@@ -13967,7 +18211,15 @@ private final class Engine: @unchecked Sendable {
                 _ = try journalArguments(command)
                 _ = try invoke("projectCreateValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if ["taskCompletion", "taskCompletionUndo"].contains(method) {
+        } else { return nil }
+        return .command(command)
+    }
+
+    @inline(never)
+    private func prepareTaskLifecycleCommand(_ method: String, argumentsJSON: String, args: [Any],
+        editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult? {
+        let command: PendingCommand
+        if ["taskCompletion", "taskCompletionUndo"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do { command = try prepareTaskCompletionCommand(method, args: args) }
             catch { throw CoreHostRejection(message: error.localizedDescription) }
@@ -13975,43 +18227,43 @@ private final class Engine: @unchecked Sendable {
             try allowRetainedOrdinaryPreparation()
             do { command = try prepareInboxUndoCommand(arguments: args) }
             catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "inboxTasksMoveWrite" {
+        } else if ["inboxTasksMoveWrite", "projectTasksMoveWrite"].contains(method) {
             try allowRetainedOrdinaryPreparation()
-            do { command = try prepareInboxTasksMoveCommand(arguments: args) }
+            do { command = try prepareTaskListMoveCommand(arguments: args, source: method == "projectTasksMoveWrite" ? "project" : "inbox") }
             catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "referenceTasksMoveWrite" {
             try allowRetainedOrdinaryPreparation()
             do { command = try prepareReferenceTasksMoveCommand(arguments: args) }
             catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "inboxTasksAddTagWrite" {
+        } else if ["inboxTasksAddTagWrite", "projectTasksAddTagWrite"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
-                switch try prepareInboxTasksAddTagCommand(arguments: args) {
+                switch try prepareTaskListAddTagCommand(arguments: args, source: method == "projectTasksAddTagWrite" ? "project" : "inbox") {
                 case .noop(let result): return .result(result)
                 case .prepared(let prepared): command = prepared
                 }
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "inboxTasksRemoveTagWrite" {
+        } else if ["inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
-                switch try prepareInboxTasksRemoveTagCommand(arguments: args) {
+                switch try prepareTaskListRemoveTagCommand(arguments: args, source: method == "projectTasksRemoveTagWrite" ? "project" : "inbox") {
                 case .noop(let result): return .result(result)
                 case .prepared(let prepared): command = prepared
                 }
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
 
-        } else if method == "inboxTasksOrganizeWrite" {
+        } else if ["inboxTasksOrganizeWrite", "projectTasksOrganizeWrite"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
-                switch try prepareInboxTasksOrganizeCommand(arguments: args) {
+                switch try prepareTaskListOrganizeCommand(arguments: args, source: method == "projectTasksOrganizeWrite" ? "project" : "inbox") {
                 case .noop(let result): return .result(result)
                 case .prepared(let prepared): command = prepared
                 }
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "inboxOrganizeDestinationCreateWrite" {
+        } else if ["inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
-                switch try prepareInboxOrganizeDestinationCreateCommand(arguments: args) {
+                switch try prepareTaskListOrganizeDestinationCreateCommand(arguments: args, source: method == "projectOrganizeDestinationCreateWrite" ? "project" : "inbox") {
                 case .noop(let result): return .result(result)
                 case .prepared(let prepared): command = prepared
                 }
@@ -14041,10 +18293,10 @@ private final class Engine: @unchecked Sendable {
                 }
             }
             catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if let prefix = Self.historyTaskWritePrefix(method), method == prefix + "Write" || ["referenceTaskBackdate", "referenceTaskDestination", "referenceProjectNextAction"].contains(method) {
+        } else if let prefix = Self.historyTaskWritePrefix(method), method == prefix + "Write" || ["referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination", "rowTaskDestination", "rowTaskDates", "rowTaskFocus", "referenceProjectNextAction"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
-                let action = prefix == "referenceProjectNextAction" ? "Reference project next action" : prefix == "referenceTaskDestination" ? "Reference destination" : prefix == "referenceTaskBackdate" ? "Reference completion time" : prefix == "doneTaskStatus" ? "Done status"
+                let action = prefix == "rowQuickStatus" ? "Row quick status" : prefix == "inlineChecklist" ? "Inline checklist" : prefix == "referenceProjectNextAction" ? "Reference project next action" : prefix == "rowTaskFocus" ? "Row Focus" : prefix == "rowTaskDates" ? "Row dates" : prefix == "rowTaskDestination" ? "Row destination" : prefix == "referenceTaskDestination" ? "Reference destination" : prefix == "referenceTaskBackdate" ? "Reference completion time" : prefix == "rowTaskBackdate" ? "Row completion time" : prefix == "doneTaskStatus" ? "Done status"
                     : prefix == "archiveTaskCompletedAt" ? "Archive completion time" : "Done completion time"
                 guard let original = args.first as? String,
                       let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
@@ -14059,8 +18311,33 @@ private final class Engine: @unchecked Sendable {
                     prepareArgs = [expanded]
                 } else { prepareArgs = args }
                 let value = try invoke(prefix + "Prepare", arguments: prepareArgs)
+                if ["rowTaskDestination", "rowTaskDates", "rowTaskFocus"].contains(prefix) {
+                    guard value.utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(value),
+                          Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                        throw HostFailure("Malformed \(action) preparation: lossy JSON")
+                    }
+                }
                 guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any] else {
                     throw HostFailure("Malformed \(action) preparation")
+                }
+                if prefix == "rowTaskFocus", ["noop", "blocked"].contains(response["kind"] as? String ?? "") {
+                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
+                        throw HostFailure("Malformed Row Focus preparation result")
+                    }
+                    if response["kind"] as? String == "noop" {
+                        guard Self.validRowTaskFocusResult(result, request: submitted) else { throw HostFailure("Malformed Row Focus no-op") }
+                    } else {
+                        guard Set(result.keys) == Set(["blocked", "blockedTitle"]), result["blocked"] is String, result["blockedTitle"] is String else {
+                            throw HostFailure("Malformed Row Focus blocked result")
+                        }
+                    }
+                    return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self))
+                }
+                if ["rowQuickStatus", "inlineChecklist", "rowTaskDates"].contains(prefix), response["kind"] as? String == "unchanged" {
+                    guard Set(response.keys) == Set(["kind", "result"]),
+                          let result = response["result"] as? [String: Any], Set(result.keys) == Set(["id"]),
+                          Self.equalJSON(result["id"], submitted["id"]) else { throw HostFailure(prefix == "rowTaskDates" ? "Malformed Row dates unchanged result" : "Malformed Inline checklist unchanged result") }
+                    return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
                 }
                 if response["kind"] as? String == "noop" {
                     let currentReference = Self.isReferenceTaskStatusRequest(submitted) && submitted["status"] as? String == "reference"
@@ -14074,24 +18351,39 @@ private final class Engine: @unchecked Sendable {
                       let prepared = response["prepared"] as? [String: Any], Self.equalJSON(prepared["request"], submitted) else {
                     throw HostFailure("Malformed \(action) preparation")
                 }
-                let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": submitted, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                let encoding: JSONSerialization.WritingOptions = ["rowTaskDestination", "rowTaskDates", "rowTaskFocus"].contains(prefix) ? [.sortedKeys, .withoutEscapingSlashes] : [.sortedKeys]
+                let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": submitted, "prepared": prepared], options: encoding), as: UTF8.self)
                 guard envelope.utf8.count <= 2_100_000 else { throw HostFailure("INVALID_INPUT: \(action) journal is too large") }
                 let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
                 guard encoded.utf8.count <= 12_610_000 else { throw HostFailure("INVALID_INPUT: \(action) journal is too large") }
                 command = PendingCommand(version: 2, method: prefix + "Commit", argumentsJSON: encoded)
                 _ = try invoke(prefix + "Validate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if let prefix = Self.archivedTasksDeletePrefix(method), method == prefix + "Write" {
+        } else if let prefix = Self.checklistMovePrefix(method), method == prefix {
+            try allowRetainedOrdinaryPreparation()
+            do { command = try prepareChecklistMoveCommand(prefix: prefix, arguments: args) }
+            catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if let prefix = Self.conversionPrefix(method), method == prefix + "Write" {
+            try allowRetainedOrdinaryPreparation()
+            do { command = try prepareConversionCommand(prefix: prefix, arguments: args) }
+            catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if let prefix = Self.taskListDeletePrefix(method), method == prefix + "Write" {
             try allowRetainedOrdinaryPreparation()
             do {
-                let encoded = prefix == "archivedTasksDeleteUndo" ? confirmedArchivedTasksDeleteEnvelope : args.first as? String
+                let originalPrefix = prefix.hasPrefix("project") ? "projectTasksDelete" : "archivedTasksDelete"
+                let encoded = prefix.hasSuffix("Undo") ? confirmedTaskListDeleteEnvelope(prefix: originalPrefix) : args.first as? String
                 let value = encoded.flatMap { try? NativeJSON.jsonObject(with: Data($0.utf8)) as? [String: Any] }
-                let request = prefix == "archivedTasksDeleteUndo" ? value?["request"] as? [String: Any] : value
+                let request = prefix.hasSuffix("Undo") ? value?["request"] as? [String: Any] : value
                 let source = request?["source"] as? String
-                guard !["reference", "inbox"].contains(source ?? "") || editorAttempt == nil else {
-                    throw HostFailure(source == "inbox" ? "INVALID_INPUT: Inbox bulk Trash cannot carry an editor draft" : "INVALID_INPUT: Reference bulk Trash cannot carry an editor draft")
+                guard !["reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(source ?? "") || editorAttempt == nil else {
+                    throw HostFailure(source == "inbox" ? "INVALID_INPUT: Inbox bulk Trash cannot carry an editor draft"
+                        : source == "waiting" ? "INVALID_INPUT: Waiting bulk Trash cannot carry an editor draft"
+                        : source == "someday" ? "INVALID_INPUT: Someday bulk Trash cannot carry an editor draft"
+                        : source == "review" ? "INVALID_INPUT: Review bulk Trash cannot carry an editor draft"
+                        : source == "contexts" ? "INVALID_INPUT: Contexts bulk Trash cannot carry an editor draft"
+                        : "INVALID_INPUT: Reference bulk Trash cannot carry an editor draft")
                 }
-                command = try prepareArchivedTasksDeleteCommand(prefix: prefix, arguments: args)
+                command = try prepareTaskListDeleteCommand(prefix: prefix, arguments: args)
             }
             catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "taskDelete" {
@@ -14268,7 +18560,14 @@ private final class Engine: @unchecked Sendable {
                       let request = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
                     throw HostFailure("INVALID_INPUT: Project lifecycle needs a bounded request")
                 }
-                let value = try invoke("projectLifecyclePrepare", arguments: args)
+                let value: String
+                if args.count == 2, let scopeRevision = args[1] as? String {
+                    let input = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request,
+                        "scopeRevision": scopeRevision], options: [.sortedKeys]), as: UTF8.self)
+                    value = try invoke("reviewProjectCompletionPrepare", arguments: [input])
+                } else {
+                    value = try invoke("projectLifecyclePrepare", arguments: [original])
+                }
                 guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
                       Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
                       let prepared = response["prepared"] as? [String: Any],
@@ -14307,7 +18606,15 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "taskCancellationUndoCommit", argumentsJSON: encoded)
                 _ = try invoke("taskCancellationUndoValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if ["checklistSave", "checklistReset"].contains(method) {
+        } else { return nil }
+        return .command(command)
+    }
+
+    @inline(never)
+    private func prepareCaptureAndCalendarCommand(_ method: String, argumentsJSON: String, args: [Any],
+        editorAttempt: EditorDraftAttempt?, freshPomodoroRequest: [String: Any]?) throws -> CallPreparationResult? {
+        let command: PendingCommand
+        if ["checklistSave", "checklistReset"].contains(method) {
             try allowRetainedOrdinaryPreparation()
             do {
                 let value = try invoke(method == "checklistSave" ? "checklistSavePrepare" : "checklistResetPrepare", arguments: args)
@@ -14383,6 +18690,23 @@ private final class Engine: @unchecked Sendable {
                 let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
                 command = PendingCommand(version: 2, method: "mindSweepCommit", argumentsJSON: encoded)
                 _ = try invoke("mindSweepValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "weeklyReviewProjectTaskWrite" {
+            try allowRetainedOrdinaryPreparation()
+            do {
+                let value = try invoke("weeklyReviewProjectTaskPrepare", arguments: args)
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"] as? [String: Any], let original = args.first as? String,
+                      try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                        == JSONSerialization.data(withJSONObject: NativeJSON.jsonObject(with: Data(original.utf8)), options: [.sortedKeys]) else {
+                    throw HostFailure("Malformed prepared Weekly Review project task")
+                }
+                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
+                command = PendingCommand(version: 2, method: "weeklyReviewProjectTaskCommit", argumentsJSON: encoded)
+                _ = try invoke("weeklyReviewProjectTaskValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "calendarDelete" {
             try allowRetainedOrdinaryPreparation()
@@ -14510,10 +18834,10 @@ private final class Engine: @unchecked Sendable {
                     _ = try invoke("boardValidate", arguments: journalArguments(command))
                 }
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "captureSubmit" {
+        } else if method == "captureSubmit" || method == "captureCopilotSubmit" {
             try allowRetainedOrdinaryPreparation()
             do {
-                let value = try invoke("capturePrepare", arguments: args)
+                let value = try invoke(method == "captureCopilotSubmit" ? "captureCopilotPrepare" : "capturePrepare", arguments: args)
                 guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
                       let kind = response["kind"] as? String else { throw HostFailure("Malformed capture preparation") }
                 if kind == "refused" || kind == "confirmLines" { return .result(value) }
@@ -14559,15 +18883,13 @@ private final class Engine: @unchecked Sendable {
                                          editorDraft: editorAttempt)
                 try validateDraftAcknowledgment(command)
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else {
-            command = PendingCommand(version: 2, method: method, argumentsJSON: argumentsJSON)
-            if retainedOrdinaryTurn != nil { _ = try ordinaryJournalArguments(command); try allowRetainedOrdinaryPreparation() }
-        }
+        } else { return nil }
         return .command(command)
     }
 
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !(pending.map { Self.aiTextConfigurationCommitMethods.contains($0.method) } ?? false) else { throw CoreHostRejection(message: "NOT_READY: AI text configuration save requires its exact typed retry") }
         guard aiRequestTimeoutTurn == nil, pending?.method != "iosAIRequestTimeoutCommit" else {
             throw CoreHostRejection(message: "NOT_READY: AI timeout save requires its exact typed retry")
         }
@@ -14658,6 +18980,10 @@ private final class Engine: @unchecked Sendable {
         try denyCleanupOwner()
         guard started, !closed else { throw HostFailure("Core host is not ready; retry startup") }
         guard let command = pending else { return nil }
+        if VoiceAction(commit: command.method) != nil {
+            guard recoveryActivationPending || voiceCommitAllowed else { throw HostFailure("NOT_READY: Voice save requires its exact typed retry") }
+            return .success(try executeVoice(command, binding: newVoiceBinding(recovery: true), cancellation: NativeAttachmentCancellation()))
+        }
         if command.method == Self.appleReminderMethod {
             try bindAppleReminderJournal(command)
             if !appleReminderRemovalPending { try persist(command) }
@@ -14783,6 +19109,18 @@ private final class Engine: @unchecked Sendable {
             }
             return try finish(command, with: terminal)
         }
+        if Self.aiTextConfigurationCommitMethods.contains(command.method), recoveryActivationPending {
+            let terminal: TerminalResult
+            do {
+                let value = try invoke(Self.aiTextConfigurationMethod("RetryOutcome", version: Self.aiTextConfigurationVersion(command)), arguments: [aiTextConfigurationJournalRequest(command)])
+                try validateAITextConfigurationAcknowledgment(command, value: value)
+                terminal = .success(value)
+            } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
+                // A cold intent without a receipt has no surviving permission or write authority.
+                terminal = .rejected(failure.message)
+            }
+            return try finish(command, with: terminal)
+        }
         if command.method == "iosAIRequestTimeoutCommit", recoveryActivationPending {
             let terminal: TerminalResult
             do {
@@ -14820,39 +19158,40 @@ private final class Engine: @unchecked Sendable {
             return try finish(command, with: terminal)
         }
         if let terminal = command.terminal {
+            try validateChecklistMoveTerminal(command, terminal: terminal)
             if command.method == "referenceTasksMoveCommit", case .success(let value) = terminal {
                 let probed = try invoke("referenceTasksMoveOutcome", arguments: referenceTasksMoveJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Reference bulk Move has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
-            if command.method == "inboxTasksMoveCommit", case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksMoveOutcome", arguments: inboxTasksMoveJournalArguments(command))
+            if ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method), case .success(let value) = terminal {
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListMoveJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Move has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
-            if command.method == "inboxTasksAddTagCommit", case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksAddTagOutcome", arguments: inboxTasksAddTagJournalArguments(command))
+            if ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method), case .success(let value) = terminal {
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListAddTagJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Add tag has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
-            if command.method == "inboxTasksRemoveTagCommit", case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksRemoveTagOutcome", arguments: inboxTasksRemoveTagJournalArguments(command))
+            if ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method), case .success(let value) = terminal {
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListRemoveTagJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Remove tag has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
 
-            if command.method == "inboxTasksOrganizeCommit", case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksOrganizeOutcome", arguments: inboxTasksOrganizeJournalArguments(command))
+            if ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method), case .success(let value) = terminal {
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListOrganizeJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Organize has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
-            if command.method == "inboxOrganizeDestinationCreateCommit", case .success(let value) = terminal {
-                let probed = try invoke("inboxOrganizeDestinationCreateOutcome", arguments: inboxOrganizeDestinationCreateJournalArguments(command))
+            if ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method), case .success(let value) = terminal {
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListOrganizeDestinationCreateJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox Organize destination creation has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
@@ -14869,8 +19208,8 @@ private final class Engine: @unchecked Sendable {
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
-            if let prefix = Self.archivedTasksDeletePrefix(command.method), case .success(let value) = terminal {
-                let probed = try invoke(prefix + "Outcome", arguments: archivedTasksDeleteJournalArguments(command))
+            if let prefix = Self.taskListDeletePrefix(command.method), case .success(let value) = terminal {
+                let probed = try invoke(prefix + "Outcome", arguments: taskListDeleteJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Archive bulk Delete has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
@@ -14917,9 +19256,8 @@ private final class Engine: @unchecked Sendable {
                 try validateSomedaySectionTaskAcknowledgment(command, value: probed)
                 try validateSomedaySectionTaskAcknowledgment(command, value: value)
             }
-            if ["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(command.method), case .success(let value) = terminal {
-                let probed = try invoke(command.method == "somedaySectionMoveCommit"
-                    ? "somedaySectionMoveRetryOutcome" : "somedaySectionMoveUndoRetryOutcome",
+            if Self.somedayMoveCommits.contains(command.method), case .success(let value) = terminal {
+                let probed = try invoke(Self.somedayMoveName(command.method, "RetryOutcome"),
                     arguments: journalArguments(command))
                 try validateSomedaySectionMoveAcknowledgment(command, value: probed)
                 try validateSomedaySectionMoveAcknowledgment(command, value: value)
@@ -14938,7 +19276,8 @@ private final class Engine: @unchecked Sendable {
             else if command.method == "captureLinesCommit" { replay = try captureLinesArguments(command) }
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
-            if command.method == "iosAIRequestTimeoutCommit" { value = try invokeAIRequestTimeoutCommit(command) }
+            if Self.aiTextConfigurationCommitMethods.contains(command.method) { value = try invokeAITextConfigurationCommit(command) }
+            else if command.method == "iosAIRequestTimeoutCommit" { value = try invokeAIRequestTimeoutCommit(command) }
             else if command.method == "iosAIReasoningEffortCommit" { value = try invokeAIReasoningEffortCommit(command) }
             else if command.method == "iosAIGeminiThinkingBudgetCommit" { value = try invokeAIGeminiThinkingBudgetCommit(command) }
             else { value = try command.method == "backupDocumentCommit"
@@ -14955,6 +19294,54 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func finish(_ command: PendingCommand, with terminal: TerminalResult) throws -> TerminalResult {
+        if command.method == "iosWatchAudioIngest", case .success(let raw) = terminal {
+            let args = try journalArguments(command), source = try NativeWatchAudio.readEnvelope(args[0] as! String).source
+            try source.validateResult(raw)
+            let proof = try invoke("iosWatchAudioOutcome", arguments: [source.body])
+            guard proof != "null", Self.equalJSON(try NativeJSON.jsonObject(with: Data(raw.utf8)),
+                                                  try NativeJSON.jsonObject(with: Data(proof.utf8))) else {
+                throw HostFailure("SAVE_FAILED: Watch audio receipt is not proven")
+            }
+        }
+        if command.method == "iosWatchIngest", case .success(let raw) = terminal {
+            let args = try journalArguments(command), batch = try NativeWatchBatch(json: args[0] as! String)
+            _ = try batch.result(raw)
+            let proof = try invoke("iosWatchIngestOutcome", arguments: args)
+            guard proof != "null", Self.equalJSON(try NativeJSON.jsonObject(with: Data(raw.utf8)),
+                                                  try NativeJSON.jsonObject(with: Data(proof.utf8))) else {
+                throw HostFailure("SAVE_FAILED: Watch source receipts are not proven")
+            }
+        }
+        if command.method == "iosWidgetCompletionCommit", case .success(let raw) = terminal {
+            let args = try journalArguments(command), plan = try NativeWidgetCompletionJSON.plan(args[0] as! String)
+            let source = plan["source"] as! [String: Any]
+            try NativeWidgetCompletionJSON.result(raw, source: source)
+            let proof = try invoke("iosWidgetCompletionOutcome", arguments: [NativeWidgetCompletionJSON.encoded(source)])
+            guard proof != "null" else { throw HostFailure("SAVE_FAILED: Widget completion receipt is not proven") }
+            try NativeWidgetCompletionJSON.result(proof, source: source)
+            guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(raw.utf8)), try NativeJSON.jsonObject(with: Data(proof.utf8))) else {
+                throw HostFailure("SAVE_FAILED: Widget completion receipt differs")
+            }
+        }
+        if command.method == "iosShareCaptureCommit", case .success(let raw) = terminal {
+            let args = try journalArguments(command), plan = try NativeShareCaptureJSON.plan(args[0] as! String)
+            let request = plan["request"] as! [String: Any], source = request["source"] as! [String: Any]
+            let proof = try invoke("iosShareCaptureOutcome", arguments: [NativeShareCaptureJSON.encoded(source)])
+            guard proof != "null", Self.equalJSON(try NativeJSON.jsonObject(with: Data(proof.utf8)), try NativeJSON.jsonObject(with: Data(raw.utf8))) else {
+                throw HostFailure("SAVE_FAILED: Share capture receipt is not proven")
+            }
+        }
+        if command.method == "iosReviewAIApply", case .success(let raw) = terminal {
+            try NativeReviewAIJSON.result(raw)
+            let proof = try invoke("iosReviewAIOutcome", arguments: journalArguments(command))
+            guard proof != "null", Self.equalJSON(try NativeTaskAIJSON.object(proof), try NativeTaskAIJSON.object(raw)) else {
+                throw HostFailure("SAVE_FAILED: Review AI acknowledgement cannot be verified")
+            }
+        }
+        if VoiceAction(commit: command.method) != nil {
+            guard case .success(let value) = terminal else { throw NativeVoiceJSON.invalid }
+            return .success(try finishVoice(command, value: value, binding: newVoiceBinding(recovery: true)))
+        }
         if command.method == Self.pomodoroMethod, case .success(let value) = terminal { try validatePomodoroResult(command, value: value) }
         if command.method == Self.ownedSaveMethod { return try finishOwnedSave(command, with: terminal) }
         if command.method == "captureLinesCommit", case .success(let value) = terminal {
@@ -14974,6 +19361,10 @@ private final class Engine: @unchecked Sendable {
         }
         if command.method == "dataSetting", case .success(let value) = terminal {
             try validateDataSettingAcknowledgment(value)
+        }
+        if command.method == "gettingStarted", case .success(let value) = terminal {
+            try validateGettingStartedAcknowledgment(value)
+            try proveGettingStartedReceipt(command, value: value)
         }
         if command.method == "reminderSnoozeCommit" {
             let expected = try frozenReminderSnooze(command)
@@ -15009,47 +19400,47 @@ private final class Engine: @unchecked Sendable {
                 try validatePreparedAcknowledgment(command, value: value)
             }
         }
-        if command.method == "inboxTasksMoveCommit" {
-            _ = try invoke("inboxTasksMoveValidate", arguments: inboxTasksMoveJournalArguments(command))
+        if ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListMoveJournalArguments(command))
             if case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksMoveOutcome", arguments: inboxTasksMoveJournalArguments(command))
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListMoveJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Move has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
         }
-        if command.method == "inboxTasksAddTagCommit" {
-            _ = try invoke("inboxTasksAddTagValidate", arguments: inboxTasksAddTagJournalArguments(command))
+        if ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListAddTagJournalArguments(command))
             if case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksAddTagOutcome", arguments: inboxTasksAddTagJournalArguments(command))
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListAddTagJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Add tag has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
         }
-        if command.method == "inboxTasksRemoveTagCommit" {
-            _ = try invoke("inboxTasksRemoveTagValidate", arguments: inboxTasksRemoveTagJournalArguments(command))
+        if ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListRemoveTagJournalArguments(command))
             if case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksRemoveTagOutcome", arguments: inboxTasksRemoveTagJournalArguments(command))
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListRemoveTagJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Remove tag has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
         }
 
-        if command.method == "inboxTasksOrganizeCommit" {
-            _ = try invoke("inboxTasksOrganizeValidate", arguments: inboxTasksOrganizeJournalArguments(command))
+        if ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListOrganizeJournalArguments(command))
             if case .success(let value) = terminal {
-                let probed = try invoke("inboxTasksOrganizeOutcome", arguments: inboxTasksOrganizeJournalArguments(command))
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListOrganizeJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox bulk Organize has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
             }
         }
-        if command.method == "inboxOrganizeDestinationCreateCommit" {
-            _ = try invoke("inboxOrganizeDestinationCreateValidate", arguments: inboxOrganizeDestinationCreateJournalArguments(command))
+        if ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method) {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: taskListOrganizeDestinationCreateJournalArguments(command))
             if case .success(let value) = terminal {
-                let probed = try invoke("inboxOrganizeDestinationCreateOutcome", arguments: inboxOrganizeDestinationCreateJournalArguments(command))
+                let probed = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Outcome"), arguments: taskListOrganizeDestinationCreateJournalArguments(command))
                 guard probed != "null" else { throw HostFailure("STALE_REVISION: Inbox Organize destination creation has no exact saved receipt") }
                 try validatePreparedAcknowledgment(command, value: probed)
                 try validatePreparedAcknowledgment(command, value: value)
@@ -15073,8 +19464,16 @@ private final class Engine: @unchecked Sendable {
                 try validatePreparedAcknowledgment(command, value: value)
             }
         }
-        if let prefix = Self.archivedTasksDeletePrefix(command.method) {
-            _ = try invoke(prefix + "Validate", arguments: archivedTasksDeleteJournalArguments(command))
+        if Self.checklistMovePrefix(command.method) != nil {
+            _ = try invoke(command.method.replacingOccurrences(of: "Commit", with: "Validate"), arguments: checklistMoveJournalArguments(command))
+            try validateChecklistMoveTerminal(command, terminal: terminal)
+        }
+        if let prefix = Self.conversionPrefix(command.method) {
+            _ = try invoke(prefix + "Validate", arguments: conversionJournalArguments(command))
+            if case .success(let value) = terminal { try validateConversionAcknowledgment(command, value: value) }
+        }
+        if let prefix = Self.taskListDeletePrefix(command.method) {
+            _ = try invoke(prefix + "Validate", arguments: taskListDeleteJournalArguments(command))
             if case .success(let value) = terminal { try validatePreparedAcknowledgment(command, value: value) }
         }
         if let prefix = Self.historyTaskWritePrefix(command.method), command.method == prefix + "Commit" {
@@ -15112,10 +19511,10 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke(command.method == "taskCompletionCommit" ? "taskCompletionValidate" : "taskCompletionUndoValidate",
                            arguments: taskCompletionJournalArguments(command))
             if case .success(let value) = terminal {
-                if taskCompletionSource(command) == "board" {
+                if ["board", "row"].contains(taskCompletionSource(command) ?? "") {
                     let probed = try invoke(command.method == "taskCompletionCommit" ? "taskCompletionOutcome" : "taskCompletionUndoOutcome",
                                             arguments: taskCompletionJournalArguments(command))
-                    guard probed != "null" else { throw HostFailure("SAVE_FAILED: Board completion has no exact saved receipt") }
+                    guard probed != "null" else { throw HostFailure("SAVE_FAILED: Scoped completion has no exact saved receipt") }
                     try validatePreparedAcknowledgment(command, value: probed)
                 }
                 try validatePreparedAcknowledgment(command, value: value)
@@ -15166,8 +19565,8 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke(command.method == "calendarComposerCommit" ? "calendarComposerValidate" : "calendarComposerCreateValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateCalendarAcknowledgment(command, value: value) }
         }
-        if command.method == "mindSweepCommit" {
-            _ = try invoke("mindSweepValidate", arguments: journalArguments(command))
+        if ["mindSweepCommit", "weeklyReviewProjectTaskCommit"].contains(command.method) {
+            _ = try invoke(command.method == "mindSweepCommit" ? "mindSweepValidate" : "weeklyReviewProjectTaskValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateMindSweepAcknowledgment(command, value: value) }
         }
         if command.method == "inboxPreparedCommit" {
@@ -15228,6 +19627,18 @@ private final class Engine: @unchecked Sendable {
                 guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
                                      try NativeJSON.jsonObject(with: Data(value.utf8))) else {
                     throw HostFailure("SAVE_FAILED: Notification setting outcome cannot be verified")
+                }
+            }
+        }
+        if Self.aiTextConfigurationCommitMethods.contains(command.method) {
+            _ = try invoke(Self.aiTextConfigurationMethod("Validate", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
+            if case .success(let value) = terminal {
+                let proven = try invoke(Self.aiTextConfigurationMethod("RetryOutcome", version: Self.aiTextConfigurationVersion(command)), arguments: [aiTextConfigurationJournalRequest(command)])
+                try validateAITextConfigurationAcknowledgment(command, value: proven)
+                try validateAITextConfigurationAcknowledgment(command, value: value)
+                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
+                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("SAVE_FAILED: AI text configuration outcome cannot be verified")
                 }
             }
         }
@@ -15421,43 +19832,64 @@ private final class Engine: @unchecked Sendable {
             try validateSomedaySectionTaskJournal(command)
             if case .success(let value) = terminal { try validateSomedaySectionTaskAcknowledgment(command, value: value) }
         }
-        if ["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(command.method) {
+        if Self.somedayMoveCommits.contains(command.method) {
             try validateSomedaySectionMoveJournal(command)
             if case .success(let value) = terminal { try validateSomedaySectionMoveAcknowledgment(command, value: value) }
         }
         if let prefix = Self.historyTaskWritePrefix(command.method), command.method == prefix + "Commit", case .success = terminal,
            let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String] {
-            if prefix == "doneTaskStatus" { confirmedDoneTaskStatusEnvelope = args.first }
+            if prefix == "rowQuickStatus" { confirmedRowQuickStatusEnvelope = args.first }
+            else if prefix == "inlineChecklist" { confirmedInlineChecklistEnvelope = args.first }
+            else if prefix == "doneTaskStatus" { confirmedDoneTaskStatusEnvelope = args.first }
             else if prefix == "doneTaskCompletedAt" { confirmedDoneTaskCompletedAtEnvelope = args.first }
             else if prefix == "referenceTaskBackdate" {
                 confirmedReferenceTaskBackdateEnvelope = args.first
+                if let encoded = args.first { rememberReferenceProjectNextActionOrigin(kind: "backdate", envelope: encoded) }
+            }
+            else if prefix == "rowTaskFocus" { confirmedRowTaskFocusEnvelope = args.first }
+            else if prefix == "rowTaskDates" { confirmedRowTaskDatesEnvelope = args.first }
+            else if prefix == "rowTaskDestination" { confirmedRowTaskDestinationEnvelope = args.first }
+            else if prefix == "rowTaskBackdate" {
+                confirmedRowTaskBackdateEnvelope = args.first
                 if let encoded = args.first { rememberReferenceProjectNextActionOrigin(kind: "backdate", envelope: encoded) }
             }
             else if prefix == "referenceTaskDestination" { confirmedReferenceTaskDestinationEnvelope = args.first }
             else if prefix == "referenceProjectNextAction" { confirmedReferenceProjectNextActionEnvelope = args.first }
             else { confirmedArchiveTaskCompletedAtEnvelope = args.first }
         }
-        if Self.archivedTasksDeletePrefix(command.method) != nil, case .success = terminal {
-            rememberConfirmedArchivedTasksDelete(command)
+        if Self.checklistMovePrefix(command.method) != nil, case .success = terminal { rememberConfirmedChecklistMove(command) }
+        if case .success = terminal { rememberConfirmedConversion(command) }
+        if Self.taskListDeletePrefix(command.method) != nil, case .success = terminal {
+            rememberConfirmedTaskListDelete(command)
         }
         if command.method == "referenceTasksMoveCommit", case .success = terminal {
             confirmedReferenceTasksMoveEnvelope = (try? referenceTasksMoveJournalArguments(command))?.first as? String
         }
-        if command.method == "inboxTasksMoveCommit", case .success = terminal {
-            confirmedInboxTasksMoveEnvelope = (try? inboxTasksMoveJournalArguments(command))?.first as? String
+        if ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method), case .success = terminal {
+            let envelope = (try? taskListMoveJournalArguments(command))?.first as? String
+            if command.method == "projectTasksMoveCommit" { confirmedProjectTasksMoveEnvelope = envelope }
+            else { confirmedInboxTasksMoveEnvelope = envelope }
         }
-        if command.method == "inboxTasksAddTagCommit", case .success = terminal {
-            confirmedInboxTasksAddTagEnvelope = (try? inboxTasksAddTagJournalArguments(command))?.first as? String
+        if ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method), case .success = terminal {
+            let envelope = (try? taskListAddTagJournalArguments(command))?.first as? String
+            if command.method == "projectTasksAddTagCommit" { confirmedProjectTasksAddTagEnvelope = envelope }
+            else { confirmedInboxTasksAddTagEnvelope = envelope }
         }
-        if command.method == "inboxTasksRemoveTagCommit", case .success = terminal {
-            confirmedInboxTasksRemoveTagEnvelope = (try? inboxTasksRemoveTagJournalArguments(command))?.first as? String
+        if ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method), case .success = terminal {
+            let envelope = (try? taskListRemoveTagJournalArguments(command))?.first as? String
+            if command.method == "projectTasksRemoveTagCommit" { confirmedProjectTasksRemoveTagEnvelope = envelope }
+            else { confirmedInboxTasksRemoveTagEnvelope = envelope }
         }
 
-        if command.method == "inboxTasksOrganizeCommit", case .success = terminal {
-            confirmedInboxTasksOrganizeEnvelope = (try? inboxTasksOrganizeJournalArguments(command))?.first as? String
+        if ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method), case .success = terminal {
+            let envelope = (try? taskListOrganizeJournalArguments(command))?.first as? String
+            if command.method == "projectTasksOrganizeCommit" { confirmedProjectTasksOrganizeEnvelope = envelope }
+            else { confirmedInboxTasksOrganizeEnvelope = envelope }
         }
-        if command.method == "inboxOrganizeDestinationCreateCommit", case .success = terminal {
-            confirmedInboxOrganizeDestinationCreateEnvelope = (try? inboxOrganizeDestinationCreateJournalArguments(command))?.first as? String
+        if ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method), case .success = terminal {
+            let envelope = (try? taskListOrganizeDestinationCreateJournalArguments(command))?.first as? String
+            if command.method == "projectOrganizeDestinationCreateCommit" { confirmedProjectOrganizeDestinationCreateEnvelope = envelope }
+            else { confirmedInboxOrganizeDestinationCreateEnvelope = envelope }
         }
         if command.method == "referenceTasksAddTagCommit", case .success = terminal {
             confirmedReferenceTasksAddTagEnvelope = (try? referenceTasksAddTagJournalArguments(command))?.first as? String
@@ -15525,6 +19957,15 @@ private final class Engine: @unchecked Sendable {
             try refreshOrdinaryEditor(snapshot: nil, attempt: nil)
         }
         try clearPending()
+        if command.method == "gettingStarted", case .success = terminal {
+            _ = try? invoke("logLine", arguments: ["Native iOS Getting Started confirmed", #"{"releaseCheck":"v1.3.8/ios-getting-started","outcome":"confirmed"}"#])
+        }
+        if command.method == "iosReviewAIApply", case .success = terminal {
+            _ = try? invoke("logLine", arguments: ["Native iOS Weekly Review AI applied", #"{"releaseCheck":"v1.3.8/ios-review-ai","outcome":"saved"}"#])
+        }
+        if command.method == "iosShareCaptureCommit", case .success = terminal {
+            _ = try? invoke("logLine", arguments: ["Native iOS shared capture saved", #"{"releaseCheck":"v1.3.8/ios-share-text-url","operation":"share-save","outcome":"confirmed"}"#])
+        }
         if command.method == "captureLinesCommit" {
             let rejected: Bool
             if case .rejected = terminal { rejected = true } else { rejected = false }
@@ -15655,12 +20096,10 @@ private final class Engine: @unchecked Sendable {
 #endif
             NSLog("Native iOS archived Task restored releaseCheck=v1.3.4/ios-archive-task-restore outcome=confirmed")
         }
-        if let prefix = Self.archivedTasksDeletePrefix(command.method), case .success = terminal {
-            let source = historyBulkSource(command), done = source == "done", reference = source == "reference", inbox = source == "inbox"
+        if let prefix = Self.taskListDeletePrefix(command.method), !prefix.hasPrefix("project"), case .success = terminal {
+            let source = historyBulkSource(command), done = source == "done", reference = ["reference", "waiting", "someday", "review", "contexts"].contains(source), inbox = source == "inbox"
             #if DEBUG
-            faults?.commandDiagnostic?(inbox ? (prefix == "archivedTasksDelete" ? "inboxTasksDelete" : "inboxTasksDeleteUndo")
-                : reference ? (prefix == "archivedTasksDelete" ? "referenceTasksDelete" : "referenceTasksDeleteUndo")
-                : done ? (prefix == "archivedTasksDelete" ? "doneTasksDelete" : "doneTasksDeleteUndo") : prefix)
+            faults?.commandDiagnostic?(source == "archive" ? prefix : source + (prefix == "archivedTasksDelete" ? "TasksDelete" : "TasksDeleteUndo"))
             #endif
             let outcome = prefix == "archivedTasksDelete" ? "deleted" : "restored"
             // Reference and Inbox shared core emit their ACK diagnostic; preserve old native logs.
@@ -15945,11 +20384,12 @@ private final class Engine: @unchecked Sendable {
             let reviewing = ["dailyReviewFocusStep", "weeklyReviewContextStep"].contains(result?["type"] as? String ?? "")
             let inboxing = ["inboxTwoMinute", "inboxProjectFirst", "inboxContextStep", "inboxSchedule"].contains(result?["type"] as? String ?? "")
             let parsing = ["quickAddAutoClean", "naturalLanguageDates"].contains(result?["type"] as? String ?? "")
+            let audioRetention = result?["type"] as? String == "saveAudioAttachments"
             let capturing = result?["type"] as? String == "defaultArea"
             let editing = result?["type"] as? String == "taskEditorSectionOpen"
             let preset = result?["type"] as? String == "taskEditorPreset"
 #if DEBUG
-            faults?.commandDiagnostic?(pomodoro ? "gtdPomodoroApplied" : reset ? "gtdTaskEditorResetApplied" : fieldOrder ? "gtdTaskEditorFieldOrderApplied" : fieldSection ? "gtdTaskEditorFieldSectionApplied" : fields ? "gtdTaskEditorFieldApplied" : archiving ? "gtdAutoArchiveApplied" : startDates ? "gtdFocusStartDatesApplied" : preset ? "gtdTaskEditorPresetApplied" : editing ? "gtdTaskEditorOpenApplied" : parsing ? "gtdCaptureParseApplied" : capturing ? "gtdCaptureAreaApplied" : inboxing ? "gtdInboxApplied" : reviewing ? "gtdReviewApplied" : "gtdWorkflowApplied")
+            faults?.commandDiagnostic?(pomodoro ? "gtdPomodoroApplied" : reset ? "gtdTaskEditorResetApplied" : fieldOrder ? "gtdTaskEditorFieldOrderApplied" : fieldSection ? "gtdTaskEditorFieldSectionApplied" : fields ? "gtdTaskEditorFieldApplied" : archiving ? "gtdAutoArchiveApplied" : startDates ? "gtdFocusStartDatesApplied" : preset ? "gtdTaskEditorPresetApplied" : editing ? "gtdTaskEditorOpenApplied" : audioRetention ? "gtdCaptureAudioApplied" : parsing ? "gtdCaptureParseApplied" : capturing ? "gtdCaptureAreaApplied" : inboxing ? "gtdInboxApplied" : reviewing ? "gtdReviewApplied" : "gtdWorkflowApplied")
 #endif
             if pomodoro {
                 _ = try? invoke("logLine", arguments: ["Native iOS Pomodoro settings saved",
@@ -15963,11 +20403,22 @@ private final class Engine: @unchecked Sendable {
             else if startDates { NSLog("Native iOS Focus start-date preference saved releaseCheck=v1.3.4/ios-focus-start-dates outcome=confirmed") }
             else if preset { NSLog("Native iOS Task Editor preset saved releaseCheck=v1.3.4/ios-gtd-editor-presets outcome=confirmed") }
             else if editing { NSLog("Native iOS Task Editor sections saved releaseCheck=v1.3.4/ios-gtd-editor-sections outcome=confirmed") }
+            else if audioRetention {
+                _ = try? invoke("logLine", arguments: ["Native iOS Capture audio retention saved",
+                    #"{"releaseCheck":"v1.3.8/ios-gtd-capture-audio","outcome":"confirmed"}"#])
+            }
             else if parsing { NSLog("Native iOS Capture parsing saved releaseCheck=v1.3.4/ios-gtd-capture-parsing outcome=confirmed") }
             else if capturing { NSLog("Native iOS Capture default area saved releaseCheck=v1.3.4/ios-gtd-capture-area outcome=confirmed") }
             else if inboxing { NSLog("Native iOS GTD Inbox saved releaseCheck=v1.3.4/ios-gtd-inbox outcome=confirmed") }
             else if reviewing { NSLog("Native iOS GTD Review saved releaseCheck=v1.3.4/ios-gtd-review outcome=confirmed") }
             else { NSLog("Native iOS GTD workflow saved releaseCheck=v1.3.4/ios-gtd-workflow outcome=confirmed") }
+        }
+        if Self.aiTextConfigurationCommitMethods.contains(command.method), case .success = terminal {
+            if let raw = try? aiTextConfigurationJournalRequest(command), let request = try? Self.aiTextConfigurationAnyRequest(raw),
+               let change = request["change"] as? [String: Any], let kind = change["type"] as? String {
+                let provider = kind == "provider" ? change["value"] as? String : (request["expected"] as? [String: Any])?["provider"] as? String
+                _ = try? invoke("iosAITextConfigurationAcknowledged", arguments: ["settings-saved", provider ?? "openai", kind])
+            }
         }
         if command.method == "iosAIRequestTimeoutCommit", case .success = terminal {
             _ = try? invoke("iosAIRequestTimeoutAcknowledged", arguments: [])
@@ -16262,18 +20713,22 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func isDefiniteRejection(_ message: String, method: String) -> Bool {
+        if method == "iosReviewAIApply" { return message.utf8.count <= 4096 && ["INVALID_INPUT:", "NOT_READY:", "STALE_REVISION:"].contains(where: { message.hasPrefix($0) }) }
         if method == Self.pomodoroMethod { return message.utf8.count <= 4096 && ["INVALID_INPUT:", "NOT_READY:", "STALE_REVISION:"].contains(where: { message.hasPrefix($0) }) }
         if method == Self.ownedSaveMethod || method == Self.mixedSaveMethod {
             return message.utf8.count <= Self.ownedSaveRejectionBytes
                 && ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:", "STALE_REVISION:"].contains(where: { message.hasPrefix($0) })
         }
         return ["INVALID_INPUT:", "TASK_NOT_FOUND:", "NOT_READY:"].contains(where: { message.hasPrefix($0) })
+            || (["rowTaskDestinationCommit", "rowTaskDatesCommit", "rowTaskFocusCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (Self.checklistMovePrefix(method) != nil && message.hasPrefix("STALE_REVISION:"))
+            || (Self.conversionPrefix(method) != nil && message.hasPrefix("STALE_REVISION:"))
             || (method == "calendarSubscriptionAddCommit" && message.hasPrefix("STALE_REVISION:"))
             || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "inboxTasksAddTagCommit", "inboxTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit", "referenceTasksMoveCommit", "inboxTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "trashItemsRestoreCommit", "trashItemsPurgeCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "inboxPreparedCommit", "inboxUndoCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "iosAIRequestTimeoutCommit", "iosAIReasoningEffortCommit", "iosAIGeminiThinkingBudgetCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(method)
+            || (["rowQuickStatusCommit", "inlineChecklistCommit", "doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "rowTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "inboxTasksAddTagCommit", "projectTasksAddTagCommit", "inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "projectTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit", "referenceTasksMoveCommit", "inboxTasksMoveCommit", "projectTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "trashItemsRestoreCommit", "trashItemsPurgeCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "projectTasksDeleteCommit", "projectTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "weeklyReviewProjectTaskCommit", "inboxPreparedCommit", "inboxUndoCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2", "iosAIRequestTimeoutCommit", "iosAIReasoningEffortCommit", "iosAIGeminiThinkingBudgetCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (Self.somedayMoveCommits.contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit", "captureLinesCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
     }
@@ -16411,7 +20866,7 @@ private final class Engine: @unchecked Sendable {
               let prepared = envelope["prepared"] as? [String: Any],
               let expected = prepared["result"] as? [String: Any],
               let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
-              Set(result.keys) == Set(["taskId", "title"]),
+              Set(result.keys) == Set(command.method == "weeklyReviewProjectTaskCommit" ? ["taskId", "title", "openAfterSave"] : ["taskId", "title"]),
               result["taskId"] as? String == request["requestId"] as? String,
               try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
                 == JSONSerialization.data(withJSONObject: expected, options: [.sortedKeys]) else {
@@ -16661,7 +21116,7 @@ private final class Engine: @unchecked Sendable {
         case "pomodoroDurations": return validGtdPomodoroDurations(edit["value"], canonical: true)
         case "autoArchiveDays": return [0, 1, 3, 7, 14, 30, 60].contains { isInteger(edit["value"], equalTo: $0) }
         case "defaultProjectFlowMode": return ["parallel", "sequential"].contains(edit["value"] as? String ?? "")
-        case "dailyReviewFocusStep", "weeklyReviewContextStep", "inboxTwoMinute", "inboxProjectFirst", "inboxContextStep", "inboxSchedule", "quickAddAutoClean", "naturalLanguageDates": return isBoolean(edit["value"])
+        case "dailyReviewFocusStep", "weeklyReviewContextStep", "inboxTwoMinute", "inboxProjectFirst", "inboxContextStep", "inboxSchedule", "quickAddAutoClean", "naturalLanguageDates", "saveAudioAttachments": return isBoolean(edit["value"])
         default: return false
         }
     }
@@ -16743,7 +21198,7 @@ private final class Engine: @unchecked Sendable {
         }
         guard validGeneralPreferenceExpected(value), let expected = value as? [String: Any] else { return false }
         if expected["present"] as? Bool == false { return true }
-        if ["quickAddAutoClean", "naturalLanguageDates", "focusIncludeStartDates"].contains(type) { return isBoolean(expected["value"]) }
+        if ["quickAddAutoClean", "naturalLanguageDates", "saveAudioAttachments", "focusIncludeStartDates"].contains(type) { return isBoolean(expected["value"]) }
         if type == "focusTaskLimit" { return !isBoolean(expected["value"]) && expected["value"] is NSNumber }
         return expected["value"] is String
     }
@@ -16767,6 +21222,7 @@ private final class Engine: @unchecked Sendable {
         guard let edit = value as? [String: Any], Set(edit.keys) == Set(["type", "value"]),
               let type = edit["type"] as? String else { return false }
         switch type {
+        case "appLockRelockDelay": return isInteger(edit["value"]) && [0, 1, 5, 15].contains((edit["value"] as? NSNumber)?.intValue ?? -1)
         case "showTaskAge": return isBoolean(edit["value"])
         case "theme", "language": return (edit["value"] as? String).map { !$0.isEmpty && $0.utf16.count <= 500 } == true
         case "quickAccessView": return ["review", "projects", "calendar", "contexts"].contains(edit["value"] as? String ?? "")
@@ -17162,7 +21618,9 @@ private final class Engine: @unchecked Sendable {
     private static func validFocusSavedFilterOperation(_ value: Any?) -> Bool {
         guard let operation = value as? [String: Any], let type = operation["type"] as? String else { return false }
         switch type {
-        case "save": return Set(operation.keys) == Set(["type"])
+        case "save":
+            return Set(operation.keys) == Set(["type"])
+                || (Set(operation.keys) == Set(["type", "view"]) && operation["view"] as? String == "contexts")
         case "delete":
             return Set(operation.keys) == Set(["type", "id"])
                 && (operation["id"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 }) == true
@@ -17174,7 +21632,10 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateFocusSavedFilterResult(_ result: [String: Any], request: [String: Any]) throws {
-        guard Set(result.keys) == Set(["controls", "id"]),
+        let rawOperation = request["operation"] as? [String: Any]
+        let contexts = rawOperation?["type"] as? String == "save" && rawOperation?["view"] as? String == "contexts"
+        guard Set(result.keys) == (contexts ? Set(["controls", "id", "view"]) : Set(["controls", "id"])),
+              !contexts || result["view"] as? String == "contexts",
               result["controls"] is [String: Any],
               let id = result["id"] as? String, !id.isEmpty, id.utf16.count <= 500,
               let operation = request["operation"] as? [String: Any],
@@ -17221,6 +21682,13 @@ private final class Engine: @unchecked Sendable {
             return Set(operation.keys) == Set(["type", "query"])
                 && (operation["query"] as? String).map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf16.count <= 2000 }) == true
         }
+        if operation["type"] as? String == "sort" {
+            return Set(operation.keys) == Set(["type", "id", "sort"])
+                && (operation["id"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true
+                && (operation["sort"] is NSNull || (operation["sort"] as? String).map {
+                    ["default", "due", "start", "review", "priority", "timeEstimate", "title", "created", "created-desc"].contains($0)
+                } == true)
+        }
         return operation["type"] as? String == "delete" && Set(operation.keys) == Set(["type", "id"])
             && (operation["id"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true
     }
@@ -17231,7 +21699,11 @@ private final class Engine: @unchecked Sendable {
               Self.isBoolean(result["existing"]), Self.isBoolean(result["changed"]),
               let existing = result["existing"] as? Bool, let changed = result["changed"] as? Bool,
               let operation = request["operation"] as? [String: Any] else { throw HostFailure("Malformed saved search result") }
-        if operation["type"] as? String == "delete" {
+        if operation["type"] as? String == "sort" {
+            guard existing, id.utf8.elementsEqual((operation["id"] as? String ?? "").utf8) else {
+                throw HostFailure("Malformed saved search sort result")
+            }
+        } else if operation["type"] as? String == "delete" {
             guard !existing, id.utf8.elementsEqual((operation["id"] as? String ?? "").utf8) else { throw HostFailure("Malformed saved search deletion result") }
         } else if existing {
             guard !changed, let encoded = request["expected"] as? String,
@@ -17774,10 +22246,26 @@ private final class Engine: @unchecked Sendable {
         case command(PendingCommand)
     }
 
+    private static let somedayMoveCommits: Set<String> = ["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit",
+                                                          "somedaySectionBulkMoveCommit", "somedaySectionBulkMoveUndoCommit"]
+    private static let somedayMovePublicMethods: Set<String> = ["somedaySectionMoveOptions", "somedaySectionMoveWrite",
+        "somedaySectionMoveUndo", "somedaySectionMoveRetryOutcome", "somedaySectionMoveUndoRetryOutcome",
+        "somedaySectionBulkMoveOptions", "somedaySectionBulkMoveWrite", "somedaySectionBulkMoveUndo",
+        "somedaySectionBulkMoveRetryOutcome", "somedaySectionBulkMoveUndoRetryOutcome"]
+    private static func somedayMoveFamily(_ method: String) -> String {
+        method.hasPrefix("somedaySectionBulkMove") ? "somedaySectionBulkMove" : "somedaySectionMove"
+    }
+    private static func somedayMoveIsUndo(_ method: String) -> Bool { method.hasPrefix(somedayMoveFamily(method) + "Undo") }
+    private static func somedayMoveName(_ method: String, _ suffix: String) -> String {
+        somedayMoveFamily(method) + (somedayMoveIsUndo(method) ? "Undo" : "") + suffix
+    }
+    private static func somedayMoveEnvelopeBytes(_ method: String) -> Int {
+        somedayMoveFamily(method) == "somedaySectionMove" ? 1_000_000 : somedayMoveIsUndo(method) ? 8_100_000 : 4_000_000
+    }
+
     private func confirmedSomedayMoveEnvelope(for method: String, publicArguments: [Any]) throws -> String {
-        let stored = method == "somedaySectionMoveUndoRetryOutcome"
-            ? confirmedSomedaySectionUndoEnvelope : confirmedSomedaySectionMoveEnvelope
-        guard let stored, let inputJSON = publicArguments.first as? String,
+        guard let stored = confirmedSomedayMoveEnvelopes[Self.somedayMoveName(method, "Commit")],
+              let inputJSON = publicArguments.first as? String,
               let input = try NativeJSON.jsonObject(with: Data(inputJSON.utf8)) as? [String: Any],
               let envelope = try NativeJSON.jsonObject(with: Data(stored.utf8)) as? [String: Any],
               Self.equalJSON(input, envelope["request"]) else {
@@ -17800,14 +22288,32 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private func validateSomedaySectionBulkMoveResult(_ value: String, expected: [String: Any], undo: Bool) throws {
+        guard Set(expected.keys) == Set(undo ? ["taskIds", "changed"] : ["taskIds", "changed", "sectionId"]),
+              let ids = expected["taskIds"] as? [String], ids.count <= 10_000, ids.allSatisfy({ !$0.isEmpty }),
+              Self.isBoolean(expected["changed"]), expected["changed"] as? Bool == !ids.isEmpty,
+              undo || expected["sectionId"] is NSNull || expected["sectionId"] is String,
+              let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(result.keys) == Set(expected.keys), Self.isBoolean(result["changed"]),
+              Self.equalJSON(result, expected) else {
+            throw HostFailure("Malformed Someday bulk section move acknowledgment")
+        }
+    }
+
+    private func validateSomedayMoveResult(_ value: String, expected: [String: Any], method: String) throws {
+        if Self.somedayMoveFamily(method) == "somedaySectionMove" {
+            try validateSomedaySectionMoveResult(value, expected: expected)
+        } else {
+            try validateSomedaySectionBulkMoveResult(value, expected: expected, undo: Self.somedayMoveIsUndo(method))
+        }
+    }
+
     private func validateSomedaySectionMoveAcknowledgment(arguments: [Any], method: String, value: String) throws {
-        let validator = method == "somedaySectionMoveUndoCommit" || method == "somedaySectionMoveUndoRetryOutcome"
-            ? "somedaySectionMoveUndoValidate" : "somedaySectionMoveValidate"
-        let validated = try invoke(validator, arguments: arguments)
+        let validated = try invoke(Self.somedayMoveName(method, "Validate"), arguments: arguments)
         guard let expected = try NativeJSON.jsonObject(with: Data(validated.utf8)) as? [String: Any] else {
             throw HostFailure("Malformed Someday section move validation")
         }
-        try validateSomedaySectionMoveResult(value, expected: expected)
+        try validateSomedayMoveResult(value, expected: expected, method: method)
     }
 
     private func validateSomedaySectionMoveAcknowledgment(_ command: PendingCommand, value: String) throws {
@@ -17815,8 +22321,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateSomedaySectionMoveJournal(_ command: PendingCommand) throws {
-        _ = try invoke(command.method == "somedaySectionMoveUndoCommit" ? "somedaySectionMoveUndoValidate" : "somedaySectionMoveValidate",
-                       arguments: journalArguments(command))
+        _ = try invoke(Self.somedayMoveName(command.method, "Validate"), arguments: journalArguments(command))
     }
 
     private func prepareSomedaySectionMove(method: String, arguments: [Any]) throws -> SomedayMovePreparation {
@@ -17824,11 +22329,13 @@ private final class Engine: @unchecked Sendable {
               let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
             throw HostFailure("INVALID_INPUT: Someday move needs one request")
         }
-        let undo = method == "somedaySectionMoveUndo"
+        let family = Self.somedayMoveFamily(method)
+        let bulk = family == "somedaySectionBulkMove"
+        let undo = Self.somedayMoveIsUndo(method)
         let prepareArguments: [Any]
         var confirmedMove: [String: Any]?
         if undo {
-            guard let moveJSON = confirmedSomedaySectionMoveEnvelope,
+            guard let moveJSON = confirmedSomedayMoveEnvelopes[family + "Commit"],
                   let move = try NativeJSON.jsonObject(with: Data(moveJSON.utf8)) as? [String: Any],
                   let moveRequest = move["request"] as? [String: Any],
                   Self.equalJSON(request["moveRequestId"], moveRequest["requestId"]) else {
@@ -17837,8 +22344,7 @@ private final class Engine: @unchecked Sendable {
             confirmedMove = move
             prepareArguments = [String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "move": move], options: [.sortedKeys]), as: UTF8.self)]
         } else { prepareArguments = arguments }
-        let responseText = try invoke(undo ? "somedaySectionMoveUndoPrepare" : "somedaySectionMovePrepare",
-                                      arguments: prepareArguments)
+        let responseText = try invoke(Self.somedayMoveName(method, "Prepare"), arguments: prepareArguments)
         guard let response = try NativeJSON.jsonObject(with: Data(responseText.utf8)) as? [String: Any],
               let kind = response["kind"] as? String else {
             throw HostFailure("Malformed Someday move preparation")
@@ -17846,20 +22352,28 @@ private final class Engine: @unchecked Sendable {
         if kind == "noop" {
             guard Set(response.keys) == Set(["kind", "result"]),
                   let result = response["result"] as? [String: Any],
-                  let expectedID = (undo ? confirmedMove?["request"] as? [String: Any] : request),
-                  let taskID = expectedID["taskId"] as? String,
-                  result["id"] as? String == taskID,
                   Self.isBoolean(result["changed"]), result["changed"] as? Bool == false else {
                 throw HostFailure("Malformed Someday move no-op")
             }
-            let original = ((confirmedMove?["prepared"] as? [String: Any])?["before"] as? [String: Any])?["viewSectionIds"] as? [String: Any]
-            let expectedSection: Any = undo
-                ? original?["someday"] ?? NSNull()
-                : request["sectionId"] ?? NSNull()
-            guard Self.equalJSON(result["sectionId"], expectedSection) else { throw HostFailure("Malformed Someday move no-op") }
+            if bulk {
+                guard (result["taskIds"] as? [String])?.isEmpty == true,
+                      undo || Self.equalJSON(result["sectionId"], request["sectionId"] ?? NSNull()) else {
+                    throw HostFailure("Malformed Someday move no-op")
+                }
+            } else {
+                guard let expectedID = (undo ? confirmedMove?["request"] as? [String: Any] : request),
+                      let taskID = expectedID["taskId"] as? String, result["id"] as? String == taskID else {
+                    throw HostFailure("Malformed Someday move no-op")
+                }
+                let original = ((confirmedMove?["prepared"] as? [String: Any])?["before"] as? [String: Any])?["viewSectionIds"] as? [String: Any]
+                let expectedSection: Any = undo
+                    ? original?["someday"] ?? NSNull()
+                    : request["sectionId"] ?? NSNull()
+                guard Self.equalJSON(result["sectionId"], expectedSection) else { throw HostFailure("Malformed Someday move no-op") }
+            }
             let value = String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self)
-            try validateSomedaySectionMoveResult(value, expected: result)
-            if undo { confirmedSomedaySectionMoveEnvelope = nil }
+            try validateSomedayMoveResult(value, expected: result, method: method)
+            if undo { confirmedSomedayMoveEnvelopes[family + "Commit"] = nil }
             return .noop(value)
         }
         guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
@@ -17868,23 +22382,22 @@ private final class Engine: @unchecked Sendable {
             throw HostFailure("Malformed prepared Someday move")
         }
         let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
-        guard envelope.utf8.count <= 1_000_000 else { throw HostFailure("INVALID_INPUT: Prepared Someday move is too large") }
+        guard envelope.utf8.count <= Self.somedayMoveEnvelopeBytes(method) else {
+            throw HostFailure("INVALID_INPUT: Prepared Someday move is too large")
+        }
         let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
-        let command = PendingCommand(version: 2, method: undo ? "somedaySectionMoveUndoCommit" : "somedaySectionMoveCommit", argumentsJSON: encoded)
+        let command = PendingCommand(version: 2, method: Self.somedayMoveName(method, "Commit"), argumentsJSON: encoded)
         try validateSomedaySectionMoveJournal(command)
         return .command(command)
     }
 
     private func rememberConfirmedSomedayMove(_ command: PendingCommand) {
-        guard ["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(command.method),
+        guard Self.somedayMoveCommits.contains(command.method),
               let arguments = try? journalArguments(command), let envelope = arguments.first as? String else { return }
-        if command.method == "somedaySectionMoveCommit" {
-            confirmedSomedaySectionMoveEnvelope = envelope
-            confirmedSomedaySectionUndoEnvelope = nil
-        } else {
-            confirmedSomedaySectionMoveEnvelope = nil
-            confirmedSomedaySectionUndoEnvelope = envelope
-        }
+        let family = Self.somedayMoveFamily(command.method)
+        let undo = Self.somedayMoveIsUndo(command.method)
+        confirmedSomedayMoveEnvelopes[family + "Commit"] = undo ? nil : envelope
+        confirmedSomedayMoveEnvelopes[family + "UndoCommit"] = undo ? envelope : nil
     }
 
     private static func validProjectColor(_ value: Any?) -> Bool {
@@ -17988,6 +22501,13 @@ private final class Engine: @unchecked Sendable {
             guard let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
                   let encoded = args.first else { return }
             confirmedTaskCompletionUndoEnvelope = encoded
+            if let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+               let request = envelope["request"] as? [String: Any],
+               let origin = referenceProjectNextActionOrigin, let original = origin["envelope"] as? [String: Any],
+               let originalRequest = original["request"] as? [String: Any],
+               Self.equalJSON(request["completionRequestId"], originalRequest["requestId"]) {
+                referenceProjectNextActionOrigin = nil
+            }
             return
         }
         guard command.method == "taskCompletionCommit",
@@ -18020,21 +22540,371 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    private static func archivedTasksDeletePrefix(_ method: String) -> String? {
+    private static let conversionPrefixes = ["projectToSection", "projectToSectionUndo", "taskPromoteUndo"]
+
+    private static func conversionPrefix(_ method: String) -> String? {
+        conversionPrefixes.first { [$0 + "Write", $0 + "RetryOutcome", $0 + "Commit"].contains(method) }
+    }
+
+    private static func conversionRequest(_ prefix: String, _ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 210_000, try NativeJSON.hasUniqueObjectKeys(raw),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Conversion needs a bounded request")
+        }
+        func bounded(_ value: Any?, _ limit: Int) -> Bool {
+            (value as? String).map { !$0.isEmpty && $0.utf16.count <= limit } == true
+        }
+        func uuid(_ value: Any?) -> Bool {
+            (value as? String).map { UUID(uuidString: $0)?.uuidString.lowercased() == $0 } == true
+        }
+        if prefix == "projectToSection" {
+            guard Set(request.keys) == Set(["requestId", "projectId", "projectRevision", "destinationProjectId", "destinationRevision", "title"]),
+                  uuid(request["requestId"]), bounded(request["projectId"], 500), bounded(request["projectRevision"], 500),
+                  bounded(request["destinationProjectId"], 500), bounded(request["destinationRevision"], 500),
+                  bounded(request["title"], 100_000), !equalJSON(request["projectId"], request["destinationProjectId"]) else {
+                throw HostFailure("INVALID_INPUT: Convert to section needs two saved projects, a title and a lowercase UUID")
+            }
+            return request
+        }
+        let origin = prefix == "taskPromoteUndo" ? "promoteRequestId" : "convertRequestId"
+        guard Set(request.keys) == Set(["requestId", origin]), uuid(request["requestId"]), uuid(request[origin]),
+              !equalJSON(request["requestId"], request[origin]) else {
+            throw HostFailure("INVALID_INPUT: Conversion Undo needs distinct lowercase UUIDs")
+        }
+        return request
+    }
+
+    private func conversionJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard command.version == 2, command.editorDraft == nil, let prefix = Self.conversionPrefix(command.method),
+              command.method == prefix + "Commit", command.argumentsJSON.utf8.count <= 12_000_000,
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+              args[0].utf8.count <= 2_000_000,
+              let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Malformed conversion journal")
+        }
+        _ = try conversionPrepared(prefix, envelope)
+        return args
+    }
+
+    private func conversionPrepared(_ prefix: String, _ envelope: [String: Any]) throws -> [String: Any] {
+        let frozen = prefix == "projectToSection" ? "command" : prefix == "projectToSectionUndo" ? "convert" : "promote"
+        guard Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
+              prepared["kind"] as? String == prefix, Set(prepared.keys) == Set(["version", "kind", "request", frozen, "result"]),
+              Self.equalJSON(prepared["request"], request), prepared[frozen] is [String: Any],
+              prepared["result"] is [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Malformed conversion prepared wrapper")
+        }
+        let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+        _ = try Self.conversionRequest(prefix, raw)
+        return prepared
+    }
+
+    @inline(never)
+    private func prepareConversionCommand(prefix: String, arguments args: [Any]) throws -> PendingCommand {
+        guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Conversion needs a request") }
+        let request = try Self.conversionRequest(prefix, raw)
+        var input = raw
+        if prefix != "projectToSection" {
+            let promote = prefix == "taskPromoteUndo"
+            guard let confirmed = promote ? confirmedTaskPromoteEnvelope : confirmedProjectToSectionEnvelope,
+                  let origin = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
+                  let originRequest = origin["request"] as? [String: Any],
+                  Self.equalJSON(request[promote ? "promoteRequestId" : "convertRequestId"], originRequest["requestId"]) else {
+                throw HostFailure("INVALID_INPUT: Undo needs its confirmed conversion")
+            }
+            input = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, promote ? "promote" : "convert": origin],
+                options: [.sortedKeys]), as: UTF8.self)
+            guard input.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Conversion Undo is too large") }
+        }
+        let value = try invoke(prefix + "Prepare", arguments: [input])
+        guard value.utf8.count <= 2_000_000,
+              let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
+              let prepared = response["prepared"] as? [String: Any], Self.equalJSON(prepared["request"], request) else {
+            throw HostFailure("INVALID_INPUT: Malformed conversion preparation")
+        }
+        let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared],
+            options: [.sortedKeys]), as: UTF8.self)
+        guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Conversion journal is too large") }
+        let command = PendingCommand(version: 2, method: prefix + "Commit",
+            argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self))
+        _ = try invoke(prefix + "Validate", arguments: conversionJournalArguments(command))
+        return command
+    }
+
+    private func validateConversionAcknowledgment(_ command: PendingCommand, value: String) throws {
+        guard value.utf8.count <= 4_096, let raw = try conversionJournalArguments(command).first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any],
+              let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Self.equalJSON(result, prepared["result"]) else {
+            throw HostFailure("INVALID_INPUT: Malformed conversion acknowledgment")
+        }
+    }
+
+    @inline(never)
+    private func validatePendingConversionStartup() throws {
+        guard let command = pending, let prefix = Self.conversionPrefix(command.method) else { return }
+        _ = try invoke(prefix + "Validate", arguments: conversionJournalArguments(command))
+        if case .success(let value) = command.terminal { try validateConversionAcknowledgment(command, value: value) }
+    }
+
+    private func rememberConfirmedConversion(_ command: PendingCommand) {
+        if command.method == "taskPromoteCommit" {
+            let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String]
+            confirmedTaskPromoteEnvelope = args?.first
+            return
+        }
+        guard let prefix = Self.conversionPrefix(command.method),
+              let encoded = (try? conversionJournalArguments(command))?.first as? String else { return }
+        if prefix == "projectToSection" { confirmedProjectToSectionEnvelope = encoded }
+        else if prefix == "projectToSectionUndo" { confirmedProjectToSectionEnvelope = nil }
+        else { confirmedTaskPromoteEnvelope = nil }
+    }
+
+    private static func checklistMovePrefix(_ method: String) -> String? {
+        switch method {
+        case "taskChecklistMoveOptions", "taskChecklistMove", "taskChecklistMoveRetryOutcome", "taskChecklistMoveCommit": return "taskChecklistMove"
+        case "taskChecklistMoveUndo", "taskChecklistMoveUndoRetryOutcome", "taskChecklistMoveUndoCommit": return "taskChecklistMoveUndo"
+        default: return nil
+        }
+    }
+
+    private static func checklistMoveRequest(_ raw: String, options: Bool = false, undo: Bool = false) throws -> [String: Any] {
+        guard raw.utf8.count <= (options ? 16_384 : 4_096), try NativeJSON.hasUniqueObjectKeys(raw),
+              referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(raw.utf8))),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Add to checklist needs a bounded lossless request")
+        }
+        func bounded(_ value: Any?, _ limit: Int) -> Bool {
+            (value as? String).map { !$0.isEmpty && $0.utf16.count <= limit } == true
+        }
+        func uuid(_ value: Any?) -> Bool {
+            (value as? String).map { UUID(uuidString: $0)?.uuidString.lowercased() == $0 } == true
+        }
+        if undo {
+            guard Set(request.keys) == Set(["requestId", "moveRequestId"]), uuid(request["requestId"]), uuid(request["moveRequestId"]),
+                  !equalJSON(request["requestId"], request["moveRequestId"]) else {
+                throw HostFailure("INVALID_INPUT: Checklist Undo needs distinct lowercase UUIDs")
+            }
+        } else {
+            guard bounded(request["id"], 500), bounded(request["taskRevision"], 200) else {
+                throw HostFailure("INVALID_INPUT: Add to checklist needs a bounded displayed source")
+            }
+            if options {
+                guard Set(request.keys) == Set(["id", "taskRevision", "query", "offset", "limit", "revision"]),
+                      let query = request["query"] as? String, query.utf16.count <= 2_000,
+                      isInteger(request["offset"]), let offset = request["offset"] as? NSNumber,
+                      (0...9_007_199_254_740_991).contains(offset.doubleValue),
+                      isInteger(request["limit"]), let limit = request["limit"] as? Int, (1...100).contains(limit),
+                      request["revision"] is NSNull || bounded(request["revision"], 200) else {
+                    throw HostFailure("INVALID_INPUT: Add to checklist needs a bounded picker page")
+                }
+            } else {
+                guard Set(request.keys) == Set(["requestId", "id", "taskRevision", "targetId", "targetRevision"]),
+                      uuid(request["requestId"]), bounded(request["targetId"], 500), bounded(request["targetRevision"], 200),
+                      !equalJSON(request["id"], request["targetId"]) else {
+                    throw HostFailure("INVALID_INPUT: Add to checklist needs distinct displayed rows and a lowercase UUID")
+                }
+            }
+        }
+        return request
+    }
+
+    private func checklistMoveJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard command.version == 2, command.editorDraft == nil, let prefix = Self.checklistMovePrefix(command.method),
+              command.method == prefix + "Commit", command.argumentsJSON.utf8.count <= 12_610_000,
+              try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+              let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+              args[0].utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
+              Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(args[0].utf8))),
+              let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any] else {
+            throw HostFailure("INVALID_INPUT: Malformed Add to checklist journal")
+        }
+        _ = try checklistMoveEnvelope(envelope, undo: prefix.hasSuffix("Undo"))
+        return args
+    }
+
+    private func checklistMoveEnvelope(_ envelope: [String: Any], undo: Bool) throws -> [String: Any] {
+        guard Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
+              prepared["kind"] as? String == (undo ? "taskChecklistMoveUndo" : "taskChecklistMove"),
+              Set(prepared.keys) == Set(["version", "kind", "request", "scope", "rawBefore", "effect", "deviceIdBefore", "deviceIdToInitialize", "updateAt", "clock", "result"]).union(undo ? ["move"] : []),
+              Self.equalJSON(prepared["request"], request), let result = prepared["result"] as? [String: Any],
+              Set(result.keys) == Set(["id"]) else { throw HostFailure("INVALID_INPUT: Malformed Add to checklist prepared wrapper") }
+        let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+        _ = try Self.checklistMoveRequest(raw, undo: undo)
+        let expected: Any?
+        if undo {
+            guard let move = prepared["move"] as? [String: Any] else { throw HostFailure("INVALID_INPUT: Checklist Undo lost its original Move") }
+            let original = try checklistMoveEnvelope(move, undo: false)
+            guard Self.equalJSON(request["moveRequestId"], original["requestId"]) else {
+                throw HostFailure("INVALID_INPUT: Checklist Undo needs its exact original Move")
+            }
+            expected = original["id"]
+        } else { expected = request["targetId"] }
+        guard Self.equalJSON(result["id"], expected) else { throw HostFailure("INVALID_INPUT: Add to checklist result identity changed") }
+        return request
+    }
+
+    private func prepareChecklistMoveCommand(prefix: String, arguments args: [Any]) throws -> PendingCommand {
+        guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Add to checklist needs a request") }
+        let undo = prefix.hasSuffix("Undo"), request = try Self.checklistMoveRequest(raw, undo: prefix.hasSuffix("Undo"))
+        var input = raw
+        var originalMove: [String: Any]?
+        if undo {
+            guard let confirmedChecklistMoveEnvelope,
+                  let move = try NativeJSON.jsonObject(with: Data(confirmedChecklistMoveEnvelope.utf8)) as? [String: Any],
+                  let original = move["request"] as? [String: Any], Self.equalJSON(request["moveRequestId"], original["requestId"]) else {
+                throw HostFailure("INVALID_INPUT: Checklist Undo needs its retained confirmed Move")
+            }
+            originalMove = move
+            input = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "move": move], options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+            guard input.utf8.count <= 2_100_000 else { throw HostFailure("INVALID_INPUT: Checklist Undo is too large") }
+        }
+        let value = try invoke(prefix + "Prepare", arguments: [input])
+        guard value.utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(value),
+              Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))),
+              let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
+              let prepared = response["prepared"] as? [String: Any], Self.equalJSON(prepared["request"], request) else {
+            throw HostFailure("INVALID_INPUT: Malformed Add to checklist preparation")
+        }
+        guard !undo || Self.equalJSON(prepared["move"], originalMove) else {
+            throw HostFailure("INVALID_INPUT: Checklist Undo preparation changed its original Move")
+        }
+        let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+        guard envelope.utf8.count <= 2_100_000 else { throw HostFailure("INVALID_INPUT: Add to checklist journal is too large") }
+        let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
+        let command = PendingCommand(version: 2, method: prefix + "Commit", argumentsJSON: outer)
+        _ = try invoke(prefix + "Validate", arguments: checklistMoveJournalArguments(command))
+        return command
+    }
+
+    private func validateChecklistMoveAcknowledgment(_ command: PendingCommand, value: String) throws {
+        let args = try checklistMoveJournalArguments(command)
+        guard value.utf8.count <= 4_096, try NativeJSON.hasUniqueObjectKeys(value),
+              Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))),
+              let raw = args.first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any],
+              let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any], Set(result.keys) == Set(["id"]),
+              Self.equalJSON(result, prepared["result"]) else { throw HostFailure("INVALID_INPUT: Malformed Add to checklist acknowledgment") }
+    }
+
+    private func validateChecklistMoveTerminal(_ command: PendingCommand, terminal: TerminalResult) throws {
+        guard let prefix = Self.checklistMovePrefix(command.method), case .success(let value) = terminal else { return }
+        let proof = try invoke(prefix + "Outcome", arguments: checklistMoveJournalArguments(command))
+        guard proof != "null" else { throw HostFailure("SAVE_FAILED: Add to checklist has no exact saved receipt") }
+        try validateChecklistMoveAcknowledgment(command, value: proof)
+        try validateChecklistMoveAcknowledgment(command, value: value)
+    }
+
+    @inline(never)
+    private func validatePendingChecklistMoveStartup() throws {
+        guard let command = pending, let prefix = Self.checklistMovePrefix(command.method) else { return }
+        _ = try invoke(prefix + "Validate", arguments: checklistMoveJournalArguments(command))
+        if case .success(let value) = command.terminal { try validateChecklistMoveAcknowledgment(command, value: value) }
+    }
+
+    private func rememberConfirmedChecklistMove(_ command: PendingCommand) {
+        guard let prefix = Self.checklistMovePrefix(command.method),
+              let args = try? checklistMoveJournalArguments(command), let encoded = args.first as? String else { return }
+        if prefix == "taskChecklistMove" { confirmedChecklistMoveEnvelope = encoded }
+        else {
+            confirmedChecklistMoveUndoEnvelope = encoded
+            if let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+               let prepared = envelope["prepared"] as? [String: Any], let move = prepared["move"] as? [String: Any],
+               let bytes = try? JSONSerialization.data(withJSONObject: move, options: [.sortedKeys, .withoutEscapingSlashes]) {
+                confirmedChecklistMoveEnvelope = String(decoding: bytes, as: UTF8.self)
+            }
+        }
+    }
+
+    private func checklistMoveReceiptOutcome(prefix: String, arguments args: [Any]) throws -> String {
+        guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Add to checklist needs a request") }
+        let request = try Self.checklistMoveRequest(raw, undo: prefix.hasSuffix("Undo"))
+        let confirmed = prefix.hasSuffix("Undo") ? confirmedChecklistMoveUndoEnvelope : confirmedChecklistMoveEnvelope
+        guard let confirmed, let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
+              Self.equalJSON(envelope["request"], request) else { return #"{"kind":"unproven"}"# }
+        let command = PendingCommand(version: 2, method: prefix + "Commit",
+            argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed]), as: UTF8.self))
+        _ = try invoke(prefix + "Validate", arguments: checklistMoveJournalArguments(command))
+        let value = try invoke(prefix + "Outcome", arguments: [confirmed])
+        if value == "null" { return #"{"kind":"unproven"}"# }
+        try validateChecklistMoveAcknowledgment(command, value: value)
+        let result = try NativeJSON.jsonObject(with: Data(value.utf8))
+        return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+    }
+
+    private func checklistMoveOptions(arguments args: [Any]) throws -> String {
+        guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Add to checklist needs a picker request") }
+        let request = try Self.checklistMoveRequest(raw, options: true)
+        let value: String
+        do { value = try invoke("taskChecklistMoveOptions", arguments: args) }
+        catch let failure as HostFailure {
+            guard ["INVALID_INPUT:", "STALE_REVISION:", "TASK_NOT_FOUND:"].contains(where: { failure.message.hasPrefix($0) }) else { throw failure }
+            throw CoreHostRejection(message: failure.message)
+        }
+        guard value.utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(value),
+              Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))),
+              let options = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(options.keys) == Set(["title", "searchPlaceholder", "cancelLabel", "noMatchesLabel", "addedMessage", "undoLabel", "taskId", "taskRevision", "revision", "query", "offset", "total", "hasMore", "items"]),
+              ["title", "searchPlaceholder", "cancelLabel", "noMatchesLabel", "addedMessage", "undoLabel"].allSatisfy({ options[$0] is String }),
+              Self.equalJSON(options["taskId"], request["id"]), Self.equalJSON(options["taskRevision"], request["taskRevision"]),
+              Self.equalJSON(options["query"], request["query"]), Self.equalJSON(options["offset"], request["offset"]),
+              let revision = options["revision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+              Self.isInteger(options["total"]), let total = options["total"] as? NSNumber,
+              (0...9_007_199_254_740_991).contains(total.doubleValue), Self.isBoolean(options["hasMore"]),
+              let items = options["items"] as? [[String: Any]], let limit = request["limit"] as? Int, items.count <= limit,
+              Set(items.compactMap { ($0["id"] as? String).map { Data($0.utf8) } }).count == items.count,
+              items.allSatisfy({ item in
+                  guard Set(item.keys) == Set(["id", "taskRevision", "title", "completedCount", "totalCount"]),
+                        let id = item["id"] as? String, !id.isEmpty, id.utf16.count <= 500, !Self.equalJSON(id, request["id"]),
+                        let revision = item["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+                        item["title"] is String, Self.isInteger(item["completedCount"]), Self.isInteger(item["totalCount"]),
+                        let completed = item["completedCount"] as? NSNumber, let count = item["totalCount"] as? NSNumber else { return false }
+                  return (0...9_007_199_254_740_991).contains(count.doubleValue) && (0...count.doubleValue).contains(completed.doubleValue)
+              }) else { throw HostFailure("INVALID_INPUT: Malformed Add to checklist options") }
+        return value
+    }
+
+    private static func taskListDeletePrefix(_ method: String) -> String? {
         switch method {
         case "archivedTasksDeleteWrite", "archivedTasksDeleteRetryOutcome", "archivedTasksDeleteCommit": return "archivedTasksDelete"
         case "archivedTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome", "archivedTasksDeleteUndoCommit": return "archivedTasksDeleteUndo"
+        case "projectTasksDeleteWrite", "projectTasksDeleteRetryOutcome", "projectTasksDeleteCommit": return "projectTasksDelete"
+        case "projectTasksDeleteUndoWrite", "projectTasksDeleteUndoRetryOutcome", "projectTasksDeleteUndoCommit": return "projectTasksDeleteUndo"
         default: return nil
         }
+    }
+
+    private func confirmedTaskListDeleteEnvelope(prefix: String) -> String? {
+        switch prefix {
+        case "projectTasksDelete": return confirmedProjectTasksDeleteEnvelope
+        case "projectTasksDeleteUndo": return confirmedProjectTasksDeleteUndoEnvelope
+        case "archivedTasksDelete": return confirmedArchivedTasksDeleteEnvelope
+        case "archivedTasksDeleteUndo": return confirmedArchivedTasksDeleteUndoEnvelope
+        default: return nil
+        }
+    }
+
+    private func statusListMoveSource(_ command: PendingCommand) -> String {
+        guard let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
+              let encoded = args.first, let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              let source = (envelope["request"] as? [String: Any])?["source"] as? String,
+              ["waiting", "someday", "review", "contexts"].contains(source) else { return "inbox" }
+        return source
     }
 
     private func historyBulkSource(_ command: PendingCommand) -> String {
         guard let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
               let encoded = args.first, let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else { return "archive" }
-        let deletion = command.method == "archivedTasksDeleteUndoCommit"
+        let deletion = ["archivedTasksDeleteUndoCommit", "projectTasksDeleteUndoCommit"].contains(command.method)
             ? (envelope["prepared"] as? [String: Any])?["delete"] as? [String: Any] : envelope
         let source = (deletion?["request"] as? [String: Any])?["source"] as? String
-        return source == "inbox" ? "inbox" : source == "reference" ? "reference" : source == "done" ? "done" : "archive"
+        return ["project", "inbox", "reference", "done", "waiting", "someday", "review", "contexts"].contains(source ?? "") ? source! : "archive"
     }
 
     private func historyBulkTagAction(_ command: PendingCommand) -> String? {
@@ -18046,8 +22916,8 @@ private final class Engine: @unchecked Sendable {
         return Self.isDoneBulkRemoveTagRequest(request) ? "removeTag" : nil
     }
 
-    private func archivedTasksDeleteJournalArguments(_ command: PendingCommand) throws -> [Any] {
-        guard let prefix = Self.archivedTasksDeletePrefix(command.method), command.method == prefix + "Commit", command.editorDraft == nil,
+    private func taskListDeleteJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        guard let prefix = Self.taskListDeletePrefix(command.method), command.method == prefix + "Commit", command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= 12_000_000,
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
               args[0].utf8.count <= 2_000_000,
@@ -18060,17 +22930,36 @@ private final class Engine: @unchecked Sendable {
               prepared["deviceIdToInitialize"] is NSNull || prepared["deviceIdToInitialize"] is String,
               (prepared["updateAt"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 100 }) == true,
               let result = prepared["result"] as? [String: Any] else { throw HostFailure("Malformed Archive bulk Delete journal") }
-        let deletionRequest = prefix == "archivedTasksDelete" ? request
+        let project = prefix.hasPrefix("project"), undo = prefix.hasSuffix("Undo")
+        let deletionRequest = !undo ? request
             : ((prepared["delete"] as? [String: Any])?["request"] as? [String: Any])
-        if deletionRequest?["source"] as? String == "inbox" {
+        if project || deletionRequest?["source"] as? String == "inbox" {
             guard try NativeJSON.hasUniqueObjectKeys(args[0]), Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(args[0].utf8))) else {
                 throw HostFailure("Malformed Inbox bulk Delete journal: lossy JSON")
             }
         }
         let keys: Set<String> = ["version", "request", "before", "after", "deviceIdBefore", "deviceIdToInitialize", "updateAt", "result"]
+        let temporalKeys: Set<String> = project ? ["preparedLocalDay", "preparedOffsetMinutes", "boundaryOffsetMinutes", "futureBoundary", "dates"] : []
+        if project {
+            guard deletionRequest?["source"] as? String == "project",
+                  let day = prepared["preparedLocalDay"] as? String, day.utf8.count == 10,
+                  Self.isInteger(prepared["preparedOffsetMinutes"]), Self.isInteger(prepared["boundaryOffsetMinutes"]),
+                  let boundary = prepared["futureBoundary"] as? String, !boundary.isEmpty, boundary.utf8.count <= 100,
+                  prepared["dates"] is [[String: Any]] else { throw HostFailure("Malformed Project bulk Delete temporal scope") }
+        }
         let ids: [String]
-        if prefix == "archivedTasksDelete" {
-            let withProjects = ["done", "reference", "inbox"].contains(request["source"] as? String ?? "")
+        if project && !undo {
+            guard Set(prepared.keys) == keys.union(["scope"]).union(temporalKeys),
+                  let selected = request["taskIds"] as? [String],
+                  let scope = prepared["scope"] as? [String: Any], Set(scope.keys) == Set(["tasks", "projects", "sections", "areas", "settings"]),
+                  scope["tasks"] is [[String: Any]], scope["projects"] is [[String: Any]],
+                  scope["sections"] is [[String: Any]], scope["areas"] is [[String: Any]], scope["settings"] is [String: Any] else {
+                throw HostFailure("Malformed Project bulk Delete structure")
+            }
+            ids = selected
+            try validateArchivedTasksDeleteNotice(result)
+        } else if !undo {
+            let withProjects = ["done", "reference", "inbox", "waiting", "someday", "review", "contexts"].contains(request["source"] as? String ?? "")
             guard Set(prepared.keys) == (withProjects ? keys.union(["projects"]) : keys),
                   !withProjects || prepared["projects"] is [[String: Any]], let selected = request["taskIds"] as? [String] else {
                 throw HostFailure("Malformed Archive bulk Delete structure")
@@ -18078,7 +22967,7 @@ private final class Engine: @unchecked Sendable {
             ids = selected
             try validateArchivedTasksDeleteNotice(result)
         } else {
-            guard Set(prepared.keys) == keys.union(["delete", "scope"]),
+            guard Set(prepared.keys) == keys.union(["delete", "scope"]).union(temporalKeys),
                   let deletion = prepared["delete"] as? [String: Any], Set(deletion.keys) == Set(["request", "prepared"]),
                   let deletedRequest = deletion["request"] as? [String: Any],
                   Self.equalJSON(request["deleteRequestId"], deletedRequest["requestId"]),
@@ -18106,14 +22995,15 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    private func prepareArchivedTasksDeleteCommand(prefix: String, arguments args: [Any]) throws -> PendingCommand {
+    private func prepareTaskListDeleteCommand(prefix: String, arguments args: [Any]) throws -> PendingCommand {
         guard let encodedRequest = args.first as? String,
               let request = try NativeJSON.jsonObject(with: Data(encodedRequest.utf8)) as? [String: Any] else {
             throw HostFailure("INVALID_INPUT: Archive bulk Delete needs a bounded request")
         }
         var input = encodedRequest
-        if prefix == "archivedTasksDeleteUndo" {
-            guard let confirmed = confirmedArchivedTasksDeleteEnvelope,
+        if prefix.hasSuffix("Undo") {
+            let originalPrefix = prefix.hasPrefix("project") ? "projectTasksDelete" : "archivedTasksDelete"
+            guard let confirmed = confirmedTaskListDeleteEnvelope(prefix: originalPrefix),
                   let deletion = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
                   let original = deletion["request"] as? [String: Any],
                   Self.equalJSON(request["deleteRequestId"], original["requestId"]) else {
@@ -18133,27 +23023,38 @@ private final class Engine: @unchecked Sendable {
         let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
         guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Archive bulk Delete journal is too large; select fewer tasks") }
         let command = PendingCommand(version: 2, method: prefix + "Commit", argumentsJSON: outer)
-        _ = try invoke(prefix + "Validate", arguments: archivedTasksDeleteJournalArguments(command))
+        _ = try invoke(prefix + "Validate", arguments: taskListDeleteJournalArguments(command))
         return command
     }
 
-    private func rememberConfirmedArchivedTasksDelete(_ command: PendingCommand) {
-        guard let prefix = Self.archivedTasksDeletePrefix(command.method), command.method == prefix + "Commit",
+    private func rememberConfirmedTaskListDelete(_ command: PendingCommand) {
+        guard let prefix = Self.taskListDeletePrefix(command.method), command.method == prefix + "Commit",
               let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], let encoded = args.first else { return }
-        if prefix == "archivedTasksDelete" { confirmedArchivedTasksDeleteEnvelope = encoded }
-        else { confirmedArchivedTasksDeleteUndoEnvelope = encoded }
+        switch prefix {
+        case "projectTasksDelete": confirmedProjectTasksDeleteEnvelope = encoded
+        case "projectTasksDeleteUndo":
+            confirmedProjectTasksDeleteUndoEnvelope = encoded
+            if let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+               let deletion = envelope["prepared"] as? [String: Any], let original = deletion["delete"] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]) {
+                confirmedProjectTasksDeleteEnvelope = String(decoding: data, as: UTF8.self)
+            }
+        case "archivedTasksDelete": confirmedArchivedTasksDeleteEnvelope = encoded
+        case "archivedTasksDeleteUndo": confirmedArchivedTasksDeleteUndoEnvelope = encoded
+        default: break
+        }
     }
 
-    private func archivedTasksDeleteReceiptOutcome(prefix: String, arguments args: [Any]) throws -> String {
+    private func taskListDeleteReceiptOutcome(prefix: String, arguments args: [Any]) throws -> String {
         guard let encodedRequest = args.first as? String,
               let request = try NativeJSON.jsonObject(with: Data(encodedRequest.utf8)) as? [String: Any],
-              let confirmed = prefix == "archivedTasksDelete" ? confirmedArchivedTasksDeleteEnvelope : confirmedArchivedTasksDeleteUndoEnvelope,
+              let confirmed = confirmedTaskListDeleteEnvelope(prefix: prefix),
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any], Self.equalJSON(envelope["request"], request) else {
             return #"{"kind":"unproven"}"#
         }
         let command = PendingCommand(version: 2, method: prefix + "Commit",
                                      argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed]), as: UTF8.self))
-        _ = try invoke(prefix + "Validate", arguments: archivedTasksDeleteJournalArguments(command))
+        _ = try invoke(prefix + "Validate", arguments: taskListDeleteJournalArguments(command))
         let value = try invoke(prefix + "Outcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
@@ -18265,110 +23166,178 @@ private final class Engine: @unchecked Sendable {
         return true
     }
 
-    private static func validInboxTasksMoveResult(_ result: [String: Any], request: [String: Any]) -> Bool {
+    private static func validProjectTasksMoveRequest(_ request: [String: Any]) -> Bool {
+        guard request["source"] as? String == "project",
+              ["inbox", "next", "waiting", "someday", "done", "reference"].contains(request["status"] as? String ?? ""),
+              let params = request["params"] as? [String: Any],
+              Set(params.keys).isSubset(of: ["projectId", "showCompleted", "completedCollapsed", "filters", "filterSheetOpen"]),
+              let projectID = params["projectId"] as? String, !projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              projectID.utf16.count <= 500,
+              isBoolean(params["showCompleted"]), isBoolean(params["completedCollapsed"]),
+              params["filters"] is [String: Any],
+              params["filterSheetOpen"] == nil || isBoolean(params["filterSheetOpen"]) && params["filterSheetOpen"] as? Bool == false else { return false }
+        var selection = request
+        selection["source"] = "inbox"
+        selection["status"] = "next"
+        selection["params"] = [String: Any]()
+        return validInboxTasksMoveRequest(selection)
+    }
+
+    private static func validShownListParams(_ params: [String: Any], source: String) -> Bool {
+        func ids(_ value: Any?) -> Bool {
+            value == nil || (value as? [String]).map({ $0.count <= 10_000 && $0.allSatisfy { $0.utf16.count <= 500 } }) == true
+        }
+        if source == "review" {
+            return Set(params.keys).isSubset(of: ["scope", "expandedAreaIds", "expandedProjectIds", "expandedLaterProjectIds"])
+                && (params["scope"] == nil || ["due", "all"].contains(params["scope"] as? String ?? ""))
+                && ids(params["expandedAreaIds"]) && ids(params["expandedProjectIds"]) && ids(params["expandedLaterProjectIds"])
+        }
+        return source == "contexts"
+            && Set(params.keys).isSubset(of: ["tokens", "matchMode", "searchQuery", "filters", "savedFilterId", "preservedCriteria"])
+            && ids(params["tokens"]) && params["filters"] is [String: Any]
+            && (params["matchMode"] == nil || ["all", "any"].contains(params["matchMode"] as? String ?? ""))
+            && (params["searchQuery"] == nil || (params["searchQuery"] as? String).map({ $0.utf16.count <= 2_000 }) == true)
+            && (params["savedFilterId"] == nil || params["savedFilterId"] is NSNull
+                || (params["savedFilterId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true)
+            && (params["preservedCriteria"] == nil || params["preservedCriteria"] is [String: Any])
+    }
+
+    private static func validStatusListMoveRequest(_ request: [String: Any]) -> Bool {
+        guard let source = request["source"] as? String, ["waiting", "someday", "review", "contexts"].contains(source) else { return validInboxTasksMoveRequest(request) }
+        guard let status = request["status"] as? String, status != source,
+              ["inbox", "next", "waiting", "someday", "done", "reference"].contains(status),
+              let params = request["params"] as? [String: Any] else { return false }
+        let validParams = ["review", "contexts"].contains(source) ? validShownListParams(params, source: source) : source == "waiting"
+            ? Set(params.keys).isSubset(of: ["person"]) && (params["person"] == nil || (params["person"] as? String).map({ $0.utf16.count <= 200 }) == true)
+            : Set(params.keys).isSubset(of: ["sortBy", "groupBy", "showDetails", "projectsInSections", "filters"])
+                && (params["sortBy"] == nil || (params["sortBy"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 50 }) == true)
+                && (params["groupBy"] == nil || (params["groupBy"] as? String).map({ ["viewSection", "none", "project", "area"].contains($0) }) == true)
+                && (params["showDetails"] == nil || isBoolean(params["showDetails"]))
+                && (params["projectsInSections"] == nil || isBoolean(params["projectsInSections"]))
+                && (params["filters"] == nil || params["filters"] is [String: Any])
+        guard validParams else { return false }
+        var selection = request
+        selection["source"] = "inbox"
+        selection["status"] = "next"
+        selection["params"] = [String: Any]()
+        return validInboxTasksMoveRequest(selection)
+    }
+
+    private static func validTaskListMoveRequest(_ request: [String: Any], source: String, statusLists: Bool = false) -> Bool {
+        switch source {
+        case "inbox": return statusLists ? validStatusListMoveRequest(request) : validInboxTasksMoveRequest(request)
+        case "project": return validProjectTasksMoveRequest(request)
+        default: return false
+        }
+    }
+
+    private static func validTaskListMoveResult(_ result: [String: Any], request: [String: Any]) -> Bool {
         guard let ids = request["taskIds"] as? [String] else { return false }
         return Set(result.keys) == Set(["count", "status"]) && isInteger(result["count"], equalTo: ids.count)
             && equalJSON(result["status"], request["status"])
     }
 
-    private func inboxTasksMoveJournalArguments(_ command: PendingCommand) throws -> [Any] {
-        guard command.method == "inboxTasksMoveCommit", command.editorDraft == nil,
+    private func taskListMoveJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        let source = command.method == "projectTasksMoveCommit" ? "project" : "inbox"
+        guard ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method), command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= 12_000_000,
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
               args.count == 1, args[0].utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
               let raw = try? NativeJSON.jsonObject(with: Data(args[0].utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let envelope = raw as? [String: Any],
               Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
-              Self.validInboxTasksMoveRequest(request), let prepared = envelope["prepared"] as? [String: Any],
+              Self.validTaskListMoveRequest(request, source: source, statusLists: true), let prepared = envelope["prepared"] as? [String: Any],
               Self.isInteger(prepared["version"], equalTo: 1), Self.equalJSON(prepared["request"], request),
-              let result = prepared["result"] as? [String: Any], Self.validInboxTasksMoveResult(result, request: request) else {
-            throw HostFailure("Malformed Inbox bulk Move journal")
+              let result = prepared["result"] as? [String: Any], Self.validTaskListMoveResult(result, request: request) else {
+            throw HostFailure("Malformed Task list bulk Move journal")
         }
         return args
     }
 
-    private func prepareInboxTasksMoveCommand(arguments args: [Any]) throws -> PendingCommand {
+    private func prepareTaskListMoveCommand(arguments args: [Any], source: String = "inbox") throws -> PendingCommand {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              Self.validInboxTasksMoveRequest(request) else { throw HostFailure("INVALID_INPUT: Inbox bulk Move needs a bounded request") }
-        let value = try invoke("inboxTasksMovePrepare", arguments: args)
+              Self.validTaskListMoveRequest(request, source: source, statusLists: true) else { throw HostFailure("INVALID_INPUT: Task list bulk Move needs a bounded request") }
+        let value = try invoke("\(source)TasksMovePrepare", arguments: args)
         guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
               let raw = try? NativeJSON.jsonObject(with: Data(value.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let response = raw as? [String: Any],
               Set(response.keys) == Set(["kind", "prepared"]), response["kind"] as? String == "prepared",
               let prepared = response["prepared"] as? [String: Any], Self.equalJSON(prepared["request"], request) else {
-            throw HostFailure("Malformed Inbox bulk Move preparation")
+            throw HostFailure("Malformed Task list bulk Move preparation")
         }
         let envelope = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
-        guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Inbox bulk Move journal is too large; select fewer tasks") }
+        guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Task list bulk Move journal is too large; select fewer tasks") }
         let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
-        guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Inbox bulk Move journal is too large; select fewer tasks") }
-        let command = PendingCommand(version: 2, method: "inboxTasksMoveCommit", argumentsJSON: outer)
-        _ = try invoke("inboxTasksMoveValidate", arguments: inboxTasksMoveJournalArguments(command))
+        guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Task list bulk Move journal is too large; select fewer tasks") }
+        let command = PendingCommand(version: 2, method: "\(source)TasksMoveCommit", argumentsJSON: outer)
+        _ = try invoke("\(source)TasksMoveValidate", arguments: taskListMoveJournalArguments(command))
         return command
     }
 
-    private func inboxTasksMoveReceiptOutcome(arguments args: [Any]) throws -> String {
+    private func taskListMoveReceiptOutcome(arguments args: [Any], source: String = "inbox") throws -> String {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              let confirmed = confirmedInboxTasksMoveEnvelope,
+              Self.validTaskListMoveRequest(request, source: source, statusLists: true),
+              let confirmed = source == "project" ? confirmedProjectTasksMoveEnvelope : confirmedInboxTasksMoveEnvelope,
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
               Self.equalJSON(envelope["request"], request) else { return #"{"kind":"unproven"}"# }
-        let command = PendingCommand(version: 2, method: "inboxTasksMoveCommit",
+        let command = PendingCommand(version: 2, method: "\(source)TasksMoveCommit",
             argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed], options: [.sortedKeys]), as: UTF8.self))
-        _ = try invoke("inboxTasksMoveValidate", arguments: inboxTasksMoveJournalArguments(command))
-        let value = try invoke("inboxTasksMoveOutcome", arguments: [confirmed])
+        _ = try invoke("\(source)TasksMoveValidate", arguments: taskListMoveJournalArguments(command))
+        let value = try invoke("\(source)TasksMoveOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
 
-    private static func validInboxTasksAddTagRequest(_ request: [String: Any]) -> Bool {
+    private static func validTaskListAddTagRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "tag", "params", "source"]),
               let tag = request["tag"] as? String, tag.utf16.count <= 2_000 else { return false }
         // Reuse the exact-byte selection transport; core owns tag semantics.
         var selection = request
         selection.removeValue(forKey: "tag")
         selection["status"] = "next"
-        return validInboxTasksMoveRequest(selection)
+        return validTaskListMoveRequest(selection, source: source, statusLists: source == "inbox")
     }
 
-    private static func validInboxTasksAddTagResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
+    private static func validTaskListAddTagResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
         guard Set(result.keys) == Set(["count", "changed"]), isInteger(result["count"]), isBoolean(result["changed"]),
               let ids = request["taskIds"] as? [String], let count = result["count"] as? NSNumber,
               let changed = result["changed"] as? Bool else { return false }
         return changed ? count.doubleValue > 0 && count.doubleValue <= Double(ids.count) : allowNoop && count.doubleValue == 0
     }
 
-    private func inboxTasksAddTagJournalArguments(_ command: PendingCommand) throws -> [Any] {
-        guard command.method == "inboxTasksAddTagCommit", command.editorDraft == nil,
+    private func taskListAddTagJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        let source = command.method == "projectTasksAddTagCommit" ? "project" : "inbox"
+        guard ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method), command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= 12_000_000,
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
               args.count == 1, args[0].utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
               let raw = try? NativeJSON.jsonObject(with: Data(args[0].utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let envelope = raw as? [String: Any], Set(envelope.keys) == Set(["request", "prepared"]),
-              let request = envelope["request"] as? [String: Any], Self.validInboxTasksAddTagRequest(request),
+              let request = envelope["request"] as? [String: Any], Self.validTaskListAddTagRequest(request, source: source),
               let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
               Self.equalJSON(prepared["request"], request), let result = prepared["result"] as? [String: Any],
-              Self.validInboxTasksAddTagResult(result, request: request) else {
+              Self.validTaskListAddTagResult(result, request: request) else {
             throw HostFailure("Malformed Inbox bulk Add tag journal")
         }
         return args
     }
 
-    private func prepareInboxTasksAddTagCommand(arguments args: [Any]) throws -> ArchivedRestorePreparation {
+    private func prepareTaskListAddTagCommand(arguments args: [Any], source: String = "inbox") throws -> ArchivedRestorePreparation {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              Self.validInboxTasksAddTagRequest(request) else { throw HostFailure("INVALID_INPUT: Inbox bulk Add tag needs a bounded request") }
-        let value = try invoke("inboxTasksAddTagPrepare", arguments: args)
+              Self.validTaskListAddTagRequest(request, source: source) else { throw HostFailure("INVALID_INPUT: Inbox bulk Add tag needs a bounded request") }
+        let value = try invoke("\(source)TasksAddTagPrepare", arguments: args)
         guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
               let raw = try? NativeJSON.jsonObject(with: Data(value.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let response = raw as? [String: Any] else { throw HostFailure("Malformed Inbox bulk Add tag preparation") }
         if response["kind"] as? String == "noop" {
             guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any],
                   result["changed"] as? Bool == false,
-                  Self.validInboxTasksAddTagResult(result, request: request, allowNoop: true) else {
+                  Self.validTaskListAddTagResult(result, request: request, allowNoop: true) else {
                 throw HostFailure("Malformed Inbox bulk Add tag no-op")
             }
             return .noop(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
@@ -18381,28 +23350,29 @@ private final class Engine: @unchecked Sendable {
         guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Inbox tag journal is too large; select fewer tasks") }
         let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
         guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Inbox tag journal is too large; select fewer tasks") }
-        let command = PendingCommand(version: 2, method: "inboxTasksAddTagCommit", argumentsJSON: outer)
-        _ = try invoke("inboxTasksAddTagValidate", arguments: inboxTasksAddTagJournalArguments(command))
+        let command = PendingCommand(version: 2, method: "\(source)TasksAddTagCommit", argumentsJSON: outer)
+        _ = try invoke("\(source)TasksAddTagValidate", arguments: taskListAddTagJournalArguments(command))
         return .prepared(command)
     }
 
-    private func inboxTasksAddTagReceiptOutcome(arguments args: [Any]) throws -> String {
+    private func taskListAddTagReceiptOutcome(arguments args: [Any], source: String = "inbox") throws -> String {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              let confirmed = confirmedInboxTasksAddTagEnvelope,
+              Self.validTaskListAddTagRequest(request, source: source),
+              let confirmed = source == "project" ? confirmedProjectTasksAddTagEnvelope : confirmedInboxTasksAddTagEnvelope,
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
               Self.equalJSON(envelope["request"], request) else { return #"{"kind":"unproven"}"# }
-        let command = PendingCommand(version: 2, method: "inboxTasksAddTagCommit",
+        let command = PendingCommand(version: 2, method: "\(source)TasksAddTagCommit",
             argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed], options: [.sortedKeys]), as: UTF8.self))
-        _ = try invoke("inboxTasksAddTagValidate", arguments: inboxTasksAddTagJournalArguments(command))
-        let value = try invoke("inboxTasksAddTagOutcome", arguments: [confirmed])
+        _ = try invoke("\(source)TasksAddTagValidate", arguments: taskListAddTagJournalArguments(command))
+        let value = try invoke("\(source)TasksAddTagOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
 
-    private static func validInboxTasksRemoveTagRequest(_ request: [String: Any]) -> Bool {
+    private static func validTaskListRemoveTagRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "tags", "params", "source"]),
               let tags = request["tags"] as? [String], (1...10_000).contains(tags.count),
               tags.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 2_000_000 }),
@@ -18411,7 +23381,7 @@ private final class Engine: @unchecked Sendable {
         var selection = request
         selection.removeValue(forKey: "tags")
         selection["status"] = "next"
-        return validInboxTasksMoveRequest(selection)
+        return validTaskListMoveRequest(selection, source: source)
     }
 
     private static func validInboxOrganizeDraft(_ draft: [String: Any]) -> Bool {
@@ -18422,15 +23392,15 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
-    private static func validInboxTasksOrganizeRequest(_ request: [String: Any]) -> Bool {
+    private static func validTaskListOrganizeRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "draft", "params", "source"]),
               let draft = request["draft"] as? [String: Any], validInboxOrganizeDraft(draft) else { return false }
         var selection = request
         selection.removeValue(forKey: "draft")
         selection["status"] = "next"
-        return validInboxTasksMoveRequest(selection)
+        return validTaskListMoveRequest(selection, source: source)
     }
-    private static func validInboxOrganizeDestinationCreateRequest(_ request: [String: Any]) -> Bool {
+    private static func validTaskListOrganizeDestinationCreateRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "draft", "params", "source", "kind", "name", "offerRevision"]),
               let draft = request["draft"] as? [String: Any], validInboxOrganizeDraft(draft) else { return false }
         guard let kind = request["kind"] as? String, ["project", "area"].contains(kind),
@@ -18441,88 +23411,91 @@ private final class Engine: @unchecked Sendable {
         selection.removeValue(forKey: "draft")
         for field in ["kind", "name", "offerRevision"] { selection.removeValue(forKey: field) }
         selection["status"] = "next"
-        return validInboxTasksMoveRequest(selection)
+        return validTaskListMoveRequest(selection, source: source)
     }
 
-    private static func validInboxTasksRemoveTagResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
+    private static func validTaskListRemoveTagResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
         guard Set(result.keys) == Set(["count", "changed"]), isInteger(result["count"]), isBoolean(result["changed"]),
               let ids = request["taskIds"] as? [String], let count = result["count"] as? NSNumber,
               let changed = result["changed"] as? Bool else { return false }
         return changed ? count.doubleValue > 0 && count.doubleValue <= Double(ids.count) : allowNoop && count.doubleValue == 0
     }
 
-    private static func validInboxTasksOrganizeResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
+    private static func validTaskListOrganizeResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
         guard Set(result.keys) == Set(["count", "changed"]), isInteger(result["count"]), isBoolean(result["changed"]),
               let ids = request["taskIds"] as? [String], let count = result["count"] as? NSNumber,
               let changed = result["changed"] as? Bool else { return false }
         return changed ? count.doubleValue > 0 && count.doubleValue <= Double(ids.count) : allowNoop && count.doubleValue == 0
     }
-    private static func validInboxOrganizeDestinationCreateResult(_ result: [String: Any], request: [String: Any]) -> Bool {
+    private static func validTaskListOrganizeDestinationCreateResult(_ result: [String: Any], request: [String: Any]) -> Bool {
         guard Set(result.keys) == Set(["id", "changed"]), isBoolean(result["changed"]),
               result["changed"] as? Bool == true, let id = result["id"] as? String,
               !id.isEmpty, id.utf16.count <= 500 else { return false }
         return true
     }
 
-    private func inboxTasksRemoveTagJournalArguments(_ command: PendingCommand) throws -> [Any] {
-        guard command.method == "inboxTasksRemoveTagCommit", command.editorDraft == nil,
+    private func taskListRemoveTagJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        let source = command.method == "projectTasksRemoveTagCommit" ? "project" : "inbox"
+        guard ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method), command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= 12_000_000,
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
               args.count == 1, args[0].utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
               let raw = try? NativeJSON.jsonObject(with: Data(args[0].utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let envelope = raw as? [String: Any], Set(envelope.keys) == Set(["request", "prepared"]),
-              let request = envelope["request"] as? [String: Any], Self.validInboxTasksRemoveTagRequest(request),
+              let request = envelope["request"] as? [String: Any], Self.validTaskListRemoveTagRequest(request, source: source),
               let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
               Self.equalJSON(prepared["request"], request), let result = prepared["result"] as? [String: Any],
-              Self.validInboxTasksRemoveTagResult(result, request: request) else {
+              Self.validTaskListRemoveTagResult(result, request: request) else {
             throw HostFailure("Malformed Inbox bulk Remove tag journal")
         }
         return args
     }
 
-    private func inboxTasksOrganizeJournalArguments(_ command: PendingCommand) throws -> [Any] {
-        guard command.method == "inboxTasksOrganizeCommit", command.editorDraft == nil,
+    private func taskListOrganizeJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        let source = command.method == "projectTasksOrganizeCommit" ? "project" : "inbox"
+        guard ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method), command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= 12_000_000,
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
               args.count == 1, args[0].utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
               let raw = try? NativeJSON.jsonObject(with: Data(args[0].utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let envelope = raw as? [String: Any], Set(envelope.keys) == Set(["request", "prepared"]),
-              let request = envelope["request"] as? [String: Any], Self.validInboxTasksOrganizeRequest(request),
+              let request = envelope["request"] as? [String: Any], Self.validTaskListOrganizeRequest(request, source: source),
               let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
               Self.equalJSON(prepared["request"], request), let result = prepared["result"] as? [String: Any],
-              Self.validInboxTasksOrganizeResult(result, request: request) else {
+              Self.validTaskListOrganizeResult(result, request: request) else {
             throw HostFailure("Malformed Inbox bulk Organize journal")
         }
         return args
     }
-    private func inboxOrganizeDestinationCreateJournalArguments(_ command: PendingCommand) throws -> [Any] {
-        guard command.method == "inboxOrganizeDestinationCreateCommit", command.editorDraft == nil,
+    private func taskListOrganizeDestinationCreateJournalArguments(_ command: PendingCommand) throws -> [Any] {
+        let source = command.method == "projectOrganizeDestinationCreateCommit" ? "project" : "inbox"
+        guard ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method), command.editorDraft == nil,
               command.argumentsJSON.utf8.count <= 12_000_000,
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
               args.count == 1, args[0].utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
               let raw = try? NativeJSON.jsonObject(with: Data(args[0].utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let envelope = raw as? [String: Any], Set(envelope.keys) == Set(["request", "prepared"]),
-              let request = envelope["request"] as? [String: Any], Self.validInboxOrganizeDestinationCreateRequest(request),
+              let request = envelope["request"] as? [String: Any], Self.validTaskListOrganizeDestinationCreateRequest(request, source: source),
               let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
               Self.equalJSON(prepared["request"], request), let result = prepared["result"] as? [String: Any],
-              Self.validInboxOrganizeDestinationCreateResult(result, request: request) else {
+              Self.validTaskListOrganizeDestinationCreateResult(result, request: request) else {
             throw HostFailure("Malformed Inbox Organize destination creation journal")
         }
         return args
     }
 
-    private func prepareInboxTasksRemoveTagCommand(arguments args: [Any]) throws -> ArchivedRestorePreparation {
+    private func prepareTaskListRemoveTagCommand(arguments args: [Any], source: String = "inbox") throws -> ArchivedRestorePreparation {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              Self.validInboxTasksRemoveTagRequest(request) else { throw HostFailure("INVALID_INPUT: Inbox bulk Remove tag needs a bounded request") }
-        let value = try invoke("inboxTasksRemoveTagPrepare", arguments: args)
+              Self.validTaskListRemoveTagRequest(request, source: source) else { throw HostFailure("INVALID_INPUT: Inbox bulk Remove tag needs a bounded request") }
+        let value = try invoke("\(source)TasksRemoveTagPrepare", arguments: args)
         guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
               let raw = try? NativeJSON.jsonObject(with: Data(value.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let response = raw as? [String: Any] else { throw HostFailure("Malformed Inbox bulk Remove tag preparation") }
         if response["kind"] as? String == "noop" {
             guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any],
                   result["changed"] as? Bool == false,
-                  Self.validInboxTasksRemoveTagResult(result, request: request, allowNoop: true) else {
+                  Self.validTaskListRemoveTagResult(result, request: request, allowNoop: true) else {
                 throw HostFailure("Malformed Inbox bulk Remove tag no-op")
             }
             return .noop(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
@@ -18535,23 +23508,23 @@ private final class Engine: @unchecked Sendable {
         guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Inbox tag journal is too large; select fewer tasks") }
         let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
         guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Inbox tag journal is too large; select fewer tasks") }
-        let command = PendingCommand(version: 2, method: "inboxTasksRemoveTagCommit", argumentsJSON: outer)
-        _ = try invoke("inboxTasksRemoveTagValidate", arguments: inboxTasksRemoveTagJournalArguments(command))
+        let command = PendingCommand(version: 2, method: "\(source)TasksRemoveTagCommit", argumentsJSON: outer)
+        _ = try invoke("\(source)TasksRemoveTagValidate", arguments: taskListRemoveTagJournalArguments(command))
         return .prepared(command)
     }
 
-    private func prepareInboxTasksOrganizeCommand(arguments args: [Any]) throws -> ArchivedRestorePreparation {
+    private func prepareTaskListOrganizeCommand(arguments args: [Any], source: String = "inbox") throws -> ArchivedRestorePreparation {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              Self.validInboxTasksOrganizeRequest(request) else { throw HostFailure("INVALID_INPUT: Inbox bulk Organize needs a bounded request") }
-        let value = try invoke("inboxTasksOrganizePrepare", arguments: args)
+              Self.validTaskListOrganizeRequest(request, source: source) else { throw HostFailure("INVALID_INPUT: Inbox bulk Organize needs a bounded request") }
+        let value = try invoke("\(source)TasksOrganizePrepare", arguments: args)
         guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
               let raw = try? NativeJSON.jsonObject(with: Data(value.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let response = raw as? [String: Any] else { throw HostFailure("Malformed Inbox bulk Organize preparation") }
         if response["kind"] as? String == "noop" {
             guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any],
                   result["changed"] as? Bool == false,
-                  Self.validInboxTasksOrganizeResult(result, request: request, allowNoop: true) else {
+                  Self.validTaskListOrganizeResult(result, request: request, allowNoop: true) else {
                 throw HostFailure("Malformed Inbox bulk Organize no-op")
             }
             return .noop(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
@@ -18564,15 +23537,15 @@ private final class Engine: @unchecked Sendable {
         guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Inbox Organize journal is too large; select fewer tasks") }
         let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
         guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Inbox Organize journal is too large; select fewer tasks") }
-        let command = PendingCommand(version: 2, method: "inboxTasksOrganizeCommit", argumentsJSON: outer)
-        _ = try invoke("inboxTasksOrganizeValidate", arguments: inboxTasksOrganizeJournalArguments(command))
+        let command = PendingCommand(version: 2, method: "\(source)TasksOrganizeCommit", argumentsJSON: outer)
+        _ = try invoke("\(source)TasksOrganizeValidate", arguments: taskListOrganizeJournalArguments(command))
         return .prepared(command)
     }
-    private func prepareInboxOrganizeDestinationCreateCommand(arguments args: [Any]) throws -> ArchivedRestorePreparation {
+    private func prepareTaskListOrganizeDestinationCreateCommand(arguments args: [Any], source: String = "inbox") throws -> ArchivedRestorePreparation {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              Self.validInboxOrganizeDestinationCreateRequest(request) else { throw HostFailure("INVALID_INPUT: Inbox Organize destination creation needs a bounded request") }
-        let value = try invoke("inboxOrganizeDestinationCreatePrepare", arguments: args)
+              Self.validTaskListOrganizeDestinationCreateRequest(request, source: source) else { throw HostFailure("INVALID_INPUT: Inbox Organize destination creation needs a bounded request") }
+        let value = try invoke("\(source)OrganizeDestinationCreatePrepare", arguments: args)
         guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
               let raw = try? NativeJSON.jsonObject(with: Data(value.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
               let response = raw as? [String: Any] else { throw HostFailure("Malformed Inbox Organize destination creation preparation") }
@@ -18584,52 +23557,55 @@ private final class Engine: @unchecked Sendable {
         guard envelope.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Inbox Organize journal is too large; select fewer tasks") }
         let outer = String(decoding: try JSONSerialization.data(withJSONObject: [envelope]), as: UTF8.self)
         guard outer.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Inbox Organize journal is too large; select fewer tasks") }
-        let command = PendingCommand(version: 2, method: "inboxOrganizeDestinationCreateCommit", argumentsJSON: outer)
-        _ = try invoke("inboxOrganizeDestinationCreateValidate", arguments: inboxOrganizeDestinationCreateJournalArguments(command))
+        let command = PendingCommand(version: 2, method: "\(source)OrganizeDestinationCreateCommit", argumentsJSON: outer)
+        _ = try invoke("\(source)OrganizeDestinationCreateValidate", arguments: taskListOrganizeDestinationCreateJournalArguments(command))
         return .prepared(command)
     }
 
-    private func inboxTasksRemoveTagReceiptOutcome(arguments args: [Any]) throws -> String {
+    private func taskListRemoveTagReceiptOutcome(arguments args: [Any], source: String = "inbox") throws -> String {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              let confirmed = confirmedInboxTasksRemoveTagEnvelope,
+              Self.validTaskListRemoveTagRequest(request, source: source),
+              let confirmed = source == "project" ? confirmedProjectTasksRemoveTagEnvelope : confirmedInboxTasksRemoveTagEnvelope,
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
               Self.equalJSON(envelope["request"], request) else { return #"{"kind":"unproven"}"# }
-        let command = PendingCommand(version: 2, method: "inboxTasksRemoveTagCommit",
+        let command = PendingCommand(version: 2, method: "\(source)TasksRemoveTagCommit",
             argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed], options: [.sortedKeys]), as: UTF8.self))
-        _ = try invoke("inboxTasksRemoveTagValidate", arguments: inboxTasksRemoveTagJournalArguments(command))
-        let value = try invoke("inboxTasksRemoveTagOutcome", arguments: [confirmed])
+        _ = try invoke("\(source)TasksRemoveTagValidate", arguments: taskListRemoveTagJournalArguments(command))
+        let value = try invoke("\(source)TasksRemoveTagOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
 
-    private func inboxTasksOrganizeReceiptOutcome(arguments args: [Any]) throws -> String {
+    private func taskListOrganizeReceiptOutcome(arguments args: [Any], source: String = "inbox") throws -> String {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              let confirmed = confirmedInboxTasksOrganizeEnvelope,
+              Self.validTaskListOrganizeRequest(request, source: source),
+              let confirmed = source == "project" ? confirmedProjectTasksOrganizeEnvelope : confirmedInboxTasksOrganizeEnvelope,
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
               Self.equalJSON(envelope["request"], request) else { return #"{"kind":"unproven"}"# }
-        let command = PendingCommand(version: 2, method: "inboxTasksOrganizeCommit",
+        let command = PendingCommand(version: 2, method: "\(source)TasksOrganizeCommit",
             argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed], options: [.sortedKeys]), as: UTF8.self))
-        _ = try invoke("inboxTasksOrganizeValidate", arguments: inboxTasksOrganizeJournalArguments(command))
-        let value = try invoke("inboxTasksOrganizeOutcome", arguments: [confirmed])
+        _ = try invoke("\(source)TasksOrganizeValidate", arguments: taskListOrganizeJournalArguments(command))
+        let value = try invoke("\(source)TasksOrganizeOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
-    private func inboxOrganizeDestinationCreateReceiptOutcome(arguments args: [Any]) throws -> String {
+    private func taskListOrganizeDestinationCreateReceiptOutcome(arguments args: [Any], source: String = "inbox") throws -> String {
         guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              let confirmed = confirmedInboxOrganizeDestinationCreateEnvelope,
+              Self.validTaskListOrganizeDestinationCreateRequest(request, source: source),
+              let confirmed = source == "project" ? confirmedProjectOrganizeDestinationCreateEnvelope : confirmedInboxOrganizeDestinationCreateEnvelope,
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
               Self.equalJSON(envelope["request"], request) else { return #"{"kind":"unproven"}"# }
-        let command = PendingCommand(version: 2, method: "inboxOrganizeDestinationCreateCommit",
+        let command = PendingCommand(version: 2, method: "\(source)OrganizeDestinationCreateCommit",
             argumentsJSON: String(decoding: try JSONSerialization.data(withJSONObject: [confirmed], options: [.sortedKeys]), as: UTF8.self))
-        _ = try invoke("inboxOrganizeDestinationCreateValidate", arguments: inboxOrganizeDestinationCreateJournalArguments(command))
-        let value = try invoke("inboxOrganizeDestinationCreateOutcome", arguments: [confirmed])
+        _ = try invoke("\(source)OrganizeDestinationCreateValidate", arguments: taskListOrganizeDestinationCreateJournalArguments(command))
+        let value = try invoke("\(source)OrganizeDestinationCreateOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
@@ -18921,6 +23897,21 @@ private final class Engine: @unchecked Sendable {
     }
     func retireAppleRemindersAccess(_ id: UUID) {
         if appleRemindersAccess?.id == id { appleRemindersAccess = nil }
+    }
+
+    func gmail(_ method: String, arguments: [String]) throws -> String {
+        try requirePersonalWorkspace()
+        guard ["iosGmailRequest", "iosGmailLifecycle"].contains(method), started, !closed, !gmailTurn, !invoking,
+              pending == nil, !recoveryActivationPending, context != nil else {
+            throw CoreHostRejection(message: "NOT_READY: Gmail capture is unavailable")
+        }
+        if gmailReceipts == nil {
+            gmailReceipts = NativeGmailReceiptFiles(folder: NativeGmail.receiptFolder(databaseURL: databaseURL, rnAdoptionContainerURL: rnAdoptionContainerURL))
+        }
+        let jobs = NativeGmailJobs(client: NativeGmail.client)
+        gmailJobs = jobs; gmailTurn = true
+        defer { gmailTurn = false; gmailJobs = nil; jobs.close() }
+        return try invoke(method, arguments: arguments)
     }
 
     func readAppleRemindersSettings() throws -> String {
@@ -19381,7 +24372,8 @@ private final class Engine: @unchecked Sendable {
         isInteger(value) && (value as? NSNumber).map { (0...9_007_199_254_740_991).contains($0.doubleValue) } == true
     }
     private static func pomodoroRequest(_ json: String) throws -> [String: Any] {
-        let request = try pomodoroObject(json, maximum: 8192)
+        let request = try pomodoroObject(json, maximum: 256 * 1024)
+        guard request["action"] as? String == "watch" || json.utf8.count <= 8192 else { throw pomodoroFailure }
         guard let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
               isInteger(request["observedAtMs"]),
               (request["observedAtMs"] as? NSNumber).map({ abs($0.doubleValue) <= 8_640_000_000_000_000 }) == true,
@@ -19399,6 +24391,15 @@ private final class Engine: @unchecked Sendable {
                   isBoolean(options["autoStartFocus"]), isBoolean(options["autoStartBreaks"]) else { throw pomodoroFailure }
             let common: Set<String> = ["action", "requestId", "observedAtMs", "localDayKey", "autoStart"]
             switch action {
+            case "watch":
+                guard Set(request.keys) == common.union(["sourceJSON", "selectedTaskId", "durations"]),
+                      let source = request["sourceJSON"] as? String,
+                      request["selectedTaskId"] is NSNull || (request["selectedTaskId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 }) == true,
+                      let durations = request["durations"] as? [String: Any], Set(durations.keys) == ["focusMinutes", "breakMinutes"],
+                      [durations["focusMinutes"], durations["breakMinutes"]].allSatisfy({
+                        Self.isInteger($0) && ($0 as? NSNumber).map { (1...180).contains($0.doubleValue) } == true
+                      }) else { throw pomodoroFailure }
+                _ = try NativeWatchPomodoro(name: id + ".json", body: source)
             case "adoptLegacy":
                 guard Set(request.keys) == common else { throw pomodoroFailure }
                 // Refuse a malformed observation day before any legacy read.
@@ -19424,6 +24425,12 @@ private final class Engine: @unchecked Sendable {
             }
         }
         return request
+    }
+    private static func watchPomodoroPlanMatches(_ source: String, planJSON: String) throws {
+        let plan = try pomodoroObject(planJSON, maximum: 2_000_000)
+        guard let request = plan["request"] as? [String: Any], request["action"] as? String == "watch",
+              let body = request["sourceJSON"] as? String, ownedEqual(body, source) else { throw pomodoroFailure }
+        _ = try pomodoroPlanRequest(ownedJSON(request))
     }
     private static let pomodoroLegacyNames = ["@mindwtr_pomodoro_state", "@mindwtr_pomodoro_collapsed"]
     /// Only a plan owned by Engine may contain the two exact source strings.
@@ -19452,6 +24459,7 @@ private final class Engine: @unchecked Sendable {
         return equalJSON(intent, request)
     }
     private func capturePomodoroRequest(_ intent: [String: Any]) throws -> [String: Any] {
+        guard intent["action"] as? String != "watch" else { throw NativeWatchPomodoro.invalid }
         guard intent["action"] as? String == "adoptLegacy" else { return intent }
         let storage = try requireDeviceStorageAdmission()
         guard let namespace = deviceStorageLocation?.bundleIdentifier, NativeReminderRequest.validNamespace(namespace) else {
@@ -20099,12 +25107,14 @@ private final class Engine: @unchecked Sendable {
         let originalRequest = undo ? originalCompletion?["request"] as? [String: Any] : request
         let reference = originalRequest.map(Self.isReferenceTaskCompletionRequest) == true
         let board = originalRequest.map(Self.isBoardTaskCompletionRequest) == true
-        let rawOverlay = reference || board
+        let row = originalRequest.map(Self.isRowTaskCompletionRequest) == true
+        let rawOverlay = reference || board || row
         let expectedFields: Set<String> = undo
             ? Set(["version", "kind", "request", "completion", "witness", "effect", "result"])
             : Set(["version", "kind", "request", "checklist", "notice", "result"])
         let fields = rawOverlay ? expectedFields.union(["rawBefore"]) : expectedFields
-        let expectedKind = board ? (undo ? "boardCompleteUndo" : "boardComplete")
+        let expectedKind = row ? (undo ? "rowCompleteUndo" : "rowComplete")
+            : board ? (undo ? "boardCompleteUndo" : "boardComplete")
             : reference ? (undo ? "referenceCompleteUndo" : "referenceComplete") : (undo ? "undo" : "complete")
         guard Set(prepared.keys) == fields,
               Self.isInteger(prepared["version"], equalTo: rawOverlay ? 2 : 1),
@@ -20160,6 +25170,11 @@ private final class Engine: @unchecked Sendable {
             && request["source"] as? String == "board"
     }
 
+    private static func isRowTaskCompletionRequest(_ request: [String: Any]) -> Bool {
+        Set(request.keys) == Set(["id", "requestId", "taskRevision", "source"])
+            && request["source"] as? String == "row"
+    }
+
     private static func validReferenceCompletionRawBefore(_ value: Any?) -> Bool {
         guard let authority = value as? [String: Any], Set(authority.keys) == Set(["tasks", "projects", "sections"]) else { return false }
         for kind in ["tasks", "projects", "sections"] {
@@ -20187,6 +25202,7 @@ private final class Engine: @unchecked Sendable {
             request = completed?["request"] as? [String: Any]
         } else { request = envelope["request"] as? [String: Any] }
         if request.map(Self.isReferenceTaskCompletionRequest) == true { return "reference" }
+        if request.map(Self.isRowTaskCompletionRequest) == true { return "row" }
         return request.map(Self.isBoardTaskCompletionRequest) == true ? "board" : nil
     }
 
@@ -20202,14 +25218,213 @@ private final class Engine: @unchecked Sendable {
     // endpoints and each durable namespace remain explicit and independent.
     private static func historyTaskWritePrefix(_ method: String) -> String? {
         switch method {
+        case "rowQuickStatusOptions", "rowQuickStatusWrite", "rowQuickStatusRetryOutcome", "rowQuickStatusCommit": return "rowQuickStatus"
+        case "inlineChecklistWrite", "inlineChecklistRetryOutcome", "inlineChecklistCommit": return "inlineChecklist"
         case "doneTaskStatusOptions", "doneTaskStatusWrite", "doneTaskStatusRetryOutcome", "doneTaskStatusCommit": return "doneTaskStatus"
         case "referenceTaskBackdateOptions", "referenceTaskBackdate", "referenceTaskBackdateRetryOutcome", "referenceTaskBackdateCommit": return "referenceTaskBackdate"
+        case "rowTaskFocus", "rowTaskFocusRetryOutcome", "rowTaskFocusCommit": return "rowTaskFocus"
+        case "rowTaskDates", "rowTaskDatesRetryOutcome", "rowTaskDatesCommit": return "rowTaskDates"
+        case "rowTaskDestinationOptions", "rowTaskDestination", "rowTaskDestinationRetryOutcome", "rowTaskDestinationCommit": return "rowTaskDestination"
+        case "rowTaskBackdateOptions", "rowTaskBackdate", "rowTaskBackdateRetryOutcome", "rowTaskBackdateCommit": return "rowTaskBackdate"
         case "referenceTaskDestinationOptions", "referenceTaskDestination", "referenceTaskDestinationRetryOutcome", "referenceTaskDestinationCommit": return "referenceTaskDestination"
         case "referenceProjectNextActionOptions", "referenceProjectNextActionInput", "referenceProjectNextAction", "referenceProjectNextActionRetryOutcome", "referenceProjectNextActionCommit": return "referenceProjectNextAction"
         case "doneTaskCompletedAtOptions", "doneTaskCompletedAtWrite", "doneTaskCompletedAtRetryOutcome", "doneTaskCompletedAtCommit": return "doneTaskCompletedAt"
         case "archiveTaskCompletedAtOptions", "archiveTaskCompletedAtWrite", "archiveTaskCompletedAtRetryOutcome", "archiveTaskCompletedAtCommit": return "archiveTaskCompletedAt"
         default: return nil
         }
+    }
+
+    private static func rowTaskFocusRequest(_ raw: String) throws -> [String: Any] {
+        let trimSpace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+        guard raw.utf8.count <= 4_096, try NativeJSON.hasUniqueObjectKeys(raw),
+              referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(raw.utf8))),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["id", "requestId", "taskRevision", "source", "focused"]),
+              let id = request["id"] as? String, id.rangeOfCharacter(from: trimSpace.inverted) != nil, id.utf16.count <= 500,
+              let revision = request["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+              let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
+              request["source"] as? String == "row", isBoolean(request["focused"]) else {
+            throw HostFailure("INVALID_INPUT: Row Focus needs an exact displayed row, target boolean and lowercase UUID")
+        }
+        return request
+    }
+
+    private static func validRowTaskFocusResult(_ result: [String: Any], request: [String: Any]) -> Bool {
+        Set(result.keys) == Set(["id", "focused"]) && equalJSON(result["id"], request["id"])
+            && isBoolean(result["focused"]) && equalJSON(result["focused"], request["focused"])
+    }
+
+    private static func taskRowSwipeRequest(_ raw: String) throws -> [String: Any] {
+        guard raw.utf8.count <= 4_096, try NativeJSON.hasUniqueObjectKeys(raw),
+              referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(raw.utf8))),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["status", "isFocusedToday", "selectionMode", "interactionDisabled"]),
+              let status = request["status"] as? String,
+              ["inbox", "next", "waiting", "someday", "reference", "done", "archived"].contains(status),
+              ["isFocusedToday", "selectionMode", "interactionDisabled"].allSatisfy({ isBoolean(request[$0]) }) else {
+            throw HostFailure("INVALID_INPUT: Task row swipe actions need exact status and boolean flags")
+        }
+        return request
+    }
+
+    private func taskRowSwipeActions(arguments args: [Any]) throws -> String {
+        guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Task row swipe actions need JSON") }
+        _ = try Self.taskRowSwipeRequest(raw)
+        let value = try invoke("taskRowSwipeActions", arguments: args)
+        guard value.utf8.count <= 16_384, try NativeJSON.hasUniqueObjectKeys(value),
+              Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))),
+              let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(result.keys) == Set(["swipeRight", "swipeLeft"]),
+              let right = result["swipeRight"] as? [[String: Any]], let left = result["swipeLeft"] as? [[String: Any]],
+              right.count <= 3, left.count <= 3, right.count + left.count <= 5 else {
+            throw HostFailure("Malformed task row swipe actions")
+        }
+        var ids = Set<String>()
+        for action in right + left {
+            let fields = Set(action.keys)
+            guard Set(["id", "label", "enabled"]).isSubset(of: fields),
+                  fields.isSubset(of: Set(["id", "label", "enabled", "status", "focused"])),
+                  let id = action["id"] as? String, ["done", "focus", "organize", "dates", "delete", "restore", "next"].contains(id),
+                  ids.insert(id).inserted, action["label"] is String, Self.isBoolean(action["enabled"]),
+                  action["status"] == nil || (action["status"] as? String).map({ ["inbox", "next", "waiting", "someday", "reference", "done", "archived"].contains($0) }) == true,
+                  action["focused"] == nil || Self.isBoolean(action["focused"]) else {
+                throw HostFailure("Malformed task row swipe action")
+            }
+        }
+        return value
+    }
+
+    private static func rowTaskDatesRequest(_ raw: String) throws -> [String: Any] {
+        let trimSpace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+        guard raw.utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(raw),
+              referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(raw.utf8))),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["id", "requestId", "taskRevision", "source", "draft", "scheduleBase"]),
+              let id = request["id"] as? String, id.rangeOfCharacter(from: trimSpace.inverted) != nil, id.utf16.count <= 500,
+              let revision = request["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+              let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
+              request["source"] as? String == "row", request["draft"] is [String: Any],
+              let schedule = request["scheduleBase"] as? [String: Any], Set(schedule.keys) == scheduleFields,
+              isOffset(schedule["relativeStartOffset"]),
+              ["startTime", "dueDate", "reviewAt"].allSatisfy({ schedule[$0] is String || schedule[$0] is NSNull }) else {
+            throw HostFailure("INVALID_INPUT: Row dates need an exact displayed row, complete draft, opening schedule and lowercase UUID")
+        }
+        return request
+    }
+
+    private static func rowTaskDestinationRequest(_ raw: String, options: Bool = false) throws -> [String: Any] {
+        let trimSpace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+        guard raw.utf8.count <= (options ? 16_384 : 4_096), try NativeJSON.hasUniqueObjectKeys(raw),
+              referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(raw.utf8))),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == (options ? Set(["id", "taskRevision", "query", "offset", "limit"]) : Set(["id", "requestId", "taskRevision", "source", "destination"])),
+              let id = request["id"] as? String, id.rangeOfCharacter(from: trimSpace.inverted) != nil, id.utf16.count <= 500,
+              let revision = request["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200 else {
+            throw HostFailure("INVALID_INPUT: Row destination needs a bounded displayed row")
+        }
+        if options {
+            guard let query = request["query"] as? String, query.utf16.count <= 2_000,
+                  isInteger(request["offset"]), let offset = request["offset"] as? NSNumber,
+                  (0...9_007_199_254_740_991).contains(offset.doubleValue),
+                  isInteger(request["limit"]), let limit = request["limit"] as? NSNumber, (1...100).contains(limit.doubleValue) else {
+                throw HostFailure("INVALID_INPUT: Row destination needs bounded query and paging")
+            }
+        } else {
+            guard request["source"] as? String == "row",
+                  let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
+                  let destination = request["destination"] as? [String: Any], let kind = destination["kind"] as? String else {
+                throw HostFailure("INVALID_INPUT: Row destination needs an existing choice and lowercase UUID")
+            }
+            if kind == "none" {
+                guard Set(destination.keys) == Set(["kind"]) else { throw HostFailure("INVALID_INPUT: None destination has unexpected fields") }
+            } else {
+                guard ["project", "area"].contains(kind), Set(destination.keys) == Set(["kind", "id"]),
+                      let destinationID = destination["id"] as? String, destinationID.rangeOfCharacter(from: trimSpace.inverted) != nil,
+                      destinationID.utf16.count <= 500 else { throw HostFailure("INVALID_INPUT: Row destination needs a bounded existing Project or Area") }
+            }
+        }
+        return request
+    }
+
+    private func rowTaskDestinationOptions(arguments args: [Any]) throws -> String {
+        guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Row destination needs a picker request") }
+        let request = try Self.rowTaskDestinationRequest(raw, options: true)
+        let value = try invoke("rowTaskDestinationOptions", arguments: args)
+        func count(_ value: Any?) -> Int? {
+            guard Self.isInteger(value), let number = value as? NSNumber,
+                  (0...9_007_199_254_740_991).contains(number.doubleValue) else { return nil }
+            return number.intValue
+        }
+        guard value.utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(value),
+              Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))),
+              let options = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(options.keys) == Set(["version", "id", "taskRevision", "query", "offset", "limit", "total", "hasMore", "nextOffset", "choices", "labels"]),
+              Self.isInteger(options["version"], equalTo: 1), Self.equalJSON(options["id"], request["id"]),
+              Self.equalJSON(options["taskRevision"], request["taskRevision"]), Self.equalJSON(options["query"], request["query"]),
+              Self.equalJSON(options["offset"], request["offset"]), Self.equalJSON(options["limit"], request["limit"]),
+              let total = count(options["total"]), total >= 1, let offset = count(request["offset"]), let limit = count(request["limit"]),
+              let choices = options["choices"] as? [[String: Any]], choices.count <= limit, Self.isBoolean(options["hasMore"]),
+              let labels = options["labels"] as? [String: Any],
+              Set(labels.keys) == Set(["title", "search", "projects", "areas", "cancel", "more", "retry", "noMatches"]),
+              labels.values.allSatisfy({ ($0 as? String).map { !$0.isEmpty } == true }) else {
+            throw HostFailure("Malformed Row destination options")
+        }
+        let hasMore = options["hasMore"] as? Bool == true
+        guard hasMore ? (count(options["nextOffset"]) == offset + choices.count && offset + choices.count < total && !choices.isEmpty)
+            : (options["nextOffset"] is NSNull && offset + choices.count >= total) else { throw HostFailure("Malformed Row destination page") }
+        var identities = Set<Data>()
+        for (index, choice) in choices.enumerated() {
+            guard Set(choice.keys) == Set(["kind", "id", "label", "selected"]), let kind = choice["kind"] as? String,
+                  let id = choice["id"] as? String, let label = choice["label"] as? String, !label.isEmpty,
+                  Self.isBoolean(choice["selected"]),
+                  (kind == "none" && id.isEmpty && offset + index == 0)
+                    || (["project", "area"].contains(kind) && !id.isEmpty && id.utf16.count <= 500),
+                  identities.insert(Data((kind + ":" + id).utf8)).inserted else { throw HostFailure("Malformed Row destination choice") }
+        }
+        return value
+    }
+
+    private static func rowQuickStatusRequest(_ raw: String, options: Bool = false) throws -> [String: Any] {
+        let trimSpace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+        guard raw.utf8.count <= 4_096, try NativeJSON.hasUniqueObjectKeys(raw),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == (options ? Set(["id", "taskRevision"]) : Set(["id", "taskRevision", "requestId", "status"])),
+              let id = request["id"] as? String, id.rangeOfCharacter(from: trimSpace.inverted) != nil, id.utf16.count <= 500,
+              let revision = request["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200 else {
+            throw HostFailure("INVALID_INPUT: Row quick status needs a bounded displayed row")
+        }
+        if !options {
+            guard let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
+                  let status = request["status"] as? String, ["inbox", "next", "waiting", "someday", "reference"].contains(status) else {
+                throw HostFailure("INVALID_INPUT: Row quick status needs a non-Done target and lowercase UUID")
+            }
+        }
+        return request
+    }
+
+    private static func inlineChecklistRequest(_ raw: String) throws -> [String: Any] {
+        // Match JavaScript trim without rewriting literal IDs or accepting NEL as whitespace.
+        let trimSpace = CharacterSet(charactersIn: "\u{0009}\u{000A}\u{000B}\u{000C}\u{000D} \u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+        guard raw.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(raw),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              let id = request["id"] as? String, id.rangeOfCharacter(from: trimSpace.inverted) != nil, id.utf16.count <= 500,
+              let revision = request["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+              let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID else {
+            throw HostFailure("INVALID_INPUT: Inline checklist needs a bounded displayed row and lowercase UUID")
+        }
+        switch request["action"] as? String {
+        case "setCompleted":
+            guard Set(request.keys) == Set(["id", "taskRevision", "requestId", "action", "itemId", "isCompleted"]),
+                  let itemID = request["itemId"] as? String, !itemID.isEmpty, itemID.utf16.count <= 200,
+                  Self.isBoolean(request["isCompleted"]) else { throw HostFailure("INVALID_INPUT: Inline checklist needs an item and desired Boolean") }
+        case "append":
+            guard Set(request.keys) == Set(["id", "taskRevision", "requestId", "action", "title"]),
+                  let title = request["title"] as? String, title.rangeOfCharacter(from: trimSpace.inverted) != nil else {
+                throw HostFailure("INVALID_INPUT: Inline checklist needs a nonempty title")
+            }
+        default: throw HostFailure("INVALID_INPUT: Inline checklist action is unavailable")
+        }
+        return request
     }
 
     private static func isReferenceTaskNextRequest(_ request: [String: Any]) -> Bool {
@@ -20235,10 +25450,16 @@ private final class Engine: @unchecked Sendable {
     private func historyTaskReceiptOutcome(prefix: String, arguments args: [Any]) throws -> String {
         let confirmedEnvelope: String?
         switch prefix {
+        case "rowQuickStatus": confirmedEnvelope = confirmedRowQuickStatusEnvelope
+        case "inlineChecklist": confirmedEnvelope = confirmedInlineChecklistEnvelope
         case "doneTaskStatus": confirmedEnvelope = confirmedDoneTaskStatusEnvelope
         case "doneTaskCompletedAt": confirmedEnvelope = confirmedDoneTaskCompletedAtEnvelope
         case "archiveTaskCompletedAt": confirmedEnvelope = confirmedArchiveTaskCompletedAtEnvelope
         case "referenceTaskBackdate": confirmedEnvelope = confirmedReferenceTaskBackdateEnvelope
+        case "rowTaskFocus": confirmedEnvelope = confirmedRowTaskFocusEnvelope
+        case "rowTaskDates": confirmedEnvelope = confirmedRowTaskDatesEnvelope
+        case "rowTaskDestination": confirmedEnvelope = confirmedRowTaskDestinationEnvelope
+        case "rowTaskBackdate": confirmedEnvelope = confirmedRowTaskBackdateEnvelope
         case "referenceTaskDestination": confirmedEnvelope = confirmedReferenceTaskDestinationEnvelope
         case "referenceProjectNextAction": confirmedEnvelope = confirmedReferenceProjectNextActionEnvelope
         default: confirmedEnvelope = nil
@@ -20258,6 +25479,10 @@ private final class Engine: @unchecked Sendable {
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
 
+    private static func hasOrdinaryTaskDeleteShape(_ request: [String: Any]) -> Bool {
+        Set(request.keys) == Set(["requestId", "taskId", "taskRevision"])
+    }
+
     private func rememberConfirmedTaskDelete(_ command: PendingCommand) {
         guard ["taskDeleteCommit", "taskDeleteUndoCommit"].contains(command.method),
               let args = try? NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
@@ -20270,7 +25495,10 @@ private final class Engine: @unchecked Sendable {
             let prepared = envelope["prepared"] as? [String: Any]
             let deletion = prepared?["delete"] as? [String: Any]
             let deletedRequest = deletion?["request"] as? [String: Any]
-            if ["done", "reference"].contains(deletedRequest?["source"] as? String ?? "") { confirmedTaskDeleteUndoEnvelope = encoded }
+            if let deletedRequest, Self.hasOrdinaryTaskDeleteShape(deletedRequest)
+                || ["done", "reference"].contains(deletedRequest["source"] as? String ?? "") {
+                confirmedTaskDeleteUndoEnvelope = encoded
+            }
             return
         }
         confirmedTaskDeleteUndoEnvelope = nil
@@ -20280,7 +25508,8 @@ private final class Engine: @unchecked Sendable {
     private func taskDeleteReceiptOutcome(arguments args: [Any]) throws -> String {
         guard let encodedRequest = args.first as? String,
               let request = try NativeJSON.jsonObject(with: Data(encodedRequest.utf8)) as? [String: Any],
-              ["archive", "done", "reference"].contains(request["source"] as? String ?? ""),
+              (Self.hasOrdinaryTaskDeleteShape(request)
+                || ["archive", "done", "reference"].contains(request["source"] as? String ?? "")),
               let confirmed = confirmedTaskDeleteEnvelope,
               let envelope = try NativeJSON.jsonObject(with: Data(confirmed.utf8)) as? [String: Any],
               Self.equalJSON(envelope["request"], request) else {
@@ -20292,6 +25521,9 @@ private final class Engine: @unchecked Sendable {
         let value = try invoke("taskDeleteOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
+        if Self.hasOrdinaryTaskDeleteShape(request) {
+            NSLog("Native iOS row Delete receipt confirmed releaseCheck=v1.3.8/ios-row-delete-receipt operation=delete")
+        }
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
@@ -20305,7 +25537,8 @@ private final class Engine: @unchecked Sendable {
               let prepared = envelope["prepared"] as? [String: Any],
               let deletion = prepared["delete"] as? [String: Any],
               let deletedRequest = deletion["request"] as? [String: Any],
-              ["done", "reference"].contains(deletedRequest["source"] as? String ?? ""),
+              (Self.hasOrdinaryTaskDeleteShape(deletedRequest)
+                || ["done", "reference"].contains(deletedRequest["source"] as? String ?? "")),
               Self.equalJSON(request["deleteRequestId"], deletedRequest["requestId"]) else {
             return #"{"kind":"unproven"}"#
         }
@@ -20315,6 +25548,9 @@ private final class Engine: @unchecked Sendable {
         let value = try invoke("taskDeleteUndoOutcome", arguments: [confirmed])
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
+        if Self.hasOrdinaryTaskDeleteShape(deletedRequest) {
+            NSLog("Native iOS row Delete receipt confirmed releaseCheck=v1.3.8/ios-row-delete-receipt operation=undo")
+        }
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
@@ -20397,15 +25633,29 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validatePreparedAcknowledgment(_ command: PendingCommand, value: String) throws {
+        if Self.checklistMovePrefix(command.method) != nil {
+            try validateChecklistMoveAcknowledgment(command, value: value)
+            return
+        }
+        if Self.conversionPrefix(command.method) != nil {
+            try validateConversionAcknowledgment(command, value: value)
+            return
+        }
         if command.method == "inboxUndoCommit" {
             guard value.utf8.count <= 4096, try NativeJSON.hasUniqueObjectKeys(value) else {
                 throw HostFailure("INVALID_INPUT: Malformed Process Inbox Undo acknowledgment")
             }
         }
-        if ["inboxTasksMoveCommit", "inboxTasksAddTagCommit", "inboxTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit"].contains(command.method) {
+        if ["inboxTasksMoveCommit", "projectTasksMoveCommit", "inboxTasksAddTagCommit", "projectTasksAddTagCommit", "inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "projectTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method) {
             guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
                   Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))) else {
                 throw HostFailure("Malformed Inbox bulk Move acknowledgment")
+            }
+        }
+        if ["projectTasksDeleteCommit", "projectTasksDeleteUndoCommit"].contains(command.method) {
+            guard value.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(value),
+                  Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                throw HostFailure("Malformed Project bulk Delete acknowledgment")
             }
         }
         let args = try journalArguments(command)
@@ -20434,8 +25684,20 @@ private final class Engine: @unchecked Sendable {
             }
         }
         if let prefix = Self.historyTaskWritePrefix(command.method), prefix != "referenceProjectNextAction", command.method == prefix + "Commit" {
+            if ["rowTaskBackdate", "rowTaskDestination", "rowTaskDates", "rowTaskFocus"].contains(prefix) {
+                guard value.utf8.count <= 4_096, try NativeJSON.hasUniqueObjectKeys(value),
+                      Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+                    throw HostFailure("Malformed Row completion time acknowledgment")
+                }
+            }
+            if prefix == "rowTaskFocus" {
+                guard let request = envelope["request"] as? [String: Any], Self.validRowTaskFocusResult(result, request: request) else {
+                    throw HostFailure("Malformed Row Focus acknowledgment")
+                }
+            } else {
             guard let request = envelope["request"] as? [String: Any], Set(result.keys) == Set(["id"]),
-                  ((Self.isReferenceTaskStatusRequest(request) || ["referenceTaskBackdate", "referenceTaskDestination"].contains(prefix)) ? Self.equalJSON(result["id"], request["id"]) : result["id"] as? String == request["id"] as? String) else { throw HostFailure("Malformed Done status acknowledgment") }
+                  ((Self.isReferenceTaskStatusRequest(request) || ["rowQuickStatus", "inlineChecklist", "referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination", "rowTaskDestination", "rowTaskDates"].contains(prefix)) ? Self.equalJSON(result["id"], request["id"]) : result["id"] as? String == request["id"] as? String) else { throw HostFailure("Malformed Done status acknowledgment") }
+            }
         }
         if command.method == "taskDeleteCommit" {
             guard let request = envelope["request"] as? [String: Any],
@@ -20462,29 +25724,29 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("Malformed Reference bulk Move acknowledgment")
             }
         }
-        if command.method == "inboxTasksMoveCommit" {
-            guard let request = envelope["request"] as? [String: Any], Self.validInboxTasksMoveResult(result, request: request) else {
+        if ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method) {
+            guard let request = envelope["request"] as? [String: Any], Self.validTaskListMoveResult(result, request: request) else {
                 throw HostFailure("Malformed Inbox bulk Move acknowledgment")
             }
         }
-        if command.method == "inboxTasksAddTagCommit" {
-            guard let request = envelope["request"] as? [String: Any], Self.validInboxTasksAddTagResult(result, request: request) else {
+        if ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method) {
+            guard let request = envelope["request"] as? [String: Any], Self.validTaskListAddTagResult(result, request: request) else {
                 throw HostFailure("Malformed Inbox bulk Add tag acknowledgment")
             }
         }
-        if command.method == "inboxTasksRemoveTagCommit" {
-            guard let request = envelope["request"] as? [String: Any], Self.validInboxTasksRemoveTagResult(result, request: request) else {
+        if ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method) {
+            guard let request = envelope["request"] as? [String: Any], Self.validTaskListRemoveTagResult(result, request: request) else {
                 throw HostFailure("Malformed Inbox bulk Remove tag acknowledgment")
             }
         }
 
-        if command.method == "inboxTasksOrganizeCommit" {
-            guard let request = envelope["request"] as? [String: Any], Self.validInboxTasksOrganizeResult(result, request: request) else {
+        if ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method) {
+            guard let request = envelope["request"] as? [String: Any], Self.validTaskListOrganizeResult(result, request: request) else {
                 throw HostFailure("Malformed Inbox bulk Organize acknowledgment")
             }
         }
-        if command.method == "inboxOrganizeDestinationCreateCommit" {
-            guard let request = envelope["request"] as? [String: Any], Self.validInboxOrganizeDestinationCreateResult(result, request: request) else {
+        if ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method) {
+            guard let request = envelope["request"] as? [String: Any], Self.validTaskListOrganizeDestinationCreateResult(result, request: request) else {
                 throw HostFailure("Malformed Inbox Organize destination creation acknowledgment")
             }
         }
@@ -20513,10 +25775,10 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("Malformed Archive bulk restore acknowledgment")
             }
         }
-        if let prefix = Self.archivedTasksDeletePrefix(command.method) {
+        if let prefix = Self.taskListDeletePrefix(command.method) {
             guard let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed Archive bulk Delete acknowledgment") }
             let selectedRequest: [String: Any]
-            if prefix == "archivedTasksDelete" {
+            if !prefix.hasSuffix("Undo") {
                 selectedRequest = request
                 try validateArchivedTasksDeleteNotice(result)
             } else {
@@ -20531,7 +25793,7 @@ private final class Engine: @unchecked Sendable {
         if command.method == "taskCompletionCommit" {
             guard let request = envelope["request"] as? [String: Any],
                   Set(result.keys) == Set(["id", "completion"]),
-                  ((Self.isReferenceTaskCompletionRequest(request) || Self.isBoardTaskCompletionRequest(request))
+                  ((Self.isReferenceTaskCompletionRequest(request) || Self.isBoardTaskCompletionRequest(request) || Self.isRowTaskCompletionRequest(request))
                     ? Self.equalJSON(result["id"], request["id"]) : result["id"] as? String == request["id"] as? String),
                   let notice = result["completion"] as? [String: Any],
                   Set(notice.keys) == Set(["completedAt", "undoEnabled", "message", "undoLabel"]),
@@ -20546,7 +25808,7 @@ private final class Engine: @unchecked Sendable {
             guard let original = prepared["completion"] as? [String: Any],
                   let completedRequest = original["request"] as? [String: Any],
                   Set(result.keys) == Set(["id"]),
-                  ((Self.isReferenceTaskCompletionRequest(completedRequest) || Self.isBoardTaskCompletionRequest(completedRequest))
+                  ((Self.isReferenceTaskCompletionRequest(completedRequest) || Self.isBoardTaskCompletionRequest(completedRequest) || Self.isRowTaskCompletionRequest(completedRequest))
                     ? Self.equalJSON(result["id"], completedRequest["id"]) : result["id"] as? String == completedRequest["id"] as? String) else {
                 throw HostFailure("Malformed completion Undo acknowledgment")
             }
@@ -20676,9 +25938,9 @@ private final class Engine: @unchecked Sendable {
         return .prepared(PendingCommand(version: 2, method: "draftCommit", argumentsJSON: arguments))
     }
 
-    private func projectLifecycleRequestArguments(_ json: String) throws -> [Any] {
+    private func projectLifecycleRequestArguments(_ json: String, allowReviewScope: Bool = false) throws -> [Any] {
         guard json.utf8.count <= 4_096,
-              let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1,
+              let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], (args.count == 1 || allowReviewScope && args.count == 2),
               let text = args.first, text.utf8.count <= 4_096,
               let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
               Set(request.keys) == Set(["requestId", "projectId", "projectRevision", "action"]),
@@ -20688,7 +25950,12 @@ private final class Engine: @unchecked Sendable {
               let action = request["action"] as? String, ["complete", "cancel", "reactivate"].contains(action) else {
             throw HostFailure("INVALID_INPUT: Project lifecycle needs an exact saved revision, action, and lowercase UUID")
         }
-        return [text]
+        if args.count == 2 {
+            guard action == "complete", !args[1].isEmpty, args[1].utf16.count <= 200 else {
+                throw HostFailure("INVALID_INPUT: Review completion needs a bounded scope revision")
+            }
+        }
+        return args
     }
 
     private func projectLifecycleJournalArguments(_ command: PendingCommand) throws -> [Any] {
@@ -20754,12 +26021,54 @@ private final class Engine: @unchecked Sendable {
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
     }
 
+    private static func referenceProjectNextActionOriginSource(_ origin: [String: Any], version: Any?) -> String? {
+        guard let envelope = origin["envelope"] as? [String: Any],
+              let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any] else { return nil }
+        if Self.isInteger(version, equalTo: 1), origin["kind"] as? String == "backdate",
+           Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "rowBackdate",
+           request["source"] as? String == "row",
+           Set(request.keys) == Set(["id", "requestId", "taskRevision", "source", "completedAt", "timeSpentText"]) { return "row" }
+        if Self.isInteger(version, equalTo: 1) {
+            guard request["source"] as? String == "reference", Self.isInteger(prepared["version"], equalTo: 2),
+                  prepared["kind"] as? String == (origin["kind"] as? String == "completion" ? "referenceComplete" : "referenceBackdate") else { return nil }
+            return "reference"
+        }
+        guard Self.isInteger(version, equalTo: 2), origin["kind"] as? String == "completion" else { return nil }
+        if Self.isInteger(prepared["version"], equalTo: 1), prepared["kind"] as? String == "complete",
+           Set(request.keys) == Set(["id", "requestId", "taskRevision"]) { return "completion" }
+        if Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "boardComplete",
+           Self.isBoardTaskCompletionRequest(request) { return "board" }
+        if Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "rowComplete",
+           Self.isRowTaskCompletionRequest(request) { return "row" }
+        return nil
+    }
+
+    // Called only after the captured command and exact saved result have been validated.
+    private func referenceProjectNextActionSource(_ command: PendingCommand) -> String? {
+        guard let args = try? journalArguments(command), let encoded = args.first as? String,
+              let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any], let origin = prepared["origin"] as? [String: Any] else { return nil }
+        return Self.referenceProjectNextActionOriginSource(origin, version: prepared["version"])
+    }
+
     private func rememberReferenceProjectNextActionOrigin(kind: String, envelope encoded: String) {
-        guard let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-              let request = envelope["request"] as? [String: Any], request["source"] as? String == "reference",
-              let prepared = envelope["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 2),
-              prepared["kind"] as? String == (kind == "completion" ? "referenceComplete" : "referenceBackdate") else { return }
-        referenceProjectNextActionOrigin = ["kind": kind, "envelope": envelope]
+        // A newer confirmed completion always replaces the previous unsubmitted offer.
+        referenceProjectNextActionOrigin = nil
+        guard let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else { return }
+        let origin: [String: Any] = ["kind": kind, "envelope": envelope]
+        guard Self.referenceProjectNextActionOriginSource(origin, version: 1) != nil
+                || Self.referenceProjectNextActionOriginSource(origin, version: 2) != nil else { return }
+        referenceProjectNextActionOrigin = origin
+    }
+
+    func retireReferenceProjectNextActionOrigin(_ encoded: String) {
+        guard encoded.utf8.count <= 4096,
+              let ref = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              Self.validReferenceProjectNextActionOriginRef(ref),
+              (try? expandedReferenceProjectNextActionOrigin(ref)) != nil else { return }
+        // Retiring presentation authority never discards a frozen write or its saved receipt.
+        referenceProjectNextActionOrigin = nil
     }
 
     private func expandedReferenceProjectNextActionOrigin(_ ref: [String: Any]) throws -> [String: Any] {
@@ -20875,6 +26184,33 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func journalArguments(_ command: PendingCommand, checkingEditorSnapshot: Bool = true, retainedOrdinary: Bool = false) throws -> [Any] {
+        if Self.checklistMovePrefix(command.method) != nil { return try checklistMoveJournalArguments(command) }
+        if Self.conversionPrefix(command.method) != nil { return try conversionJournalArguments(command) }
+        if command.method == "iosWatchAudioIngest" {
+            guard command.version == 2, command.editorDraft == nil, !retainedOrdinary else { throw NativeWatchAudio.invalid }
+            return try arguments(command.method, command.argumentsJSON)
+        }
+        if command.method == "iosWatchIngest" {
+            guard command.version == 2, command.editorDraft == nil, !retainedOrdinary else { throw NativeWatchBatch.invalid }
+            return try arguments(command.method, command.argumentsJSON)
+        }
+        if command.method == "iosWidgetCompletionCommit" {
+            guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else { throw NativeWidgetCompletionJSON.invalid }
+            _ = try NativeWidgetCompletionJSON.plan(args[0]); return args
+        }
+        if command.method == "iosShareCaptureCommit" {
+            guard command.version == 2, command.editorDraft == nil,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else { throw NativeShareError.invalidInput }
+            _ = try NativeShareCaptureJSON.plan(args[0]); return args
+        }
+        if command.method == "iosReviewAIApply" {
+            guard command.editorDraft == nil, command.argumentsJSON.utf8.count <= 6_100_000,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1 else { throw NativeTaskAIJSON.invalid }
+            _ = try NativeReviewAIJSON.apply(args[0]); return args
+        }
+        if VoiceAction(commit: command.method) != nil { guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }; return [try voiceJournalEnvelope(command)] }
         if command.method == Self.appleReminderMethod {
             guard !retainedOrdinary else { throw Self.appleReminderFailure }
             _ = try appleReminderItem(command)
@@ -20900,18 +26236,18 @@ private final class Engine: @unchecked Sendable {
             _ = try backupOperationReference(command)
             return [try backupEncoded(backupOperationReference(command))]
         }
-        if command.method == "dataSetting" {
+        if ["dataSetting", "gettingStarted"].contains(command.method) {
             guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
             guard command.editorDraft == nil else { throw HostFailure("Invalid Data setting journal") }
             return try arguments(command.method, command.argumentsJSON)
         }
         if command.method == "referenceTasksMoveCommit" { return try referenceTasksMoveJournalArguments(command) }
-        if command.method == "inboxTasksMoveCommit" { return try inboxTasksMoveJournalArguments(command) }
-        if command.method == "inboxTasksAddTagCommit" { return try inboxTasksAddTagJournalArguments(command) }
-        if command.method == "inboxTasksRemoveTagCommit" { return try inboxTasksRemoveTagJournalArguments(command) }
+        if ["inboxTasksMoveCommit", "projectTasksMoveCommit"].contains(command.method) { return try taskListMoveJournalArguments(command) }
+        if ["inboxTasksAddTagCommit", "projectTasksAddTagCommit"].contains(command.method) { return try taskListAddTagJournalArguments(command) }
+        if ["inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit"].contains(command.method) { return try taskListRemoveTagJournalArguments(command) }
 
-        if command.method == "inboxTasksOrganizeCommit" { return try inboxTasksOrganizeJournalArguments(command) }
-        if command.method == "inboxOrganizeDestinationCreateCommit" { return try inboxOrganizeDestinationCreateJournalArguments(command) }
+        if ["inboxTasksOrganizeCommit", "projectTasksOrganizeCommit"].contains(command.method) { return try taskListOrganizeJournalArguments(command) }
+        if ["inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit"].contains(command.method) { return try taskListOrganizeDestinationCreateJournalArguments(command) }
         if command.method == "referenceTasksAddTagCommit" { return try referenceTasksAddTagJournalArguments(command) }
         if command.method == "referenceTasksRemoveTagCommit" { return try referenceTasksRemoveTagJournalArguments(command) }
         if command.method == "referenceProjectNextActionCommit" {
@@ -20922,15 +26258,14 @@ private final class Engine: @unchecked Sendable {
                   Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
                   Self.validReferenceProjectNextActionRequest(request), let prepared = envelope["prepared"] as? [String: Any],
                   Set(prepared.keys) == Set(["version", "kind", "request", "origin", "context", "rawBefore", "operation", "result"]),
-                  Self.isInteger(prepared["version"], equalTo: 1), prepared["kind"] as? String == "referenceProjectNextAction",
+                  prepared["kind"] as? String == "referenceProjectNextAction",
                   Self.equalJSON(prepared["request"], request), let origin = prepared["origin"] as? [String: Any],
                   Set(origin.keys) == Set(["kind", "envelope"]), let original = origin["envelope"] as? [String: Any],
                   Set(original.keys) == Set(["request", "prepared"]), let originalRequest = original["request"] as? [String: Any],
-                  let ref = request["origin"] as? [String: Any], let originalPrepared = original["prepared"] as? [String: Any],
-                  Self.isInteger(originalPrepared["version"], equalTo: 2),
-                  originalPrepared["kind"] as? String == (origin["kind"] as? String == "completion" ? "referenceComplete" : "referenceBackdate"),
+                  let ref = request["origin"] as? [String: Any],
+                  Self.referenceProjectNextActionOriginSource(origin, version: prepared["version"]) != nil,
                   Self.equalJSON(origin["kind"], ref["kind"]), Self.equalJSON(originalRequest["id"], ref["id"]),
-                  Self.equalJSON(originalRequest["requestId"], ref["requestId"]), originalRequest["source"] as? String == "reference",
+                  Self.equalJSON(originalRequest["requestId"], ref["requestId"]),
                   Self.validReferenceProjectNextActionWitness(prepared, request: request),
                   Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
                   let result = prepared["result"] as? [String: Any], Self.validReferenceProjectNextActionResult(result, request: request) else {
@@ -20941,6 +26276,66 @@ private final class Engine: @unchecked Sendable {
             return args
         }
 
+        if command.method == "rowTaskFocusCommit" {
+            guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
+                  args.count == 1, args[0].utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(args[0].utf8))),
+                  let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+                  let prepared = envelope["prepared"] as? [String: Any],
+                  Set(prepared.keys) == Set(["version", "kind", "request", "rawBefore", "checklist", "result"]),
+                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "rowFocus",
+                  Self.equalJSON(prepared["request"], request), Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
+                  prepared["checklist"] is [String: Any], let result = prepared["result"] as? [String: Any],
+                  Self.validRowTaskFocusResult(result, request: request) else {
+                throw HostFailure("Malformed Row Focus journal")
+            }
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+            _ = try Self.rowTaskFocusRequest(raw)
+            return args
+        }
+        if command.method == "rowTaskDatesCommit" {
+            guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
+                  args.count == 1, args[0].utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(args[0].utf8))),
+                  let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+                  let prepared = envelope["prepared"] as? [String: Any],
+                  Set(prepared.keys) == Set(["version", "kind", "request", "rawBefore", "checklist", "result"]),
+                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "rowDates",
+                  Self.equalJSON(prepared["request"], request), Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
+                  prepared["checklist"] is [String: Any], let result = prepared["result"] as? [String: Any],
+                  Set(result.keys) == Set(["id"]), Self.equalJSON(result["id"], request["id"]) else {
+                throw HostFailure("Malformed Row dates journal")
+            }
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+            _ = try Self.rowTaskDatesRequest(raw)
+            return args
+        }
+        if command.method == "rowTaskDestinationCommit" {
+            guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
+                  args.count == 1, args[0].utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(args[0].utf8))),
+                  let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(envelope.keys) == Set(["request", "prepared"]), let request = envelope["request"] as? [String: Any],
+                  let prepared = envelope["prepared"] as? [String: Any],
+                  Set(prepared.keys) == Set(["version", "kind", "request", "rawBefore", "checklist", "result"]),
+                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "rowDestination",
+                  Self.equalJSON(prepared["request"], request), Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
+                  prepared["checklist"] is [String: Any], let result = prepared["result"] as? [String: Any],
+                  Set(result.keys) == Set(["id"]), Self.equalJSON(result["id"], request["id"]) else {
+                throw HostFailure("Malformed Row destination journal")
+            }
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+            _ = try Self.rowTaskDestinationRequest(raw)
+            return args
+        }
         if command.method == "referenceTaskDestinationCommit" {
             guard command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
                   let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
@@ -20959,7 +26354,8 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("referenceTaskDestination", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
-        if command.method == "referenceTaskBackdateCommit" {
+        if ["referenceTaskBackdateCommit", "rowTaskBackdateCommit"].contains(command.method) {
+            let row = command.method == "rowTaskBackdateCommit"
             guard command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
                   let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
                   args.count == 1, args[0].utf8.count <= 2_100_000,
@@ -20968,17 +26364,61 @@ private final class Engine: @unchecked Sendable {
                   let request = envelope["request"] as? [String: Any],
                   let prepared = envelope["prepared"] as? [String: Any],
                   Set(prepared.keys) == Set(["version", "kind", "request", "rawBefore", "checklist", "result"]),
-                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "referenceBackdate",
+                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == (row ? "rowBackdate" : "referenceBackdate"),
                   Self.equalJSON(prepared["request"], request), Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
                   prepared["checklist"] is [String: Any],
                   let result = prepared["result"] as? [String: Any], Set(result.keys) == Set(["id"]),
                   Self.equalJSON(result["id"], request["id"]) else { throw HostFailure("Malformed Reference completion time journal") }
+            if row {
+                guard command.version == 2, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                      Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(args[0].utf8))) else {
+                    throw HostFailure("Malformed Row completion time journal: lossy JSON")
+                }
+            }
             let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
-            _ = try arguments("referenceTaskBackdate", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
+            _ = try arguments(row ? "rowTaskBackdate" : "referenceTaskBackdate", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
-        if Self.archivedTasksDeletePrefix(command.method) != nil {
-            return try archivedTasksDeleteJournalArguments(command)
+        if Self.taskListDeletePrefix(command.method) != nil {
+            return try taskListDeleteJournalArguments(command)
+        }
+        if command.method == "rowQuickStatusCommit" {
+            guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
+                  args.count == 1, args[0].utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(envelope.keys) == Set(["request", "prepared"]),
+                  let request = envelope["request"] as? [String: Any],
+                  let prepared = envelope["prepared"] as? [String: Any],
+                  Set(prepared.keys) == Set(["version", "kind", "request", "rawBefore", "witness", "effect", "result"]),
+                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "rowQuickStatus",
+                  Self.equalJSON(prepared["request"], request), Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
+                  prepared["witness"] is [String: Any], prepared["effect"] is [String: Any],
+                  let result = prepared["result"] as? [String: Any], Set(result.keys) == Set(["id"]),
+                  Self.equalJSON(result["id"], request["id"]) else { throw HostFailure("Malformed Row quick status journal") }
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+            _ = try Self.rowQuickStatusRequest(raw)
+            return args
+        }
+        if command.method == "inlineChecklistCommit" {
+            guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
+                  try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String],
+                  args.count == 1, args[0].utf8.count <= 2_100_000, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(envelope.keys) == Set(["request", "prepared"]),
+                  let request = envelope["request"] as? [String: Any],
+                  let prepared = envelope["prepared"] as? [String: Any],
+                  Set(prepared.keys) == Set(["version", "kind", "request", "rawBefore", "checklist", "result"]),
+                  Self.isInteger(prepared["version"], equalTo: 2), prepared["kind"] as? String == "inlineChecklist",
+                  Self.equalJSON(prepared["request"], request), Self.validReferenceCompletionRawBefore(prepared["rawBefore"]),
+                  prepared["checklist"] is [String: Any],
+                  let result = prepared["result"] as? [String: Any], Set(result.keys) == Set(["id"]),
+                  Self.equalJSON(result["id"], request["id"]) else { throw HostFailure("Malformed Inline checklist journal") }
+            let raw = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+            _ = try Self.inlineChecklistRequest(raw)
+            return args
         }
         if let prefix = Self.historyTaskWritePrefix(command.method), command.method == prefix + "Commit" {
             guard command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
@@ -21137,6 +26577,23 @@ private final class Engine: @unchecked Sendable {
             }
             let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
             _ = try arguments("notificationSetting", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
+            return args
+        }
+        if Self.aiTextConfigurationCommitMethods.contains(command.method) {
+            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
+            guard command.argumentsJSON.utf8.count <= 786_432, try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 65_536, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]),
+                  let request = input["request"] as? [String: Any],
+                  let prepared = input["prepared"] as? [String: Any],
+                  Set(prepared.keys) == Set(["version", "request"]), Self.isInteger(prepared["version"], equalTo: Self.aiTextConfigurationVersion(command)),
+                  let original = prepared["request"] as? [String: Any], Self.equalJSON(request, original) else {
+                throw HostFailure("Malformed prepared AI text configuration journal")
+            }
+            let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+            _ = try arguments(Self.aiTextConfigurationMethod("", version: Self.aiTextConfigurationVersion(command)), String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
         if command.method == "iosAIRequestTimeoutCommit" {
@@ -21521,7 +26978,9 @@ private final class Engine: @unchecked Sendable {
                   Set(input.keys) == Set(["request", "prepared"]),
                   let request = input["request"] as? [String: Any],
                   let prepared = input["prepared"] as? [String: Any],
-                  Self.isInteger(prepared["version"], equalTo: 1),
+                  Self.isInteger(prepared["version"], equalTo:
+                    ((request["action"] as? [String: Any])?["kind"] as? String) == "sectionFlow" ? 3
+                        : ((request["action"] as? [String: Any])?["kind"] as? String) == "flowMode" ? 2 : 1),
                   let original = prepared["request"] as? [String: Any],
                   try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
                     == JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]) else {
@@ -21853,7 +27312,8 @@ private final class Engine: @unchecked Sendable {
                   Set(envelope.keys) == Set(["request", "prepared"]),
                   let request = envelope["request"] as? [String: Any],
                   let prepared = envelope["prepared"] as? [String: Any],
-                  Self.isInteger(prepared["version"], equalTo: 1),
+                  Self.isInteger(prepared["version"], equalTo: 1)
+                    || (Self.isInteger(prepared["version"], equalTo: 2) && request["expandChecklist"] as? Bool == true),
                   Self.equalJSON(prepared["request"], request) else {
                 throw HostFailure("Malformed Task promotion journal")
             }
@@ -21971,20 +27431,21 @@ private final class Engine: @unchecked Sendable {
             // must not be reparsed/reprepared under a different clock or zone.
             return try arguments(command.method, command.argumentsJSON, allowPreparedDates: false)
         }
-        if ["somedaySectionMoveCommit", "somedaySectionMoveUndoCommit"].contains(command.method) {
-            guard command.argumentsJSON.utf8.count <= 2_100_000,
+        if Self.somedayMoveCommits.contains(command.method) {
+            let limit = Self.somedayMoveEnvelopeBytes(command.method)
+            guard command.argumentsJSON.utf8.count <= limit * 2 + 100_000,
                   let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
-                  args[0].utf8.count <= 1_000_000,
+                  args[0].utf8.count <= limit,
                   let envelope = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
                   Set(envelope.keys) == Set(["request", "prepared"]),
                   let request = envelope["request"] as? [String: Any],
                   let prepared = envelope["prepared"] as? [String: Any],
                   Self.isInteger(prepared["version"], equalTo: 1),
-                  prepared["kind"] as? String == (command.method == "somedaySectionMoveCommit" ? "move" : "undo"),
+                  prepared["kind"] as? String == (Self.somedayMoveIsUndo(command.method) ? "undo" : "move"),
                   Self.equalJSON(prepared["request"], request) else {
                 throw HostFailure("INVALID_INPUT: Malformed prepared Someday move journal")
             }
-            let publicMethod = command.method == "somedaySectionMoveCommit" ? "somedaySectionMoveWrite" : "somedaySectionMoveUndo"
+            let publicMethod = Self.somedayMoveFamily(command.method) + (Self.somedayMoveIsUndo(command.method) ? "Undo" : "Write")
             let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
             let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self)
             _ = try arguments(publicMethod, encoded)
@@ -21995,7 +27456,9 @@ private final class Engine: @unchecked Sendable {
             guard let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
                   let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
                   Set(input.keys) == Set(["request", "prepared"]), let request = input["request"] as? [String: Any],
-                  let prepared = input["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
+                  let prepared = input["prepared"] as? [String: Any],
+                  (Self.isInteger(prepared["version"], equalTo: 1)
+                      || Self.isInteger(prepared["version"], equalTo: 2) && (request["action"] as? [String: Any])?["type"] as? String == "duplicateTask"),
                   Set(prepared.keys) == (((request["action"] as? [String: Any])?["type"] as? String == "moveCard")
                       ? Set(["version", "request", "before", "after", "deviceIdToInitialize", "result", "move"])
                       : Set(["version", "request", "before", "after", "deviceIdToInitialize", "result"])),
@@ -22103,6 +27566,22 @@ private final class Engine: @unchecked Sendable {
             }
             return args
         }
+        if command.method == "weeklyReviewProjectTaskCommit" {
+            guard let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 2_000_000,
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]), let request = input["request"] as? [String: Any],
+                  Set(request.keys) == Set(["requestId", "projectId", "projectRevision", "title", "openAfterSave"]),
+                  let id = request["requestId"] as? String, UUID(uuidString: id) != nil, id == id.lowercased(),
+                  request["title"] is String, request["projectId"] is String, request["projectRevision"] is String, Self.isBoolean(request["openAfterSave"]),
+                  let prepared = input["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1),
+                  let original = prepared["request"] as? [String: Any],
+                  try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                    == JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]) else {
+                throw HostFailure("Malformed prepared Weekly Review project task journal")
+            }
+            return args
+        }
         if command.method == "draftCommit" {
             guard command.argumentsJSON.utf8.count <= 12_000_000,
                   let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
@@ -22128,8 +27607,18 @@ private final class Engine: @unchecked Sendable {
               let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
               let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
               Set(input.keys) == Set(["request", "prepared"]), input["request"] is [String: Any],
-              let prepared = input["prepared"] as? [String: Any], Self.isInteger(prepared["version"], equalTo: 1) else {
+              let prepared = input["prepared"] as? [String: Any],
+              Self.isInteger(prepared["version"], equalTo: 1)
+                || Self.isInteger(prepared["version"], equalTo: 2) && Self.isBoolean(prepared["timeEstimatesEnabled"]) else {
             throw HostFailure("Malformed prepared capture journal")
+        }
+        if Self.isInteger(prepared["version"], equalTo: 2) {
+            guard Set(prepared.keys) == Set(["version", "request", "task", "project", "result", "deviceIdToInitialize", "timeEstimatesEnabled", "typedTimeEstimate"]),
+                  prepared["typedTimeEstimate"] is NSNull || (prepared["typedTimeEstimate"] as? String).map({ $0.utf16.count <= 200 && Self.isTimeEstimate($0) }) == true,
+                  let request = input["request"] as? [String: Any], Set(request.keys) == Set(["capture", "applied"]),
+                  request["capture"] is [String: Any], request["applied"] is [String: Any], Self.equalJSON(prepared["request"], request) else {
+                throw HostFailure("Malformed prepared capture copilot journal")
+            }
         }
         return args
     }
@@ -22170,6 +27659,12 @@ private final class Engine: @unchecked Sendable {
         return CFGetTypeID(number) == CFBooleanGetTypeID()
     }
 
+    private static let reminderDraftFields: Set<String> = ["reminderPolicy", "dueReminderLeadMinutes", "startReminderLeadMinutes"]
+
+    private static func isReminderLead(_ value: Any?) -> Bool {
+        value is NSNull || isInteger(value) && ((value as? NSNumber).map { (0...10_080).contains($0.doubleValue) } ?? false)
+    }
+
     private static func isTimeSpent(_ value: Any?) -> Bool {
         if value is NSNull { return true }
         guard isFiniteNumber(value), let number = value as? NSNumber else { return false }
@@ -22205,6 +27700,57 @@ private final class Engine: @unchecked Sendable {
 
     private func arguments(_ method: String, _ json: String, allowPreparedDates: Bool = true) throws -> [Any] {
         try validateArgumentTransportSize(method, json)
+        if method == "iosWidgetFamilySnapshot" {
+            guard json.utf8.count <= 256,
+                  let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 128, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == ["systemColorScheme"], let scheme = input["systemColorScheme"] as? String,
+                  NativeWidgetFamilySnapshot.SystemColorScheme(rawValue: scheme) != nil else {
+                throw HostFailure("INVALID_INPUT: Widget family snapshot needs a closed appearance object")
+            }
+            return args
+        }
+        if method == "iosWatchAudioIngest" {
+            guard json.utf8.count <= 5 * 1024 * 1024, try NativeJSON.hasUniqueObjectKeys(json),
+                  let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1 else { throw NativeWatchAudio.invalid }
+            _ = try NativeWatchAudio.readEnvelope(args[0]); return args
+        }
+        if method == "watchPomodoroSubmit" {
+            guard json.utf8.count <= 256 * 1024, try NativeJSON.hasUniqueObjectKeys(json),
+                  let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1,
+                  let source = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  let id = source["id"] as? String else { throw NativeWatchPomodoro.invalid }
+            _ = try NativeWatchPomodoro(name: id + ".json", body: args[0]); return args
+        }
+        if method == "iosWatchIngest" {
+            guard json.utf8.count <= 8 * 1024 * 1024 + 16, try NativeJSON.hasUniqueObjectKeys(json),
+                  let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1 else { throw NativeWatchBatch.invalid }
+            _ = try NativeWatchBatch(json: args[0]); return args
+        }
+        if method == "shareCaptureSubmit" {
+            guard let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1 else { throw NativeShareError.invalidInput }
+            let input = try NativeShareCaptureJSON.request(args[0]), method = input["method"] as! String
+            _ = try arguments(method, Self.ownedJSON([NativeShareCaptureJSON.encoded(input["capture"] as Any)]))
+            return args
+        }
+        if method == "iosShareCaptureDraft" {
+            guard let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= NativeShareEnvelope.maximumBytes, try NativeJSON.hasUniqueObjectKeys(args[0]),
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["subject", "text", "webUrl"]) else { throw NativeShareError.invalidInput }
+            for (field, limit) in [("subject", NativeShareEnvelope.subjectLimit), ("text", NativeShareEnvelope.textLimit), ("webUrl", NativeShareEnvelope.webURLLimit)] {
+                guard input[field] is NSNull || (input[field] as? String).map({ $0.utf16.count <= limit }) == true else { throw NativeShareError.invalidInput }
+            }
+            return args
+        }
+        if method == "iosProductionWidgetTaskOpen" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, args[0].utf16.count <= 16_000 else {
+                throw HostFailure("INVALID_INPUT: Production task open requires one bounded URL string")
+            }
+            return args
+        }
         if method == "iosEntityOpen" {
             guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
                   args.count == 1, args[0].utf16.count <= 16_000 else {
@@ -22237,6 +27783,9 @@ private final class Engine: @unchecked Sendable {
                 }
             } else if !(argument is String) { throw HostFailure("Core arguments must be strings") }
         }
+        if method == "reviewAISuggestionsWrite" {
+            guard let raw = args.first as? String else { throw NativeTaskAIJSON.invalid }; _ = try NativeReviewAIJSON.apply(raw)
+        }
         if method == "captureLinesSubmit" {
             guard try NativeJSON.hasUniqueObjectKeys(json), let encoded = args.first as? String,
                   encoded.utf8.count <= Self.captureLinesPlanLimit, try NativeJSON.hasUniqueObjectKeys(encoded),
@@ -22261,6 +27810,24 @@ private final class Engine: @unchecked Sendable {
         }
         if method == "logLine" { try validateClientDiagnosticArguments(args) }
         if method == "dataSetting" { try validateDataSettingArguments(args, json) }
+        if method == "gettingStarted" { try validateGettingStartedArguments(args, json) }
+        if method == "captureCopilotEdit" || method == "captureCopilotSubmit" {
+            guard json.utf8.count <= 12_000_000, let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Capture copilot transport is malformed") }
+            let input = try Self.captureCopilotObject(raw, fields: method == "captureCopilotEdit"
+                ? ["text", "options", "revision", "suggestion", "applied", "edit"] : ["capture", "applied"])
+            guard input["applied"] is [String: Any], method != "captureCopilotSubmit" || input["capture"] is [String: Any] else {
+                throw HostFailure("INVALID_INPUT: Capture copilot input is malformed")
+            }
+        }
+        if method == "archiveRetentionReview" {
+            guard let raw = args.first as? String, raw.utf8.count <= 1_024,
+                  let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["days"]), Self.isInteger(input["days"]),
+                  let days = input["days"] as? NSNumber, (0.0...36_500.0).contains(days.doubleValue),
+                  try dataSettingHasExactKeyTokens(raw, expected: ["days"]) else {
+                throw HostFailure("INVALID_INPUT: Archive retention review needs integer days from 0 to 36500")
+            }
+        }
         if method == "reminderCompletionCommit", let raw = args.first as? String { _ = try reminderCompletionRequest(raw) }
         try validateTaskReadArguments(method, args, json, allowPreparedDates: allowPreparedDates)
         try validateListAndInboxArguments(method, args, json, allowPreparedDates: allowPreparedDates)
@@ -22291,10 +27858,18 @@ private final class Engine: @unchecked Sendable {
                 && faults?.secretService == "mindwtr.native-keychain.fixture." + identifier
                 && Self.equalJSON(context, ["outcome": "injected"])
         #endif
+        case "Native iOS Process Inbox editor reloaded":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-inbox-processing-editor-reload", "outcome": "refreshed"])
+        case "Native iOS Contexts filter saved":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-context-filter-save", "outcome": "saved"])
+        case "Native iOS Weekly Review project completion confirmed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-weekly-review-complete-project", "outcome": "confirmed"])
         case "Native iOS launch selection admitted":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"])
         case "Native iOS command preparation frame returned":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-native-command-stack", "outcome": "prepared"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-native-command-stack", "outcome": "prepared"])
+        case "Native iOS close cancellation reached finalization":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-close-cancellation-order", "operation": "close", "outcome": "drained"])
         case "Native iOS Inbox view boundary rendered":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-inbox-view-boundary", "outcome": "rendered"])
         case "Native iOS Board drag submitted":
@@ -22379,6 +27954,45 @@ private final class Engine: @unchecked Sendable {
                 && context["releaseCheck"] as? String == "v1.3.5/ios-reminder-response"
                 && ["open", "complete", "snooze", "dismiss", "unknown"].contains(context["action"] as? String ?? "")
                 && ["captured", "retired", "capture-refused", "admitting", "confirmed", "refused", "uncertain"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS reminder capture handover confirmed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-reminder-capture-handover",
+                                            "operation": "handover", "outcome": "confirmed"])
+        case "Native iOS personal intake capture confirmed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-personal-intake",
+                                            "operation": "capture", "outcome": "confirmed"])
+        case "Native iOS Next widget published":
+            valid = Set(context.keys) == ["releaseCheck", "count"]
+                && context["releaseCheck"] as? String == "v1.3.8/ios-widget-next-publication"
+                && Self.isInteger(context["count"])
+                && (context["count"] as? NSNumber).map({ (0.0...13.0).contains($0.doubleValue) }) == true
+        case "Native iOS Next widget task opened":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-widget-next-open", "outcome": "opened"])
+        case "Native iOS Add Task shortcut presented":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-quick-capture-intent", "outcome": "presented"])
+        case "Native iOS share intake confirmed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-share-text-url",
+                                            "operation": "share-import", "outcome": "confirmed"])
+        case "Native iOS shared capture bound":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-share-text-url",
+                                            "operation": "share-open", "outcome": "confirmed"])
+        case "Native iOS shared capture finish confirmed":
+            valid = ["completed", "ignored"].contains(context["outcome"] as? String ?? "")
+                && Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-share-text-url",
+                                            "operation": "share-finish", "outcome": context["outcome"] as? String ?? ""])
+        case "Native iOS capture copilot completed":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome", "provider", "partCount"])
+                && context["releaseCheck"] as? String == "v1.3.8/ios-capture-copilot"
+                && ["suggested", "empty", "stopped"].contains(context["outcome"] as? String ?? "")
+                && ["openai", "gemini", "anthropic"].contains(context["provider"] as? String ?? "")
+                && Self.isInteger(context["partCount"])
+                && (context["partCount"] as? NSNumber).map({ (0.0...1002.0).contains($0.doubleValue) }) == true
+        case "Native iOS personal intake reopened after container relocation":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-intake-same-tree-reopen",
+                                            "operation": "same-tree-reopen", "outcome": "confirmed"])
+        case "Native iOS navigation finish settlement confirmed":
+            valid = ["completed", "ignored"].contains(context["outcome"] as? String ?? "")
+                && Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-navigation-finish-settlement",
+                                            "operation": "finish-settlement", "outcome": context["outcome"] as? String ?? ""])
         case "Native iOS foreground reminder presentation requested":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-reminder-present"
@@ -22388,13 +28002,44 @@ private final class Engine: @unchecked Sendable {
         guard valid else { throw invalid }
     }
 
+    private func validateGettingStartedArguments(_ args: [Any], _ transport: String) throws {
+        guard transport.utf8.count <= 2048, args.count == 1, let raw = args.first as? String, raw.utf8.count <= 1024,
+              try NativeJSON.hasUniqueObjectKeys(raw),
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Set(request.keys) == Set(["requestId", "language"]),
+              let id = request["requestId"] as? String, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let language = request["language"] as? String, !language.isEmpty, language.utf16.count <= 40,
+              !language.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 }) else {
+            throw HostFailure("INVALID_INPUT: Getting Started requires one bounded request UUID and language")
+        }
+        // Core remains authoritative for its supported language catalog.
+    }
+    private func validateGettingStartedAcknowledgment(_ raw: String) throws {
+        let value = try Self.projectObject(raw, maximum: 4096)
+        guard Set(value.keys) == Set(["projectId"]), value["projectId"] is NSNull
+            || (value["projectId"] as? String).map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf16.count <= 500 }) == true else {
+            throw HostFailure("Malformed Getting Started acknowledgment")
+        }
+    }
+    private func proveGettingStartedReceipt(_ command: PendingCommand, value: String) throws {
+        let args = try journalArguments(command)
+        let proven = try invoke("gettingStartedOutcome", arguments: args)
+        guard proven != "null" else { throw HostFailure("SAVE_FAILED: Getting Started receipt is not proven") }
+        try validateGettingStartedAcknowledgment(proven)
+        guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)), try NativeJSON.jsonObject(with: Data(value.utf8))) else {
+            throw HostFailure("SAVE_FAILED: Getting Started outcome differs")
+        }
+    }
+
     private func validateDataSettingArguments(_ args: [Any], _ transport: String) throws {
         guard transport.utf8.count <= 2_048, let raw = args.first as? String, raw.utf8.count <= 1_024,
               let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               Set(request.keys) == Set(["requestId", "edit"]), let id = request["requestId"] as? String,
               id.utf8.count == 36, UUID(uuidString: id) != nil,
               let edit = request["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "value"]),
-              edit["type"] as? String == "debugLogging", Self.isBoolean(edit["value"]) else {
+              let type = edit["type"] as? String,
+              type == "debugLogging" && Self.isBoolean(edit["value"])
+                || type == "archiveRetentionDays" && Self.isInteger(edit["value"])
+                    && (edit["value"] as? NSNumber).map({ (0.0...36_500.0).contains($0.doubleValue) }) == true else {
             throw HostFailure("INVALID_INPUT: Invalid Data setting request")
         }
         guard try dataSettingHasExactKeyTokens(raw, expected: ["requestId", "edit", "type", "value"]) else {
@@ -22440,11 +28085,26 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validateArgumentTransportSize(_ method: String, _ json: String) throws {
+        if ["rowQuickStatusOptions", "rowQuickStatusWrite", "rowQuickStatusRetryOutcome"].contains(method), json.utf8.count > 24_580 {
+            throw HostFailure("INVALID_INPUT: Row quick status request is too large")
+        }
+        if ["inlineChecklistWrite", "inlineChecklistRetryOutcome"].contains(method), json.utf8.count > 12_000_004 {
+            throw HostFailure("INVALID_INPUT: Inline checklist transport is too large")
+        }
+        if ["captureCopilotEdit", "captureCopilotSubmit"].contains(method), json.utf8.count > 12_000_000 {
+            throw HostFailure("INVALID_INPUT: Capture copilot transport is too large")
+        }
         if method == "captureLinesSubmit", json.utf8.count > 6 * Self.captureLinesPlanLimit + 4 {
             throw HostFailure("INVALID_INPUT: Capture lines transport is too large")
         }
         if method == "logLine", json.utf8.count > 2_048 {
             throw HostFailure("INVALID_INPUT: Client diagnostic request is too large")
+        }
+        if method == "iosWatchSnapshot", json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Watch snapshot request is too large")
+        }
+        if method == "iosWidgetNextSnapshot", json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Widget Next snapshot request is too large")
         }
         if ["iosSearchSnapshot", "iosSearchObservation"].contains(method), json.utf8.count > 2_048 {
             throw HostFailure("INVALID_INPUT: Search snapshot request is too large")
@@ -22452,24 +28112,44 @@ private final class Engine: @unchecked Sendable {
         if method == "iosSearchOpen", json.utf8.count > 8_192 {
             throw HostFailure("INVALID_INPUT: Search open request is too large")
         }
-        if method == "iosEntityOpen", json.utf8.count > 128_000 {
+        if ["iosEntityOpen", "iosProductionWidgetTaskOpen"].contains(method), json.utf8.count > 128_000 {
             throw HostFailure("INVALID_INPUT: Entity open request is too large")
         }
         if method == "iosNotificationOpen", json.utf8.count > 400_000 {
             throw HostFailure("INVALID_INPUT: Notification open request is too large")
         }
         if method == "dataSetting", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Data setting request is too large") }
+        if method == "gettingStarted", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Getting Started request is too large") }
+        if ["archiveRetentionOptions", "archiveRetentionReview"].contains(method), json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Archive retention request is too large")
+        }
         if Self.historyTaskWritePrefix(method) == "referenceProjectNextAction", json.utf8.count > 12_610_000 {
             throw HostFailure("INVALID_INPUT: Next action request is too large")
         }
-        if ["referenceTasksRemoveTagWrite", "referenceTasksRemoveTagRetryOutcome", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "inboxTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "referenceTasksAddTagRetryOutcome", "inboxTasksAddTagRetryOutcome", "inboxTasksRemoveTagRetryOutcome", "inboxTasksOrganizeRetryOutcome", "inboxOrganizeDestinationCreateRetryOutcome", "referenceTasksMoveWrite", "referenceTasksMoveRetryOutcome", "inboxTasksMoveWrite", "inboxTasksMoveRetryOutcome", "archiveTaskSelection", "trashSelection", "archivedTasksRestoreWrite", "archivedTasksRestoreRetryOutcome", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "trashItemsRestoreRetryOutcome", "trashItemsPurgeRetryOutcome", "archivedTasksDeleteWrite", "archivedTasksDeleteRetryOutcome", "archivedTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome"].contains(method), json.utf8.count > 12_000_000 {
+        if ["referenceTasksRemoveTagWrite", "referenceTasksRemoveTagRetryOutcome", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "projectTasksAddTagWrite", "inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "projectTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite", "referenceTasksAddTagRetryOutcome", "inboxTasksAddTagRetryOutcome", "projectTasksAddTagRetryOutcome", "inboxTasksRemoveTagRetryOutcome", "projectTasksRemoveTagRetryOutcome", "inboxTasksOrganizeRetryOutcome", "projectTasksOrganizeRetryOutcome", "inboxOrganizeDestinationCreateRetryOutcome", "projectOrganizeDestinationCreateRetryOutcome", "referenceTasksMoveWrite", "referenceTasksMoveRetryOutcome", "inboxTasksMoveWrite", "projectTasksMoveWrite", "inboxTasksMoveRetryOutcome", "projectTasksMoveRetryOutcome", "archiveTaskSelection", "trashSelection", "archivedTasksRestoreWrite", "archivedTasksRestoreRetryOutcome", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "trashItemsRestoreRetryOutcome", "trashItemsPurgeRetryOutcome", "archivedTasksDeleteWrite", "archivedTasksDeleteRetryOutcome", "archivedTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome", "projectTasksDeleteRetryOutcome", "projectTasksDeleteUndoRetryOutcome"].contains(method), json.utf8.count > 12_000_000 {
             throw HostFailure("INVALID_INPUT: Bulk selection request is too large; select fewer tasks")
         }
-        if let prefix = Self.historyTaskWritePrefix(method), ["referenceTaskBackdate", "referenceTaskDestination"].contains(prefix), json.utf8.count > 24_586 {
+        if let prefix = Self.historyTaskWritePrefix(method), ["referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination"].contains(prefix), json.utf8.count > 24_586 {
             throw HostFailure("INVALID_INPUT: Reference completion time request is too large")
         }
-        if let prefix = Self.historyTaskWritePrefix(method), !["referenceTaskBackdate", "referenceTaskDestination", "referenceProjectNextAction"].contains(prefix), json.utf8.count > 4_096 {
+        if let prefix = Self.historyTaskWritePrefix(method), !["rowQuickStatus", "inlineChecklist", "referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination", "rowTaskDestination", "rowTaskDates", "rowTaskFocus", "referenceProjectNextAction"].contains(prefix), json.utf8.count > 4_096 {
             throw HostFailure("INVALID_INPUT: Done status request is too large")
+        }
+        if Self.checklistMovePrefix(method) != nil, json.utf8.count > (method == "taskChecklistMoveOptions" ? 98_308 : 24_586) {
+            throw HostFailure("INVALID_INPUT: Add to checklist request is too large")
+        }
+        if Self.conversionPrefix(method) != nil || ["taskPromoteOptions", "projectToSectionOptions"].contains(method),
+           json.utf8.count > (method.hasSuffix("Options") ? 8_192 : 220_000) {
+            throw HostFailure("INVALID_INPUT: Conversion request is too large")
+        }
+        if Self.historyTaskWritePrefix(method) == "rowTaskDestination", json.utf8.count > (method == "rowTaskDestinationOptions" ? 98_308 : 24_586) {
+            throw HostFailure("INVALID_INPUT: Row destination request is too large")
+        }
+        if Self.historyTaskWritePrefix(method) == "rowTaskFocus", json.utf8.count > 12_610_000 {
+            throw HostFailure("INVALID_INPUT: Row Focus journal is too large")
+        }
+        if Self.historyTaskWritePrefix(method) == "rowTaskDates", json.utf8.count > 12_610_000 {
+            throw HostFailure("INVALID_INPUT: Row dates request is too large")
         }
         if method == "taskOpenTab", json.utf8.count > 4_096 {
             throw HostFailure("INVALID_INPUT: Task open tab request is too large")
@@ -22483,7 +28163,7 @@ private final class Engine: @unchecked Sendable {
         if method == "taskEditorResumeCheck" && json.utf8.count > 2_000_000 {
             throw HostFailure("INVALID_INPUT: Editor resume check is too large")
         }
-        if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "appLockOptions", "appLock", "appLockRetryOutcome", "generalPreferenceOptions", "generalPreference", "generalPreferenceRetryOutcome"].contains(method), json.utf8.count > 49_152 {
+        if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "appLockOptions", "appLock", "appLockRetryOutcome", "generalPreferenceOptions", "generalPreference", "generalPreferenceRetryOutcome"].contains(method), json.utf8.count > 49_152 {
             throw HostFailure("INVALID_INPUT: General preference transport is too large")
         }
         if method == "gtdArchiveOptions", json.utf8.count > 49_152 {
@@ -22530,9 +28210,7 @@ private final class Engine: @unchecked Sendable {
             && json.utf8.count > 2_100_000 {
             throw HostFailure("INVALID_INPUT: Someday section order transport is too large")
         }
-        if ["somedaySectionMoveOptions", "somedaySectionMoveWrite", "somedaySectionMoveUndo",
-            "somedaySectionMoveRetryOutcome", "somedaySectionMoveUndoRetryOutcome"].contains(method)
-            && json.utf8.count > 2_100_000 {
+        if Self.somedayMovePublicMethods.contains(method) && json.utf8.count > 2_100_000 {
             throw HostFailure("INVALID_INPUT: Someday section move transport is too large")
         }
         if method == "projectNotes" && json.utf8.count > 2_000_000 {
@@ -22541,7 +28219,7 @@ private final class Engine: @unchecked Sendable {
         if method == "taskEditorDraftDirection" && json.utf8.count > 12_000_000 {
             throw HostFailure("INVALID_INPUT: Task Editor direction transport is too large")
         }
-        if ["projectCreate", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "areaCreate", "manageAreaCreate", "areaCreateResolve", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) && json.utf8.count > 12_000_000 {
+        if ["projectCreate", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "areaCreate", "manageAreaCreate", "areaCreateResolve", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) && json.utf8.count > 12_000_000 {
             throw HostFailure(method == "projectCreate" ? "INVALID_INPUT: Project creation transport is too large"
                 : ["areaColor", "areaColorRetryOutcome"].contains(method) ? "INVALID_INPUT: Area color transport is too large"
                 : ["areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome"].contains(method) ? "INVALID_INPUT: Area rename transport is too large"
@@ -22550,7 +28228,7 @@ private final class Engine: @unchecked Sendable {
                 : ["projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome"].contains(method) ? "INVALID_INPUT: Project Focus transport is too large"
                 : ["taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome"].contains(method) ? "INVALID_INPUT: Task Focus transport is too large"
                 : ["projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome"].contains(method) ? "INVALID_INPUT: Project rename transport is too large"
-                : ["projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome"].contains(method) ? "INVALID_INPUT: Project flow transport is too large"
+                : ["projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome"].contains(method) ? "INVALID_INPUT: Project flow transport is too large"
                 : ["projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome"].contains(method) ? "INVALID_INPUT: Project task sort transport is too large"
                 : ["projectTaskOrderWrite", "projectTaskOrderRetryOutcome"].contains(method) ? "INVALID_INPUT: Project task order transport is too large"
                 : ["projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome"].contains(method) ? "INVALID_INPUT: Project Notes transport is too large"
@@ -22879,13 +28557,38 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if ["somedaySectionMoveOptions", "somedaySectionMoveWrite", "somedaySectionMoveUndo",
-            "somedaySectionMoveRetryOutcome", "somedaySectionMoveUndoRetryOutcome"].contains(method) {
-            guard let encoded = args.first as? String, encoded.utf8.count <= 1_000_000,
+        if Self.somedayMovePublicMethods.contains(method) {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else {
                 throw HostFailure("INVALID_INPUT: Someday move needs a bounded request")
             }
-            if method == "somedaySectionMoveOptions" {
+            func validTaskIDs(_ value: Any?) -> [String]? {
+                guard let ids = value as? [String], (1...10_000).contains(ids.count), Set(ids).count == ids.count,
+                      ids.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 500 && !$0.contains("\0") }) else { return nil }
+                return ids
+            }
+            if method == "somedaySectionBulkMoveOptions" {
+                guard Set(input.keys).isSubset(of: Set(["taskIds", "offset", "limit", "revision"])),
+                      validTaskIDs(input["taskIds"]) != nil,
+                      input["offset"] == nil || (Self.isInteger(input["offset"])
+                        && (input["offset"] as? NSNumber).map({ $0.intValue >= 0 }) == true),
+                      input["limit"] == nil || (Self.isInteger(input["limit"])
+                        && (input["limit"] as? NSNumber).map({ (1...100).contains($0.intValue) }) == true),
+                      input["revision"] == nil || (input["revision"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 && !$0.contains("\0") }) == true else {
+                    throw HostFailure("INVALID_INPUT: Someday bulk move needs bounded tasks and a window")
+                }
+            } else if ["somedaySectionBulkMoveWrite", "somedaySectionBulkMoveRetryOutcome"].contains(method) {
+                guard Set(input.keys) == Set(["requestId", "taskIds", "taskRevisions", "sectionId"]),
+                      let id = input["requestId"] as? String, id == UUID(uuidString: id)?.uuidString.lowercased(),
+                      let taskIDs = validTaskIDs(input["taskIds"]),
+                      let revisions = input["taskRevisions"] as? [String: String], Set(revisions.keys) == Set(taskIDs),
+                      revisions.values.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 200 && !$0.contains("\0") }),
+                      input["sectionId"] is NSNull || (input["sectionId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 && !$0.contains("\0") }) == true else {
+                    throw HostFailure("INVALID_INPUT: Someday bulk move needs exact tasks, revisions, destination, and lowercase UUID")
+                }
+            } else if encoded.utf8.count > 1_000_000 {
+                throw HostFailure("INVALID_INPUT: Someday move needs a bounded request")
+            } else if method == "somedaySectionMoveOptions" {
                 guard Set(input.keys).isSubset(of: Set(["taskId", "offset", "limit", "revision"])),
                       let id = input["taskId"] as? String, !id.isEmpty, id.utf16.count <= 500, !id.contains("\0"),
                       input["offset"] == nil || (Self.isInteger(input["offset"])
@@ -22904,7 +28607,9 @@ private final class Engine: @unchecked Sendable {
                     throw HostFailure("INVALID_INPUT: Someday move needs an exact task, revision, destination, and lowercase UUID")
                 }
             } else {
-                guard Set(input.keys) == Set(["requestId", "moveRequestId"]),
+                guard ["somedaySectionMoveUndo", "somedaySectionMoveUndoRetryOutcome", "somedaySectionBulkMoveUndo",
+                       "somedaySectionBulkMoveUndoRetryOutcome"].contains(method),
+                      Set(input.keys) == Set(["requestId", "moveRequestId"]),
                       let id = input["requestId"] as? String, id == UUID(uuidString: id)?.uuidString.lowercased(),
                       let moveID = input["moveRequestId"] as? String, moveID == UUID(uuidString: moveID)?.uuidString.lowercased(),
                       id != moveID else {
@@ -22952,6 +28657,14 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
+        if method == "inboxEditorReload" {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 8_192,
+                  let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: String],
+                  Set(input.keys) == Set(["sessionId", "taskId", "step"]),
+                  input.values.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 500 }) else {
+                throw HostFailure("INVALID_INPUT: Process Inbox editor return needs an exact bounded owner")
+            }
+        }
         if method == "inboxStep" {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
@@ -22976,7 +28689,7 @@ private final class Engine: @unchecked Sendable {
         }
         if ["inboxView", "captureView", "captureEdit", "captureSubmit", "setAreaFilter", "taskView", "taskOpenTab", "taskViewReferenceTarget", "editDraft", "destinationPicker", "search", "mindSweepGuide", "mindSweepAdd",
             "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "calendarEventTaskCreate", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
-            "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
+            "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
             guard let json = args.first as? String,
                   (try NativeJSON.jsonObject(with: Data(json.utf8))) is [String: Any] else {
                 throw HostFailure("Core input must be a JSON object")
@@ -23138,6 +28851,14 @@ private final class Engine: @unchecked Sendable {
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
                   Set(input.keys) == Set(["controls"]), input["controls"] is [String: Any] else {
                 throw HostFailure("INVALID_INPUT: Focus order options need bounded controls")
+            }
+        }
+        if method == "savedSearchSortOptions" {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 4_096,
+                  let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["id"]), let id = input["id"] as? String,
+                  !id.isEmpty, id.utf16.count <= 200 else {
+                throw HostFailure("INVALID_INPUT: Saved search sort options need one bounded ID")
             }
         }
         if method == "savedSearchOptions" {
@@ -23467,8 +29188,9 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Project URL link write needs bounded intent, row token, and lowercase UUID")
             }
         }
-        if method == "projectFlowOptions" {
+        if ["projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
+                  method != "projectSectionFlowOptions" || (try? NativeJSON.hasUniqueObjectKeys(encoded)) == true,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
                   Set(input.keys) == Set(["projectId"]),
                   let projectID = input["projectId"] as? String, !projectID.isEmpty,
@@ -23486,7 +29208,12 @@ private final class Engine: @unchecked Sendable {
                   let kind = action["kind"] as? String,
                   (kind == "toggleType" && Set(action.keys) == Set(["kind"]))
                     || (kind == "setScope" && Set(action.keys) == Set(["kind", "scope"])
-                        && (action["scope"] as? String).map({ ["project", "section"].contains($0) }) == true),
+                        && (action["scope"] as? String).map({ ["project", "section"].contains($0) }) == true)
+                    || (kind == "flowMode" && Set(action.keys) == Set(["kind", "mode"])
+                        && (action["mode"] as? String).map({ ["parallel", "sequential", "perSection"].contains($0) }) == true)
+                    || (kind == "sectionFlow" && Set(action.keys) == Set(["kind", "sectionId", "sequential", "expectedSection"])
+                        && (action["sectionId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 }) == true
+                        && Self.isBoolean(action["sequential"]) && action["expectedSection"] is [String: Any]),
                   let expected = input["expected"] as? [String: Any],
                   Set(expected.keys) == Set(["title", "status", "isSequential", "sequentialScope", "rev", "revBy", "updatedAt"]),
                   let title = expected["title"] as? String, title.utf16.count <= 100_000,
@@ -23566,6 +29293,11 @@ private final class Engine: @unchecked Sendable {
             }
             _ = try Self.deviceCalendarSettingRequest(raw)
         }
+        if ["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: AI text configuration requires one request") }
+            if method == "iosAITextConfigurationV2" { _ = try Self.aiTextConfigurationRequestV2(raw) }
+            else { _ = try Self.aiTextConfigurationRequest(raw) }
+        }
         if method == "iosAIRequestTimeout" {
             guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: AI timeout requires one request") }
             _ = try Self.aiRequestTimeoutRequest(raw)
@@ -23607,7 +29339,7 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Task open tab requires a bounded mode and explicit opening context")
             }
         }
-        if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome"].contains(method) {
+        if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 8_192,
                   try NativeJSON.hasUniqueObjectKeys(encoded),
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else {
@@ -23625,7 +29357,7 @@ private final class Engine: @unchecked Sendable {
                     && (input["rawMode"] is NSNull || (input["rawMode"] as? String).map({ $0.utf16.count <= 200 }) == true)) else {
                     throw HostFailure("INVALID_INPUT: Task Editor options require an optional bounded local mode")
                 }
-            } else if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureParseOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorFieldOptions"].contains(method) {
+            } else if ["gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorFieldOptions"].contains(method) {
                 guard input.isEmpty else { throw HostFailure("INVALID_INPUT: GTD workflow options take an empty object") }
             } else if method == "gtdWorkflowDraft" {
                 if input["type"] as? String == "pomodoroDurations" {
@@ -23654,6 +29386,12 @@ private final class Engine: @unchecked Sendable {
             guard let encoded = args.first as? String, encoded.utf8.count <= 8_192,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any], input.isEmpty else {
                 throw HostFailure("INVALID_INPUT: GTD Auto-archive options take an empty object")
+            }
+        }
+        if method == "appLockDelayOptions" {
+            guard let raw = args.first as? String, raw.utf8.count <= 1024,
+                  let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], input.isEmpty else {
+                throw HostFailure("App lock delay options require an empty object")
             }
         }
         if ["generalPreferenceOptions", "generalPreference", "generalPreferenceRetryOutcome"].contains(method) {
@@ -23851,7 +29589,26 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func validatePreparedTaskArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
-        if ["archivedTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome"].contains(method) {
+        if ["projectTasksDeleteWrite", "projectTasksDeleteRetryOutcome"].contains(method) {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
+                  try NativeJSON.hasUniqueObjectKeys(encoded),
+                  let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
+                  let request = raw as? [String: Any], Set(request.keys) == Set(["requestId", "source", "taskIds", "taskRevisions", "params"]) else {
+                throw HostFailure("INVALID_INPUT: Project bulk Delete needs a bounded exact selection")
+            }
+            var selection = request
+            selection["status"] = "next"
+            guard Self.validTaskListMoveRequest(selection, source: "project") else {
+                throw HostFailure("INVALID_INPUT: Project bulk Delete needs exact selected revisions and Project params")
+            }
+        }
+        if ["projectTasksDeleteUndoWrite", "projectTasksDeleteUndoRetryOutcome"].contains(method) {
+            guard let encoded = args.first as? String, try NativeJSON.hasUniqueObjectKeys(encoded),
+                  let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw) else {
+                throw HostFailure("INVALID_INPUT: Project bulk Undo needs lossless request identity")
+            }
+        }
+        if ["archivedTasksDeleteUndoWrite", "archivedTasksDeleteUndoRetryOutcome", "projectTasksDeleteUndoWrite", "projectTasksDeleteUndoRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
                   let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
                   Set(request.keys) == Set(["requestId", "deleteRequestId"]),
@@ -23935,8 +29692,54 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if let prefix = Self.historyTaskWritePrefix(method), prefix == "referenceTaskBackdate", method != prefix + "Commit" {
-            let options = method == "referenceTaskBackdateOptions"
+        if method == "taskRowSwipeActions" {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Task row swipe actions need JSON") }
+            _ = try Self.taskRowSwipeRequest(raw)
+        }
+        if Self.historyTaskWritePrefix(method) == "rowTaskFocus", method != "rowTaskFocusCommit" {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Row Focus needs JSON") }
+            _ = try Self.rowTaskFocusRequest(raw)
+        }
+        if Self.historyTaskWritePrefix(method) == "rowTaskDates", method != "rowTaskDatesCommit" {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Row dates need a request") }
+            _ = try Self.rowTaskDatesRequest(raw)
+        }
+        if Self.historyTaskWritePrefix(method) == "rowTaskDestination", method != "rowTaskDestinationCommit" {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Row destination needs a request") }
+            _ = try Self.rowTaskDestinationRequest(raw, options: method == "rowTaskDestinationOptions")
+        }
+        if let prefix = Self.checklistMovePrefix(method), method != prefix + "Commit" {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Add to checklist needs a request") }
+            _ = try Self.checklistMoveRequest(raw, options: method == "taskChecklistMoveOptions", undo: prefix.hasSuffix("Undo"))
+        }
+        if let prefix = Self.conversionPrefix(method), method != prefix + "Commit" {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Conversion needs a request") }
+            _ = try Self.conversionRequest(prefix, raw)
+        }
+        if ["taskPromoteOptions", "projectToSectionOptions"].contains(method) {
+            guard let raw = args.first as? String, raw.utf8.count <= 4_096, try NativeJSON.hasUniqueObjectKeys(raw),
+                  let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                  Set(request.keys) == (method == "taskPromoteOptions" ? Set(["taskId", "taskRevision"]) : Set(["projectId", "projectRevision"])),
+                  request.values.allSatisfy({ ($0 as? String).map { !$0.isEmpty && $0.utf16.count <= 2_000 } == true }) else {
+                throw HostFailure("INVALID_INPUT: Conversion options need a bounded saved revision")
+            }
+        }
+        if ["rowQuickStatusOptions", "rowQuickStatusWrite", "rowQuickStatusRetryOutcome"].contains(method) {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Row quick status needs a request") }
+            _ = try Self.rowQuickStatusRequest(raw, options: method == "rowQuickStatusOptions")
+        }
+        if ["inlineChecklistWrite", "inlineChecklistRetryOutcome"].contains(method) {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Inline checklist needs a request") }
+            _ = try Self.inlineChecklistRequest(raw)
+        }
+        if let prefix = Self.historyTaskWritePrefix(method), ["referenceTaskBackdate", "rowTaskBackdate"].contains(prefix), method != prefix + "Commit" {
+            let options = method == prefix + "Options"
+            if prefix == "rowTaskBackdate" {
+                guard let raw = args.first as? String, try NativeJSON.hasUniqueObjectKeys(raw),
+                      Self.referenceTasksMoveJSONIsLossless(try NativeJSON.jsonObject(with: Data(raw.utf8))) else {
+                    throw HostFailure("INVALID_INPUT: Row completion time needs lossless request identity")
+                }
+            }
             guard let text = args.first as? String, text.utf8.count <= 4_096,
                   let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
                   Set(request.keys) == (options ? Set(["id", "taskRevision"]) : Set(["id", "requestId", "taskRevision", "source", "completedAt", "timeSpentText"])),
@@ -23945,7 +29748,7 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Reference completion time needs a bounded displayed row")
             }
             if !options {
-                guard request["source"] as? String == "reference",
+                guard request["source"] as? String == (prefix == "rowTaskBackdate" ? "row" : "reference"),
                       let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
                       let instant = request["completedAt"] as? String, !instant.isEmpty, instant.utf16.count <= 200,
                       request["timeSpentText"] is NSNull || (request["timeSpentText"] as? String).map({ $0.utf16.count <= 200 }) == true else {
@@ -23953,7 +29756,7 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if let prefix = Self.historyTaskWritePrefix(method), !["referenceTaskBackdate", "referenceTaskDestination", "referenceProjectNextAction"].contains(prefix), method != prefix + "Commit" {
+        if let prefix = Self.historyTaskWritePrefix(method), !["rowQuickStatus", "inlineChecklist", "referenceTaskBackdate", "rowTaskBackdate", "referenceTaskDestination", "rowTaskDestination", "rowTaskDates", "rowTaskFocus", "referenceProjectNextAction"].contains(prefix), method != prefix + "Commit" {
             let options = method == prefix + "Options"
             let completionTime = prefix != "doneTaskStatus"
             guard let text = args.first as? String, text.utf8.count <= 4_096,
@@ -23977,10 +29780,10 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: History row needs a displayed revision, \(value), and lowercase UUID")
             }
         }
-        if ["inboxTasksMoveWrite", "inboxTasksMoveRetryOutcome"].contains(method) {
+        if ["inboxTasksMoveWrite", "projectTasksMoveWrite", "inboxTasksMoveRetryOutcome", "projectTasksMoveRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(encoded),
                   let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
-                  let request = raw as? [String: Any], Self.validInboxTasksMoveRequest(request) else {
+                  let request = raw as? [String: Any], Self.validTaskListMoveRequest(request, source: method.hasPrefix("project") ? "project" : "inbox", statusLists: true) else {
                 throw HostFailure("INVALID_INPUT: Inbox bulk Move needs exact selected revisions, scope, status and a lowercase UUID")
             }
         }
@@ -23991,32 +29794,32 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Reference bulk Move needs exact selected revisions, scope, status and a lowercase UUID")
             }
         }
-        if ["inboxTasksAddTagWrite", "inboxTasksAddTagRetryOutcome"].contains(method) {
+        if ["inboxTasksAddTagWrite", "projectTasksAddTagWrite", "inboxTasksAddTagRetryOutcome", "projectTasksAddTagRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(encoded),
                   let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
-                  let request = raw as? [String: Any], Self.validInboxTasksAddTagRequest(request) else {
+                  let request = raw as? [String: Any], Self.validTaskListAddTagRequest(request, source: method.hasPrefix("project") ? "project" : "inbox") else {
                 throw HostFailure("INVALID_INPUT: Inbox bulk Add tag needs exact selected revisions, scope, tag and a lowercase UUID")
             }
         }
-        if ["inboxTasksRemoveTagWrite", "inboxTasksRemoveTagRetryOutcome"].contains(method) {
+        if ["inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite", "inboxTasksRemoveTagRetryOutcome", "projectTasksRemoveTagRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(encoded),
                   let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
-                  let request = raw as? [String: Any], Self.validInboxTasksRemoveTagRequest(request) else {
+                  let request = raw as? [String: Any], Self.validTaskListRemoveTagRequest(request, source: method.hasPrefix("project") ? "project" : "inbox") else {
                 throw HostFailure("INVALID_INPUT: Inbox bulk Remove tag needs exact selected revisions, scope, tags and a lowercase UUID")
             }
         }
 
-        if ["inboxTasksOrganizeWrite", "inboxTasksOrganizeRetryOutcome"].contains(method) {
+        if ["inboxTasksOrganizeWrite", "projectTasksOrganizeWrite", "inboxTasksOrganizeRetryOutcome", "projectTasksOrganizeRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(encoded),
                   let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
-                  let request = raw as? [String: Any], Self.validInboxTasksOrganizeRequest(request) else {
+                  let request = raw as? [String: Any], Self.validTaskListOrganizeRequest(request, source: method.hasPrefix("project") ? "project" : "inbox") else {
                 throw HostFailure("INVALID_INPUT: Inbox bulk Organize needs exact selected revisions, scope, tags and a lowercase UUID")
             }
         }
-        if ["inboxOrganizeDestinationCreateWrite", "inboxOrganizeDestinationCreateRetryOutcome"].contains(method) {
+        if ["inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite", "inboxOrganizeDestinationCreateRetryOutcome", "projectOrganizeDestinationCreateRetryOutcome"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000, try NativeJSON.hasUniqueObjectKeys(encoded),
                   let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)), Self.referenceTasksMoveJSONIsLossless(raw),
-                  let request = raw as? [String: Any], Self.validInboxOrganizeDestinationCreateRequest(request) else {
+                  let request = raw as? [String: Any], Self.validTaskListOrganizeDestinationCreateRequest(request, source: method.hasPrefix("project") ? "project" : "inbox") else {
                 throw HostFailure("INVALID_INPUT: Inbox Organize destination creation needs exact selected revisions, scope, tags and a lowercase UUID")
             }
         }
@@ -24034,12 +29837,12 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Reference bulk Remove tag needs exact selected revisions, scope, tags and a lowercase UUID")
             }
         }
-        if method == "inboxTasksMoveNotice" {
+        if ["inboxTasksMoveNotice", "projectTasksMoveNotice"].contains(method) {
             guard let encoded = args.first as? String, encoded.utf8.count <= 512, try NativeJSON.hasUniqueObjectKeys(encoded),
                   let result = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
                   Set(result.keys) == Set(["count", "status"]), Self.isInteger(result["count"]),
                   let count = result["count"] as? NSNumber, (1...10_000).contains(count.intValue),
-                  ["next", "waiting", "someday", "done", "reference"].contains(result["status"] as? String ?? "") else {
+                  ["inbox", "next", "waiting", "someday", "done", "reference"].contains(result["status"] as? String ?? "") else {
                 throw HostFailure("INVALID_INPUT: Inbox bulk Move notice needs a bounded result")
             }
         }
@@ -24055,7 +29858,7 @@ private final class Engine: @unchecked Sendable {
         if ["archivedTasksRestoreWrite", "archivedTasksRestoreRetryOutcome", "archivedTasksDeleteWrite", "archivedTasksDeleteRetryOutcome"].contains(method) {
             if method.hasPrefix("archivedTasksDelete"), let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
                let raw = try? NativeJSON.jsonObject(with: Data(encoded.utf8)),
-               let request = raw as? [String: Any], request["source"] as? String == "inbox" {
+               let request = raw as? [String: Any], ["inbox", "waiting", "someday", "review", "contexts"].contains(request["source"] as? String ?? "") {
                 guard try NativeJSON.hasUniqueObjectKeys(encoded), Self.referenceTasksMoveJSONIsLossless(raw) else {
                     throw HostFailure("INVALID_INPUT: Inbox bulk Trash needs lossless selected IDs and revisions")
                 }
@@ -24065,14 +29868,17 @@ private final class Engine: @unchecked Sendable {
                   ((method.hasPrefix("archivedTasksRestore") && (Self.archivedTasksRestoreTarget(request) != nil || Self.isDoneBulkAddTagRequest(request) || Self.isDoneBulkRemoveTagRequest(request)))
                     || (method.hasPrefix("archivedTasksDelete")
                         && (Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions"])
-                            || (["done", "reference", "inbox"].contains(request["source"] as? String ?? "")
-                                && Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "source"]))))),
+                            || (["done", "reference", "inbox", "waiting", "someday"].contains(request["source"] as? String ?? "")
+                                && Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "source"]))
+                            || (["review", "contexts"].contains(request["source"] as? String ?? "")
+                                && Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "source", "params"])
+                                && (request["params"] as? [String: Any]).map({ Self.validShownListParams($0, source: request["source"] as? String ?? "") }) == true)))),
                   let requestID = request["requestId"] as? String, UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
                   let ids = request["taskIds"] as? [String], !ids.isEmpty, ids.count <= 10_000,
                   Set(ids.map { Data($0.utf8) }).count == ids.count, ids.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 500 }),
                   let revisions = request["taskRevisions"] as? [String: Any], revisions.count == ids.count,
                   Set(revisions.keys) == Set(ids),
-                  !["reference", "inbox"].contains(request["source"] as? String ?? "") || Set(revisions.keys.map { Data($0.utf8) }) == Set(ids.map { Data($0.utf8) }),
+                  !["reference", "inbox", "waiting", "someday", "review", "contexts"].contains(request["source"] as? String ?? "") || Set(revisions.keys.map { Data($0.utf8) }) == Set(ids.map { Data($0.utf8) }),
                   revisions.values.allSatisfy({ ($0 as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true }) else {
                 throw HostFailure("INVALID_INPUT: Archive bulk restore needs unique selected IDs, exact revisions and a lowercase UUID")
             }
@@ -24092,7 +29898,7 @@ private final class Engine: @unchecked Sendable {
             guard let text = args.first as? String, text.utf8.count <= 4_096,
                   let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
                   (Set(request.keys) == Set(["id", "requestId", "taskRevision"]) || Self.isReferenceTaskCompletionRequest(request)
-                    || Self.isBoardTaskCompletionRequest(request)),
+                    || Self.isBoardTaskCompletionRequest(request) || Self.isRowTaskCompletionRequest(request)),
                   let requestID = request["requestId"] as? String,
                   UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
                   let taskID = request["id"] as? String, !taskID.isEmpty, taskID.utf16.count <= 500,
@@ -24141,12 +29947,16 @@ private final class Engine: @unchecked Sendable {
                   (Set(request.keys) == Set(["requestId", "taskId", "taskRevision"])
                     || Set(request.keys) == Set(["requestId", "taskId", "taskRevision", "source"])
                        && ["archive", "done", "reference"].contains(request["source"] as? String ?? "")),
-                  method != "taskDeleteReceiptOutcome" || ["archive", "done", "reference"].contains(request["source"] as? String ?? ""),
                   let id = request["requestId"] as? String,
                   UUID(uuidString: id)?.uuidString.lowercased() == id,
                   let taskID = request["taskId"] as? String, !taskID.isEmpty, taskID.utf16.count <= 200,
                   let revision = request["taskRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200 else {
                 throw HostFailure("INVALID_INPUT: Task Delete needs an exact saved revision and lowercase UUID")
+            }
+            if method == "taskDeleteReceiptOutcome", Self.hasOrdinaryTaskDeleteShape(request) {
+                guard try NativeJSON.hasUniqueObjectKeys(text), Self.referenceTasksMoveJSONIsLossless(request) else {
+                    throw HostFailure("INVALID_INPUT: Task Delete receipt needs a lossless exact request")
+                }
             }
         }
         if ["trashTaskRestoreWrite", "trashTaskRestoreRetryOutcome"].contains(method) {
@@ -24207,7 +30017,9 @@ private final class Engine: @unchecked Sendable {
         if method == "taskPromote" {
             guard let text = args.first as? String, text.utf8.count <= 2_000_000,
                   let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
-                  Set(request.keys) == Set(["requestId", "taskId", "taskRevision", "title"]),
+                  Set(request.keys) == Set(["requestId", "taskId", "taskRevision", "title"])
+                    || (Set(request.keys) == Set(["requestId", "taskId", "taskRevision", "title", "expandChecklist"])
+                        && Self.isBoolean(request["expandChecklist"]) && request["expandChecklist"] as? Bool == true),
                   let requestID = request["requestId"] as? String,
                   UUID(uuidString: requestID)?.uuidString.lowercased() == requestID,
                   let taskID = request["taskId"] as? String, !taskID.isEmpty, taskID.utf16.count <= 500,
@@ -24267,9 +30079,10 @@ private final class Engine: @unchecked Sendable {
                         throw HostFailure("INVALID_INPUT: Checklist save needs exact baselines and final list")
                     }
                     let allowed = Set(["title", "description", "location", "assignedTo", "priority", "energyLevel", "timeEstimate", "timeSpentMinutes", "projectId", "areaId", "sectionId", "contexts", "tags", "status", "focusedToday", "completedAt"])
-                        .union(Self.scheduleFields).union(Self.recurrenceFields)
+                        .union(Self.scheduleFields).union(Self.recurrenceFields).union(Self.reminderDraftFields)
                     guard Set(patch.keys).isSubset(of: allowed), patch.keys.allSatisfy({ field in
                         if field == "relativeStartOffset" { return Self.isOffset(base[field]) && Self.isOffset(patch[field]) }
+                        if field == "dueReminderLeadMinutes" || field == "startReminderLeadMinutes" { return Self.isReminderLead(base[field]) && Self.isReminderLead(patch[field]) }
                         if field == "showFutureRecurrence" || field == "focusedToday" { return Self.isBoolean(base[field]) && Self.isBoolean(patch[field]) }
                         if field == "timeSpentMinutes" { return Self.isTimeSpent(base[field]) && Self.isTimeSpent(patch[field]) }
                         return base[field] is String && patch[field] is String
@@ -24292,6 +30105,22 @@ private final class Engine: @unchecked Sendable {
                         throw HostFailure("INVALID_INPUT: Checklist destination needs every association field")
                     }
                 }
+            }
+        }
+        if ["weeklyReviewProjectTaskOptions", "weeklyReviewProjectTaskWrite"].contains(method) {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 100_000,
+                  let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+                  let project = input["projectId"] as? String, !project.isEmpty, project.utf16.count <= 500 else {
+                throw HostFailure("INVALID_INPUT: Review project task needs a bounded project")
+            }
+            if method == "weeklyReviewProjectTaskOptions" {
+                guard Set(input.keys) == Set(["projectId"]) else { throw HostFailure("INVALID_INPUT: Unsupported Review project task read") }
+            } else {
+                guard Set(input.keys) == Set(["requestId", "projectId", "projectRevision", "title", "openAfterSave"]),
+                      let id = input["requestId"] as? String, UUID(uuidString: id) != nil, id == id.lowercased(),
+                      let title = input["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.utf16.count <= 10_000,
+                      let revision = input["projectRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+                      Self.isBoolean(input["openAfterSave"]) else { throw HostFailure("INVALID_INPUT: Unsupported Review project task write") }
             }
         }
         if ["mindSweepGuide", "mindSweepAdd"].contains(method) {
@@ -24434,6 +30263,30 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private static func validateContextsFilters(_ value: Any) throws {
+        let arrays: Set<String> = ["tokens", "excludedTokens", "projects", "excludedProjects", "statuses", "priorities", "energyLevels", "timeEstimates"]
+        let fields = arrays.union(["searchQuery", "location", "contextMatchMode", "tagMatchMode", "anyDateRange"])
+        guard let filters = value as? [String: Any], Set(filters.keys).isSubset(of: fields) else {
+            throw HostFailure("Unsupported native Contexts filters")
+        }
+        for (field, value) in filters {
+            if arrays.contains(field) {
+                guard let values = value as? [String], values.count <= (field == "statuses" ? 7 : field == "timeEstimates" ? 50 : 100),
+                      values.allSatisfy({ $0.utf16.count <= 500 }),
+                      field != "statuses" || values.allSatisfy({ ["inbox", "next", "waiting", "someday", "reference", "done", "archived"].contains($0) }) else {
+                    throw HostFailure("Unsupported native Contexts filters")
+                }
+            } else if field == "anyDateRange" {
+                guard value is [String: Any] else { throw HostFailure("Unsupported native Contexts date filter") }
+            } else {
+                guard let text = value as? String, text.utf16.count <= (field == "searchQuery" ? 2000 : 500),
+                      !["contextMatchMode", "tagMatchMode"].contains(field) || ["any", "all"].contains(text) else {
+                    throw HostFailure("Unsupported native Contexts filters")
+                }
+            }
+        }
+    }
+
     private func validateMenuAndDraftArguments(_ method: String, _ args: [Any], _ json: String, allowPreparedDates: Bool) throws {
         if ["doneBulkTagInput", "referenceBulkTagInput", "inboxBulkTagInput"].contains(method) {
             guard let tag = args.first as? String, tag.utf16.count <= 2_000 else {
@@ -24441,7 +30294,7 @@ private final class Engine: @unchecked Sendable {
             }
         }
         if method == "menuRead" {
-            guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "inboxTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
+            guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "inboxTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "reviewProjectCompletionOptions", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
                   let json = args[1] as? String else {
                 throw HostFailure("Unsupported native menu read or JSON object input")
             }
@@ -24482,10 +30335,17 @@ private final class Engine: @unchecked Sendable {
             if name == "bulk" {
                 let referenceSelection = input["list"] as? String == "reference"
                 let inboxSelection = input["list"] as? String == "inbox"
-                let selectionName = referenceSelection ? "Reference" : inboxSelection ? "Inbox" : "Done"
+                let projectSelection = input["list"] as? String == "project"
+                let waitingSelection = input["list"] as? String == "waiting"
+                let somedaySelection = input["list"] as? String == "someday"
+                let reviewSelection = input["list"] as? String == "review"
+                let contextsSelection = input["list"] as? String == "contexts"
+                let selectionName = projectSelection ? "Project" : referenceSelection ? "Reference" : inboxSelection ? "Inbox"
+                    : waitingSelection ? "Waiting" : somedaySelection ? "Someday" : reviewSelection ? "Review" : contextsSelection ? "Contexts" : "Done"
                 // Inbox also exposes the core-owned Organize draft and destination picker.
                 let selectionKeys: Set<String> = ["list", "params", "taskIds", "anchorId", "selectionEdit", "rangeSelectMode", "busy", "picker", "organize"]
-                guard json.utf8.count <= 2_000_000, ["done", "reference", "inbox"].contains(input["list"] as? String ?? ""),
+                guard json.utf8.count <= 2_000_000, ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(input["list"] as? String ?? ""),
+                      !(reviewSelection || contextsSelection) || (input["organize"] == nil && input["picker"] == nil && input["rangeSelectMode"] as? Bool != true),
                       Set(input.keys).isSubset(of: selectionKeys),
                       input["rangeSelectMode"] == nil || Self.isBoolean(input["rangeSelectMode"]),
                       input["busy"] == nil || Self.isBoolean(input["busy"]),
@@ -24493,14 +30353,32 @@ private final class Engine: @unchecked Sendable {
                         || (input["anchorId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true else {
                     throw HostFailure("INVALID_INPUT: Unsupported native \(selectionName) selection read")
                 }
-                if let params = input["params"] {
-                    let parameterKeys: Set<String> = referenceSelection
-                        ? ["groupBy", "includeArchivedProjects", "collapsedGroupIds", "filters"]
+                if reviewSelection || contextsSelection {
+                    guard try NativeJSON.hasUniqueObjectKeys(json), let params = input["params"] as? [String: Any],
+                          Self.validShownListParams(params, source: reviewSelection ? "review" : "contexts") else {
+                        throw HostFailure("INVALID_INPUT: \(selectionName) selection requires the list's own view params")
+                    }
+                    if contextsSelection { try Self.validateContextsFilters(params["filters"] as Any) }
+                } else if let params = input["params"] {
+                    let parameterKeys: Set<String> = projectSelection
+                        ? ["projectId", "showCompleted", "completedCollapsed", "filters", "filterSheetOpen"]
+                        : referenceSelection ? ["groupBy", "includeArchivedProjects", "collapsedGroupIds", "filters"]
                         : inboxSelection ? ["groupBy", "collapsedGroupIds", "filters"]
+                        : waitingSelection ? ["person"]
+                        : somedaySelection ? ["sortBy", "groupBy", "showDetails", "projectsInSections", "filters"]
                         : ["groupBy", "sortBy", "collapsedGroupIds", "filters"]
                     guard let value = params as? [String: Any],
                           Set(value.keys).isSubset(of: parameterKeys) else {
                         throw HostFailure("INVALID_INPUT: \(selectionName) selection requires the list's own view params")
+                    }
+                }
+                if projectSelection {
+                    guard try NativeJSON.hasUniqueObjectKeys(json), let params = input["params"] as? [String: Any],
+                          let id = params["projectId"] as? String, !id.isEmpty, id.utf16.count <= 500,
+                          Self.isBoolean(params["showCompleted"]), Self.isBoolean(params["completedCollapsed"]),
+                          params["filters"] is [String: Any],
+                          params["filterSheetOpen"] == nil || Self.isBoolean(params["filterSheetOpen"]) && params["filterSheetOpen"] as? Bool == false else {
+                        throw HostFailure("INVALID_INPUT: Project selection requires the accepted project view context")
                     }
                 }
                 if let selected = input["taskIds"] {
@@ -24511,7 +30389,7 @@ private final class Engine: @unchecked Sendable {
                     }
                 }
                 if let organize = input["organize"] {
-                    guard inboxSelection, let value = organize as? [String: Any],
+                    guard inboxSelection || projectSelection, let value = organize as? [String: Any],
                           Set(value.keys).isSubset(of: ["draft", "edit"]) else {
                         throw HostFailure("INVALID_INPUT: Inbox Organize requires a bounded draft and edit")
                     }
@@ -24534,7 +30412,7 @@ private final class Engine: @unchecked Sendable {
                 }
                 if let picker = input["picker"] {
                     guard let value = picker as? [String: Any], Set(value.keys).isSubset(of: ["kind", "query", "offset", "limit", "revision"]),
-                          value["kind"] as? String == "removeTag" || (inboxSelection && input["organize"] != nil && ["project", "area"].contains(value["kind"] as? String ?? "")),
+                          value["kind"] as? String == "removeTag" || ((inboxSelection || projectSelection) && input["organize"] != nil && ["project", "area"].contains(value["kind"] as? String ?? "")),
                           value["query"] == nil || (value["query"] as? String).map({ $0.utf16.count <= 500 }) == true,
                           value["offset"] == nil || Self.isInteger(value["offset"]) && (0...9_007_199_254_740_991).contains((value["offset"] as? NSNumber)?.doubleValue ?? -1),
                           value["limit"] == nil || Self.isInteger(value["limit"]) && (1...100).contains((value["limit"] as? NSNumber)?.intValue ?? 0),
@@ -24678,9 +30556,33 @@ private final class Engine: @unchecked Sendable {
                 }
             }
             if name == "contexts" {
-                let fields = Set(["tokens", "matchMode", "searchQuery", "offset", "limit", "revision"])
-                guard Set(input.keys).isSubset(of: fields) else {
+                let legacyFields: Set<String> = ["tokens", "matchMode", "searchQuery", "offset", "limit", "revision"]
+                let enhancedFields: Set<String> = ["filters", "filterEdit", "savedFilterId", "preservedCriteria", "filterSheetOpen", "filterPicker", "savedFiltersWindow"]
+                let enhanced = input["filters"] != nil
+                guard json.utf8.count <= 2_000_000, (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
+                      Set(input.keys).isSubset(of: enhanced ? legacyFields.union(enhancedFields) : legacyFields),
+                      !enhanced || input["filters"] is [String: Any],
+                      input["filterEdit"] == nil || input["filterEdit"] is [String: Any],
+                      input["preservedCriteria"] == nil || input["preservedCriteria"] is [String: Any],
+                      input["savedFilterId"] == nil || input["savedFilterId"] is NSNull
+                        || (input["savedFilterId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true,
+                      input["filterSheetOpen"] == nil || Self.isBoolean(input["filterSheetOpen"]) else {
                     throw HostFailure("Unsupported native Contexts browsing input")
+                }
+                if let filters = input["filters"] { try Self.validateContextsFilters(filters) }
+                for name in ["filterPicker", "savedFiltersWindow"] {
+                    guard let raw = input[name] else { continue }
+                    guard let window = raw as? [String: Any],
+                          Set(window.keys).isSubset(of: name == "filterPicker" ? ["name", "query", "offset", "limit", "revision"] : ["offset", "limit", "revision"]),
+                          window["offset"] == nil || (Self.isInteger(window["offset"]) && (0...9_007_199_254_740_991).contains((window["offset"] as? NSNumber)?.doubleValue ?? -1)),
+                          window["limit"] == nil || (Self.isInteger(window["limit"]) && (1...100).contains((window["limit"] as? NSNumber)?.doubleValue ?? 0)),
+                          window["revision"] == nil || window["revision"] is String,
+                          ((window["offset"] as? NSNumber)?.doubleValue ?? 0) == 0 || window["revision"] is String,
+                          name != "filterPicker" || ["projects", "tokens"].contains(window["name"] as? String ?? ""),
+                          window["query"] == nil || (window["query"] as? String).map({ $0.utf16.count <= 500 }) == true,
+                          name != "savedFiltersWindow" || (window["offset"] != nil && window["limit"] != nil) else {
+                        throw HostFailure("Unsupported native Contexts filter window")
+                    }
                 }
             }
             let focusFields: [String: Set<String>] = [
@@ -24693,20 +30595,43 @@ private final class Engine: @unchecked Sendable {
                     throw HostFailure("Unsupported native Focus read or missing controls object")
                 }
             }
+            if name == "reviewProjectCompletionOptions" {
+                guard Set(input.keys) == Set(["projectId"]), let id = input["projectId"] as? String,
+                      !id.isEmpty, id.utf16.count <= 200 else {
+                    throw HostFailure("INVALID_INPUT: Review completion needs one bounded Project identifier")
+                }
+            }
+            if ["weeklyReview", "weeklyReviewList"].contains(name), let hold = input["keepProjectsStep"], !Self.isBoolean(hold) {
+                throw HostFailure("INVALID_INPUT: Review Projects hold must be a boolean")
+            }
+            if ["weeklyReview", "weeklyReviewList"].contains(name) {
+                for field in ["keepStaleStep", "includeStaleProjectCards"] {
+                    if let flag = input[field], !Self.isBoolean(flag) { throw HostFailure("INVALID_INPUT: Review project options must be booleans") }
+                }
+            }
             let reviewFields: [String: Set<String>] = [
-                "reviewOverview": ["scope", "expandedAreaIds", "expandedProjectIds", "expansionEdit", "offset", "limit", "revision"],
+                "reviewOverview": ["expandedLaterProjectIds", "scope", "expandedAreaIds", "expandedProjectIds", "expansionEdit", "offset", "limit", "revision"],
                 "dailyReview": ["checkpoint", "offset", "limit", "revision"],
-                "weeklyReview": ["checkpoint", "expandedProjectId", "offset", "limit", "revision"],
-                "weeklyReviewList": ["checkpoint", "expandedProjectId", "list", "key", "offset", "limit", "revision"],
+                "weeklyReview": ["expandedLaterProjectIds", "checkpoint", "expandedProjectId", "keepProjectsStep", "keepStaleStep", "includeStaleProjectCards", "offset", "limit", "revision"],
+                "weeklyReviewList": ["expandedLaterProjectIds", "checkpoint", "expandedProjectId", "keepProjectsStep", "keepStaleStep", "includeStaleProjectCards", "list", "key", "offset", "limit", "revision"],
             ]
             if let fields = reviewFields[name], !Set(input.keys).isSubset(of: fields) {
                 throw HostFailure("Unsupported native Review browsing input")
             }
+            if reviewFields[name] != nil, let value = input["expandedLaterProjectIds"] {
+                guard let ids = value as? [String], ids.count <= 10_000, Set(ids.map { Data($0.utf8) }).count == ids.count,
+                      ids.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 500 }) else {
+                    throw HostFailure("INVALID_INPUT: Review later projects requires bounded unique ids")
+                }
+            }
             let calendarFields: [String: Set<String>] = [
-                "calendar": ["state", "scheduleQuery", "offset", "limit", "revision", "calendar"],
+                "calendar": ["state", "scheduleQuery", "offset", "limit", "revision", "calendar", "includeAllDayLanes"],
                 "calendarItem": ["taskId", "state", "calendar"],
                 "calendarPreferences": [],
             ]
+            if name == "calendar", let flag = input["includeAllDayLanes"], !Self.isBoolean(flag) {
+                throw HostFailure("INVALID_INPUT: Calendar all-day lanes requires a boolean")
+            }
             if name == "calendarItem", input["event"] != nil {
                 guard json.utf8.count <= 2_000_000, (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
                       Set(input.keys) == Set(["event", "canOpen", "state", "calendarName"]),
@@ -24801,7 +30726,7 @@ private final class Engine: @unchecked Sendable {
             let hasRecurrence = !Self.recurrenceFields.isDisjoint(with: patch.keys)
             let isPrepared = hasSchedule || hasRecurrence || input["scheduleBase"] != nil
             let allowed = Set(["title", "description", "priority", "energyLevel", "timeEstimate", "projectId", "areaId", "sectionId", "contexts", "tags"])
-                .union(allowPreparedDates && isPrepared ? ["location", "assignedTo", "timeSpentMinutes"] : [])
+                .union(allowPreparedDates && isPrepared ? Set(["location", "assignedTo", "timeSpentMinutes"]).union(Self.reminderDraftFields) : [])
                 .union(allowPreparedDates ? Self.scheduleFields.union(Self.recurrenceFields) : [])
             var inputFields: Set<String> = ["id", "base", "patch"]
             if isPrepared && allowPreparedDates { inputFields.insert("scheduleBase") }
@@ -24814,6 +30739,7 @@ private final class Engine: @unchecked Sendable {
                       if field == "relativeStartOffset" { return Self.isOffset(base[field]) && Self.isOffset(patch[field]) }
                       if field == "showFutureRecurrence" { return Self.isBoolean(base[field]) && Self.isBoolean(patch[field]) }
                       if field == "timeSpentMinutes" { return Self.isTimeSpent(base[field]) && Self.isTimeSpent(patch[field]) }
+                      if field == "dueReminderLeadMinutes" || field == "startReminderLeadMinutes" { return Self.isReminderLead(base[field]) && Self.isReminderLead(patch[field]) }
                       return base[field] is String && patch[field] is String
                   }) else { throw HostFailure("INVALID_INPUT: Native editor requires matching supported draft fields") }
             if isPrepared {
@@ -25245,7 +31171,7 @@ private final class Engine: @unchecked Sendable {
     func foregroundDirectorySyncSettings(command: String, requestJSON: String, pickedBookmark: Data?, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         try denyCleanupOwner()
-        guard ["openSyncSettings", "syncSettings", "closeSyncSettings", "selectSyncBackend", "pickSyncFolder", "syncNow"].contains(command),
+        guard ["openSyncSettings", "syncSettings", "closeSyncSettings", "selectSyncBackend", "pickSyncFolder", "syncNow", "syncPull"].contains(command),
               requestJSON.utf8.count <= 128 * 1024, try NativeJSON.hasUniqueObjectKeys(requestJSON),
               let input = try NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
               started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
@@ -25284,7 +31210,7 @@ private final class Engine: @unchecked Sendable {
                 guard try NativeJSON.hasUniqueObjectKeys(text), let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw Self.foregroundSyncFailure }
                 if request["phase"] as? String == "begin" {
                     try cancellation.check()
-                    guard command == "pickSyncFolder" || command == "syncNow" || command == "selectSyncBackend" && input["option"] as? String == "file" else { throw Self.foregroundSyncFailure }
+                    guard command == "pickSyncFolder" || command == "syncNow" || command == "syncPull" || command == "selectSyncBackend" && input["option"] as? String == "file" else { throw Self.foregroundSyncFailure }
                     guard Set(request.keys) == Set(["phase", "picked", "probe", "path", "bookmark"]),
                           Self.isBoolean(request["picked"]), let picked = request["picked"] as? Bool,
                           Self.isBoolean(request["probe"]), let probe = request["probe"] as? Bool,
@@ -25340,11 +31266,32 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private var cloudKitAvailable: Bool {
+        guard workspaceMode == .personal else { return false }
+        #if DEBUG
+        if faults?.cloudKitRequest != nil || faults?.selectedCloudKitBridge != nil { return true }
+        #endif
+        return NativeCloudKitBridge.configuredContainer != nil
+    }
+
+    private func makeCloudKitJobs() throws -> NativeCloudKitJobs? {
+        guard cloudKitAvailable, let files = attachmentJobs else { return nil }
+        #if DEBUG
+        if let request = faults?.cloudKitRequest {
+            let cancel = faults?.cloudKitCancel
+            return NativeCloudKitJobs(registry: localRequests, perform: request, cancel: { await cancel?() })
+        }
+        #endif
+        guard let container = NativeCloudKitBridge.configuredContainer else { return nil }
+        let bridge = try NativeCloudKitBridge(containerIdentifier: container, files: files)
+        return NativeCloudKitJobs(registry: localRequests, perform: { try await bridge.call($0) }, cancel: { await bridge.cancel() })
+    }
+
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
             try denyCleanupOwner()
-            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection", "syncStored", "syncResume", "projectAttachmentDownload", "runSyncEncryptionAction"].contains(command),
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction"].contains(command),
                   requestJSON.utf8.count <= 128 * 1024,
                   (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
                   started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
@@ -25354,16 +31301,39 @@ private final class Engine: @unchecked Sendable {
                   try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
                   try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
                   let runtime = context else { throw Self.foregroundSyncFailure }
+            if command == "archiveRetention" {
+                guard let input = try NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
+                      Set(input.keys) == Set(["editorOpen"]), Self.isBoolean(input["editorOpen"]),
+                      try dataSettingHasExactKeyTokens(requestJSON, expected: ["editorOpen"]) else {
+                    throw Self.foregroundSyncFailure
+                }
+            }
+            if command == "syncPull" {
+                guard try Self.projectObject(requestJSON, maximum: 1024).isEmpty else { throw Self.foregroundSyncFailure }
+                let stored = try requireDeviceStorageAdmission().multiGet(["@mindwtr_sync_backend"])
+                if stored.first?.1 == "file" {
+                    return try foregroundDirectorySyncSettings(command: command, requestJSON: requestJSON,
+                        pickedBookmark: nil, cancellation: cancellation)
+                }
+            }
             try cancellation.check()
             let generation = attachmentGeneration
             var scopeLive = true
+            let cloudKit = try makeCloudKitJobs()
             foregroundCleanupCancellation = cancellation
+            cloudKitJobs = cloudKit
+            var dropbox: DropboxTurn?
             defer {
+                dropbox?.jobs.closeAndDrain()
+                if dropboxTurn === dropbox { dropboxTurn = nil }
+                cloudKit?.closeAndDrain()
+                cloudKitJobs = nil
                 scopeLive = false
                 foregroundCleanupCancellation = nil
                 foregroundCleanupActive = false
                 emitCleanupAcknowledgement()
             }
+            dropbox = try beginDropboxForeground(command: command, requestJSON: requestJSON, runtime: runtime, cancellation: cancellation)
             let cleanup: @convention(block) (JSValue) -> String = { [weak self, weak runtime] value in
                 guard let self, let runtime, scopeLive, self.invoking,
                       self.foregroundCleanupCancellation === cancellation, !self.foregroundCleanupActive, !self.cleanupOwed,
@@ -25395,7 +31365,7 @@ private final class Engine: @unchecked Sendable {
             }
             if command == "projectAttachmentDownload" {
                 let storage = try requireDeviceStorageAdmission(), saved = try storage.multiGet(Self.taskDownloadConfigKeys)
-                if Self.taskDownloadSelfHosted(saved) || saved[0].1 == "webdav" {
+                if Self.taskDownloadSelfHosted(saved) || Self.taskDownloadDropbox(saved) || saved[0].1 == "webdav" {
                     if let cached = try relocatedProjectAvailability(requestJSON: requestJSON, callback: callback,
                         cancellation: cancellation, cached: true) { return cached }
                     let result = try downloadProjectFile(requestJSON: requestJSON, storage: storage, config: saved, cancellation: cancellation)
@@ -25426,16 +31396,60 @@ private final class Engine: @unchecked Sendable {
                 encryptionUnlockTurn = turn
                 defer { turn.live = false; encryptionUnlockTurn = nil; scheduleAttachmentIdle(immediate: true) }
                 try requireEncryptionUnlockTurn()
-                let result = try invoke("iosForegroundSync", arguments: [command, requestJSON, callback], localCancellation: cancellation)
+                let result = try invokeForegroundWithDropbox(command: command, requestJSON: requestJSON, cleanup: callback, cancellation: cancellation)
                 try requireEncryptionUnlockTurn()
                 return result
             }
-            let result = try invoke("iosForegroundSync", arguments: [command, requestJSON, callback], localCancellation: cancellation)
+            let result = try invokeForegroundWithDropbox(command: command, requestJSON: requestJSON, cleanup: callback, cancellation: cancellation)
             try denyCleanupOwner()
             return result
         } catch {
             throw cleanupOwed ? Self.cleanupFailure : Self.foregroundSyncFailure
         }
+    }
+
+    // Kept outside startup and the foreground orchestration frame. No browser or credential work at boot.
+    private func beginDropboxForeground(command: String, requestJSON: String, runtime: JSContext,
+                                        cancellation: NativeAttachmentCancellation) throws -> DropboxTurn? {
+        guard let binding = dropboxAuthorization else { return nil }
+        try requirePersonalWorkspace(); try cancellation.check()
+        guard binding.isCurrent(), dropboxTurn == nil else { throw Self.foregroundSyncFailure }
+        var requestID: String?
+        if command == "connectDropbox" {
+            let input = try Self.projectObject(requestJSON, maximum: 128 * 1024)
+            guard let id = input["requestId"] as? String, NativeDropboxAuthorizationJobs.canonicalRequestID(id) else { throw Self.foregroundSyncFailure }
+            requestID = id
+        }
+        let jobs = NativeDropboxAuthorizationJobs(registry: localRequests, binding: binding, expectedRequestID: requestID)
+        let turn = DropboxTurn(runtime: runtime, generation: attachmentGeneration, cancellation: cancellation, jobs: jobs)
+        dropboxTurn = turn
+        return turn
+    }
+    private func requireDropboxTurn(_ expected: DropboxTurn? = nil) throws -> DropboxTurn {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try requirePersonalWorkspace(); try denyCleanupOwner()
+        guard let turn = dropboxTurn, expected == nil || turn === expected,
+              started, !closed, invoking, !recoveryActivationPending, lockFD >= 0,
+              context === turn.runtime, attachmentGeneration == turn.generation,
+              foregroundCleanupCancellation === turn.cancellation, !foregroundCleanupActive else { throw Self.foregroundSyncFailure }
+        try turn.cancellation.check()
+        return turn
+    }
+    private func invokeForegroundWithDropbox(command: String, requestJSON: String, cleanup: JSValue,
+                                            cancellation: NativeAttachmentCancellation) throws -> String {
+        guard let turn = dropboxTurn else {
+            return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup], localCancellation: cancellation)
+        }
+        let control: @convention(block) (JSValue) -> String = { [weak self, weak turn] value in
+            guard let self, let turn else { return "!MindwtrNativeError:Dropbox capability is unavailable" }
+            do {
+                _ = try self.requireDropboxTurn(turn)
+                guard value.context === turn.runtime, value.isString, let input = value.toString() else { throw Self.foregroundSyncFailure }
+                return try turn.jobs.control(input)
+            } catch { return "!MindwtrNativeError:Dropbox capability is unavailable" }
+        }
+        guard let callback = JSValue(object: control, in: turn.runtime), let undefined = JSValue(undefinedIn: turn.runtime) else { throw Self.foregroundSyncFailure }
+        return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup, undefined, callback], localCancellation: cancellation)
     }
 
     private static let encryptionUnlockConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url",
@@ -25653,8 +31667,25 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private func projectManagedURI() throws -> String {
+        if let container = rnAdoptionContainerURL {
+            if attachmentJobs != nil { return try mixedSaveManagedURI() }
+            return container.appendingPathComponent("Documents/attachments", isDirectory: true).absoluteString
+        }
         let path = try NativeAttachmentFiles.filePath(databaseURL.deletingLastPathComponent().absoluteString)
         return URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent("attachment-files/documents/attachments", isDirectory: true).absoluteString
+    }
+    private func projectCacheURI() throws -> String {
+        if let container = rnAdoptionContainerURL, attachmentJobs == nil {
+            return container.appendingPathComponent("Library/Caches", isDirectory: true).absoluteString
+        }
+        if rnAdoptionContainerURL == nil {
+            return URL(string: try projectManagedURI())!.deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("cache", isDirectory: true).absoluteString
+        }
+        guard let jobs = attachmentJobs,
+              let directories = try NativeJSON.jsonObject(with: Data(jobs.directoriesJSON.utf8)) as? [String: Any],
+              let cache = directories["cache"] as? String else { throw Self.projectFileAddFailure }
+        return cache
     }
     private func projectManagedIdentity() throws -> String? {
         let path = try NativeAttachmentFiles.filePath(projectManagedURI())
@@ -25948,6 +31979,151 @@ private final class Engine: @unchecked Sendable {
             } else { self.boardMoveFixtureOriginal = command.argumentsJSON }
             guard self.boardMoveFixtureRetry else { throw HostFailure("Isolated Board Move COMMIT interrupted") }
         }
+    }
+
+    private func requireIsolatedCaptureAIFixture(restore: Bool) throws {
+        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
+        let arguments = ProcessInfo.processInfo.arguments
+        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+        #if targetEnvironment(simulator)
+        let mode = NativeLaunchSelection.BuildMode.simulatorDebug
+        let expectedBundle = "tech.dongdongbh.mindwtr"
+        #else
+        let mode = NativeLaunchSelection.BuildMode.deviceTest
+        let expectedBundle = "tech.dongdongbh.mindwtr.native.dev"
+        #endif
+        let selection = try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: Bundle.main.bundleIdentifier,
+            supportURL: support, homeURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: mode)
+        let flag = restore ? "--native-capture-ai-restore-fixture" : "--native-capture-ai-fixture"
+        let taskAIFlag = "--native-task-ai-ui-fixture", taskAI = arguments.contains(taskAIFlag)
+        let inboxAIFlag = "--native-inbox-ai-ui-fixture", inboxAI = arguments.contains(inboxAIFlag)
+        let reviewAIFlag = "--native-review-ai-ui-fixture", reviewAI = arguments.contains(reviewAIFlag)
+        #if !targetEnvironment(simulator)
+        guard !taskAI && !inboxAI && !reviewAI else { throw HostFailure("Isolated manual AI fixtures require the simulator") }
+        #endif
+        let expectedIdentifier = reviewAI ? "36af9502-a26f-4c4d-b37a-6158deff197f"
+            : inboxAI ? "9e9cc1b8-659c-4daf-8b31-71f55378ee4c"
+            : taskAI ? "7c6c4adb-06b2-4ecb-94c2-0e84a7c41b2c" : "200e5e94-1e41-4b90-a43f-190ae4d55bdc"
+        guard [taskAI, inboxAI, reviewAI].filter({ $0 }).count <= 1, !(taskAI || inboxAI || reviewAI) || (
+                arguments.filter({ $0 == (reviewAI ? reviewAIFlag : inboxAI ? inboxAIFlag : taskAIFlag) }).count == 1
+                && !arguments.contains("--native-voice-ui-fixture")
+                && !arguments.contains("--native-capture-lines-fixture")
+                && !arguments.contains("--native-voice-ui-synthetic-audio")),
+               Bundle.main.bundleIdentifier == expectedBundle, arguments.filter({ $0 == flag }).count == 1,
+              !arguments.contains(restore ? "--native-capture-ai-fixture" : "--native-capture-ai-restore-fixture"),
+              identifier == expectedIdentifier,
+              case let .isolated(selectedDatabase, selectedContainer, namespace, selectedID) = selection,
+              selectedID.uuidString.lowercased() == identifier,
+              selectedDatabase.resolvingSymlinksInPath() == databaseURL.resolvingSymlinksInPath(),
+              selectedContainer.resolvingSymlinksInPath() == directory.resolvingSymlinksInPath(),
+              databaseURL.lastPathComponent == "mindwtr.sqlite", directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
+              deviceStorageLocation?.bundleIdentifier == namespace,
+              faults?.secretService == "mindwtr.native-keychain.fixture." + identifier else {
+            throw HostFailure("Isolated Capture AI fixture is unavailable")
+        }
+    }
+    func configureIsolatedCaptureAIFixture(baseURL: String) throws {
+        try requireIsolatedCaptureAIFixture(restore: false)
+        guard !started, !closed, !invoking, captureAIFixtureChange == nil, pending == nil,
+              let url = URLComponents(string: baseURL), url.scheme == "http", url.host == "127.0.0.1",
+              let port = url.port, (1...65_535).contains(port), url.path == "/v1", url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil, url.string == baseURL else {
+            throw HostFailure("Isolated Capture AI fixture requires its loopback endpoint")
+        }
+        #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("--native-task-ai-ui-fixture")
+            || ProcessInfo.processInfo.arguments.contains("--native-inbox-ai-ui-fixture")
+            || ProcessInfo.processInfo.arguments.contains("--native-review-ai-ui-fixture") {
+            guard !ProcessInfo.processInfo.arguments.contains("--native-voice-ui-fixture") else {
+                throw HostFailure("Isolated AI fixtures cannot overlap")
+            }
+            faults?.httpConfiguration = NativeVoiceUIFixture.taskAIConfiguration()
+        } else if ProcessInfo.processInfo.arguments.contains("--native-voice-ui-fixture") {
+            faults?.httpConfiguration = NativeVoiceUIFixture.configuration()
+            voiceUIFixtureSyntheticAudio = ProcessInfo.processInfo.arguments.contains("--native-voice-ui-synthetic-audio")
+        }
+        #endif
+        captureAIFixtureChange = .configure(baseURL)
+    }
+    func restoreIsolatedCaptureAIFixture() throws {
+        try requireIsolatedCaptureAIFixture(restore: true)
+        guard !started, !closed, !invoking, captureAIFixtureChange == nil, pending == nil else {
+            throw HostFailure("Isolated Capture AI fixture is unavailable")
+        }
+        captureAIFixtureChange = .restore
+    }
+    private func applyCaptureAIFixtureBeforeBoot() throws {
+        guard let change = captureAIFixtureChange else { return }
+        let restoring: Bool
+        switch change { case .configure: restoring = false; case .restore: restoring = true }
+        try requireIsolatedCaptureAIFixture(restore: restoring)
+        guard !started, !closed, !invoking, pending == nil, lockFD >= 0 else {
+            throw HostFailure("Isolated Capture AI fixture waits for exact recovery")
+        }
+        let sqlite = try requireDatabase(), directory = databaseURL.deletingLastPathComponent()
+        let sidecar = directory.appendingPathComponent("capture-ai-fixture-original.json")
+        let rows = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT data FROM settings WHERE id=1").utf8)) as? [[String: Any]]
+        guard let raw = rows?.first?["data"] as? String,
+              var settings = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+            throw HostFailure("Isolated Capture AI fixture settings are unavailable")
+        }
+        let saved = try NativeAISummaryEvidence.readFile(sidecar, limit: 1024 * 1024)
+        if restoring, saved == nil { captureAIFixtureChange = nil; return }
+        let original: [String: Any]
+        if let saved {
+            guard try NativeJSON.hasUniqueObjectKeys(String(decoding: saved.bytes, as: UTF8.self)),
+                  let value = try NativeJSON.jsonObject(with: saved.bytes) as? [String: Any],
+                  Set(value.keys) == Set(["version", "namespace", "aiPresent", "ai", "featuresPresent", "features"]),
+                  Self.isInteger(value["version"], equalTo: 1), value["namespace"] as? String == directory.lastPathComponent,
+                  Self.isBoolean(value["aiPresent"]), Self.isBoolean(value["featuresPresent"]) else {
+                throw HostFailure("Isolated Capture AI fixture restore evidence is invalid")
+            }
+            original = value
+        } else {
+            original = ["version": 1, "namespace": directory.lastPathComponent,
+                "aiPresent": settings["ai"] != nil, "ai": settings["ai"] ?? NSNull(),
+                "featuresPresent": settings["features"] != nil, "features": settings["features"] ?? NSNull()]
+            try NativeAISummaryEvidence.writeExclusive(Data(try Self.ownedJSON(original).utf8), to: sidecar)
+            try DurableFile.sync(directory, directory: true)
+        }
+        switch change {
+        case .configure(let baseURL):
+            guard let secrets = secretJobs, let storage = deviceStorage,
+                  try secrets.inspectAIProviderItem(account: "mindwtr-ai-key_openai", cancellation: NativeAttachmentCancellation()) == "absent",
+                  (try storage.readAIProviderDeviceMetadata(provider: .openai)).legacyItemPresent == false else {
+                throw HostFailure("Isolated Capture AI fixture requires an empty selected credential namespace")
+            }
+            settings["ai"] = ["enabled": true, "provider": "openai", "model": "capture-ai-fixture", "copilotModel": "capture-ai-fixture",
+                              "baseUrl": baseURL, "requestTimeoutSeconds": 30]
+            var features = settings["features"] as? [String: Any] ?? [:]; features["timeEstimates"] = true; settings["features"] = features
+        case .restore:
+            if original["aiPresent"] as? Bool == true { settings["ai"] = original["ai"] } else { settings.removeValue(forKey: "ai") }
+            if original["featuresPresent"] as? Bool == true { settings["features"] = original["features"] } else { settings.removeValue(forKey: "features") }
+        }
+        _ = try sqlite.execute("BEGIN IMMEDIATE")
+        do {
+            _ = try sqlite.execute("UPDATE settings SET data=? WHERE id=1", parametersJSON: Self.ownedJSON([Self.ownedJSON(settings)]))
+            #if targetEnvironment(simulator)
+            if !restoring && ProcessInfo.processInfo.arguments.contains("--native-review-ai-ui-fixture") {
+                guard let run = ProcessInfo.processInfo.environment["MINDWTR_REVIEW_AI_UI_RUN"],
+                      let token = UUID(uuidString: run), token.uuidString.lowercased() == run else {
+                    throw HostFailure("Isolated Review AI fixture requires its exact run token")
+                }
+                // Insert-only, under the selected fixture's pre-boot lock/transaction. Cold reads never enter here.
+                for role in ["someday", "archive"] {
+                    let id = "review-ai-" + run + "-" + role
+                    let found = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id])).utf8)) as? [[String: Any]]
+                    guard found?.isEmpty == true else { throw HostFailure("Isolated Review AI fixture run already exists") }
+                    _ = try sqlite.execute("INSERT INTO tasks (id,title,status,contexts,tags,checklist,createdAt,updatedAt,rev,revBy) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        parametersJSON: Self.ownedJSON([id, "Synthetic review AI " + run + " " + role, "next", "[]", "[]", "[]",
+                            "2020-01-01T00:00:00.000Z", "2020-01-01T00:00:00.000Z", 1, "review-ai-fixture"]))
+                }
+            }
+            #endif
+            _ = try sqlite.execute("COMMIT")
+        } catch { _ = try? sqlite.execute("ROLLBACK"); throw error }
+        if restoring { try FileManager.default.removeItem(at: sidecar); try DurableFile.sync(directory, directory: true) }
+        captureAIFixtureChange = nil
     }
 
     private func requireIsolatedAIRequestTimeoutFixture() throws {
@@ -26284,12 +32460,12 @@ private final class Engine: @unchecked Sendable {
               Self.ownedEqual(try Self.ownedJSON(effect["rawBefore"] as Any), try Self.ownedJSON(rawBefore)),
               Self.ownedEqual(state.deviceBeforeJSON, try Self.ownedJSON([effect["deviceIdBefore"] as Any])),
               state.config.count == Self.taskDownloadConfigKeys.count,
-              Self.taskDownloadSelfHosted(Array(zip(Self.taskDownloadConfigKeys, state.config))) || state.config[0] == "webdav",
-              state.config[state.config[0] == "webdav" ? 1 : 5]?.isEmpty == false else { throw Self.projectDownloadFailure }
+              Self.taskDownloadSelfHosted(Array(zip(Self.taskDownloadConfigKeys, state.config))) || Self.taskDownloadDropbox(Array(zip(Self.taskDownloadConfigKeys, state.config))) || state.config[0] == "webdav",
+              Self.taskDownloadDropbox(Array(zip(Self.taskDownloadConfigKeys, state.config))) || state.config[state.config[0] == "webdav" ? 1 : 5]?.isEmpty == false else { throw Self.projectDownloadFailure }
         let rank = ProjectDownloadPhase.allCases.firstIndex(of: state.phase)!
         let result = try Self.ownedJSON(prepared["result"] as Any)
         if metadataOnly {
-            guard state.config[0] == "webdav", state.outcome == "unrecoverable", state.source == nil,
+            guard state.config[0] == "webdav" || Self.projectDownloadBackend(state.config) == "dropbox", state.outcome == "unrecoverable", state.source == nil,
                   Set(enriched.keys) == Set(["version", "requestId", "projectId", "attachmentId", "revision", "managedDirectoryURI", "unrecoverableAt"]),
                   let stamp = enriched["unrecoverableAt"] as? String, Self.isCanonicalReviewInstant(stamp),
                   prepared["version"] as? Int == 2, prepared["kind"] as? String == "project-file-unrecoverable",
@@ -26308,9 +32484,8 @@ private final class Engine: @unchecked Sendable {
                   source.size >= 0, source.size <= 8_388_608, source.sha256.utf8.count == 64,
                   source.sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
                   [source.identity, source.cacheRootIdentity, source.parentIdentity].allSatisfy(Self.projectToken) else { throw Self.projectDownloadFailure }
-            let root = URL(string: try projectManagedURI())!.deletingLastPathComponent().deletingLastPathComponent()
             guard let sourceURL = URL(string: source.sourceURI),
-                  Self.ownedEqual(sourceURL.deletingLastPathComponent().absoluteString, root.appendingPathComponent("cache", isDirectory: true).absoluteString),
+                  Self.ownedEqual(sourceURL.deletingLastPathComponent().absoluteString, try projectCacheURI()),
                   Self.ownedDiscardUUID(sourceURL.lastPathComponent) != nil else { throw Self.projectDownloadFailure }
             if let directory = state.managedDirectoryIdentity { guard Self.projectToken(directory) else { throw Self.projectDownloadFailure } }
             if let stage = state.stage {
@@ -26412,6 +32587,7 @@ private final class Engine: @unchecked Sendable {
         guard requested ?? turn.strict, !turn.checking else { return }
         turn.checking = true; defer { turn.checking = false }
         try turn.cancellation.check()
+        if turn.preparing, Self.taskDownloadDropbox(turn.config) { _ = try requireSelectedDropboxConfiguration() }
         let current = try turn.storage.multiGet(Self.taskDownloadConfigKeys)
         guard current.count == turn.config.count, zip(current, turn.config).allSatisfy({ Self.ownedEqual($0.0.0, $0.1.0) && Self.taskDownloadOptionalEqual($0.0.1, $0.1.1) }) else { throw Self.projectDownloadFailure }
         for (name, value) in turn.legacy { guard Self.taskDownloadOptionalEqual(try turn.storage.get(name), value) else { throw Self.projectDownloadFailure } }
@@ -26431,6 +32607,10 @@ private final class Engine: @unchecked Sendable {
               Self.ownedEqual(device, turn.deviceBeforeJSON) || turn.allowAfter && Self.ownedEqual(device, turn.deviceAfterJSON) else { throw Self.projectDownloadFailure }
     }
     private func observeProjectDownloadCredential(_ turn: ProjectDownloadTurn) throws {
+        if Self.taskDownloadDropbox(turn.config) {
+            turn.legacy = [(NativeDropboxSelectedAdmission.legacyTokens, try turn.storage.get(NativeDropboxSelectedAdmission.legacyTokens))]
+            return
+        }
         let webdav = turn.config.first?.1 == "webdav"
         let name = webdav ? "@mindwtr_webdav_password" : "@mindwtr_cloud_token"
         turn.legacy = [(name, try turn.storage.get(name))]
@@ -26563,10 +32743,13 @@ private final class Engine: @unchecked Sendable {
         let original = try Self.projectObject(requestJSON, maximum: 128 * 1024)
         guard Set(original.keys) == Set(["projectId", "attachmentId", "revision"]), let project = original["projectId"] as? String,
               let attachment = Self.ownedDiscardUUID(original["attachmentId"]), let revision = original["revision"] as? String,
-              config.count == Self.taskDownloadConfigKeys.count, Self.taskDownloadSelfHosted(config) || config[0].1 == "webdav",
-              let url = config[config[0].1 == "webdav" ? 1 : 5].1, !url.isEmpty else { throw Self.projectDownloadFailure }
-        let backend = config[0].1 == "webdav" ? "webdav" : "cloud"
-        let operation = backend == "webdav" ? "webdav-project-download" : "selfhosted-project-download"
+              config.count == Self.taskDownloadConfigKeys.count, Self.taskDownloadSelfHosted(config) || Self.taskDownloadDropbox(config) || config[0].1 == "webdav" else { throw Self.projectDownloadFailure }
+        let dropbox = Self.taskDownloadDropbox(config)
+        if dropbox { _ = try requireSelectedDropboxConfiguration() }
+        let url = config[config[0].1 == "webdav" ? 1 : 5].1
+        guard dropbox || url?.isEmpty == false else { throw Self.projectDownloadFailure }
+        let backend = dropbox ? "dropbox" : config[0].1 == "webdav" ? "webdav" : "cloud"
+        let operation = backend == "webdav" ? "webdav-project-download" : dropbox ? "dropbox-project-download" : "selfhosted-project-download"
         let turn = try captureProjectDownloadTurn(command: nil)
         projectDownloadAcknowledgedTurn = nil
         do {
@@ -26576,17 +32759,22 @@ private final class Engine: @unchecked Sendable {
             try requireProjectDownloadTurn(strict: true)
             let id = UUID().uuidString.lowercased()
             var request: [String: Any] = ["version": 1, "requestId": id, "projectId": project, "attachmentId": attachment, "revision": revision, "managedDirectoryURI": try projectManagedURI()]
-            let wrapper = try Self.projectObject(invoke("projectFileAvailabilityPreflight", arguments: [Self.ownedJSON(request), config[4].1 as Any? ?? NSNull(), url, backend], localCancellation: cancellation))
+            let wrapper = try Self.projectObject(invoke("projectFileAvailabilityPreflight", arguments: [Self.ownedJSON(request), config[4].1 as Any? ?? NSNull(), dropbox ? NSNull() : url! as Any, dropbox ? "dropbox" : backend], localCancellation: cancellation))
             let nativeBefore = try Self.projectObject(turn.beforeJSON)
             guard Set(wrapper.keys) == Set(["preflight", "columns", "initialURL"]), let preflight = wrapper["preflight"] as? [String: Any],
-                  let columns = wrapper["columns"] as? [String], let initial = wrapper["initialURL"] as? String,
+                  let columns = wrapper["columns"] as? [String], dropbox ? wrapper["initialURL"] is NSNull : wrapper["initialURL"] is String,
                   let attachmentJSON = preflight["attachmentJSON"] as? String, let target = preflight["targetURI"] as? String,
                   let rawBefore = preflight["rawBefore"] as? [Any], Self.projectColumnCounts.contains(columns.count), Set(columns).count == columns.count,
                   rawBefore.count == columns.count,
                   Self.ownedEqual(try Self.ownedJSON(columns.map { nativeBefore[$0] ?? NSNull() }), try Self.ownedJSON(rawBefore)),
                   Self.ownedEqual(turn.deviceBeforeJSON, try Self.ownedJSON([preflight["deviceIdBefore"] as Any])),
                   taskDownloadManagedPath(target, root: try projectManagedURI()) else { throw Self.projectDownloadFailure }
-            turn.targetURI = target; turn.initialURL = initial
+            turn.targetURI = target; turn.initialURL = wrapper["initialURL"] as? String ?? ""
+            if dropbox {
+                let selected = try Self.projectObject(attachmentJSON, maximum: 1_000_000)
+                guard let key = selected["cloudKey"] as? String else { throw Self.projectDownloadFailure }
+                _ = try NativeDropboxSelectedAdmission.path(key); turn.dropboxCloudKey = key
+            }
             // Eligibility/incomplete refusal precedes all secure reads and local byte proof.
             try observeProjectDownloadCredential(turn)
             try requireProjectDownloadTurn(strict: true)
@@ -26602,13 +32790,19 @@ private final class Engine: @unchecked Sendable {
             }
             guard let callbackValue = JSValue(object: callback, in: turn.runtime) else { throw Self.projectDownloadFailure }
             let configJSON = try Self.ownedJSON(backend == "webdav"
-                ? ["backend": backend, "url": url, "username": config[2].1 as Any? ?? NSNull(), "allowInsecureHttp": config[3].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()]
-                : ["backend": backend, "url": url, "provider": config[6].1 as Any? ?? NSNull(), "allowInsecureHttp": config[7].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()])
+                ? ["backend": backend, "url": url!, "username": config[2].1 as Any? ?? NSNull(), "allowInsecureHttp": config[3].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()]
+                : ["backend": "cloud", "url": dropbox ? NSNull() : url! as Any, "provider": config[6].1 as Any? ?? NSNull(), "allowInsecureHttp": dropbox ? NSNull() : config[7].1 as Any? ?? NSNull(), "encryptionStateJSON": config[4].1 as Any? ?? NSNull()])
             turn.preparing = true
-            let preparedSource = try Self.projectObject(invoke("iosProjectFilePrepareAvailability", arguments: [Self.ownedJSON(["version": 1, "requestId": id, "attachmentJSON": attachmentJSON, "targetURI": target, "rawConfigJSON": configJSON]), callbackValue], localCancellation: cancellation))
+            let preparedSource: [String: Any]
+            let preparationInput = try Self.ownedJSON(["version": 1, "requestId": id, "attachmentJSON": attachmentJSON, "targetURI": target, "rawConfigJSON": configJSON])
+            if dropbox {
+                let capability = try selectedDropboxControl(runtime: turn.runtime, requireOwner: { [unowned self] in try self.requireProjectDownloadTurn(strict: true) })
+                defer { capability.0.closeAndDrain() }
+                preparedSource = try Self.projectObject(invoke("iosProjectFilePrepareAvailability", arguments: [preparationInput, callbackValue, capability.1], localCancellation: cancellation))
+            } else { preparedSource = try Self.projectObject(invoke("iosProjectFilePrepareAvailability", arguments: [preparationInput, callbackValue], localCancellation: cancellation)) }
             turn.preparing = false
             try requireProjectDownloadTurn(strict: true)
-            if backend == "webdav", let status = preparedSource["status"] as? String, status != "prepared" {
+            if backend == "webdav" || dropbox, let status = preparedSource["status"] as? String, status != "prepared" {
                 guard preparedSource["version"] as? Int == 1, preparedSource["requestId"] as? String == id,
                       !turn.callbackUsed, turn.source == nil, turn.receipt == nil else { throw Self.projectDownloadFailure }
                 if ["unavailable", "generation-conflict"].contains(status) {
@@ -26700,7 +32894,7 @@ private final class Engine: @unchecked Sendable {
         turn.cancellation = cancellation; turn.strict = false
         var state = try projectDownloadJournal(command)
         guard state.requestId == requestId else { throw Self.projectDownloadFailure }
-        _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, state.config[0] ?? "cloud"])
+        _ = try invoke("projectFileAvailabilityWriteValidate", arguments: [state.envelopeJSON, Self.projectDownloadBackend(state.config)])
         if turn.unacknowledged { try writeProjectDownloadState(state, turn: turn) }
         if abandon && !state.abandoned && state.phase != .settled {
             state.abandoned = true; try writeProjectDownloadState(state, turn: turn); try projectDownloadBoundary(.afterAbandonDecision)
@@ -26742,7 +32936,7 @@ private final class Engine: @unchecked Sendable {
             }
             // An exact after row is a lost commit acknowledgment, never rollback authority.
             try projectDownloadBoundary(.beforeCommit)
-            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, "webdav"], localCancellation: cancellation)
+            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, Self.projectDownloadBackend(state.config)], localCancellation: cancellation)
             try projectDownloadBoundary(.afterCommit)
             guard Self.ownedEqual(try Self.ownedJSON(Self.projectObject(result)), try Self.ownedJSON(prepared["result"]!)),
                   Self.ownedEqual(try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), turn.afterJSON),
@@ -26809,7 +33003,7 @@ private final class Engine: @unchecked Sendable {
             guard try JSONDecoder().decode(ProjectPublished.self, from: Data(Self.ownedJSON(value).utf8)) == state.published else { throw Self.projectDownloadFailure }
             try projectDownloadBoundary(.beforeCommit)
             turn.allowAfter = true
-            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, state.config[0] ?? "cloud"], localCancellation: cancellation)
+            let result = try invoke("projectFileAvailabilityWriteCommit", arguments: [state.envelopeJSON, Self.projectDownloadBackend(state.config)], localCancellation: cancellation)
             try projectDownloadBoundary(.afterCommit)
             guard Self.ownedEqual(try Self.ownedJSON(Self.projectObject(result)), try Self.ownedJSON(prepared["result"]!)),
                   Self.ownedEqual(try Self.ownedJSON(projectAvailabilityRow(turn.projectID)), turn.afterJSON),
@@ -26927,7 +33121,7 @@ private final class Engine: @unchecked Sendable {
         }
         let effect = (try Self.projectObject(state.envelopeJSON)["prepared"] as! [String: Any])["effect"] as! [String: Any]
         let outcome = state.abandoned ? "abandoned" : state.version == 2 ? "unrecoverable" : effect["outcome"] as? String == "noop" ? "noop" : "saved"
-        _ = try? invoke("attachmentDraftAcknowledged", arguments: [state.config[0] == "webdav" ? "webdav-project-download" : "selfhosted-project-download", outcome])
+        _ = try? invoke("attachmentDraftAcknowledged", arguments: [state.config[0] == "webdav" ? "webdav-project-download" : Self.projectDownloadBackend(state.config) == "dropbox" ? "dropbox-project-download" : "selfhosted-project-download", outcome])
         try requireProjectDownloadTurn(strict: false)
         projectDownloadAcknowledgedTurn = turn
         projectDownloadTurn = nil
@@ -26981,10 +33175,8 @@ private final class Engine: @unchecked Sendable {
         } else {
             guard Set(enriched.keys) == Set(["requestId", "projectId", "expected", "picked", "measuredSize", "managedDirectoryURI"]) else { throw Self.projectFileAddFailure }
         }
-        let root = URL(string: try projectManagedURI())!.deletingLastPathComponent().deletingLastPathComponent()
-        let cache = root.appendingPathComponent("cache", isDirectory: true)
         guard let sourceURL = URL(string: state.source.sourceURI),
-              Self.ownedEqual(sourceURL.deletingLastPathComponent().absoluteString, cache.absoluteString),
+              Self.ownedEqual(sourceURL.deletingLastPathComponent().absoluteString, try projectCacheURI()),
               Self.ownedDiscardUUID(sourceURL.lastPathComponent) != nil else { throw Self.projectFileAddFailure }
         let rank = ProjectAddPhase.allCases.firstIndex(of: state.phase)!
         if let directory = state.managedDirectoryIdentity { guard Self.projectToken(directory) else { throw Self.projectFileAddFailure } }
@@ -27674,9 +33866,29 @@ private final class Engine: @unchecked Sendable {
               let slash = uri.lastIndex(of: "/"), slash < uri.index(before: uri.endIndex) else { throw Self.ownedSaveFailure }
         let oldPath = try Self.mixedSaveCanonicalPath(uri, directory: false)
         let original = String(uri[...slash])
-        let mapping = try Self.mixedSaveRelocation(original: original, current: managed)
-        guard mapping.containerComponentIndex != nil else { throw Self.ownedSaveFailure }
         let current = try Self.mixedSaveCanonicalPath(managed, directory: true)
+        if let container = rnAdoptionContainerURL {
+            let expected = container.appendingPathComponent("Documents/attachments", isDirectory: true)
+            guard Self.ownedEqual(current, try Self.mixedSaveCanonicalPath(expected.absoluteString, directory: true)) else { throw Self.ownedSaveFailure }
+            let old = try Self.mixedSaveCanonicalPath(original, directory: true).split(separator: "/").map(String.init)
+            let fresh = current.split(separator: "/").map(String.init)
+            func anchors(_ parts: [String]) -> [Int] {
+                parts.indices.filter { index in
+                    index > 0 && Self.ownedEqual(parts[index - 1], "Application")
+                        && parts[index].utf8.count == 36
+                        && UUID(uuidString: parts[index])?.uuidString.lowercased() == parts[index].lowercased()
+                }
+            }
+            let freshAnchors = anchors(fresh), oldAnchors = anchors(old)
+            guard freshAnchors.count == 1, oldAnchors == freshAnchors, let index = freshAnchors.first,
+                  old.count == fresh.count, index + 3 == fresh.count,
+                  Self.ownedEqual(fresh[index + 1], "Documents"), Self.ownedEqual(fresh[index + 2], "attachments"),
+                  !Self.ownedEqual(old[index].lowercased(), fresh[index].lowercased()),
+                  zip(old.indices, old).allSatisfy({ $0.0 == index || Self.ownedEqual($0.1, fresh[$0.0]) }) else { throw Self.ownedSaveFailure }
+        } else {
+            let mapping = try Self.mixedSaveRelocation(original: original, current: managed)
+            guard mapping.containerComponentIndex != nil else { throw Self.ownedSaveFailure }
+        }
         return URL(fileURLWithPath: current + "/" + (oldPath as NSString).lastPathComponent, isDirectory: false).absoluteString
     }
     private func relocatedFileOpenProof(_ proof: NativeAttachmentFiles.BaselineAttachmentProof?, selected: [String: Any]) throws {
@@ -28005,9 +34217,10 @@ private final class Engine: @unchecked Sendable {
         runtime.exception = nil
         _ = host.invokeMethod("cancel", withArguments: [id])
         runtime.exception = nil
+        turn?.cloudKitJobs?.closeAndDrain()
         attachmentJobs?.cancelAndDrain()
         httpJobs?.cancelAndDrain()
-        secretJobs?.drain()
+        if aiConfigurationTurn?.usesSecretJobs != false { secretJobs?.drain() }
         calendarJobs?.drain()
         cryptoJobs?.drain()
         if !terminalConsumed {
@@ -28049,11 +34262,15 @@ private final class Engine: @unchecked Sendable {
         let selectedDownload = projectDownloadTurn
         let selectedProject = projectAvailabilityTurn
         let selectedEncryption = encryptionUnlockTurn
+        let selectedCaptureAI = captureAITurn
+        let selectedAIConfiguration = aiConfigurationTurn
         var selectedTicket: String?, selectedSucceeded = false, terminalConsumed = false
         defer {
             if drainCalendarTest, let selectedTicket {
                 settleSelectedTicket(selectedTicket, terminalConsumed: terminalConsumed, turn: nil, runtime: context, host: host)
-            } else if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil {
+            } else if !selectedSucceeded, let selectedTicket, selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil || selectedCaptureAI != nil || selectedAIConfiguration != nil {
+                selectedCaptureAI?.live = false
+                selectedAIConfiguration?.live = false
                 selectedDownload?.preparing = false
                 selectedProject?.live = false
                 selectedEncryption?.live = false
@@ -28062,19 +34279,19 @@ private final class Engine: @unchecked Sendable {
         }
         context.exception = nil
         let ticket: JSValue?
-        if method == "dataSetting" {
+        if ["dataSetting", "gettingStarted"].contains(method) {
             guard arguments.count == 1, let originalRequest = arguments.first as? String else {
                 throw HostFailure("INVALID_INPUT: Invalid Data setting request")
             }
             // The journal retains its original method and raw request. The
             // shared host exposes this exact existing command through its menu dispatcher.
-            ticket = host.invokeMethod("menuCommand", withArguments: ["dataSetting", originalRequest])
+            ticket = host.invokeMethod("menuCommand", withArguments: [method, originalRequest])
         } else {
             ticket = host.invokeMethod(method, withArguments: arguments)
         }
         // Capture a trusted submitted ticket before observing a synchronous
         // exception so an accepted selected call is still cancelled and polled.
-        if drainCalendarTest || selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
+        if drainCalendarTest || selectedTurn != nil || selectedProject != nil || selectedEncryption != nil || selectedDownload != nil || selectedCaptureAI != nil || selectedAIConfiguration != nil, let ticket, ticket.isString, let id = ticket.toString(), Int(id).map({ $0 > 0 }) == true {
             selectedTicket = id
         }
         try checkException()
@@ -28086,7 +34303,8 @@ private final class Engine: @unchecked Sendable {
         var cancelled = false
         var fileSyncInvocationDisposed = false
         defer {
-            if cancelled && !fileSyncInvocationDisposed && !drainCalendarTest && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
+            if cancelled && !fileSyncInvocationDisposed && !drainCalendarTest && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil && selectedCaptureAI == nil && selectedAIConfiguration == nil {
+                dropboxTurn?.jobs.closeAndDrain()
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
@@ -28118,12 +34336,14 @@ private final class Engine: @unchecked Sendable {
                     }
                     _ = host.invokeMethod("cancel", withArguments: [id])
                     try checkException()
+                    selectedTurn?.cloudKitJobs?.closeAndDrain()
+                    dropboxTurn?.jobs.closeAndDrain()
                     // Completes uninterruptible RN installer work before allowing
                     // another operation or library owner to observe the namespace.
                     if !drainCalendarTest {
                         attachmentJobs?.cancelAndDrain()
                         httpJobs?.cancelAndDrain()
-                        secretJobs?.drain()
+                        if selectedAIConfiguration?.usesSecretJobs != false { secretJobs?.drain() }
                         calendarJobs?.drain()
                         if selectedTurn != nil || selectedEncryption != nil || selectedDownload != nil { cryptoJobs?.drain() }
                     }
@@ -28157,6 +34377,9 @@ private final class Engine: @unchecked Sendable {
                 try requireProjectAvailabilityTurn()
                 try requireEncryptionUnlockTurn()
                 let result = String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), as: UTF8.self)
+                if method == "language", let language = (value as? [String: Any])?["language"] as? String {
+                    taskAIRuntimeLanguage = language
+                }
                 selectedSucceeded = true
                 return result
             }
@@ -28209,6 +34432,19 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func ordinaryGuardedSQL(_ sql: String, parameters: String? = nil) throws -> String {
+        if let turn = aiConfigurationTurn {
+            try requireAIConfigurationTurn()
+            let readOnly = turn.op != "save-endpoint" && (turn.op != "save-extra-body" || !turn.extraBodyAccepted)
+            let result = try requireDatabase().execute(sql, parametersJSON: parameters ?? "[]", readOnly: readOnly)
+            try requireAIConfigurationTurn()
+            return result
+        }
+        if let turn = captureAITurn {
+            try turn.requireOwner()
+            let result = try requireDatabase().execute(sql, parametersJSON: parameters ?? "[]", readOnly: true)
+            try turn.requireOwner()
+            return result
+        }
         guard calendarPushTurn == nil else { throw NativeCalendarWriteError.unavailable }
         try requireCalendarSubscriptionSettingTurn(publication: calendarSubscriptionSQLPublication(sql))
         if let turn = pomodoroAlarmTurn {
@@ -28243,8 +34479,9 @@ private final class Engine: @unchecked Sendable {
     private static let deviceStorageFrameLimit = 12 * 1024 * 1024
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
+        guard captureAITurn == nil else { throw Self.deviceStorageUnavailable }
         try requirePersonalWorkspace()
-        guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.deviceStorageUnavailable }
@@ -28259,7 +34496,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func projectDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
         guard let turn = projectDownloadTurn, turn.preparing, !names.isEmpty, names.count <= 2,
-              Set(names).count == names.count, names.allSatisfy({ (turn.config.first?.1 == "webdav" ? Self.taskDownloadLegacyKeys : Self.taskDownloadCloudLegacyKeys).contains($0) }) else { throw Self.deviceStorageUnavailable }
+              Set(names).count == names.count, names.allSatisfy({ Self.selectedDownloadLegacyKeys(turn.config).contains($0) }) else { throw Self.deviceStorageUnavailable }
         if names.contains("@mindwtr_sync_encryption_key_v1") { try observeProjectDownloadEncryption(turn) }
         try requireProjectDownloadTurn(strict: true)
         let values = try turn.storage.multiGet(names)
@@ -28270,8 +34507,8 @@ private final class Engine: @unchecked Sendable {
         try requireProjectDownloadTurn(strict: true); return values
     }
     private func taskDownloadLegacyRead(_ names: [String]) throws -> [(String, String?)] {
-        guard let turn = taskDownloadTurn, turn.preparing, !names.isEmpty,
-              names.count <= 2, names.allSatisfy({ (Self.taskDownloadSelfHosted(turn.config) ? Self.taskDownloadCloudLegacyKeys : Self.taskDownloadLegacyKeys).contains($0) }) else { throw Self.deviceStorageUnavailable }
+        guard let turn = taskDownloadTurn, turn.preparing, turn.cloudKitRecordName == nil, !names.isEmpty,
+              names.count <= 2, names.allSatisfy({ Self.selectedDownloadLegacyKeys(turn.config).contains($0) }) else { throw Self.deviceStorageUnavailable }
         if names.contains("@mindwtr_sync_encryption_key_v1") { try observeTaskDownloadEncryption(turn) }
         try requireTaskDownloadTurn(before: true)
         let values = try turn.storage.multiGet(names)
@@ -28356,14 +34593,29 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireHTTPAdmission(_ input: String) throws {
+        guard aiConfigurationTurn == nil, aiTextConfigurationTurn == nil else { throw Self.deviceStorageUnavailable }
         try requirePersonalWorkspace()
-        guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        if let turn = captureAITurn {
+            try turn.requireOwner()
+            guard turn.began, turn.loaded, input.utf8.count <= 2_000_000,
+                  let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
+                  let url = raw["url"] as? String, url == turn.httpURL, raw["method"] as? String == "POST" else {
+                throw HostFailure("Capture copilot HTTP request is unavailable")
+            }
+            turn.httpURL = nil
+            return
+        }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
         try denyCleanupOwner()
         if let turn = projectDownloadTurn {
             try requireProjectDownloadTurn(strict: true)
+            if Self.taskDownloadDropbox(turn.config) {
+                guard turn.preparing, let key = turn.dropboxCloudKey else { throw Self.projectDownloadFailure }
+                try NativeDropboxSelectedAdmission.validateHTTP(input, configuration: requireSelectedDropboxConfiguration(), cloudKey: key); return
+            }
             guard turn.preparing, input.utf8.count <= 128 * 1024,
                   let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any], raw["url"] as? String == turn.initialURL,
                   raw["method"] as? String == "GET", raw["text"] == nil, raw["base64"] == nil else { throw Self.projectDownloadFailure }
@@ -28372,7 +34624,11 @@ private final class Engine: @unchecked Sendable {
         if let turn = taskDownloadTurn {
             guard input.utf8.count <= 12 * 1024 * 1024 else { throw Self.taskDownloadFailure }
             try requireTaskDownloadTurn(before: true)
-            guard turn.preparing else { throw Self.taskDownloadFailure }
+            guard turn.preparing, turn.cloudKitRecordName == nil else { throw Self.taskDownloadFailure }
+            if Self.taskDownloadDropbox(turn.config) {
+                guard let key = turn.dropboxCloudKey else { throw Self.taskDownloadFailure }
+                try NativeDropboxSelectedAdmission.validateHTTP(input, configuration: requireSelectedDropboxConfiguration(), cloudKey: key); return
+            }
             guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
                   let url = raw["url"] as? String, Self.ownedEqual(url, turn.initialURL),
                   raw["method"] as? String == "GET", raw["text"] == nil, raw["base64"] == nil else { throw Self.taskDownloadFailure }
@@ -28385,15 +34641,32 @@ private final class Engine: @unchecked Sendable {
         try requireNoAttachmentDraft()
     }
 
+    private func requireSelectedDropboxSecret(_ input: String, observeEncryption: () throws -> Void) throws {
+        _ = try requireSelectedDropboxConfiguration()
+        guard input.utf8.count <= 512 * 1024, try NativeJSON.hasUniqueObjectKeys(input),
+              let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any] else { throw NativeDropboxSelectedAdmission.unavailable }
+        if raw["key"] as? String == NativeDropboxSelectedAdmission.secureTokens {
+            try NativeDropboxSelectedAdmission.validateSecret(input); return
+        }
+        guard Set(raw.keys) == Set(["op", "key"]), raw["op"] as? String == "get",
+              raw["key"] as? String == "mindwtr_sync_encryption_key_v1" else { throw NativeDropboxSelectedAdmission.unavailable }
+        try observeEncryption()
+    }
     private func requireSecretAdmission(_ input: String) throws {
+        guard captureAITurn == nil else { throw HostFailure("Capture copilot secure storage is read-only") }
         try requirePersonalWorkspace()
-        guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
         try denyCleanupOwner()
         if let turn = projectDownloadTurn {
             try requireProjectDownloadTurn(strict: true)
+            if Self.taskDownloadDropbox(turn.config) {
+                guard turn.preparing else { throw Self.projectDownloadFailure }
+                try requireSelectedDropboxSecret(input) { try observeProjectDownloadEncryption(turn) }
+                return
+            }
             guard turn.preparing, input.utf8.count <= 512 * 1024,
                   let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any], Set(raw.keys) == Set(["op", "key"]),
                   raw["op"] as? String == "get", let account = raw["key"] as? String,
@@ -28404,7 +34677,11 @@ private final class Engine: @unchecked Sendable {
         if let turn = taskDownloadTurn {
             guard input.utf8.count <= 512 * 1024 else { throw Self.taskDownloadFailure }
             try requireTaskDownloadTurn(before: true)
-            guard turn.preparing else { throw Self.taskDownloadFailure }
+            guard turn.preparing, turn.cloudKitRecordName == nil else { throw Self.taskDownloadFailure }
+            if Self.taskDownloadDropbox(turn.config) {
+                try requireSelectedDropboxSecret(input) { try observeTaskDownloadEncryption(turn) }
+                return
+            }
             guard let raw = try NativeJSON.jsonObject(with: Data(input.utf8)) as? [String: Any],
                   Set(raw.keys) == Set(["op", "key"]), raw["op"] as? String == "get", let account = raw["key"] as? String,
                   [Self.taskDownloadSelfHosted(turn.config) ? "mindwtr_cloud_token" : "mindwtr_webdav_password", "mindwtr_sync_encryption_key_v1"].contains(account) else { throw Self.taskDownloadFailure }
@@ -28420,6 +34697,8 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireCalendarAdmission() throws {
+        guard aiConfigurationTurn?.discovery == nil else { throw Self.aiModelDiscoveryUnavailable }
+        guard captureAITurn == nil else { throw HostFailure("Capture copilot request is still active") }
         try requirePersonalWorkspace()
         dispatchPrecondition(condition: .onQueue(queue))
         guard started, !closed, !localRequests.isClosing, !recoveryActivationPending, pending == nil, lockFD >= 0,
@@ -28433,8 +34712,9 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireCryptoAdmission(_ input: String) throws {
+        guard captureAITurn == nil else { throw HostFailure("Capture copilot request is read-only") }
         try requirePersonalWorkspace()
-        guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -28470,6 +34750,17 @@ private final class Engine: @unchecked Sendable {
     private func nextIO() throws -> String {
         try denyCleanupOwner()
         guard ioBodySource == nil else { throw HostFailure("I/O response body is unavailable") }
+        if let answer = dropboxTurn?.jobs.next() { return answer }
+        if gmailTurn, let answer = gmailJobs?.next() { return answer }
+        if let answer = cloudKitJobs?.next() { return answer }
+        if let answer = try taskAITurn?.http.next() {
+            if answer.body { ioBodySource = .taskAI }
+            return answer.json
+        }
+        if let answer = try aiConfigurationTurn?.discovery?.http.next() {
+            if answer.body { ioBodySource = .aiModelDiscovery }
+            return answer.json
+        }
         if let answer = fileSyncTurn?.jobs.next() {
             if let input = try? NativeJSON.jsonObject(with: Data(answer.utf8)) as? [String: Any], input["body"] as? Bool == true { ioBodySource = .fileSync }
             return answer
@@ -28565,6 +34856,12 @@ private final class Engine: @unchecked Sendable {
         guard let source = ioBodySource else { throw HostFailure("I/O response body is unavailable") }
         ioBodySource = nil
         switch source {
+        case .aiModelDiscovery:
+            guard let jobs = aiConfigurationTurn?.discovery?.http else { throw Self.aiModelDiscoveryUnavailable }
+            return try jobs.body().base64
+        case .taskAI:
+            guard let jobs = taskAITurn?.http else { throw NativeTaskAIJSON.unavailable }
+            return try jobs.body().base64
         case .fileSync:
             guard let jobs = fileSyncTurn?.jobs else { throw HostFailure("I/O response body is unavailable") }
             return try jobs.body()
@@ -28780,6 +35077,22 @@ private final class Engine: @unchecked Sendable {
         let netFetch: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:HTTP request is invalid" }
             return self.guarded {
+                if let turn = self.aiConfigurationTurn, let discovery = turn.discovery {
+                    _ = try self.requireAIModelDiscovery(discovery.id)
+                    let input = try Self.projectObject(json, maximum: 64 * 1024)
+                    guard discovery.credentialLoaded, let authorized = discovery.httpURL, let url = input["url"] as? String, Self.ownedEqual(url, authorized),
+                          input["method"] as? String == "GET", input["text"] == nil, input["base64"] == nil else { throw Self.aiModelDiscoveryUnavailable }
+                    discovery.httpURL = nil
+                    let id = try discovery.http.submit(json); discovery.httpIDs.insert(id); return id
+                }
+                if let turn = self.taskAITurn, let authorized = turn.httpURL {
+                    try turn.requireOwner()
+                    let input = try NativeTaskAIJSON.object(json)
+                    guard turn.began, turn.loaded, input["url"] as? String == authorized,
+                          input["method"] as? String == "POST" else { throw NativeTaskAIJSON.unavailable }
+                    turn.httpURL = nil
+                    let id = try turn.http.submit(json); turn.httpIDs.insert(id); return id
+                }
                 try self.requireHTTPAdmission(json)
                 guard let jobs = self.httpJobs else { throw HostFailure("HTTP bridge is unavailable") }
                 return try jobs.submit(json)
@@ -28787,7 +35100,25 @@ private final class Engine: @unchecked Sendable {
         }
         let netAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
             guard request.isString, let id = request.toString() else { return }
-            self?.httpJobs?.abort(id)
+            if let discovery = self?.aiConfigurationTurn?.discovery, discovery.httpIDs.contains(id) { discovery.http.abort(id) }
+            else if let turn = self?.taskAITurn, turn.httpIDs.contains(id) { turn.http.abort(id) }
+            else { self?.httpJobs?.abort(id) }
+        }
+        let dropboxCall: @convention(block) (JSValue) -> String = { [weak self] value in
+            guard let self else { return "!MindwtrNativeError:Dropbox capability is unavailable" }
+            return self.guarded {
+                let turn = try self.requireDropboxTurn()
+                guard value.context === turn.runtime, value.isString, let input = value.toString() else { throw Self.foregroundSyncFailure }
+                return try turn.jobs.submit(input)
+            } ?? "!MindwtrNativeError:Dropbox capability is unavailable"
+        }
+        let dropboxCancel: @convention(block) (JSValue) -> String = { [weak self] value in
+            guard let self else { return "!MindwtrNativeError:Dropbox capability is unavailable" }
+            return self.guarded {
+                let turn = try self.requireDropboxTurn()
+                guard value.context === turn.runtime, value.isString, let id = value.toString(), id.utf8.count <= 100 else { throw Self.foregroundSyncFailure }
+                turn.jobs.abort(id); return ""
+            } ?? "!MindwtrNativeError:Dropbox capability is unavailable"
         }
         let secretCall: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Secure storage request is invalid" }
@@ -28820,6 +35151,40 @@ private final class Engine: @unchecked Sendable {
             guard request.isString, let id = request.toString() else { return }
             self?.calendarJobs?.abort(id)
         }
+        let cloudKitAvailable: @convention(block) () -> Bool = { [weak self] in self?.cloudKitAvailable == true }
+        let cloudKitCall: @convention(block) (JSValue) -> String = { [weak self, weak context] request in
+            guard let self, let context, self.context === context, request.context === context,
+                  request.isString, let json = request.toString() else { return "!MindwtrNativeError:CloudKit request is invalid" }
+            return self.guarded {
+                try self.requirePersonalWorkspace()
+                if let turn = self.taskDownloadTurn {
+                    try self.requireTaskDownloadTurn(before: true)
+                    guard self.invoking, turn.preparing, let name = turn.cloudKitRecordName,
+                          let jobs = turn.cloudKitJobs, self.cloudKitJobs === jobs,
+                          turn.cloudKitFetchID == nil,
+                          case .fetchAttachmentAsset(let selected, let path) = try NativeCloudKitRequest(json: json),
+                          Self.ownedEqual(name, selected), turn.jobs.isCloudKitDownloadStage(path) else {
+                        throw Self.taskDownloadFailure
+                    }
+                    let id = try jobs.submit(json)
+                    turn.cloudKitFetchID = id
+                    return id
+                }
+                guard self.invoking, self.started, !self.closed, !self.cleanupOwed, !self.foregroundCleanupActive,
+                      let cancellation = self.foregroundCleanupCancellation, let jobs = self.cloudKitJobs else {
+                    throw HostFailure("CloudKit foreground owner is unavailable")
+                }
+                try cancellation.check()
+                return try jobs.submit(json)
+            } ?? "!MindwtrNativeError:CloudKit foreground owner is unavailable"
+        }
+        let cloudKitAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
+            guard request.isString, let id = request.toString() else { return }
+            self?.cloudKitJobs?.abort(id)
+        }
+        bridge.setObject(cloudKitAvailable, forKeyedSubscript: "cloudKitAvailable" as NSString)
+        bridge.setObject(cloudKitCall, forKeyedSubscript: "cloudKitCall" as NSString)
+        bridge.setObject(cloudKitAbort, forKeyedSubscript: "cloudKitAbort" as NSString)
         let calendarPushCall: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
             return self.guarded { try self.requirePersonalWorkspace(); return try self.calendarPushCall(json) } ?? "!MindwtrNativeError:Calendar push is unavailable"
@@ -28863,6 +35228,40 @@ private final class Engine: @unchecked Sendable {
         }
         let body: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.ioBody() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
+        }
+        if workspaceMode == .personal {
+            let gmailUnavailable = "!MindwtrNativeError:Gmail capture is unavailable"
+            let gmailCall: @convention(block) (JSValue) -> String = { [weak self] request in
+                guard let self else { return gmailUnavailable }
+                return self.guarded {
+                    guard self.gmailTurn, self.invoking, let jobs = self.gmailJobs, request.isString,
+                          let json = request.toString() else { throw HostFailure("Gmail capture is unavailable") }
+                    return try jobs.submit(json)
+                } ?? gmailUnavailable
+            }
+            let gmailFile: @convention(block) (JSValue, JSValue, JSValue) -> String = { [weak self] op, name, to in
+                guard let self else { return gmailUnavailable }
+                return self.guarded {
+                    guard self.gmailTurn, self.invoking, let receipts = self.gmailReceipts, op.isString, name.isString, to.isString,
+                          let op = op.toString(), let name = name.toString(), let to = to.toString() else { throw HostFailure("Gmail capture is unavailable") }
+                    return try receipts.file(op, name: name, to: to)
+                } ?? gmailUnavailable
+            }
+            let gmailSql: @convention(block) (JSValue, JSValue, JSValue) -> String = { [weak self] name, sql, parameters in
+                guard let self else { return gmailUnavailable }
+                return self.guarded {
+                    guard self.gmailTurn, self.invoking, let receipts = self.gmailReceipts, name.isString, sql.isString, parameters.isString,
+                          let name = name.toString(), let sql = sql.toString(), let parameters = parameters.toString() else { throw HostFailure("Gmail capture is unavailable") }
+                    return try receipts.sql(name: name, sql: sql, parametersJSON: parameters)
+                } ?? gmailUnavailable
+            }
+            for (name, block) in ["gmailCall": gmailCall as Any, "gmailFile": gmailFile as Any, "gmailSql": gmailSql as Any] {
+                bridge.setObject(block, forKeyedSubscript: name as NSString)
+            }
+        }
+        if workspaceMode == .personal, dropboxAuthorization != nil {
+            bridge.setObject(dropboxCall, forKeyedSubscript: "dropboxCall" as NSString)
+            bridge.setObject(dropboxCancel, forKeyedSubscript: "dropboxCancel" as NSString)
         }
         for (name, block) in ["netFetch": netFetch as Any, "netAbort": netAbort as Any, "secretCall": secretCall as Any,
                               "cryptoCall": cryptoCall as Any, "calendarCall": calendarCall as Any,
@@ -28914,7 +35313,9 @@ private final class Engine: @unchecked Sendable {
                     guard self.reminderEffectsTurn == nil, self.pomodoroAlarmTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
                     let value: String?
-                    if self.calendarPushTurn != nil {
+                    if key == NativeDeviceKV.watchOrderingName {
+                        value = try self.requireWatchOrderingStorage().settledWatchOrderingRecord()
+                    } else if self.calendarPushTurn != nil {
                         let turn = try self.requireCalendarPushTurn()
                         guard ["mindwtr-system-calendar-settings", "mindwtr-external-calendars"].contains(key) else {
                             throw Self.deviceStorageUnavailable
@@ -28936,7 +35337,10 @@ private final class Engine: @unchecked Sendable {
                 return self.deviceStorageResult {
                     guard self.reminderEffectsTurn == nil, self.pomodoroAlarmTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key), value = try Self.deviceStorageText(value)
-                    try self.requireDeviceStorageAdmission().set(key, value); return nil
+                    if key == NativeDeviceKV.watchOrderingName {
+                        try self.requireWatchOrderingStorage().writeWatchOrderingRecord(value)
+                    } else { try self.requireDeviceStorageAdmission().set(key, value) }
+                    return nil
                 }
             }
             let remove: @convention(block) (JSValue) -> String? = { [weak self] key in
@@ -28945,7 +35349,8 @@ private final class Engine: @unchecked Sendable {
                 return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
                     guard self.reminderEffectsTurn == nil, self.pomodoroAlarmTurn == nil else { throw Self.deviceStorageUnavailable }
                     let key = try Self.deviceStorageText(key)
-                    try self.requireDeviceStorageAdmission().remove(key)
+                    if self.taskDownloadTurn != nil || self.projectDownloadTurn != nil { try self.removeSelectedDropboxLegacy([key]) }
+                    else { try self.requireDeviceStorageAdmission().remove(key) }
                     retiredSecret = NativeDeviceKV.isLegacySecretRemoval([key]); return nil
                 }
             }
@@ -28990,7 +35395,8 @@ private final class Engine: @unchecked Sendable {
                 return self.deviceStorageResult(legacySecretRemoval: { retiredSecret }) {
                     guard self.reminderEffectsTurn == nil, self.pomodoroAlarmTurn == nil else { throw Self.deviceStorageUnavailable }
                     let keys = try Self.deviceStorageKeys(keys)
-                    try self.requireDeviceStorageAdmission().multiRemove(keys)
+                    if self.taskDownloadTurn != nil || self.projectDownloadTurn != nil { try self.removeSelectedDropboxLegacy(keys) }
+                    else { try self.requireDeviceStorageAdmission().multiRemove(keys) }
                     retiredSecret = NativeDeviceKV.isLegacySecretRemoval(keys); return nil
                 }
             }
@@ -29002,8 +35408,15 @@ private final class Engine: @unchecked Sendable {
         if let jobs = attachmentJobs {
             let fileCall: @convention(block) (JSValue) -> String = { [weak self] request in
                 guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Attachment file request is invalid" }
-                return self.guarded { try self.requireRawAttachmentRead(json); return try jobs.submit(json,
-                    maximumReadBytes: self.taskDownloadTurn == nil && self.projectAvailabilityTurn == nil && self.projectDownloadTurn == nil ? nil : 8_388_608) } ?? "!MindwtrNativeError:Attachment file operation is unavailable"
+                guard self.captureAITurn == nil else { return "!MindwtrNativeError:Capture copilot request is read-only" }
+                return self.guarded {
+                    try self.requireRawAttachmentRead(json)
+                    let uri = (try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any])?["uri"] as? String
+                    let proof = uri.flatMap { self.taskDownloadTurn?.cloudKitBridge?.selectedStageProof(for: $0) }
+                    return try jobs.submit(json,
+                        maximumReadBytes: self.taskDownloadTurn == nil && self.projectAvailabilityTurn == nil && self.projectDownloadTurn == nil ? nil : 8_388_608,
+                        cloudKitStageProof: proof)
+                } ?? "!MindwtrNativeError:Attachment file operation is unavailable"
             }
             let installerCall: @convention(block) (JSValue) -> String = { [weak self] request in
                 guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Attachment installer request is invalid" }
@@ -29066,14 +35479,15 @@ private final class Engine: @unchecked Sendable {
         // Ordinary close and failed startup clear evidence and cannot prove retirement.
         guard started, !closed, context != nil, database != nil, lockFD >= 0,
               !localRequests.isClosing, !fileSyncCloseFailed, !reminderSourceStale,
-              !aiRequestTimeoutRetired, !aiReasoningEffortRetired, !aiGeminiThinkingBudgetRetired else { throw CoreHostRetirementError.unavailable }
+              !aiTextConfigurationRetired, !aiRequestTimeoutRetired, !aiReasoningEffortRetired, !aiGeminiThinkingBudgetRetired else { throw CoreHostRetirementError.unavailable }
         guard !recoveryActivationPending, !unresolvedAppLockRecovery, pending == nil,
               cleanupTurn == nil, !foregroundCleanupActive, foregroundCleanupCancellation == nil,
               retainedOrdinaryTurn == nil, ordinaryMutationDepth == 0,
               projectFileAddTurn == nil, projectDownloadTurn == nil, projectDownloadAcknowledgedTurn == nil,
-              projectAvailabilityTurn == nil, encryptionUnlockTurn == nil, providerCopy == nil, taskDownloadTurn == nil,
+              projectAvailabilityTurn == nil, encryptionUnlockTurn == nil, captureAITurn == nil, taskAITurn == nil, providerCopy == nil, taskDownloadTurn == nil,
               fileSyncTurn == nil, reminderEffectsTurn == nil, pomodoroAlarmTurn == nil,
               notificationSettingTurn == nil, !notificationSettingOwnerAccess,
+              aiTextConfigurationTurn == nil, !aiTextConfigurationOwnerAccess, aiConfigurationTurn == nil,
               aiRequestTimeoutTurn == nil, !aiRequestTimeoutOwnerAccess,
               aiReasoningEffortTurn == nil, !aiReasoningEffortOwnerAccess,
               aiGeminiThinkingBudgetTurn == nil, !aiGeminiThinkingBudgetOwnerAccess,
@@ -29127,6 +35541,12 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        dropboxTurn?.jobs.closeAndDrain(); dropboxTurn = nil
+        gmailJobs?.close(); gmailJobs = nil
+        gmailReceipts?.close(); gmailReceipts = nil
+        cloudKitJobs?.closeAndDrain(); cloudKitJobs = nil
+        voiceWarmEnvelope = nil
+        _ = retireVoiceOperations()
         if let turn = fileSyncTurn {
             do { try turn.jobs.closeAndDrain() } catch { fileSyncCloseFailed = true }
             turn.cancellation.setCancellationHandler(nil)
@@ -29149,9 +35569,13 @@ private final class Engine: @unchecked Sendable {
         reminderAdmissions.clearOrdinaryReadyWake()
         reminderEffectsTurn = nil
         pomodoroAlarmTurn = nil
+        aiTextConfigurationTurn = nil; aiTextConfigurationOwnerAccess = false; aiTextConfigurationRetired = false
+        aiConfigurationTurn?.cancellation.cancel(); aiConfigurationTurn?.discovery?.http.shutdown()
+        aiConfigurationTurn = nil; aiConfigurationSession = nil
         aiRequestTimeoutTurn = nil; aiRequestTimeoutOwnerAccess = false; aiRequestTimeoutRetired = false
         aiReasoningEffortTurn = nil; aiReasoningEffortOwnerAccess = false; aiReasoningEffortRetired = false
         aiGeminiThinkingBudgetTurn = nil; aiGeminiThinkingBudgetOwnerAccess = false; aiGeminiThinkingBudgetRetired = false
+        captureAITurn?.live = false; captureAITurn = nil
         notificationSettingTurn = nil; notificationSettingOwnerAccess = false
         deviceCalendarSettingTurn = nil
         calendarSubscriptionSettingTurn = nil
@@ -29171,6 +35595,8 @@ private final class Engine: @unchecked Sendable {
         attachmentGeneration &+= 1
         attachmentIdlePump?.cancel(); attachmentIdlePump = nil
         // No file/installer worker survives release of the library lock.
+        retireTaskAIAnswer(nil)
+        taskAITurn?.handle.cancel(); taskAITurn?.http.shutdown(); taskAITurn = nil
         httpJobs?.shutdown(); httpJobs = nil
         secretJobs?.shutdown(); secretJobs = nil
         calendarJobs?.shutdown(); calendarJobs = nil
@@ -29186,10 +35612,27 @@ private final class Engine: @unchecked Sendable {
         started = false
         recoveryActivationPending = false
         startupBoardResult = nil
+        startupRowQuickStatusResult = nil
+        startupInlineChecklistResult = nil
         startupDoneTaskStatusResult = nil
         startupReferenceTaskBackdateResult = nil
+        startupChecklistMoveResult = nil
+        startupConversionResult = nil
+        confirmedChecklistMoveEnvelope = nil
+        confirmedChecklistMoveUndoEnvelope = nil
+        confirmedProjectToSectionEnvelope = nil
+        confirmedTaskPromoteEnvelope = nil
+        confirmedRowTaskFocusEnvelope = nil
+        confirmedRowTaskDatesEnvelope = nil
+        confirmedRowTaskDestinationEnvelope = nil
+        startupRowTaskFocusResult = nil
+        startupRowTaskDatesResult = nil
+        startupRowTaskDestinationResult = nil
+        startupRowTaskBackdateResult = nil
         startupReferenceTaskDestinationResult = nil
         startupReferenceProjectNextActionResult = nil
+        startupReferenceProjectNextActionSource = nil
+        referenceProjectNextActionOrigin = nil
         startupDoneTaskStatusSource = nil
         startupTaskCompletionSource = nil
         startupTaskCompletionRequestID = nil
@@ -29199,6 +35642,7 @@ private final class Engine: @unchecked Sendable {
         startupTrashProjectRestoreResult = nil
         startupCalendarResult = nil
         startupMindSweepResult = nil
+        startupReviewProjectTaskResult = nil
         startupInboxResult = nil
         startupInboxUndoResult = nil
         confirmedInboxDecisionEnvelope = nil
@@ -29209,6 +35653,9 @@ private final class Engine: @unchecked Sendable {
         database?.close()
         database = nil
         if lockFD >= 0 { flock(lockFD, LOCK_UN); Darwin.close(lockFD); lockFD = -1 }
+        for directory in rnAdoptionDirectories { Darwin.close(directory.fd) }
+        rnAdoptionDirectories.removeAll()
+        if rnAdoptionContainerURL != nil { legacyStorage = nil }
     }
 }
 

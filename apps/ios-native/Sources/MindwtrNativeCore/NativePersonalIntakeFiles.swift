@@ -131,7 +131,44 @@ final class NativePersonalIntakeFiles {
     var retainedArtifactCount: Int { hotArtifacts.count }
     #endif
 
-    init(route: NativePersonalIntakeRoute) throws {
+    /// An absent trusted path is the only negative fact; every uncertain existing path throws.
+    static func hasExistingRoot(route: NativePersonalIntakeRoute) throws -> Bool {
+        var chain: [Directory] = []
+        defer { for directory in chain.reversed() { Darwin.close(directory.fd) } }
+        let home = Darwin.open(route.home.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+        guard home >= 0 else { throw NativePersonalIntakeError.unavailable }
+        do { chain.append(.init(name: "", fd: home, identity: .init(try directoryStat(home)))) }
+        catch { Darwin.close(home); throw error }
+        func verify() throws {
+            let current = Darwin.open(route.home.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
+            guard current >= 0 else { throw NativePersonalIntakeError.unavailable }
+            defer { Darwin.close(current) }
+            guard IntakeDirectoryIdentity(try directoryStat(current)) == chain[0].identity else { throw NativePersonalIntakeError.unavailable }
+            for index in chain.indices {
+                guard IntakeDirectoryIdentity(try directoryStat(chain[index].fd)) == chain[index].identity else { throw NativePersonalIntakeError.unavailable }
+                if index > 0 {
+                    var named = stat()
+                    guard fstatat(chain[index - 1].fd, chain[index].name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+                          named.st_mode & S_IFMT == S_IFDIR, IntakeDirectoryIdentity(named) == chain[index].identity else { throw NativePersonalIntakeError.unavailable }
+                }
+            }
+        }
+        for name in route.components {
+            let parent = chain.last!.fd
+            let fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            if fd < 0 {
+                var named = stat()
+                guard errno == ENOENT, fstatat(parent, name, &named, AT_SYMLINK_NOFOLLOW) != 0,
+                      errno == ENOENT else { throw NativePersonalIntakeError.unavailable }
+                try verify(); return false
+            }
+            do { chain.append(.init(name: name, fd: fd, identity: .init(try directoryStat(fd)))) }
+            catch { Darwin.close(fd); throw error }
+        }
+        try verify(); return true
+    }
+
+    init(route: NativePersonalIntakeRoute, requireExisting: Bool = false) throws {
         self.route = route
         var madeRoot = false
         do {
@@ -140,7 +177,7 @@ final class NativePersonalIntakeFiles {
             do { directories.append(.init(name: "", fd: fd, identity: .init(try Self.directoryStat(fd)))) }
             catch { Darwin.close(fd); throw error }
             for (index, name) in route.components.enumerated() {
-                let made = try appendDirectory(name)
+                let made = try appendDirectory(name, creating: !requireExisting)
                 if index == route.components.count - 1 { madeRoot = made }
             }
             created = madeRoot
@@ -230,19 +267,38 @@ final class NativePersonalIntakeFiles {
         return try perform(pending)
     }
     /// A failed write retains its original before snapshot and exact creation FD. Cancellation is not success.
-    func retryPublication() throws {
+    @discardableResult
+    func retryPublication() throws -> IntakeFileSnapshot? {
         guard !closed, !poisoned else { throw NativePersonalIntakeError.unavailable }
-        guard let pending = attempt else { try check(); return }
+        guard let pending = attempt else { try check(); return nil }
         let current: IntakeFileSnapshot?
         do { try verifyNamespace(); current = try read(pending.target) }
         catch { poisoned = true; throw NativePersonalIntakeError.unavailable }
-        if Self.matches(current, pending.before) { _ = try perform(pending); return }
+        if Self.matches(current, pending.before) { return try perform(pending) }
         guard let current, let witness = pending.witness, pending.fd >= 0,
               current.bytes == pending.bytes, current.witness == witness,
               try Self.fileWitness(pending.fd) == witness else {
             poisoned = true; throw NativePersonalIntakeError.unavailable
         }
+        #if DEBUG
+        try afterPublication?(pending.target.name)
+        #endif
         try synchronize(current, target: pending.target); try accept(current, target: pending.target); attempt = nil
+        return current
+    }
+    /// A retained record retry may check its original header without admitting any other pending write.
+    func checkPendingPublication(_ pending: IntakePublicationAttempt, header: IntakeFileSnapshot) throws {
+        guard !closed, !poisoned, attempt === pending, pending.target != .header,
+              headerSnapshot === header else { throw NativePersonalIntakeError.unavailable }
+        try validateSnapshot(header, target: .header)
+    }
+    /// Bytes alone never replace a snapshot's still-open original descriptor and complete witness.
+    func validateSnapshot(_ snapshot: IntakeFileSnapshot, target: IntakeTarget) throws {
+        do {
+            try verifyNamespace()
+            guard try Self.fileWitness(snapshot.fd) == snapshot.witness,
+                  Self.matches(try read(target), snapshot) else { throw NativePersonalIntakeError.unavailable }
+        } catch { poisoned = true; throw NativePersonalIntakeError.unavailable }
     }
     /// A cold existing target without a persisted witness is held, even when every byte matches.
     func ensureArtifact(_ bytes: Data, target: IntakeTarget, witness: IntakeFileWitness?) throws -> IntakeFileWitness {
@@ -331,11 +387,14 @@ final class NativePersonalIntakeFiles {
         }
         try verifyNamespace()
     }
-    private func appendDirectory(_ name: String) throws -> Bool {
+    private func appendDirectory(_ name: String, creating: Bool = true) throws -> Bool {
         guard let parent = directories.last else { throw NativePersonalIntakeError.unavailable }
-        let made = mkdirat(parent.fd, name, 0o700) == 0
-        guard made || errno == EEXIST else { throw NativePersonalIntakeError.unavailable }
-        if made { guard fsync(parent.fd) == 0 else { throw NativePersonalIntakeError.unavailable } }
+        let made: Bool
+        if creating {
+            made = mkdirat(parent.fd, name, 0o700) == 0
+            guard made || errno == EEXIST else { throw NativePersonalIntakeError.unavailable }
+            if made { guard fsync(parent.fd) == 0 else { throw NativePersonalIntakeError.unavailable } }
+        } else { made = false }
         let fd = openat(parent.fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { throw NativePersonalIntakeError.unavailable }
         do { directories.append(.init(name: name, fd: fd, identity: .init(try Self.directoryStat(fd)))) }

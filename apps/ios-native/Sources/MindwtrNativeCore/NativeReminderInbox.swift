@@ -23,6 +23,11 @@ public actor NativeReminderInbox {
         let retiredThrough: String?
         let sourceGeneration: Data
     }
+    struct HeldReplayProof: Equatable, Sendable {
+        let origin: Data
+        let generation: Data
+        fileprivate init(origin: Data, generation: Data) { self.origin = origin; self.generation = generation }
+    }
     struct SealDiagnostic: Sendable {
         let message = "Native iOS legacy reminder owner sealed"
         let releaseCheck = "v1.3.8/ios-personal-intake-seal"
@@ -45,7 +50,7 @@ public actor NativeReminderInbox {
     #endif
 
     // Read-only grammar reuse; personal intake does not alter the legacy writer or its v1 bytes.
-    static func validateForPersonalIntake(_ response: NativeReminderResponse, namespace: String) throws {
+    public static func validateForPersonalIntake(_ response: NativeReminderResponse, namespace: String) throws {
         try ReminderInboxState.validate(response, namespace: namespace)
     }
     static func validateTerminalForPersonalIntake(_ id: String, deliveredAtBits: String) throws -> Double {
@@ -58,6 +63,66 @@ public actor NativeReminderInbox {
     public init(selection: NativeLaunchSelection) throws {
         do { files = try ReminderInboxFiles(selection: selection) }
         catch { throw ReminderInboxFiles.failure }
+    }
+
+    /// Reacquire only an existing original source. Missing cold handover data is held, never recreated.
+    public static func openExistingForHandover(selection: NativeLaunchSelection) throws -> NativeReminderInbox {
+        try NativeReminderInbox(existingSelection: selection)
+    }
+    private init(existingSelection selection: NativeLaunchSelection) throws {
+        do { files = try ReminderInboxFiles(selection: selection, requireExisting: true) }
+        catch { throw ReminderInboxFiles.failure }
+    }
+    public enum CaptureHandoverFailure: Error, Equatable, Sendable { case refused, unavailable }
+    /// After its App/domain wrapper drain, the original owner may establish a never-used empty source.
+    public func prepareEmptySourceForPersonalIntake(route: NativePersonalIntakeRoute) throws {
+        do {
+            try files.prepareEmptySourceForPersonalIntake(route: route)
+            if let sealed { _ = try exportSealed(sealed.token, route: route) }
+        } catch let failure as CaptureHandoverFailure { throw failure }
+        catch { throw CaptureHandoverFailure.unavailable }
+    }
+    /// The actual App consumer retains this same original actor through its final native acknowledgement.
+    public func handoverCaptures(into destination: NativePersonalIntake, route: NativePersonalIntakeRoute) async throws {
+        let alreadySealed = sealed != nil
+        let token: Seal
+        do { token = try sealForPersonalIntake(route: route, diagnostic: { _ in }) }
+        catch { throw alreadySealed ? CaptureHandoverFailure.unavailable : CaptureHandoverFailure.refused }
+        do { try await importSealed(token, into: destination, route: route, diagnostic: { _ in }) }
+        catch { throw CaptureHandoverFailure.unavailable }
+    }
+
+    /// The original sealed producer alone may admit its confirmed destination's exact held reminder.
+    public func admitHeldReminder(_ item: NativePersonalIntake.Item, in destination: NativePersonalIntake,
+                                  route: NativePersonalIntakeRoute) async throws -> NativePersonalIntake.Item {
+        let proof = try heldReplayProof(destination: destination, route: route)
+        let admitted = try await destination.admitHeldReminder(item, proof: proof)
+        guard try heldReplayProof(destination: destination, route: route) == proof else { throw ReminderInboxFiles.failure }
+        return admitted
+    }
+
+    public func heldReminderDispatchItem(_ admitted: NativePersonalIntake.Item, in destination: NativePersonalIntake,
+                                         route: NativePersonalIntakeRoute) async throws -> Item {
+        let proof = try heldReplayProof(destination: destination, route: route)
+        let response = try await destination.heldReminderResponse(admitted, proof: proof)
+        guard try heldReplayProof(destination: destination, route: route) == proof else { throw ReminderInboxFiles.failure }
+        return .init(response: response, stage: .admitting)
+    }
+
+    /// App must already hold its exact domain receipt; a repeat settles only this retained finish.
+    public func finishHeldReminder(_ originalAdmittingItem: NativePersonalIntake.Item, outcome: NativePersonalIntake.Outcome,
+                                   in destination: NativePersonalIntake, route: NativePersonalIntakeRoute) async throws -> NativePersonalIntake.FinishSettlement {
+        let proof = try heldReplayProof(destination: destination, route: route)
+        let settlement = try await destination.finishHeldReminder(originalAdmittingItem, outcome: outcome, proof: proof)
+        guard try heldReplayProof(destination: destination, route: route) == proof else { throw ReminderInboxFiles.failure }
+        return settlement
+    }
+
+    private func heldReplayProof(destination: NativePersonalIntake, route: NativePersonalIntakeRoute) throws -> HeldReplayProof {
+        guard !Task.isCancelled, let sealed, confirmedImportDestination === destination,
+              confirmedImportGeneration == sealed.generation else { throw ReminderInboxFiles.failure }
+        let source = try exportSealed(sealed.token, route: route)
+        return .init(origin: route.descriptor, generation: source.sourceGeneration)
     }
 
     public func capture(_ response: NativeReminderResponse) throws -> Item? {
@@ -197,8 +262,8 @@ public actor NativeReminderInbox {
     }
 
     #if DEBUG
-    func setImportAcknowledgementBarrier(_ barrier: (@Sendable () async -> Void)?) { importAcknowledgementBarrier = barrier }
-    func setIOFaults(beforePublication: (() throws -> Void)? = nil, afterPublication: (() throws -> Void)? = nil) {
+    public func setImportAcknowledgementBarrier(_ barrier: (@Sendable () async -> Void)?) { importAcknowledgementBarrier = barrier }
+    public func setIOFaults(beforePublication: (() throws -> Void)? = nil, afterPublication: (() throws -> Void)? = nil) {
         files.beforePublication = beforePublication
         files.afterPublication = afterPublication
     }
@@ -393,16 +458,20 @@ private final class ReminderInboxFiles {
     private var attempt: Attempt?
     private var closed = false
     private var poisoned = false
+    private var initiallyAbsent = false
     private(set) var state = ReminderInboxState()
     #if DEBUG
     var beforePublication: (() throws -> Void)?
     var afterPublication: (() throws -> Void)?
     #endif
 
-    init(selection: NativeLaunchSelection) throws {
+    init(selection: NativeLaunchSelection, requireExisting: Bool = false) throws {
         self.selection = selection
         let database: URL, container: URL
         switch selection {
+        case let .production(owner):
+            database = owner.appendingPathComponent("Documents/SQLite/mindwtr.db")
+            container = owner; namespace = NativeLaunchSelection.productionNamespace
         case let .standard(databaseURL, containerURL, name), let .isolated(databaseURL, containerURL, name, _):
             database = databaseURL; container = containerURL; namespace = name
         case .rehearsal: throw Self.failure
@@ -420,9 +489,9 @@ private final class ReminderInboxFiles {
             guard fd >= 0 else { throw Self.failure }
             do { directories.append(.init(name: "", fd: fd, identity: Identity(try Self.directoryStat(fd)))) }
             catch { Darwin.close(fd); throw error }
-            for name in parentParts.dropFirst(rootParts.count) { try appendDirectory(name) }
-            try appendDirectory("NotificationResponses")
-            lockFD = openat(try directoryFD(), ".lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
+            for name in parentParts.dropFirst(rootParts.count) { try appendDirectory(name, creating: !requireExisting) }
+            try appendDirectory("NotificationResponses", creating: !requireExisting)
+            lockFD = openat(try directoryFD(), ".lock", O_RDWR | (requireExisting ? 0 : O_CREAT) | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
             guard lockFD >= 0 else { throw Self.failure }
             lockGeneration = try Self.fileStat(lockFD)
             guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw Self.failure }
@@ -434,8 +503,9 @@ private final class ReminderInboxFiles {
                 state = try ReminderInboxState.decode(snapshot.bytes, namespace: namespace)
                 try synchronize(snapshot)
             } else {
-                guard fsync(try directoryFD()) == 0 else { throw Self.failure }
+                guard !requireExisting, fsync(try directoryFD()) == 0 else { throw Self.failure }
                 try verifyNamespace(); try verifyAbsent()
+                initiallyAbsent = true
             }
         } catch { close(); throw Self.failure }
     }
@@ -468,11 +538,23 @@ private final class ReminderInboxFiles {
             + directories.map { "\($0.identity.device):\($0.identity.inode)" }
         return Data(SHA256.hash(data: Data(values.joined(separator: "|").utf8)))
     }
+    func prepareEmptySourceForPersonalIntake(route: NativePersonalIntakeRoute) throws {
+        try check()
+        guard try Self.sameSelection(selection, route.selection) else { throw NativeReminderInbox.CaptureHandoverFailure.refused }
+        guard snapshot == nil else { return }
+        guard hasLease, lockGeneration != nil, initiallyAbsent,
+              state.nextSequence == 1, state.active.isEmpty, state.tombstones.isEmpty,
+              state.retiredThrough == nil else { throw Self.failure }
+        initiallyAbsent = false
+        try publish(state)
+    }
     private static func sameSelection(_ lhs: NativeLaunchSelection, _ rhs: NativeLaunchSelection) throws -> Bool {
         func same(_ a: URL, _ b: URL) throws -> Bool {
             try Data(NativeAttachmentFiles.filePath(a.absoluteString).utf8) == Data(NativeAttachmentFiles.filePath(b.absoluteString).utf8)
         }
         switch (lhs, rhs) {
+        case let (.production(a), .production(b)):
+            return try same(a, b)
         case let (.standard(a, b, c), .standard(x, y, z)):
             return try c == z && same(a, x) && same(b, y)
         case let (.isolated(a, b, c, d), .isolated(x, y, z, w)):
@@ -547,11 +629,13 @@ private final class ReminderInboxFiles {
             guard Self.matches(try read(), file) else { poisoned = true; throw Self.failure }
         } catch { throw Self.failure }
     }
-    private func appendDirectory(_ name: String) throws {
+    private func appendDirectory(_ name: String, creating: Bool = true) throws {
         guard let parent = directories.last else { throw Self.failure }
-        if mkdirat(parent.fd, name, 0o700) == 0 {
-            guard fsync(parent.fd) == 0 else { throw Self.failure }
-        } else if errno != EEXIST { throw Self.failure }
+        if creating {
+            if mkdirat(parent.fd, name, 0o700) == 0 {
+                guard fsync(parent.fd) == 0 else { throw Self.failure }
+            } else if errno != EEXIST { throw Self.failure }
+        }
         let fd = openat(parent.fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { throw Self.failure }
         do { directories.append(.init(name: name, fd: fd, identity: Identity(try Self.directoryStat(fd)))) }
