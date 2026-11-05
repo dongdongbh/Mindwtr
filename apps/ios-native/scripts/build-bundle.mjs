@@ -12,10 +12,7 @@ if (cryptoTest && uploadTest) throw new Error('Private test bundle flags are mut
 const output = resolve(app, cryptoTest ? '.build/crypto-test-host.js'
     : uploadTest ? '.build/attachment-upload-test-host.js' : 'Resources/core-host.js');
 mkdirSync(dirname(output), { recursive: true });
-await build({
-    entryPoints: [cryptoTest ? resolve(app, 'bundle/crypto-test-entry.ts')
-        : uploadTest ? resolve(app, 'bundle/attachment-upload-test-entry.ts') : resolve(android, 'host-entry.ts')],
-    outfile: output,
+const options = {
     bundle: true,
     alias: { '@mindwtr/core': resolve(app, '../../packages/core/src/index.ts') },
     tsconfigRaw: {},
@@ -24,4 +21,17 @@ await build({
     minify: true,
     legalComments: 'none',
     banner: { js: `globalThis.__mindwtrHostPlatform = 'ios';\n${readFileSync(resolve(app, 'bundle/jsc-preflight.js'), 'utf8')}\n${readFileSync(resolve(android, 'host-polyfills.js'), 'utf8')}` },
+};
+await build({
+    ...options,
+    entryPoints: [cryptoTest ? resolve(app, 'bundle/crypto-test-entry.ts')
+        : uploadTest ? resolve(app, 'bundle/attachment-upload-test-entry.ts') : resolve(android, 'host-entry.ts')],
+    outfile: output,
 });
+if (!cryptoTest && !uploadTest) {
+    await build({
+        ...options,
+        entryPoints: [resolve(app, 'bundle/sandbox-entry.ts')],
+        outfile: resolve(app, 'Sources/MindwtrNativeCore/Resources/sandbox-host.js'),
+    });
+}

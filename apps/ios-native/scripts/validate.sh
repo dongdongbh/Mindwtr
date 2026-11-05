@@ -15,6 +15,7 @@ swiftc -parse-as-library "$app/App/NativeCalendarEventEditor.swift" \
   -o "$app/.build/calendar-editor-lifetime-check"
 "$app/.build/calendar-editor-lifetime-check"
 python3 apps/ios-native/scripts/check-project-download-fixture.test.py
+python3 apps/ios-native/scripts/check-label-keys.test.py
 export MINDWTR_CORE_BUNDLE="$app/Resources/core-host.js"
 export MINDWTR_CRYPTO_TEST_BUNDLE="$app/.build/crypto-test-host.js"
 export MINDWTR_ATTACHMENT_UPLOAD_TEST_BUNDLE="$app/.build/attachment-upload-test-host.js"
