@@ -55,4 +55,15 @@ class SwipeTrayTest {
         assertEquals(left, trayDragOffset(left, 20f, 28f, left, right))
         assertEquals(left - 40f, trayDragOffset(left, -50f, 28f, left, right))
     }
+
+    @Test fun aFlickShorterThanRnsActivationDistanceLeavesTheTrayWhereItWas() {
+        val left = 166f
+        val right = 248f
+        assertEquals(0f, releaseTray(0f, 20f, 3000f, 28f, 72f, left, right))
+        assertEquals(0f, releaseTray(0f, -20f, -3000f, 28f, 72f, left, right))
+        assertEquals(left, releaseTray(left, -20f, -3000f, 28f, 72f, left, right))
+        assertEquals(-right, releaseTray(-right, 20f, 3000f, 28f, 72f, left, right))
+        assertEquals(left, releaseTray(0f, 30f, 3000f, 28f, 72f, left, right))
+    }
+
 }

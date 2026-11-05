@@ -512,6 +512,9 @@ internal fun settleTray(start: Float, offset: Float, velocity: Float, threshold:
     }
 }
 
+internal fun releaseTray(start: Float, dragged: Float, velocity: Float, dragOffset: Float, threshold: Float, left: Float, right: Float): Float =
+    if (abs(dragged) < dragOffset) start else settleTray(start, trayDragOffset(start, dragged, dragOffset, left, right), velocity, threshold, left, right)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, isEnabled: (TrayAction) -> Boolean, run: (TrayAction) -> Unit,
@@ -547,7 +550,7 @@ private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, 
             },
             orientation = Orientation.Horizontal, enabled = enabled,
             onDragStarted = { start = offset.targetValue; dragged = 0f },
-            onDragStopped = { velocity -> settle(settleTray(start, trayDragOffset(start, dragged, dragOffset, left, right), velocity, threshold, left, right)) },
+            onDragStopped = { velocity -> settle(releaseTray(start, dragged, velocity, dragOffset, threshold, left, right)) },
         )) {
             content()
             if (offset.targetValue != 0f) Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures(onLongPress = { }) { settle(0f) } })

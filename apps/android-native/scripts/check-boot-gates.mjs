@@ -798,7 +798,7 @@ assert.match(rowUi, /"done" -> canComplete\s+"restore", "next" -> if \(listed !=
 assert.match(rowUi, /val all = trayActions\.map \{ action -> CustomAccessibilityAction\(action\.label\) \{ runTray\(action\); true \} \}/);
 assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = long,/);
 assert.match(rowUi, /val long = onLongDone\?\.takeIf \{ action\.id == "done" && enabled \}/);
-assert.match(rowUi, /onDragStopped = \{ velocity -> settle\(settleTray\(start, trayDragOffset\(start, dragged, dragOffset, left, right\), velocity, threshold, left, right\)\) \}/, 'a drag only opens or closes the row');
+assert.match(rowUi, /onDragStopped = \{ velocity -> settle\(releaseTray\(start, dragged, velocity, dragOffset, threshold, left, right\)\) \}/, 'a drag only opens or closes the row');
 assert.doesNotMatch(code(rowUi), /LocalViewConfiguration provides/, 'the row keeps the system touch slop: a larger one let the list take the drag');
 assert.match(rowUi, /if \(offset\.targetValue != 0f\) Box\(Modifier\.matchParentSize\(\)\.pointerInput\(Unit\) \{ detectTapGestures\(onLongPress = \{ \}\) \{ settle\(0f\) \} \}\)/, 'a tap on an open row shuts the tray and reaches nothing under it, as RN\'s Swipeable does');
 assert.match(rowUi, /internal const val TRAY_FRICTION = 1\.25f\s+internal const val TRAY_OPEN_THRESHOLD_DP = 72f\s+internal const val TRAY_DRAG_OFFSET_DP = 28f/);
