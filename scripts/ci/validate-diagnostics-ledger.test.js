@@ -41,11 +41,13 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
     const slug = match[2] ?? constants.get(match[3]);
     if (slug !== undefined) sites.push({ file, slug });
   }
-  // A conditional value (`releaseCheck: queued ? 'a' : 'b'`) emits either literal.
+  // Conditional chains emit each literal arm, including Project/Inbox/Reference diagnostics.
   for (const match of source.matchAll(
-    /\breleaseCheck\s*:\s*[^,{}?;]+\?\s*(['"])([^'"\r\n]*)\1\s*:\s*(['"])([^'"\r\n]*)\3/g,
+    /\breleaseCheck\s*:\s*([^,{};]+\?[^,{};]+)/g,
   )) {
-    sites.push({ file, slug: match[2] }, { file, slug: match[4] });
+    for (const arm of match[1].matchAll(/[?:]\s*(['"])([^'"\r\n]*)\1/g)) {
+      sites.push({ file, slug: arm[2] });
+    }
   }
   // Native Rust diagnostics put the field inside a log message rather than
   // a JavaScript object. Only count log macros, not unused string constants.
@@ -87,6 +89,15 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
         if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
       } catch { /* Invalid JSON cannot supply a Diagnostics context. */ }
     }
+    // Engine-local calls pass the literal context directly, as raw or escaped JSON.
+    for (const call of source.matchAll(
+      /\binvoke\(\s*"logLine"\s*,\s*arguments:\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*(?:(#+)"([\s\S]*?)"\1|("(?:\\[\s\S]|[^"\\])*"))\s*,?\s*\]\s*\)/g,
+    )) {
+      try {
+        const context = JSON.parse(call[2] ?? JSON.parse(call[3]));
+        if (typeof context?.releaseCheck === "string") sites.push({ file, slug: context.releaseCheck });
+      } catch { /* Interpolation, invalid JSON and unsupported escapes are not literal contexts. */ }
+    }
     // Shared Swift formatters: count only a guard-bound payload actually forwarded
     // with that formatter's message to logLine, not an unused static tag literal.
     for (const call of source.matchAll(
@@ -119,6 +130,14 @@ function collectCodeSlugs({ file, source, formatterSources = [] }) {
       /\bcall\(\s*"logLine"\s*,\s*argumentsJSON:\s*(?:self\.)?json\(\s*\[\s*"(?:\\[\s\S]|[^"\\])*"\s*,\s*try\s+(?:self\.)?json\(\s*\[((?:"(?:\\[\s\S]|[^"\\])*"|[^"[\]])*)\]\s*\)\s*,?\s*\]\s*\)\s*\)/g,
     )) {
       for (const field of call[1].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
+        try { sites.push({ file, slug: JSON.parse(field[1]) }); }
+        catch { /* Interpolated or unsupported Swift strings are not resolved literals. */ }
+      }
+    }
+    for (const call of source.matchAll(
+      /\bvar\s+(\w+)\s*:\s*\[String:\s*Any\]\s*=\s*\[((?:"(?:\\[\s\S]|[^"\\])*"|[^"[\]])*)\][\s\S]{0,400}?\bif\s+let\s+(\w+)\s*=\s*try\?\s*(?:Self|self)\.ownedJSON\(\s*\1\s*\)\s*\{[^{}]*?\binvoke\(\s*"logLine"\s*,\s*arguments:\s*\[[^[\]]*,\s*\3\s*\]\s*\)/g,
+    )) {
+      for (const field of call[2].matchAll(/"releaseCheck"\s*:\s*("(?:\\[\s\S]|[^"\\])*")/g)) {
         try { sites.push({ file, slug: JSON.parse(field[1]) }); }
         catch { /* Interpolated or unsupported Swift strings are not resolved literals. */ }
       }
@@ -215,6 +234,20 @@ describe("release diagnostics ledger", () => {
     ]);
   });
 
+  it("resolves nested releaseCheck arms without conditions or adjacent fields", () => {
+    const file = "apps/Example.ts";
+    expect(collectCodeSlugs({ file, source: `
+      logInfo('confirmed', { context: {
+        releaseCheck: source === 'project' ? 'v1.3.8/project' : source === 'inbox' ? 'v1.3.8/inbox' : 'v1.3.8/reference',
+        outcome: changed ? 'unrelated-success' : 'unrelated-noop'
+      } });
+    ` })).toEqual([
+      { file, slug: "v1.3.8/project" },
+      { file, slug: "v1.3.8/inbox" },
+      { file, slug: "v1.3.8/reference" },
+    ]);
+  });
+
   it("resolves both literals of a conditional releaseCheck value", () => {
     const file = "apps/example.ts";
     expect(collectCodeSlugs({ file, source: `
@@ -302,6 +335,26 @@ describe("release diagnostics ledger", () => {
         "Wrong field type", #"{"releaseCheck":123}"#,
       ]))
     ` })).toEqual([]);
+  });
+
+  it("resolves only literal Swift Engine logLine contexts", () => {
+    const file = "apps/ios-native/Sources/MindwtrNativeCore/Example.swift";
+    const source = String.raw`
+      _ = try? invoke("logLine", arguments: ["Raw diagnostic", #"{"releaseCheck":"v1.3.8/raw-engine","outcome":"confirmed"}"#])
+      _ = try? invoke("logLine", arguments: ["Escaped diagnostic", "{\"releaseCheck\":\"v1.3.8/escaped-engine\"}"])
+      let unused = #"{"releaseCheck":"v1.3.8/unused-engine"}"#
+      _ = try? invoke("other", arguments: ["Other call", #"{"releaseCheck":"v1.3.8/other-engine"}"#])
+      _ = try? invoke("logLine", arguments: ["Variable context", unused])
+      _ = try? invoke("logLine", arguments: ["Malformed context", #"{"releaseCheck":"v1.3.8/malformed-engine",}"#])
+      _ = try? invoke("logLine", arguments: ["Numeric field", "{\"releaseCheck\":123}"])
+      _ = try? invoke("logLine", arguments: ["Interpolated context", "{\"releaseCheck\":\"\(slug)\"}"])
+      _ = try? invoke("logLine", arguments: ["Concatenated context", "{\"releaseCheck\":\"v1.3.8/partial-engine\"}" + suffix])
+    `;
+    expect(collectCodeSlugs({ file, source })).toEqual([
+      { file, slug: "v1.3.8/raw-engine" },
+      { file, slug: "v1.3.8/escaped-engine" },
+    ]);
+    expect(collectCodeSlugs({ file: "apps/Example.ts", source })).toEqual([]);
   });
 
   it("resolves the actual shared Board geometry formatter only through its logLine emission", () => {
