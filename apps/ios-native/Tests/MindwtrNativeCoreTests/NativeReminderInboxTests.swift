@@ -564,7 +564,7 @@ final class NativeReminderInboxTests: XCTestCase {
         XCTAssertEqual(diagnostics.events.count, 1)
         let event = try XCTUnwrap(diagnostics.events.first)
         XCTAssertEqual(event.message, "Native iOS legacy reminder owner sealed")
-        XCTAssertEqual(event.releaseCheck, "v1.3.8/ios-personal-intake-seal")
+        XCTAssertEqual(event.releaseCheck, "v1.3.9/ios-personal-intake-seal")
         XCTAssertEqual(event.operation, "seal"); XCTAssertEqual(event.outcome, "confirmed")
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.home.appendingPathComponent("Library/Application Support/NativePersonalIntake").path))
     }

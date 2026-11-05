@@ -495,7 +495,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 entries.set(name, renamedUri);
                 host.log.info('File Sync path rename completed', {
                     scope: 'sync',
-                    extra: { releaseCheck: 'v1.3.8/file-sync-path-await', operation: 'rename', outcome: 'completed' },
+                    extra: { releaseCheck: 'v1.3.9/file-sync-path-await', operation: 'rename', outcome: 'completed' },
                 });
                 return renamedUri;
             },

@@ -404,7 +404,7 @@ export function createReminderMethods(deps: ReminderDeps) {
             }
             const advanceScheduled = schedule.filter((alarm) => /^task:.+:s?a\d+:-?\d+$/.test(alarm.key)).length;
             if (deps.reminderPlatform === 'ios' && advanceScheduled > 0) logInfo('Native iOS advance reminders scheduled', { scope: 'notifications',
-                context: { releaseCheck: 'v1.3.8/ios-advance-reminders', outcome: 'scheduled', count: advanceScheduled } });
+                context: { releaseCheck: 'v1.3.9/ios-advance-reminders', outcome: 'scheduled', count: advanceScheduled } });
             return {
                 ok: true,
                 value: {

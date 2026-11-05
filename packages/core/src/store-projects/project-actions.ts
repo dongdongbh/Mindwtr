@@ -762,10 +762,10 @@ export const projectPurgeEffect = (project: Project, tasks: readonly Task[], sec
  * section's choice) reached durable storage. No titles or identifiers.
  */
 export const logProjectFlowModeSaved = (mode: string, sectionDefaults: number,
-    releaseCheck: 'v1.3.7/section-flow-mode' | 'v1.3.8/ios-project-flow-mode' = 'v1.3.7/section-flow-mode'): void => {
+    releaseCheck: 'v1.3.7/section-flow-mode' | 'v1.3.9/ios-project-flow-mode' = 'v1.3.7/section-flow-mode'): void => {
     logInfo('Project flow mode saved', { scope: 'store', category: 'storage',
-        context: { releaseCheck: releaseCheck === 'v1.3.8/ios-project-flow-mode'
-            ? 'v1.3.8/ios-project-flow-mode' : 'v1.3.7/section-flow-mode', mode, sectionDefaults } });
+        context: { releaseCheck: releaseCheck === 'v1.3.9/ios-project-flow-mode'
+            ? 'v1.3.9/ios-project-flow-mode' : 'v1.3.7/section-flow-mode', mode, sectionDefaults } });
 };
 
 const logProjectArchiveTaxonomy = (operation: 'update' | 'native-lifecycle') => logInfo('Project archive taxonomy retained', {

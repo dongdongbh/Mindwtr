@@ -95,7 +95,7 @@ describe('actual exported iOS Someday bulk Move to section keeps durable receipt
         expect(await f.call('somedaySectionBulkMoveUndoRetryOutcome', undo)).toMatchObject({ ok: true });
         expect(f.database.query<{ method: string }, []>('SELECT method FROM native_request_receipts').all().map(row => row.method.split(':')[0]).sort())
             .toEqual(['somedaySectionBulkMove', 'somedaySectionBulkMoveUndo']);
-        expect(f.log().match(/v1\.3\.8\/ios-someday-section-bulk-move/g)?.length).toBe(2);
+        expect(f.log().match(/v1\.3\.9\/ios-someday-section-bulk-move/g)?.length).toBe(2);
         expect(f.log()).toContain('"operation":"undo"');
         expect(f.log()).not.toContain('PRIVATE_');
     });

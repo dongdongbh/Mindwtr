@@ -100,7 +100,7 @@ describe('actual exported iOS Project bulk status bridge', () => {
         }
         await cold.call('logShare'); const entries = cold.log().trim().split('\n').map(line => JSON.parse(line)).filter(e => e.message === 'Native Project bulk status confirmed');
         expect(entries.length).toBeGreaterThan(0);
-        for (const entry of entries) expect(entry.context).toEqual({ releaseCheck: 'v1.3.8/ios-project-bulk-status', count: '2', status: 'waiting', outcome: 'moved', category: 'storage' });
+        for (const entry of entries) expect(entry.context).toEqual({ releaseCheck: 'v1.3.9/ios-project-bulk-status', count: '2', status: 'waiting', outcome: 'moved', category: 'storage' });
         expect(JSON.stringify(entries)).not.toContain('PRIVATE'); expect(JSON.stringify(entries)).not.toContain(seeded.projectId);
         expect(await cold.call('inboxTasksMovePrepare', e.request)).toMatchObject({ ok: false, error: expect.stringContaining('INVALID_INPUT') });
         expect(await cold.call('referenceTasksMovePrepare', e.request)).toMatchObject({ ok: false, error: expect.stringContaining('INVALID_INPUT') });

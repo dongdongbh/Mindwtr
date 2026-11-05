@@ -291,7 +291,7 @@ export function createTasksAddTagMethods(deps: {
             if (confirmed.ok) {
                 const kind = tagSourceOf(envelope.request), statusList = kind === 'waiting' || kind === 'someday' || SHOWN_SOURCES.includes(kind);
                 try { logInfo(`Native ${TAG_LABELS[kind]} bulk tag confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' || statusList ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-tag' : statusList ? 'v1.3.8/ios-status-list-bulk-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-tag' : 'v1.3.4/ios-reference-bulk-tag', count: confirmed.value.count, outcome: 'added' } }); }
+                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-tag' : statusList ? 'v1.3.9/ios-status-list-bulk-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-tag' : 'v1.3.4/ios-reference-bulk-tag', count: confirmed.value.count, outcome: 'added' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;

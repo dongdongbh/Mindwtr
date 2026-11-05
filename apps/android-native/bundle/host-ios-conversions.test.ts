@@ -108,7 +108,7 @@ describe('actual exported iOS conversion bridge', () => {
         await f.call('logShare');
         const entries = confirmations(f.log(), 'Native checklist project conversion confirmed');
         expect(entries.map(entry => entry.context.operation)).toEqual(['convert', 'convert', 'undo']);
-        for (const entry of entries) expect(entry.context).toMatchObject({ releaseCheck: 'v1.3.8/ios-checklist-project', count: '2', outcome: 'confirmed' });
+        for (const entry of entries) expect(entry.context).toMatchObject({ releaseCheck: 'v1.3.9/ios-checklist-project', count: '2', outcome: 'confirmed' });
         expect(JSON.stringify(entries)).not.toContain('PRIVATE');
     });
 

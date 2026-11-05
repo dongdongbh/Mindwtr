@@ -298,7 +298,7 @@ const createNativeFileSyncAttachmentPass = (bindings: NativeAttachmentBindings, 
         const counts = folder.drainCounts();
         try {
             await bindings.log.info('Native iOS File Sync attachment pass completed', { scope: 'sync', extra: {
-                releaseCheck: 'v1.3.8/ios-file-sync-attachments', phase: options.phase ?? 'full', outcome: result ? 'updated' : 'unchanged',
+                releaseCheck: 'v1.3.9/ios-file-sync-attachments', phase: options.phase ?? 'full', outcome: result ? 'updated' : 'unchanged',
                 published: String(counts.published), downloaded: String(counts.downloaded),
             } });
         } catch { return result; }

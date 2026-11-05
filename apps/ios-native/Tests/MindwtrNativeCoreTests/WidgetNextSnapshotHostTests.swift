@@ -72,7 +72,7 @@ final class WidgetNextSnapshotHostTests: XCTestCase {
             try XCTUnwrap(NativeJSON.jsonObject(with: Data($0.utf8)) as? [String: Any])
         }
         let marker = try XCTUnwrap(lines.first { $0["message"] as? String == "Native iOS Next widget snapshot" })
-        XCTAssertEqual(marker["context"] as? [String: String], ["releaseCheck": "v1.3.8/ios-widget-next-snapshot", "count": "13"])
+        XCTAssertEqual(marker["context"] as? [String: String], ["releaseCheck": "v1.3.9/ios-widget-next-snapshot", "count": "13"])
         XCTAssertEqual(try rows(), before); XCTAssertEqual(writes, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }

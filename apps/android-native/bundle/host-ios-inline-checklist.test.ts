@@ -79,7 +79,7 @@ describe('actual exported iOS inline checklist bridge', () => {
         await f.call('logShare');
         const entries = f.log().trim().split('\n').map(line => JSON.parse(line)).filter(e => e.message === 'Native iOS inline checklist confirmed');
         expect(entries.length).toBeGreaterThan(0);
-        for (const entry of entries) expect(entry.context).toEqual({ releaseCheck: 'v1.3.8/ios-inline-checklist', action: 'append', outcome: 'confirmed', category: 'storage' });
+        for (const entry of entries) expect(entry.context).toEqual({ releaseCheck: 'v1.3.9/ios-inline-checklist', action: 'append', outcome: 'confirmed', category: 'storage' });
         expect(JSON.stringify(entries)).not.toContain('PRIVATE'); expect(JSON.stringify(entries)).not.toContain(id);
     });
     it.each([undefined, 'journaled'] as const)('refuses all four methods before SQL on Android boot mode %s', async bootMode => {

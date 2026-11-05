@@ -327,7 +327,7 @@ export function createTasksOrganizeMethods(deps: {
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize result does not match its journal`);
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} bulk Organize confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
+                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;

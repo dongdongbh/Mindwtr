@@ -192,7 +192,7 @@ export function createTaskChecklistMoveMethods(deps:{readiness:()=>NativeHostRes
             try{applied=await apply(e,read.value.authority);}catch(error){disarm();throw error;}if(!applied.success||applied.outcome!=='applied'){disarm();return fail('STALE_REVISION','Checklist move conflicts with saved data');}
             pending={envelope:e,adapter,boundary:read.value.authority.saveBoundary};return{ok:true as const,value:e.prepared.result};
         });if(notSaved)return notSaved;if(result.ok&&!same(result.value,e.prepared.result))return fail('INVALID_INPUT','Saved checklist move result differs');
-        if(result.ok)try{logInfo('Native iOS task checklist move confirmed',{scope:'native-host',category:'storage',force:true,context:{releaseCheck:'v1.3.8/ios-task-checklist-move',outcome:undo(e)?'undone':'moved'}});}catch{}
+        if(result.ok)try{logInfo('Native iOS task checklist move confirmed',{scope:'native-host',category:'storage',force:true,context:{releaseCheck:'v1.3.9/ios-task-checklist-move',outcome:undo(e)?'undone':'moved'}});}catch{}
         return result;
     };
     const build=(request:NativeTaskChecklistMoveRequest|NativeTaskChecklistMoveUndoRequest,scope:Scope,isUndo:boolean,original?:NativeTaskChecklistMoveEnvelope):Envelope|null=>{

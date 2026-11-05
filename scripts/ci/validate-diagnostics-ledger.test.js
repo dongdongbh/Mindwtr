@@ -365,7 +365,7 @@ describe("release diagnostics ledger", () => {
     const emission = source.slice(start, end);
     const formatter = sources.find((entry) => entry.file.endsWith("/NativeBoardDragGeometry.swift"));
     const resolve = (text, formatterSources = [formatter]) => collectCodeSlugs({ file, source: text, formatterSources });
-    expect(resolve(emission)).toEqual([{ file, slug: "v1.3.8/ios-board-drag-geometry" }]);
+    expect(resolve(emission)).toEqual([{ file, slug: "v1.3.9/ios-board-drag-geometry" }]);
     for (const text of [
       emission.replace('call("logLine"', 'call("other"'),
       emission.replace("NativeBoardDragGeometry.message", "Other.message"),

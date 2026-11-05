@@ -104,7 +104,7 @@ export function createNativeGmail(bindings: NativeGmailBindings) {
             const errorKind = error instanceof TypeError ? 'type' : error instanceof Error ? 'native' : 'storage';
             try {
                 bindings.logWarn(`${hostName} Gmail receipt storage unavailable`, { scope: 'gmail-capture', force: true,
-                    context: { releaseCheck: ios ? 'v1.3.8/ios-gmail-capture' : 'v1.3.8/native-gmail-receipts', stage, errorKind } });
+                    context: { releaseCheck: ios ? 'v1.3.9/ios-gmail-capture' : 'v1.3.8/native-gmail-receipts', stage, errorKind } });
             } catch {                                                   }
             throw STORAGE_FAILURE;
         }
@@ -159,7 +159,7 @@ export function createNativeGmail(bindings: NativeGmailBindings) {
             } finally {
                 try {
                     bindings.logInfo(`${hostName} Gmail connect`, { scope: 'gmail-capture', force: true,
-                        context: { releaseCheck: ios ? 'v1.3.8/ios-gmail-capture' : 'v1.3.8/native-gmail-connect', outcome } });
+                        context: { releaseCheck: ios ? 'v1.3.9/ios-gmail-capture' : 'v1.3.8/native-gmail-connect', outcome } });
                 } catch {                                                   }
             }
         },

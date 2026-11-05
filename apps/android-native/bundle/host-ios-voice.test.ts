@@ -184,7 +184,7 @@ describe('actual private iOS voice bridge', () => {
         expect(await f.poll(f.host.iosVoiceAcknowledged('capture', 'saved', () => ''))).toEqual({ ok: true, value: null });
         const lines = f.log().trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
         expect(lines.map(line => ({ message: line.message, context: line.context }))).toEqual([{ message: 'Native iOS voice operation completed',
-            context: { releaseCheck: 'v1.3.8/ios-native-voice', provider: 'gemini', stage: 'capture', outcome: 'saved' } }]);
+            context: { releaseCheck: 'v1.3.9/ios-native-voice', provider: 'gemini', stage: 'capture', outcome: 'saved' } }]);
         expect(f.log()).not.toContain(PRIVATE); expect(f.log()).not.toContain(ID);
         f.failLog(); expect(await f.poll(f.host.iosVoiceAcknowledged('speech', 'applied', () => ''))).toEqual({ ok: true, value: null });
     });

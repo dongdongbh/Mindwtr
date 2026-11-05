@@ -138,7 +138,7 @@ describe('Project creation exact receipts, retry and temporal publication', () =
             expect(await raw(db)).toEqual(before); expect(await db.receiptIds()).toEqual([]);
             fail = false; await db.restart(undefined, { recoveryLoad: true }); value(await db.host.commitPreparedProjectOrganizeDestinationCreate(e));
             expect(logs).toHaveBeenCalledWith('Native Project Organize destination confirmed', expect.objectContaining({ force: true, context: {
-                releaseCheck: 'v1.3.8/ios-project-organize-destination-create', kind: 'project', outcome: 'saved' } }));
+                releaseCheck: 'v1.3.9/ios-project-organize-destination-create', kind: 'project', outcome: 'saved' } }));
             await db.client().run('DELETE FROM projects WHERE id=?', [ID]); await db.restart(undefined, { recoveryLoad: true }); const saved = await raw(db);
             const count = logs.mock.calls.filter(([message]) => message === 'Native Project Organize destination confirmed').length;
             expect(value(db.host.projectOrganizeDestinationCreateOutcome(e))).toEqual(e.prepared.result);

@@ -309,7 +309,7 @@ describe('File Sync attachments in the selected folder', () => {
             .toEqual(['attachmentDirectory', 'attachmentPrepare', 'attachmentWrite', 'attachmentSnapshot', 'attachmentPublish', 'attachmentCleanup']);
         expect(context.storage.values.get('@mindwtr/file-sync-publication-reservations-v1')).toBeUndefined();
         expect(context.lines).toContainEqual({ level: 'info', message: 'Native iOS File Sync attachment pass completed', extra: {
-            releaseCheck: 'v1.3.8/ios-file-sync-attachments', phase: 'full', outcome: 'updated', published: '1', downloaded: '0' } });
+            releaseCheck: 'v1.3.9/ios-file-sync-attachments', phase: 'full', outcome: 'updated', published: '1', downloaded: '0' } });
     });
 
     it('a link row alone needs no folder transfer', async () => {

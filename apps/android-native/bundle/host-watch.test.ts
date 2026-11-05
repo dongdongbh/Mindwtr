@@ -242,7 +242,7 @@ describe('actual iOS Watch snapshot bridge', () => {
         expect((await f.snapshot()).ok).toBe(true);
         expect(f.logText().trim().split('\n').map((line) => JSON.parse(line))).toEqual([
             { ts: expect.any(String), level: 'info', scope: 'native-ios', message: 'Native iOS Watch snapshot read',
-                context: { releaseCheck: 'v1.3.8/ios-watch-snapshot', operation: 'read', outcome: 'ready' } },
+                context: { releaseCheck: 'v1.3.9/ios-watch-snapshot', operation: 'read', outcome: 'ready' } },
         ]);
         expect(f.logText()).not.toContain('PRIVATE'); f.failLog(); expect((await f.snapshot()).ok).toBe(true); expect(f.writes).toEqual([]);
     });

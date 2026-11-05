@@ -631,11 +631,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             if (dropbox && iosBackend === 'cloud' && answer.success && !answer.skipped
                 && (options.configOverride?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY)) === 'dropbox') try {
                 await logLine('info', 'Native iOS Dropbox shared cycle completed', { scope: 'native-ios', force: true,
-                    extra: { releaseCheck: 'v1.3.8/ios-dropbox', operation: options.activationProbe ? 'verify' : 'sync', outcome: 'completed' } });
+                    extra: { releaseCheck: 'v1.3.9/ios-dropbox', operation: options.activationProbe ? 'verify' : 'sync', outcome: 'completed' } });
             } catch { /* A diagnostic cannot change a completed candidate or stored cycle. */ }
             if (iosBackend === 'cloudkit' && answer.success && !answer.skipped) try {
                 await logLine('info', 'Native iOS CloudKit foreground cycle completed', { scope: 'native-ios', force: true,
-                    extra: { releaseCheck: 'v1.3.8/ios-cloudkit-foreground', operation: 'foreground', outcome: 'completed' } });
+                    extra: { releaseCheck: 'v1.3.9/ios-cloudkit-foreground', operation: 'foreground', outcome: 'completed' } });
             } catch { /* Diagnostics cannot change the settled sync result. */ }
             return answer;
         } catch (error) {

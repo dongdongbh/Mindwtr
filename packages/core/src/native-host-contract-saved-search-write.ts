@@ -219,7 +219,7 @@ export function createSavedSearchWriteMethods(deps: {
             const saved = await deps.save();
             if (saved.ok && prepared.request.operation.type === 'sort') {
                 try { logInfo('Native saved search sort saved', { scope: 'native-host', category: 'storage',
-                    context: { releaseCheck: 'v1.3.8/native-saved-search-sort', outcome: 'saved' } }); }
+                    context: { releaseCheck: 'v1.3.9/native-saved-search-sort', outcome: 'saved' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return saved.ok ? { ok: true, value: prepared.result } : saved;

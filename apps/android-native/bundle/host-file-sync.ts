@@ -27,10 +27,10 @@ const logNativeFileSyncEvents = (events: unknown, log: MobileFileSyncFullHost['l
                 || !['Native iOS File Sync read owner admitted', 'Native iOS File Sync created-file write completed', 'Native iOS File Sync quarantine rename completed', 'Native iOS File Sync owned artifact deletion completed'].includes(event.message)
                 || Object.values(event.context).some((v) => typeof v !== 'string')) return refused();
             const expected: Record<string, [string, string, string]> = {
-                'Native iOS File Sync read owner admitted': ['v1.3.8/ios-file-sync-read-owner', 'admission', 'confirmed'],
-                'Native iOS File Sync created-file write completed': ['v1.3.8/ios-file-sync-created-write', 'createdWrite', 'completed'],
-                'Native iOS File Sync quarantine rename completed': ['v1.3.8/ios-file-sync-publication-primitives', 'quarantine', 'completed'],
-                'Native iOS File Sync owned artifact deletion completed': ['v1.3.8/ios-file-sync-publication-primitives', 'ownedDelete', 'completed'],
+                'Native iOS File Sync read owner admitted': ['v1.3.9/ios-file-sync-read-owner', 'admission', 'confirmed'],
+                'Native iOS File Sync created-file write completed': ['v1.3.9/ios-file-sync-created-write', 'createdWrite', 'completed'],
+                'Native iOS File Sync quarantine rename completed': ['v1.3.9/ios-file-sync-publication-primitives', 'quarantine', 'completed'],
+                'Native iOS File Sync owned artifact deletion completed': ['v1.3.9/ios-file-sync-publication-primitives', 'ownedDelete', 'completed'],
             };
             const fields = expected[event.message];
             if (!fields || Object.keys(event.context).length !== 3 || event.context.releaseCheck !== fields[0]

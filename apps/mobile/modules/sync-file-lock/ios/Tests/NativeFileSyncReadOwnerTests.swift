@@ -715,7 +715,7 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
       (Owner.Diagnostic.ownedDeleteCompleted, "ownedDelete", "Native iOS File Sync owned artifact deletion completed"),
     ] {
       XCTAssertEqual(event.eventMessage, message)
-      XCTAssertEqual(event.context, ["releaseCheck": "v1.3.8/ios-file-sync-publication-primitives", "operation": operation, "outcome": "completed"])
+      XCTAssertEqual(event.context, ["releaseCheck": "v1.3.9/ios-file-sync-publication-primitives", "operation": operation, "outcome": "completed"])
       XCTAssertTrue(Owner.Diagnostic.accepts(event.context))
       for extra in ["path", "uri", "bookmark", "token", "fileName", "namespace", "count", "error"] {
         var changed: [String: Any] = event.context; changed[extra] = "private"
@@ -1209,7 +1209,7 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
   func testCreatedWriteDiagnosticHasOnlyTheFixedCompletedContext() {
     let event = Owner.Diagnostic.createdWriteCompleted
     XCTAssertEqual(event.eventMessage, "Native iOS File Sync created-file write completed")
-    XCTAssertEqual(event.context, ["releaseCheck": "v1.3.8/ios-file-sync-created-write", "operation": "createdWrite", "outcome": "completed"])
+    XCTAssertEqual(event.context, ["releaseCheck": "v1.3.9/ios-file-sync-created-write", "operation": "createdWrite", "outcome": "completed"])
     XCTAssertTrue(Owner.Diagnostic.accepts(event.context))
     for extra in ["path", "uri", "bookmark", "token", "fileName", "namespace", "count"] {
       var changed: [String: Any] = event.context; changed[extra] = "private"

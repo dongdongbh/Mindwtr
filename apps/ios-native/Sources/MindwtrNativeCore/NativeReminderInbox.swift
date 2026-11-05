@@ -30,13 +30,13 @@ public actor NativeReminderInbox {
     }
     struct SealDiagnostic: Sendable {
         let message = "Native iOS legacy reminder owner sealed"
-        let releaseCheck = "v1.3.8/ios-personal-intake-seal"
+        let releaseCheck = "v1.3.9/ios-personal-intake-seal"
         let operation = "seal"
         let outcome = "confirmed"
     }
     struct ImportDiagnostic: Sendable {
         let message = "Native iOS sealed reminder import completed"
-        let releaseCheck = "v1.3.8/ios-personal-intake-import"
+        let releaseCheck = "v1.3.9/ios-personal-intake-import"
         let operation = "import"
         let outcome = "confirmed"
     }

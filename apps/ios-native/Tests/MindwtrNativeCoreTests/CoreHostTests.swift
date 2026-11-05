@@ -39777,7 +39777,7 @@ extension CoreHostTests {
         XCTAssertEqual(try json(XCTUnwrap(savedSettings["ai"])), try json(XCTUnwrap(settingsBefore["ai"])))
         XCTAssertEqual(state.recorded.count, 1)
         let log = try String(contentsOf: directory.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)
-        XCTAssertTrue(log.contains("v1.3.8/ios-capture-copilot")); XCTAssertTrue(log.contains("suggested"))
+        XCTAssertTrue(log.contains("v1.3.9/ios-capture-copilot")); XCTAssertTrue(log.contains("suggested"))
         for privateText in ["synthetic-openai-value", "legacy-must-stay", "Parsed note sentinel", "Private More note sentinel"] { XCTAssertFalse(log.contains(privateText)) }
         let unrelatedAccount = Data("mindwtr-ai-key_gemini".utf8)
         let unrelatedQuery: [String: Any] = [kSecClass as String: kSecClassGenericPassword,

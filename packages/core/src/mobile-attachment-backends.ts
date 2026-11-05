@@ -1664,7 +1664,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     catch (error) {
       if (maxDropboxBufferedUploadBytes !== undefined && isAttachmentUploadAdmissionError(error)) {
         try { files.logAttachmentWarn('Dropbox host upload admission refused', undefined, {
-          releaseCheck: 'v1.3.8/ios-dropbox', operation: 'attachment-upload', outcome: 'refused',
+          releaseCheck: 'v1.3.9/ios-dropbox', operation: 'attachment-upload', outcome: 'refused',
         }); } catch { /* The original refusal is authoritative. */ }
         throw new Error('Dropbox attachment upload cannot be admitted by this host transport');
       }

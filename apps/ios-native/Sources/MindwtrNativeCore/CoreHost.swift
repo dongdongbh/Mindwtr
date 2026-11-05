@@ -5666,7 +5666,7 @@ private final class Engine: @unchecked Sendable {
                 attachmentJobs = try? NativeAttachmentFileJobs(rnAdoptionContainerURL: container)
                 calendarFiles = attachmentJobs?.files
                 if attachmentJobs != nil {
-                    NSLog("Native iOS RN candidate attachment roots bound releaseCheck=v1.3.8/ios-rn-candidate-attachment-roots outcome=bound")
+                    NSLog("Native iOS RN candidate attachment roots bound releaseCheck=v1.3.9/ios-rn-candidate-attachment-roots outcome=bound")
                 }
             } else {
                 attachmentJobs = try? NativeAttachmentFileJobs(libraryRoot: databaseURL.deletingLastPathComponent())
@@ -5781,7 +5781,7 @@ private final class Engine: @unchecked Sendable {
             try validatePendingStartupWorkflow()
             try validatePendingStartupSettings()
             if pending != nil {
-                NSLog("Native iOS startup validation phase completed releaseCheck=v1.3.8/ios-startup-validation-frame outcome=checked")
+                NSLog("Native iOS startup validation phase completed releaseCheck=v1.3.9/ios-startup-validation-frame outcome=checked")
             }
             var legacy = cleanupRecovery ? nil : try legacyStorage?.bootState()
             if let legacy {
@@ -5867,7 +5867,7 @@ private final class Engine: @unchecked Sendable {
                 if let deviceStorage { faults?.configureDeviceStorage?(deviceStorage) }
                 #endif
                 try verifyRNAdoptionDirectories()
-                NSLog("Native iOS RN candidate storage admitted releaseCheck=v1.3.8/ios-rn-candidate-storage outcome=ready")
+                NSLog("Native iOS RN candidate storage admitted releaseCheck=v1.3.9/ios-rn-candidate-storage outcome=ready")
             }
             started = true
             emitCleanupAcknowledgement()
@@ -9116,10 +9116,10 @@ private final class Engine: @unchecked Sendable {
         turn.live = false; aiConfigurationTurn = nil
         if let result, let choices = try? discovery.request.validate(result) {
             if discovery.request.voice {
-                if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-voice-model-discovery", "provider": choices.provider, "outcome": choices.outcome]) {
+                if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-voice-model-discovery", "provider": choices.provider, "outcome": choices.outcome]) {
                     _ = try? invoke("logLine", arguments: ["Native iOS speech model discovery settled", context])
                 }
-            } else if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-ai-model-discovery", "provider": choices.provider, "outcome": choices.outcome]) {
+            } else if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-ai-model-discovery", "provider": choices.provider, "outcome": choices.outcome]) {
                 _ = try? invoke("logLine", arguments: ["Native iOS AI model discovery settled", context])
             }
         }
@@ -10119,7 +10119,7 @@ private final class Engine: @unchecked Sendable {
             guard let outcome = (value["outcome"] as? String).flatMap(NativeVoiceSpeechOutcome.init(rawValue:)) else { throw NativeVoiceJSON.invalid }
             job.outcome = outcome; acknowledgeVoice("speech", outcome.rawValue, binding: job.capture.binding)
             if job.capture.runtime?.provider == .openai {
-                if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-phone-openai-speech", "provider": "openai", "stage": "result", "outcome": outcome.rawValue]) {
+                if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-phone-openai-speech", "provider": "openai", "stage": "result", "outcome": outcome.rawValue]) {
                     _ = try? invoke("logLine", arguments: ["Native iOS OpenAI phone speech result confirmed", context])
                 }
             }
@@ -10178,7 +10178,7 @@ private final class Engine: @unchecked Sendable {
     }
     func whisperStoreForDrain() -> NativeWhisperModelStore? { voiceWhisperStore }
     private func acknowledgeWhisperModelFailure(_ failure: NativeWhisperModelDiagnostic) {
-        var fields: [String: Any] = ["releaseCheck": "v1.3.8/ios-whisper-model-download", "stage": failure.stage.rawValue,
+        var fields: [String: Any] = ["releaseCheck": "v1.3.9/ios-whisper-model-download", "stage": failure.stage.rawValue,
             "outcome": "failed", "reason": failure.reason.rawValue]
         if let value = failure.errorNumber { fields["errno"] = value }
         if let context = try? Self.ownedJSON(fields) {
@@ -10200,7 +10200,7 @@ private final class Engine: @unchecked Sendable {
             voiceWhisperStore = try NativeWhisperModelStore(root: databaseURL.deletingLastPathComponent().appendingPathComponent("whisper-models", isDirectory: true), sessionConfiguration: configuration, onFailure: { [weak self] failure in
                 self?.queue.async { [weak self] in self?.acknowledgeWhisperModelFailure(failure) }
             })
-            if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-whisper-model-root", "operation": "prepare", "outcome": "ready"]) {
+            if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-whisper-model-root", "operation": "prepare", "outcome": "ready"]) {
                 _ = try? invoke("logLine", arguments: ["Native Whisper model store initialized", context])
             }
         }
@@ -10241,7 +10241,7 @@ private final class Engine: @unchecked Sendable {
         acknowledgeWhisperTranscription()
     }
     func acknowledgeWhisperTranscription() {
-        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-offline-whisper", "provider": "whisper", "stage": "transcription", "outcome": "completed"]) {
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-offline-whisper", "provider": "whisper", "stage": "transcription", "outcome": "completed"]) {
             _ = try? invoke("logLine", arguments: ["Native offline speech completed", context])
         }
     }
@@ -11053,7 +11053,7 @@ private final class Engine: @unchecked Sendable {
         let transcript = value.trimmingCharacters(in: .whitespacesAndNewlines)
         try NativeWatchAudio.validateTranscript(transcript)
         _ = try? invoke("logLine", arguments: ["Native iOS OpenAI Watch speech is ready",
-            #"{"releaseCheck":"v1.3.8/ios-watch-openai-speech","provider":"openai","stage":"transcribed","outcome":"ready"}"#])
+            #"{"releaseCheck":"v1.3.9/ios-watch-openai-speech","provider":"openai","stage":"transcribed","outcome":"ready"}"#])
         return transcript
     }
 
@@ -11092,7 +11092,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func acknowledgeWatchAudio() {
         _ = try? invoke("logLine", arguments: ["Native iOS Watch audio command confirmed",
-            #"{"releaseCheck":"v1.3.8/ios-watch-audio","outcome":"confirmed"}"#])
+            #"{"releaseCheck":"v1.3.9/ios-watch-audio","outcome":"confirmed"}"#])
     }
 
     func submitWatchPomodoro(_ source: NativeWatchPomodoro, lease: NativeTaskAIEditorLease) throws {
@@ -11104,7 +11104,7 @@ private final class Engine: @unchecked Sendable {
         guard Set(result.keys) == ["kind", "result", "projectionReloaded"], result["kind"] as? String == "confirmed",
               result["projectionReloaded"] as? Bool == true else { throw Self.pomodoroFailure }
         _ = try? invoke("logLine", arguments: ["Native iOS Watch timer command confirmed",
-            #"{"releaseCheck":"v1.3.8/ios-watch-pomodoro","outcome":"confirmed"}"#])
+            #"{"releaseCheck":"v1.3.9/ios-watch-pomodoro","outcome":"confirmed"}"#])
     }
 
     private func requireWatchOrderingStorage() throws -> NativeDeviceKV {
@@ -11356,14 +11356,14 @@ private final class Engine: @unchecked Sendable {
         taskAITurn = nil
         // Fixed, content-free marker. Suggestions are unsaved editor choices.
         if handle.review {
-            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-review-ai", "outcome": outcome]) {
+            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-review-ai", "outcome": outcome]) {
                 _ = try? invoke("logLine", arguments: ["Native iOS Weekly Review AI settled", diagnostic])
             }
         } else if handle.inbox {
-            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-inbox-ai", "outcome": outcome]) {
+            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-inbox-ai", "outcome": outcome]) {
                 _ = try? invoke("logLine", arguments: ["Native iOS Inbox AI settled", diagnostic])
             }
-        } else if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-task-editor-ai", "operation": turn.operation, "outcome": outcome]) {
+        } else if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-task-editor-ai", "operation": turn.operation, "outcome": outcome]) {
             _ = try? invoke("logLine", arguments: ["Native iOS task editor AI settled", diagnostic])
         }
     }
@@ -11416,7 +11416,7 @@ private final class Engine: @unchecked Sendable {
         defer {
             http.cancelAndDrain(); secrets.drain()
             turn.live = false; captureAITurn = nil
-            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-capture-copilot",
+            if let diagnostic = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-capture-copilot",
                 "outcome": outcome, "provider": turn.provider.rawValue, "partCount": partCount]) {
                 _ = try? invoke("logLine", arguments: ["Native iOS capture copilot completed", diagnostic])
             }
@@ -16797,7 +16797,7 @@ private final class Engine: @unchecked Sendable {
         guard !commandPreparationStackLogged else { return }
         commandPreparationStackLogged = true
         // Best effort, once per Engine; this marks preparation, never a saved command.
-        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-native-command-stack", "outcome": "prepared"]) {
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-native-command-stack", "outcome": "prepared"]) {
             _ = try? invoke("logLine", arguments: ["Native iOS command preparation frame returned", context])
         }
     }
@@ -16805,7 +16805,7 @@ private final class Engine: @unchecked Sendable {
         guard started, !closed, context != nil else { return }
         // The primitive cancellation and AI/voice drains reached this queued
         // finalization; the runtime and remaining native drains still follow.
-        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.8/ios-close-cancellation-order", "operation": "close", "outcome": "drained"]) {
+        if let context = try? Self.ownedJSON(["releaseCheck": "v1.3.9/ios-close-cancellation-order", "operation": "close", "outcome": "drained"]) {
             _ = try? invoke("logLine", arguments: ["Native iOS close cancellation reached finalization", context])
         }
     }
@@ -19937,13 +19937,13 @@ private final class Engine: @unchecked Sendable {
         }
         try clearPending()
         if command.method == "gettingStarted", case .success = terminal {
-            _ = try? invoke("logLine", arguments: ["Native iOS Getting Started confirmed", #"{"releaseCheck":"v1.3.8/ios-getting-started","outcome":"confirmed"}"#])
+            _ = try? invoke("logLine", arguments: ["Native iOS Getting Started confirmed", #"{"releaseCheck":"v1.3.9/ios-getting-started","outcome":"confirmed"}"#])
         }
         if command.method == "iosReviewAIApply", case .success = terminal {
-            _ = try? invoke("logLine", arguments: ["Native iOS Weekly Review AI applied", #"{"releaseCheck":"v1.3.8/ios-review-ai","outcome":"saved"}"#])
+            _ = try? invoke("logLine", arguments: ["Native iOS Weekly Review AI applied", #"{"releaseCheck":"v1.3.9/ios-review-ai","outcome":"saved"}"#])
         }
         if command.method == "iosShareCaptureCommit", case .success = terminal {
-            _ = try? invoke("logLine", arguments: ["Native iOS shared capture saved", #"{"releaseCheck":"v1.3.8/ios-share-text-url","operation":"share-save","outcome":"confirmed"}"#])
+            _ = try? invoke("logLine", arguments: ["Native iOS shared capture saved", #"{"releaseCheck":"v1.3.9/ios-share-text-url","operation":"share-save","outcome":"confirmed"}"#])
         }
         if command.method == "captureLinesCommit" {
             let rejected: Bool
@@ -20384,7 +20384,7 @@ private final class Engine: @unchecked Sendable {
             else if editing { NSLog("Native iOS Task Editor sections saved releaseCheck=v1.3.4/ios-gtd-editor-sections outcome=confirmed") }
             else if audioRetention {
                 _ = try? invoke("logLine", arguments: ["Native iOS Capture audio retention saved",
-                    #"{"releaseCheck":"v1.3.8/ios-gtd-capture-audio","outcome":"confirmed"}"#])
+                    #"{"releaseCheck":"v1.3.9/ios-gtd-capture-audio","outcome":"confirmed"}"#])
             }
             else if parsing { NSLog("Native iOS Capture parsing saved releaseCheck=v1.3.4/ios-gtd-capture-parsing outcome=confirmed") }
             else if capturing { NSLog("Native iOS Capture default area saved releaseCheck=v1.3.4/ios-gtd-capture-area outcome=confirmed") }
@@ -25510,7 +25510,7 @@ private final class Engine: @unchecked Sendable {
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         if Self.hasOrdinaryTaskDeleteShape(request) {
-            NSLog("Native iOS row Delete receipt confirmed releaseCheck=v1.3.8/ios-row-delete-receipt operation=delete")
+            NSLog("Native iOS row Delete receipt confirmed releaseCheck=v1.3.9/ios-row-delete-receipt operation=delete")
         }
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
@@ -25537,7 +25537,7 @@ private final class Engine: @unchecked Sendable {
         if value == "null" { return #"{"kind":"unproven"}"# }
         try validatePreparedAcknowledgment(command, value: value)
         if Self.hasOrdinaryTaskDeleteShape(deletedRequest) {
-            NSLog("Native iOS row Delete receipt confirmed releaseCheck=v1.3.8/ios-row-delete-receipt operation=undo")
+            NSLog("Native iOS row Delete receipt confirmed releaseCheck=v1.3.9/ios-row-delete-receipt operation=undo")
         }
         let result = try NativeJSON.jsonObject(with: Data(value.utf8))
         return String(decoding: try JSONSerialization.data(withJSONObject: ["kind": "confirmed", "result": result], options: [.sortedKeys]), as: UTF8.self)
@@ -27847,17 +27847,17 @@ private final class Engine: @unchecked Sendable {
                 && Self.equalJSON(context, ["outcome": "injected"])
         #endif
         case "Native iOS Process Inbox editor reloaded":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-inbox-processing-editor-reload", "outcome": "refreshed"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed"])
         case "Native iOS Contexts filter saved":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-context-filter-save", "outcome": "saved"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-context-filter-save", "outcome": "saved"])
         case "Native iOS Weekly Review project completion confirmed":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-weekly-review-complete-project", "outcome": "confirmed"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-weekly-review-complete-project", "outcome": "confirmed"])
         case "Native iOS launch selection admitted":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"])
         case "Native iOS command preparation frame returned":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-native-command-stack", "outcome": "prepared"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-native-command-stack", "outcome": "prepared"])
         case "Native iOS close cancellation reached finalization":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-close-cancellation-order", "operation": "close", "outcome": "drained"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-close-cancellation-order", "operation": "close", "outcome": "drained"])
         case "Native iOS Inbox view boundary rendered":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-inbox-view-boundary", "outcome": "rendered"])
         case "Native iOS Board drag submitted":
@@ -27943,43 +27943,43 @@ private final class Engine: @unchecked Sendable {
                 && ["open", "complete", "snooze", "dismiss", "unknown"].contains(context["action"] as? String ?? "")
                 && ["captured", "retired", "capture-refused", "admitting", "confirmed", "refused", "uncertain"].contains(context["outcome"] as? String ?? "")
         case "Native iOS reminder capture handover confirmed":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-reminder-capture-handover",
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-reminder-capture-handover",
                                             "operation": "handover", "outcome": "confirmed"])
         case "Native iOS personal intake capture confirmed":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-personal-intake",
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-personal-intake",
                                             "operation": "capture", "outcome": "confirmed"])
         case "Native iOS Next widget published":
             valid = Set(context.keys) == ["releaseCheck", "count"]
-                && context["releaseCheck"] as? String == "v1.3.8/ios-widget-next-publication"
+                && context["releaseCheck"] as? String == "v1.3.9/ios-widget-next-publication"
                 && Self.isInteger(context["count"])
                 && (context["count"] as? NSNumber).map({ (0.0...13.0).contains($0.doubleValue) }) == true
         case "Native iOS Next widget task opened":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-widget-next-open", "outcome": "opened"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "opened"])
         case "Native iOS Add Task shortcut presented":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-quick-capture-intent", "outcome": "presented"])
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])
         case "Native iOS share intake confirmed":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-share-text-url",
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-share-text-url",
                                             "operation": "share-import", "outcome": "confirmed"])
         case "Native iOS shared capture bound":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-share-text-url",
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-share-text-url",
                                             "operation": "share-open", "outcome": "confirmed"])
         case "Native iOS shared capture finish confirmed":
             valid = ["completed", "ignored"].contains(context["outcome"] as? String ?? "")
-                && Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-share-text-url",
+                && Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-share-text-url",
                                             "operation": "share-finish", "outcome": context["outcome"] as? String ?? ""])
         case "Native iOS capture copilot completed":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome", "provider", "partCount"])
-                && context["releaseCheck"] as? String == "v1.3.8/ios-capture-copilot"
+                && context["releaseCheck"] as? String == "v1.3.9/ios-capture-copilot"
                 && ["suggested", "empty", "stopped"].contains(context["outcome"] as? String ?? "")
                 && ["openai", "gemini", "anthropic"].contains(context["provider"] as? String ?? "")
                 && Self.isInteger(context["partCount"])
                 && (context["partCount"] as? NSNumber).map({ (0.0...1002.0).contains($0.doubleValue) }) == true
         case "Native iOS personal intake reopened after container relocation":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-intake-same-tree-reopen",
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen",
                                             "operation": "same-tree-reopen", "outcome": "confirmed"])
         case "Native iOS navigation finish settlement confirmed":
             valid = ["completed", "ignored"].contains(context["outcome"] as? String ?? "")
-                && Self.equalJSON(context, ["releaseCheck": "v1.3.8/ios-navigation-finish-settlement",
+                && Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-navigation-finish-settlement",
                                             "operation": "finish-settlement", "outcome": context["outcome"] as? String ?? ""])
         case "Native iOS foreground reminder presentation requested":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])

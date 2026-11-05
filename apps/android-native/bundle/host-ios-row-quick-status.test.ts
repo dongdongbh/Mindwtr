@@ -78,7 +78,7 @@ describe('actual exported iOS row quick status bridge', () => {
         expect(f.database.query('SELECT status FROM tasks WHERE id=?').get(id)).toEqual({ status: 'waiting' });
         await f.call('logShare'); const entries = f.log().trim().split('\n').map(line => JSON.parse(line)).filter(e => e.message === 'Native iOS row quick status confirmed');
         expect(entries.length).toBeGreaterThan(0);
-        for (const e of entries) expect(e.context).toEqual({ releaseCheck: 'v1.3.8/ios-row-quick-status', target: 'waiting', outcome: 'confirmed', category: 'storage' });
+        for (const e of entries) expect(e.context).toEqual({ releaseCheck: 'v1.3.9/ios-row-quick-status', target: 'waiting', outcome: 'confirmed', category: 'storage' });
         expect(JSON.stringify(entries)).not.toContain('PRIVATE'); expect(JSON.stringify(entries)).not.toContain(id);
         expect(await f.call('rowQuickStatusPrepare', { ...request, status: 'done' })).toMatchObject({ ok: false, error: expect.stringContaining('INVALID_INPUT') });
     });

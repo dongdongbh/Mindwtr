@@ -94,9 +94,9 @@ describe('actual exported iOS Project Organize', () => {
         const before = [...cold.writes]; expect(await cold.call('projectTasksOrganizeCommit', e)).toEqual({ ok: true, value: result });
         expect(cold.writes).toEqual(before); expect(cold.database.query('SELECT * FROM tasks ORDER BY id').all()).toEqual(after);
         expect(cold.database.query<{ method: string }, []>('SELECT method FROM native_request_receipts').all().map(row => row.method.split(':')[0])).toEqual(['projectTasksOrganize']);
-        const entries = diagnostics.trim().split('\n').map(line => JSON.parse(line)).filter(e => e.context?.releaseCheck === 'v1.3.8/ios-project-bulk-organize');
+        const entries = diagnostics.trim().split('\n').map(line => JSON.parse(line)).filter(e => e.context?.releaseCheck === 'v1.3.9/ios-project-bulk-organize');
         expect(entries).toHaveLength(1);
-        expect(entries[0].context).toEqual({ releaseCheck: 'v1.3.8/ios-project-bulk-organize', count: '2', outcome: 'organized', category: 'storage' });
+        expect(entries[0].context).toEqual({ releaseCheck: 'v1.3.9/ios-project-bulk-organize', count: '2', outcome: 'organized', category: 'storage' });
         expect(JSON.stringify(entries)).not.toContain('PRIVATE'); expect(JSON.stringify(entries)).not.toContain(seeded.projectId);
     });
     it.each([undefined, 'journaled'] as const)('refuses every method before SQL in Android %s', async bootMode => {

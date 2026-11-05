@@ -451,7 +451,7 @@ export function createTasksMoveMethods(deps: {
     const diagnoseProject = (result: MovePrepared['result']) => {
         if (source !== 'project') return;
         try { logInfo('Native Project bulk status confirmed', { scope: 'native-host', category: 'storage', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-project-bulk-status', count: result.count, status: result.status, outcome: 'moved' } }); }
+            context: { releaseCheck: 'v1.3.9/ios-project-bulk-status', count: result.count, status: result.status, outcome: 'moved' } }); }
         catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
     };
     let pending: { envelope: MoveEnvelope; adapter: ReturnType<typeof getStorageAdapter>;
@@ -577,7 +577,7 @@ export function createTasksMoveMethods(deps: {
             if (confirmed.ok) {
                 const kind = sourceOf(envelope.request); const statusList = kind === 'waiting' || kind === 'someday' || SHOWN_SOURCES.includes(kind);
                 try { logInfo(`Native ${labelOf(envelope.request)} bulk status confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' || statusList ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-status' : statusList ? 'v1.3.8/ios-status-list-bulk-status' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-status' : 'v1.3.4/ios-reference-bulk-status', count: confirmed.value.count,
+                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-status' : statusList ? 'v1.3.9/ios-status-list-bulk-status' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-status' : 'v1.3.4/ios-reference-bulk-status', count: confirmed.value.count,
                         status: confirmed.value.status, outcome: 'moved' } }); }
                 catch {                                                               }
             }

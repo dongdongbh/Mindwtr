@@ -31,10 +31,10 @@ final class WidgetNextPublicationHostTests: XCTestCase {
         let before = try rows()
         for count in [0, 13] {
             _ = try await core.call("logLine", argumentsJSON: json(["Native iOS Next widget published",
-                try json(["releaseCheck": "v1.3.8/ios-widget-next-publication", "count": count])]))
+                try json(["releaseCheck": "v1.3.9/ios-widget-next-publication", "count": count])]))
         }
         _ = try await core.call("logLine", argumentsJSON: json(["Native iOS Next widget task opened",
-            #"{"releaseCheck":"v1.3.8/ios-widget-next-open","outcome":"opened"}"#]))
+            #"{"releaseCheck":"v1.3.9/ios-widget-next-open","outcome":"opened"}"#]))
         let share = try await core.diagnosticsFileAction("logShare")
         let export = try XCTUnwrap(NativeJSON.jsonObject(with: Data(share.utf8)) as? [String: Any])
         let log = try await core.validatedDiagnosticsShareURL(XCTUnwrap(export["path"] as? String))
@@ -45,13 +45,13 @@ final class WidgetNextPublicationHostTests: XCTestCase {
         XCTAssertEqual(entries.filter { $0["message"] as? String == "Native iOS Next widget published" }.count, 2)
         XCTAssertEqual(entries.filter { $0["message"] as? String == "Native iOS Next widget task opened" }.count, 1)
         let invalid: [(String, [String: Any])] = [
-            ("Native iOS Next widget published", ["releaseCheck": "v1.3.8/ios-widget-next-publication", "count": true]),
-            ("Native iOS Next widget published", ["releaseCheck": "v1.3.8/ios-widget-next-publication", "count": -1]),
-            ("Native iOS Next widget published", ["releaseCheck": "v1.3.8/ios-widget-next-publication", "count": 14]),
-            ("Native iOS Next widget published", ["releaseCheck": "v1.3.8/ios-widget-next-publication", "count": "1"]),
-            ("Native iOS Next widget published", ["releaseCheck": "v1.3.8/ios-widget-next-publication", "count": 1, "id": "synthetic"]),
-            ("Native iOS Next widget task opened", ["releaseCheck": "v1.3.8/ios-widget-next-open", "outcome": "refused"]),
-            ("Native iOS Next widget task opened", ["releaseCheck": "v1.3.8/ios-widget-next-open", "outcome": "opened", "url": "synthetic"]),
+            ("Native iOS Next widget published", ["releaseCheck": "v1.3.9/ios-widget-next-publication", "count": true]),
+            ("Native iOS Next widget published", ["releaseCheck": "v1.3.9/ios-widget-next-publication", "count": -1]),
+            ("Native iOS Next widget published", ["releaseCheck": "v1.3.9/ios-widget-next-publication", "count": 14]),
+            ("Native iOS Next widget published", ["releaseCheck": "v1.3.9/ios-widget-next-publication", "count": "1"]),
+            ("Native iOS Next widget published", ["releaseCheck": "v1.3.9/ios-widget-next-publication", "count": 1, "id": "synthetic"]),
+            ("Native iOS Next widget task opened", ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "refused"]),
+            ("Native iOS Next widget task opened", ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "opened", "url": "synthetic"]),
         ]
         for (message, context) in invalid {
             do { _ = try await core.call("logLine", argumentsJSON: json([message, try json(context)])); XCTFail("Unaudited diagnostic must refuse") }

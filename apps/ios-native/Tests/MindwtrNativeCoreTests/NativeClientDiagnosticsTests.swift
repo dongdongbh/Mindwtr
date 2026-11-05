@@ -47,16 +47,16 @@ final class NativeClientDiagnosticsTests: XCTestCase {
     private var approved: [(String, [String: Any])] {
         var result: [(String, [String: Any])] = [
             ("Native iOS retained editor draft protected from late close", ["releaseCheck": "v1.3.5/ios-editor-retained-close", "outcome": "ignored"]),
-            ("Native iOS Process Inbox editor reloaded", ["releaseCheck": "v1.3.8/ios-inbox-processing-editor-reload", "outcome": "refreshed"]),
-            ("Native iOS Weekly Review project completion confirmed", ["releaseCheck": "v1.3.8/ios-weekly-review-complete-project", "outcome": "confirmed"]),
+            ("Native iOS Process Inbox editor reloaded", ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed"]),
+            ("Native iOS Weekly Review project completion confirmed", ["releaseCheck": "v1.3.9/ios-weekly-review-complete-project", "outcome": "confirmed"]),
             ("Native iOS launch selection admitted", ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"]),
             ("Native iOS reminder lifecycle reconciled", ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"]),
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
-            ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.8/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
+            ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
         ]
         for outcome in ["completed", "ignored"] {
             result.append(("Native iOS navigation finish settlement confirmed", [
-                "releaseCheck": "v1.3.8/ios-navigation-finish-settlement", "operation": "finish-settlement", "outcome": outcome]))
+                "releaseCheck": "v1.3.9/ios-navigation-finish-settlement", "operation": "finish-settlement", "outcome": outcome]))
         }
         for operation in ["capture", "restore", "purge"] {
             result.append(("Native iOS bulk operation acknowledged", ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": operation, "outcome": "confirmed"]))
@@ -85,7 +85,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
     func testQuickCaptureIntentMarkerReachesSavedExportAndRefusesForeignContext() async throws {
         let core = try await preparedHost(), before = try rows()
         let message = "Native iOS Add Task shortcut presented"
-        let context = ["releaseCheck": "v1.3.8/ios-quick-capture-intent", "outcome": "presented"]
+        let context = ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"]
         _ = try await core.call("logLine", argumentsJSON: json([message, json(context)]))
         let exported = try await lines(core)
         XCTAssertTrue(exported.contains { line in
@@ -94,11 +94,11 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         })
         let log = root.appendingPathComponent("logs/mindwtr.log"), bytes = try Data(contentsOf: log)
         var invalid = [
-            try json(["releaseCheck": "v1.3.8/ios-quick-capture-intent", "outcome": "saved"]),
-            try json(["releaseCheck": "v1.3.8/ios-share-text-url", "outcome": "presented"]),
-            try json(["releaseCheck": "v1.3.8/ios-quick-capture-intent"]),
-            try json(["releaseCheck": "v1.3.8/ios-quick-capture-intent", "outcome": true]),
-            #"{"releaseCheck":"v1.3.8/ios-quick-capture-intent","outcome":"presented","outcome":"saved"}"#,
+            try json(["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "saved"]),
+            try json(["releaseCheck": "v1.3.9/ios-share-text-url", "outcome": "presented"]),
+            try json(["releaseCheck": "v1.3.9/ios-quick-capture-intent"]),
+            try json(["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": true]),
+            #"{"releaseCheck":"v1.3.9/ios-quick-capture-intent","outcome":"presented","outcome":"saved"}"#,
         ]
         for field in ["text", "taskId", "url", "operation"] {
             var extra = context; extra[field] = "private"
@@ -169,36 +169,36 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             refused.append(try json(["Native iOS bulk operation acknowledged", json(context)]))
         }
         for context in [
-            ["releaseCheck": "v1.3.8/ios-inbox-processing-editor-reload", "outcome": "pending"],
-            ["releaseCheck": "v1.3.8/ios-inbox-processing-editor-reload", "outcome": "refreshed", "taskId": "private"],
+            ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "pending"],
+            ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed", "taskId": "private"],
         ] {
             refused.append(try json(["Native iOS Process Inbox editor reloaded", json(context)]))
         }
         for context in [
-            ["releaseCheck": "v1.3.8/ios-weekly-review-complete-project", "outcome": "pending"],
-            ["releaseCheck": "v1.3.8/ios-weekly-review-complete-project", "outcome": "confirmed", "projectId": "private"],
+            ["releaseCheck": "v1.3.9/ios-weekly-review-complete-project", "outcome": "pending"],
+            ["releaseCheck": "v1.3.9/ios-weekly-review-complete-project", "outcome": "confirmed", "projectId": "private"],
             ["releaseCheck": "v1.3.8/unreviewed", "outcome": "confirmed"],
         ] {
             refused.append(try json(["Native iOS Weekly Review project completion confirmed", json(context)]))
         }
         let finishMessage = "Native iOS navigation finish settlement confirmed"
         for invalid in [
-            ["releaseCheck": "v1.3.8/ios-navigation-finish-settlement", "operation": "capture", "outcome": "completed"],
+            ["releaseCheck": "v1.3.9/ios-navigation-finish-settlement", "operation": "capture", "outcome": "completed"],
             ["releaseCheck": "v1.3.8/unreviewed", "operation": "finish-settlement", "outcome": "completed"],
-            ["releaseCheck": "v1.3.8/ios-navigation-finish-settlement", "outcome": "completed"],
+            ["releaseCheck": "v1.3.9/ios-navigation-finish-settlement", "outcome": "completed"],
         ] { refused.append(try json([finishMessage, json(invalid)])) }
-        refused.append(try json([finishMessage, #"{"releaseCheck":"v1.3.8/ios-navigation-finish-settlement","operation":"finish-settlement","outcome":"completed","outcome":"ignored"}"#]))
+        refused.append(try json([finishMessage, #"{"releaseCheck":"v1.3.9/ios-navigation-finish-settlement","operation":"finish-settlement","outcome":"completed","outcome":"ignored"}"#]))
         for invalidOutcome in ["confirmed", "pending", true, 1, NSNull()] as [Any] {
             refused.append(try json([finishMessage, json([
-                "releaseCheck": "v1.3.8/ios-navigation-finish-settlement", "operation": "finish-settlement", "outcome": invalidOutcome])]))
+                "releaseCheck": "v1.3.9/ios-navigation-finish-settlement", "operation": "finish-settlement", "outcome": invalidOutcome])]))
         }
         for field in ["taskId", "eventId", "url", "text", "path"] {
             refused.append(try json([finishMessage, json([
-                "releaseCheck": "v1.3.8/ios-navigation-finish-settlement", "operation": "finish-settlement",
+                "releaseCheck": "v1.3.9/ios-navigation-finish-settlement", "operation": "finish-settlement",
                 "outcome": "completed", field: "Synthetic private value"])]))
         }
         let reopenMessage = "Native iOS personal intake reopened after container relocation"
-        let reopenContext: [String: Any] = ["releaseCheck": "v1.3.8/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]
+        let reopenContext: [String: Any] = ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]
         for (field, value) in [("releaseCheck", "v1.3.8/unreviewed"), ("operation", "capture"),
                                ("outcome", "pending"), ("outcome", true), ("path", "Synthetic private value")] as [(String, Any)] {
             var invalid = reopenContext; invalid[field] = value
@@ -206,7 +206,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         }
         var missingReopenOperation = reopenContext; missingReopenOperation.removeValue(forKey: "operation")
         refused.append(try json([reopenMessage, json(missingReopenOperation)]))
-        refused.append(try json([reopenMessage, #"{"releaseCheck":"v1.3.8/ios-intake-same-tree-reopen","operation":"same-tree-reopen","operation":"capture","outcome":"confirmed"}"#]))
+        refused.append(try json([reopenMessage, #"{"releaseCheck":"v1.3.9/ios-intake-same-tree-reopen","operation":"same-tree-reopen","operation":"capture","outcome":"confirmed"}"#]))
         for raw in refused {
             do { _ = try await core.call("logLine", argumentsJSON: raw); XCTFail("Expected closed client diagnostic refusal") } catch {}
         }
@@ -218,7 +218,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
     func testReminderCaptureHandoverMarkerIsExportedAndRefusesInvalidContext() async throws {
         let core = try await preparedHost(), before = try rows()
         let message = "Native iOS reminder capture handover confirmed"
-        let context: [String: Any] = ["releaseCheck": "v1.3.8/ios-reminder-capture-handover",
+        let context: [String: Any] = ["releaseCheck": "v1.3.9/ios-reminder-capture-handover",
                                       "operation": "handover", "outcome": "confirmed"]
         let initial = try await lines(core)
         XCTAssertFalse(initial.contains { $0["message"] as? String == message })
@@ -246,7 +246,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         }
         var missing = context; missing.removeValue(forKey: "operation")
         refused.append(try json([message, json(missing)]))
-        refused.append(try json([message, #"{"releaseCheck":"v1.3.8/ios-reminder-capture-handover","operation":"handover","operation":"retire","outcome":"confirmed"}"#]))
+        refused.append(try json([message, #"{"releaseCheck":"v1.3.9/ios-reminder-capture-handover","operation":"handover","operation":"retire","outcome":"confirmed"}"#]))
         for arguments in refused {
             do {
                 _ = try await core.call("logLine", argumentsJSON: arguments)
@@ -261,7 +261,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
     func testPersonalIntakeCaptureMarkerIsExportedAndRefusesInvalidContext() async throws {
         let core = try await preparedHost(), before = try rows()
         let message = "Native iOS personal intake capture confirmed"
-        let context: [String: Any] = ["releaseCheck": "v1.3.8/ios-personal-intake",
+        let context: [String: Any] = ["releaseCheck": "v1.3.9/ios-personal-intake",
                                       "operation": "capture", "outcome": "confirmed"]
         let initial = try await lines(core)
         XCTAssertFalse(initial.contains { $0["message"] as? String == message })
@@ -292,7 +292,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         }
         var missing = context; missing.removeValue(forKey: "operation")
         refused.append(try json([message, json(missing)]))
-        refused.append(try json([message, #"{"releaseCheck":"v1.3.8/ios-personal-intake","operation":"capture","operation":"retire","outcome":"confirmed"}"#]))
+        refused.append(try json([message, #"{"releaseCheck":"v1.3.9/ios-personal-intake","operation":"capture","operation":"retire","outcome":"confirmed"}"#]))
         for arguments in refused {
             do {
                 _ = try await core.call("logLine", argumentsJSON: arguments)
@@ -313,13 +313,13 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS shared capture finish confirmed", "share-finish", "ignored"),
         ]
         for (message, operation, outcome) in markers {
-            let context = ["releaseCheck": "v1.3.8/ios-share-text-url", "operation": operation, "outcome": outcome]
+            let context = ["releaseCheck": "v1.3.9/ios-share-text-url", "operation": operation, "outcome": outcome]
             let result = try await core.call("logLine", argumentsJSON: json([message, json(context)]))
             XCTAssertEqual(result, "{}")
         }
         let exported = try await lines(core)
         for (message, operation, outcome) in markers {
-            let expected = ["releaseCheck": "v1.3.8/ios-share-text-url", "operation": operation, "outcome": outcome]
+            let expected = ["releaseCheck": "v1.3.9/ios-share-text-url", "operation": operation, "outcome": outcome]
             XCTAssertTrue(try exported.contains { line in
                 guard line["message"] as? String == message else { return false }
                 return try json(line["context"] as? [String: Any] ?? [:]) == json(expected)
@@ -327,7 +327,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         }
         let log = root.appendingPathComponent("logs/mindwtr.log"), bytes = try Data(contentsOf: log)
         for (message, operation, outcome) in markers {
-            let context: [String: Any] = ["releaseCheck": "v1.3.8/ios-share-text-url", "operation": operation, "outcome": outcome]
+            let context: [String: Any] = ["releaseCheck": "v1.3.9/ios-share-text-url", "operation": operation, "outcome": outcome]
             for (field, value) in [("releaseCheck", "v1.3.8/foreign"), ("operation", "share-save"), ("outcome", "pending"),
                 ("outcome", true), ("text", "Synthetic private body"), ("url", "https://private.invalid"),
                 ("eventId", "Synthetic private id"), ("fingerprint", String(repeating: "a", count: 64))] as [(String, Any)] {
@@ -339,13 +339,13 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             }
             var missing = context; missing.removeValue(forKey: "operation")
             do { _ = try await core.call("logLine", argumentsJSON: json([message, json(missing)])); XCTFail("Missing operation must refuse") } catch {}
-            let duplicate = "{\"releaseCheck\":\"v1.3.8/ios-share-text-url\",\"operation\":\"\(operation)\",\"operation\":\"\(operation)\",\"outcome\":\"\(outcome)\"}"
+            let duplicate = "{\"releaseCheck\":\"v1.3.9/ios-share-text-url\",\"operation\":\"\(operation)\",\"operation\":\"\(operation)\",\"outcome\":\"\(outcome)\"}"
             do { _ = try await core.call("logLine", argumentsJSON: json([message, duplicate])); XCTFail("Duplicate share field must refuse") } catch {}
         }
         for (message, context) in [
-            ("Native iOS shared capture saved", ["releaseCheck": "v1.3.8/ios-share-text-url", "operation": "share-save", "outcome": "confirmed"]),
-            ("Native iOS share intake confirmed", ["releaseCheck": "v1.3.8/ios-share-text-url", "operation": "share-open", "outcome": "confirmed"]),
-            ("Native iOS shared capture bound", ["releaseCheck": "v1.3.8/ios-share-text-url", "operation": "share-import", "outcome": "confirmed"]),
+            ("Native iOS shared capture saved", ["releaseCheck": "v1.3.9/ios-share-text-url", "operation": "share-save", "outcome": "confirmed"]),
+            ("Native iOS share intake confirmed", ["releaseCheck": "v1.3.9/ios-share-text-url", "operation": "share-open", "outcome": "confirmed"]),
+            ("Native iOS shared capture bound", ["releaseCheck": "v1.3.9/ios-share-text-url", "operation": "share-import", "outcome": "confirmed"]),
         ] {
             do { _ = try await core.call("logLine", argumentsJSON: json([message, json(context)])); XCTFail("A client cannot forge another phase or internal Save marker") } catch {}
         }

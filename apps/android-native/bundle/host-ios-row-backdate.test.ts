@@ -91,8 +91,8 @@ describe('actual exported iOS shared-row backdate',()=>{
         expect(await cold.call('rowTaskBackdateOutcome',e)).toEqual({ok:true,value:result});expect(await cold.call('rowTaskBackdateCommit',e)).toEqual({ok:true,value:result});
         expect(cold.writes).toEqual(before);expect(cold.database.query('SELECT * FROM tasks ORDER BY id').all()).toEqual(after);
         expect(cold.database.query<{method:string},[]>('SELECT method FROM native_request_receipts').all().map(row=>row.method.split(':')[0])).toEqual(['rowTaskBackdate']);
-        const entries=diagnostics.trim().split('\n').map(line=>JSON.parse(line)).filter(e=>e.context?.releaseCheck==='v1.3.8/ios-row-backdate');
-        expect(entries).toHaveLength(1);expect(entries[0].context).toEqual({releaseCheck:'v1.3.8/ios-row-backdate',outcome:'completed',category:'storage'});
+        const entries=diagnostics.trim().split('\n').map(line=>JSON.parse(line)).filter(e=>e.context?.releaseCheck==='v1.3.9/ios-row-backdate');
+        expect(entries).toHaveLength(1);expect(entries[0].context).toEqual({releaseCheck:'v1.3.9/ios-row-backdate',outcome:'completed',category:'storage'});
         expect(JSON.stringify(entries)).not.toContain('PRIVATE');expect(JSON.stringify(entries)).not.toContain(e.request.id);
     });
     it.each([undefined,'journaled'] as const)('refuses all new methods and row-origin next-action before SQL in Android %s',async bootMode=>{

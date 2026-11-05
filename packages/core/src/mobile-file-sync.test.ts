@@ -252,7 +252,7 @@ describe('promise-capable File Sync path ports', () => {
         const remote = await createMobileFileSync(host).createFileSyncEncryptionRemotePort(fileUri);
         if (!remote) throw new Error('Expected path remote');
         const operation = observe(remote.rotateBackup('data.json.bak', replacement));
-        const markers = () => logged.filter((entry) => JSON.stringify(entry.context).includes('v1.3.8/file-sync-path-await'));
+        const markers = () => logged.filter((entry) => JSON.stringify(entry.context).includes('v1.3.9/file-sync-path-await'));
         try {
             await entered.promise;
             await nextTurn();
@@ -270,7 +270,7 @@ describe('promise-capable File Sync path ports', () => {
             expect([...folder.files.keys()]).toEqual([backupUri]);
             expect(mutations).toEqual(['renamed', 'created', 'written', 'deleted']);
             expect(markers()).toEqual([{ level: 'info', message: 'File Sync path rename completed', context: {
-                scope: 'sync', extra: { releaseCheck: 'v1.3.8/file-sync-path-await', operation: 'rename', outcome: 'completed' },
+                scope: 'sync', extra: { releaseCheck: 'v1.3.9/file-sync-path-await', operation: 'rename', outcome: 'completed' },
             } }]);
             expect(all()).not.toContain(PRIVATE);
         } finally {
@@ -316,7 +316,7 @@ describe('promise-capable File Sync path ports', () => {
             if (retained.state === 'fulfilled') expect(retained.value.bytes).toEqual(peerConflict ? peer : null);
             expect(folder.files.get(backupUri)).toEqual(original);
             expect(mutations).toEqual([]);
-            expect(logged.some((entry) => JSON.stringify(entry.context).includes('v1.3.8/file-sync-path-await'))).toBe(false);
+            expect(logged.some((entry) => JSON.stringify(entry.context).includes('v1.3.9/file-sync-path-await'))).toBe(false);
         } finally {
             gate.resolve(undefined);
             await operation.result;
@@ -534,7 +534,7 @@ describe('observed publication capability', () => {
         expect(folder.calls.filter(call => call.operation === 'delete').map(call => call.bytes)).toEqual([old, payload, current]);
         expect(folder.counters()).toEqual({ closed: false, lateCalls: 0, legacyCalls: 0 });
         expect(folder.completions()).toHaveLength(1);
-        expect(folder.completions()[0]?.context).toEqual({ scope: 'sync', extra: { releaseCheck: 'v1.3.8/file-sync-observed-publication', operation: 'write', outcome: 'completed' } });
+        expect(folder.completions()[0]?.context).toEqual({ scope: 'sync', extra: { releaseCheck: 'v1.3.9/file-sync-observed-publication', operation: 'write', outcome: 'completed' } });
     });
 
     it.each([null, {}, { createExclusive: async (): Promise<'created'> => 'created' }, { createExclusive: async (): Promise<'created'> => 'created', writeCreated: async () => undefined, renameObserved: async () => uri }])('rejects incomplete capability before IO (%j)', value => {

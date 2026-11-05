@@ -5,7 +5,7 @@ import CoreGraphics
 /// Fixed, content-free geometry snapshot shared by App emission and host admission.
 public enum NativeBoardDragGeometry {
     public static let message = "Native iOS Board drag geometry"
-    public static let releaseCheck = "v1.3.8/ios-board-drag-geometry"
+    public static let releaseCheck = "v1.3.9/ios-board-drag-geometry"
     private static let rectangles = ["originalViewport", "currentViewport", "originalArea", "currentArea", "originalRow", "currentRow", "originalColumn", "currentColumn"]
     public enum RebaseRejection: String, CaseIterable {
         case claimed = "claimed", captureUnavailable = "capture-unavailable"

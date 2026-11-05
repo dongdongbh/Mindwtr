@@ -2050,7 +2050,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             Task {
                 _ = try? await currentHost.call("logLine", argumentsJSON: json([
                     "Native iOS deferred text input revalidated",
-                    try json(["releaseCheck": "v1.3.8/ios-text-input-deferred", "outcome": family.outcome, "family": family.name]),
+                    try json(["releaseCheck": "v1.3.9/ios-text-input-deferred", "outcome": family.outcome, "family": family.name]),
                 ]))
             }
         }
@@ -6576,7 +6576,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     let size = try handle.seekToEnd(); try handle.seek(toOffset: size > 65_536 ? size - 65_536 : 0)
                     let text = String(decoding: try handle.read(upToCount: 65_536) ?? Data(), as: UTF8.self)
                     navigationReplayFixtureMarker = text.contains("Native iOS navigation finish settlement confirmed")
-                        && text.contains("v1.3.8/ios-navigation-finish-settlement")
+                        && text.contains("v1.3.9/ios-navigation-finish-settlement")
                 } else {
                     let value = try await query("menuRead", ["dataSettings", "{}"])
                     let old = value.object("diagnostics").object("debugLogging").flag("value")
@@ -6771,7 +6771,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let size = try handle.seekToEnd(); try handle.seek(toOffset: size > 65_536 ? size - 65_536 : 0)
                 let text = String(decoding: try handle.read(upToCount: 65_536) ?? Data(), as: UTF8.self)
                 navigationFixtureLogMarker = text.contains("Native iOS personal intake capture confirmed")
-                    && text.contains("v1.3.8/ios-personal-intake")
+                    && text.contains("v1.3.9/ios-personal-intake")
                 navigationFixtureMode = "exported"
             } catch { navigationFixtureMode = "export-error" }
         case "dirty": draft = "Synthetic navigation capture draft"
@@ -6868,7 +6868,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
                 let size = try handle.seekToEnd(); try handle.seek(toOffset: size > 65_536 ? size - 65_536 : 0)
                 let tail = String(decoding: try handle.read(upToCount: 65_536) ?? Data(), as: UTF8.self)
-                reminderHandoverExportedMarker = tail.contains("v1.3.8/ios-reminder-capture-handover") && tail.contains("Native iOS reminder capture handover confirmed")
+                reminderHandoverExportedMarker = tail.contains("v1.3.9/ios-reminder-capture-handover") && tail.contains("Native iOS reminder capture handover confirmed")
                 reminderHandoverFixtureState = "log-exported"
             case "wrapper":
                 try await NativeNotificationResponses.shared.armCaptureRetryFixture()
@@ -7164,11 +7164,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         guard current(), reminderHandoverDiagnosticHost !== original || reminderHandoverDiagnosticToken != startupToken,
               let fields = await NativeNotificationResponses.shared.handoverDiagnostic, current(),
-              fields == ["releaseCheck": "v1.3.8/ios-reminder-capture-handover", "operation": "handover", "outcome": "confirmed"] else { return }
+              fields == ["releaseCheck": "v1.3.9/ios-reminder-capture-handover", "operation": "handover", "outcome": "confirmed"] else { return }
         do {
             _ = try await original.call("logLine", argumentsJSON: json([
                 "Native iOS reminder capture handover confirmed",
-                #"{"releaseCheck":"v1.3.8/ios-reminder-capture-handover","operation":"handover","outcome":"confirmed"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-reminder-capture-handover","operation":"handover","outcome":"confirmed"}"#,
             ]))
             guard current() else { return }
             reminderHandoverDiagnosticHost = original; reminderHandoverDiagnosticToken = startupToken
@@ -7180,7 +7180,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               !settingsSyncRestartRequired, !appLockRecoveryPending else { return }
         _ = try? await original.call("logLine", argumentsJSON: json([
             "Native iOS Sandbox reminder preparation confirmed",
-            #"{"releaseCheck":"v1.3.8/ios-sandbox-lifecycle","operation":"reminderPreparation","outcome":"confirmed","workspace":"personal"}"#,
+            #"{"releaseCheck":"v1.3.9/ios-sandbox-lifecycle","operation":"reminderPreparation","outcome":"confirmed","workspace":"personal"}"#,
         ]))
     }
     private func refuseReminderHandover(_ owner: ReminderCaptureHandoverOwner, reservation: UUID?) async -> NativeSandboxSession.CaptureHandoverResult {
@@ -7375,7 +7375,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             heldReminderReplayEnabled = true; sandboxNavigationReplayOwed = true
             _ = try? await current.call("logLine", argumentsJSON: json([
                 "Native iOS Sandbox personal return confirmed",
-                #"{"releaseCheck":"v1.3.8/ios-sandbox-lifecycle","operation":"return","outcome":"confirmed","workspace":"personal"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-sandbox-lifecycle","operation":"return","outcome":"confirmed","workspace":"personal"}"#,
             ]))
             guard host === current else { return false }
             workspaceReturning = false; sandboxEntryPreparing = false
@@ -7408,7 +7408,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard workspaceAdmissionsOpen, let original = host else { return }
         _ = try? await original.call("logLine", argumentsJSON: json([
             "Native iOS workspace retirement refused",
-            #"{"releaseCheck":"v1.3.8/ios-sandbox-lifecycle","operation":"retire","outcome":"refused","workspace":"personal"}"#,
+            #"{"releaseCheck":"v1.3.9/ios-sandbox-lifecycle","operation":"retire","outcome":"refused","workspace":"personal"}"#,
         ]))
     }
 
@@ -8183,7 +8183,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             } else {
                 // Startup must reach ready so the lock can authenticate. The unlock
                 // observer refreshes the selected surface after admission opens.
-                NSLog("Native App lock startup awaiting authentication releaseCheck=v1.3.8/ios-app-lock-delay outcome=awaiting-unlock")
+                NSLog("Native App lock startup awaiting authentication releaseCheck=v1.3.9/ios-app-lock-delay outcome=awaiting-unlock")
             }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             ready = true
@@ -8254,7 +8254,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if let token = completedStartupToken { await recordReminderHandoverDiagnostic(host: currentHost, startupToken: token) }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             if case .production = selection {
-                NSLog("Native iOS production RN bootstrap admitted releaseCheck=v1.3.8/ios-production-rn-bootstrap outcome=ready")
+                NSLog("Native iOS production RN bootstrap admitted releaseCheck=v1.3.9/ios-production-rn-bootstrap outcome=ready")
             }
             requestNotificationResponses()
             requestEntityLinks()
@@ -8645,12 +8645,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard current(), intakeSameTreeDiagnosticHost !== original || intakeSameTreeDiagnosticToken != startupToken,
               let marker = await NativeNotificationResponses.shared.sameTreeReopenDiagnostic, current(),
               marker.message == "Native iOS personal intake reopened after container relocation",
-              marker.releaseCheck == "v1.3.8/ios-intake-same-tree-reopen",
+              marker.releaseCheck == "v1.3.9/ios-intake-same-tree-reopen",
               marker.operation == "same-tree-reopen", marker.outcome == "confirmed" else { return }
         do {
             _ = try await original.call("logLine", argumentsJSON: json([
                 "Native iOS personal intake reopened after container relocation", try json([
-                    "releaseCheck": "v1.3.8/ios-intake-same-tree-reopen",
+                    "releaseCheck": "v1.3.9/ios-intake-same-tree-reopen",
                     "operation": "same-tree-reopen", "outcome": "confirmed"]),
             ]))
             guard current() else { return }
@@ -8759,7 +8759,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               !settingsSyncRestartRequired, !appLockRecoveryPending else { return }
         _ = try? await original.call("logLine", argumentsJSON: json([
             "Native iOS personal intake capture confirmed",
-            #"{"releaseCheck":"v1.3.8/ios-personal-intake","operation":"capture","outcome":"confirmed"}"#,
+            #"{"releaseCheck":"v1.3.9/ios-personal-intake","operation":"capture","outcome":"confirmed"}"#,
         ]))
     }
 
@@ -9049,7 +9049,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                             if widgetURL != nil, type == "task" {
                                 _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
                                     "Native iOS Next widget task opened",
-                                    #"{"releaseCheck":"v1.3.8/ios-widget-next-open","outcome":"opened"}"#,
+                                    #"{"releaseCheck":"v1.3.9/ios-widget-next-open","outcome":"opened"}"#,
                                 ]))
                             }
                         }
@@ -9139,7 +9139,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               completedStartupToken == owner.startup, !appLockRecoveryPending,
               ready || workspaceRetirementOwner?.host === owner.host,
               marker.message == "Native iOS navigation finish settlement confirmed",
-              marker.releaseCheck == "v1.3.8/ios-navigation-finish-settlement",
+              marker.releaseCheck == "v1.3.9/ios-navigation-finish-settlement",
               marker.operation == "finish-settlement", marker.outcome == outcome.rawValue else { throw NavigationReplayFailure.held }
         if !owner.diagnosticDelivered {
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -9155,7 +9155,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
             _ = try await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS navigation finish settlement confirmed", try json([
-                    "releaseCheck": "v1.3.8/ios-navigation-finish-settlement",
+                    "releaseCheck": "v1.3.9/ios-navigation-finish-settlement",
                     "operation": "finish-settlement", "outcome": marker.outcome]),
             ]))
             owner.diagnosticDelivered = true
@@ -9377,7 +9377,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if owner.delivery.input.widgetURL != nil, kind == "task", outcome == "opened" {
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS Next widget task opened",
-                #"{"releaseCheck":"v1.3.8/ios-widget-next-open","outcome":"opened"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-widget-next-open","outcome":"opened"}"#,
             ]))
             return
         }
@@ -9526,7 +9526,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             guard notificationResponseCurrent(owner) else { throw CancellationError() }
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS Sandbox reminder replay confirmed",
-                #"{"releaseCheck":"v1.3.8/ios-sandbox-lifecycle","operation":"reminderReplay","outcome":"confirmed","workspace":"personal"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-sandbox-lifecycle","operation":"reminderReplay","outcome":"confirmed","workspace":"personal"}"#,
             ]))
         }
         await recordNotificationResponse(owner, action: action.rawValue, outcome: outcome)
@@ -10311,7 +10311,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         badge.report = { [weak self] publication in
             guard let self, let observed = self.host, self.workspaceAdmissionsOpen, observed.workspaceMode == .personal,
                   let line = try? self.json(["Native iOS due badge updated", try self.json([
-                      "releaseCheck": "v1.3.8/ios-due-badge", "count": publication.count,
+                      "releaseCheck": "v1.3.9/ios-due-badge", "count": publication.count,
                       "enabled": publication.enabled, "result": publication.result.rawValue])]) else { return }
             Task { _ = try? await observed.call("logLine", argumentsJSON: line) }
         }
@@ -10600,7 +10600,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             try await receiver.updateApplicationContext(snapshot.applicationContext(), isCurrent: { lease.isCurrent })
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS Watch context published", try json([
-                    "releaseCheck": "v1.3.8/ios-watch-publication", "outcome": "submitted"]),
+                    "releaseCheck": "v1.3.9/ios-watch-publication", "outcome": "submitted"]),
             ]))
         } catch {
             if dispatched, host === owner.host, !isDefiniteRejection(error) {
@@ -10689,7 +10689,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             WidgetCenter.shared.reloadTimelines(ofKind: NativeWidgetNextCache.kind)
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS Next widget published", try json([
-                    "releaseCheck": "v1.3.8/ios-widget-next-publication", "count": snapshot.items.count]),
+                    "releaseCheck": "v1.3.9/ios-widget-next-publication", "count": snapshot.items.count]),
             ]))
         } catch {
             // Read/write failure preserves the previous valid same-scope cache until its own expiration.
@@ -10776,12 +10776,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if !settled.isEmpty {
                 _ = try? await owner.host.call("logLine", argumentsJSON: json([
                     "Native iOS legacy widget actions acknowledged", try json([
-                        "releaseCheck": "v1.3.8/ios-widget-legacy-ack", "outcome": "confirmed", "count": settled.count]),
+                        "releaseCheck": "v1.3.9/ios-widget-legacy-ack", "outcome": "confirmed", "count": settled.count]),
                 ]))
             }
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS widget families published", try json([
-                    "releaseCheck": "v1.3.8/ios-widget-family-publication", "outcome": "ready", "count": 5]),
+                    "releaseCheck": "v1.3.9/ios-widget-family-publication", "outcome": "ready", "count": 5]),
             ]))
         } catch {}
     }
@@ -35665,7 +35665,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } else if origin == .weeklyReview {
             _ = try? await host?.call("logLine", argumentsJSON: json([
                 "Native iOS Weekly Review project completion confirmed",
-                #"{"releaseCheck":"v1.3.8/ios-weekly-review-complete-project","outcome":"confirmed"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-weekly-review-complete-project","outcome":"confirmed"}"#,
             ]))
             reviewProjectCompletionOptions = [:]
             reviewError = nil
@@ -39374,7 +39374,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         Task {
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS ordinary project next action confirmed",
-                try json(["releaseCheck": "v1.3.8/ios-ordinary-project-next-action",
+                try json(["releaseCheck": "v1.3.9/ios-ordinary-project-next-action",
                     "completionSource": owner.source, "outcome": outcome, "scope": scope]),
             ]))
         }
@@ -41873,11 +41873,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                         if let selection = try? NativeAppLaunch.selection.get(), case .production = selection {
                             _ = try await original.call("logLine", argumentsJSON: self.json([
                                 "Native iOS production Share route admitted", try self.json([
-                                    "releaseCheck": "v1.3.8/ios-production-share-route", "operation": "import", "outcome": "ready"])]))
+                                    "releaseCheck": "v1.3.9/ios-production-share-route", "operation": "import", "outcome": "ready"])]))
                         }
                         _ = try await original.call("logLine", argumentsJSON: self.json([
                             "Native iOS Share protected publication imported", try self.json([
-                                "releaseCheck": "v1.3.8/ios-share-protection", "operation": "share-import", "outcome": "confirmed"])]))
+                                "releaseCheck": "v1.3.9/ios-share-protection", "operation": "share-import", "outcome": "confirmed"])]))
                         await NativeNotificationResponses.shared.deliveredShareImportDiagnostic(marker)
                     }
                     var page = try await storage.writer.pendingPage()
@@ -41936,7 +41936,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 self.notice = raw["draft"] is NSNull ? self.label("share.unavailable") : nil
                 self.capturePresented = true; owner.presentationID = self.capturePresentationID
                 _ = try? await owner.host.call("logLine", argumentsJSON: self.json(["Native iOS shared capture bound",
-                    #"{"releaseCheck":"v1.3.8/ios-share-text-url","operation":"share-open","outcome":"confirmed"}"#]))
+                    #"{"releaseCheck":"v1.3.9/ios-share-text-url","operation":"share-open","outcome":"confirmed"}"#]))
                 await self.refreshCaptureCopilotOptions()
             } catch {
                 if let owner = self.shareCaptureOwner {
@@ -41967,7 +41967,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let proof = try await NativeNotificationResponses.shared.settleShareCaptureFinish(owner.item, outcome: outcome, storage: owner.storage, owner: owner.id)
                 owner.receipt = proof.receipt; owner.diagnostic = proof.diagnostic
             }
-            guard let marker = owner.diagnostic, marker.releaseCheck == "v1.3.8/ios-navigation-finish-settlement",
+            guard let marker = owner.diagnostic, marker.releaseCheck == "v1.3.9/ios-navigation-finish-settlement",
                   marker.operation == "finish-settlement", marker.outcome == outcome.rawValue else { throw CocoaError(.coderReadCorrupt) }
             if !owner.diagnosticTransferred {
                 try await NativeNotificationResponses.shared.transferredShareCaptureFinish(owner.item, outcome: outcome, storage: owner.storage, owner: owner.id)
@@ -41975,7 +41975,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
             guard shareCaptureFinishCurrent(owner) else { throw CocoaError(.userCancelled) }
             _ = try await owner.host.call("logLine", argumentsJSON: json(["Native iOS shared capture finish confirmed", try json([
-                "releaseCheck": "v1.3.8/ios-share-text-url", "operation": "share-finish", "outcome": outcome.rawValue])]))
+                "releaseCheck": "v1.3.9/ios-share-text-url", "operation": "share-finish", "outcome": outcome.rawValue])]))
             owner.saveLease?.invalidate(); shareCaptureOwner = nil; retryNeeded = false; error = nil; shareCaptureWakePending = true
         } catch {
             owner.requiresRetry = true; retryNeeded = true
@@ -42105,7 +42105,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             #endif
             _ = try? await original.call("logLine", argumentsJSON: self.json([
                 "Native iOS Add Task shortcut presented",
-                #"{"releaseCheck":"v1.3.8/ios-quick-capture-intent","outcome":"presented"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-quick-capture-intent","outcome":"presented"}"#,
             ]))
         }
     }
@@ -42286,7 +42286,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             processInboxEditorReturn = nil
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS Process Inbox editor reloaded",
-                #"{"releaseCheck":"v1.3.8/ios-inbox-processing-editor-reload","outcome":"refreshed"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-inbox-processing-editor-reload","outcome":"refreshed"}"#,
             ]))
         } catch {
             guard processInboxEditorReturn?.id == owner.id, processInboxEditorCurrent(owner) else { return }
@@ -46138,7 +46138,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if fromContexts {
             _ = try? await diagnosticHost?.call("logLine", argumentsJSON: json([
                 "Native iOS Contexts filter saved",
-                #"{"releaseCheck":"v1.3.8/ios-context-filter-save","outcome":"saved"}"#,
+                #"{"releaseCheck":"v1.3.9/ios-context-filter-save","outcome":"saved"}"#,
             ]))
         }
     }

@@ -97,7 +97,7 @@ for (const action of ['AddTag', 'RemoveTag'] as const) {
             expect(cold.writes).toEqual(before); expect(cold.database.query('SELECT * FROM tasks ORDER BY id').all()).toEqual(after);
             const receipts = cold.database.query<{ method: string }, []>('SELECT method FROM native_request_receipts').all();
             expect(receipts.map(row => row.method.split(':')[0])).toEqual([family]);
-            const marker = `v1.3.8/ios-project-bulk-${action === 'AddTag' ? 'tag' : 'remove-tag'}`;
+            const marker = `v1.3.9/ios-project-bulk-${action === 'AddTag' ? 'tag' : 'remove-tag'}`;
             const entries = diagnostics.trim().split('\n').map(line => JSON.parse(line)).filter(e => e.context?.releaseCheck === marker);
             expect(entries.length).toBeGreaterThan(0);
             for (const entry of entries) expect(entry.context).toEqual({ releaseCheck: marker, count: '2', outcome: action === 'AddTag' ? 'added' : 'removed', category: 'storage' });

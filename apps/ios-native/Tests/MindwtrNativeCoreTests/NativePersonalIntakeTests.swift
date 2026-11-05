@@ -689,7 +689,7 @@ final class NativePersonalIntakeTests: XCTestCase {
             let marker = try XCTUnwrap(diagnostics.events.last)
             XCTAssertEqual(diagnostics.events.count, 2)
             XCTAssertEqual(marker.message, "Native iOS navigation finish settlement confirmed")
-            XCTAssertEqual(marker.releaseCheck, "v1.3.8/ios-navigation-finish-settlement")
+            XCTAssertEqual(marker.releaseCheck, "v1.3.9/ios-navigation-finish-settlement")
             XCTAssertEqual(marker.operation, "finish-settlement"); XCTAssertEqual(marker.outcome, outcome.rawValue)
             let fields = Mirror(reflecting: marker).children.compactMap { $0.label }
             XCTAssertEqual(Set(fields), ["message", "releaseCheck", "operation", "outcome"])
@@ -938,7 +938,7 @@ final class NativePersonalIntakeTests: XCTestCase {
         let marker = try XCTUnwrap(diagnostics.events.first)
         XCTAssertEqual(diagnostics.events.count, 1)
         XCTAssertEqual(marker.message, "Native iOS personal intake capture confirmed")
-        XCTAssertEqual(marker.releaseCheck, "v1.3.8/ios-personal-intake")
+        XCTAssertEqual(marker.releaseCheck, "v1.3.9/ios-personal-intake")
         XCTAssertEqual(marker.operation, "capture"); XCTAssertEqual(marker.outcome, "confirmed")
         _ = try await store.capture(first); XCTAssertEqual(diagnostics.events.count, 1)
     }
@@ -1109,7 +1109,7 @@ final class NativePersonalIntakeTests: XCTestCase {
         let markers = diagnostics.events.filter { $0.operation == "same-tree-reopen" }
         XCTAssertEqual(markers.count, 1, "Cold admission emits once, not once per validated operation")
         XCTAssertEqual(markers.first?.message, "Native iOS personal intake reopened after container relocation")
-        XCTAssertEqual(markers.first?.releaseCheck, "v1.3.8/ios-intake-same-tree-reopen")
+        XCTAssertEqual(markers.first?.releaseCheck, "v1.3.9/ios-intake-same-tree-reopen")
         XCTAssertEqual(markers.first?.outcome, "confirmed")
     }
     func testColdFullHomeRenameReopensSameStandardTreeWithoutRewritingHeader() async throws {

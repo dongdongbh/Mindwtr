@@ -330,7 +330,7 @@ export function createOrganizeDestinationCreateMethods(deps: {
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize destination creation result does not match its journal`);
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-organize-destination-create' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
+                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-organize-destination-create' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;

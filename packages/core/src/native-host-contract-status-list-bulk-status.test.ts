@@ -44,7 +44,7 @@ describe('Waiting and Someday bulk Move through the status-list move family', ()
             expect(['ann-1', 'ann-2', 'bob'].map((id) => useTaskStore.getState()._tasksById.get(id)?.status)).toEqual(['next', 'next', 'waiting']);
             expect(value(sqlite.host.inboxTasksMoveOutcome(command))).toEqual({ count: 2, status: 'next' });
             expect(log).toHaveBeenCalledWith('Native Waiting bulk status confirmed', expect.objectContaining({ force: true,
-                context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-status', count: 2, status: 'next', outcome: 'moved' } }));
+                context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-status', count: 2, status: 'next', outcome: 'moved' } }));
             expect(await sqlite.receiptIds()).toEqual([REQUEST_ID]);
         } finally { await sqlite.close(); }
     });
@@ -105,7 +105,7 @@ describe('Waiting and Someday bulk Move through the status-list move family', ()
                 expect(result.count).toBe(ids.length); expect(result.deletion.undoEnabled).toBe(true);
                 for (const id of ids) expect(useTaskStore.getState()._tasksById.get(id)?.deletedAt).toBeTruthy();
                 expect(log).toHaveBeenCalledWith(`Native ${source === 'waiting' ? 'Waiting' : 'Someday'} bulk Trash confirmed`, expect.objectContaining({ force: true,
-                    context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-trash', count: ids.length, outcome: 'deleted' } }));
+                    context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-trash', count: ids.length, outcome: 'deleted' } }));
                 const undoRequest = { requestId: source === 'waiting' ? '00000000-0000-4000-8000-000000001417' : '00000000-0000-4000-8000-000000001418', deleteRequestId: input.requestId };
                 const undo = { request: undoRequest, prepared: value(await sqlite.host.prepareArchivedTasksDeleteUndo({ request: undoRequest, delete: deletion } as never)).prepared } as never;
                 expect(value(await sqlite.host.commitPreparedArchivedTasksDeleteUndo(undo))).toEqual({ count: ids.length });
@@ -134,7 +134,7 @@ describe('Waiting and Someday bulk Move through the status-list move family', ()
             expect(value(await sqlite.host.commitPreparedInboxTasksAddTag(command))).toEqual({ count: 2, changed: true });
             expect(useTaskStore.getState()._tasksById.get('ann-1')?.tags).toContain('#call');
             expect(log).toHaveBeenCalledWith('Native Waiting bulk tag confirmed', expect.objectContaining({ force: true,
-                context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-tag', count: 2, outcome: 'added' } }));
+                context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-tag', count: 2, outcome: 'added' } }));
             const hidden = { ...input, requestId: '00000000-0000-4000-8000-000000001419', taskIds: ['bob'], taskRevisions: revisions(['bob']) };
             expect(await sqlite.host.prepareInboxTasksAddTag(hidden as never)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
             const someday = { requestId: '00000000-0000-4000-8000-000000001420', source: 'someday', taskIds: ['idea'], taskRevisions: revisions(['idea']), tag: '#maybe', params: {} };

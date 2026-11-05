@@ -862,7 +862,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         if (observedPublication && !resolvedUri.startsWith('content://')) {
             host.log.info('File Sync observed path publication completed', {
                 scope: 'sync',
-                extra: { releaseCheck: 'v1.3.8/file-sync-observed-publication', operation: 'write', outcome: 'completed' },
+                extra: { releaseCheck: 'v1.3.9/file-sync-observed-publication', operation: 'write', outcome: 'completed' },
             });
         }
     };

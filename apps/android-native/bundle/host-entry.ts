@@ -2802,7 +2802,7 @@ const readIOSWidgetNext = (includeActions: boolean) => {
         || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
     try {
         logInfo('Native iOS Next widget snapshot', { scope: 'native-ios', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-widget-next-snapshot', count: String(result.items.length) } });
+            context: { releaseCheck: 'v1.3.9/ios-widget-next-snapshot', count: String(result.items.length) } });
     } catch { /* Diagnostics cannot fail a successful readonly projection. */ }
     return actions ? { snapshot: JSON.stringify(result), ...actions } : result;
 };
@@ -2858,7 +2858,7 @@ const readIOSWidgetFamilies = (json: string): IOSWidgetFamilySnapshot => {
         || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
     try {
         logInfo('Native iOS widget families read', { scope: 'native-ios', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-widget-family-read', operation: 'read', outcome: 'ready' } });
+            context: { releaseCheck: 'v1.3.9/ios-widget-family-read', operation: 'read', outcome: 'ready' } });
     } catch {}
     return result;
 };
@@ -2919,7 +2919,7 @@ const readIOSWatchSnapshot = async () => {
         || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
     try {
         logInfo('Native iOS Watch snapshot read', { scope: 'native-ios', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-watch-snapshot', operation: 'read', outcome: 'ready' } });
+            context: { releaseCheck: 'v1.3.9/ios-watch-snapshot', operation: 'read', outcome: 'ready' } });
     } catch { /* Diagnostics cannot fail a successful readonly projection. */ }
     return result;
 };
@@ -3937,7 +3937,7 @@ globalThis.MindwtrHost = {
             if (type !== 'none') {
                 try {
                     logInfo('Native iOS production task URL resolved', { scope: 'native-ios', force: true,
-                        context: { releaseCheck: 'v1.3.8/ios-production-task-url', outcome: type } });
+                        context: { releaseCheck: 'v1.3.9/ios-production-task-url', outcome: type } });
                 } catch {}
             }
             return type === 'task' ? { type, taskId: target.taskId } : { type };
@@ -6993,7 +6993,7 @@ globalThis.MindwtrHost = {
             requireSaved();
             const result = await ingestIOSWatchBatch(json, { contract, current: iosWatchReadiness, lastApplied: lastAppliedRecord });
             logInfo('Native iOS Watch command batch saved', { scope: 'native-ios', force: true,
-                context: { releaseCheck: 'v1.3.8/ios-watch-ingest', operation: 'ingest', outcome: 'saved' } });
+                context: { releaseCheck: 'v1.3.9/ios-watch-ingest', operation: 'ingest', outcome: 'saved' } });
             return result;
         });
     },
@@ -7068,7 +7068,7 @@ globalThis.MindwtrHost = {
             if (!['opened', 'failed'].includes(outcome) || !['markdown', 'attachment'].includes(surface)
                 || !['upnote', 'obsidian'].includes(scheme)) return {};
             const meta = { scope: 'links', force: true, context: { outcome, surface, scheme,
-                ...(scheme === 'obsidian' ? { releaseCheck: 'v1.3.8/ios-native-obsidian-link' } : {}) } };
+                ...(scheme === 'obsidian' ? { releaseCheck: 'v1.3.9/ios-native-obsidian-link' } : {}) } };
             const noteApp = scheme === 'upnote' ? 'UpNote' : 'Obsidian';
             if (outcome === 'failed') logWarn(`Native ${noteApp} handoff failed`, meta);
             else logInfo(`Native ${noteApp} handoff accepted`, meta);
@@ -7482,8 +7482,8 @@ globalThis.MindwtrHost = {
                         : webdavProjectDownload ? { releaseCheck: 'v1.3.5/ios-webdav-project-download' }
                         : projectDownload ? { releaseCheck: 'v1.3.5/ios-selfhosted-project-download' }
                         : taskDownloadMaterial ? { releaseCheck: 'v1.3.5/ios-task-download-material' }
-                        : dropboxAvailability ? { releaseCheck: 'v1.3.8/ios-dropbox' }
-                        : cloudKitTaskAvailability ? { releaseCheck: 'v1.3.8/ios-cloudkit-selected-download' }
+                        : dropboxAvailability ? { releaseCheck: 'v1.3.9/ios-dropbox' }
+                        : cloudKitTaskAvailability ? { releaseCheck: 'v1.3.9/ios-cloudkit-selected-download' }
                         : webdavTaskAvailability ? { releaseCheck: 'v1.3.5/ios-webdav-task-availability' }
                         : selfHostedAvailability ? { releaseCheck: 'v1.3.5/ios-selfhosted-file-availability' }
                         : availabilityConsumer ? { releaseCheck: 'v1.3.5/ios-task-availability-consumers' }
@@ -8236,7 +8236,7 @@ globalThis.MindwtrHost = {
             current();
             try {
                 logInfo('Native iOS voice operation completed', { scope: 'native-ios', force: true,
-                    context: { releaseCheck: 'v1.3.8/ios-native-voice', provider: 'gemini', stage, outcome } });
+                    context: { releaseCheck: 'v1.3.9/ios-native-voice', provider: 'gemini', stage, outcome } });
                 await diagnosticsLog.serialize(async () => undefined);
             } catch { /* Diagnostics cannot change native's already proved result. */ }
             current(); return null;
@@ -8408,7 +8408,7 @@ globalThis.MindwtrHost = {
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !['openai', 'gemini', 'anthropic'].includes(provider) || !['scalar', 'enabled', 'model', 'copilotModel', 'provider', 'anthropicThinking', 'thinkingBudget', 'extraBodyParams', 'credential', 'endpoint', 'consent'].includes(kind) || !['settings-saved', 'credential-saved', 'credential-cleared', 'endpoint-saved', 'consent-record-failed'].includes(outcome)) return null;
             try {
                 logInfo('Native iOS AI text configuration completed', { scope: 'native-ios', force: true,
-                    context: { releaseCheck: 'v1.3.8/ios-ai-text-configuration', outcome, provider, kind } });
+                    context: { releaseCheck: 'v1.3.9/ios-ai-text-configuration', outcome, provider, kind } });
                 await diagnosticsLog.serialize(async () => undefined);
             } catch { /* Diagnostics cannot change a verified durable reply. */ }
             return null;
@@ -8679,7 +8679,7 @@ globalThis.MindwtrHost = {
             if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: File Sync diagnostic is unavailable');
             try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                 message: 'Native iOS File Sync app binding completed',
-                context: { releaseCheck: 'v1.3.8/ios-file-sync-app-binding', operation: 'foreground', outcome: 'completed' },
+                context: { releaseCheck: 'v1.3.9/ios-file-sync-app-binding', operation: 'foreground', outcome: 'completed' },
             }, { force: true }); } catch { /* Diagnostics cannot change a settled native result. */ }
             return null;
         });
@@ -8689,7 +8689,7 @@ globalThis.MindwtrHost = {
             if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Directory File Sync diagnostic is unavailable');
             try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                 message: 'Native iOS manual directory File Sync completed',
-                context: { releaseCheck: 'v1.3.8/ios-file-sync-directory-manual', operation: 'foreground', outcome: 'completed' },
+                context: { releaseCheck: 'v1.3.9/ios-file-sync-directory-manual', operation: 'foreground', outcome: 'completed' },
             }, { force: true }); } catch { /* A diagnostic cannot change a settled result. */ }
             return null;
         });
@@ -8761,7 +8761,7 @@ globalThis.MindwtrHost = {
                     await flushPendingSave(); requireSaved();
                     try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                         message: 'Native iOS pull Sync command settled',
-                        context: { releaseCheck: 'v1.3.8/ios-pull-sync', operation: name, outcome: 'settled' },
+                        context: { releaseCheck: 'v1.3.9/ios-pull-sync', operation: name, outcome: 'settled' },
                     }, { force: true }); } catch { /* Diagnostics cannot change the settled result. */ }
                     return { ok: true as const, value };
                 }
@@ -8886,7 +8886,7 @@ globalThis.MindwtrHost = {
                     if (name === 'syncPull') try {
                         await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                             message: 'Native iOS pull Sync command settled',
-                            context: { releaseCheck: 'v1.3.8/ios-pull-sync', operation: name, outcome: 'skipped' },
+                            context: { releaseCheck: 'v1.3.9/ios-pull-sync', operation: name, outcome: 'skipped' },
                         }, { force: true });
                     } catch { /* A diagnostic cannot change the skipped result. */ }
                     return { ok: true as const, value: { success: true, skipped: true } };
@@ -8978,7 +8978,7 @@ globalThis.MindwtrHost = {
                     && 'status' in result.value && result.value.status === 'available')) try {
                     const diagnostic = name === 'projectAttachmentDownload' ? { message: 'Native iOS Project file availability settled', releaseCheck: 'v1.3.5/ios-project-file-download' }
                         : name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
-                        : name === 'syncPull' ? { message: 'Native iOS pull Sync command settled', releaseCheck: 'v1.3.8/ios-pull-sync' }
+                        : name === 'syncPull' ? { message: 'Native iOS pull Sync command settled', releaseCheck: 'v1.3.9/ios-pull-sync' }
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
                         : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',

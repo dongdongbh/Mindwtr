@@ -287,7 +287,7 @@ describe('iOS Gmail capture host', () => {
         expect(await f.request('connect')).toMatchObject({ ok: true, value: { value: { connected: true } } });
         await f.request('configure', { labelId: 'label', enabled: true });
         await f.request('checkNow');
-        expect(f.lines.filter((line) => line.includes('v1.3.8/ios-gmail-capture'))).toEqual([
+        expect(f.lines.filter((line) => line.includes('v1.3.9/ios-gmail-capture'))).toEqual([
             expect.stringContaining('Native iOS Gmail connect')]);
         expect(f.lines.some((line) => line.includes('outcome') && line.includes('connected'))).toBe(true);
         for (const line of f.lines) expect(line).not.toMatch(SECRET_TEXT);

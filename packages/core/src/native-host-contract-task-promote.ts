@@ -206,7 +206,7 @@ export function createTaskPromotionMethods(deps: {
         ? fail('SAVE_FAILED', deps.t()(error)) : fail('STALE_REVISION', deps.t()(error ?? 'task.expandChecklistConflict'));
     const confirmed = <T,>(operation: 'convert' | 'undo', count: number, value: T): NativeHostResult<T> => {
         try { logInfo('Native checklist project conversion confirmed', { scope: 'native-host', category: 'storage', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-checklist-project', operation, count, outcome: 'confirmed' } }); }
+            context: { releaseCheck: 'v1.3.9/ios-checklist-project', operation, count, outcome: 'confirmed' } }); }
         catch {}
         return { ok: true, value };
     };

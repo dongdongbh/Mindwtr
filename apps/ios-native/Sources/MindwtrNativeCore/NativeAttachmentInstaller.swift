@@ -111,7 +111,7 @@ final class NativeAttachmentInstaller {
         }
         if candidateFiles != nil {
             let outcome = operation == "hash" ? "verified" : response["status"] as? String ?? "refused"
-            NSLog("Native iOS RN candidate provider attachment operation confirmed releaseCheck=v1.3.8/ios-rn-candidate-provider-installer operation=%@ outcome=%@", operation, outcome)
+            NSLog("Native iOS RN candidate provider attachment operation confirmed releaseCheck=v1.3.9/ios-rn-candidate-provider-installer operation=%@ outcome=%@", operation, outcome)
         }
         return String(decoding: try JSONSerialization.data(withJSONObject: response, options: [.sortedKeys]), as: UTF8.self)
     }

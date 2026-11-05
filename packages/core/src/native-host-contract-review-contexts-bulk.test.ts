@@ -45,7 +45,7 @@ describe('Review and Contexts bulk selection through the shared bulk read and st
             expect(value(await sqlite.host.commitPreparedInboxTasksMove(command))).toEqual({ count: 2, status: 'reference' });
             expect(['home-1', 'later', 'work'].map((row) => useTaskStore.getState()._tasksById.get(row)?.status)).toEqual(['reference', 'reference', 'next']);
             expect(log).toHaveBeenCalledWith('Native Review bulk status confirmed', expect.objectContaining({ force: true,
-                context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-status', count: 2, status: 'reference', outcome: 'moved' } }));
+                context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-status', count: 2, status: 'reference', outcome: 'moved' } }));
         } finally { await sqlite.close(); }
     });
 
@@ -76,7 +76,7 @@ describe('Review and Contexts bulk selection through the shared bulk read and st
             expect(value(await sqlite.host.commitPreparedInboxTasksAddTag(tagged))).toEqual({ count: 2, changed: true });
             expect(useTaskStore.getState()._tasksById.get('home-2')?.tags).toContain('#errand');
             expect(log).toHaveBeenCalledWith('Native Contexts bulk tag confirmed', expect.objectContaining({ force: true,
-                context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-tag', count: 2, outcome: 'added' } }));
+                context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-tag', count: 2, outcome: 'added' } }));
             const move = { requestId: id(5), source: 'contexts', taskIds: ['home-1', 'home-2'], taskRevisions: revisions(['home-1', 'home-2']), status: 'someday', params: CONTEXTS };
             const moved = { request: move, prepared: value(await sqlite.host.prepareInboxTasksMove(move as never)).prepared } as never;
             expect(value(await sqlite.host.commitPreparedInboxTasksMove(moved))).toEqual({ count: 2, status: 'someday' });
@@ -85,7 +85,7 @@ describe('Review and Contexts bulk selection through the shared bulk read and st
             expect((value(await sqlite.host.commitPreparedArchivedTasksDelete(deletion)) as { count: number }).count).toBe(1);
             expect(useTaskStore.getState()._tasksById.get('home-1')?.deletedAt).toBeTruthy();
             expect(log).toHaveBeenCalledWith('Native Contexts bulk Trash confirmed', expect.objectContaining({ force: true,
-                context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-trash', count: 1, outcome: 'deleted' } }));
+                context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-trash', count: 1, outcome: 'deleted' } }));
             const undoRequest = { requestId: id(7), deleteRequestId: remove.requestId };
             const undo = { request: undoRequest, prepared: value(await sqlite.host.prepareArchivedTasksDeleteUndo({ request: undoRequest, delete: deletion } as never)).prepared } as never;
             expect(value(await sqlite.host.commitPreparedArchivedTasksDeleteUndo(undo))).toEqual({ count: 1 });

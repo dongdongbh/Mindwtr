@@ -266,7 +266,7 @@ final class NativeSandboxSession: ObservableObject {
     }
 
     private static func diagnostic(_ outcome: String) -> [String: String] {
-        ["releaseCheck": "v1.3.8/ios-sandbox-lifecycle", "operation": "retire",
+        ["releaseCheck": "v1.3.9/ios-sandbox-lifecycle", "operation": "retire",
          "outcome": outcome, "workspace": "personal"]
     }
 }

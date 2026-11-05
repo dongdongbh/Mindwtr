@@ -108,9 +108,9 @@ describe('actual exported iOS Project selected Trash',()=>{
         expect(await cold.call('projectTasksDeleteUndoCommit',undo)).toEqual({ok:true,value:{count:2}});
         expect(cold.writes).toEqual(before);
         expect(cold.database.query<{method:string},[]>('SELECT method FROM native_request_receipts').all().map(row=>row.method.split(':')[0])).toEqual(['projectTasksDeleteUndo']);
-        const entries=diagnostics.trim().split('\n').map(line=>JSON.parse(line)).filter(e=>e.context?.releaseCheck==='v1.3.8/ios-project-bulk-trash');
+        const entries=diagnostics.trim().split('\n').map(line=>JSON.parse(line)).filter(e=>e.context?.releaseCheck==='v1.3.9/ios-project-bulk-trash');
         expect(entries).toHaveLength(2);
-        expect(entries.map(e=>e.context)).toEqual(['deleted','restored'].map(outcome=>({releaseCheck:'v1.3.8/ios-project-bulk-trash',count:'2',outcome,category:'storage'})));
+        expect(entries.map(e=>e.context)).toEqual(['deleted','restored'].map(outcome=>({releaseCheck:'v1.3.9/ios-project-bulk-trash',count:'2',outcome,category:'storage'})));
         expect(JSON.stringify(entries)).not.toContain('PRIVATE');expect(JSON.stringify(entries)).not.toContain(seeded.projectId);
     });
     it.each([undefined,'journaled'] as const)('refuses all eight exports before SQL in Android %s',async bootMode=>{

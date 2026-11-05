@@ -227,7 +227,7 @@ describe('actual native note app handoff diagnostics', () => {
         const lines = f.text().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
         const link = lines.find((line) => line.scope === 'links');
         expect(link).toMatchObject({ level, context: { outcome: args[0], surface: args[1], scheme,
-            ...(scheme === 'obsidian' ? { releaseCheck: 'v1.3.8/ios-native-obsidian-link' } : {}) } });
+            ...(scheme === 'obsidian' ? { releaseCheck: 'v1.3.9/ios-native-obsidian-link' } : {}) } });
         expect(Object.keys(link.context).sort()).toEqual(scheme === 'obsidian'
             ? ['outcome', 'releaseCheck', 'scheme', 'surface'] : ['outcome', 'scheme', 'surface']);
         expect(f.requests).toEqual([]); expect(f.writes).toEqual([]);

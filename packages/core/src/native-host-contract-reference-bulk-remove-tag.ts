@@ -255,7 +255,7 @@ export function createTasksRemoveTagMethods(deps: {
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Remove tag result does not match its journal`);
             if (confirmed.ok) {
                 try { logInfo(`Native ${label} bulk Remove tag confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.8/ios-project-bulk-remove-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-remove-tag' : 'v1.3.4/ios-reference-bulk-remove-tag', count: confirmed.value.count, outcome: 'removed' } }); }
+                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-remove-tag' : source === 'inbox' ? 'v1.3.5/ios-inbox-bulk-remove-tag' : 'v1.3.4/ios-reference-bulk-remove-tag', count: confirmed.value.count, outcome: 'removed' } }); }
                 catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
             }
             return confirmed;

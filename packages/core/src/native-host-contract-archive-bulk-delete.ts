@@ -416,9 +416,9 @@ export function createTasksDeleteMethods(deps: {
         if (prewriteFailure) return prewriteFailure;
         if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${sourceName(envelope)} Trash result does not match its journal`);
         if (confirmed.ok) { try { if (isProject(envelope)) logInfo('Native Project bulk Trash confirmed', { scope: 'native-host', category: 'storage', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-project-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
+            context: { releaseCheck: 'v1.3.9/ios-project-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
         else if (statusListOf(envelope)) logInfo(`Native ${sourceName(envelope)} bulk Trash confirmed`, { scope: 'native-host', category: 'storage', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-status-list-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
+            context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
         else if (isInbox(envelope)) logInfo('Native Inbox bulk Trash confirmed', { scope: 'native-host', category: 'storage',
             context: { releaseCheck: 'v1.3.5/ios-inbox-bulk-trash', count: confirmed.value.count, outcome: isUndo(envelope) ? 'restored' : 'deleted' } });
         else if (isReference(envelope)) logInfo('Native Reference bulk Trash confirmed', { scope: 'native-host', category: 'storage',

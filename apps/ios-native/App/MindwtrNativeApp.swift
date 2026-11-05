@@ -83,7 +83,7 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
     }
     func receive(_ value: NativePersonalIntake.Diagnostic) {
         if value.operation == "share-import" {
-            guard value.message == "Native iOS share intake confirmed", value.releaseCheck == "v1.3.8/ios-share-text-url",
+            guard value.message == "Native iOS share intake confirmed", value.releaseCheck == "v1.3.9/ios-share-text-url",
                   value.outcome == "confirmed" else { return }
             lock.lock(); defer { lock.unlock() }
             if shareImportMarker == nil { shareImportMarker = value }
@@ -91,7 +91,7 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
         }
         if value.operation == "same-tree-reopen" {
             guard value.message == "Native iOS personal intake reopened after container relocation",
-                  value.releaseCheck == "v1.3.8/ios-intake-same-tree-reopen", value.outcome == "confirmed" else { return }
+                  value.releaseCheck == "v1.3.9/ios-intake-same-tree-reopen", value.outcome == "confirmed" else { return }
             lock.lock(); defer { lock.unlock() }
             if sameTreeReopenMarker == nil { sameTreeReopenMarker = value }
             return
@@ -99,7 +99,7 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
         guard value.operation == "finish-settlement" else { return }
         lock.lock(); defer { lock.unlock() }
         guard let identity, value.outcome == identity.outcome.rawValue,
-              value.releaseCheck == "v1.3.8/ios-navigation-finish-settlement",
+              value.releaseCheck == "v1.3.9/ios-navigation-finish-settlement",
               value.message == "Native iOS navigation finish settlement confirmed" else { return }
         if marker == nil { marker = value }
     }
@@ -806,7 +806,7 @@ actor NativeNotificationResponses {
 
     private func bufferHandover() {
         if handoverDiagnostic == nil {
-            handoverDiagnostic = ["releaseCheck":"v1.3.8/ios-reminder-capture-handover", "operation":"handover", "outcome":"confirmed"]
+            handoverDiagnostic = ["releaseCheck":"v1.3.9/ios-reminder-capture-handover", "operation":"handover", "outcome":"confirmed"]
         }
     }
 }
@@ -1163,7 +1163,7 @@ final class AppLockController: ObservableObject {
             if enabled == true && locked && !authenticating && warmReturn {
                 locked = false
                 errorKey = nil
-                NSLog("Native App lock warm return releaseCheck=v1.3.8/ios-app-lock-delay outcome=within-delay")
+                NSLog("Native App lock warm return releaseCheck=v1.3.9/ios-app-lock-delay outcome=within-delay")
             }
             // Remove after SwiftUI has reconciled the locked tree, including any presented sheets.
             DispatchQueue.main.async { [weak self] in

@@ -196,7 +196,7 @@ describe('Project Organize durable exact retry and frozen replay', () => {
             fail = false; await s.restart(undefined, { recoveryLoad: true });
             expect(value(await s.host.commitPreparedProjectTasksOrganize(e))).toEqual(e.prepared.result);
             expect(logs).toHaveBeenCalledWith('Native Project bulk Organize confirmed', expect.objectContaining({ force: true, context: {
-                releaseCheck: 'v1.3.8/ios-project-bulk-organize', count: e.prepared.result.count, outcome: 'organized' } }));
+                releaseCheck: 'v1.3.9/ios-project-bulk-organize', count: e.prepared.result.count, outcome: 'organized' } }));
             const savedReceipts = await receipts(s), logCount = logs.mock.calls.filter(([message]) => message === 'Native Project bulk Organize confirmed').length;
             await s.client().run('DELETE FROM tasks WHERE id=?', ['waiting']); await s.restart(undefined, { recoveryLoad: true }); const saved = await raw(s);
             expect(value(s.host.projectTasksOrganizeOutcome(e))).toEqual(e.prepared.result); expect(value(await s.host.commitPreparedProjectTasksOrganize(e))).toEqual(e.prepared.result);

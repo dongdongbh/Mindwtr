@@ -489,7 +489,7 @@ final class NativeReminderImportTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("records").path), [])
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("order").path), [])
         XCTAssertEqual(diagnostics.intakeEvents.map(\.outcome), ["knownTerminal", "knownTerminal", "knownTerminal"])
-        XCTAssertTrue(diagnostics.intakeEvents.allSatisfy { $0.releaseCheck == "v1.3.8/ios-personal-intake-disposition" && $0.operation == "reminder-capture" })
+        XCTAssertTrue(diagnostics.intakeEvents.allSatisfy { $0.releaseCheck == "v1.3.9/ios-personal-intake-disposition" && $0.operation == "reminder-capture" })
     }
 
     func testReminderFloorUnknownAndOriginalActiveKeepTruthfulHotColdDispositionAndFirstBytes() async throws {

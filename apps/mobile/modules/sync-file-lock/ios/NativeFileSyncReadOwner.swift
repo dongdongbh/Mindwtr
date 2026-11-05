@@ -17,10 +17,10 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   enum Diagnostic: Equatable {
     case admitted, createdWriteCompleted, quarantineCompleted, ownedDeleteCompleted
     static let message = "Native iOS File Sync read owner admitted"
-    static let marker = "v1.3.8/ios-file-sync-read-owner"
+    static let marker = "v1.3.9/ios-file-sync-read-owner"
     static let createdWriteMessage = "Native iOS File Sync created-file write completed"
-    static let createdWriteMarker = "v1.3.8/ios-file-sync-created-write"
-    static let publicationMarker = "v1.3.8/ios-file-sync-publication-primitives"
+    static let createdWriteMarker = "v1.3.9/ios-file-sync-created-write"
+    static let publicationMarker = "v1.3.9/ios-file-sync-publication-primitives"
     var eventMessage: String {
       switch self {
       case .admitted: return Self.message

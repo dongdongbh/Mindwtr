@@ -84,7 +84,7 @@ export function createIOSReviewAI(deps: { contract: Contract; adapter: () => Sql
             try {
                 accept({ phase: 'begin', provider, configuration: JSON.stringify(configuration), language: frozen.language }); current();
                 logInfo('Native iOS review sequence candidates prepared', { scope: 'ai', force: true,
-                    context: { releaseCheck: 'v1.3.8/ios-review-sequence', outcome: 'prepared', candidateCount: frozen.items.length } });
+                    context: { releaseCheck: 'v1.3.9/ios-review-sequence', outcome: 'prepared', candidateCount: frozen.items.length } });
                 selectedHost = host;
                 let pending; try { pending = deps.contract.requestWeeklyReviewAnalysis({ signal }).then(unwrap); }
                 finally { selectedHost = null; }

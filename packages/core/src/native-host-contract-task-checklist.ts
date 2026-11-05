@@ -1807,7 +1807,7 @@ const readInlineEnvelope = (value: unknown, validateField: (field: TaskDraftFiel
 };
 const diagnoseInline = (request: NativeInlineChecklistRequest): void => {
     try { logInfo('Native iOS inline checklist confirmed', { scope: 'native-host', category: 'storage', force: true,
-        context: { releaseCheck: 'v1.3.8/ios-inline-checklist', action: request.action, outcome: 'confirmed' } }); }
+        context: { releaseCheck: 'v1.3.9/ios-inline-checklist', action: request.action, outcome: 'confirmed' } }); }
     catch { /* Diagnostics cannot change a durable acknowledgment. */ }
 };
 
@@ -1840,12 +1840,12 @@ const readRowQuickStatusEnvelope = (value: unknown, validateField: (field: TaskD
 };
 const diagnoseRowQuickStatus = (request: NativeRowQuickStatusRequest): void => {
     try { logInfo('Native iOS row quick status confirmed', { scope: 'native-host', category: 'storage', force: true,
-        context: { releaseCheck: 'v1.3.8/ios-row-quick-status', target: request.status, outcome: 'confirmed' } }); }
+        context: { releaseCheck: 'v1.3.9/ios-row-quick-status', target: request.status, outcome: 'confirmed' } }); }
     catch { /* Diagnostics cannot change a durable acknowledgment. */ }
 };
 const diagnoseRowCompletion = (kind: 'rowComplete' | 'rowCompleteUndo'): void => {
     try { logInfo('Native iOS row completion confirmed', { scope: 'native-host', category: 'storage', force: true,
-        context: { releaseCheck: 'v1.3.8/ios-row-completion', outcome: kind === 'rowComplete' ? 'completed' : 'undone' } }); }
+        context: { releaseCheck: 'v1.3.9/ios-row-completion', outcome: kind === 'rowComplete' ? 'completed' : 'undone' } }); }
     catch { /* Diagnostics cannot change a durable acknowledgment. */ }
 };
 
@@ -2173,19 +2173,19 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                         context: { releaseCheck: 'v1.3.4/ios-reference-completion', outcome: envelope.prepared.kind === 'referenceComplete' ? 'completed' : 'undone' } });
                 } else if (envelope.prepared.kind === 'rowBackdate') {
                     logInfo('Native iOS row backdated completion confirmed', { scope: 'native-host', category: 'storage', force: true,
-                        context: { releaseCheck: 'v1.3.8/ios-row-backdate', outcome: 'completed' } });
+                        context: { releaseCheck: 'v1.3.9/ios-row-backdate', outcome: 'completed' } });
                 } else if (envelope.prepared.kind === 'referenceBackdate') {
                     logInfo('Native Reference Task backdated completion confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: 'v1.3.4/ios-reference-backdate', outcome: 'completed' } });
                 } else if (envelope.prepared.kind === 'rowFocus') {
                     logInfo('Native iOS row Focus confirmed', { scope: 'native-host', category: 'storage', force: true,
-                        context: { releaseCheck: 'v1.3.8/ios-row-focus', outcome: envelope.prepared.request.focused ? 'focused' : 'unfocused' } });
+                        context: { releaseCheck: 'v1.3.9/ios-row-focus', outcome: envelope.prepared.request.focused ? 'focused' : 'unfocused' } });
                 } else if (envelope.prepared.kind === 'rowDates') {
                     logInfo('Native iOS row dates confirmed', { scope: 'native-host', category: 'storage', force: true,
-                        context: { releaseCheck: 'v1.3.8/ios-row-dates', outcome: 'changed' } });
+                        context: { releaseCheck: 'v1.3.9/ios-row-dates', outcome: 'changed' } });
                 } else if (envelope.prepared.kind === 'rowDestination') {
                     logInfo('Native iOS row destination confirmed', { scope: 'native-host', category: 'storage', force: true,
-                        context: { releaseCheck: 'v1.3.8/ios-row-destination', outcome: 'moved' } });
+                        context: { releaseCheck: 'v1.3.9/ios-row-destination', outcome: 'moved' } });
                 } else if (envelope.prepared.kind === 'referenceDestination') {
                     logInfo('Native Reference Task destination confirmed', { scope: 'native-host', category: 'storage',
                         context: { releaseCheck: 'v1.3.4/ios-reference-destination', outcome: 'moved' } });
@@ -2375,7 +2375,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
     });
     const widgetDiagnostic = (result: NativeWidgetCompletionResult) => {
         try { logInfo('Native iOS widget completion confirmed', { scope: 'widget', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-widget-completion', outcome: result.outcome } }); } catch { /* Diagnostics cannot change a saved result. */ }
+            context: { releaseCheck: 'v1.3.9/ios-widget-completion', outcome: result.outcome } }); } catch { /* Diagnostics cannot change a saved result. */ }
     };
     const widgetAuthority = {
         prepareWidgetCompletion(input: unknown): NativeHostResult<{ kind: 'prepared'; prepared: NativeWidgetCompletionEnvelope }

@@ -53,12 +53,12 @@ public actor NativePersonalIntake {
         public let outcome: String
         init() {
             message = "Native iOS personal intake capture confirmed"
-            releaseCheck = "v1.3.8/ios-personal-intake"
+            releaseCheck = "v1.3.9/ios-personal-intake"
             operation = "capture"; outcome = "confirmed"
         }
         fileprivate init(disposition: ReminderCaptureDisposition) {
             message = "Native iOS reminder capture disposition confirmed"
-            releaseCheck = "v1.3.8/ios-personal-intake-disposition"
+            releaseCheck = "v1.3.9/ios-personal-intake-disposition"
             operation = "reminder-capture"
             switch disposition {
             case .captured: outcome = "captured"
@@ -68,17 +68,17 @@ public actor NativePersonalIntake {
         }
         fileprivate init(shareImported: Void) {
             message = "Native iOS share intake confirmed"
-            releaseCheck = "v1.3.8/ios-share-text-url"
+            releaseCheck = "v1.3.9/ios-share-text-url"
             operation = "share-import"; outcome = "confirmed"
         }
         fileprivate init(finish outcome: Outcome) {
             message = "Native iOS navigation finish settlement confirmed"
-            releaseCheck = "v1.3.8/ios-navigation-finish-settlement"
+            releaseCheck = "v1.3.9/ios-navigation-finish-settlement"
             operation = "finish-settlement"; self.outcome = outcome.rawValue
         }
         fileprivate init(sameTreeReopen: Void) {
             message = "Native iOS personal intake reopened after container relocation"
-            releaseCheck = "v1.3.8/ios-intake-same-tree-reopen"
+            releaseCheck = "v1.3.9/ios-intake-same-tree-reopen"
             operation = "same-tree-reopen"; outcome = "confirmed"
         }
     }

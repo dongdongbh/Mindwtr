@@ -129,7 +129,7 @@ describe('private iOS Weekly Review AI', () => {
         expect(witness.items.some((item: { id: string }) => item.id === ID)).toBe(false);
         const answer = await f.call('iosReviewAIRequest', {});
         expect(answer).toMatchObject({ ok: true, value: { suggestions: [], selectedIds: [] } });
-        expect(f.logs.filter(row => row.op === 'append').map(row => row.text).join('')).toContain('v1.3.8/ios-review-sequence');
+        expect(f.logs.filter(row => row.op === 'append').map(row => row.text).join('')).toContain('v1.3.9/ios-review-sequence');
         expect(f.logs.filter(row => row.op === 'append').map(row => row.text).join('')).toContain('prepared');
         expect(f.writes).toEqual([]);
         const plain = await f.poll(f.host.menuRead('weeklyReview', JSON.stringify({ checkpoint: JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }), offset: 0, limit: 100 })));

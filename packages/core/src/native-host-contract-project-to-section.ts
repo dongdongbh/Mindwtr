@@ -101,7 +101,7 @@ export function createProjectToSectionMethods(deps: {
             deps.t()(`projects.${prefix}.${reason}`));
     const confirmed = <T,>(operation: 'convert' | 'undo', count: number, value: T): NativeHostResult<T> => {
         try { logInfo('Native project to section conversion confirmed', { scope: 'native-host', category: 'storage', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-project-to-section', operation, count, outcome: 'confirmed' } }); }
+            context: { releaseCheck: 'v1.3.9/ios-project-to-section', operation, count, outcome: 'confirmed' } }); }
         catch {}
         return { ok: true, value };
     };

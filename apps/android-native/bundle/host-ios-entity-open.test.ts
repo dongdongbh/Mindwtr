@@ -176,7 +176,7 @@ describe('closed production widget task URL read', () => {
         for (const field of ['_allTasks', '_allProjects', 'settings'] as const) expect(after[field]).toBe(before[field]);
         expect(f.writes).toEqual([]);
         expect(f.diagnostics).toEqual([{ message: 'Native iOS production task URL resolved', options: { scope: 'native-ios', force: true,
-            context: { releaseCheck: 'v1.3.8/ios-production-task-url', outcome: expected.type } } }]);
+            context: { releaseCheck: 'v1.3.9/ios-production-task-url', outcome: expected.type } } }]);
     });
     it.each(['mindwtr-native-dev://open?task=reference-task', 'https://open?task=reference-task',
         'mindwtr:///focus', 'mindwtr:///inbox', 'mindwtr:///waiting', 'mindwtr:///someday',

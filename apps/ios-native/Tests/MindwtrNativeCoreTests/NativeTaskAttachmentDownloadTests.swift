@@ -301,7 +301,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         XCTAssertFalse(text.contains("selected-cloudkit-record")); XCTAssertFalse(text.contains("sdk-selected-asset"))
         return try text.split(separator: "\n").compactMap { line in
             let entry = try object(String(line)), context = entry["context"] as? [String: String]
-            guard context?["releaseCheck"] == "v1.3.8/ios-cloudkit-selected-download" else { return nil }
+            guard context?["releaseCheck"] == "v1.3.9/ios-cloudkit-selected-download" else { return nil }
             XCTAssertEqual(Set(context?.keys.map { $0 } ?? []), Set(["releaseCheck", "operation", "outcome"]))
             XCTAssertEqual(context?["operation"], "cloudkit-task-availability")
             return context?["outcome"]
@@ -521,8 +521,8 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         guard FileManager.default.fileExists(atPath: log.path) else { return [] }
         return try String(contentsOf: log, encoding: .utf8).split(separator: "\n").compactMap { line in
             let entry = try object(String(line)), context = entry["context"] as? [String: String]
-            guard context?["releaseCheck"] == "v1.3.8/ios-close-cancellation-order" else { return nil }
-            XCTAssertEqual(context, ["releaseCheck": "v1.3.8/ios-close-cancellation-order", "operation": "close", "outcome": "drained"])
+            guard context?["releaseCheck"] == "v1.3.9/ios-close-cancellation-order" else { return nil }
+            XCTAssertEqual(context, ["releaseCheck": "v1.3.9/ios-close-cancellation-order", "operation": "close", "outcome": "drained"])
             return context
         }
     }

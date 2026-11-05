@@ -155,7 +155,7 @@ actor NativeVoiceRecorder {
             }
             let result = NativeVoiceRecordingSource(session: selected, receipt: frozen.receipt, proof: frozen.source)
             source = result; self.reservation = nil; state = .stopped
-            NSLog("Native iOS voice source frozen releaseCheck=v1.3.8/ios-native-voice stage=recording outcome=stopped")
+            NSLog("Native iOS voice source frozen releaseCheck=v1.3.9/ios-native-voice stage=recording outcome=stopped")
             return result
         } catch {
             self.adapter = nil
@@ -277,7 +277,7 @@ struct NativeAVAudioRecorderBackend: NativeVoiceRecorderBackend {
             guard !waited || ProcessInfo.processInfo.systemUptime < deadline else { throw NativeVoiceRecordingError.unavailable }
             if state == .active {
                 if waited {
-                    NSLog("Native iOS voice permission foreground readmitted releaseCheck=v1.3.8/ios-voice-permission-foreground outcome=active")
+                    NSLog("Native iOS voice permission foreground readmitted releaseCheck=v1.3.9/ios-voice-permission-foreground outcome=active")
                 }
                 return true
             }

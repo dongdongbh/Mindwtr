@@ -587,7 +587,7 @@ export function createSomedaySectionBulkMoveMethods(deps: {
         if (!confirmed.ok) return confirmed;
         try {
             logInfo('Native Someday bulk section move confirmed', { scope: 'native-host', category: 'storage', force: true,
-                context: { releaseCheck: 'v1.3.8/ios-someday-section-bulk-move', operation: prepared.kind,
+                context: { releaseCheck: 'v1.3.9/ios-someday-section-bulk-move', operation: prepared.kind,
                     count: prepared.result.taskIds.length, outcome: 'confirmed' } });
         } catch {
             return confirmed;

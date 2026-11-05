@@ -163,8 +163,8 @@ describe('native host contract: reminders', () => {
             expect(advances).toHaveLength(2);
             expect(new Set(advances.map((alarm) => alarm.id)).size).toBe(2);
             expect(first.schedule.some((alarm) => alarm.key.startsWith('task:dated'))).toBe(false);
-            const marker = logs.filter((entry) => (entry.context as Record<string, unknown> | undefined)?.releaseCheck === 'v1.3.8/ios-advance-reminders');
-            expect(marker.map((entry) => entry.context)).toEqual(platform === 'ios' ? [{ releaseCheck: 'v1.3.8/ios-advance-reminders', outcome: 'scheduled', count: 2 }] : []);
+            const marker = logs.filter((entry) => (entry.context as Record<string, unknown> | undefined)?.releaseCheck === 'v1.3.9/ios-advance-reminders');
+            expect(marker.map((entry) => entry.context)).toEqual(platform === 'ios' ? [{ releaseCheck: 'v1.3.9/ios-advance-reminders', outcome: 'scheduled', count: 2 }] : []);
             vi.setSystemTime(new Date('2026-09-28T11:00:01.000Z'));
             const expired = value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: first.state, permissionGranted: true }));
             await useTaskStore.getState().updateTask('timed', { reminderPolicy: 'skip' });

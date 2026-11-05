@@ -280,7 +280,7 @@ describe('release diagnostics field names', () => {
         expect(sanitizeLogContext(receipt)).toEqual(receipt);
     });
     it('preserves the content-free iOS File Sync attachment pass receipt', () => {
-        const receipt = { releaseCheck: 'v1.3.8/ios-file-sync-attachments', phase: 'post-merge', outcome: 'updated', published: '1', downloaded: '2' };
+        const receipt = { releaseCheck: 'v1.3.9/ios-file-sync-attachments', phase: 'post-merge', outcome: 'updated', published: '1', downloaded: '2' };
         expect(sanitizeLogContext(receipt)).toEqual(receipt);
     });
     it('preserves the content-free iOS background sync hold receipt', () => {
@@ -332,7 +332,7 @@ describe('release diagnostics field names', () => {
         const missing = { validity: 'missing', x: 0, y: 0, width: 0, height: 0 };
         const nonfinite = { ...missing, validity: 'nonfinite' };
         const context = {
-            releaseCheck: 'v1.3.8/ios-board-drag-geometry', reason: 'geometry-area',
+            releaseCheck: 'v1.3.9/ios-board-drag-geometry', reason: 'geometry-area',
             originalViewport: finite, currentViewport: finite, originalArea: finite, currentArea: finite,
             originalRow: missing, currentRow: nonfinite,
             rebaseReason: 'not-recorded', columnOrdinal: -1, originalColumn: missing, currentColumn: missing,

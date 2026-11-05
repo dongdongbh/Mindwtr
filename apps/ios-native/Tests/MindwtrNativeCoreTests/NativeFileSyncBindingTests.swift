@@ -133,7 +133,7 @@ final class NativeFileSyncBindingTests: XCTestCase {
             XCTAssertEqual(completion["level"] as? String, "info")
             XCTAssertEqual(completion["scope"] as? String, "native-ios")
             let context = try XCTUnwrap(completion["context"] as? [String: String])
-            XCTAssertEqual(context, ["releaseCheck": "v1.3.8/ios-file-sync-app-binding", "operation": "foreground", "outcome": "completed"])
+            XCTAssertEqual(context, ["releaseCheck": "v1.3.9/ios-file-sync-app-binding", "operation": "foreground", "outcome": "completed"])
         }
         XCTAssertEqual(try readConfiguration(), configuration)
         XCTAssertEqual(try Data(contentsOf: selected.appendingPathComponent("unknown.bin")), Data([0, 255, 7]))
@@ -196,7 +196,7 @@ final class NativeFileSyncBindingTests: XCTestCase {
         let lines = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)
         let markers = try lines.split(separator: "\n").map { try object(String($0)) }.filter { $0["message"] as? String == "Native iOS manual directory File Sync completed" }
         XCTAssertEqual(markers.count, 2)
-        for marker in markers { XCTAssertEqual(marker["context"] as? [String: String], ["releaseCheck": "v1.3.8/ios-file-sync-directory-manual", "operation": "foreground", "outcome": "completed"]) }
+        for marker in markers { XCTAssertEqual(marker["context"] as? [String: String], ["releaseCheck": "v1.3.9/ios-file-sync-directory-manual", "operation": "foreground", "outcome": "completed"]) }
         try Data(json(["picked": result, "manual": manual, "off": off]).utf8).write(to: root.appendingPathComponent("directory-result.json"))
         await cold.close()
     }

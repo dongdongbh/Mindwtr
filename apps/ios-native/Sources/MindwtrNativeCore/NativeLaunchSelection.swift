@@ -58,7 +58,7 @@ public enum NativeLaunchSelection: Sendable {
                 guard let bundleIdentifier, !bundleIdentifier.isEmpty else { throw SelectionFailure() }
                 let container = supportURL.appendingPathComponent("NativeRNRehearsal", isDirectory: true)
                 #if DEBUG
-                NSLog("Native iOS RN rehearsal source selected releaseCheck=v1.3.8/ios-rn-rehearsal-source outcome=production-copy")
+                NSLog("Native iOS RN rehearsal source selected releaseCheck=v1.3.9/ios-rn-rehearsal-source outcome=production-copy")
                 #endif
                 // The staged source belongs to production RN, independently of the test app's namespace.
                 return .rehearsal(containerURL: container,

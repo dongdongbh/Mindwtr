@@ -289,9 +289,9 @@ export function createProjectFlowMethods(deps: {
             const saved = await deps.save();
             if (saved.ok && prepared.version === 2)
                 logProjectFlowModeSaved(prepared.request.action.mode, prepared.effect.sections.length,
-                    'v1.3.8/ios-project-flow-mode');
+                    'v1.3.9/ios-project-flow-mode');
             if (saved.ok && prepared.version === 3) logInfo('Native section flow mode saved', {
-                scope: 'store', category: 'storage', context: { releaseCheck: 'v1.3.8/ios-section-flow-mode',
+                scope: 'store', category: 'storage', context: { releaseCheck: 'v1.3.9/ios-section-flow-mode',
                     enabled: prepared.request.action.sequential, sectionCount: 1 },
             });
             return saved.ok ? { ok: true, value: prepared.result } : saved;

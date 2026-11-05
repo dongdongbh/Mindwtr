@@ -291,7 +291,7 @@ describe('actual exported canonical iOS Next widget snapshot', () => {
         expect(await f.snapshot()).toMatchObject({ ok: true });
         expect(f.logText().trim().split('\n').map((line) => JSON.parse(line))).toEqual([
             { ts: expect.any(String), level: 'info', scope: 'native-ios', message: 'Native iOS Next widget snapshot',
-                context: { releaseCheck: 'v1.3.8/ios-widget-next-snapshot', count: '1' } },
+                context: { releaseCheck: 'v1.3.9/ios-widget-next-snapshot', count: '1' } },
         ]);
         expect(f.logText()).not.toContain('PRIVATE');
         f.failLog(); expect(await f.snapshot()).toMatchObject({ ok: true }); expect(f.writes).toEqual([]);
@@ -461,7 +461,7 @@ describe('private iOS full-family widget read', () => {
         expect(await f.familySnapshot(appearance('light'))).toMatchObject({ ok: true });
         expect(f.logText().trim().split('\n').map((line) => JSON.parse(line))).toEqual([
             { ts: expect.any(String), level: 'info', scope: 'native-ios', message: 'Native iOS widget families read',
-                context: { releaseCheck: 'v1.3.8/ios-widget-family-read', operation: 'read', outcome: 'ready' } },
+                context: { releaseCheck: 'v1.3.9/ios-widget-family-read', operation: 'read', outcome: 'ready' } },
         ]);
         expect(f.logText()).not.toContain('PRIVATE');
         f.failLog(); expect(await f.familySnapshot(appearance('dark'))).toMatchObject({ ok: true });

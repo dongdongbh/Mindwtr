@@ -78,7 +78,7 @@ export function createReviewProjectTaskMethods(deps: { readiness: () => NativeHo
         return saved;
     } });
     const diagnose = () => { try { logInfo('Native iOS Weekly Review project task confirmed', { scope: 'native-host', category: 'storage',
-        context: { releaseCheck: 'v1.3.8/ios-weekly-review-project-task', outcome: 'confirmed' } }); } catch { return undefined; } };
+        context: { releaseCheck: 'v1.3.9/ios-weekly-review-project-task', outcome: 'confirmed' } }); } catch { return undefined; } };
     return {
         async getWeeklyReviewProjectTaskOptions(input: { projectId: string }) {
             const ready = deps.readiness(); if (!ready.ok) return ready;
