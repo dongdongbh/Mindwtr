@@ -220,6 +220,21 @@ const menuDotIsRed = async () => {
 
 const badge = () => [...logs().matchAll(/Native Android sync state badge=(\w+) cycles=(\d+)/g)].at(-1)?.slice(1) ?? [null, null];
 
+const STORE_WRITE = /"scope":"store"|Archive retention cleanup saved|Sync refresh applied load migrations|task command/;
+const changeOwedAfterLastCycle = () => {
+    const lines = logs().split('\n');
+    const done = lines.reduce((found, line, index) => (/\[sync\] Sync diagnostic complete \{"elapsedMs":"\d+".*"status":"success"/.test(line) ? index : found), -1);
+    if (done < 0 || lines.slice(done + 1).some((line) => line.includes('[sync] Sync start'))) return null;
+    const last = lines.slice(done + 1).map((line) => /sync state badge=(\w+) cycles=(\d+)/.exec(line)).filter(Boolean).at(-1);
+    if (last?.[1] !== 'syncing') return null;
+    const started = lines.slice(0, done).reduce((found, line, index) => (line.includes('[sync] Sync start') ? index : found), 0);
+    return {
+        cycleMs: Number(/"elapsedMs":"(\d+)"/.exec(lines[done])[1]),
+        cycles: Number(last[2]),
+        writes: lines.slice(started, lines.length).filter((line) => STORE_WRITE.test(line)).map((line) => line.slice(0, 300)),
+    };
+};
+
 let dav = null;
 let cloud = null;
 let second = null;
@@ -425,7 +440,21 @@ try {
     await until('the retry to upload the capture with no tap', () => webdavDocument(dav, FOLDER).tasks.some((task) => task.title === titles.failed)
         && webdavDocument(dav, FOLDER).tasks.some((task) => task.title === titles.down), 600_000, 3_000);
     check(true, '(5) once the server took writes again, the retry uploaded both captures by itself');
-    await until('the badge healthy again', () => badge()[0] === 'healthy', 30_000);
+    const healthySince = Date.now();
+    try {
+        await until('the badge healthy again', () => badge()[0] === 'healthy', 30_000);
+    } catch (error) {
+        const owed = changeOwedAfterLastCycle();
+        if (!owed) throw error;
+        const limitMs = Math.min(30_000 + 9 * owed.cycleMs, 300_000);
+        console.log(`info - a change stayed owed after the last cycle (${owed.cycleMs} ms, badge=syncing cycles=${owed.cycles}); waiting up to ${limitMs} ms for the next cycle`);
+        console.log(`evidence - store writes since that cycle started:\n${owed.writes.join('\n') || '(none in the log)'}`);
+        await until('the next cycle after the owed change, then the badge healthy', () => {
+            const [state, cycles] = badge();
+            return state === 'healthy' && Number(cycles) > owed.cycles;
+        }, Math.max(0, healthySince + limitMs - Date.now()), 2_000);
+        check(true, `(5) the change owed after the last cycle went up in the next cycle (#766 adaptive wait), and the badge is healthy`);
+    }
 
 
     nodes = await openSync();
@@ -479,7 +508,7 @@ try {
     console.log('Sync device check passed');
 } catch (error) {
     try {
-        console.log(`evidence - app log (sync):\n${logs().split('\n').filter((line) => /\[sync\]|sync state|automatic cycle|Auto-sync|task command|Core action|idle pump/.test(line))
+        console.log(`evidence - app log (sync):\n${logs().split('\n').filter((line) => /\[sync\]|sync state|automatic cycle|Auto-sync|task command|Core action|idle pump|"scope":"store"|Archive retention cleanup saved/.test(line))
             .slice(-60).map((line) => line.slice(0, 300)).join('\n')}`);
     } catch {                       }
     evidenced(error);
