@@ -124,6 +124,7 @@ export function parseNativeWatchPomodoroSource(sourceJSON: string): {
     if (!time(createdAtMs) || createdAtMs < Date.parse('2000-01-01T00:00:00.000Z')
         || createdAtMs > Date.parse('2100-01-01T00:00:00.000Z')) invalid();
     if (Object.prototype.hasOwnProperty.call(value, 'taskId') && (!identity(value.taskId, 512)
+        // eslint-disable-next-line no-control-regex
         || !bounded(value.taskId, 512) || /[\u0000-\u001f\u007f-\u009f]/u.test(value.taskId))) invalid();
     return { id: value.id, action: value.action, createdAtMs,
         ...(typeof value.taskId === 'string' ? { taskId: value.taskId } : {}) };

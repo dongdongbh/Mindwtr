@@ -67,6 +67,7 @@ export function buildWatchApplicationContext({
     const fits = size <= Math.min(16 * 1024, remainingDetails)
       && (item.checklist?.length ?? 0) <= 100
       && (item.checklist ?? []).every((entry) => entry.id.length > 0 && entry.id.trim() === entry.id
+        // eslint-disable-next-line no-control-regex
         && !/[\u0000-\u001f\u007f]/.test(entry.id)
         && new TextEncoder().encode(entry.id).length <= 512
         && new TextEncoder().encode(entry.title).length <= 8000);
