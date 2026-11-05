@@ -215,8 +215,10 @@ try {
     await tap(await device.revealAction(nodes, T.done, 'done'));
     const done = await storedWhen(T.done, (row) => row.status === 'done');
     check(done.status === 'done' && Boolean(done.completedAt), '(g) Done completed the task');
-    await waitFor('the Done toast\'s Undo', undoShown, 10_000);
-    check(true, '(g) RN\'s Undo toast shows');
+    nodes = await waitFor('the Done toast\'s Undo', undoShown, 10_000);
+    await tap(nodes.find((node) => node.text === en['common.undo']));
+    const undone = await storedWhen(T.done, (row) => row.status !== 'done');
+    check(undone.status === 'inbox' && !undone.completedAt && undone.rev === done.rev + 1, `(g) the Done toast's Undo put the task back in the Inbox in one write (stored ${JSON.stringify(undone)})`);
 
     nodes = await device.reveal(T.backdate);
     longPress(await device.revealAction(nodes, T.backdate, 'done'));
