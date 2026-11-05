@@ -285,6 +285,7 @@ import { createMindSweepMethods } from './native-host-contract-mind-sweep';
 import { createProjectNextActionPromptMethods } from './native-host-contract-project-next-action-prompt';
 import { createTaskBackdateMethods } from './native-host-contract-task-backdate';
 import { createTaskSwipeMethods } from './native-host-contract-task-swipe';
+import { createTaskRowChecklistMethods } from './native-host-contract-task-row-checklist';
 import { createOwnedEditorCompleteTaskDraftSaveMethods, createOwnedEditorFileEditTaskDraftSaveMethods } from './native-host-contract-owned-file-edit-save';
 import { createOwnedEditorFileAddTaskDraftSaveMethods } from './native-host-contract-owned-editor-save';
 import { createOwnedFileAddTaskDraftSaveMethods } from './native-host-contract-owned-file-save';
@@ -1959,6 +1960,7 @@ export function createNativeHostContract(options: {
         ...createTaskBackdateMethods({ readiness, save, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()), requestIdPattern: CAPTURE_ID_PATTERN }),
 
         ...createTaskSwipeMethods({ readiness, save, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()), requestIdPattern: CAPTURE_ID_PATTERN }),
+        ...createTaskRowChecklistMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         ...createCaptureIngestMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
 
         ...createReminderMethods({ readiness, save, language: () => language, requestIdPattern: CAPTURE_ID_PATTERN,

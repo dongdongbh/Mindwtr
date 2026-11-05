@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { generateUUID, getChecklistEditStatus, runStoreCommand, Task, useTaskStore } from '@mindwtr/core';
+import { applyRowChecklistEdit, generateUUID, runStoreCommand, Task, useTaskStore } from '@mindwtr/core';
 import { logError } from '../../lib/app-log';
 import { settleStoreAction } from '../store-action-result';
 
@@ -48,14 +48,8 @@ export function useSwipeableChecklist(
         void settleStoreAction(() => runStoreCommand(async () => {
             const latestTask = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);
             if (!latestTask || latestTask.deletedAt) return undefined;
-            const stored = latestTask.checklist ?? [];
-            const storedIds = new Set(stored.map((item) => item.id));
-            const checklist = [...stored, ...added.filter((item) => !storedIds.has(item.id))].map((item) => (
-                completed.has(item.id) ? { ...item, isCompleted: completed.get(item.id)! } : item
-            ));
-            const status = getChecklistEditStatus({ taskMode: latestTask.taskMode, status: latestTask.status, checklist });
-            const nextStatus = status !== latestTask.status ? status : undefined;
-            return updateTask(taskId, { checklist, ...(nextStatus ? { status: nextStatus } : {}) });
+            const { checklist, status } = applyRowChecklistEdit(latestTask, Object.fromEntries(completed), added);
+            return updateTask(taskId, { checklist, ...(status ? { status } : {}) });
         })).then((outcome) => {
             if (outcome.ok) return;
             const error = 'cause' in outcome
