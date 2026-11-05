@@ -600,6 +600,7 @@ export const createSettingsActions = ({
             let projectsReplaced = 0;
             let attachmentOnlyTasksReplaced = 0;
             let normalizedFocusTasksReplaced = 0;
+            let migrationsPersisted = false;
             let settingsReused = false;
             let visibleTasksReused = false;
             let stateUpdateSkipped = false;
@@ -685,6 +686,7 @@ export const createSettingsActions = ({
                             return state;
                         }
                         if (applied.length > 0) {
+                            migrationsPersisted = true;
 
 
                             const migrationGuardBaseline = isDocumentReplacement
@@ -747,6 +749,19 @@ export const createSettingsActions = ({
                 return;
             }
             const totalFetchMs = Date.now() - fetchInvokedAt;
+
+
+            if (options?.silent && migrationsPersisted) {
+                logInfo('Sync refresh applied load migrations', {
+                    scope: 'store',
+                    category: 'storage',
+                    context: {
+                        releaseCheck: 'v1.3.9/sync-refresh-migrations',
+                        migrations: applied.join(','),
+                        count: applied.length,
+                    },
+                });
+            }
 
 
             if (attachmentOnlyTasksReplaced > 0) {
