@@ -573,7 +573,7 @@ export type TaskEditorModel = {
 
         timeEstimates: Array<{ value: TimeEstimate | ''; label: string }>;
 
-        projects: Array<{ id: string; title: string; areaId: string | null }>;
+        projects: Array<{ id: string; title: string; areaId: string | null; deferred?: boolean }>;
 
         sections: Array<{ id: string; title: string }>;
         areas: Array<{ id: string; name: string; color: string | null }>;
@@ -626,6 +626,8 @@ export type TaskEditorModelInput = {
     formatDate?: DateFormatter;
 
     language?: string;
+
+    groupDeferredProjects?: boolean;
 };
 
 export type TaskDraftDestinationPicker = {
@@ -655,6 +657,14 @@ export type TaskDraftDestinationPicker = {
         choices: Array<{ id: string; label: string; selected: boolean; patch: Pick<TaskDraft, 'sectionId'> }>;
     };
 };
+
+
+function editorProjectOptions(projects: Project[], areas: readonly Area[], grouped: boolean): TaskEditorModel['options']['projects'] {
+    const option = (project: Project) => ({ id: project.id, title: project.title, areaId: project.areaId ?? null });
+    if (!grouped) return projects.map(option);
+    const { active, deferred } = groupProjectsForPicker(projects, areas);
+    return [...active.map((project) => ({ ...option(project), deferred: false })), ...deferred.map((project) => ({ ...option(project), deferred: true }))];
+}
 
 
 export function buildTaskDraftDestinationPicker(input: {
@@ -802,8 +812,7 @@ export function buildTaskEditorModel(input: TaskEditorModelInput): TaskEditorMod
                 value,
                 label: value ? formatTimeEstimateLabel(value, { t }) : t('common.none'),
             })),
-            projects: filterProjectsBySelectedArea(input.projects, draft.areaId)
-                .map((project) => ({ id: project.id, title: project.title, areaId: project.areaId ?? null })),
+            projects: editorProjectOptions(filterProjectsBySelectedArea(input.projects, draft.areaId), input.areas, input.groupDeferredProjects === true),
             sections: projectSections.map((section) => ({ id: section.id, title: section.title })),
             areas: input.areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder)
                 .map((area) => ({ id: area.id, name: area.name, color: area.color ?? null })),

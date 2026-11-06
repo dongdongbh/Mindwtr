@@ -108,6 +108,10 @@ describe('native task draft destination picker', () => {
         expect(searched.destination.groups.filter((group) => group.kind === 'project').map((group) => group.choices.map((choice) => choice.id)))
             .toEqual([['p-b', 'p-a', 'p-z'], ['p-later']]);
         expect(groupIds()).toEqual({ none: [''], project: ['p-z', 'p-a', 'p-b', 'p-later'], area: ['a-home', 'a-2', 'a-10', 'a-work'] });
+        const options = value(grouped.getTaskEditorModel({ id: 'edit' })).options.projects;
+        expect(options.map((option) => [option.id, option.deferred])).toEqual([['p-b', false], ['p-a', false], ['p-z', false], ['p-later', true]]);
+        expect(value(host.getTaskEditorModel({ id: 'edit' })).options.projects.map((option) => Object.keys(option).sort())).toEqual(
+            Array(4).fill(['areaId', 'id', 'title']));
     });
 
     it('filters browsing by the direct area, searches across areas, and never infers an area from a project', () => {

@@ -1687,6 +1687,7 @@ export function createNativeHostContract(options: {
             ...buildTaskEditorModel({
                 task,
                 draft,
+                groupDeferredProjects: options.projectPickerGroups === true,
                 settings: state.settings,
                 projects: state.projects,
                 sections: state.sections,
