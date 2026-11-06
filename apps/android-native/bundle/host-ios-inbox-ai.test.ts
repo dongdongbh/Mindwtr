@@ -79,7 +79,7 @@ async function fixture(provider: 'openai' | 'gemini' | 'anthropic' = 'openai', p
     await import(`./host-entry.ts?inboxAIFixture=${++sequence}`);
     const host = (globalThis as any).MindwtrHost;
     const poll = async (ticket: string) => {
-        for (let i = 0; i < 1000; i++) {
+        for (const deadline = Date.now() + 4_000; Date.now() < deadline;) {
             const raw = host.poll(ticket); if (raw !== null) return JSON.parse(raw);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
