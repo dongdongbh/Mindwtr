@@ -222,6 +222,16 @@ final class NativeVoiceRecordingFilesTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), Data("foreign".utf8))
         XCTAssertEqual(try Data(contentsOf: retained), Data("created".utf8))
     }
+    func testCancelRemovesOwnUnwrittenReservationWhoseTimestampsChangeAfterHook() throws {
+        let reservation = try files.reserveVoiceRecording()
+        let url = try files.withVoiceRecordingURL(reservation, discard: { _ in }) { $0 }
+        files.beforeRetirementUnlink = {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: url.path)
+        }
+        defer { files.beforeRetirementUnlink = nil }
+        XCTAssertEqual(try files.cancelVoiceRecording(reservation), .removed)
+        XCTAssertTrue(try entries().isEmpty)
+    }
     func testHardlinkAndSymlinkRefuseFreezeAndCleanup() throws {
         for hardlink in [true, false] {
             let reservation = try files.reserveVoiceRecording(), bytes = Data("recording".utf8)

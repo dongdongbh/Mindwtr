@@ -824,14 +824,13 @@ final class NativeAttachmentFiles {
         try requireVoiceRecording(reservation)
         let path = Reference(cache: true, components: [reservation.leaf])
         let parent = try openParent(path); defer { Darwin.close(parent.fd) }
-        let before = try Self.regular(reservation.output)
-        try stable(reservation.output, before: before, parent: parent, path: path)
         #if DEBUG
         try beforeRetirementUnlink?()
         #endif
         try requireVoiceRecording(reservation)
-        try stable(reservation.output, before: before, parent: parent, path: path)
-        guard Darwin.unlinkat(parent.fd, parent.leaf, 0) == 0 else { throw NativeAttachmentFilesError.unavailable }
+        try verify(parent, path: path)
+        guard Identity(try Self.named(parent)) == reservation.created,
+              Darwin.unlinkat(parent.fd, parent.leaf, 0) == 0 else { throw NativeAttachmentFilesError.unavailable }
         reservation.finished = true
         guard Darwin.fsync(parent.fd) == 0 else { throw NativeAttachmentFilesError.unavailable }
         try verify(parent, path: path)
