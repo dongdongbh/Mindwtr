@@ -232,6 +232,68 @@ final class NativeVoiceRecordingFilesTests: XCTestCase {
         XCTAssertEqual(try files.cancelVoiceRecording(reservation), .removed)
         XCTAssertTrue(try entries().isEmpty)
     }
+    private func changeOnlyCtime(_ url: URL) throws {
+        let fd = Darwin.open(url.path, O_RDWR | O_NOFOLLOW_ANY | O_CLOEXEC)
+        guard fd >= 0 else { throw FixtureError.failed }
+        defer { Darwin.close(fd) }
+        var before = stat(), after = stat()
+        let marker = Data([0x2a])
+        guard Darwin.fstat(fd, &before) == 0,
+              marker.withUnsafeBytes({ Darwin.fsetxattr(fd, "com.mindwtr.fixture.ctime", $0.baseAddress, $0.count, 0, 0) }) == 0,
+              Darwin.fstat(fd, &after) == 0 else { throw FixtureError.failed }
+        XCTAssertEqual(statChanges(before, after), "ctime")
+    }
+    private func settlement(_ source: NativeAttachmentFiles.CacheSourceProof, voice: NativeVoiceFiles) throws -> NativeVoiceFileSettlement {
+        let target = files.managedRoot.appendingPathComponent(UUID().uuidString.lowercased() + ".m4a")
+        var value = NativeVoiceFileSettlement(source: .init(source), targetURI: target.absoluteString,
+            operationID: UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: ""))
+        value.stage = try voice.reserve(value)
+        return value
+    }
+    func testOwnRecordingCtimeChangesAfterFreezeKeepFrozenHashThroughPublishVerifyAndRetire() throws {
+        let voice = try NativeVoiceFiles(files: files)
+        let reservation = try files.reserveVoiceRecording(), bytes = Data("own recording ctime".utf8)
+        let url = try write(reservation, bytes: bytes), frozen = try finish(reservation)
+        XCTAssertEqual(frozen.source.sha256, SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined())
+        try changeOnlyCtime(url)
+        try files.requireProviderSource(frozen.receipt)
+        let state = try settlement(frozen.source, voice: voice)
+        var sourceChanges = 0
+        files.afterSourceOpened = { try self.changeOnlyCtime(url); sourceChanges += 1 }
+        try voice.publish(state)
+        files.afterSourceOpened = nil
+        XCTAssertGreaterThan(sourceChanges, 0)
+        let target = try XCTUnwrap(URL(string: state.targetURI))
+        try NativeVoiceFiles(files: NativeAttachmentFiles(libraryRoot: root)).verify(state)
+        XCTAssertEqual(try Data(contentsOf: target), bytes)
+        files.beforeRetirementUnlink = { try self.changeOnlyCtime(url) }
+        defer { files.beforeRetirementUnlink = nil }
+        XCTAssertEqual(try files.retireProviderSource(frozen.receipt, checkCancellation: {}), .removed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+    func testOwnRecordingMtimeOrContentChangeAfterFreezeIsRefusedAndRetained() throws {
+        for rewriteContent in [false, true] {
+            let reservation = try files.reserveVoiceRecording(), bytes = Data("frozen recording".utf8)
+            let url = try write(reservation, bytes: bytes), frozen = try finish(reservation)
+            let replacement = Data("changed recording".utf8.prefix(bytes.count))
+            if rewriteContent {
+                let writer = try FileHandle(forWritingTo: url)
+                try writer.write(contentsOf: replacement); try writer.close()
+            } else {
+                try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: url.path)
+            }
+            XCTAssertThrowsError(try files.requireProviderSource(frozen.receipt))
+            if rewriteContent {
+                let voice = try NativeVoiceFiles(files: files), state = try settlement(frozen.source, voice: voice)
+                XCTAssertThrowsError(try voice.publish(state))
+                XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(URL(string: state.targetURI)).path))
+                XCTAssertEqual(try files.retireProviderSource(frozen.receipt, checkCancellation: {}), .generationChanged)
+                XCTAssertEqual(try Data(contentsOf: url), replacement)
+            } else {
+                XCTAssertEqual(try Data(contentsOf: url), bytes)
+            }
+        }
+    }
     func testHardlinkAndSymlinkRefuseFreezeAndCleanup() throws {
         for hardlink in [true, false] {
             let reservation = try files.reserveVoiceRecording(), bytes = Data("recording".utf8)

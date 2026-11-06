@@ -200,6 +200,26 @@ final class NativeVoiceRecorderTests: XCTestCase {
             XCTAssertEqual(backend.adapter?.closeCount, 1); XCTAssertTrue(try entries().isEmpty)
         }
     }
+    func testEmptyStopDiscardsOwnReservationWhoseCtimeChangesBeforeUnlink() async throws {
+        let backend = Backend(); backend.startBytes = Data(); backend.closeBytes = Data()
+        let recorder = NativeVoiceRecorder(files: files, backend: backend), selected = try await session(recorder)
+        try await recorder.start(selected)
+        let url = try XCTUnwrap(try entries().first)
+        var changed = 0
+        files.beforeRetirementUnlink = {
+            let fd = Darwin.open(url.path, O_RDWR | O_NOFOLLOW_ANY | O_CLOEXEC)
+            guard fd >= 0 else { throw FixtureError.failed }
+            defer { Darwin.close(fd) }
+            let marker = Data([0x2a])
+            guard marker.withUnsafeBytes({ Darwin.fsetxattr(fd, "com.mindwtr.fixture.ctime", $0.baseAddress, $0.count, 0, 0) }) == 0 else {
+                throw FixtureError.failed
+            }
+            changed += 1
+        }
+        defer { files.beforeRetirementUnlink = nil }
+        await assertStopFailure(recorder, selected, .emptyRecording)
+        XCTAssertEqual(changed, 1); XCTAssertEqual(backend.adapter?.closeCount, 1); XCTAssertTrue(try entries().isEmpty)
+    }
     func testLiveOversizeMonitorClosesAndCancelsWithoutAcceptingSource() async throws {
         let backend = Backend(); backend.startBytes = Data(repeating: 0x2a, count: NativeVoiceRecorder.maximumAudioBytes + 1)
         backend.closeBytes = Data()

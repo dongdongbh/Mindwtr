@@ -62,20 +62,20 @@ final class NativeVoiceFiles: @unchecked Sendable {
     func publish(_ state: NativeVoiceFileSettlement) throws {
         try queue.sync {
             guard let stage = state.stage?.proof else { throw NativeVoiceJSON.invalid }
-            if (try? files.verifyPublishedAttachment(targetURI: state.targetURI, stageProof: stage, sha256: state.source.sha256, size: state.source.size)) == nil {
-                if (try? files.observeFilledAttachmentStage(stageProof: stage, sha256: state.source.sha256, size: state.source.size)) == nil {
-                    _ = try files.fillReservedAttachmentStage(sourceProof: state.source.proof, stageProof: stage)
+            if (try? files.verifyPublishedAttachment(targetURI: state.targetURI, stageProof: stage, sha256: state.source.sha256, size: state.source.size, includingChangeTime: false)) == nil {
+                if (try? files.observeFilledAttachmentStage(stageProof: stage, sha256: state.source.sha256, size: state.source.size, includingChangeTime: false)) == nil {
+                    _ = try files.fillReservedAttachmentStage(sourceProof: state.source.proof, stageProof: stage, includingChangeTime: false)
                 }
                 try files.verifyCandidateRoots()
                 _ = try? installer.publishStage(stage: stage, targetURI: state.targetURI, sha256: state.source.sha256)
             }
-            _ = try files.verifyPublishedAttachment(targetURI: state.targetURI, stageProof: stage, sha256: state.source.sha256, size: state.source.size)
+            _ = try files.verifyPublishedAttachment(targetURI: state.targetURI, stageProof: stage, sha256: state.source.sha256, size: state.source.size, includingChangeTime: false)
         }
     }
     func verify(_ state: NativeVoiceFileSettlement) throws {
         try queue.sync {
             guard let stage = state.stage?.proof else { throw NativeVoiceJSON.invalid }
-            _ = try files.verifyPublishedAttachment(targetURI: state.targetURI, stageProof: stage, sha256: state.source.sha256, size: state.source.size)
+            _ = try files.verifyPublishedAttachment(targetURI: state.targetURI, stageProof: stage, sha256: state.source.sha256, size: state.source.size, includingChangeTime: false)
         }
     }
     func retireStage(_ state: NativeVoiceFileSettlement) {

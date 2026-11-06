@@ -138,12 +138,12 @@ actor NativeVoiceRecorder {
         monitor?.cancel(); monitor = nil
         do {
             try adapter.close(); self.adapter = nil
-            let frozen = try files.finishVoiceRecording(reservation, maximumBytes: Self.maximumAudioBytes)
-            guard frozen.source.size > 0 else {
-                _ = try files.retireProviderSource(frozen.receipt, checkCancellation: {})
+            guard try files.voiceRecordingSize(reservation) > 0 else {
+                _ = try files.cancelVoiceRecording(reservation)
                 self.reservation = nil; state = .cancelled(.emptyRecording)
                 throw NativeVoiceRecordingError.emptyRecording
             }
+            let frozen = try files.finishVoiceRecording(reservation, maximumBytes: Self.maximumAudioBytes)
             let result = NativeVoiceRecordingSource(session: selected, receipt: frozen.receipt, proof: frozen.source)
             source = result; self.reservation = nil; state = .stopped
             NSLog("Native iOS voice source frozen releaseCheck=v1.3.9/ios-native-voice stage=recording outcome=stopped")
