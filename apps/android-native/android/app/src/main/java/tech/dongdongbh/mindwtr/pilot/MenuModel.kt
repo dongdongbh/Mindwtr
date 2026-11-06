@@ -22,7 +22,7 @@ private const val PAGE = 50
 private const val WINDOW = 100
 
 
-val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "taskDatesSave", "taskSwipeFocus", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
+val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
     "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 
@@ -1313,7 +1313,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
         "taskDestinationMove" -> JSONObject(action.title).put("requestId", action.id)
 
-        "taskDatesSave", "taskSwipeFocus" -> JSONObject(action.title).put("requestId", action.id)
+        "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit" -> JSONObject(action.title).put("requestId", action.id)
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
 
         "notificationsSetting" -> JSONObject(action.title).put("requestId", action.id)

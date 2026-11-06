@@ -1379,7 +1379,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'runProjectNextAction',
 
-        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates'];
+        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates', 'editTaskRowChecklist'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -2114,7 +2114,9 @@ assert.doesNotMatch(themeCall, /requireSaved/);
 assert.match(model, /fun JSONObject\.taskRow\(\) = getJSONObject\("meta"\)\.let \{ meta ->/);
 assert.match(model, /meta\.getJSONArray\("parts"\)\.let \{ parts -> List\(parts\.length\(\)\) \{ parts\.getJSONObject\(it\)\.metaPart\(\) \} \}/);
 assert.match(rowUi, /val parts = if \(details\) meta\.parts else meta\.parts\.filter \{ !it\.detail \}/, 'detail parts show only where RN\'s list shows them');
-assert.match(rowUi, /for \(part in parts\) MetaPartView\(part, if \(part\.kind == "completed"\) editCompleted else null\)/);
+assert.match(rowUi, /if \(part\.kind == "checklist"\) ChecklistBadge\(part\) \{ toggleRowChecklist\(task\.id\) \}\s+else Box\(Modifier\.clearAndSetSemantics \{ \}\) \{ MetaPartView\(part, if \(part\.kind == "completed"\) editCompleted else null\) \}/, 'the checklist badge opens the row\'s list as RN\'s badge does; other parts stay silent');
+assert.match(rowUi, /if \(rowChecklistOpen\[task\.id\] == true\) \{\s+LaunchedEffect\(task\.taskRevision\) \{ readRowChecklist\(task\.id\) \}\s+RowChecklistItems\(model, task\.id, selecting\)/);
+assert.match(rowUi, /if \(!selecting && tappable\) \{\s+val draft = rowChecklistDrafts\[taskId\]/, 'selection mode hides the row\'s Add item, as RN does');
 assert.match(rowUi, /"due" -> MetaText\(part\.text, when \(part\.tone\) \{ "overdue" -> c\.danger; "dueSoon" -> c\.warning; else -> c\.secondaryText \}, 600\)/);
 assert.match(rowUi, /val strip = theme\.priority\(meta\.priority\)/);
 assert.match(rowUi, /contentDescription = meta\.accessibilityLabel/);

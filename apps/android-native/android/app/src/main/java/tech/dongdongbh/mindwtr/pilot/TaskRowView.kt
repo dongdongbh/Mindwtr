@@ -1,6 +1,18 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.testTag
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.layout.BoxScope
@@ -193,14 +205,21 @@ fun TaskRowItem(
 
                     val parts = if (details) meta.parts else meta.parts.filter { !it.detail }
                     if (parts.isNotEmpty()) {
-                        FlowRow(Modifier.padding(top = 2.dp).clearAndSetSemantics { }, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        FlowRow(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-                            for (part in parts) MetaPartView(part, if (part.kind == "completed") editCompleted else null)
+                            for (part in parts) {
+                                if (part.kind == "checklist") ChecklistBadge(part) { toggleRowChecklist(task.id) }
+                                else Box(Modifier.clearAndSetSemantics { }) { MetaPartView(part, if (part.kind == "completed") editCompleted else null) }
+                            }
                         }
                     }
                     note?.let { MetaText(it, if (available) c.tint else c.secondaryText, 600, Modifier.padding(top = 2.dp)) }
                     task.revealLabel?.let { MetaText(it, c.secondaryText, 600, Modifier.padding(top = 4.dp)) }
                     actions?.footer?.invoke()
+                    if (rowChecklistOpen[task.id] == true) {
+                        LaunchedEffect(task.taskRevision) { readRowChecklist(task.id) }
+                        RowChecklistItems(model, task.id, selecting)
+                    }
                 }
                 if (showStatus) StatusControl(model, task, status == RowStatus.Icon, completable && !selecting)
             }
@@ -244,6 +263,53 @@ private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null) {
         else -> MetaText(part.text, c.secondaryText, 500)
     }
 }
+
+@Composable
+private fun ChecklistBadge(part: MetaPart, toggle: () -> Unit) {
+    val label = t("checklist.progress")
+    Box(Modifier.clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = "row-checklist-toggle"; onClick { toggle(); true } }
+        .clickable(role = Role.Button, onClick = toggle)) {
+        MetaIcon(Lucide.ListChecks, "${part.done}/${part.of}", 13)
+    }
+}
+
+
+@Composable
+private fun RowChecklistItems(model: InboxViewModel, taskId: String, selecting: Boolean) = with(model) {
+    val c = LocalTheme.current.colors
+    val read = rowChecklists[taskId] ?: return
+    val items = shownRowChecklistItems(taskId)
+    if (items.isEmpty()) return
+    val tappable = writable && !read.optBoolean("readOnly")
+    val labels = read.optJSONObject("markdownLabels") ?: JSONObject()
+    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (item in items) {
+            val text = buildAnnotatedString {
+                append(if (item.completed) "\u2713 " else "\u25CB ")
+                append(inline(item.inline, labels, c.tint, c.secondaryText, c.cardBg) { })
+            }
+            Text(text, style = rnText(11, 400).copy(textDecoration = if (item.completed) TextDecoration.LineThrough else null),
+                color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().fade(if (item.completed) 0.6f else 1f)
+                    .clearAndSetSemantics {
+                        contentDescription = item.title; role = Role.Checkbox; toggleableState = ToggleableState(item.completed); testTag = "row-checklist-item"
+                        if (tappable) onClick { tickRowChecklistItem(taskId, item); true } else disabled()
+                    }
+                    .clickable(enabled = tappable) { tickRowChecklistItem(taskId, item) }
+                    .padding(vertical = 2.dp))
+        }
+        if (!selecting && tappable) {
+            val draft = rowChecklistDrafts[taskId].orEmpty()
+            val addLabel = read.getString("addLabel")
+            BasicTextField(draft, { typeRowChecklistDraft(taskId, it) }, singleLine = true, textStyle = rnText(11, 400).copy(color = c.text),
+                cursorBrush = SolidColor(c.tint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (!submitRowChecklistDraft(taskId)) defaultKeyboardAction(ImeAction.Done) }),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 28.dp).semantics { contentDescription = addLabel }.testTag("row-checklist-add").padding(vertical = 4.dp),
+                decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (draft.isEmpty()) Text("+ $addLabel", style = rnText(11, 400), color = c.secondaryText); inner() } })
+        }
+    }
+}
+
 
 @Composable
 private fun MetaIcon(icon: ImageVector, text: String, size: Int = 12) = Row(verticalAlignment = Alignment.CenterVertically) {
