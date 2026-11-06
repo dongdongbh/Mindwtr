@@ -120,8 +120,6 @@ const EXTERNAL_CALENDAR_COLOR_MAPS_BY_THEME = new Map<AppTheme, Record<string, s
 
 export function themeExternalCalendarDisplayColor(color: string, theme?: string): string {
     if (theme === 'eink') {
-        // E-ink is monochrome: only the einkSafeColor pass-through guarantees every
-        // calendar color (including per-feed overrides) draws black rather than leaking.
         return einkSafeColor(color, theme);
     }
     const map = theme ? EXTERNAL_CALENDAR_COLOR_MAPS_BY_THEME.get(theme as AppTheme) : undefined;

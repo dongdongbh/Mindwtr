@@ -2215,7 +2215,7 @@ assert.match(rowUi, /if \(relativeScheduleDates\) Row[\s\S]*Icon\(if \(part\.kin
 assert.match(rowUi, /else MetaText\(part\.text, color, if \(part\.kind == "due"\) 600 else 500\)/);
 assert.match(rowUi, /val strip = theme\.priority\(meta\.priority\)/);
 assert.match(rowUi, /contentDescription = meta\.accessibilityLabel/);
-assert.match(rowUi, /coreColorOrNull\(part\.dotColor\) \?: c\.tint/, 'a null dot color is the tint, as RN');
+assert.match(rowUi, /theme\.identityColorOrNull\(part\.dotColor\) \?: c\.tint/, 'a null dot color stays the tint and the drawn one is eink-safe, as RN');
 assert.doesNotMatch(code(model), /"dueDate"|"startTime"|"projectTitle"/, 'no row reads core\'s raw dates');
 
 assert.match(iconsKt, /Lucide is ISC licensed/);

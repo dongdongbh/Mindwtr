@@ -58,6 +58,5 @@ const isEinkPreset = (themePreset?: string | null): boolean => themePreset === '
 
 export const einkSafeColor = (color: string, themePreset?: string | null): string => {
     if (!isEinkPreset(themePreset)) return color;
-    // An 8-digit hex keeps its alpha channel, so tinted backgrounds stay light on the monochrome display.
     return /^#[0-9a-f]{8}$/i.test(color) ? `#000000${color.slice(7)}` : '#000000';
 };
