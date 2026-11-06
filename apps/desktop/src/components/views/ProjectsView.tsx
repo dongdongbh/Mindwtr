@@ -996,6 +996,7 @@ export function ProjectsView() {
                     source={convertSource}
                     projects={projects}
                     t={t}
+                    theme={settings?.theme}
                     onCancel={() => setConvertSource(null)}
                     onSuccess={(result) => {
                         setConvertSource(null);
