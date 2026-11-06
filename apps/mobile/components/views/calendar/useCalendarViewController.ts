@@ -16,9 +16,13 @@ import {
   CALENDAR_DAY_MINUTES,
   CALENDAR_DAY_START_HOUR,
   CALENDAR_DONE_UPDATES,
+  CALENDAR_GRID_STEP_OPTIONS,
   CALENDAR_SNAP_MINUTES,
+  CALENDAR_TIMELINE_ZOOM_OPTIONS,
   CALENDAR_UNSCHEDULE_UPDATES,
   calendarDateKey,
+  coerceCalendarGridStep,
+  coerceCalendarTimelineZoom,
   coerceCalendarViewMode,
   coerceCalendarWeekVisibleDays,
   createCalendarLocaleDates,
@@ -66,6 +70,7 @@ import {
   needsCalendarSelectedDate,
   planCalendarEventTask,
   planCalendarTaskMove,
+  planCalendarTaskResize,
   resolveFeatureFlags,
   safeFormatDate,
   safeParseDate,
@@ -122,6 +127,8 @@ const DAY_END_HOUR = CALENDAR_DAY_END_HOUR;
 const PIXELS_PER_MINUTE = 1.4;
 const DAY_TIMELINE_MINUTES = CALENDAR_DAY_MINUTES;
 const SNAP_MINUTES = CALENDAR_SNAP_MINUTES;
+/** The timeline zoom multiplies this base; the week view stays at it (1.4pt/min = 84pt an hour). */
+const DAY_TIMELINE_ZOOM_BASE_PIXELS_PER_MINUTE = PIXELS_PER_MINUTE;
 type CalendarTaskComposerMode = CalendarComposerMode;
 
 type CalendarTaskComposerState = CalendarViewComposerState;
@@ -173,6 +180,12 @@ export function useCalendarViewController() {
 
   const { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
   const calendarSettings: CalendarSettings | undefined = settings?.calendar;
+  const timelineGridStep = coerceCalendarGridStep(calendarSettings?.timelineGridStep);
+  const timelineZoom = coerceCalendarTimelineZoom(calendarSettings?.timelineZoom);
+  /** The day view's pixels per minute; the week view keeps the unzoomed base. */
+  const dayPixelsPerMinute = DAY_TIMELINE_ZOOM_BASE_PIXELS_PER_MINUTE * timelineZoom;
+  /** Drag, resize and timeline taps snap to the grid step. */
+  const daySnapMinutes = timelineGridStep;
   const today = new Date();
   const systemLocale = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
     ? Intl.DateTimeFormat().resolvedOptions().locale
@@ -244,6 +257,20 @@ export function useCalendarViewController() {
 
   const toggleShowCompleted = () => {
     updateSettings({ calendar: { ...calendarSettings, showCompleted: !showCompleted } })
+      .catch(logCalendarError);
+  };
+
+  const setTimelineGridStep = (minutes: number) => {
+    const next = coerceCalendarGridStep(minutes);
+    if (next === timelineGridStep) return;
+    updateSettings({ calendar: { ...calendarSettingsRef.current, timelineGridStep: next } })
+      .catch(logCalendarError);
+  };
+
+  const setTimelineZoom = (zoom: number) => {
+    const next = coerceCalendarTimelineZoom(zoom);
+    if (next === timelineZoom) return;
+    updateSettings({ calendar: { ...calendarSettingsRef.current, timelineZoom: next } })
       .catch(logCalendarError);
   };
 
@@ -646,21 +673,26 @@ export function useCalendarViewController() {
 
   const selectedDayKey = selectedDate ? calendarDateKey(selectedDate) : '';
 
+  // The day view's pixels follow the zoom setting; the week view stays at the base.
+  const timelinePixelsPerMinute = useCallback(() => (viewModeRef.current === 'day'
+    ? DAY_TIMELINE_ZOOM_BASE_PIXELS_PER_MINUTE * coerceCalendarTimelineZoom(calendarSettingsRef.current?.timelineZoom)
+    : PIXELS_PER_MINUTE), []);
+
   const getTimelineScrollY = useCallback((minutes: number) => getCalendarTimelineScrollYForMinutes({
     contentTop: viewModeRef.current === 'day' ? timelineContentTopRef.current : 0,
     minutes,
-    pixelsPerMinute: PIXELS_PER_MINUTE,
-  }), []);
+    pixelsPerMinute: timelinePixelsPerMinute(),
+  }), [timelinePixelsPerMinute]);
 
   const rememberTimelineScrollY = useCallback((scrollY: number) => {
     timelineScrollOffsetRef.current = Math.max(0, scrollY);
     timelineAnchorMinutesRef.current = getCalendarTimelineAnchorMinutes({
       contentTop: viewModeRef.current === 'day' ? timelineContentTopRef.current : 0,
       dayMinutes: DAY_TIMELINE_MINUTES,
-      pixelsPerMinute: PIXELS_PER_MINUTE,
+      pixelsPerMinute: timelinePixelsPerMinute(),
       scrollY: timelineScrollOffsetRef.current,
     });
-  }, []);
+  }, [timelinePixelsPerMinute]);
 
   const scrollTimelineToMinutes = useCallback((minutes: number, animated: boolean) => {
     const y = getTimelineScrollY(minutes);
@@ -755,6 +787,19 @@ export function useCalendarViewController() {
       return;
     }
     if (plan.updates.startTime === currentStart?.toISOString()) return;
+    updateTask(taskId, plan.updates).catch(logCalendarError);
+  };
+
+  const commitTaskResize = (taskId: string, dayStartMs: number, startMinutes: number, durationMinutes: number) => {
+    const current = allTasks?.find((task) => task.id === taskId);
+    const currentStart = safeParseDate(current?.startTime);
+    const plan = planCalendarTaskResize({ taskId, dayStartMs, startMinutes, durationMinutes, currentStart, isSlotFree: isSlotFreeForDay });
+    if (plan.kind === 'projected') return;
+    if (plan.kind === 'conflict') {
+      showToast(getCalendarToasts(t).timeConflict);
+      return;
+    }
+    if (timeEstimateToMinutes(current?.timeEstimate) === durationMinutes) return;
     updateTask(taskId, plan.updates).catch(logCalendarError);
   };
 
@@ -886,7 +931,7 @@ export function useCalendarViewController() {
     return dayEnd;
   }, [selectedDate]);
   const selectedDayMinutes = DAY_TIMELINE_MINUTES;
-  const timelineHeight = selectedDayMinutes * PIXELS_PER_MINUTE;
+  const timelineHeight = selectedDayMinutes * dayPixelsPerMinute;
   const selectedDayScheduledTasks = useMemo(
     () => getCalendarDayTimedTasks(selectedDateScheduled),
     [selectedDateScheduled],
@@ -894,8 +939,8 @@ export function useCalendarViewController() {
   const selectedDayNowTop = useMemo(() => {
     if (!selectedDate || !isToday(selectedDate)) return null;
     const minutes = getCalendarNowMinutes(new Date(nowTick));
-    return minutes === null ? null : minutes * PIXELS_PER_MINUTE;
-  }, [nowTick, selectedDate]);
+    return minutes === null ? null : minutes * dayPixelsPerMinute;
+  }, [dayPixelsPerMinute, nowTick, selectedDate]);
   const {
     long: selectedDateLongLabel,
     planning: selectedDatePlanningLabel,
@@ -912,6 +957,10 @@ export function useCalendarViewController() {
   return {
     DAY_END_HOUR,
     DAY_START_HOUR,
+    DAY_PIXELS_PER_MINUTE: dayPixelsPerMinute,
+    DAY_SNAP_MINUTES: daySnapMinutes,
+    GRID_STEP_OPTIONS: CALENDAR_GRID_STEP_OPTIONS,
+    ZOOM_OPTIONS: CALENDAR_TIMELINE_ZOOM_OPTIONS,
     PIXELS_PER_MINUTE,
     SNAP_MINUTES,
     calendarDays,
@@ -926,6 +975,7 @@ export function useCalendarViewController() {
     closeCalendarComposer,
     closeEditingTask,
     commitTaskDrag,
+    commitTaskResize,
     dayNames,
     editingTask,
     externalCalendars,
@@ -979,6 +1029,8 @@ export function useCalendarViewController() {
     setCalendarComposerStartTime,
     setCalendarComposerTitle,
     setCalendarWeekVisibleDays,
+    setTimelineGridStep,
+    setTimelineZoom,
     showCompleted,
     toggleShowCompleted,
     setEditingTask,
@@ -992,6 +1044,9 @@ export function useCalendarViewController() {
     t,
     tc,
     timeEstimateToMinutes,
+    timeEstimatesEnabled,
+    timelineGridStep,
+    timelineZoom,
     timelineHeight,
     timelineScrollRef,
     toRgba,

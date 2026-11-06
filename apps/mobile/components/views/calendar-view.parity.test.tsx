@@ -3,6 +3,8 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -25,7 +27,7 @@ import {
 import { styles } from './calendar/calendar-view.styles';
 import { CalendarView } from './calendar-view';
 
-const FIXTURE_PATH = new URL('../../../../packages/core/src/calendar-views-parity.fixtures.json', import.meta.url).pathname;
+const FIXTURE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packages/core/src/calendar-views-parity.fixtures.json');
 const CAPTURE = process.env.MINDWTR_CAPTURE_CALENDAR_VIEWS === '1';
 const TIME_ZONE = 'America/New_York';
 
@@ -352,6 +354,9 @@ const scenarios: Scenario[] = [
     actions: [
       ['timeline', 420], ['type', 'Add new task...', 'Early call'], ['press', 'Save'],
       ['drag', 'Standup prep', 140], ['drag', 'Standup prep', 300],
+      ['resize', 'Standup prep', 84],
+      ['press', '15m'], ['press', '150%'],
+      ['drag', 'Early call', -140],
       ['tapBlock', 'Review PR'], ['alert', 'Done'],
       ['press', 'Pay rent'], ['alert', 'Cancel'],
     ],
@@ -608,6 +613,14 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       const detector = detectorWith(String(target));
       const pan = detector?.props.gesture.race?.[0];
       return run(`drag ${String(target)}`, pan && (() => pan.onEnd({ translationY: rest[0] })));
+    }
+    case 'resize': {
+      // The block's own resize handle: the nested pan detector, named by its a11y label.
+      const handleLabel = `${harness.strings['calendar.mobile.resizeHandle']} ${String(target)}`;
+      const detector = hostsOf(root, 'GestureDetector').find((node) => typeof node.props.gesture?.onEnd === 'function'
+        && visibleNodes(node).some((child) => child.props.accessibilityLabel === handleLabel));
+      const pan = detector?.props.gesture;
+      return run(`resize ${String(target)}`, pan && (() => pan.onEnd({ translationY: rest[0] })));
     }
     case 'tapBlock': {
       const detector = detectorWith(String(target));

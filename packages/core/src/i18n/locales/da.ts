@@ -2447,6 +2447,7 @@ export const daOverrides: Record<string, string> = {
     'calendar.mobile.newTask': 'Ny opgave',
     'calendar.mobile.noMatchingTasks': 'Ingen matchende opgaver',
     'calendar.mobile.scheduleTask': 'Planlæg opgave',
+    'calendar.mobile.resizeHandle': 'Håndtag til varighed',
     'calendar.mobile.show1VisibleDay': 'Vis 1 synlig dag',
     'calendar.mobile.showFewerDays': 'Vis færre dage',
     'calendar.mobile.showMoreDays': 'Vis flere dage',
@@ -2454,6 +2455,8 @@ export const daOverrides: Record<string, string> = {
     'calendar.mobile.swipeUpOrDownToResizeTheDayDetailsPanel':
         'Stryg op eller ned for at ændre størrelsen på panelet med dagsdetaljer.',
     'calendar.mobile.swipeUpOrDownToShowMoreOrFewerDays': 'Stryg op eller ned for at vise flere eller færre dage.',
+    'calendar.mobile.timelineGridStep': 'Gittertrin',
+    'calendar.mobile.timelineZoom': 'Zoom på tidslinjen',
     'calendar.mobile.visibleDayCount': '{{dayCount}} dage',
     'calendar.mobile.visibleWeekDays': 'Synlige ugedage',
     'calendar.mobile.week': 'uge',

@@ -398,8 +398,39 @@ export const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 16,
   },
-
-
+  // The grid step and zoom chips, pinned above the timeline like the all-day card.
+  timelineControls: {
+    borderWidth: 1,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  timelineControlLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  timelineControlChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  timelineChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  timelineChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  // Bounded so a day full of all-day items cannot crowd out the timeline.
+  // Collapsed, the card shows core's first four chips (they fit) and a
+  // "+N more" chip; expanded, the list scrolls past this height.
   allDayList: {
     maxHeight: 176,
   },
@@ -502,6 +533,13 @@ export const styles = StyleSheet.create({
     flex: 1,
     height: 1,
   },
+  // A sub-hour grid line: lighter than the hour divider it sits between.
+  gridLine: {
+    position: 'absolute',
+    left: 56,
+    right: 12,
+    height: 1,
+  },
   eventBlock: {
     position: 'absolute',
     left: 56,
@@ -541,6 +579,22 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
     color: 'rgba(255,255,255,0.9)',
+  },
+  // The bottom strip a resize drag starts from: a pill cue centered on it.
+  resizeHandle: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resizeHandleBar: {
+    width: 28,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.75)',
   },
   dayScheduleCard: {
     borderWidth: 1,
