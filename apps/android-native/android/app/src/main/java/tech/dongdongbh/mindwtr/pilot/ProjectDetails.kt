@@ -1318,7 +1318,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
                         for (index in 1 until lines.length()) {
 
                             if (index == lines.length() - 4) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(12.dp).clip(CircleShape).background(shown.menuText("color")?.let(::coreColorOrNull) ?: Color.Transparent).rnBorder(1.dp, c.border, CircleShape))
+                                Box(Modifier.size(12.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(shown.menuText("color")) ?: Color.Transparent).rnBorder(1.dp, c.border, CircleShape))
                                 Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
                             } else Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
                         }

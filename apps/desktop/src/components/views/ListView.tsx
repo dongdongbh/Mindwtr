@@ -786,8 +786,9 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             onOpen={handleOpenProject}
             onReactivate={handleReactivateProject}
             onMoveToSection={readOnly ? undefined : setSomedayMoveProjectId}
+            theme={settings?.theme}
         />
-    ), [areaById, handleOpenProject, handleReactivateProject, readOnly, t]);
+    ), [areaById, handleOpenProject, handleReactivateProject, readOnly, settings?.theme, t]);
     const virtualRowCount = groupedVirtualRows?.length ?? filteredTasks.length;
     const shouldVirtualize = virtualRowCount > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
@@ -1081,6 +1082,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         getProject: (projectId) => projectMap.get(projectId),
         getAreaColor: (areaId) => areaById.get(areaId)?.color,
         getAreaLabel: (areaId) => areaById.get(areaId)?.name,
+        theme: settings?.theme,
     };
     const activeFilterChips: DesktopActiveFilterChip[] = [];
     if (normalizedSearchQuery) {
@@ -1345,6 +1347,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                                         project={project}
                                         area={project.areaId ? areaById.get(project.areaId) : undefined}
                                         t={t}
+                                        theme={settings?.theme}
                                         onOpen={handleOpenProject}
                                         onReactivate={handleReactivateProject}
                                     />

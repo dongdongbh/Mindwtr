@@ -352,7 +352,7 @@ private fun PushCard(model: InboxViewModel, push: JSONObject) {
                     if (enabled) onClick { screen.edit(option.getJSONObject("edit")); true } else disabled()
                 }.clickable(enabled = enabled) { screen.edit(option.getJSONObject("edit")) }, info = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        coreColorOrNull(option.menuText("color"))?.let { Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(it)) }
+                        theme.identityColorOrNull(option.menuText("color"))?.let { Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(it)) }
                         Text(option.getString("name"), style = rnText(16, 500, 21), color = c.text, maxLines = 1, modifier = Modifier.weight(1f))
                     }
                     Detail(option.getString("description"), lines = 1)

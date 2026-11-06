@@ -2118,7 +2118,7 @@ assert.match(rowUi, /for \(part in parts\) MetaPartView\(part, if \(part\.kind =
 assert.match(rowUi, /"due" -> MetaText\(part\.text, when \(part\.tone\) \{ "overdue" -> c\.danger; "dueSoon" -> c\.warning; else -> c\.secondaryText \}, 600\)/);
 assert.match(rowUi, /val strip = theme\.priority\(meta\.priority\)/);
 assert.match(rowUi, /contentDescription = meta\.accessibilityLabel/);
-assert.match(rowUi, /coreColorOrNull\(part\.dotColor\) \?: c\.tint/, 'a null dot color is the tint, as RN');
+assert.match(rowUi, /theme\.identityColorOrNull\(part\.dotColor\) \?: c\.tint/, 'a null dot color stays the tint and the drawn one is eink-safe, as RN');
 assert.doesNotMatch(code(model), /"dueDate"|"startTime"|"projectTitle"/, 'no row reads core\'s raw dates');
 
 assert.match(iconsKt, /Lucide is ISC licensed/);

@@ -1,4 +1,4 @@
-import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from './color-constants';
+import { DEFAULT_PROJECT_COLOR, einkSafeColor, isValidProjectColorOverride } from './color-constants';
 import type { Area, Project, Task } from './types';
 
 
@@ -7,25 +7,40 @@ const chosenColor = (color: string | undefined): string | undefined => (
 );
 
 
-export function getProjectAccentColor(project: Pick<Project, 'colorOverride' | 'areaId'> & { color?: string }, areaById: ReadonlyMap<string, Pick<Area, 'color' | 'deletedAt'>>): string | undefined {
+export function getProjectAccentColor(
+    project: Pick<Project, 'colorOverride' | 'areaId'> & { color?: string },
+    areaById: ReadonlyMap<string, Pick<Area, 'color' | 'deletedAt'>>,
+    themePreset?: string | null,
+): string | undefined {
+    const accent = projectAccent(project, areaById);
+    return accent === undefined ? undefined : einkSafeColor(accent, themePreset);
+}
+
+
+const projectAccent = (
+    project: Pick<Project, 'colorOverride' | 'areaId'> & { color?: string },
+    areaById: ReadonlyMap<string, Pick<Area, 'color' | 'deletedAt'>>,
+): string | undefined => {
     if (project.colorOverride && isValidProjectColorOverride(project.colorOverride)) return project.colorOverride;
     if (project.areaId) {
         const area = areaById.get(project.areaId);
         return area && !area.deletedAt ? chosenColor(area.color) : undefined;
     }
     return chosenColor(project.color);
-}
+};
 
 
 export function getTaskAccentColor(
     task: Task,
     projectById: Map<string, Project>,
     areaById: ReadonlyMap<string, Pick<Area, 'color' | 'deletedAt'>>,
+    themePreset?: string | null,
 ): string | undefined {
     const project = task.projectId ? projectById.get(task.projectId) : undefined;
-    if (project) return getProjectAccentColor(project, areaById);
+    if (project) return getProjectAccentColor(project, areaById, themePreset);
     const area = task.areaId ? areaById.get(task.areaId) : undefined;
-    return area && !area.deletedAt ? chosenColor(area.color) : undefined;
+    const accent = area && !area.deletedAt ? chosenColor(area.color) : undefined;
+    return accent === undefined ? undefined : einkSafeColor(accent, themePreset);
 }
 
 

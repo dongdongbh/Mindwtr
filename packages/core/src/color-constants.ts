@@ -56,5 +56,7 @@ export function getTaskPriorityColors(themePreset?: string | null): Readonly<Rec
 
 const isEinkPreset = (themePreset?: string | null): boolean => themePreset === 'eink';
 
-export const einkSafeColor = (color: string, themePreset?: string | null): string =>
-    isEinkPreset(themePreset) ? '#000000' : color;
+export const einkSafeColor = (color: string, themePreset?: string | null): string => {
+    if (!isEinkPreset(themePreset)) return color;
+    return /^#[0-9a-f]{8}$/i.test(color) ? `#000000${color.slice(7)}` : '#000000';
+};

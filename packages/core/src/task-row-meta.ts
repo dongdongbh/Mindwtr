@@ -1,5 +1,5 @@
 import { getProjectAccentColor } from './task-accent-color';
-import { DEFAULT_AREA_COLOR } from './color-constants';
+import { DEFAULT_AREA_COLOR, einkSafeColor } from './color-constants';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { createDateFormatter, hasTimeComponent, safeParseDate, safeParseDueDate, type DateFormatter, type DateFormattingConfig } from './date';
 import { tFallback, type TranslateFn } from './i18n';
@@ -118,6 +118,7 @@ export type TaskRowMetaInput = {
     projectDeadlineLabel?: string;
     sequenceCue?: ProjectSequenceTaskCue;
     sequenceLabel?: string;
+    themePreset?: string | null;
 };
 
 const DETAIL_PART_KINDS = new Set<TaskRowMetaPartKind>(['assignedTo', 'tag', 'recurrence', 'estimate', 'timeSpent', 'attachments']);
@@ -198,13 +199,13 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
             kind: 'project',
             text: section ? `${project.title} · ${section.title}` : project.title,
             projectId: project.id,
-            dotColor: getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : [])) ?? DEFAULT_AREA_COLOR,
+            dotColor: einkSafeColor(getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : []), input.themePreset) ?? DEFAULT_AREA_COLOR, input.themePreset),
         });
     }
 
 
     if ((isReference || !project) && area) {
-        add({ kind: 'area', text: area.name, dotColor: area.color || DEFAULT_AREA_COLOR });
+        add({ kind: 'area', text: area.name, dotColor: einkSafeColor(area.color || DEFAULT_AREA_COLOR, input.themePreset) });
     }
     if (!isReference && input.projectDeadlineLabel) {
         add({ kind: 'projectDeadline', text: input.projectDeadlineLabel });

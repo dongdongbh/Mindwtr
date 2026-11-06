@@ -420,6 +420,7 @@ export function ArchiveView() {
         getProject: (projectId) => projectById.get(projectId),
         getAreaColor: (areaId) => areaById.get(areaId)?.color,
         getAreaLabel: (areaId) => areaById.get(areaId)?.name,
+        theme: settings?.theme,
     };
     const activeFilterChips: DesktopActiveFilterChip[] = [];
     if (searchQuery.trim()) {

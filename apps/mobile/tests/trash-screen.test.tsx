@@ -83,6 +83,7 @@ vi.mock('@/lib/app-log', () => ({
 }));
 
 vi.mock('../contexts/theme-context', () => ({
+  ThemeContext: React.createContext(undefined),
   useTheme: vi.fn(),
 }));
 

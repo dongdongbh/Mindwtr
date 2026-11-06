@@ -7,6 +7,7 @@ import { tFallback } from '@mindwtr/core';
 import type { Area, Project } from '@mindwtr/core';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
+import { useThemePreset } from '@/hooks/use-eink-safe-color';
 
 export interface DeferredProjectsSectionProps {
   projects: Project[];
@@ -81,6 +82,7 @@ export function DeferredProjectRow({
 }: DeferredProjectRowProps) {
   const projectArea = project.areaId ? areaById.get(project.areaId) : undefined;
   const moveLabel = tFallback(t, 'viewSections.moveToSection', 'Move to section…');
+  const themePreset = useThemePreset();
   return (
     <Swipeable
       renderLeftActions={() => (
@@ -99,7 +101,7 @@ export function DeferredProjectRow({
           ? (event) => { if (event.nativeEvent.actionName === 'moveToSection') onMoveToSection(project); }
           : undefined}
       >
-        <Folder size={18} color={getProjectAccentColor(project, areaById) || tc.secondaryText} />
+        <Folder size={18} color={getProjectAccentColor(project, areaById, themePreset) || tc.secondaryText} />
         <View style={styles.projectText}>
           <Text style={[styles.projectTitle, { color: tc.text }]} numberOfLines={1}>
             {project.title}

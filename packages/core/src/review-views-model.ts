@@ -4,7 +4,7 @@
 import type { ReviewSnapshotItem, ReviewSuggestion } from './ai/types';
 import { filterReviewSuggestionsToKnownIds } from './ai/utils';
 import { getProjectAccentColor } from './task-accent-color';
-import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
+import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR, einkSafeColor } from './color-constants';
 import { createDateFormatter, hasTimeComponent, isDueForReview, safeParseDate, type DateFormatter } from './date';
 import { formatFocusTaskLimitText, normalizeFocusTaskLimit } from './focus-utils';
 import { formatI18nTemplate, tFallback } from './i18n';
@@ -132,9 +132,11 @@ export function decorateReviewOverviewGroups(
         unassignedAreaColor: string | undefined;
         text: ReviewOverviewText;
         scope?: ReviewOverviewScope;
+        themePreset?: string | null;
     },
 ): ReviewAreaSection[] {
     const { areaById, text, scope = 'all' } = options;
+    const themePreset = options.themePreset;
     const unassignedAreaColor = options.unassignedAreaColor || DEFAULT_AREA_COLOR;
     return groups.map((group) => {
         const area = group.areaId ? areaById.get(group.areaId) : undefined;
@@ -150,12 +152,13 @@ export function decorateReviewOverviewGroups(
             taskSummary,
             scope === 'all' && group.needsActionCount > 0 ? `${group.needsActionCount} ${text.needsActionSummary}` : null,
         ].filter(Boolean).join(' · ');
+        const rawAreaColor = group.areaId ? (area?.color && area.color !== DEFAULT_PROJECT_COLOR ? area.color : null) : unassignedAreaColor;
         return {
             id,
             areaId: group.areaId ?? null,
             isUnassigned,
             title,
-            color: group.areaId ? (area?.color && area.color !== DEFAULT_PROJECT_COLOR ? area.color : null) : unassignedAreaColor,
+            color: rawAreaColor === null ? null : einkSafeColor(rawAreaColor, themePreset),
             taskCount: group.taskCount,
             projectCount: group.projectCount,
             needsActionCount: group.needsActionCount,
@@ -620,13 +623,18 @@ export function getWeeklyReviewProjects(
     entries: readonly WeeklyReviewProjectEntry[],
     areaById: ReadonlyMap<string, Area>,
     labels: WeeklyReviewLabels,
+    themePreset?: string | null,
 ): WeeklyReviewProject[] {
     return entries.map((entry) => {
         const badge = PROJECT_BADGES[entry.nextActionState];
         return {
             ...entry,
-            areaColor: getProjectAccentColor(entry.project, areaById) || null,
-            badge: { label: labels[badge.label], color: badge.color, background: badge.background },
+            areaColor: getProjectAccentColor(entry.project, areaById, themePreset) || null,
+            badge: {
+                label: labels[badge.label],
+                color: einkSafeColor(badge.color, themePreset),
+                background: einkSafeColor(badge.background, themePreset),
+            },
             countLabel: `${entry.tasks.length} ${entry.tasks.length === 1 ? labels.activeTask : labels.activeTasks}`,
         };
     });

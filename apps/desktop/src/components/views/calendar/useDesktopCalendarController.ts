@@ -136,8 +136,8 @@ export function useDesktopCalendarController() {
 
 
     const getTaskAccentColor = useCallback(
-        (task: Task): string | undefined => resolveTaskAccentColor(task, projectMap, areaById),
-        [areaById, projectMap],
+        (task: Task): string | undefined => resolveTaskAccentColor(task, projectMap, areaById, settings?.theme),
+        [areaById, projectMap, settings?.theme],
     );
     const resolvedAreaFilter = useMemo(
         () => resolveAreaFilterSelection(settings?.filters, areas),

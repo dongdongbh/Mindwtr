@@ -4,6 +4,7 @@ import {
     compareProjectsByOrder,
     DEFAULT_AREA_COLOR,
     getContextColor,
+    einkSafeColor,
     groupTasksByContext as groupCoreTasksByContext,
     groupTasksByTag as groupCoreTasksByTag,
     groupTasksByViewSection,
@@ -53,6 +54,7 @@ interface GroupByAreaParams {
     tasks: Task[];
     projectMap: Map<string, Project>;
     noAreaLabel: string;
+    theme?: string;
 }
 
 interface GroupByContextParams {
@@ -67,6 +69,7 @@ interface GroupByProjectParams {
     projectMap: Map<string, Project>;
     noProjectLabel: string;
     areas?: Area[];
+    theme?: string;
 }
 
 interface GroupByTagParams {
@@ -101,6 +104,7 @@ export function groupTasksByArea({
     tasks,
     projectMap,
     noAreaLabel,
+    theme,
 }: GroupByAreaParams): TaskGroup[] {
     const activeAreas = [...areas]
         .filter((area) => !area.deletedAt)
@@ -129,7 +133,7 @@ export function groupTasksByArea({
             id: `area:${area.id}`,
             title: area.name,
             tasks: areaTasks,
-            dotColor: area.color || DEFAULT_AREA_COLOR,
+            dotColor: einkSafeColor(area.color || DEFAULT_AREA_COLOR, theme),
         });
     });
 
@@ -242,6 +246,7 @@ export function groupTasksByProject({
     projectMap,
     noProjectLabel,
     areas,
+    theme,
 }: GroupByProjectParams): TaskGroup[] {
     const grouped = new Map<string, Task[]>();
     const noProjectTasks: Task[] = [];
@@ -276,7 +281,7 @@ export function groupTasksByProject({
             tasks: projectTasks,
 
 
-            dotColor: getProjectAccentColor(project, areaById) ?? DEFAULT_AREA_COLOR,
+            dotColor: getProjectAccentColor(project, areaById, theme) ?? einkSafeColor(DEFAULT_AREA_COLOR, theme),
         });
     });
 
@@ -395,9 +400,9 @@ export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, t
         case 'status':
             return groupTasksByStatus({ tasks, getStatusLabel: (status) => t(`status.${status}`) });
         case 'area':
-            return groupTasksByArea({ areas, tasks, projectMap, noAreaLabel: tFallback(t, 'taskEdit.noAreaOption', 'No Area') });
+            return groupTasksByArea({ areas, tasks, projectMap, noAreaLabel: tFallback(t, 'taskEdit.noAreaOption', 'No Area'), theme });
         case 'project':
-            return groupTasksByProject({ tasks, projectMap, areas, noProjectLabel: tFallback(t, 'taskEdit.noProjectOption', 'No project') });
+            return groupTasksByProject({ tasks, projectMap, areas, noProjectLabel: tFallback(t, 'taskEdit.noProjectOption', 'No project'), theme });
         case 'priority':
             return groupTasksByPriority({ tasks, getPriorityLabel: (priority) => t(`priority.${priority}`), noPriorityLabel: tFallback(t, 'focus.group.noPriority', 'No priority') });
         case 'energy':

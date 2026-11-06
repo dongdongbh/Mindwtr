@@ -40,7 +40,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('../../contexts/language-context', () => ({
   useLanguage: () => ({ t: (key: string) => harness.strings[key] ?? key, language: 'en' }),
 }));
-vi.mock('../../contexts/theme-context', () => ({ useTheme: () => ({ isDark: false }) }));
+vi.mock('../../contexts/theme-context', () => ({ ThemeContext: React.createContext(undefined), useTheme: () => ({ isDark: false }) }));
 vi.mock('@/contexts/toast-context', () => ({
   useToast: () => ({ showToast: (toast: (typeof harness.toasts)[number]) => { harness.toasts.push(toast); }, dismissToast: vi.fn() }),
 }));

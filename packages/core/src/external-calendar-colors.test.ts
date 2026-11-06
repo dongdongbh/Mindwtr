@@ -111,9 +111,17 @@ describe('themeExternalCalendarDisplayColor', () => {
     });
 
     it('is the identity on every other theme', () => {
-        for (const theme of [undefined, 'dark', 'light', 'sepia', 'eink', 'oled']) {
+        for (const theme of [undefined, 'dark', 'light', 'sepia', 'oled']) {
             expect(themeExternalCalendarDisplayColor('#2563EB', theme)).toBe('#2563EB');
         }
+    });
+
+    it('draws everything black on eink — the display is monochrome and a feed COLOR hint is arbitrary hex', () => {
+        for (const color of EXTERNAL_CALENDAR_COLORS) {
+            expect(themeExternalCalendarDisplayColor(color, 'eink')).toBe('#000000');
+        }
+        expect(themeExternalCalendarDisplayColor('#123456', 'eink')).toBe('#000000');
+        expect(themeExternalCalendarDisplayColor('#2563EB', 'eink')).toBe('#000000');
     });
 
     it('never changes what resolution or the explicit-pick rule report', () => {

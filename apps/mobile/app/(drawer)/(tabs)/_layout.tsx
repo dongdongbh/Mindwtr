@@ -17,6 +17,7 @@ import { useAndroidActivitySession } from '@/hooks/use-android-activity-session'
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useThemeTokens } from '@/hooks/use-theme-tokens';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { MOBILE_HOME_TAB_ROUTE } from '@/lib/home-route';
 import { useLanguage } from '../../../contexts/language-context';
 import {
@@ -119,6 +120,7 @@ function MoreSheetTile({
   onNavigate: (route: string) => void;
   tc: ReturnType<typeof useThemeColors>;
 }) {
+  const einkSafe = useEinkSafeColor();
   return (
     <Pressable
       accessibilityRole="button"
@@ -140,7 +142,7 @@ function MoreSheetTile({
       ]}
     >
       <View style={[styles.moreTileIcon, { backgroundColor: tc.filterBg }]}>
-        <IconSymbol name={item.icon} size={24} color={item.iconColor} />
+        <IconSymbol name={item.icon} size={24} color={einkSafe(item.iconColor)} />
       </View>
       <Text
         style={[styles.moreTileLabel, { color: tc.text }]}
@@ -166,6 +168,7 @@ function MoreSheetCompactItem({
   onNavigate: (route: string) => void;
   tc: ReturnType<typeof useThemeColors>;
 }) {
+  const einkSafe = useEinkSafeColor();
   return (
     <Pressable
       accessibilityRole="button"
@@ -184,7 +187,7 @@ function MoreSheetCompactItem({
       ]}
     >
       <View style={styles.moreCompactIcon}>
-        <IconSymbol name={item.icon} size={18} color={item.iconColor} />
+        <IconSymbol name={item.icon} size={18} color={einkSafe(item.iconColor)} />
       </View>
       <Text
         style={[styles.moreCompactLabel, { color: tc.secondaryText }]}
