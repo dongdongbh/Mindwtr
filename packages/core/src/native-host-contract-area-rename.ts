@@ -248,6 +248,9 @@ export function createAreaRenameMethods(deps: {
                 || !readRequest({ ...input, expected: { id: input.areaId, name: '', color: null, order: 0, rev: null, revBy: null, updatedAt: new Date(0).toISOString() } }))
                 return fail('INVALID_INPUT', 'A bounded Area rename request is required');
             if (!input.name.trim()) return fail('INVALID_INPUT', 'An Area name is required');
+            try {
+                if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
+            } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
             let stale = 'Area changed; refresh before renaming';
             for (let attempt = 0; attempt < 4; attempt += 1) {
                 const current = useTaskStore.getState()._allAreas.find((row) => row.id === input.areaId && !row.deletedAt);

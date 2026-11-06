@@ -252,7 +252,7 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
 
                 val areaKey = group.areaId ?: "no-area"
                 val folded = areaKey in projectsView.collapsedAreas
-                item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, group, areaKey, folded) }
+                item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, bucket, group, areaKey, folded) }
                 if (!folded) for (row in group.projects) item(key = "project:${row.id}") {
                     val (up, down) = projects?.moves?.get(row.id) ?: (false to false)
                     ProjectRowItem(model, row, group.projects.map { it.id }, up, down)
@@ -264,7 +264,7 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
 
 
 @Composable
-private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: String, folded: Boolean) {
+private fun AreaHeader(model: InboxViewModel, bucket: String, group: ProjectGroup, areaKey: String, folded: Boolean) {
     val c = LocalTheme.current.colors
     val area = group.areaName ?: t("projects.noArea")
     val toggleLabel = t(if (folded) "markdown.expand" else "markdown.collapse")
@@ -291,7 +291,7 @@ private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: Stri
     if (areaId != null) {
         val label = "${t("projects.manageAreas")}: $area"
         Box(Modifier.size(44.dp).clickable(enabled = model.writable && !model.busy, role = Role.Button) { model.openAreaManager(areaId, area) }
-            .semantics { contentDescription = label }.testTag("project-area-menu-$areaId"), contentAlignment = Alignment.Center) {
+            .semantics { contentDescription = label }.testTag("project-area-menu-$bucket-$areaId"), contentAlignment = Alignment.Center) {
             Icon(Lucide.MoreHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
     }

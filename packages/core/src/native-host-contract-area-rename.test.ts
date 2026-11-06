@@ -520,6 +520,31 @@ describe('Projects list Area rename refuses a taken name (RN 8b31620e4)', () => 
         expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'missing', name: 'Desk' })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(await methods.runAreaRename({ requestId: 'not-a-uuid', areaId: 'work', name: 'Desk' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
+
+    it('lands the name on disk once when its first save fails and the same request is retried', async () => {
+        let failing = true;
+        const { methods, data } = await open({ areas: [area('work', 'Work', 0), area('home', 'Home', 1)],
+            projects: [project('linked', 'work', 'Work')] }, () => failing);
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: 'Office' })).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(data().areas.find((row) => row.id === 'work')?.name).toBe('Work');
+        failing = false;
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: 'Office' })).toMatchObject({ ok: true, value: { areaId: 'work', name: 'Office' } });
+        expect(data().areas.filter((row) => !row.deletedAt).map((row) => [row.id, row.name])).toEqual([['work', 'Office'], ['home', 'Home']]);
+        expect(data().projects[0]).toMatchObject({ areaId: 'work', areaTitle: 'Office' });
+        expect(useTaskStore.getState().persistenceFailure).toBeNull();
+    });
+
+    it('is not blocked by an earlier unrelated failed save once the disk recovers', async () => {
+        let failing = false;
+        const { methods, data } = await open({ areas: [area('work', 'Work', 0), area('home', 'Home', 1)] }, () => failing);
+        failing = true;
+        await useTaskStore.getState().updateArea('home', { color: '#ef4444' });
+        await flushPendingSave().catch(() => undefined);
+        expect(useTaskStore.getState().persistenceFailure).not.toBeNull();
+        failing = false;
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: 'Office' })).toMatchObject({ ok: true, value: { outcome: 'saved', name: 'Office' } });
+        expect(data().areas.map((row) => [row.id, row.name, row.color])).toEqual([['work', 'Office', '#3b82f6'], ['home', 'Home', '#ef4444']]);
+    });
 });
 
 

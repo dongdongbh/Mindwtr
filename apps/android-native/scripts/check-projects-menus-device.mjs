@@ -46,7 +46,7 @@ const pullDatabase = (name) => {
 
 const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
-    import { SqliteAdapter, createNativeHostContract, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
+    import { AREA_FILTER_NONE, SqliteAdapter, createNativeHostContract, flushPendingSave, resolveAreaFilterSelection, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
     const db = new Database(process.env.CHECK_DB);
     setStorageAdapter(new SqliteAdapter({
         run: async (sql, params = []) => { db.query(sql).run(...params); },
@@ -80,11 +80,18 @@ const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', [
     if (process.env.CHECK_MODE === 'cleanup') {
         for (const title of [names.one, names.two]) if (project(title)) await store().deleteProject(project(title).id);
         for (const name of [names.work, names.office, names.home]) if (area(name)) await store().deleteArea(area(name).id);
+        const kept = JSON.parse(process.env.CHECK_KEPT);
+        if ((store().settings.appearance?.mobileQuickAccessView ?? null) !== kept.quickView)
+            await store().updateSettings({ appearance: { ...store().settings.appearance, mobileQuickAccessView: kept.quickView ?? undefined } });
+        const live = new Set([AREA_FILTER_NONE, ...store()._allAreas.filter((entry) => !entry.deletedAt).map((entry) => entry.id)]);
+        const restored = await host.setAreaFilter({ included: kept.areaFilter.included.filter((id) => live.has(id)), excluded: kept.areaFilter.excluded.filter((id) => live.has(id)) });
+        if (!restored.ok) throw new Error(restored.error.message);
         await flushPendingSave();
         if (store().persistenceFailure) throw new Error('save failed: ' + store().persistenceFailure.message);
     }
     const out = {
         quickView: store().settings.appearance?.mobileQuickAccessView ?? null,
+        areaFilter: resolveAreaFilterSelection(store().settings.filters, store()._allAreas),
         areas: store()._allAreas.filter((entry) => !entry.deletedAt && entry.name.startsWith('PM1489')).map((entry) => ({ id: entry.id, name: entry.name })),
         projects: [names.one, names.two].map((title) => project(title)).filter(Boolean)
             .map((entry) => ({ id: entry.id, title: entry.title, areaId: entry.areaId ?? null, order: entry.order, status: entry.status })),
@@ -93,7 +100,7 @@ const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', [
     db.close();
     console.log(JSON.stringify(out));
     process.exit(0);
-`], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify(NAMES) } })
+`], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify(NAMES), CHECK_KEPT: JSON.stringify(kept ?? { quickView: null, areaFilter: { included: [], excluded: [] } }) } })
     .trim().split('\n').pop());
 
 const areaNamed = (seen, name) => seen.areas.find((entry) => entry.name === name);
@@ -133,12 +140,13 @@ const rewrite = async (mode) => {
     await waitFor('the Inbox', onInbox, 60_000);
 };
 let fixtureAdded = false;
+let kept = null;
 
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const originalNight = sh('cmd uimode night').replace(/^Night mode: /, '').trim();
 const restore = async () => {
-    try { if (originalNight && originalNight !== 'unknown') sh(`cmd uimode night ${originalNight}`); } catch {                   }
+    try { if (originalNight && originalNight !== 'unknown') sh(`cmd uimode night ${originalNight}`); } catch {}
     try {
         for (let step = 0; step < 4 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -148,18 +156,19 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch {                       }
+    } catch {}
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {}
     }
     try {
         if (fixtureAdded) {
             await rewrite('cleanup');
             const left = core('view');
-            if (left.areas.length || left.projects.length) console.error(`RESTORE: the fixture areas or projects are still stored: ${JSON.stringify(left)}`);
+            if (left.areas.length || left.projects.length || left.quickView !== kept.quickView || JSON.stringify(left.areaFilter) !== JSON.stringify(kept.areaFilter))
+                console.error(`RESTORE: the fixture or the settings it changed are still stored: ${JSON.stringify(left)}`);
         }
     } catch (error) { console.error(`RESTORE FAILED: the fixture areas and projects were not removed (${error.message})`); process.exitCode = 1; }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {}
 };
 
 try {
@@ -176,12 +185,14 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
     let seen = core('view');
+    kept = { quickView: seen.quickView, areaFilter: seen.areaFilter };
+    console.log(`info - kept the quick-access view ${kept.quickView} and the area filter ${JSON.stringify(kept.areaFilter)} to put back`);
+    fixtureAdded = true;
     if (!canonical(seen)) {
         await rewrite('inject');
         seen = core('view');
         console.log(`info - injected the areas ${NAMES.work} and ${NAMES.home} with ${NAMES.one} above ${NAMES.two} in ${NAMES.work}`);
     }
-    fixtureAdded = true;
     check(canonical(seen), `core stores ${NAMES.one} above ${NAMES.two}, both in ${NAMES.work}, beside ${NAMES.home}`);
     const workId = areaNamed(seen, NAMES.work).id;
     const homeId = areaNamed(seen, NAMES.home).id;
@@ -227,7 +238,9 @@ try {
     nodes = await device.reveal(NAMES.two, 60);
     nodes = await device.settle(nodes);
     check(!withDescription(nodes, `${en['projects.manageAreas']}: ${en['projects.noArea']}`), `the ${en['projects.noArea']} heading has no "…" menu`);
-    nodes = await tapExpecting(withDescription(nodes, manageLabel) ?? fail(`no "${manageLabel}" button on the area heading`),
+    const headingMenu = tagged(nodes, `project-area-menu-active-${workId}`) ?? fail(`no project-area-menu-active-${workId} on the ${NAMES.work} heading`);
+    check(headingMenu['content-desc'] === manageLabel, `the Active ${NAMES.work} heading's "…" is project-area-menu-active-${workId}, read as "${manageLabel}"`);
+    nodes = await tapExpecting(headingMenu,
         (current) => Boolean(tagged(current, 'project-area-manager')) && Boolean(tagged(current, 'project-area-rename-input')), `the ${en['projects.manageAreas']} sheet for ${NAMES.work}`);
     const input = tagged(nodes, 'project-area-rename-input');
     check(input.text === NAMES.work && Boolean(textNode(nodes, en['projects.manageAreas'])) && !tagged(nodes, `project-area-row-${homeId}`) && !tagged(nodes, 'project-area-new-name'),
@@ -262,7 +275,7 @@ try {
     await back();
     nodes = await waitFor('the sheet closed', (current) => !tagged(current, 'project-area-manager'), 10_000);
     nodes = await device.reveal(NAMES.two, 60);
-    check(Boolean(withDescription(await screen(), `${en['projects.manageAreas']}: ${NAMES.office}`)), `the Projects list heading now reads ${NAMES.office}`);
+    check(tagged(await screen(), `project-area-menu-active-${workId}`)?.['content-desc'] === `${en['projects.manageAreas']}: ${NAMES.office}`, `the Projects list heading now reads ${NAMES.office}`);
 
     sh('cmd uimode night yes');
     await sleep(2500);
@@ -270,7 +283,7 @@ try {
     shot('row-menu-dark');
     await back();
     nodes = await device.reveal(NAMES.two, 60);
-    nodes = await tapExpecting(withDescription(nodes, `${en['projects.manageAreas']}: ${NAMES.office}`) ?? fail('no area heading menu in dark mode'),
+    nodes = await tapExpecting(tagged(nodes, `project-area-menu-active-${workId}`) ?? fail('no area heading menu in dark mode'),
         (current) => Boolean(tagged(current, 'project-area-rename-input')), 'the rename sheet in dark mode');
     shot('area-rename-dark');
     await back();

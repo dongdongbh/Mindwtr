@@ -1,6 +1,3 @@
-
-
-
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import vm from 'node:vm';
