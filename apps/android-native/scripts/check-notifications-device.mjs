@@ -330,6 +330,7 @@ const armedAt = (alert) => pomodoroAlarms().filter((at) => at === alert.fireAtMs
 let found = null;
 
 let stayOn = null;
+let exactMode = null;
 const restore = async () => {
     try { sh('input keyevent KEYCODE_WAKEUP'); sh('wm dismiss-keyguard'); } catch {                   }
     try { closeShade(); } catch {                   }
@@ -368,6 +369,7 @@ const restore = async () => {
     try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch {                   }
     try { sh('settings put system accelerometer_rotation 1'); } catch {                   }
     try { if (stayOn !== null) sh(`settings put global stay_on_while_plugged_in ${stayOn}`); } catch {                   }
+    try { if (exactMode !== null) sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${exactMode}`); } catch {                   }
     try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
@@ -379,6 +381,8 @@ try {
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     sh(`pm grant ${PKG} android.permission.POST_NOTIFICATIONS`);
+    exactMode = /SCHEDULE_EXACT_ALARM: (\w+)/.exec(sh(`appops get ${PKG} SCHEDULE_EXACT_ALARM`))?.[1] ?? 'default';
+    sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM allow`);
     sh('settings put system accelerometer_rotation 0');
 
     stayOn = /^\d+$/.test(sh('settings get global stay_on_while_plugged_in')) ? sh('settings get global stay_on_while_plugged_in') : '0';
@@ -598,15 +602,17 @@ try {
 
     const openBreak = await breakOf(open, Math.max(0, open.fireAtMs - Date.now()) + 30_000);
     await waitUntil('the break\'s alarm', () => armedAt(openBreak) === 1, 30_000, 2000);
+    check(openBreak.id !== open.id && book().armed.some((entry) => entry.id === openBreak.id) && armedAt(openBreak) === 1,
+        '(5) the break\'s alarm is armed at its end under another id');
+    nodes = await toCard();
+    check(Date.now() < openBreak.fireAtMs - 15_000, `(5) the Pause comes while the break still runs (${openBreak.fireAtMs - Date.now()} ms before its end)`);
+    await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
+    await waitUntil('the break\'s alarm to go', () => armedAt(openBreak) === 0, 15_000);
+    check(!book().armed.some((entry) => entry.id === openBreak.id), '(5) Pause cancels the break\'s alarm');
     await waitUntil('the focus alert', () => shownOnce(open).length === 1, Math.max(0, open.fireAtMs - Date.now()) + LATE_MS);
     await sleep(3000);
     check(shownOnce(open).length === 1 && shownOnce(open)[0].text === en['pomodoro.focusComplete'], '(5) the break starts and the focus alert shows, once');
-    check(openBreak.id !== open.id && book().armed.some((entry) => entry.id === openBreak.id) && pomodoroAlarms().length === 1,
-        '(5) the break\'s alarm is armed at its end under another id');
-    nodes = await toCard();
-    await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
-    await waitUntil('the break\'s alarm to go', () => pomodoroAlarms().length === 0, 15_000);
-    check(true, '(5) Pause cancels the break\'s alarm');
+    check(pomodoroAlarms().length === 0, '(5) after the focus alert, no Pomodoro alarm is left');
 
 
     nodes = await idleCard();

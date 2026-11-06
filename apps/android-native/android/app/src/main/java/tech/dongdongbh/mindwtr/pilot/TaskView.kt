@@ -319,7 +319,7 @@ internal fun MarkdownBlocks(blocks: List<JSONObject>, labels: JSONObject, follow
 }
 
 
-private fun inline(runs: List<JSONObject>, labels: JSONObject, tint: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color,
+internal fun inline(runs: List<JSONObject>, labels: JSONObject, tint: androidx.compose.ui.graphics.Color, muted: androidx.compose.ui.graphics.Color,
                    codeBg: androidx.compose.ui.graphics.Color, follow: (JSONObject) -> Unit) = buildAnnotatedString {
     for (run in runs) {
         val text = run.getString("text")

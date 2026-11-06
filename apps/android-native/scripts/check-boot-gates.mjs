@@ -1379,7 +1379,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'runProjectNextAction',
 
-        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates'];
+        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates', 'editTaskRowChecklist'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -2122,7 +2122,23 @@ assert.doesNotMatch(themeCall, /requireSaved/);
 assert.match(model, /fun JSONObject\.taskRow\(\) = getJSONObject\("meta"\)\.let \{ meta ->/);
 assert.match(model, /meta\.getJSONArray\("parts"\)\.let \{ parts -> List\(parts\.length\(\)\) \{ parts\.getJSONObject\(it\)\.metaPart\(\) \} \}/);
 assert.match(rowUi, /val parts = if \(details\) meta\.parts else meta\.parts\.filter \{ !it\.detail \}/, 'detail parts show only where RN\'s list shows them');
-assert.match(rowUi, /for \(part in parts\) MetaPartView\(part, if \(part\.kind == "completed"\) editCompleted else null\)/);
+assert.match(rowUi, /if \(part\.kind == "checklist"\) ChecklistBadge\(part\) \{ toggleRowChecklist\(task\.id\) \}\s+else Box\(Modifier\.clearAndSetSemantics \{ \}\) \{ MetaPartView\(part, if \(part\.kind == "completed"\) editCompleted else null\) \}/, 'the checklist badge opens the row\'s list as RN\'s badge does; other parts stay silent');
+assert.match(rowUi, /if \(rowChecklistOpen\[task\.id\] == true\) \{\s+LaunchedEffect\(task\.taskRevision\) \{ readRowChecklist\(task\.id\) \}\s+RowChecklistItems\(model, task\.id, selecting\)/);
+assert.match(rowUi, /if \(!selecting && tappable\) \{\s+val draft = rowChecklistDrafts\[taskId\]/, 'selection mode hides the row\'s Add item, as RN does');
+assert.match(rowUi, /val tappable = rowChecklistTappable\(read\)/);
+{
+    const vm = source('InboxViewModel.kt');
+    assert.match(vm, /fun rowChecklistTappable\(read: JSONObject\): Boolean = writable && failedAction == null && !read\.optBoolean\("readOnly"\)/, 'a row checklist takes no tick while an action is owed');
+    assert.match(vm, /private fun editRowChecklist\(taskId: String, edit: \(RowChecklistPending\) -> Unit\) \{\s+val read = rowChecklists\[taskId\] \?: return\s+if \(!rowChecklistTappable\(read\)\) return/);
+    assert.match(vm, /if \(title\.isEmpty\(\) \|\| !rowChecklistTappable\(read\)\) return false\s+rowChecklistDrafts\[taskId\] = ""/, 'a refused Add item keeps its typed text');
+    assert.match(vm, /if \(switched\) \{ keepProjectReturn\(null\); closeRowChecklists\(\) \}/, 'a tab change folds open row checklists, as RN rows reset');
+    assert.match(vm, /if \(id != openProjectId\) closeRowChecklists\(\)/);
+    assert.match(vm, /if \(busy\) return menu\.whenIdle \{ readRowChecklist\(taskId\) \}/, 'a checklist opened while a write runs reads once idle');
+    assert.match(menuModel, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) == true\) \{ shell\.acknowledged\(action\); return@perform \}/, 'a tick on a deleted task is dropped silently, as RN does');
+    assert.match(menuModel, /"taskRowChecklistEdit" -> shell\.rowChecklistSettled\(JSONObject\(action\.title\)\.getString\("taskId"\), RowChecklistOutcome\.Written\)/);
+    assert.match(menuModel, /private fun open\(target: MenuScreen, tab: String\? = null\) \{\s+closeSheet\(\)\s+shell\.closeRowChecklists\(\)/);
+    assert.match(menuModel, /private fun leave\(back: MenuScreen\?\) \{\s+shell\.closeRowChecklists\(\)/);
+}
 assert.match(rowUi, /"due" -> MetaText\(part\.text, when \(part\.tone\) \{ "overdue" -> c\.danger; "dueSoon" -> c\.warning; else -> c\.secondaryText \}, 600\)/);
 assert.match(rowUi, /val strip = theme\.priority\(meta\.priority\)/);
 assert.match(rowUi, /contentDescription = meta\.accessibilityLabel/);
@@ -2183,7 +2199,7 @@ assert.match(projectsUi, /IconButton\(onClick = model::backFromProject, enabled 
 assert.match(menuModel, /fun openProjects\(projectId: String\?\) \{\s+val back = projectId\?\.let \{ projectReturnFrom\(shell\.screen, screen, quickView == "projects", shell\.openProjectId, shell\.projectReturn\) \}[\s\S]{0,300}?shell\.keepProjectReturn\(back\)/, 'a project opened from Someday or any other screen remembers that screen');
 assert.match(source('InboxViewModel.kt'), /fun backFromProject\(\) \{\s+val back = projectReturn\s+closeProject\(\)\s+back\?\.let\(menu::returnTo\)/);
 assert.doesNotMatch(source('FocusScreen.kt'), /show\(Screen\.Projects\); openProject\(/, 'Focus opens a project through openProjects, so Back returns to Focus');
-assert.match(source('InboxViewModel.kt'), /fun show\(target: Screen\) \{\s+val switched = target != screen\s+if \(switched\) keepProjectReturn\(null\)/, 'a real tab switch forgets where the project came from');
+assert.match(source('InboxViewModel.kt'), /fun show\(target: Screen\) \{\s+val switched = target != screen\s+if \(switched\) \{ keepProjectReturn\(null\);/, 'a real tab switch forgets where the project came from');
 assert.match(source('InboxViewModel.kt'), /fun closeProject\(\) \{\s+keepProject\(null\)\s+keepProjectReturn\(null\)/, 'a closed project forgets where it came from');
 assert.match(projectsUi, /\)\) \{ keepProjectReturn\(null\); openProject\(row\.id\) \}/, 'a Projects list row opens its project with Back to the list');
 assert.match(source('CaptureModalModel.kt'), /"openInProject" -> \{\s+keep\(null\)\s+reopenProjectWithTask\(reply\.getString\("projectId"\), reply\.getString\("taskId"\)\)/, 'Save and edit from a project reopens it in place, keeping its Back');

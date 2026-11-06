@@ -1004,7 +1004,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
         })) throw new Error('Invalid project attachment request');
     return input as { projectId: string; attachmentId?: string };
 };
-type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayProjectMove' | 'taskDestinationMove' | 'taskDatesSave' | 'taskSwipeFocus' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
+type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayProjectMove' | 'taskDestinationMove' | 'taskDatesSave' | 'taskSwipeFocus' | 'taskRowChecklistEdit' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
     | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'taskCompletedAt' | 'areaOrder' | 'areaColor' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
     | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
@@ -1395,6 +1395,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
 
     taskDestination: (input) => contract.getTaskDestinationPicker(input),
     taskDates: (input) => contract.getTaskDatesSheet(input),
+    taskRowChecklist: (input) => contract.getTaskRowChecklist(input),
     history: (input) => contract.getHistoryView(input),
     archive: (input) => contract.getArchiveView(input),
     contexts: (input) => contract.getContextsView(input),
@@ -1610,6 +1611,7 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     taskDestinationMove: (input) => contract.moveTaskToDestination(input),
     taskDatesSave: (input) => contract.saveTaskDates(input),
     taskSwipeFocus: (input) => contract.setTaskSwipeFocus(input),
+    taskRowChecklistEdit: (input) => contract.editTaskRowChecklist(input),
     somedayUndo: (input) => contract.undoSomedaySectionMove(input),
     somedayTask: (input) => contract.addSomedaySectionTask(input),
     somedaySection: (input) => contract.createSomedaySection(input),
