@@ -35,8 +35,15 @@ import {
     getCalendarDayAllDayTones,
     getCalendarWeekAllDayTones,
     planCalendarTaskMove,
+    planCalendarTaskResize,
     indexCalendarScheduledTasks,
     calendarDateKey,
+    CALENDAR_GRID_STEP_OPTIONS,
+    CALENDAR_TIMELINE_ZOOM_OPTIONS,
+    coerceCalendarGridStep,
+    coerceCalendarTimelineZoom,
+    formatCalendarTimelineZoomLabel,
+    getCalendarGridLineMinutes,
     isAllDayScheduledTask,
     isTimedScheduledTask,
     moveCalendarPeriod,
@@ -332,6 +339,47 @@ describe('calendar view model', () => {
             if (previous === undefined) delete process.env.TZ;
             else process.env.TZ = previous;
         }
+    });
+
+    it('resizes a block by its estimate, refusing projections and conflicts', () => {
+        const midnight = new Date(2026, 9, 28).getTime();
+        expect(planCalendarTaskResize({ taskId: 'task-1:projected-recurrence:2026-10-28', dayStartMs: midnight, startMinutes: 90, durationMinutes: 45, isSlotFree: () => true })).toEqual({ kind: 'projected' });
+        const refused = planCalendarTaskResize({ taskId: 'task-1', dayStartMs: midnight, startMinutes: 90, durationMinutes: 45, isSlotFree: () => false });
+        expect(refused.kind).toBe('conflict');
+        const plan = planCalendarTaskResize({ taskId: 'task-1', dayStartMs: midnight, startMinutes: 90, durationMinutes: 45, isSlotFree: () => true });
+        if (plan.kind !== 'resize') throw new Error(plan.kind);
+        expect(plan.updates).toEqual({ timeEstimate: 'custom:45' });
+        const hour = planCalendarTaskResize({ taskId: 'task-1', dayStartMs: midnight, startMinutes: 90, durationMinutes: 60, isSlotFree: () => true });
+        if (hour.kind !== 'resize') throw new Error(hour.kind);
+        expect(hour.updates).toEqual({ timeEstimate: '1hr' });
+    });
+
+    it('coerces the timeline grid step and zoom to the offered choices', () => {
+        expect(CALENDAR_GRID_STEP_OPTIONS).toEqual([5, 10, 15, 30, 60]);
+        for (const step of [5, 10, 15, 30, 60]) expect(coerceCalendarGridStep(step)).toBe(step);
+        expect(coerceCalendarGridStep(undefined)).toBe(5);
+        expect(coerceCalendarGridStep(7)).toBe(5);
+        expect(coerceCalendarGridStep(120)).toBe(5);
+        expect(CALENDAR_TIMELINE_ZOOM_OPTIONS).toEqual([0.75, 1, 1.5, 2]);
+        expect(coerceCalendarTimelineZoom(undefined)).toBe(1);
+        expect(coerceCalendarTimelineZoom(Number.NaN)).toBe(1);
+        expect(coerceCalendarTimelineZoom(0.75)).toBe(0.75);
+        expect(coerceCalendarTimelineZoom(2)).toBe(2);
+        expect(coerceCalendarTimelineZoom(0.1)).toBe(0.75);
+        expect(coerceCalendarTimelineZoom(9)).toBe(2);
+        expect(formatCalendarTimelineZoomLabel(0.75)).toBe('75%');
+        expect(formatCalendarTimelineZoomLabel(1.5)).toBe('150%');
+    });
+
+    it('draws sub-hour grid lines only for a step shorter than an hour', () => {
+        expect(getCalendarGridLineMinutes(60)).toEqual([]);
+        // The hour lines already cover the whole hours; only the odd multiples stay.
+        expect(getCalendarGridLineMinutes(30)).toHaveLength(24);
+        expect(getCalendarGridLineMinutes(30).filter((minute) => minute % 30 !== 0)).toEqual([]);
+        expect(getCalendarGridLineMinutes(15)).toHaveLength(72);
+        expect(getCalendarGridLineMinutes(5)).toHaveLength(264);
+        // 1440 lands on no minute inside the day, so no grid line is drawn.
+        expect(getCalendarGridLineMinutes(1440)).toEqual([]);
     });
 
     it('builds the English headings from date-fns patterns as the React Native screen draws them', () => {

@@ -24,6 +24,7 @@ import {
   formatCalendarAllDayMore,
   formatCalendarDurationChip,
   formatCalendarScheduleDayTitle,
+  formatCalendarTimelineZoomLabel,
   getCalendarAllDayLane,
   getCalendarComposerPlaceholders,
   getCalendarDayAllDayTones,
@@ -32,6 +33,7 @@ import {
   getCalendarDayOfMonth,
   getCalendarDayTimeline,
   getCalendarDetailsEventRow,
+  getCalendarGridLineMinutes,
   getCalendarDetailsTaskRow,
   getCalendarItemTitle,
   getCalendarMonthItemTitle,
@@ -119,11 +121,13 @@ const getTimedBlockInsetStyle = (layout?: CalendarTimedLayout): TimedBlockInsetS
 };
 
 type ScheduledTaskBlockProps = {
+  canResize: boolean;
   DAY_END_HOUR: number;
   DAY_START_HOUR: number;
   PIXELS_PER_MINUTE: number;
   SNAP_MINUTES: number;
   commitTaskDrag: (taskId: string, dayStartMs: number, startMinutes: number, durationMinutes: number) => void;
+  commitTaskResize: (taskId: string, dayStartMs: number, startMinutes: number, durationMinutes: number) => void;
   dayStartMs: number;
   durationMinutes: number;
   height: number;
@@ -132,6 +136,7 @@ type ScheduledTaskBlockProps = {
   openTaskActions: (taskId: string) => void;
   projected: boolean;
   reducedMotion: boolean;
+  resizeHandleLabel: string;
   setTimelineScrollEnabled: (enabled: boolean) => void;
   task: Task;
   tc: ReturnType<typeof useCalendarViewController>['tc'];
@@ -200,11 +205,13 @@ function PlanningTaskList({
 }
 
 function ScheduledTaskBlock({
+  canResize,
   DAY_END_HOUR,
   DAY_START_HOUR,
   PIXELS_PER_MINUTE,
   SNAP_MINUTES,
   commitTaskDrag,
+  commitTaskResize,
   dayStartMs,
   durationMinutes,
   height,
@@ -213,6 +220,7 @@ function ScheduledTaskBlock({
   openTaskActions,
   projected,
   reducedMotion,
+  resizeHandleLabel,
   setTimelineScrollEnabled,
   task,
   tc,
@@ -224,7 +232,10 @@ function ScheduledTaskBlock({
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
   const zIndex = useSharedValue(1);
+  const resizeY = useSharedValue(0);
   const taskId = task.id;
+  // The block's own start, in minutes into its day, before any drag moves it.
+  const startMinutes = top / PIXELS_PER_MINUTE;
 
   const panGesture = Gesture.Pan()
     .activateAfterLongPress(140)
@@ -250,6 +261,31 @@ function ScheduledTaskBlock({
       runOnJS(setTimelineScrollEnabled)(true);
     });
 
+  // The bottom edge: dragging it grows or shrinks the block around its start,
+  // snapping to the grid step, no shorter than one step and never past midnight.
+  const resizeGesture = Gesture.Pan()
+    .activateAfterLongPress(80)
+    .onStart(() => {
+      zIndex.value = 50;
+      runOnJS(triggerDragHaptic)();
+      runOnJS(setTimelineScrollEnabled)(false);
+    })
+    .onUpdate((event) => {
+      resizeY.value = event.translationY;
+    })
+    .onEnd((event) => {
+      const dayMinutes = (DAY_END_HOUR - DAY_START_HOUR) * 60;
+      const rawDuration = durationMinutes + event.translationY / PIXELS_PER_MINUTE;
+      const snappedDuration = Math.round(rawDuration / SNAP_MINUTES) * SNAP_MINUTES;
+      const clampedDuration = Math.max(SNAP_MINUTES, Math.min(dayMinutes - startMinutes, snappedDuration));
+      runOnJS(commitTaskResize)(taskId, dayStartMs, startMinutes, clampedDuration);
+      resizeY.value = reducedMotion ? 0 : withSpring(0);
+      zIndex.value = 1;
+    })
+    .onFinalize(() => {
+      runOnJS(setTimelineScrollEnabled)(true);
+    });
+
   const tapGesture = Gesture.Tap().onEnd(() => {
     runOnJS(openTaskActions)(taskId);
   });
@@ -257,6 +293,9 @@ function ScheduledTaskBlock({
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }, { scale: scale.value }],
     zIndex: zIndex.value,
+  }));
+  const resizeStyle = useAnimatedStyle(() => ({
+    height: Math.max(24, height + resizeY.value),
   }));
 
   const compact = height < 48;
@@ -316,9 +355,23 @@ function ScheduledTaskBlock({
           },
           layoutStyle,
           animatedStyle,
+          resizeStyle,
         ]}
       >
         {blockContent}
+        {canResize && (
+          <GestureDetector gesture={resizeGesture}>
+            <View
+              accessibilityLabel={`${resizeHandleLabel} ${task.title}`}
+              accessibilityRole="adjustable"
+              hitSlop={{ bottom: 8, left: 0, right: 0, top: 8 }}
+              pointerEvents="auto"
+              style={styles.resizeHandle}
+            >
+              <View style={styles.resizeHandleBar} />
+            </View>
+          </GestureDetector>
+        )}
       </Animated.View>
     </GestureDetector>
   );
@@ -364,6 +417,10 @@ export function CalendarView() {
   const {
     DAY_END_HOUR,
     DAY_START_HOUR,
+    DAY_PIXELS_PER_MINUTE,
+    DAY_SNAP_MINUTES,
+    GRID_STEP_OPTIONS,
+    ZOOM_OPTIONS,
     PIXELS_PER_MINUTE,
     SNAP_MINUTES,
     calendarDays,
@@ -378,6 +435,7 @@ export function CalendarView() {
     closeCalendarComposer,
     closeEditingTask,
     commitTaskDrag,
+    commitTaskResize,
     dayNames,
     editingTask,
     externalCalendars,
@@ -429,6 +487,8 @@ export function CalendarView() {
     setCalendarComposerStartTime,
     setCalendarComposerTitle,
     setCalendarWeekVisibleDays,
+    setTimelineGridStep,
+    setTimelineZoom,
     setScheduleQuery,
     setSelectedDate,
     setTimelineScrollEnabled,
@@ -440,6 +500,9 @@ export function CalendarView() {
     t,
     tc,
     timeEstimateToMinutes,
+    timeEstimatesEnabled,
+    timelineGridStep,
+    timelineZoom,
     timelineHeight,
     timelineScrollRef,
     toRgba,
@@ -852,9 +915,10 @@ export function CalendarView() {
     const allDayLane = getCalendarAllDayLane(getCalendarItemsForDate(selectedDate), CALENDAR_DAY_ALL_DAY_ITEMS, allDayExpanded);
     const allDayItems = allDayLane.items;
     const handleDayTimelinePress = (event: GestureResponderEvent) => {
-      const clampedMinutes = snapCalendarTimelineMinutes(event.nativeEvent.locationY / PIXELS_PER_MINUTE);
+      const clampedMinutes = snapCalendarTimelineMinutes(event.nativeEvent.locationY / DAY_PIXELS_PER_MINUTE, DAY_SNAP_MINUTES);
       openQuickAddAtDateTime(getCalendarMovedStart(selectedDayStart.getTime(), clampedMinutes));
     };
+    const gridLineMinutes = getCalendarGridLineMinutes(timelineGridStep);
 
     return (
       <View style={[styles.container, { backgroundColor: tc.bg }]}>
@@ -921,6 +985,55 @@ export function CalendarView() {
               </View>
             )}
 
+            {/* The timeline's grid step and zoom, pinned above the grid like the
+                all-day card so the chips stay reachable while it scrolls. */}
+            <View style={[styles.timelineControls, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+              <Text style={[styles.timelineControlLabel, { color: tc.secondaryText }]}>
+                {t('calendar.mobile.timelineGridStep')}
+              </Text>
+              <View style={styles.timelineControlChips}>
+                {GRID_STEP_OPTIONS.map((minutes) => {
+                  const selected = minutes === timelineGridStep;
+                  return (
+                    <Pressable
+                      key={minutes}
+                      accessibilityLabel={`${t('calendar.mobile.timelineGridStep')} ${formatCalendarDurationChip(minutes)}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => setTimelineGridStep(minutes)}
+                      style={[styles.timelineChip, { borderColor: selected ? tc.tint : tc.border, backgroundColor: selected ? toRgba(tc.tint, isDark ? 0.22 : 0.1) : 'transparent' }]}
+                    >
+                      <Text style={[styles.timelineChipText, { color: selected ? tc.tint : tc.secondaryText }]}>
+                        {formatCalendarDurationChip(minutes)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.timelineControlLabel, { color: tc.secondaryText }]}>
+                {t('calendar.mobile.timelineZoom')}
+              </Text>
+              <View style={styles.timelineControlChips}>
+                {ZOOM_OPTIONS.map((zoom) => {
+                  const selected = zoom === timelineZoom;
+                  return (
+                    <Pressable
+                      key={zoom}
+                      accessibilityLabel={`${t('calendar.mobile.timelineZoom')} ${formatCalendarTimelineZoomLabel(zoom)}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => setTimelineZoom(zoom)}
+                      style={[styles.timelineChip, { borderColor: selected ? tc.tint : tc.border, backgroundColor: selected ? toRgba(tc.tint, isDark ? 0.22 : 0.1) : 'transparent' }]}
+                    >
+                      <Text style={[styles.timelineChipText, { color: selected ? tc.tint : tc.secondaryText }]}>
+                        {formatCalendarTimelineZoomLabel(zoom)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
             <ScrollView
               ref={timelineScrollRef}
               style={styles.dayScroll}
@@ -934,9 +1047,16 @@ export function CalendarView() {
             >
               <View style={[styles.timelineArea, { height: timelineHeight }]}>
                 <Pressable onPress={handleDayTimelinePress} style={styles.timelineTapTarget} />
+                {gridLineMinutes.map((minute) => (
+                  <View
+                    key={minute}
+                    pointerEvents="none"
+                    style={[styles.gridLine, { top: minute * DAY_PIXELS_PER_MINUTE, backgroundColor: toRgba(tc.border, 0.5) }]}
+                  />
+                ))}
                 {Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, idx) => {
                   const hour = DAY_START_HOUR + idx;
-                  const top = idx * 60 * PIXELS_PER_MINUTE;
+                  const top = idx * 60 * DAY_PIXELS_PER_MINUTE;
                   return (
                     <View key={hour} pointerEvents="none" style={[styles.hourLine, { top }]}>
                       <CompactText style={[styles.hourLabel, { color: tc.secondaryText }]} numberOfLines={1}>
@@ -958,8 +1078,8 @@ export function CalendarView() {
                   {selectedDayTimeline.events.map(({ event, start: clampedStart, end: clampedEnd, layout, timeLabel }) => {
                     const startMinutes = getCalendarWallMinutes(selectedDayStart, clampedStart);
                     const endMinutes = getCalendarWallMinutes(selectedDayStart, clampedEnd);
-                    const top = Math.max(0, startMinutes) * PIXELS_PER_MINUTE;
-                    const height = Math.max(16, (endMinutes - startMinutes) * PIXELS_PER_MINUTE);
+                    const top = Math.max(0, startMinutes) * DAY_PIXELS_PER_MINUTE;
+                    const height = Math.max(16, (endMinutes - startMinutes) * DAY_PIXELS_PER_MINUTE);
                     const eventStyle = [
                       styles.eventBlock,
                       {
@@ -997,16 +1117,18 @@ export function CalendarView() {
                   {selectedDayTimeline.tasks.map(({ task, durationMinutes, displayStart: clampedStart, displayEnd: clampedEnd, layout, projected, timeLabel }) => {
                     const startMinutes = getCalendarWallMinutes(selectedDayStart, clampedStart);
                     const endMinutes = getCalendarWallMinutes(selectedDayStart, clampedEnd);
-                    const top = Math.max(0, startMinutes) * PIXELS_PER_MINUTE;
-                    const height = Math.max(24, (endMinutes - startMinutes) * PIXELS_PER_MINUTE);
+                    const top = Math.max(0, startMinutes) * DAY_PIXELS_PER_MINUTE;
+                    const height = Math.max(24, (endMinutes - startMinutes) * DAY_PIXELS_PER_MINUTE);
                     return (
                       <ScheduledTaskBlock
                         key={task.id}
+                        canResize={timeEstimatesEnabled}
                         DAY_END_HOUR={DAY_END_HOUR}
                         DAY_START_HOUR={DAY_START_HOUR}
-                        PIXELS_PER_MINUTE={PIXELS_PER_MINUTE}
-                        SNAP_MINUTES={SNAP_MINUTES}
+                        PIXELS_PER_MINUTE={DAY_PIXELS_PER_MINUTE}
+                        SNAP_MINUTES={DAY_SNAP_MINUTES}
                         commitTaskDrag={commitTaskDrag}
+                        commitTaskResize={commitTaskResize}
                         task={task}
                         dayStartMs={selectedDayStart.getTime()}
                         top={top}
@@ -1017,6 +1139,7 @@ export function CalendarView() {
                         openTaskActions={openTaskActions}
                         projected={projected}
                         reducedMotion={reducedMotion}
+                        resizeHandleLabel={t('calendar.mobile.resizeHandle')}
                         setTimelineScrollEnabled={setTimelineScrollEnabled}
                         tc={tc}
                         timeLabel={timeLabel}
@@ -1027,7 +1150,7 @@ export function CalendarView() {
                   })}
                 </View>
                 {selectedDayDeadlines.length > 0 && <View pointerEvents="box-none" style={styles.timelineItemsLayer}>
-                  <DeadlineMarkerRail markers={selectedDayDeadlines} dayStart={selectedDayStart} pixelsPerMinute={PIXELS_PER_MINUTE}
+                  <DeadlineMarkerRail markers={selectedDayDeadlines} dayStart={selectedDayStart} pixelsPerMinute={DAY_PIXELS_PER_MINUTE}
                     openTaskActions={openTaskActions} tc={tc} dueLabel={t('calendar.due')} projectedLabel={projectedLabel} />
                 </View>}
               </View>

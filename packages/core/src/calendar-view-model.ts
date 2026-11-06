@@ -23,6 +23,7 @@ import {
     findFreeSlotForDay,
     formatCalendarTimeInputValue,
     isSlotFreeForDay,
+    minutesToTimeEstimate,
     parseCalendarTimeOnDate,
 } from './calendar-scheduling';
 import {
@@ -79,6 +80,43 @@ export const CALENDAR_WEEK_ALL_DAY_ITEMS = 3;
 export const CALENDAR_DAY_ALL_DAY_ITEMS = 4;
 
 export const CALENDAR_TAP_DURATION_MINUTES = 30;
+
+/** The grid steps a day timeline may snap to, shortest first. */
+export const CALENDAR_GRID_STEP_OPTIONS: readonly number[] = [5, 10, 15, 30, 60];
+/** The default keeps the drag and tap snap the screen has always had. */
+export const CALENDAR_GRID_STEP_DEFAULT = CALENDAR_SNAP_MINUTES;
+/** The day timeline's zoom multiplies the screen's base pixels per minute; the week stays fixed. */
+export const CALENDAR_TIMELINE_ZOOM_OPTIONS: readonly number[] = [0.75, 1, 1.5, 2];
+export const CALENDAR_TIMELINE_ZOOM_DEFAULT = 1;
+export const CALENDAR_TIMELINE_ZOOM_MIN = CALENDAR_TIMELINE_ZOOM_OPTIONS[0];
+export const CALENDAR_TIMELINE_ZOOM_MAX = CALENDAR_TIMELINE_ZOOM_OPTIONS[CALENDAR_TIMELINE_ZOOM_OPTIONS.length - 1];
+
+/** The stored grid step, or the default when it is not one a timeline offers. */
+export const coerceCalendarGridStep = (value?: number | null): number => {
+    const step = Number(value);
+    return CALENDAR_GRID_STEP_OPTIONS.includes(step) ? step : CALENDAR_GRID_STEP_DEFAULT;
+};
+
+/** The stored zoom, clamped to the range the timeline offers. */
+export const coerceCalendarTimelineZoom = (value?: number | null): number => {
+    const zoom = Number(value);
+    if (!Number.isFinite(zoom)) return CALENDAR_TIMELINE_ZOOM_DEFAULT;
+    return Math.max(CALENDAR_TIMELINE_ZOOM_MIN, Math.min(CALENDAR_TIMELINE_ZOOM_MAX, zoom));
+};
+
+/** The zoom choices' labels: "75%", "100%", "150%", "200%". */
+export const formatCalendarTimelineZoomLabel = (zoom: number): string => `${Math.round(zoom * 100)}%`;
+
+/** The sub-hour minutes the timeline draws grid lines at for `gridStep`; 60 leaves the hour lines alone. */
+export const getCalendarGridLineMinutes = (gridStep: number): number[] => {
+    const step = Number(gridStep);
+    if (!Number.isFinite(step) || step <= 0 || step >= CALENDAR_DAY_MINUTES) return [];
+    const minutes: number[] = [];
+    for (let minute = step; minute < CALENDAR_DAY_MINUTES; minute += step) {
+        if (minute % 60 !== 0) minutes.push(minute);
+    }
+    return minutes;
+};
 
 export const CALENDAR_VIEW_MODES: readonly CalendarViewMode[] = ['month', 'day', 'week', 'schedule'];
 
@@ -1101,9 +1139,9 @@ export const getCalendarNowMinutes = (now: Date): number | null => {
     return minutes;
 };
 
-
-export const snapCalendarTimelineMinutes = (rawMinutes: number): number => {
-    const snappedMinutes = Math.round(rawMinutes / CALENDAR_SNAP_MINUTES) * CALENDAR_SNAP_MINUTES;
+/** A timeline tap at `rawMinutes` into the day: snapped to `snapMinutes`, and early enough for a 30-minute task. */
+export const snapCalendarTimelineMinutes = (rawMinutes: number, snapMinutes: number = CALENDAR_SNAP_MINUTES): number => {
+    const snappedMinutes = Math.round(rawMinutes / snapMinutes) * snapMinutes;
     return Math.max(0, Math.min(CALENDAR_DAY_MINUTES - CALENDAR_TAP_DURATION_MINUTES, snappedMinutes));
 };
 
@@ -1291,7 +1329,28 @@ export const getCalendarMovedStart = (dayStartMs: number, startMinutes: number, 
     return start;
 };
 
+/**
+ * A block's bottom edge dragged to `durationMinutes`, its start staying at
+ * `startMinutes` into the day. A projected occurrence never resizes; a
+ * duration that would overlap something else is refused with the
+ * time-conflict toast; otherwise the task's estimate becomes the duration.
+ */
+export function planCalendarTaskResize(options: {
+    taskId: string;
+    dayStartMs: number;
+    startMinutes: number;
+    durationMinutes: number;
+    currentStart?: Date | null;
+    isSlotFree: (day: Date, start: Date, durationMinutes: number, excludeTaskId: string) => boolean;
+}): { kind: 'projected' } | { kind: 'conflict' } | { kind: 'resize'; updates: Partial<Task> } {
+    if (isProjectedRecurringTaskId(options.taskId)) return { kind: 'projected' };
+    const day = new Date(options.dayStartMs);
+    const start = getCalendarMovedStart(options.dayStartMs, options.startMinutes, options.currentStart);
+    if (!options.isSlotFree(day, start, options.durationMinutes, options.taskId)) return { kind: 'conflict' };
+    return { kind: 'resize', updates: { timeEstimate: minutesToTimeEstimate(options.durationMinutes) } };
+}
 
+/** A task made from an event (an all-day event gives a date-only due date), and the day to show after. */
 export function planCalendarEventTask(event: ExternalCalendarEvent, options: { calendarName?: string; t: Translate }) {
     const { initialProps, title } = buildCalendarEventTaskDraft(event, {
         calendarName: options.calendarName,

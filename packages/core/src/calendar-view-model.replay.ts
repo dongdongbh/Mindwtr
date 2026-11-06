@@ -398,6 +398,15 @@ export async function replayCalendarScenario(options: {
                     press({ press: async () => { allDayExpanded = !allDayExpanded; } }, [allDayExpanded ? view.text.allDayLess : content.allDayMore]);
                 }
             }
+            // The timeline's grid step and zoom chips, above the grid itself.
+            text(content.timeline.gridStepLabel);
+            for (const choice of content.timeline.gridStepChoices) {
+                press({ label: `${content.timeline.gridStepLabel} ${choice.label}`, press: async () => { await run({ type: 'setTimelineGridStep', minutes: choice.minutes }); } }, [choice.label]);
+            }
+            text(content.timeline.zoomLabel);
+            for (const choice of content.timeline.zoomChoices) {
+                press({ label: `${content.timeline.zoomLabel} ${choice.label}`, press: async () => { await run({ type: 'setTimelineZoom', zoom: choice.zoom }); } }, [choice.label]);
+            }
             drawn.presses.push({ press: async () => undefined, texts: [] });
             content.hourLabels.forEach(text);
             for (const item of byDay(content.dayKey, 'timed')) {
@@ -406,7 +415,8 @@ export async function replayCalendarScenario(options: {
                     continue;
                 }
                 const timed = item.timed!;
-                const height = Math.max(24, (timed.endMinutes - timed.startMinutes) * PIXELS_PER_MINUTE);
+                // The day timeline zooms, so the label threshold moves with it (44pt on screen).
+                const height = Math.max(24, (timed.endMinutes - timed.startMinutes) * PIXELS_PER_MINUTE * content.timeline.zoom);
                 drawn.blocks.push({ title: item.title, item });
                 text(item.title);
                 if (height >= 44) text(item.detail ?? '');
@@ -563,8 +573,8 @@ export async function replayCalendarScenario(options: {
             case 'timeline': {
                 const content = view.content;
                 if (content.mode !== 'day') throw new Error('The timeline is on the day view');
-                const rawMinutes = Number(target) / PIXELS_PER_MINUTE;
-                const snapped = Math.round(rawMinutes / 5) * 5;
+                const rawMinutes = Number(target) / (PIXELS_PER_MINUTE * content.timeline.zoom);
+                const snapped = Math.round(rawMinutes / content.timeline.gridStep) * content.timeline.gridStep;
                 const minutes = Math.max(0, Math.min(24 * 60 - 30, snapped));
                 const [year, month, day] = content.dayKey.split('-').map(Number);
                 openComposer({ at: new Date(new Date(year, month - 1, day).getTime() + minutes * 60_000).toISOString(), mode: 'new' });
@@ -584,12 +594,29 @@ export async function replayCalendarScenario(options: {
             case 'drag': {
                 const block = need(drawn.blocks.find((entry) => entry.title === target && !entry.item.projected), `drag ${String(target)}`);
                 const timed = block.item.timed!;
-                const top = Math.max(0, timed.startMinutes) * PIXELS_PER_MINUTE;
-                const startMinutes = Math.round((top + Number(rest[0])) / PIXELS_PER_MINUTE / 5) * 5;
-                const clamped = Math.max(0, Math.min(24 * 60 - timed.durationMinutes, startMinutes));
                 const content = view.content as Extract<NativeCalendarView['content'], { mode: 'day' }>;
+                const pixelsPerMinute = PIXELS_PER_MINUTE * content.timeline.zoom;
+                const top = Math.max(0, timed.startMinutes) * pixelsPerMinute;
+                const startMinutes = Math.round((top + Number(rest[0])) / pixelsPerMinute / content.timeline.gridStep) * content.timeline.gridStep;
+                const clamped = Math.max(0, Math.min(24 * 60 - timed.durationMinutes, startMinutes));
                 const result = await run({
                     type: 'moveTask', taskId: block.item.taskId, day: content.dayKey, startMinutes: clamped, durationMinutes: timed.durationMinutes,
+                    taskRevision: block.item.row!.taskRevision,
+                });
+                if (result.toast) toasts.push([result.toast.tone, result.toast.title, result.toast.message, result.toast.durationMs]);
+                return;
+            }
+            case 'resize': {
+                const block = need(drawn.blocks.find((entry) => entry.title === target && !entry.item.projected), `resize ${String(target)}`);
+                const timed = block.item.timed!;
+                const content = view.content as Extract<NativeCalendarView['content'], { mode: 'day' }>;
+                const pixelsPerMinute = PIXELS_PER_MINUTE * content.timeline.zoom;
+                const startMinutes = Math.max(0, timed.startMinutes);
+                const rawDuration = timed.durationMinutes + Number(rest[0]) / pixelsPerMinute;
+                const snapped = Math.round(rawDuration / content.timeline.gridStep) * content.timeline.gridStep;
+                const clamped = Math.max(content.timeline.gridStep, Math.min(24 * 60 - startMinutes, snapped));
+                const result = await run({
+                    type: 'resizeTask', taskId: block.item.taskId, day: content.dayKey, startMinutes, durationMinutes: clamped,
                     taskRevision: block.item.row!.taskRevision,
                 });
                 if (result.toast) toasts.push([result.toast.tone, result.toast.title, result.toast.message, result.toast.durationMs]);
