@@ -199,3 +199,23 @@ describe('Inbox widget area selection', () => {
         expect(payload.lists.next?.items.map((row) => row.id)).toEqual(['work-next']);
     });
 });
+
+describe('eink widget colors', () => {
+    it('publishes black identity and priority colors when the widget theme is eink', () => {
+        const now = new Date().toISOString();
+        const data: AppData = {
+            tasks: [{
+                id: 'eink-task', title: 'Task', status: 'next', tags: [], contexts: [],
+                projectId: 'project-1', priority: 'urgent', isFocusedToday: true,
+                createdAt: now, updatedAt: now,
+            }],
+            projects: [{
+                id: 'project-1', title: 'Launch', status: 'active', color: '#ABCDEF',
+                order: 0, tagIds: [], createdAt: now, updatedAt: now,
+            }],
+            sections: [], areas: [], settings: { theme: 'eink' } as AppSettings,
+        };
+        const payload = createWidgetPayloadProjection(data, 'en', iosWidgetProjectionOptions({})).build(3);
+        expect(payload.items[0]).toMatchObject({ identityColor: '#000000', priorityColor: '#000000' });
+    });
+});

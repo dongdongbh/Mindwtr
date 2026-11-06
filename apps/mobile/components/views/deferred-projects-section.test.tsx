@@ -17,6 +17,7 @@ vi.mock('react-native-gesture-handler', () => ({
 
 vi.mock('react-native', () => ({
   StyleSheet: { create: (styles: unknown) => styles },
+  Platform: { OS: 'ios' },
   Text: ({ children, ...props }: any) => React.createElement('Text', props, children),
   TouchableOpacity: ({ children, ...props }: any) => React.createElement('TouchableOpacity', props, children),
   View: ({ children, ...props }: any) => React.createElement('View', props, children),

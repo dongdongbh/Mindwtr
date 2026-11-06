@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { useTaskStore } from '@mindwtr/core';
 
 import { useLanguage } from '../contexts/language-context';
+import { useThemePreset } from './use-eink-safe-color';
 import {
     getMobileSyncActivityState,
     getMobileSyncConfigurationStatus,
@@ -10,7 +11,7 @@ import {
 } from '../lib/sync-service';
 import {
     getMobileLocalChangePending,
-    MOBILE_SYNC_BADGE_COLORS,
+    getMobileSyncBadgeColor,
     resolveMobileSyncBadgeState,
     subscribeMobileLocalChangePending,
 } from '../lib/sync-badge';
@@ -18,6 +19,7 @@ import {
 export function useMobileSyncBadge() {
     const pathname = usePathname();
     const { t } = useLanguage();
+    const themePreset = useThemePreset();
     const settings = useTaskStore((state) => state.settings);
     const [syncConfigured, setSyncConfigured] = useState(false);
     const [syncActivityState, setSyncActivityState] = useState(() => getMobileSyncActivityState());
@@ -63,7 +65,7 @@ export function useMobileSyncBadge() {
         syncConfigured,
     ]);
 
-    const syncBadgeColor = syncBadgeState === 'hidden' ? undefined : MOBILE_SYNC_BADGE_COLORS[syncBadgeState];
+    const syncBadgeColor = syncBadgeState === 'hidden' ? undefined : getMobileSyncBadgeColor(syncBadgeState, themePreset);
 
     const syncBadgeAccessibilityLabel = useMemo(() => {
         if (syncBadgeState === 'hidden') return undefined;

@@ -103,8 +103,8 @@ export function buildBoardColumns(input: {
 export type BoardProjectBadge = { title: string; color?: string };
 
 
-export const getBoardProjectBadges = (projects: readonly Project[], areaById: Map<string, Area>): Map<string, BoardProjectBadge> => new Map(
-    projects.map((project) => [project.id, { title: project.title, color: getProjectAccentColor(project, areaById) }]),
+export const getBoardProjectBadges = (projects: readonly Project[], areaById: Map<string, Area>, themePreset?: string | null): Map<string, BoardProjectBadge> => new Map(
+    projects.map((project) => [project.id, { title: project.title, color: getProjectAccentColor(project, areaById, themePreset) }]),
 );
 
 export type BoardCard = {

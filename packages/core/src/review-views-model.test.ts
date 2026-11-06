@@ -204,3 +204,24 @@ describe('review view models', () => {
         expect(suggestion.title).toBe('Fix bike');
     });
 });
+
+describe('eink review colors', () => {
+    it('draws weekly review badges and area colors black on the eink preset', () => {
+        const [entry] = getWeeklyReviewProjects([{ project: { id: 'project', areaId: 'blue',
+            color: '#ff0000', colorOverride: '#ff0000' }, tasks: [], nextActionState: 'none' }] as never,
+        new Map([['blue', { id: 'blue', color: '#0000ff' } as never]]), getWeeklyReviewLabels((key) => key), 'eink');
+        expect(entry.areaColor).toBe('#000000');
+        expect(entry.badge.color).toBe('#000000');
+        expect(entry.badge.background).toBe('#00000020');
+    });
+
+    it('draws the review overview area dot black on the eink preset', () => {
+        const groups = [{ areaId: 'area', taskCount: 1, projectCount: 1, needsActionCount: 0,
+            projectGroups: [{ project: { id: 'project', title: 'Project' }, tasks: [{ id: 'task' }], nextActionState: 'next' }] }] as never;
+        const [area] = decorateReviewOverviewGroups(groups, {
+            areaById: new Map([['area', { id: 'area', name: 'Area', color: '#0000ff' } as never]]),
+            text: getReviewOverviewText((key) => key), unassignedAreaColor: undefined, themePreset: 'eink',
+        });
+        expect(area.color).toBe('#000000');
+    });
+});

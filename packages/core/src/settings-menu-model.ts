@@ -8,6 +8,7 @@ import {
     SETTINGS_SEARCH_MOBILE_EXCLUSIONS,
     type SettingsSearchPageId,
 } from './settings-search-keys';
+import { einkSafeColor } from './color-constants';
 
 type Translate = (key: string) => string;
 
@@ -200,10 +201,10 @@ export const SETTINGS_SYNC_BADGE_COLORS: Record<Exclude<SettingsSyncBadgeState, 
 };
 
 
-export function getSettingsSyncBadge(state: SettingsSyncBadgeState, t: Translate): { color: string; accessibilityLabel: string } | null {
+export function getSettingsSyncBadge(state: SettingsSyncBadgeState, t: Translate, themePreset?: string | null): { color: string; accessibilityLabel: string } | null {
     if (state === 'hidden') return null;
     const key = state === 'syncing' ? 'settings.syncBadgeSyncing' : state === 'healthy' ? 'settings.syncBadgeHealthy' : 'settings.syncBadgeWarning';
-    return { color: SETTINGS_SYNC_BADGE_COLORS[state], accessibilityLabel: t(key) };
+    return { color: einkSafeColor(SETTINGS_SYNC_BADGE_COLORS[state], themePreset), accessibilityLabel: t(key) };
 }
 
 

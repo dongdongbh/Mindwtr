@@ -1234,7 +1234,7 @@ export default function FocusScreen() {
             <View
               style={[
                 styles.projectReviewIcon,
-                { backgroundColor: tc.filterBg, borderColor: getProjectAccentColor(project, areaById) || tc.border },
+                { backgroundColor: tc.filterBg, borderColor: getProjectAccentColor(project, areaById, themePreset) || tc.border },
               ]}
             >
               <Folder size={18} color={tc.text} />

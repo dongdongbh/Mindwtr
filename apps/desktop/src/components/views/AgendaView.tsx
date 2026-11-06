@@ -515,9 +515,9 @@ export function AgendaView() {
             .map((project) => ({
                 id: project.id,
                 title: project.title,
-                dotColor: getProjectAccentColor(project, areaById),
+                dotColor: getProjectAccentColor(project, areaById, settings?.theme),
             }));
-    }, [activeTasks, areaById, projects]);
+    }, [activeTasks, areaById, projects, settings?.theme]);
     const showNoProjectOption = activeTasks.some((task) => !task.projectId);
     const formatEstimate = (value: TimeEstimate) => formatTimeEstimateLabel(value, { t });
     const savedFocusFilters = useMemo(() => selectFocusSavedFilters(settings?.savedFilters), [settings?.savedFilters]);
@@ -600,7 +600,8 @@ export function AgendaView() {
         getProject: (projectId) => projectMap.get(projectId),
         getAreaColor: (areaId) => areaById.get(areaId)?.color,
         getAreaLabel: (areaId) => areaById.get(areaId)?.name,
-    }), [areaById, projectMap, resolveText, t]);
+        theme: settings?.theme,
+    }), [areaById, projectMap, resolveText, settings?.theme, t]);
     const removeSelectionChip = useCallback((chipId: string) => {
         if (chipId.startsWith('token:')) {
 
@@ -1486,6 +1487,7 @@ export function AgendaView() {
                     expanded={expandedSections.reviewProjects}
                     onToggle={() => toggleSection('reviewProjects')}
                     t={t}
+                    theme={settings?.theme}
                 />
             </div>
 

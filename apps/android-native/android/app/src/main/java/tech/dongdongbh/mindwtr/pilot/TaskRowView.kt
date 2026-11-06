@@ -251,7 +251,7 @@ private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null, relative
     val c = theme.colors
     when (part.kind) {
         "project", "area" -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(theme.einkSafe(coreColorOrNull(part.dotColor) ?: c.tint)))
+            Box(Modifier.size(6.dp).clip(CircleShape).background(theme.identityColorOrNull(part.dotColor) ?: c.tint))
             MetaText(part.text, c.secondaryText, 500, Modifier.padding(start = 4.dp))
         }
         "projectDeadline", "dateIssue" -> MetaText(part.text, theme.metaAmber, 600, maxLines = if (part.kind == "dateIssue") 1 else 2)

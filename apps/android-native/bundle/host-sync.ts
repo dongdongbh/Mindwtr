@@ -28,6 +28,7 @@ import {
     createSyncEncryptionStateStore,
     createSyncSecretVault,
     createWebdavCapabilityProofStore,
+    einkSafeColor,
     flushPendingSave,
     generateUUID,
     getInMemorySyncChangeFingerprint,
@@ -46,6 +47,7 @@ import {
     sanitizeLogMessage,
     setSha256HexProvider,
     shouldScheduleMobileBackgroundSync,
+    themeDescriptor,
     useTaskStore,
     FileSyncRetainedGenerationError,
     FileSyncUnverifiedReadError,
@@ -525,7 +527,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         const current = badge();
 
 
-        return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles,
+        return { type: 'sync', badge: current, color: current === 'hidden' ? null : einkSafeColor(SETTINGS_SYNC_BADGE_COLORS[current], themeDescriptor(useTaskStore.getState().settings.theme)?.statusPreset), cycles,
             contentRevision, active: service.getMobileSyncActivityState() === 'syncing' };
     };
     const emitState = () => {

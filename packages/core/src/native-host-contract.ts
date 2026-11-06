@@ -1056,6 +1056,8 @@ const NATIVE_CONTRACT_PROMISE_COMMANDS: ReadonlySet<string> = new Set([
     'setFocusGroupBy', 'saveFocusFilter', 'removeFocusFilterCriterion', 'deleteFocusFilter', 'reorderFocus',
 ]);
 
+const settingsThemePreset = (): string | undefined => themeDescriptor(useTaskStore.getState().settings.theme)?.statusPreset ?? undefined;
+
 export function createNativeHostContract(options: {
     syncSettings?: NativeSyncSettingsHost;
     registerSyncSettingsRetirementStatus?: (read: () => NativeSyncSettingsSettlement) => void;
@@ -1268,6 +1270,7 @@ export function createNativeHostContract(options: {
                 dateFormatting: dateFormatting(),
                 t: translate,
                 now,
+                themePreset: settingsThemePreset(),
             }),
             validUntil: getTaskRowMetaValidUntil(task, now, features, options),
         };
@@ -5133,7 +5136,7 @@ function createListViewMethods(deps: ListViewDeps) {
             const { resolved, labels } = view;
             const toItem = (entry: TaskGroupItem | Project): NativeArchiveItem => {
                 if (!('type' in entry)) {
-                    const row = getArchivedProjectRow(entry, formatDate, view.areaById, labels.notSet);
+                    const row = getArchivedProjectRow(entry, formatDate, view.areaById, labels.notSet, settingsThemePreset());
                     return {
                         type: 'project', id: entry.id, projectRevision: revisionOf(entry), title: entry.title, cancelled: row.cancelled, struck: !row.cancelled,
                         dateLabel: `${row.cancelled ? labels.projectCancelled : labels.completed}: ${row.dateLabel}`,
@@ -5377,7 +5380,7 @@ function createListViewMethods(deps: ListViewDeps) {
                     item.type === 'project'
                         ? {
                             type: 'project', id: item.project.id, projectRevision: revisionOf(item.project),
-                            title: item.project.title, indicatorColor: getProjectAccentColor(item.project, view.areaById) ?? null,
+                            title: item.project.title, indicatorColor: getProjectAccentColor(item.project, view.areaById, settingsThemePreset()) ?? null,
                             typeLabel: labels.projectType, deletedLabel: deletedLabel(item.project.deletedAt),
                         }
                         : {

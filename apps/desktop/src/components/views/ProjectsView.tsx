@@ -482,7 +482,7 @@ export function ProjectsView() {
         showToast,
     });
 
-    const getProjectColorForTask = (project: Project) => getProjectColor(project, areaById, DEFAULT_AREA_COLOR);
+    const getProjectColorForTask = (project: Project) => getProjectColor(project, areaById, DEFAULT_AREA_COLOR, settings?.theme);
 
     useEffect(() => {
         setNewProjectAreaId(selectedAreaValue !== ALL_AREAS && selectedAreaValue !== NO_AREA ? selectedAreaValue : '');

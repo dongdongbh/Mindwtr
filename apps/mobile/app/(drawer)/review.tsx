@@ -52,7 +52,7 @@ export default function ReviewScreen() {
     batchUpdateTasks: state.batchUpdateTasks,
     settings: state.settings,
   }), shallow);
-  const { isDark } = useTheme();
+  const { isDark, themePreset } = useTheme();
   const { t } = useLanguage();
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -103,8 +103,8 @@ export default function ReviewScreen() {
   }), [nowTick, projects, resolvedAreaFilter, scope, sections, sortBy, sortedAreas, tasks]);
   const unassignedAreaColor = settings?.appearance?.unassignedAreaColor;
   const reviewTaskGroups = useMemo(
-    () => decorateReviewOverviewGroups(reviewOverviewGroups, { areaById, unassignedAreaColor, text, scope }),
-    [areaById, reviewOverviewGroups, scope, text, unassignedAreaColor],
+    () => decorateReviewOverviewGroups(reviewOverviewGroups, { areaById, unassignedAreaColor, text, scope, themePreset }),
+    [areaById, reviewOverviewGroups, scope, text, themePreset, unassignedAreaColor],
   );
   const renderedTaskIds = useMemo(() => new Set(reviewTaskGroups.flatMap((area) => (
     !expandedAreaIds.has(area.id) ? [] : area.projectGroups.flatMap((project) => (
