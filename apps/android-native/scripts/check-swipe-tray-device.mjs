@@ -3,7 +3,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, EDGE_SAFE_X, evidenced, fail, hasText, inboxCount, inEditor, Stopped, tab, tabSelected, tagged, taskRow } from './device.mjs';
+import { box, button, check, connect, EDGE_SAFE_X, evidenced, fail, hasText, inboxCount, inEditor, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -102,7 +102,39 @@ const setNight = async (mode) => {
     sh(`cmd uimode night ${mode}`);
     await sleep(3000);
 };
+const toInbox = async () => {
+    for (let step = 0; step < 6; step += 1) {
+        const nodes = await screen();
+        if (onInbox(nodes)) return nodes;
+        if (tab(nodes, 'Inbox') && !tagged(nodes, 'menu-screen') && !tagged(nodes, 'more-sheet')) return showTab('Inbox').then(() => waitFor('the Inbox', onInbox, 20_000));
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(800);
+    }
+    return waitFor('the Inbox', onInbox, 20_000);
+};
+const themePrefix = `${en['settings.theme']}: `;
+const setTheme = async (label) => {
+    let nodes = await toInbox();
+    nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), (current) => Boolean(tagged(current, 'more-sheet')), 'the More sheet');
+    nodes = await device.settle(nodes);
+    nodes = await tapExpecting(withDescription(nodes, en['settings.title']) ?? fail('no Settings tile'), (current) => Boolean(tagged(current, 'settings-main')), 'Settings');
+    const general = nodes.find((node) => (node['content-desc'] ?? '').startsWith(en['settings.general'])) ?? fail('no General row');
+    const themeRow = (current) => current.find((node) => (node['content-desc'] ?? '').startsWith(themePrefix));
+    nodes = await tapExpecting(general, (current) => Boolean(themeRow(current)), 'Settings › General');
+    const before = themeRow(nodes)['content-desc'].slice(themePrefix.length);
+    console.log(`info - Settings › General › Theme reads ${before}`);
+    if (before !== label) {
+        nodes = await tapExpecting(themeRow(nodes), (current) => Boolean(tagged(current, 'settings-picker')), 'the Theme picker');
+        await tap(withDescription(nodes, label) ?? fail(`no "${label}" theme`));
+        nodes = await waitFor(`the Theme row to read ${label}`, (current) => themeRow(current)?.['content-desc'] === `${themePrefix}${label}`, 15_000);
+    }
+    await toInbox();
+    return before;
+};
+let themeToRestore = null;
 const restore = async () => {
+    try { if (themeToRestore) console.log(`info - theme put back from ${await setTheme(themeToRestore)} to ${themeToRestore}`); } catch (error) { console.error(`could not put the theme back to ${themeToRestore}: ${error.message}`); }
     try {
         for (let step = 0; step < 5 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -249,6 +281,37 @@ try {
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the sheet to close', (current) => !datesOpen(current), 10_000);
     check(stored(T.organize).rev === organizeBefore.rev, 'the dark Dates sheet closed with Back, nothing stored');
+
+    await setNight('no');
+    await waitFor('the Inbox', onInbox, 30_000);
+    themeToRestore = await setTheme(en['settings.eink']);
+    const background = (node) => { const [l, t, , b] = box(node); return [l + 10, Math.round((t + b) / 2)]; };
+    const trayNode = (current, id) => current.find((node) => (node['resource-id'] ?? '').endsWith(`swipe-${id}`)) ?? fail(`no ${id} button`);
+    nodes = await device.reveal(T.organize);
+    await device.revealAction(nodes, T.organize, 'done');
+    await sleep(900);
+    const [focusFill] = device.colors(resolve(shots, 'swipe-tray-right-eink.png'), [background(trayNode(await screen(), 'focus'))]);
+    check(focusFill === '000000', `(i) on E-Ink the tray's Focus draws black, as RN's einkSafeColor does (got #${focusFill})`);
+    await shut(T.organize, 'right');
+    await device.revealAction(await screen(), T.organize, 'delete');
+    await sleep(900);
+    const [deleteFill] = device.colors(resolve(shots, 'swipe-tray-left-eink.png'), [background(trayNode(await screen(), 'delete'))]);
+    check(deleteFill === '000000', `(i) on E-Ink the tray's Delete draws black, as RN's einkSafeColor does (got #${deleteFill})`);
+    await shut(T.organize, 'left');
+    await tap(await device.revealAction(await screen(), T.organize, 'focus'));
+    await storedWhen(T.organize, (row) => row.isFocusedToday === 1);
+    await showTab('Focus');
+    nodes = await device.reveal(T.organize);
+    const rowY = center(taskRow(nodes, T.organize) ?? fail(`no row ${T.organize} in Focus`))[1];
+    const star = nodes.find((node) => node['content-desc'] === en['agenda.removeFromFocus'] && box(node)[1] <= rowY && box(node)[3] >= rowY) ?? fail('no Remove from focus star beside the row');
+    await sleep(900);
+    const [starFill] = device.colors(resolve(shots, 'focus-star-eink.png'), [center(star)]);
+    check(starFill === '000000', `(i) on E-Ink the Focus star draws black, as RN's FocusStarIcon does (got #${starFill})`);
+    await tap(star);
+    await storedWhen(T.organize, (row) => !row.isFocusedToday);
+    await setTheme(themeToRestore);
+    check(true, `(i) the theme is back to ${themeToRestore}`);
+    themeToRestore = null;
     console.log('Swipe tray device check passed');
 } catch (error) {
     evidenced(error);

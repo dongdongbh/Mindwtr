@@ -99,7 +99,12 @@ class PomodoroModel(private val shell: InboxViewModel) {
 
 
     fun refresh(planAlarms: Boolean = false) {
-        if (planAlarms) planGate.request()
+        if (!planAlarms) return read()
+        planGate.request()
+        shell.menu.whenIdle(::read)
+    }
+
+    private fun read() {
         shell.background(listOf(Part.Pomodoro), { runtime -> runtime.pomodoroPanelRead(presentation()) }) { next, mine ->
             if (!shell.fresh(mine, Part.Pomodoro)) return@background
             panel = next
@@ -186,7 +191,7 @@ class PomodoroModel(private val shell: InboxViewModel) {
     }
 
 
-    fun planInBackground() = shell.background(listOf(Part.Pomodoro), { runtime -> plan(runtime) }) { _, _ -> }
+    fun planInBackground() = shell.menu.whenIdle { shell.background(listOf(Part.Pomodoro), { runtime -> plan(runtime) }) { _, _ -> } }
 
 
     fun taskDone(id: String, taskRevision: String) {

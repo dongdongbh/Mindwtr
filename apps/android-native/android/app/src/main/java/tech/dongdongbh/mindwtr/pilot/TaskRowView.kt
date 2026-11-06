@@ -496,6 +496,15 @@ private const val TRAY_MARGIN_DP = 8
 internal const val TRAY_LABEL_MAX_FONT_SCALE = 1.2f
 private const val TRAY_DRAG_TOSS = 0.05f
 
+internal fun trayButtonColor(theme: MindwtrTheme, id: String): Color = when (id) {
+    "done" -> theme.status("done").text
+    "focus" -> theme.star
+    "organize", "next" -> theme.status("next").text
+    "dates" -> theme.status("someday").text
+    "restore" -> theme.status("inbox").text
+    else -> theme.einkSafe(theme.deleteAction)
+}
+
 internal fun trayWidthDp(buttons: Int): Int = if (buttons == 0) 0 else buttons * TRAY_BUTTON_DP + (buttons - 1) * TRAY_GAP_DP + TRAY_MARGIN_DP
 
 internal fun trayDragOffset(start: Float, dragged: Float, dragOffset: Float, left: Float, right: Float): Float =
@@ -578,14 +587,7 @@ private fun BoxScope.TrayButtons(actions: List<TrayAction>, side: Alignment.Hori
             val enabled = isEnabled(action)
             val long = onLongDone?.takeIf { action.id == "done" && enabled }
             val spoken = if (action.id == "delete") t("task.aria.delete") else t("task.aria.action").replace("{{action}}", action.label)
-            val color = when (action.id) {
-                "done" -> theme.status("done").text
-                "focus" -> theme.star
-                "organize", "next" -> theme.status("next").text
-                "dates" -> theme.status("someday").text
-                "restore" -> theme.status("inbox").text
-                else -> theme.deleteAction
-            }
+            val color = trayButtonColor(theme, action.id)
             Column(Modifier.fade(if (enabled) 1f else 0.5f).width(TRAY_BUTTON_DP.dp).fillMaxHeight().heightIn(min = 48.dp).clip(shape).background(color)
                 .testTag("swipe-${action.id}")
                 .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = long,

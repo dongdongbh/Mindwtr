@@ -84,6 +84,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'encrypted', 'retained',
 
+    'migrations',
+
     'candidates', 'attached', 'unreadable',
 
     'adopted', 'refused',

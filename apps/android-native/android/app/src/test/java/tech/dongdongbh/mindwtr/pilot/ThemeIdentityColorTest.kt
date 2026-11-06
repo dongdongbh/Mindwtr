@@ -22,4 +22,19 @@ class ThemeIdentityColorTest {
             assertNull(theme.identityColorOrNull("not a color"))
         }
     }
+
+    @Test fun einkDrawsTheFocusStarAndTheSwipeTraysFocusAndDeleteBlackAsRnDoes() {
+        val eink = mindwtrTheme(reply("eink", "eink"), systemDark = false)
+        assertEquals(Color.Black, eink.star)
+        assertEquals(Color.Black, trayButtonColor(eink, "focus"))
+        assertEquals(Color.Black, trayButtonColor(eink, "delete"))
+        assertEquals(eink.status("done").text, trayButtonColor(eink, "done"))
+    }
+
+    @Test fun otherThemesKeepRnsAmberStarAndRedDelete() {
+        val light = mindwtrTheme(reply("light", "default"), false)
+        assertEquals(Color(0xFFF59E0B), light.star)
+        assertEquals(Color(0xFFF59E0B), trayButtonColor(light, "focus"))
+        assertEquals(Color(0xFFEF4444), trayButtonColor(light, "delete"))
+    }
 }

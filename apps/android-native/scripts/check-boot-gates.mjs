@@ -2612,6 +2612,10 @@ assert.deepEqual(readdirSync(resolve(app, 'android/app/src/main/java/tech/dongdo
 assert.match(searchUi, /\{ complete\(task\.id, task\.taskRevision\) \}/);
 assert.match(source('CalendarModel.kt'), /"done" -> complete\(taskId, revision\)\n/);
 assert.match(source('Pomodoro.kt'), /shell\.complete\(id, taskRevision\)\n/);
+assert.match(source('Pomodoro.kt'), /fun refresh\(planAlarms: Boolean = false\) \{\s+if \(!planAlarms\) return read\(\)\s+planGate\.request\(\)\s+shell\.menu\.whenIdle\(::read\)/,
+    'a read that asks for an alarm plan waits for the running command, so a Pomodoro setting change still plans (or cancels) its alerts');
+assert.match(source('Pomodoro.kt'), /fun planInBackground\(\) = shell\.menu\.whenIdle \{ shell\.background\(listOf\(Part\.Pomodoro\), \{ runtime -> plan\(runtime\) \}\) \{ _, _ -> \} \}/,
+    'the alarm plan itself waits for the running command, since a background read is dropped while one runs');
 assert.match(model, /"complete" -> complete\(action\.id, action\.patch\["taskRevision"\]\.orEmpty\(\)\)\n/);
 assert.match(rowUi, /failedAction == if \(status == "done"\) completeAction\(task\.id, task\.taskRevision\) else statusAction\(task, status\)\)/);
 assert.match(menuModel, /private val ROW_KINDS = mapOf\("contexts" to "contextsAction", "review" to "reviewAction", "weekly" to "reviewAction", "daily" to "reviewAction"\)/);
