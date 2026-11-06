@@ -107,12 +107,6 @@ struct ListFilterControls: View {
                 filterInput(localized("search.placeholder"), label: localized("common.search"), id: prefix + "-filter-search",
                             value: $searchText)
             }
-            if !filters.objects("statuses").isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    sectionLabel(localized("taskEdit.statusLabel"))
-                    optionChips(filters.objects("statuses"), id: prefix + "-filter-status")
-                }
-            }
             let archived = data.object("archivedProjectsToggle")
             if !archived.isEmpty {
                 Toggle(archived.text("label"), isOn: Binding(get: { archived.flag("value") }, set: onArchived))
