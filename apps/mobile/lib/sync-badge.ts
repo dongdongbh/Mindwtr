@@ -1,3 +1,4 @@
+import { einkSafeColor } from '@mindwtr/core';
 import { resolveSyncBadgeState, type SyncBadgeState } from '@mindwtr/core/sync-settings-model';
 
 export type MobileSyncActivityState = 'idle' | 'syncing';
@@ -8,6 +9,11 @@ export const MOBILE_SYNC_BADGE_COLORS: Record<Exclude<MobileSyncBadgeState, 'hid
     healthy: '#22C55E',
     attention: '#EF4444',
 };
+
+export const getMobileSyncBadgeColor = (
+    state: Exclude<MobileSyncBadgeState, 'hidden'>,
+    themePreset?: string | null,
+): string => einkSafeColor(MOBILE_SYNC_BADGE_COLORS[state], themePreset);
 
 
 export const resolveMobileSyncBadgeState = resolveSyncBadgeState;

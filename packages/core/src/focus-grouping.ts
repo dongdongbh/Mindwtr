@@ -2,7 +2,7 @@ import { getProjectAccentColor } from './task-accent-color';
 import type { Area, FocusGroupBy, Project, Task, TaskEnergyLevel, TaskPriority } from './types';
 import type { ProjectDeadlineBoost } from './task-utils';
 import { baseTextCollator } from './task-utils';
-import { DEFAULT_AREA_COLOR } from './color-constants';
+import { DEFAULT_AREA_COLOR, einkSafeColor } from './color-constants';
 import { getContextColor } from './context-color';
 
 
@@ -170,7 +170,7 @@ export function buildFocusTaskGroups({
                     key: `project:${project.id}`,
                     label: project.title,
                     sortOrder: Number.isFinite(project.order) ? project.order : Number.POSITIVE_INFINITY,
-                    dotColor: getProjectAccentColor(project, areaById) ?? DEFAULT_AREA_COLOR,
+                    dotColor: getProjectAccentColor(project, areaById, theme) ?? DEFAULT_AREA_COLOR,
                 };
             });
         }
@@ -189,7 +189,7 @@ export function buildFocusTaskGroups({
                     key: `area:${areaId}`,
                     label: area?.name ?? project?.areaTitle ?? noAreaLabel,
                     sortOrder: area && Number.isFinite(area.order) ? area.order : Number.POSITIVE_INFINITY,
-                    dotColor: area?.color || DEFAULT_AREA_COLOR,
+                    dotColor: einkSafeColor(area?.color || DEFAULT_AREA_COLOR, theme),
                 };
             });
         }

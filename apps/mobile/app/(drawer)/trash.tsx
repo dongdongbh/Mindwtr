@@ -32,6 +32,7 @@ import { useToast } from '@/contexts/toast-context';
 import { logError } from '@/lib/app-log';
 import { addHardwareBackPressListener } from '@/lib/hardware-back';
 import { useTheme } from '../../contexts/theme-context';
+import { useThemePreset } from '@/hooks/use-eink-safe-color';
 import { useLanguage } from '../../contexts/language-context';
 
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
@@ -208,7 +209,8 @@ function TrashProjectItem({
   restoreLabel: string;
   deleteLabel: string;
 }) {
-  const indicatorColor = getProjectAccentColor(project, areaById);
+  const themePreset = useThemePreset();
+  const indicatorColor = getProjectAccentColor(project, areaById, themePreset);
   return (
     <TrashSwipeRow onRestore={onRestore} onDelete={onDelete} restoreLabel={restoreLabel} deleteLabel={deleteLabel} swipeDisabled={selectionMode}>
       <Pressable

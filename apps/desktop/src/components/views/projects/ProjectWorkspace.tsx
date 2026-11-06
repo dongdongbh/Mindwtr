@@ -1804,7 +1804,7 @@ export function ProjectWorkspace({
                             <ProjectDetailsHeader
                                 primaryAction={projectAddTaskButton}
                                 project={selectedProject}
-                                projectColor={getProjectColor(selectedProject, areaById, DEFAULT_AREA_COLOR)}
+                                projectColor={getProjectColor(selectedProject, areaById, DEFAULT_AREA_COLOR, settings?.theme)}
                                 areaLabel={selectedProjectAreaLabel}
                                 isSequential={selectedProject.isSequential === true}
                                 dueDate={selectedProject.dueDate}

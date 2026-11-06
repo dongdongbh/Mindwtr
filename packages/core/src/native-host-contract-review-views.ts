@@ -98,6 +98,7 @@ import {
     type WeeklyReviewStepId,
 } from './review-views-model';
 import { useTaskStore } from './store';
+import { themeDescriptor } from './theme-scheme';
 import { EMPTY_BULK_ORGANIZE_DRAFT, type BulkOrganizeDraft, type BulkOrganizeDraftEdit } from './task-list-bulk-actions';
 import { getBulkTrashConfirmation, type ListConfirmation } from './trash-view-model';
 import type { Task, TaskStatus } from './types';
@@ -496,7 +497,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             sortBy: getReviewOverviewSortBy(state.settings),
             scope,
             now,
-        }), { areaById: new Map(areas.map((area) => [area.id, area])), unassignedAreaColor: state.settings.appearance?.unassignedAreaColor, text, scope });
+        }), { areaById: new Map(areas.map((area) => [area.id, area])), unassignedAreaColor: state.settings.appearance?.unassignedAreaColor, text, scope, themePreset: themeDescriptor(state.settings.theme)?.statusPreset });
         return { groups, text, t };
     });
 
@@ -707,7 +708,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 lists.set(key, items);
                 return firstWindow(items);
             };
-            const weeklyProjects = () => getWeeklyReviewProjects(buckets.projectEntries, new Map(state.areas.map((area) => [area.id, area])), labels);
+            const weeklyProjects = () => getWeeklyReviewProjects(buckets.projectEntries, new Map(state.areas.map((area) => [area.id, area])), labels, themeDescriptor(state.settings.theme)?.statusPreset);
 
             const pushProject = (entry: ReturnType<typeof weeklyProjects>[number], countLabel = entry.countLabel) => {
                 const expanded = entry.project.id === expandedProjectId;

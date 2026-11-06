@@ -1322,7 +1322,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                                 >
                                                     <div
                                                         className="w-3 h-3 rounded-full"
-                                                        style={{ backgroundColor: getProjectAccentColor(project, areaById) || 'hsl(var(--muted-foreground))' }}
+                                                        style={{ backgroundColor: getProjectAccentColor(project, areaById, settings?.theme) || 'hsl(var(--muted-foreground))' }}
                                                     />
                                                     <span>{project.title}</span>
                                                 </button>

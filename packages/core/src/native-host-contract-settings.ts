@@ -98,6 +98,7 @@ import {
     type SettingsSyncBadgeState,
 } from './settings-menu-model';
 import { getPersistenceStatus, useTaskStore } from './store';
+import { themeDescriptor } from './theme-scheme';
 import { normalizeTagId } from './store-helpers';
 import { formatTagIdPreservingCase } from './store-projects/shared';
 import { DEFAULT_TASK_EDITOR_ORDER, isTaskEditorSectionableField, TASK_EDITOR_SECTION_ORDER } from './task-editor-layout';
@@ -699,7 +700,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 return fail('INVALID_INPUT', 'A search text, a sync badge state and an update flag are optional; nothing else is accepted');
             }
             const t = deps.t();
-            const badge = getSettingsSyncBadge(input.syncBadge ?? 'hidden', t);
+            const badge = getSettingsSyncBadge(input.syncBadge ?? 'hidden', t, themeDescriptor(useTaskStore.getState().settings.theme)?.statusPreset);
             const menu = buildSettingsMenu({
                 t,
                 query: input.query ?? '',

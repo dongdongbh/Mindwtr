@@ -48,6 +48,7 @@ import { isProjectedRecurringTaskId } from './recurrence';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
+import { themeDescriptor } from './theme-scheme';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { validRawTask } from './native-host-contract-task-save';
 import type { AppData, Area, Project, Section, Task } from './types';
@@ -324,7 +325,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
         const resolvedAreaFilter = resolveAreaFilterSelection(state.settings.filters, areas);
 
         const tasks = selectBoardTasks(state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter })));
-        const badges = getBoardProjectBadges(state.projects, areaById);
+        const badges = getBoardProjectBadges(state.projects, areaById, themeDescriptor(state.settings.theme)?.statusPreset);
         const options = getBoardFilterOptions({ tasks, projects: state.projects, areaFilter: resolvedAreaFilter, areaById, badges, t });
         const resolved = resolveBoardFilterState(input, {
             tokens: options.tokens, projectIds: options.projects.map((project) => project.id), getProjectLabel: options.getProjectLabel, t,

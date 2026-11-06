@@ -149,12 +149,13 @@ export function getArchivedProjectRow(
     formatDate: DateFormatter,
     areaById: Map<string, Area>,
     notSetLabel: string,
+    themePreset?: string | null,
 ): { cancelled: boolean; dateLabel: string; indicatorColor: string | undefined } {
     const timestamp = project.cancelledAt || project.updatedAt;
     return {
         cancelled: Boolean(project.cancelledAt),
         dateLabel: timestamp ? formatDate(timestamp, 'Pp', timestamp) : notSetLabel,
-        indicatorColor: getProjectAccentColor(project, areaById),
+        indicatorColor: getProjectAccentColor(project, areaById, themePreset),
     };
 }
 

@@ -266,3 +266,21 @@ describe('getProjectDeadlineBoostLabel', () => {
         expect(getProjectDeadlineBoostLabel(boost({ isOverdue: false }), resolveText)).toBe('Project due today');
     });
 });
+
+describe('eink focus group dots', () => {
+    it('draws project and area group dots black on the eink theme', () => {
+        const projectGroups = build('project', {
+            tasks: [makeTask({ id: 'a', projectId: 'p1' })],
+            projects: [makeProject({ id: 'p1', color: '#10b981' })],
+            theme: 'eink',
+        });
+        expect(projectGroups.find((group) => group.key === 'project:p1')?.dotColor).toBe('#000000');
+
+        const areaGroups = build('area', {
+            tasks: [makeTask({ id: 'a', areaId: 'a1' })],
+            areas: [makeArea({ id: 'a1', color: '#ef4444' })],
+            theme: 'eink',
+        });
+        expect(areaGroups.find((group) => group.key === 'area:a1')?.dotColor).toBe('#000000');
+    });
+});

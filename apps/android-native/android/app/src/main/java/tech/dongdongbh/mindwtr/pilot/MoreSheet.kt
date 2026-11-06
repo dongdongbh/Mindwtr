@@ -154,7 +154,8 @@ fun MoreSheet(model: InboxViewModel) = with(model.menu) {
 
 @Composable
 private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
-    val c = LocalTheme.current.colors
+    val theme = LocalTheme.current
+    val c = theme.colors
     val id = item.getString("id")
     val opens = model.menu.opens(id)
     val enabled = opens && model.menu.idle
@@ -173,7 +174,7 @@ private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Box(Modifier.padding(bottom = 8.dp).size(44.dp).clip(shape).background(c.filterBg), contentAlignment = Alignment.Center) {
-            item.icon()?.let { Icon(it, null, tint = coreColorOrNull(item.getString("iconColor")) ?: c.tint, modifier = Modifier.size(24.dp)) }
+            item.icon()?.let { Icon(it, null, tint = theme.identityColorOrNull(item.getString("iconColor")) ?: c.tint, modifier = Modifier.size(24.dp)) }
         }
         Text(item.getString("displayLabel"), style = rnText(12, 700, 15), color = c.text, textAlign = TextAlign.Center, maxLines = 2,
             overflow = TextOverflow.Ellipsis)
@@ -183,7 +184,8 @@ private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
 
 @Composable
 private fun CompactItem(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
-    val c = LocalTheme.current.colors
+    val theme = LocalTheme.current
+    val c = theme.colors
     val id = item.getString("id")
     val opens = model.menu.opens(id)
     val enabled = opens && model.menu.idle
@@ -200,7 +202,7 @@ private fun CompactItem(model: InboxViewModel, item: JSONObject, modifier: Modif
             .padding(horizontal = 2.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        item.icon()?.let { Icon(it, null, tint = coreColorOrNull(item.getString("iconColor")) ?: c.tint, modifier = Modifier.size(18.dp).fade(0.64f)) }
+        item.icon()?.let { Icon(it, null, tint = theme.identityColorOrNull(item.getString("iconColor")) ?: c.tint, modifier = Modifier.size(18.dp).fade(0.64f)) }
         Text(item.getString("displayLabel"), style = rnText(10, 700, 12), color = c.secondaryText, textAlign = TextAlign.Center, maxLines = 2,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp).heightIn(min = 16.dp))
     }

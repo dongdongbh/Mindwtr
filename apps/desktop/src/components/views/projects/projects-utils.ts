@@ -24,8 +24,8 @@ export function parseTagInput(input: string): string[] {
     return Array.from(new Set(values));
 }
 
-export function getProjectColor(project: Project, areaById: Map<string, Area>, fallback = DEFAULT_AREA_COLOR): string {
-    return getProjectAccentColor(project, areaById) ?? fallback;
+export function getProjectColor(project: Project, areaById: Map<string, Area>, fallback = DEFAULT_AREA_COLOR, themePreset?: string): string {
+    return getProjectAccentColor(project, areaById, themePreset) ?? fallback;
 }
 
 export function sortAreasByName(areas: Area[]): string[] {
