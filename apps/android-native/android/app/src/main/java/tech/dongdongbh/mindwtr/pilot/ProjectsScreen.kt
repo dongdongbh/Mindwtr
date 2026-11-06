@@ -22,6 +22,8 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,8 +92,10 @@ val PROJECT_BUCKETS = listOf("active" to "projects.activeSection", "deferred" to
 
 
 data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves: Map<String, Pair<Boolean, Boolean>> = emptyMap()) {
-    fun title(id: String) = buckets.values.firstNotNullOfOrNull { groups ->
-        groups.firstNotNullOfOrNull { group -> group.projects.firstOrNull { it.id == id }?.title }
+    fun title(id: String) = row(id)?.first?.title
+
+    fun row(id: String): Pair<ProjectRow, ProjectGroup>? = buckets.values.firstNotNullOfOrNull { groups ->
+        groups.firstNotNullOfOrNull { group -> group.projects.firstOrNull { it.id == id }?.let { it to group } }
     }
 
     companion object {
@@ -202,7 +206,7 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
         item(key = "add") { AddProjectField(model) }
 
         item(key = "controls") {
-            val manage = t("areas.manage")
+            val manage = t("projects.manageAreas")
             val shape = RoundedCornerShape(8.dp)
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.End) {
                 Box(Modifier.heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
@@ -264,8 +268,9 @@ private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: Stri
     val c = LocalTheme.current.colors
     val area = group.areaName ?: t("projects.noArea")
     val toggleLabel = t(if (folded) "markdown.expand" else "markdown.collapse")
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 44.dp)
+        Modifier.weight(1f).heightIn(min = 44.dp)
             .clearAndSetSemantics {
                 text = AnnotatedString(area)
                 heading()
@@ -281,6 +286,15 @@ private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: Stri
         Text(area.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
         Icon(if (folded) Lucide.ChevronRight else Lucide.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+    }
+    val areaId = group.areaId
+    if (areaId != null) {
+        val label = "${t("projects.manageAreas")}: $area"
+        Box(Modifier.size(44.dp).clickable(enabled = model.writable && !model.busy, role = Role.Button) { model.openAreaManager(areaId, area) }
+            .semantics { contentDescription = label }.testTag("project-area-menu-$areaId"), contentAlignment = Alignment.Center) {
+            Icon(Lucide.MoreHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+        }
+    }
     }
 }
 
@@ -351,6 +365,8 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
     val canAct = writable && !busy && failedAction == null
     var moveMenu by remember { mutableStateOf(false) }
     val move = { direction: String -> moveMenu = false; projectDetails.move(row.id, direction, order) }
+    val movable = row.status != "archived"
+    val areaLabel = t("projects.areaLabel")
     if (moveMenu) ThemedAlert(row.title, null, moves.map { (direction, label) -> AlertButton(label, "default") { move(direction) } } +
         AlertButton(t("common.cancel"), "cancel") { moveMenu = false }) { moveMenu = false }
     Row(
@@ -362,7 +378,8 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
             .combinedClickable(enabled = canAct, role = Role.Button, onLongClick = if (moves.isEmpty()) null else ({
                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); moveMenu = true
             })) { keepProjectReturn(null); openProject(row.id) }
-            .semantics { customActions = moves.map { (direction, label) -> CustomAccessibilityAction(label) { if (canAct) move(direction); canAct } } }
+            .semantics { customActions = moves.map { (direction, label) -> CustomAccessibilityAction(label) { if (canAct) move(direction); canAct } } +
+                listOfNotNull(CustomAccessibilityAction(areaLabel) { if (canAct) openAreaMove(row.id); canAct }.takeIf { movable }) }
             .testTag("project-row-open-${row.id}")) {
             Text(row.title, style = rnText(16, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(bottom = 4.dp))
@@ -383,6 +400,13 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
                 Text(row.statusLabel, style = rnText(12, 400), color = color)
             }
         }
+        if (movable) {
+            val more = "${t("common.more")}: ${row.title}"
+            Box(Modifier.size(44.dp).clickable(enabled = canAct, role = Role.Button) { openProjectMenu(row.id) }
+                .semantics { contentDescription = more }.testTag("project-row-menu-${row.id}"), contentAlignment = Alignment.Center) {
+                Icon(Lucide.MoreHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+            }
+        }
         Text("${row.activeTaskCount}", style = rnText(12, 600, 16), color = c.secondaryText, textAlign = TextAlign.End,
             modifier = Modifier.padding(start = 8.dp).widthIn(min = 20.dp).semantics { contentDescription = count })
         val disabled = row.focusDisabled && !row.isFocused
@@ -394,6 +418,34 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<S
                 setProjectFocus(row.id, !row.isFocused, row.projectRevision)
             }
             .semantics { contentDescription = label; selected = row.isFocused; if (disabled) disabled() })
+    }
+}
+
+
+@Composable
+fun ProjectListOverlays(model: InboxViewModel) = with(model) {
+    projectMenu?.let { id ->
+        val found = projects?.row(id)
+        if (found == null) { LaunchedEffect(id) { openProjectMenu(null) }; return@let }
+        val (row, group) = found
+        val (up, down) = projects?.moves?.get(id) ?: (false to false)
+        val order = group.projects.map { it.id }
+        val enabled = writable && !busy && failedAction == null
+        PickerCard(row.title, { openProjectMenu(null) }, "project-row-menu-sheet") {
+            if (up) AreaRow(t("projects.moveUp"), null, enabled = enabled, tag = "project-menu-move-up") { openProjectMenu(null); projectDetails.move(id, "up", order) }
+            if (down) AreaRow(t("projects.moveDown"), null, enabled = enabled, tag = "project-menu-move-down") { openProjectMenu(null); projectDetails.move(id, "down", order) }
+            if (row.status != "archived") AreaRow(t("projects.areaLabel"), null, enabled = enabled, tag = "project-menu-area") { openAreaMove(id) }
+        }
+    }
+    areaMove?.let { (_, options) ->
+        val enabled = writable && !busy && failedAction == null
+        PickerCard(t("projects.areaLabel"), ::closeAreaMove, "project-area-move-sheet") {
+            AreaRow(t("projects.manageAreas"), null, muted = true, enabled = enabled, tag = "project-area-move-manage", pick = ::manageAreasFromMove)
+            AreaRow(options.getString("noAreaLabel"), null, enabled = enabled, tag = "project-area-move-none") { moveToArea(null) }
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                for (area in options.menuObjects("areas")) AreaRow(area.getString("label"), area, enabled = enabled, tag = "project-area-picker-${area.getString("id")}") { moveToArea(area) }
+            }
+        }
     }
 }
 

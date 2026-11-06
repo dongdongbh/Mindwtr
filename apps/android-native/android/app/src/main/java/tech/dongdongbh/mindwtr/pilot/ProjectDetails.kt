@@ -638,6 +638,12 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }
 
 
+    fun moveToArea(projectId: String, area: JSONObject?) =
+        edit(projectId, "area", refused = { shell.showToast(t("common.error"), t("projects.moveProjectFailed"), "error") }) {
+            put("areaId", area?.getString("id") ?: JSONObject.NULL)
+        }
+
+
     fun setArea(area: JSONObject?) {
         areaPicker = null
         edit(projectId, "area") { put("areaId", area?.getString("id") ?: JSONObject.NULL) }
@@ -1113,12 +1119,13 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
 
 
 @Composable
-private fun AreaRow(model: InboxViewModel, label: String, area: JSONObject?) {
+internal fun AreaRow(label: String, area: JSONObject?, muted: Boolean = false, enabled: Boolean = true, tag: String? = null, pick: () -> Unit) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).clickable(role = Role.Button) { model.projectDetails.setArea(area) }.padding(vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).rnBorderBottom(c.border).clickable(enabled = enabled, role = Role.Button, onClick = pick)
+        .semantics { contentDescription = label }.then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (area != null) Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(area.menuText("color")) ?: c.tint))
-        Text(label, style = rnText(14, 600), color = c.text)
+        Text(label, style = rnText(14, 600), color = if (muted) c.secondaryText else c.text)
     }
 }
 
@@ -1133,7 +1140,7 @@ private fun Overlay(dismiss: () -> Unit, outsideCloses: Boolean, content: @Compo
 
 
 @Composable
-private fun PickerCard(title: String, dismiss: () -> Unit, tag: String, content: @Composable () -> Unit) {
+internal fun PickerCard(title: String, dismiss: () -> Unit, tag: String, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
     val c = theme.colors
     Overlay(dismiss, outsideCloses = true) {
@@ -1177,9 +1184,10 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
                     }
                 }
             }
-            AreaRow(model, options.getString("noAreaLabel"), null)
+            AreaRow(t("projects.manageAreas"), null, muted = true, tag = "project-area-manage") { closeAreas(); model.openAreaManager() }
+            AreaRow(options.getString("noAreaLabel"), null) { setArea(null) }
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                for (area in options.menuObjects("areas")) AreaRow(model, area.getString("label"), area)
+                for (area in options.menuObjects("areas")) AreaRow(area.getString("label"), area) { setArea(area) }
             }
         }
     }

@@ -24,4 +24,23 @@ class ProjectMovesTest {
         assertFalse(AreaManagerDraft(name = "  ", check = JSONObject("""{"saveDisabled":false}""")).canSave)
         assertTrue(AreaManagerDraft(name = "Home", check = JSONObject("""{"nameTaken":false,"saveDisabled":false}""")).canSave)
     }
+
+
+    @Test fun anAreaRenameSavesOnlyAfterCoreFindsTheNameFree() {
+        assertFalse(AreaManagerDraft(renaming = "work", renameName = "Home").canRename)
+        assertFalse(AreaManagerDraft(renaming = "work", renameName = "Home", renameCheck = JSONObject("""{"nameTaken":true,"saveDisabled":true}""")).canRename)
+        assertFalse(AreaManagerDraft(renaming = "work", renameName = " ", renameCheck = JSONObject("""{"nameTaken":false,"saveDisabled":false}""")).canRename)
+        assertTrue(AreaManagerDraft(renaming = "work", renameName = "Office", renameCheck = JSONObject("""{"nameTaken":false,"saveDisabled":false}""")).canRename)
+    }
+
+
+    @Test fun aRowMenuFindsItsProjectAndTheGroupItMovesIn() {
+        val json = JSONObject("""{"version":1,"deferred":[],"archived":[],"active":[{"areaId":"w","areaName":"Work","areaColor":null,"areaIcon":null,"projects":[
+            {"id":"p1","title":"One","status":"active","statusLabel":"Active","isFocused":false,"focusDisabled":false,"activeTaskCount":0,"nextActionTitle":null,"focusedWithoutNextAction":false},
+            {"id":"p2","title":"Two","status":"active","statusLabel":"Active","isFocused":false,"focusDisabled":false,"activeTaskCount":0,"nextActionTitle":null,"focusedWithoutNextAction":false}]}]}""")
+        val (row, group) = ProjectsView.parse(json).row("p2")!!
+        assertEquals("Two", row.title)
+        assertEquals(listOf("p1", "p2"), group.projects.map { it.id })
+        assertEquals(null, ProjectsView.parse(json).row("gone"))
+    }
 }

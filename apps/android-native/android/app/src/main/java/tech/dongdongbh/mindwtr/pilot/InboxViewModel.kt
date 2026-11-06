@@ -1131,11 +1131,58 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var areaManager by mutableStateOf<JSONObject?>(null); private set
 
     var areaManagerDraft by mutableStateOf(AreaManagerDraft()); private set
-    fun openAreaManager() {
+    fun openAreaManager(focus: String? = null, name: String = "") {
         areaManager = JSONObject()
-        areaManagerDraft = AreaManagerDraft()
+        areaManagerDraft = AreaManagerDraft(focus = focus)
         readAreaManager()
+        if (focus != null) startAreaRename(focus, name)
     }
+
+    fun startAreaRename(areaId: String, name: String) {
+        areaManagerDraft = areaManagerDraft.copy(renaming = areaId, renameName = name, renameCheck = null)
+        editAreaRename(name)
+    }
+
+    fun cancelAreaRename() { areaManagerDraft = areaManagerDraft.copy(renaming = null, renameName = "", renameCheck = null) }
+
+    fun editAreaRename(name: String) {
+        val areaId = areaManagerDraft.renaming ?: return
+        areaManagerDraft = areaManagerDraft.copy(renameName = name, renameCheck = null)
+        background(emptyList(), { runtime -> runtime.menuRead("areaRenameCheck", JSONObject().put("areaId", areaId).put("name", name).toString()) }) { check, _ ->
+            if (areaManagerDraft.renaming == areaId && areaManagerDraft.renameName == name) areaManagerDraft = areaManagerDraft.copy(renameCheck = check)
+        }
+    }
+
+    fun saveAreaRename() {
+        val draft = areaManagerDraft
+        val areaId = draft.renaming ?: return
+        if (!draft.canRename) return
+        menu.command("areaRename", JSONObject().put("areaId", areaId).put("name", draft.renameName))
+    }
+
+    internal fun areaRenamed(reply: JSONObject) {
+        if (reply.optString("outcome") == "taken") return showToast(t("common.notice"), t("areas.nameExists"), "warning")
+        if (areaManagerDraft.renaming == reply.optString("id")) cancelAreaRename()
+    }
+
+
+    var projectMenu by mutableStateOf<String?>(null); private set
+    fun openProjectMenu(projectId: String?) { projectMenu = projectId }
+
+    var areaMove by mutableStateOf<Pair<String, JSONObject>?>(null); private set
+    fun openAreaMove(projectId: String) {
+        projectMenu = null
+        background(emptyList(), { runtime -> runtime.menuRead("projectAreaOptions", JSONObject().put("projectId", projectId).toString()) }) { options, _ ->
+            areaMove = projectId to options
+        }
+    }
+    fun closeAreaMove() { areaMove = null }
+    fun moveToArea(area: JSONObject?) {
+        val (projectId, _) = areaMove ?: return
+        areaMove = null
+        projectDetails.moveToArea(projectId, area)
+    }
+    fun manageAreasFromMove() { areaMove = null; openAreaManager() }
     fun closeAreaManager() { areaManager = null; areaManagerDraft = AreaManagerDraft() }
     fun expandAreaColor(areaId: String?) { areaManagerDraft = areaManagerDraft.copy(expanded = areaId) }
     fun pickNewAreaColor(color: String) { areaManagerDraft = areaManagerDraft.copy(color = color) }
@@ -2423,7 +2470,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 }
 
 
-data class AreaManagerDraft(val expanded: String? = null, val name: String = "", val color: String? = null, val check: JSONObject? = null) {
+data class AreaManagerDraft(val expanded: String? = null, val name: String = "", val color: String? = null, val check: JSONObject? = null,
+                           val focus: String? = null, val renaming: String? = null, val renameName: String = "", val renameCheck: JSONObject? = null) {
 
     val canSave get() = name.isNotBlank() && check?.optBoolean("saveDisabled") == false
+
+    val canRename get() = renameName.isNotBlank() && renameCheck?.optBoolean("saveDisabled") == false
 }

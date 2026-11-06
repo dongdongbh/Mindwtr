@@ -481,6 +481,48 @@ async function openAreaRecovery(mode: RecoveryMode) {
 }
 const recoveryModes: RecoveryMode[] = ['rename', 'merge', 'delete', 'restore', 'fresh'];
 
+describe('Projects list Area rename refuses a taken name (RN 8b31620e4)', () => {
+    const RUN_ID = '00000000-0000-4000-8000-000000001489';
+
+    it('reports a name another live Area holds, trimmed and in any case, and allows the Area its own name', async () => {
+        const { methods } = await open({ areas: [area('work', 'Work', 0), area('home', 'Home', 1),
+            area('gone', 'Old', 2, { deletedAt: NOW })] });
+        expect(methods.checkAreaRename({ areaId: 'work', name: '  home ' })).toEqual({ ok: true, value: { nameTaken: true, saveDisabled: true } });
+        expect(methods.checkAreaRename({ areaId: 'work', name: 'WORK' })).toEqual({ ok: true, value: { nameTaken: false, saveDisabled: false } });
+        expect(methods.checkAreaRename({ areaId: 'work', name: 'Old' })).toEqual({ ok: true, value: { nameTaken: false, saveDisabled: false } });
+        expect(methods.checkAreaRename({ areaId: 'work', name: '   ' })).toEqual({ ok: true, value: { nameTaken: false, saveDisabled: true } });
+        expect(methods.checkAreaRename({ areaId: 'work', name: 7 } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('refuses a taken name without merging the Areas or saving', async () => {
+        const { methods, data, saves } = await open({ areas: [area('work', 'Work', 0), area('home', 'Home', 1)],
+            projects: [project('linked', 'work', 'Work')] });
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: ' HOME ' }))
+            .toEqual({ ok: true, value: { outcome: 'taken', id: 'work', areaId: 'work', name: 'Work' } });
+        expect(data().areas.map((row) => [row.id, row.name, row.deletedAt])).toEqual([['work', 'Work', undefined], ['home', 'Home', undefined]]);
+        expect(data().projects[0].areaId).toBe('work');
+        expect(saves()).toBe(0);
+    });
+
+    it('stores a free trimmed name once, keeps the same name unchanged, and refuses a blank name or a gone Area', async () => {
+        const { methods, data, saves } = await open({ areas: [area('work', 'Work', 0), area('home', 'Home', 1)],
+            projects: [project('linked', 'work', 'Work')] });
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: '  Office ' }))
+            .toEqual({ ok: true, value: { outcome: 'saved', id: 'work', areaId: 'work', name: 'Office' } });
+        expect(data().areas.find((row) => row.id === 'work')?.name).toBe('Office');
+        expect(data().projects[0].areaTitle).toBe('Office');
+        const afterSave = saves();
+        expect(afterSave).toBeGreaterThan(0);
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: 'Office' }))
+            .toEqual({ ok: true, value: { outcome: 'unchanged', id: 'work', areaId: 'work', name: 'Office' } });
+        expect(data().areas.filter((row) => row.name === 'Office')).toHaveLength(1);
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'work', name: '  ' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await methods.runAreaRename({ requestId: RUN_ID, areaId: 'missing', name: 'Desk' })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await methods.runAreaRename({ requestId: 'not-a-uuid', areaId: 'work', name: 'Desk' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+});
+
+
 describe('Area durable recovery baselines', () => {
     it.each(recoveryModes.flatMap((mode) => ['synchronous', 'microtask'].map((timing) => ({ mode, timing }))))
     ('$mode cannot own a $timing subscriber Task intent coalesced with its failed save', async ({ mode, timing }) => {

@@ -52,6 +52,8 @@ class WriteJournal(
 
             "areaColor" to "{requestId,areaId}",
 
+            "areaRename" to "{requestId,areaId}",
+
             "gettingStarted" to "{requestId,language}",
 
             "supportPromptShown" to "{requestId,shownAt}",

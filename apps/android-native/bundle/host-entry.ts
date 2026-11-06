@@ -1005,7 +1005,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
     return input as { projectId: string; attachmentId?: string };
 };
 type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayProjectMove' | 'taskDestinationMove' | 'taskDatesSave' | 'taskSwipeFocus' | 'taskRowChecklistEdit' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
-    | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'taskCompletedAt' | 'areaOrder' | 'areaColor' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
+    | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'taskCompletedAt' | 'areaOrder' | 'areaColor' | 'areaRename' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
     | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
 
@@ -1386,6 +1386,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
 
 
     projectAreaManager: () => contract.getProjectAreaManager(),
+    areaRenameCheck: (input) => contract.checkAreaRename(input),
     waiting: (input) => contract.getWaitingView(input),
     someday: (input) => contract.getSomedayView(input),
     reference: (input) => contract.getReferenceView(input),
@@ -1687,6 +1688,8 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     areaOrder: (input) => contract.runAreaOrder(input),
 
     areaColor: (input) => contract.runAreaColor(input),
+
+    areaRename: (input) => contract.runAreaRename(input),
 
     taskEditorAction: (input) => contract.runTaskEditorAction(input),
 };

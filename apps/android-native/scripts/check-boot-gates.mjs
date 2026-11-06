@@ -1365,7 +1365,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'runProjectEdit',
 
-        'runAreaOrder', 'runAreaColor',
+        'runAreaOrder', 'runAreaColor', 'runAreaRename',
 
         'setNotificationsSetting',
 

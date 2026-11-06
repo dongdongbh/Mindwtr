@@ -13,6 +13,7 @@ import { areaRenameEffect, planAreaEditorSave, selectAreaRenameScope, type AreaR
 import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR } from './color-constants';
 import type { PreparedAreaRename } from './store-types';
 import { taskEditValuesEqual } from './json-value-equality';
+import { isManageAreaNameTaken } from './manage-settings-model';
 import type { Area, Project, Task } from './types';
 
 export type NativeAreaRenameRequest = { requestId: string; areaId: string; name: string;
@@ -155,7 +156,8 @@ export function createAreaRenameMethods(deps: {
     save: () => Promise<NativeHostResult<null>>;
 }) {
     const saves = createAreaSaveGuard(deps.save);
-    return {
+    const otherLiveAreas = (areaId: string) => useTaskStore.getState()._allAreas.filter((row) => !row.deletedAt && row.id !== areaId);
+    const methods = {
         probeAreaRenameOutcome(input: NativeAreaRenameRequest): NativeHostResult<NativeAreaRenameResult> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -227,5 +229,50 @@ export function createAreaRenameMethods(deps: {
             const saved = await saves.finish(prepared, read.value.adapter, applied.outcome === 'replayed', read.value.authority.saveBoundary);
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
+
+        checkAreaRename(input: { areaId: string; name: string }): NativeHostResult<{ nameTaken: boolean; saveDisabled: boolean }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['areaId', 'name']) || typeof input.areaId !== 'string' || !input.areaId
+                || input.areaId.length > 500 || typeof input.name !== 'string' || input.name.length > 10_000)
+                return fail('INVALID_INPUT', 'An Area ID and the name as typed are required');
+            const nameTaken = isManageAreaNameTaken('newArea', input.name, otherLiveAreas(input.areaId));
+            return { ok: true, value: { nameTaken, saveDisabled: nameTaken || !input.name.trim() } };
+        },
+
+        async runAreaRename(input: { requestId: string; areaId: string; name: string }): Promise<NativeHostResult<
+            { outcome: 'saved' | 'unchanged' | 'taken' } & NativeAreaRenameResult>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['requestId', 'areaId', 'name'])
+                || !readRequest({ ...input, expected: { id: input.areaId, name: '', color: null, order: 0, rev: null, revBy: null, updatedAt: new Date(0).toISOString() } }))
+                return fail('INVALID_INPUT', 'A bounded Area rename request is required');
+            if (!input.name.trim()) return fail('INVALID_INPUT', 'An Area name is required');
+            let stale = 'Area changed; refresh before renaming';
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+                const current = useTaskStore.getState()._allAreas.find((row) => row.id === input.areaId && !row.deletedAt);
+                if (!current) return fail('STALE_REVISION', 'The Area is no longer there');
+                const kept = { id: current.id, areaId: current.id, name: current.name };
+                if (isManageAreaNameTaken('newArea', input.name, otherLiveAreas(current.id))) return { ok: true, value: { outcome: 'taken', ...kept } };
+                const request = { ...input, expected: token(current) };
+                const planned = await methods.prepareAreaRename(request);
+                if (!planned.ok) {
+                    if (planned.error.code !== 'STALE_REVISION') return planned;
+                    stale = planned.error.message;
+                    continue;
+                }
+                if (planned.value.kind === 'noop') {
+                    const saved = await deps.save();
+                    return saved.ok ? { ok: true, value: { outcome: 'unchanged', ...planned.value.result } } : saved;
+                }
+                if (planned.value.prepared.result.areaId !== current.id) return { ok: true, value: { outcome: 'taken', ...kept } };
+                const committed = await methods.commitPreparedAreaRename({ request, prepared: planned.value.prepared });
+                if (committed.ok) return { ok: true, value: { outcome: 'saved', ...committed.value } };
+                if (committed.error.code !== 'STALE_REVISION') return committed;
+                stale = committed.error.message;
+            }
+            return fail('STALE_REVISION', stale);
+        },
     };
+    return methods;
 }

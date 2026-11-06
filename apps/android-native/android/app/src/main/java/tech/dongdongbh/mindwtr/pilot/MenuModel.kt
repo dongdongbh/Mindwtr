@@ -24,7 +24,7 @@ private const val WINDOW = 100
 
 val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
-    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
+    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "areaRename", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 
 
 internal fun staleMoveLine(kind: String, message: String?): String? =
@@ -1321,7 +1321,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "notificationsSetting" -> JSONObject(action.title).put("requestId", action.id)
         "somedayRename", "somedayReorder", "somedayDelete" -> JSONObject(action.title)
 
-        "areaOrder", "areaColor" -> JSONObject(action.title).put("requestId", action.id)
+        "areaOrder", "areaColor", "areaRename" -> JSONObject(action.title).put("requestId", action.id)
         else -> JSONObject().put("requestId", action.id).put("action", JSONObject(action.title))
     }.toString()
 
@@ -1415,6 +1415,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             "taskSwipeFocus" -> reply.optString("blocked").takeIf { it.isNotEmpty() }?.let { shell.showToast(reply.getString("blockedTitle"), it) }
             "taskRowChecklistEdit" -> shell.rowChecklistSettled(JSONObject(action.title).getString("taskId"), RowChecklistOutcome.Written)
             "projectNextAction" -> shell.nextAction.done(reply)
+            "areaRename" -> shell.areaRenamed(reply)
             "somedayMove" -> {
                 val refused = reply.optJSONObject("refused")
                 if (refused != null) { shell.showToast(refused, tone = "error"); return }

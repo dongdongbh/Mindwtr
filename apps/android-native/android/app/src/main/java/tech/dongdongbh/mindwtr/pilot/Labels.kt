@@ -92,7 +92,7 @@ val LABEL_KEYS = listOf(
     "projects.reviewAt", "projects.sectionPlaceholder", "projects.moveUp", "projects.moveDown", "projects.deleteSectionConfirm", "common.add",
     "projects.parallel", "projects.sequential", "projects.perSection", "projects.perSectionTooltip", "projects.sequenceMode",
 
-    "projects.moveProjectFailed", "areas.manage", "projects.sortByName", "projects.sortByColor", "projects.colorNone", "projects.color",
+    "projects.moveProjectFailed", "areas.manage", "projects.manageAreas", "projects.renameArea", "areas.new", "areas.nameExists", "projects.changeColor", "common.rename", "projects.sortByName", "projects.sortByColor", "projects.colorNone", "projects.color",
 
     "settings.gettingStartedContentContinueTitle", "settings.gettingStartedContentContinueDesc", "onboarding.startFreshTitle",
 

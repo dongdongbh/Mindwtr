@@ -285,6 +285,8 @@ class MainActivity : FragmentActivity() {
 
                 if (writable) NextActionPrompt(model)
 
+                if (writable && screen == Screen.Projects && openProjectId == null) ProjectListOverlays(model)
+
                 if (writable) areaManager?.let { AreaOrderSheet(model, it) }
 
                 if (writable) CompletedAtFlow(model)
