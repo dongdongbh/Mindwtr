@@ -35,4 +35,71 @@ class RowChecklistTest {
     @Test fun noPendingEditShowsTheReadAsIs() {
         assertEquals(listOf("a" to true), shownRowChecklist(read(Triple("a", "Bread", true)), null).map { it.id to it.completed })
     }
+
+    private class Clock {
+        var now = 0L
+        val timers = mutableMapOf<String, Pair<Long, () -> Unit>>()
+        val sends = mutableListOf<Pair<String, () -> JSONObject?>>()
+        val sentPayloads = mutableListOf<JSONObject>()
+        val edits = RowChecklistEdits({ key, delay, run -> timers[key] = now + delay to run }, { key -> timers.remove(key) },
+            { taskId, payload -> sends += taskId to payload }, {})
+        fun advance(ms: Long) {
+            now += ms
+            timers.entries.filter { it.value.first <= now }.map { it.key }.forEach { key -> timers.remove(key)?.second?.invoke() }
+        }
+        fun runSends() { val ready = sends.toList(); sends.clear(); ready.forEach { (_, payload) -> payload()?.let(sentPayloads::add) } }
+    }
+
+    private fun JSONObject.ticks() = getJSONObject("completed").let { json -> json.keys().asSequence().associateWith { json.getBoolean(it) } }
+
+    @Test fun twoTicksInside200MsMakeOneSend() {
+        val clock = Clock()
+        clock.edits.edit("t1") { it.completed["a"] = true }
+        clock.advance(150)
+        clock.edits.edit("t1") { it.completed["b"] = true }
+        clock.advance(150)
+        assertEquals(0, clock.sends.size)
+        clock.advance(60)
+        clock.runSends()
+        assertEquals(listOf(mapOf("a" to true, "b" to true)), clock.sentPayloads.map { it.ticks() })
+    }
+
+    @Test fun twoTicksAcross200MsMakeTwoSendsInOrder() {
+        val clock = Clock()
+        clock.edits.edit("t1") { it.completed["a"] = true }
+        clock.advance(250)
+        clock.runSends()
+        clock.edits.edit("t1") { it.completed["a"] = false }
+        clock.advance(250)
+        assertEquals("a second send waits while the first is in flight", 0, clock.sends.size)
+        clock.edits.settled("t1", RowChecklistOutcome.Written)
+        clock.runSends()
+        assertEquals(listOf(mapOf("a" to true), mapOf("a" to false)), clock.sentPayloads.map { it.ticks() })
+    }
+
+    @Test fun aTickMadeWhileTheEditWaitsToGoOutJoinsIt() {
+        val clock = Clock()
+        clock.edits.edit("t1") { it.completed["a"] = true }
+        clock.advance(250)
+        clock.edits.edit("t1") { it.completed["b"] = true }
+        clock.advance(250)
+        clock.runSends()
+        assertEquals(listOf(mapOf("a" to true, "b" to true)), clock.sentPayloads.map { it.ticks() })
+    }
+
+    @Test fun anOwedSendIsNotShownAsWrittenAndARefusedOneIsDropped() {
+        val clock = Clock()
+        clock.edits.edit("t1") { it.completed["a"] = true }
+        clock.advance(250)
+        clock.runSends()
+        assertEquals(mapOf("a" to true), clock.edits.shown("t1")?.completed)
+        assertEquals(null, clock.edits.settled("t1", RowChecklistOutcome.Owed))
+        assertEquals(null, clock.edits.shown("t1"))
+        assertEquals(mapOf("a" to true), clock.edits.settled("t1", RowChecklistOutcome.Written)?.completed)
+        clock.edits.edit("t1") { it.completed["b"] = true }
+        clock.advance(250)
+        clock.runSends()
+        assertEquals(null, clock.edits.settled("t1", RowChecklistOutcome.Dropped))
+        assertEquals(null, clock.edits.shown("t1"))
+    }
 }

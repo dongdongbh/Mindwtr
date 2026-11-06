@@ -603,7 +603,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     fun show(target: Screen) {
         val switched = target != screen
-        if (switched) keepProjectReturn(null)
+        if (switched) { keepProjectReturn(null); closeRowChecklists() }
         screen = target
         saved["screen"] = target.name
         if (switched) focused(target)
@@ -1317,29 +1317,47 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     val rowChecklistOpen = mutableStateMapOf<String, Boolean>()
     val rowChecklists = mutableStateMapOf<String, JSONObject>()
     val rowChecklistDrafts = mutableStateMapOf<String, String>()
-    private val rowChecklistPending = mutableStateMapOf<String, RowChecklistPending>()
+    private var rowChecklistVersion by mutableIntStateOf(0)
+    private val rowChecklistEdits = RowChecklistEdits(
+        schedule = { key, delay, run -> main.postAtTime(run, key.intern(), android.os.SystemClock.uptimeMillis() + delay) },
+        cancel = { key -> main.removeCallbacksAndMessages(key.intern()) },
+        send = { _, payload -> menu.whenIdle { payload()?.let { menu.command("taskRowChecklistEdit", it) } } },
+        changed = { rowChecklistVersion += 1 },
+    )
 
     fun toggleRowChecklist(taskId: String) {
-        if (rowChecklistOpen.remove(taskId) == true) return flushRowChecklist(taskId)
-        rowChecklistOpen[taskId] = true
-        readRowChecklist(taskId)
+        if (rowChecklistOpen.remove(taskId) == true) rowChecklistEdits.flush(taskId) else rowChecklistOpen[taskId] = true
+    }
+
+    fun closeRowChecklists() {
+        if (rowChecklistOpen.isEmpty()) return
+        rowChecklistOpen.keys.toList().forEach(rowChecklistEdits::flush)
+        rowChecklistOpen.clear()
     }
 
     fun readRowChecklist(taskId: String) {
+        if (busy) return menu.whenIdle { readRowChecklist(taskId) }
         background(emptyList(), { runtime -> runtime.menuRead("taskRowChecklist", JSONObject().put("taskId", taskId).toString()).getJSONObject("checklist") }) { read, _ ->
+            if (failedAction == null && rowChecklistEdits.isOwed(taskId)) rowChecklistEdits.settled(taskId, RowChecklistOutcome.Dropped)
             if (rowChecklistOpen[taskId] == true) rowChecklists[taskId] = read
         }
     }
 
-    fun shownRowChecklistItems(taskId: String): List<RowChecklistItem> = rowChecklists[taskId]?.let { shownRowChecklist(it, rowChecklistPending[taskId]) }.orEmpty()
+    fun shownRowChecklistItems(taskId: String): List<RowChecklistItem> {
+        rowChecklistVersion
+        return rowChecklists[taskId]?.let { shownRowChecklist(it, rowChecklistEdits.shown(taskId)) }.orEmpty()
+    }
+
+    fun rowChecklistTappable(read: JSONObject): Boolean = writable && failedAction == null && !read.optBoolean("readOnly")
 
     fun tickRowChecklistItem(taskId: String, item: RowChecklistItem) = editRowChecklist(taskId) { it.completed[item.id] = !item.completed }
 
     fun typeRowChecklistDraft(taskId: String, text: String) { rowChecklistDrafts[taskId] = text }
 
     fun submitRowChecklistDraft(taskId: String): Boolean {
+        val read = rowChecklists[taskId] ?: return false
         val title = rowChecklistDrafts[taskId].orEmpty().trim()
-        if (title.isEmpty()) return false
+        if (title.isEmpty() || !rowChecklistTappable(read)) return false
         rowChecklistDrafts[taskId] = ""
         editRowChecklist(taskId) { it.added += UUID.randomUUID().toString() to title }
         return true
@@ -1347,25 +1365,19 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     private fun editRowChecklist(taskId: String, edit: (RowChecklistPending) -> Unit) {
         val read = rowChecklists[taskId] ?: return
-        if (read.optBoolean("readOnly") || !writable) return
-        val pending = rowChecklistPending[taskId] ?: RowChecklistPending()
-        edit(pending)
-        rowChecklistPending[taskId] = RowChecklistPending(pending.completed, pending.added)
-        main.removeCallbacksAndMessages(rowChecklistToken(taskId))
-        main.postAtTime({ flushRowChecklist(taskId) }, rowChecklistToken(taskId), android.os.SystemClock.uptimeMillis() + ROW_CHECKLIST_FLUSH_MS)
+        if (!rowChecklistTappable(read)) return
+        rowChecklistEdits.edit(taskId, edit)
     }
 
-    private fun rowChecklistToken(taskId: String) = "rowChecklist:$taskId".intern()
-
-    private fun flushRowChecklist(taskId: String) {
-        main.removeCallbacksAndMessages(rowChecklistToken(taskId))
-        val pending = rowChecklistPending.remove(taskId) ?: return
+    internal fun rowChecklistSettled(taskId: String, outcome: RowChecklistOutcome) {
+        val written = rowChecklistEdits.settled(taskId, outcome)
+        if (outcome == RowChecklistOutcome.Dropped && rowChecklistOpen[taskId] == true) readRowChecklist(taskId)
+        written ?: return
         rowChecklists[taskId]?.let { read ->
-            rowChecklists[taskId] = JSONObject(read.toString()).put("items", JSONArray(shownRowChecklist(read, pending).map { item ->
+            rowChecklists[taskId] = JSONObject(read.toString()).put("items", JSONArray(shownRowChecklist(read, written).map { item ->
                 JSONObject().put("id", item.id).put("title", item.title).put("completed", item.completed).put("inline", JSONArray(item.inline))
             }))
         }
-        menu.whenIdle { menu.command("taskRowChecklistEdit", rowChecklistEditInput(taskId, pending)) }
     }
 
     fun moveToDestination(destination: JSONObject) {
@@ -2094,6 +2106,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     private fun keepProject(id: String?) {
+        if (id != openProjectId) closeRowChecklists()
         openProjectId = id
         saved["project"] = id
     }

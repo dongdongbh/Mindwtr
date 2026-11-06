@@ -361,6 +361,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     private fun open(target: MenuScreen, tab: String? = null) {
         closeSheet()
+        shell.closeRowChecklists()
 
         if (target == MenuScreen.Review) editOwn("review") { remove("expandedAreaIds"); remove("expandedProjectIds"); remove("selected") }
 
@@ -416,6 +417,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     private fun leave(back: MenuScreen?) {
+        shell.closeRowChecklists()
         if (screen == MenuScreen.Projects) shell.closeProject()
 
         if (screen == MenuScreen.Weekly) shell.ai.leaveReview()
@@ -1330,6 +1332,11 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         } catch (failure: Exception) {
             val refused = UPDATE_REFUSALS.any { failure.message?.startsWith(it) == true }
                 || ((action.kind in LANDLESS || action.kind == "projectNextAction") && failure.message?.startsWith("ACTION_FAILED") == true)
+            if (action.kind == "taskRowChecklistEdit") {
+                val taskId = JSONObject(action.title).getString("taskId")
+                shell.ui { shell.rowChecklistSettled(taskId, if (refused) RowChecklistOutcome.Dropped else RowChecklistOutcome.Owed) }
+                if (failure.message?.startsWith("TASK_NOT_FOUND") == true) { shell.acknowledged(action); return@perform }
+            }
             if (refused && action.kind in CREATES) shell.ui { store.delete() }
 
             if (refused && action.kind == "calendarCreate") shell.ui { calendar.refused(action) }
@@ -1406,6 +1413,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     private fun finish(action: FailedAction, reply: JSONObject) {
         when (action.kind) {
             "taskSwipeFocus" -> reply.optString("blocked").takeIf { it.isNotEmpty() }?.let { shell.showToast(reply.getString("blockedTitle"), it) }
+            "taskRowChecklistEdit" -> shell.rowChecklistSettled(JSONObject(action.title).getString("taskId"), RowChecklistOutcome.Written)
             "projectNextAction" -> shell.nextAction.done(reply)
             "somedayMove" -> {
                 val refused = reply.optJSONObject("refused")

@@ -43,11 +43,12 @@ describe('native host contract: a row\'s inline checklist (RN useSwipeableCheckl
     it('reads the row\'s items, its labels, and whether the row may change', async () => {
         const { host } = await openHost({ tasks: [task('t1'), task('t2', { projectId: 'p1' })], projects: [project('p1', { status: 'archived' })] });
         expect(value(host.getTaskRowChecklist({ taskId: 't1' })).checklist).toMatchObject({
-            taskId: 't1', readOnly: false, progressLabel: 'Checklist progress', addLabel: 'Add Item',
+            taskId: 't1', readOnly: false, addLabel: 'Add Item',
             markdownLabels: { deletedTask: 'deleted task', deletedProject: 'deleted project' },
             items: [{ id: 'a', title: 'Bread', completed: false }, { id: 'b', title: 'Milk', completed: false }],
         });
         expect(value(host.getTaskRowChecklist({ taskId: 't1' })).checklist.items[0].inline).toEqual([{ type: 'text', text: 'Bread' }]);
+        expect(Object.keys(value(host.getTaskRowChecklist({ taskId: 't1' })).checklist).sort()).toEqual(['addLabel', 'items', 'markdownLabels', 'readOnly', 'taskId']);
         expect(value(host.getTaskRowChecklist({ taskId: 't2' })).checklist.readOnly).toBe(true);
         const missing = host.getTaskRowChecklist({ taskId: 'nope' });
         expect(missing.ok ? '' : missing.error.code).toBe('TASK_NOT_FOUND');
@@ -77,19 +78,20 @@ describe('native host contract: a row\'s inline checklist (RN useSwipeableCheckl
         expect(stored('t1').completedAt).toBeTruthy();
     });
 
-    it('a Reference item\'s list ticks, while the reference never completes or enters Focus (bc518c30e)', async () => {
-        const { host } = await openHost({ tasks: [task('r1', { status: 'reference', taskMode: 'list' })] });
+    it('a Reference item\'s list ticks, while the reference never completes and leaves Focus, even when it was starred (bc518c30e)', async () => {
+        const { host } = await openHost({ tasks: [task('r1', { status: 'reference', taskMode: 'list', isFocusedToday: true })] });
+        expect(stored('r1').isFocusedToday).toBe(true);
         expect(value(await host.editTaskRowChecklist(edit('r1', { a: true, b: true })))).toEqual({ id: 'r1', status: 'reference' });
         expect(stored('r1')).toMatchObject({ status: 'reference', checklist: [item('a', 'Bread', true), item('b', 'Milk', true)] });
         expect(stored('r1').completedAt).toBeUndefined();
-        expect(stored('r1').isFocusedToday).toBeFalsy();
+        expect(stored('r1').isFocusedToday).toBe(false);
     });
 
-    it('refuses a row whose project is archived, a deleted task and bad input, and writes nothing', async () => {
+    it('refuses a row whose project was archived as stale, so the row reads again, plus a deleted task and bad input, and writes nothing', async () => {
         const { host, writes } = await openHost({ tasks: [task('t2', { projectId: 'p1' }), task('gone', { deletedAt: NOW })], projects: [project('p1', { status: 'archived' })] });
         const start = writes();
         const archived = await host.editTaskRowChecklist(edit('t2', { a: true }));
-        expect(archived.ok ? '' : archived.error.code).toBe('ACTION_FAILED');
+        expect(archived.ok ? '' : archived.error.code).toBe('STALE_REVISION');
         const gone = await host.editTaskRowChecklist(edit('gone', { a: true }));
         expect(gone.ok ? '' : gone.error.code).toBe('TASK_NOT_FOUND');
         for (const bad of [{ ...edit('t2', {}), completed: { a: 'yes' } }, { ...edit('t2', {}), added: [{ id: 'c', title: '   ' }] }, { ...edit('t2', {}), requestId: 'x' }]) {

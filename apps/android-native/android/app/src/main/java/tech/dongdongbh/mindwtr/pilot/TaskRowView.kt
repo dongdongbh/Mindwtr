@@ -280,7 +280,7 @@ private fun RowChecklistItems(model: InboxViewModel, taskId: String, selecting: 
     val read = rowChecklists[taskId] ?: return
     val items = shownRowChecklistItems(taskId)
     if (items.isEmpty()) return
-    val tappable = writable && !read.optBoolean("readOnly")
+    val tappable = rowChecklistTappable(read)
     val labels = read.optJSONObject("markdownLabels") ?: JSONObject()
     Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         for (item in items) {

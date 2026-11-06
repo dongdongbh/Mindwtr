@@ -2,7 +2,7 @@ import { tFallback } from './i18n';
 import { createMarkdownLinkLookup, resolveMarkdownInline, type MarkdownInline } from './markdown-blocks';
 import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord } from './native-host-contract-menu-views';
-import { createNativeRequestReceipts, runStoreWrite, settleWrite, taskRevisionOf } from './native-request-receipts';
+import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
 import { useTaskStore } from './store';
 import { applyRowChecklistEdit } from './task-row-checklist';
 import type { ChecklistItem, Task } from './types';
@@ -11,9 +11,7 @@ type Translate = (key: string) => string;
 
 export type NativeTaskRowChecklist = {
     taskId: string;
-    taskRevision: string;
     readOnly: boolean;
-    progressLabel: string;
     addLabel: string;
     markdownLabels: { deletedTask: string; deletedProject: string };
     items: Array<{ id: string; title: string; completed: boolean; inline: MarkdownInline[] }>;
@@ -70,7 +68,7 @@ export function createTaskRowChecklistMethods(deps: {
     };
     const readOnly = (task: Task): boolean => {
         if (!task.projectId) return false;
-        const project = useTaskStore.getState()._projectsById.get(task.projectId);
+        const project = useTaskStore.getState()._allProjects.find((item) => item.id === task.projectId);
         return Boolean(project?.deletedAt || project?.status === 'archived');
     };
 
@@ -86,9 +84,7 @@ export function createTaskRowChecklistMethods(deps: {
             const lookup = createMarkdownLinkLookup(state._allTasks, state._allProjects);
             return { ok: true, value: { checklist: {
                 taskId: task.id,
-                taskRevision: taskRevisionOf(task),
                 readOnly: readOnly(task),
-                progressLabel: tFallback(t, 'checklist.progress', 'Checklist progress'),
                 addLabel: tFallback(t, 'taskEdit.addItem', 'Add Item'),
                 markdownLabels: {
                     deletedTask: tFallback(t, 'markdown.referenceDeletedTask', 'deleted task'),
@@ -113,7 +109,7 @@ export function createTaskRowChecklistMethods(deps: {
             return receipts.run<{ id: string; status: Task['status'] }>(requestId, JSON.stringify(['taskRowChecklistEdit', rest]), async () => {
                 const task = liveTask(input.taskId);
                 if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
-                if (readOnly(task)) return fail('ACTION_FAILED', 'The task\'s project is archived');
+                if (readOnly(task)) return fail('STALE_REVISION', 'The task\'s project was archived or deleted');
                 const edit = applyRowChecklistEdit(task, completed, added);
                 const written = await runStoreWrite(() => useTaskStore.getState().updateTask(task.id, edit));
                 return settleWrite(written, { id: task.id, status: useTaskStore.getState()._tasksById.get(task.id)?.status ?? edit.status ?? task.status });

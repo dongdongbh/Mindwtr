@@ -39,7 +39,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `row-checklist-toggle`, `row-checklist-item`, `row-checklist-add`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskRowView.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/RowChecklist.kt`, `packages/core/src/native-host-contract-task-row-checklist.ts`, `packages/core/src/task-row-checklist.ts`
 - Checks: `apps/android-native/scripts/check-row-checklist-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/RowChecklistTest.kt`, `packages/core/src/native-host-contract-task-row-checklist.test.ts`, `packages/core/src/task-row-checklist.test.ts`
-- Notes: A tick changes the item by its id on the latest task. A list-mode task completes when its last item is ticked. A Reference item's list ticks, but the reference never completes or enters Focus. Rows in an archived project show the items read-only. Selection mode hides + Add Item.
+- Notes: A tick changes the item by its id on the latest task. A list-mode task completes when its last item is ticked. A Reference item's list ticks, but the reference never completes or enters Focus. Rows in an archived project show the items read-only. Selection mode hides + Add Item. Open lists fold when the screen or tab changes, as RN's rows reset. While an action waits for Retry, ticks are off. A tick on a task deleted elsewhere is dropped without a message, as in RN.
 
 ## Selection mode and Bulk organize
 
