@@ -286,6 +286,7 @@ import { createProjectNextActionPromptMethods } from './native-host-contract-pro
 import { createTaskBackdateMethods } from './native-host-contract-task-backdate';
 import { createTaskSwipeMethods } from './native-host-contract-task-swipe';
 import { createReviewProjectTaskMethods } from './native-host-contract-review-project-task';
+import { createChecklistMoveMethods } from './native-host-contract-checklist-move';
 import { createTaskRowChecklistMethods } from './native-host-contract-task-row-checklist';
 import { createOwnedEditorCompleteTaskDraftSaveMethods, createOwnedEditorFileEditTaskDraftSaveMethods } from './native-host-contract-owned-file-edit-save';
 import { createOwnedEditorFileAddTaskDraftSaveMethods } from './native-host-contract-owned-editor-save';
@@ -1060,6 +1061,8 @@ export function createNativeHostContract(options: {
     persistentCapture?: NativePersistentCaptureHost;
 
     focusModelCache?: boolean;
+
+    projectPickerGroups?: boolean;
 } = {}) {
 
     startNativeRequestSession();
@@ -1743,7 +1746,7 @@ export function createNativeHostContract(options: {
 
     const inboxProcessingMethods = createInboxProcessingMethods({
         readiness, save, receipts, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()),
-        revision: (now) => `${revision()}:${displayRevision(now)}`,
+        revision: (now) => `${revision()}:${displayRevision(now)}`, groupDeferredProjects: options.projectPickerGroups === true,
     });
 
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
@@ -1958,6 +1961,7 @@ export function createNativeHostContract(options: {
         ...createTaskBackdateMethods({ readiness, save, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()), requestIdPattern: CAPTURE_ID_PATTERN }),
 
         ...createTaskSwipeMethods({ readiness, save, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()), requestIdPattern: CAPTURE_ID_PATTERN }),
+        ...createChecklistMoveMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         ...createTaskRowChecklistMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         ...createCaptureIngestMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
 
@@ -3129,7 +3133,7 @@ export function createNativeHostContract(options: {
                 readOnly: editor.readOnly,
                 ...buildTaskDraftDestinationPicker({
                     draft, layout: editor.layout, projects: state.projects, sections: state.sections, areas: state.areas,
-                    query: input.query, t: translate,
+                    query: input.query, t: translate, groupDeferredProjects: options.projectPickerGroups === true,
                 }),
             } };
         },
@@ -3623,6 +3627,7 @@ type InboxProcessingDeps = {
     revision: (now: Date) => string;
     t: () => (key: string) => string;
     formatDate: () => DateFormatter;
+    groupDeferredProjects: boolean;
 };
 
 type InboxProcessingEntry = {
@@ -3797,6 +3802,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 t,
                 formatDate: deps.formatDate(),
                 now,
+                groupDeferredProjects: deps.groupDeferredProjects,
             }),
         };
     };

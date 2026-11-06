@@ -34,7 +34,7 @@ import {
     type ProcessInboxWorkflowEvent,
     type ProcessInboxWorkflowFields,
 } from './process-inbox-workflow';
-import { filterProjectsBySelectedArea, getProjectChoiceState, getProjectSectionsForView, isSelectableProjectForTaskAssignment } from './project-utils';
+import { filterProjectsBySelectedArea, getProjectChoiceState, getProjectSectionsForView, groupProjectsForPicker, isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult } from './store-types';
 import { findSimilarTasks, type TaskSimilarityIndex } from './task-similarity';
 import { collectTaskTokenUsage } from './task-token-usage';
@@ -1482,6 +1482,8 @@ export type ProcessInboxStepView = {
         projects: ProcessInboxViewOption[];
 
         sections?: { label: string; options: ProcessInboxViewOption[] };
+
+        deferredFrom?: { index: number; label: string };
     } | null;
     somedaySections: { label: string; options: ProcessInboxViewOption[] } | null;
     delegate: {
@@ -1624,6 +1626,7 @@ export type ProcessInboxViewInput = {
     t: Translate;
     formatDate: DateFormatter;
     now: Date;
+    groupDeferredProjects?: boolean;
 };
 
 
@@ -1735,7 +1738,11 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         const currentArea = draft.areaId ? input.areas.find((area) => area.id === draft.areaId) ?? null : null;
         const areaLabel = t('taskEdit.areaLabel');
         const showAreas = fields.area && !draft.projectId;
-        const { filteredProjects, exactMatch } = getProcessInboxProjectChoices(input.projects, draft.areaId, draft.projectSearch);
+        const { filteredProjects: matches, exactMatch } = getProcessInboxProjectChoices(input.projects, draft.areaId, draft.projectSearch);
+        const projectGroups = input.groupDeferredProjects ? groupProjectsForPicker(matches, input.areas) : null;
+        const filteredProjects = projectGroups ? [...projectGroups.active, ...projectGroups.deferred] : matches;
+        const deferredFrom = projectGroups && projectGroups.deferred.length > 0 && !conversion && fields.project
+            ? { index: 1 + projectGroups.active.length, label: tf('projects.deferredSection', 'Someday / Waiting') } : null;
         const projectSections = !conversion && fields.project && currentProject
             ? getProjectSectionsForView(currentProject, input.sections ?? [])
             : [];
@@ -1796,6 +1803,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                     edit: { type: 'selectProject' as const, value: project.id },
                 })),
             ] : [],
+            ...(deferredFrom ? { deferredFrom } : {}),
             ...(sectionOptions.length > 0 ? { sections: { label: t('taskEdit.sectionLabel'), options: sectionOptions } } : {}),
         };
     };

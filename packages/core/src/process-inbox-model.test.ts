@@ -262,6 +262,28 @@ describe('Process Inbox steps', () => {
         expect(view.moreOptions.organization?.timeEstimates.map(({ label }) => label)).toContain('5 min.');
     });
 
+    it('with project groups on, lists active projects in the Projects view order and marks where Someday / Waiting starts (78dafc4a2, ebdfa59ed, #1467)', () => {
+        const task = { id: 'inbox', title: 'Inbox', status: 'inbox' } as Task;
+        const project = (id: string, order: number, areaId: string | undefined, status: 'active' | 'someday' | 'waiting' = 'active') =>
+            ({ id, title: id, order, areaId, status, color: '#123456', tagIds: [], createdAt: '', updatedAt: '' }) as never;
+        const build = (groupDeferredProjects: boolean) => buildProcessInboxStepView({ task, draft: createProcessInboxDraft(task),
+            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true },
+            mode: 'quick', plan: resolveProcessInboxPlan({ gtd: { taskEditor: { hidden: [] } } } as never),
+            settings: undefined, tasks: [task],
+            projects: [project('p-z', 9, 'a-work'), project('p-later', 0, 'a-home', 'someday'), project('p-a', 1, 'a-work'), project('p-b', 0, 'a-home'),
+                project('p-wait', 1, undefined, 'waiting'), project('p-free', 0, undefined)],
+            areas: [{ id: 'a-work', name: 'Work', order: 1 }, { id: 'a-home', name: 'Home', order: 0 }] as never, people: [], similarityIndex: null,
+            t: (key) => key, formatDate: () => '', now: new Date(2026, 8, 23), groupDeferredProjects,
+        }).project!;
+        const ids = (projects: Array<{ edit: unknown }>) => projects.map((option) => (option.edit as { value: string | null }).value);
+        const grouped = build(true);
+        expect(ids(grouped.projects)).toEqual([null, 'p-b', 'p-a', 'p-z', 'p-free', 'p-later', 'p-wait']);
+        expect(grouped.deferredFrom).toEqual({ index: 5, label: 'Someday / Waiting' });
+        const plain = build(false);
+        expect(plain).not.toHaveProperty('deferredFrom');
+        expect(ids(plain.projects)).toEqual([null, 'p-z', 'p-later', 'p-a', 'p-b', 'p-wait', 'p-free']);
+    });
+
     it('offers contexts before the project on Start later, as React Native does (#1445)', () => {
         const task = { id: 'inbox', title: 'Inbox', status: 'inbox' } as Task;
         const view = buildProcessInboxStepView({ task, draft: createProcessInboxDraft(task),

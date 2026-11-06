@@ -7,7 +7,7 @@ import {
 import { normalizeClockTimeInput, safeFormatDate, safeParseDate, type DateFormatter } from './date';
 import { tFallback } from './i18n';
 import { getPersonOptionNames, getPersonSuggestionNames } from './people';
-import { filterProjectsBySelectedArea, getProjectChoiceState } from './project-utils';
+import { filterProjectsBySelectedArea, getProjectChoiceState, groupProjectsForPicker } from './project-utils';
 import { parseRRuleString } from './recurrence';
 import { REFERENCE_HIDDEN_TASK_FIELDS } from './reference';
 import { resolveFeatureFlags } from './resolve-feature-flags';
@@ -665,6 +665,7 @@ export function buildTaskDraftDestinationPicker(input: {
     areas: readonly Area[];
     query: string;
     t: (key: string) => string;
+    groupDeferredProjects?: boolean;
 }): TaskDraftDestinationPicker {
     const { draft, query, t } = input;
     const basicFields = input.layout.sections.find((section) => section.id === 'basic')?.fields ?? [];
@@ -685,7 +686,14 @@ export function buildTaskDraftDestinationPicker(input: {
     ];
     if (destinationFields.includes('project')) {
         const { filteredProjects } = getProjectChoiceState(filterProjectsBySelectedArea(input.projects, draft.areaId), query, input.projects);
-        groups.push({ kind: 'project', label: t('nav.projects'), choices: filteredProjects.map((project) => choice({ kind: 'project', id: project.id }, project.title)) });
+        const projectChoices = (projects: readonly Project[]) => projects.map((project) => choice({ kind: 'project', id: project.id }, project.title));
+        if (input.groupDeferredProjects) {
+            const { active, deferred } = groupProjectsForPicker(filteredProjects, input.areas);
+            groups.push({ kind: 'project', label: t('nav.projects'), choices: projectChoices(active) });
+            if (deferred.length > 0) groups.push({ kind: 'project', label: tFallback(t, 'projects.deferredSection', 'Someday / Waiting'), choices: projectChoices(deferred) });
+        } else {
+            groups.push({ kind: 'project', label: t('nav.projects'), choices: projectChoices(filteredProjects) });
+        }
     }
     if (destinationFields.includes('area')) {
         const areas = input.areas.filter((area) => !area.deletedAt && (!normalizedQuery || area.name.toLowerCase().includes(normalizedQuery)))

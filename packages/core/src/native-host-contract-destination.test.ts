@@ -95,6 +95,21 @@ describe('native task draft destination picker', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('on Android, lists projects in the Projects view order with Someday / Waiting after them, as RN (78dafc4a2, ebdfa59ed, #1467)', async () => {
+        const grouped = createNativeHostContract({ projectPickerGroups: true });
+        expect(await grouped.activate({ writeSafetyReady: true })).toMatchObject({ ok: true });
+        const draft = value(grouped.getTaskEditorModel({ id: 'edit' })).draft;
+        const picker = value(grouped.getTaskDraftDestinationPicker({ id: 'edit', draft, query: '' }));
+        expect(picker.destination.groups.map((group) => [group.kind, group.label, group.choices.map((choice) => choice.id)])).toEqual([
+            ['none', null, ['']], ['project', 'Projects', ['p-b', 'p-a', 'p-z']], ['project', 'Someday / Waiting', ['p-later']],
+            ['area', 'Area', ['a-home', 'a-2', 'a-10', 'a-work']],
+        ]);
+        const searched = value(grouped.getTaskDraftDestinationPicker({ id: 'edit', draft, query: 'a' }));
+        expect(searched.destination.groups.filter((group) => group.kind === 'project').map((group) => group.choices.map((choice) => choice.id)))
+            .toEqual([['p-b', 'p-a', 'p-z'], ['p-later']]);
+        expect(groupIds()).toEqual({ none: [''], project: ['p-z', 'p-a', 'p-b', 'p-later'], area: ['a-home', 'a-2', 'a-10', 'a-work'] });
+    });
+
     it('filters browsing by the direct area, searches across areas, and never infers an area from a project', () => {
         const direct = { ...draftOf(), projectId: '', sectionId: '', areaId: 'a-work' };
         expect(groupIds(direct).project).toEqual(['p-z', 'p-a']);
