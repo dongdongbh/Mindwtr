@@ -158,6 +158,7 @@ class EditorModel(val source: String) {
 
     val timeEstimates = options.getJSONArray("timeEstimates").objects().map { it.getString("value") to it.getString("label") }
     val projects = options.getJSONArray("projects").objects().map { EditorChoice(it.getString("id"), it.getString("title")) }
+    val deferredProjectIds = options.getJSONArray("projects").objects().filter { it.optBoolean("deferred") }.map { it.getString("id") }.toSet()
     val projectSections = options.getJSONArray("sections").objects().map { EditorChoice(it.getString("id"), it.getString("title")) }
     val areas = options.getJSONArray("areas").objects().map { EditorChoice(it.getString("id"), it.getString("name")) }
     val somedaySections = options.getJSONArray("somedaySections").objects().map {
@@ -590,8 +591,11 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
         "destination" -> PickerDialog(t("task.destination"), { picker = null }) {
             PickerItem(t("common.none")) { editFields(mapOf("projectId" to "", "areaId" to "")); picker = null }
 
+            val (deferred, active) = editor.view.projects.partition { it.id in editor.view.deferredProjectIds }
             PickerHeading(t("nav.projects"))
-            for (project in editor.view.projects) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
+            for (project in active) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
+            if (deferred.isNotEmpty()) PickerHeading(t("projects.deferredSection"))
+            for (project in deferred) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
             PickerHeading(t("taskEdit.areaLabel"))
             for (area in editor.view.areas) PickerItem(area.title) { editFields(mapOf("projectId" to "", "areaId" to area.id)); picker = null }
         }

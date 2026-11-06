@@ -22,13 +22,13 @@ private const val PAGE = 50
 private const val WINDOW = 100
 
 
-val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
+val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit", "taskChecklistMove", "taskChecklistMoveUndo", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
     "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "areaRename", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 
 
 internal fun staleMoveLine(kind: String, message: String?): String? =
-    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus") && it.startsWith("STALE_REVISION") }
+    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus", "taskChecklistMove") && it.startsWith("STALE_REVISION") }
         ?.substringAfter(": ", "")?.ifEmpty { null }
 
 
@@ -1315,7 +1315,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
         "taskDestinationMove" -> JSONObject(action.title).put("requestId", action.id)
 
-        "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit" -> JSONObject(action.title).put("requestId", action.id)
+        "taskDatesSave", "taskSwipeFocus", "taskRowChecklistEdit", "taskChecklistMove", "taskChecklistMoveUndo" -> JSONObject(action.title).put("requestId", action.id)
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
 
         "notificationsSetting" -> JSONObject(action.title).put("requestId", action.id)
@@ -1413,6 +1413,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     private fun finish(action: FailedAction, reply: JSONObject) {
         when (action.kind) {
             "taskSwipeFocus" -> reply.optString("blocked").takeIf { it.isNotEmpty() }?.let { shell.showToast(reply.getString("blockedTitle"), it) }
+            "taskChecklistMove" -> JSONObject(action.title).let { input -> shell.checklistMoved(input.getString("sourceId"), input.getString("targetId"), reply.getJSONObject("toast")) }
             "taskRowChecklistEdit" -> shell.rowChecklistSettled(JSONObject(action.title).getString("taskId"), RowChecklistOutcome.Written)
             "projectNextAction" -> shell.nextAction.done(reply)
             "areaRename" -> shell.areaRenamed(reply)

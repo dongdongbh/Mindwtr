@@ -803,7 +803,14 @@ assert.match(rowUi, /LaunchedEffect\(tray\) \{\s+val kept = trayOffsetAfterChang
 assert.doesNotMatch(code(rowUi), /LocalViewConfiguration provides/, 'the row keeps the system touch slop: a larger one let the list take the drag');
 assert.match(rowUi, /if \(offset\.targetValue != 0f\) Box\(Modifier\.matchParentSize\(\)\.pointerInput\(Unit\) \{ detectTapGestures\(onLongPress = \{ \}\) \{ settle\(0f\) \} \}\)/, 'a tap on an open row shuts the tray and reaches nothing under it, as RN\'s Swipeable does');
 assert.match(rowUi, /internal const val TRAY_FRICTION = 1\.25f\s+internal const val TRAY_OPEN_THRESHOLD_DP = 72f\s+internal const val TRAY_DRAG_OFFSET_DP = 28f/);
-assert.match(menuModel, /kind in setOf\("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus"\) && it\.startsWith\("STALE_REVISION"\)/);
+assert.match(menuModel, /kind in setOf\("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus", "taskChecklistMove"\) && it\.startsWith\("STALE_REVISION"\)/);
+assert.match(rowUi, /if \(checklistMoveEligible == task\.id\) StatusMenuAction\(t\("task\.addToChecklist"\), idle\) \{ openChecklistTargets\(task\) \}/, 'the status menu offers Add to checklist… only for a title-only Inbox task, as RN does');
+assert.match(rowUi, /clickable\(enabled = enabled, role = Role\.Button\) \{ moveToChecklist\(target\.getString\("id"\)\) \}/);
+assert.match(menuModel, /"taskChecklistMove" -> JSONObject\(action\.title\)\.let \{ input -> shell\.checklistMoved\(input\.getString\("sourceId"\), input\.getString\("targetId"\), reply\.getJSONObject\("toast"\)\) \}/);
+assert.match(source('InboxViewModel.kt'), /showToast\(null, toast\.getString\("message"\), "info", toast\.getString\("undoLabel"\), 5_200\) \{\s+menu\.command\("taskChecklistMoveUndo"/, 'RN\'s Added to checklist toast with Undo');
+assert.match(source('TaskEditor.kt'), /if \(deferred\.isNotEmpty\(\)\) PickerHeading\(t\("projects\.deferredSection"\)\)/, 'the editor lists Someday \/ Waiting projects after the active ones');
+assert.match(source('ProcessInbox.kt'), /if \(index == deferredFrom\?\.getInt\("index"\)\) Text\(deferredFrom\.getString\("label"\)/, 'Process Inbox heads its Someday \/ Waiting projects');
+assert.match(readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8'), /\.\.\.\(globalThis\.__mindwtrHostPlatform !== 'ios' \? \{ projectPickerGroups: true \} : \{\}\)/, 'only Android asks core for grouped pickers; iOS keeps its key sets');
 
 
 
@@ -1379,7 +1386,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'runProjectNextAction',
 
-        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates', 'editTaskRowChecklist'];
+        'setTaskCompletedAt', 'setTaskSwipeFocus', 'saveTaskDates', 'editTaskRowChecklist', 'moveTaskToChecklist', 'undoMoveTaskToChecklist'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -6550,7 +6557,8 @@ export function createNativeSync() {
             if (variant === 'partial') delete state.__mindwtrNative.ioBody;
             if (variant === 'refused') state.__mindwtrNative.fileDirectories = () => '!MindwtrNativeError:fixed unavailable';
         });
-        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined), [...(variant === 'android' ? [] : ['registerSyncSettingsRetirementStatus']), 'reminderPlatform'], `${variant} capability offers no local fallback`);
+        assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined),
+            variant === 'android' ? ['reminderPlatform', 'projectPickerGroups'] : ['registerSyncSettingsRetirementStatus', 'reminderPlatform'], `${variant} capability offers no local fallback`);
         assert.equal(unavailable.localShaInstallCount, 0, 'failed optional discovery leaves SHA binding unchanged');
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }

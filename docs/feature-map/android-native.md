@@ -32,6 +32,14 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Checks: `apps/android-native/scripts/check-swipe-tray-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/SwipeTrayTest.kt`, `packages/core/src/native-host-contract-task-swipe.test.ts`
 - Notes: Core builds each tray, the same table RN reads. Each tray button's test tag is `swipe-<action id>` (done, focus, organize, dates, delete, restore, next). Organize opens the status and Move menu. Dates… opens the Task dates sheet; Save writes once. Swipes are off during bulk selection.
 
+## Add to checklist
+
+- Reach: An Inbox row whose task is only a title › its status control › Destination › Add to checklist…. Pick an open task; the search narrows by title.
+- Selectors: `checklist-target-search`, `checklist-target`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskRowView.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt`, `packages/core/src/native-host-contract-checklist-move.ts`, `packages/core/src/task-checklist-move.ts`
+- Checks: `apps/android-native/scripts/check-checklist-target-device.mjs`, `packages/core/src/native-host-contract-checklist-move.test.ts`, `packages/core/src/task-checklist-move.test.ts`
+- Notes: The title becomes one unchecked item on the target and the Inbox item goes to Trash, in one write. The toast "Added to checklist" has Undo, which brings the item back and removes only its line. Targets with a checklist come first and show their n/m progress. A task with notes, dates, tags, a project or any other detail does not offer it, as in RN.
+
 ## Task row checklist
 
 - Reach: Any task list row whose task has a checklist (not the Inbox, as in RN) › the checklist badge (n/m) under the title.
@@ -55,7 +63,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `process-inbox`, `process-title`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessInbox.kt`
 - Checks: `apps/android-native/scripts/check-process-inbox-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProcessInboxHeaderTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProcessInboxScrollTest.kt`
-- Notes: The count shows 99+ above 99, but TalkBack reads the exact count. After a process death the app lands on the Inbox and resends the owed answer in the background.
+- Notes: The count shows 99+ above 99, but TalkBack reads the exact count. After a process death the app lands on the Inbox and resends the owed answer in the background. The project chips follow the Projects view order (areas in order, then each project's order), with Someday / Waiting projects after a heading (`process-inbox-deferred-projects`).
 
 ## Mind Sweep
 
@@ -114,7 +122,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `task-editor`, `markdown-toolbar`, `task-description-fullscreen`, `task-description-preview`, `editor-waiting-for`, `monthly-custom`, `monthly-custom-interval`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskEditor.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MarkdownToolbar.kt`
 - Checks: `apps/android-native/scripts/check-editor-device.mjs`, `apps/android-native/scripts/check-monthly-repeat-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EditorNavigationTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EditorActionSaveTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/MarkdownDraftTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/MonthlyCustomTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorFocusRevealTest.kt`
-- Notes: The draft survives rotation and process death. If a save was in flight at a death, the relaunch sends that same save again and closes the editor.
+- Notes: The draft survives rotation and process death. If a save was in flight at a death, the relaunch sends that same save again and closes the editor. Destination lists projects in the Projects view order, with Someday / Waiting projects after them under their own heading.
 
 ## Task View tab and checklist
 

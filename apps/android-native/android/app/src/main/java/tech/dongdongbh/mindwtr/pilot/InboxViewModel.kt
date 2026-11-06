@@ -1262,7 +1262,51 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     fun showAreaSheet(open: Boolean) { areaSheet = open }
 
-    fun showStatusMenu(task: TaskRow?) { statusMenu = task }
+    fun showStatusMenu(task: TaskRow?) {
+        statusMenu = task
+        checklistMoveEligible = null
+        if (task != null && task.status == "inbox") readChecklistTargets(task.id, "") { reply -> if (statusMenu?.id == task.id) checklistMoveEligible = task.id.takeIf { reply.getBoolean("eligible") } }
+    }
+
+    var checklistMoveEligible by mutableStateOf<String?>(null); private set
+    var checklistTargetsFor by mutableStateOf<TaskRow?>(null); private set
+    var checklistTargets by mutableStateOf<JSONObject?>(null); private set
+    var checklistTargetQuery by mutableStateOf(""); private set
+
+    fun openChecklistTargets(task: TaskRow) {
+        statusMenu = null
+        checklistTargetsFor = task
+        checklistTargetQuery = ""
+        checklistTargets = null
+        readChecklistTargets(task.id, "") { reply -> if (checklistTargetsFor?.id == task.id && checklistTargetQuery.isEmpty()) checklistTargets = reply }
+    }
+
+    fun searchChecklistTargets(text: String) {
+        val task = checklistTargetsFor ?: return
+        checklistTargetQuery = text
+        readChecklistTargets(task.id, text) { reply -> if (checklistTargetsFor?.id == task.id && checklistTargetQuery == text) checklistTargets = reply }
+    }
+
+    fun closeChecklistTargets() {
+        checklistTargetsFor = null
+        checklistTargets = null
+    }
+
+    fun moveToChecklist(targetId: String) {
+        val task = checklistTargetsFor ?: return
+        closeChecklistTargets()
+        menu.command("taskChecklistMove", JSONObject().put("sourceId", task.id).put("targetId", targetId))
+    }
+
+    internal fun checklistMoved(sourceId: String, targetId: String, toast: JSONObject) {
+        showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5_200) {
+            menu.command("taskChecklistMoveUndo", JSONObject().put("sourceId", sourceId).put("targetId", targetId))
+        }
+    }
+
+    private fun readChecklistTargets(sourceId: String, query: String, apply: (JSONObject) -> Unit) {
+        background(listOf(Part.MenuDialog), { runtime -> runtime.menuRead("checklistTargets", JSONObject().put("sourceId", sourceId).put("query", query).toString()) }) { reply, _ -> apply(reply) }
+    }
 
 
     var pullSync by mutableStateOf("idle"); private set

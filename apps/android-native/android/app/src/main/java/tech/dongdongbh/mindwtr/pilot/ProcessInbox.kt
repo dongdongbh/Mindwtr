@@ -639,7 +639,12 @@ private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONOb
             }
         }
     }
-    for (option in project.items("projects")) OptionChip(option, projectLabel, locked, send)
+    val deferredFrom = project.child("deferredFrom")
+    project.items("projects").forEachIndexed { index, option ->
+        if (index == deferredFrom?.getInt("index")) Text(deferredFrom.getString("label"), style = rnText(12, 600), color = c.secondaryText,
+            modifier = Modifier.padding(bottom = 8.dp).semantics { heading() }.testTag("process-inbox-deferred-projects"))
+        OptionChip(option, projectLabel, locked, send)
+    }
 }
 
 

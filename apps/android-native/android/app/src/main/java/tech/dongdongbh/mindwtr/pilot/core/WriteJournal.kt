@@ -32,7 +32,7 @@ class WriteJournal(
         )
 
         val MENU = mapOf(
-            "activateProject" to "{projectId,projectRevision}", "somedayMove" to "{requestId,taskIds[]}", "somedayProjectMove" to "{requestId,projectId}", "taskDestinationMove" to "{requestId,id}", "taskDatesSave" to "{requestId,taskId}", "taskSwipeFocus" to "{requestId,taskId,taskRevision}", "taskRowChecklistEdit" to "{requestId,taskId}", "somedayUndo" to "{moveRequestId,requestId}",
+            "activateProject" to "{projectId,projectRevision}", "somedayMove" to "{requestId,taskIds[]}", "somedayProjectMove" to "{requestId,projectId}", "taskDestinationMove" to "{requestId,id}", "taskDatesSave" to "{requestId,taskId}", "taskSwipeFocus" to "{requestId,taskId,taskRevision}", "taskRowChecklistEdit" to "{requestId,taskId}", "taskChecklistMove" to "{requestId,sourceId,targetId}", "taskChecklistMoveUndo" to "{requestId,sourceId,targetId}", "somedayUndo" to "{moveRequestId,requestId}",
             "somedayTask" to "{captureId}", "somedaySection" to "{requestId}", "taskListSort" to "{sortBy}", "somedayRename" to "{id}",
             "somedayReorder" to "{ids[]}", "somedayDelete" to "{id}",
 

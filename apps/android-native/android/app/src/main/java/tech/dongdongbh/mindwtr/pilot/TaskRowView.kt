@@ -374,6 +374,7 @@ private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, e
 @Composable
 fun StatusMenu(model: InboxViewModel) = with(model) {
     DestinationPicker(model)
+    ChecklistTargetPicker(model)
     DatesSheet(model)
     val task = statusMenu ?: return
     val theme = LocalTheme.current
@@ -418,6 +419,7 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                 menu.moveLabel(task)?.let { moveLabel ->
                     StatusMenuAction(moveLabel, idle) { showStatusMenu(null); menu.openMove(listOf(task.id), JSONObject().put(task.id, task.taskRevision)) }
                 }
+                if (checklistMoveEligible == task.id) StatusMenuAction(t("task.addToChecklist"), idle) { openChecklistTargets(task) }
             }
 
             val context = LocalContext.current
@@ -426,6 +428,32 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                 StatusMenuAction(t("task.copyTaskId"), true) { showStatusMenu(null); copyTaskReference(context, task.id, link = false) }
             }
         }
+    }
+}
+
+
+@Composable
+private fun ChecklistTargetPicker(model: InboxViewModel) = with(model) {
+    checklistTargetsFor ?: return
+    val picker = checklistTargets
+    val c = LocalTheme.current.colors
+    val title = picker?.getString("title") ?: t("task.addToChecklist")
+    PickerDialog(title, { closeChecklistTargets() }, search = {
+        ModalInput(checklistTargetQuery, picker?.getString("searchLabel") ?: t("common.search"), title, Modifier.testTag("checklist-target-search")) { searchChecklistTargets(it) }
+    }) {
+        picker ?: return@PickerDialog
+        val enabled = writable && !busy && failedAction == null
+        for (target in picker.menuObjects("rows")) {
+            val progress = target.menuText("progress")
+            Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(enabled = enabled, role = Role.Button) { moveToChecklist(target.getString("id")) }
+                .semantics { contentDescription = target.getString("title"); testTag = "checklist-target" }
+                .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(target.getString("title"), style = rnText(16, 400), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                progress?.let { Text(it, style = rnText(16, 400), color = c.secondaryText) }
+            }
+        }
+        picker.menuText("noMatches")?.let { Text(it, style = rnText(16, 400), color = c.secondaryText,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
     }
 }
 

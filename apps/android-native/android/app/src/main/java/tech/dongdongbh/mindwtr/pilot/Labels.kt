@@ -46,7 +46,7 @@ val LABEL_KEYS = listOf(
     "taskEdit.startModeAbsolute", "taskEdit.startModeRelative", "taskEdit.relativeStartAmount", "taskEdit.relativeStartBeforeDue",
     "taskEdit.dateOnly", "taskEdit.timeSpentLabel", "recurrence.weekUnit", "recurrence.monthUnit", "recurrence.yearUnit",
     "recurrence.endsLabel", "recurrence.endsNever", "recurrence.endsOnDate", "recurrence.endsAfterCount", "recurrence.occurrenceUnit",
-    "viewSections.somedaySection", "taskEdit.checklist", "checklist.progress", "taskEdit.tab.list", "attachments.title",
+    "viewSections.somedaySection", "taskEdit.checklist", "checklist.progress", "task.addToChecklist", "taskEdit.tab.list", "attachments.title",
     "process.waitingFor", "process.waitingForDesc",
     "status.inbox", "status.next", "status.waiting", "status.someday", "status.reference", "status.done",
     "priority.low", "priority.medium", "priority.high", "priority.urgent",
