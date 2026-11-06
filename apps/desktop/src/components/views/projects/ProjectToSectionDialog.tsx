@@ -13,12 +13,13 @@ import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../../ui/Dialog'
 type Prepared = Extract<ReturnType<typeof prepareProjectToSection>, { ok: true }>;
 type Success = Extract<Awaited<ReturnType<ReturnType<typeof useTaskStore.getState>['convertProjectToSection']>>, { success: true }>;
 
-export function ProjectToSectionDialog({ source, projects, onCancel, onSuccess, t }: {
+export function ProjectToSectionDialog({ source, projects, onCancel, onSuccess, t, theme }: {
     source: Project;
     projects: Project[];
     onCancel: () => void;
     onSuccess: (result: Success) => void;
     t: (key: string) => string;
+    theme?: string;
 }) {
     const titleId = useId();
     const [destinationId, setDestinationId] = useState('');
@@ -27,7 +28,6 @@ export function ProjectToSectionDialog({ source, projects, onCancel, onSuccess, 
     const [busy, setBusy] = useState(false);
     const [retryOnly, setRetryOnly] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const theme = useTaskStore((state) => state.settings?.theme);
 
     const { _allProjects, _allSections, _allTasks } = useTaskStore.getState();
     const previewDestination = useMemo(() => createProjectToSectionPreviewer({ _allProjects, _allSections, _allTasks }, source.id),
