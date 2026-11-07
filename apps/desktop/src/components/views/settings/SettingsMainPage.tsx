@@ -20,6 +20,7 @@ const FLATPAK_QUICK_ADD_COMMAND = 'flatpak run tech.dongdongbh.mindwtr --quick-a
 
 type ThemeMode = DesktopThemeMode;
 type DensityMode = 'comfortable' | 'compact' | 'condensed';
+type AreaFilterStyle = 'list' | 'chips';
 type TextSizeMode = 'small' | 'default' | 'large' | 'extra-large';
 type WeekStart = 'system' | 'sunday' | 'monday' | 'saturday';
 type DateFormatSetting = 'system' | 'dmy' | 'mdy' | 'ymd';
@@ -38,6 +39,10 @@ type Labels = {
     densityComfortable: string;
     densityCompact: string;
     densityCondensed: string;
+    areaFilterStyle: string;
+    areaFilterStyleDesc: string;
+    areaFilterStyleList: string;
+    areaFilterStyleChips: string;
     textSize: string;
     textSizeDesc: string;
     textSizeSmall: string;
@@ -128,6 +133,8 @@ export type SettingsMainPageProps = {
     onThemeChange: (mode: ThemeMode) => void;
     densityMode: DensityMode;
     onDensityChange: (mode: DensityMode) => void;
+    areaFilterStyle: AreaFilterStyle;
+    onAreaFilterStyleChange: (style: AreaFilterStyle) => void;
     textSizeMode: TextSizeMode;
     onTextSizeChange: (mode: TextSizeMode) => void;
 
@@ -183,6 +190,8 @@ export function SettingsMainPage({
     onThemeChange,
     densityMode,
     onDensityChange,
+    areaFilterStyle,
+    onAreaFilterStyleChange,
     textSizeMode,
     onTextSizeChange,
     fontFamily,
@@ -292,6 +301,17 @@ export function SettingsMainPage({
                         <option value="comfortable">{t.densityComfortable}</option>
                         <option value="compact">{t.densityCompact}</option>
                         <option value="condensed">{t.densityCondensed}</option>
+                    </select>
+                </SettingRow>
+                <SettingRow padded settingsKey="areaFilterStyle" title={t.areaFilterStyle} description={t.areaFilterStyleDesc}>
+                    <select
+                        aria-label={t.areaFilterStyle}
+                        value={areaFilterStyle}
+                        onChange={(e) => onAreaFilterStyleChange(e.target.value as AreaFilterStyle)}
+                        className={selectCls}
+                    >
+                        <option value="list">{t.areaFilterStyleList}</option>
+                        <option value="chips">{t.areaFilterStyleChips}</option>
                     </select>
                 </SettingRow>
                 <SettingRow padded settingsKey="textSize" title={t.textSize} description={t.textSizeDesc}>

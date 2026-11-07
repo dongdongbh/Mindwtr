@@ -85,6 +85,7 @@ export function useSettingsMainPage({
                 ? 'compact'
                 : 'comfortable'
     ) as MainPageProps['densityMode'];
+    const areaFilterStyle: MainPageProps['areaFilterStyle'] = appearanceSettings?.areaFilterStyle === 'chips' ? 'chips' : 'list';
     const textSizeMode = coerceDesktopTextSize(appearanceSettings?.textSize);
     const fontFamily = coerceDesktopFontFamily(appearanceSettings?.fontFamily);
     const showTaskAge = appearanceSettings?.showTaskAge === true;
@@ -182,6 +183,16 @@ export function useSettingsMainPage({
         })
             .then(showSaved)
             .catch((error) => reportError('Failed to update density', error));
+    }, [showSaved, updateSettings]);
+
+    const onAreaFilterStyleChange = useCallback((style: MainPageProps['areaFilterStyle']) => {
+        updateSettings({
+            appearance: {
+                areaFilterStyle: style,
+            },
+        })
+            .then(showSaved)
+            .catch((error) => reportError('Failed to update area filter style', error));
     }, [showSaved, updateSettings]);
 
     const onTextSizeChange = useCallback((mode: MainPageProps['textSizeMode']) => {
@@ -353,6 +364,8 @@ export function useSettingsMainPage({
         onCalendarSystemChange,
         onDateFormatChange,
         onDensityChange,
+        areaFilterStyle,
+        onAreaFilterStyleChange,
         onGlobalQuickAddShortcutChange,
         onKeybindingStyleChange,
         onLanguageChange,

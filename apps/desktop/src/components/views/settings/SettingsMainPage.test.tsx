@@ -21,6 +21,8 @@ const baseProps: SettingsMainPageProps = {
     onThemeChange: vi.fn(),
     densityMode: 'comfortable',
     onDensityChange: vi.fn(),
+    areaFilterStyle: 'list',
+    onAreaFilterStyleChange: vi.fn(),
     textSizeMode: 'default',
     onTextSizeChange: vi.fn(),
     fontFamily: '',
@@ -168,6 +170,25 @@ describe('SettingsMainPage', () => {
         });
 
         expect(onDensityChange).toHaveBeenCalledWith('compact');
+    });
+
+    it('switches the sidebar area filter to chips', () => {
+        const onAreaFilterStyleChange = vi.fn();
+        const { getByRole } = render(
+            <SettingsMainPage
+                {...baseProps}
+                onAreaFilterStyleChange={onAreaFilterStyleChange}
+            />,
+        );
+
+        const select = getByRole('combobox', { name: 'Area filter style' });
+        expect(select).toHaveValue('list');
+
+        fireEvent.change(select, {
+            target: { value: 'chips' },
+        });
+
+        expect(onAreaFilterStyleChange).toHaveBeenCalledWith('chips');
     });
 
     it('offers the small text size preset', () => {

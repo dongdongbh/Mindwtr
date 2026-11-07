@@ -33,6 +33,7 @@ import { showSyncErrorToast } from '../lib/sync-error-toast';
 import { ToastHost } from './ToastHost';
 import { areaFilterSelectionToFilters, isTaskVisibleInInbox, resolveAreaFilterSelection, type AreaFilterSelection } from '@mindwtr/core';
 import { SyncService } from '../lib/sync-service';
+import { SidebarAreaChips } from './ui/SidebarAreaChips';
 import { SidebarAreaFilter } from './ui/SidebarAreaFilter';
 import { SidebarWorkspaceSwitcher } from './workspaces/SidebarWorkspaceSwitcher';
 import { getCalendarTaskDragTaskId, hasCalendarTaskDragData } from '../lib/calendar-task-drag';
@@ -966,16 +967,31 @@ export function Layout({
                 <div className="mt-auto border-t border-border/60 px-2 py-1.5" data-sidebar-footer>
                     <div className={cn("pb-1.5", isCollapsed && "flex flex-col items-center")}>
                         <SidebarWorkspaceSwitcher collapsed={isCollapsed} />
-                        <SidebarAreaFilter
-                            areas={sortedAreas}
-                            selection={resolvedAreaFilter}
-                            onChange={handleAreaFilterChange}
-                            ariaLabel={t('projects.areaFilter')}
-                            allAreasLabel={t('projects.allAreas')}
-                            noAreaLabel={t('projects.noArea')}
-                            excludedLabel={tFallback(t, 'filters.excluded', 'Excluded')}
-                            collapsed={isCollapsed}
-                        />
+                        {settings?.appearance?.areaFilterStyle === 'chips' ? (
+                            <SidebarAreaChips
+                                areas={sortedAreas}
+                                selection={resolvedAreaFilter}
+                                onChange={handleAreaFilterChange}
+                                ariaLabel={t('projects.areaFilter')}
+                                allAreasLabel={t('projects.allAreas')}
+                                noAreaLabel={t('projects.noArea')}
+                                excludedLabel={tFallback(t, 'filters.excluded', 'Excluded')}
+                                selectAllLabel={t('projects.areaFilterSelectAll')}
+                                excludeAllLabel={t('projects.areaFilterExcludeAll')}
+                                collapsed={isCollapsed}
+                            />
+                        ) : (
+                            <SidebarAreaFilter
+                                areas={sortedAreas}
+                                selection={resolvedAreaFilter}
+                                onChange={handleAreaFilterChange}
+                                ariaLabel={t('projects.areaFilter')}
+                                allAreasLabel={t('projects.allAreas')}
+                                noAreaLabel={t('projects.noArea')}
+                                excludedLabel={tFallback(t, 'filters.excluded', 'Excluded')}
+                                collapsed={isCollapsed}
+                            />
+                        )}
                     </div>
                     <div className={cn(!isCollapsed && "border-t border-border/50 pt-1.5")}>
                         <div className={cn("flex gap-1.5", isCollapsed ? "flex-col items-center" : "items-center")}>

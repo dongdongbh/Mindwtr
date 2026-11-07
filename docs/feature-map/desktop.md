@@ -101,12 +101,12 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Areas and the area filter
 
-- Reach: Sidebar › Area filter (All areas, each area, No area). Areas are managed in Sidebar › Projects › (project) › Manage areas, and in Settings › Manage › Areas.
+- Reach: Sidebar › Area filter (All areas, each area, No area). Settings › General › Look & Feel › Area filter style turns it into always-visible chips with Select all and Exclude all. Areas are managed in Sidebar › Projects › (project) › Manage areas, and in Settings › Manage › Areas.
 - Shortcuts: `1`–`9` select area 1–9, `0` clears the filter. `Shift+A` then a digit does the same.
 - Selectors: `area-color-picker-root`, `area-color-picker-menu`, `area-color-picker-panel`, `area-color-picker-surface`, `area-color-picker-hue`, `area-color-picker-preview`, `area-color-picker-custom`
-- Code: `apps/desktop/src/components/ui/SidebarAreaFilter.tsx`, `apps/desktop/src/components/views/projects/AreaManagerModal.tsx`, `apps/desktop/src/components/views/projects/AreaColorPicker.tsx`, `apps/desktop/src/components/ui/AreaSelector.tsx`
-- Checks: `e2e/focus-area-selection.spec.ts`, `e2e/unified-inbox.spec.ts`, `e2e/project-color-override.spec.ts`, `apps/desktop/src/components/ui/SidebarAreaFilter.test.tsx`, `apps/desktop/src/components/views/projects/AreaManagerModal.test.tsx`, `apps/desktop/src/components/views/projects/AreaColorPicker.test.tsx`
-- Notes: The filter can include and exclude areas. A task in an area with no project is an Area task.
+- Code: `apps/desktop/src/components/ui/SidebarAreaFilter.tsx`, `apps/desktop/src/components/ui/SidebarAreaChips.tsx`, `apps/desktop/src/components/views/projects/AreaManagerModal.tsx`, `apps/desktop/src/components/views/projects/AreaColorPicker.tsx`, `apps/desktop/src/components/ui/AreaSelector.tsx`
+- Checks: `e2e/focus-area-selection.spec.ts`, `e2e/unified-inbox.spec.ts`, `e2e/project-color-override.spec.ts`, `apps/desktop/src/components/ui/SidebarAreaFilter.test.tsx`, `apps/desktop/src/components/ui/SidebarAreaChips.test.tsx`, `apps/desktop/src/components/views/projects/AreaManagerModal.test.tsx`, `apps/desktop/src/components/views/projects/AreaColorPicker.test.tsx`
+- Notes: The filter can include and exclude areas. Each chip shows or hides one area. A task in an area with no project is an Area task.
 
 ## Someday/Maybe
 

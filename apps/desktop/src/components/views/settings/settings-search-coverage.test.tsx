@@ -73,6 +73,8 @@ const mainProps: Parameters<typeof SettingsMainPage>[0] = {
     onThemeChange: noop,
     densityMode: 'comfortable',
     onDensityChange: noop,
+    areaFilterStyle: 'list',
+    onAreaFilterStyleChange: noop,
     textSizeMode: 'default',
     onTextSizeChange: noop,
     fontFamily: '',

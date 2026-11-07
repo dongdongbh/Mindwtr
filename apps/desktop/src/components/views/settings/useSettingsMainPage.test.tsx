@@ -148,11 +148,13 @@ describe('useSettingsMainPage appearance writes', () => {
             showSaved: vi.fn(), updateSettings,
         }));
         result.current.onDensityChange('comfortable');
+        result.current.onAreaFilterStyleChange('chips');
         result.current.onTextSizeChange('default');
         result.current.onFontFamilyChange('');
         result.current.onShowTaskAgeChange(false);
         expect(updateSettings.mock.calls.map(([updates]) => updates)).toEqual([
             { appearance: { density: 'comfortable' } },
+            { appearance: { areaFilterStyle: 'chips' } },
             { appearance: { textSize: 'default' } },
             { appearance: { fontFamily: undefined } },
             { appearance: { showTaskAge: false } },

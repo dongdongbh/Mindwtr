@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useTaskStore, type MergeStats } from '@mindwtr/core';
 
 import { LanguageProvider } from '../contexts/language-context';
@@ -885,6 +885,41 @@ describe('Layout collapsed sidebar area filter', () => {
 
         expect(boardIcon).toHaveClass('lucide-kanban');
         expect(areaFilterIcon).toHaveClass('lucide-layers');
+    });
+});
+
+describe('Layout area filter style', () => {
+    const setStyle = (areaFilterStyle?: 'list' | 'chips') => {
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                _allAreas: [
+                    { id: 'area-work', name: 'Work', color: '#3b82f6', order: 0, createdAt: '', updatedAt: '' },
+                ],
+                settings: {
+                    ...state.settings,
+                    sidebarCollapsed: false,
+                    appearance: { ...(state.settings?.appearance ?? {}), areaFilterStyle },
+                },
+            }));
+        });
+    };
+
+    it('shows the dropdown trigger by default', () => {
+        setStyle(undefined);
+        const { getByRole, queryByRole } = renderLayout();
+
+        expect(getByRole('button', { name: 'Area filter', expanded: false })).toBeInTheDocument();
+        expect(queryByRole('button', { name: 'Select all' })).toBeNull();
+    });
+
+    it('shows the area chips when the chips style is chosen', () => {
+        setStyle('chips');
+        const { getByRole } = renderLayout();
+        const group = getByRole('group', { name: 'Area filter' });
+
+        expect(within(group).getByRole('button', { name: 'Work' })).toHaveAttribute('aria-pressed', 'true');
+        expect(within(group).getByRole('button', { name: 'Select all' })).toBeDisabled();
     });
 });
 
