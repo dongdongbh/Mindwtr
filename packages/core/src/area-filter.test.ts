@@ -7,12 +7,15 @@ import {
     areaFilterSelectionToFilters,
     areaFilterSelectionToValue,
     cycleAreaFilterSelection,
+    excludeAllAreas,
     isAreaFilterSelectionActive,
+    isAreaVisibleInSelection,
     projectMatchesAreaFilterSelection,
     resolveAreaFilterSelection,
     isTaskVisibleInArea,
     isTaskVisibleInInbox,
     taskMatchesAreaFilterSelection,
+    toggleAreaVisibility,
 } from './area-filter';
 
 const workArea: Area = {
@@ -123,6 +126,62 @@ describe('area filter selection', () => {
     it('round-trips what it stores', () => {
         const selection = { included: [workArea.id, AREA_FILTER_NONE], excluded: [homeArea.id] };
         expect(resolveAreaFilterSelection(areaFilterSelectionToFilters(selection), allAreas)).toEqual(selection);
+    });
+});
+
+describe('area visibility toggles', () => {
+    const optionIds = [workArea.id, homeArea.id, AREA_FILTER_NONE];
+    const visibleIds = (selection: { included: string[]; excluded: string[] }, ids = optionIds) =>
+        ids.filter((id) => isAreaVisibleInSelection(selection, id));
+
+    it('reads visibility from either stored form', () => {
+        expect(visibleIds({ included: [], excluded: [] })).toEqual(optionIds);
+        expect(visibleIds({ included: [homeArea.id], excluded: [] })).toEqual([homeArea.id]);
+        expect(visibleIds({ included: [], excluded: [workArea.id] })).toEqual([homeArea.id, AREA_FILTER_NONE]);
+        expect(visibleIds({ included: [workArea.id, homeArea.id], excluded: [homeArea.id] })).toEqual([workArea.id]);
+    });
+
+    it('hides one area from the unfiltered state as an exclusion', () => {
+        expect(toggleAreaVisibility({ included: [], excluded: [] }, workArea.id, optionIds))
+            .toEqual({ included: [], excluded: [workArea.id] });
+    });
+
+    it('clears the filter when the last hidden area is shown again', () => {
+        expect(toggleAreaVisibility({ included: [], excluded: [workArea.id] }, workArea.id, optionIds))
+            .toEqual({ included: [], excluded: [] });
+    });
+
+    it('stores a single visible area as an inclusion so it stays the active area', () => {
+        const single = toggleAreaVisibility({ included: [], excluded: [homeArea.id] }, AREA_FILTER_NONE, optionIds);
+        expect(single).toEqual({ included: [workArea.id], excluded: [] });
+        expect(areaFilterSelectionToValue(single)).toBe(workArea.id);
+        expect(toggleAreaVisibility(excludeAllAreas(optionIds), homeArea.id, optionIds))
+            .toEqual({ included: [homeArea.id], excluded: [] });
+    });
+
+    it('normalizes a multi-area inclusion into exclusions', () => {
+        expect(toggleAreaVisibility({ included: [workArea.id], excluded: [] }, homeArea.id, optionIds))
+            .toEqual({ included: [], excluded: [AREA_FILTER_NONE] });
+        expect(toggleAreaVisibility({ included: [workArea.id, homeArea.id], excluded: [] }, homeArea.id, optionIds))
+            .toEqual({ included: [workArea.id], excluded: [] });
+    });
+
+    it('hides every option and can hide the only one', () => {
+        expect(excludeAllAreas(optionIds)).toEqual({ included: [], excluded: optionIds });
+        expect(visibleIds(excludeAllAreas(optionIds))).toEqual([]);
+        expect(toggleAreaVisibility({ included: [], excluded: [] }, AREA_FILTER_NONE, [AREA_FILTER_NONE]))
+            .toEqual({ included: [], excluded: [AREA_FILTER_NONE] });
+        expect(toggleAreaVisibility({ included: [], excluded: [AREA_FILTER_NONE] }, AREA_FILTER_NONE, [AREA_FILTER_NONE]))
+            .toEqual({ included: [], excluded: [] });
+    });
+
+    it('shows a new area unless a single area is selected', () => {
+        const withNewArea = [...optionIds, 'area-new'];
+        expect(isAreaVisibleInSelection(excludeAllAreas(optionIds), 'area-new')).toBe(true);
+        const partial = toggleAreaVisibility({ included: [], excluded: [] }, workArea.id, optionIds);
+        expect(visibleIds(partial, withNewArea)).toEqual([homeArea.id, AREA_FILTER_NONE, 'area-new']);
+        const single = toggleAreaVisibility({ included: [], excluded: [homeArea.id] }, AREA_FILTER_NONE, optionIds);
+        expect(isAreaVisibleInSelection(single, 'area-new')).toBe(false);
     });
 });
 

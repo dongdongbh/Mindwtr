@@ -400,6 +400,34 @@ describe('Sync Logic', () => {
             expect(merged.settings.appearance?.density).toBe('compact');
         });
 
+        it('sanitizes the incoming area filter style', () => {
+            const appData = (appearance: AppData['settings']['appearance'], day: string): AppData => ({
+                ...mockAppData(),
+                settings: {
+                    appearance,
+                    syncPreferences: { appearance: true },
+                    syncPreferencesUpdatedAt: {
+                        preferences: `2024-01-0${day}T00:00:00.000Z`,
+                        appearance: `2024-01-0${day}T00:00:00.000Z`,
+                    },
+                },
+            });
+
+            expect(mergeAppData(appData({ areaFilterStyle: 'list' }, '1'), appData({ areaFilterStyle: 'chips' }, '2'))
+                .settings.appearance?.areaFilterStyle).toBe('chips');
+            expect(mergeAppData(
+                appData({ areaFilterStyle: 'chips' }, '1'),
+                appData({ areaFilterStyle: 'grid' as unknown as 'list' }, '2'),
+            ).settings.appearance?.areaFilterStyle).toBe('chips');
+            const withoutLocal = mergeAppData(
+                appData({ density: 'compact' }, '1'),
+                appData({ density: 'compact', areaFilterStyle: 'grid' as unknown as 'list' }, '2'),
+            ).settings.appearance;
+            expect(withoutLocal).toEqual({ density: 'compact' });
+            expect(mergeAppData(appData({ density: 'compact' }, '1'), appData({ density: 'condensed' }, '2'))
+                .settings.appearance).toEqual({ density: 'condensed' });
+        });
+
         it('preserves local mobile quick access when newer incoming appearance omits it', () => {
             const local: AppData = {
                 ...mockAppData(),

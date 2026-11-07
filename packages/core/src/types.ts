@@ -435,6 +435,7 @@ export interface AppearanceSettings {
     showFutureStarts?: boolean;
     unassignedAreaColor?: string;
     mobileQuickAccessView?: MobileQuickAccessView;
+    areaFilterStyle?: 'list' | 'chips';
 }
 
 export interface CalendarSettings {

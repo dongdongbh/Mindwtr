@@ -100,11 +100,31 @@ const normalizeAreaId = (areaId: string | undefined, areaById?: Map<string, Area
 };
 
 
-const areaIdMatchesSelection = (areaId: string | undefined, selection: AreaFilterSelection): boolean => {
-    const key = areaId ?? AREA_FILTER_NONE;
-    if (selection.excluded.includes(key)) return false;
-    return selection.included.length === 0 || selection.included.includes(key);
-};
+export function isAreaVisibleInSelection(selection: AreaFilterSelection, id: string): boolean {
+    if (selection.excluded.includes(id)) return false;
+    return selection.included.length === 0 || selection.included.includes(id);
+}
+
+export function toggleAreaVisibility(
+    selection: AreaFilterSelection,
+    id: string,
+    optionIds: readonly string[],
+): AreaFilterSelection {
+    const wasVisible = isAreaVisibleInSelection(selection, id);
+    const visible = optionIds.filter((optionId) => (
+        optionId === id ? !wasVisible : isAreaVisibleInSelection(selection, optionId)
+    ));
+    if (visible.length === optionIds.length) return { included: [], excluded: [] };
+    if (visible.length === 1) return { included: [visible[0]], excluded: [] };
+    return { included: [], excluded: optionIds.filter((optionId) => !visible.includes(optionId)) };
+}
+
+export function excludeAllAreas(optionIds: readonly string[]): AreaFilterSelection {
+    return { included: [], excluded: [...optionIds] };
+}
+
+const areaIdMatchesSelection = (areaId: string | undefined, selection: AreaFilterSelection): boolean =>
+    isAreaVisibleInSelection(selection, areaId ?? AREA_FILTER_NONE);
 
 export function projectMatchesAreaFilterSelection(
     project: Project,

@@ -7,6 +7,7 @@ import {
     GTD_SYNCED_FEATURE_FIELD_KEYS,
     GTD_SYNCED_FIELD_KEYS,
     GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS,
+    SETTINGS_AREA_FILTER_STYLE_VALUE_SET,
     SETTINGS_DEFAULT_PROJECT_FLOW_MODE_VALUE_SET,
     SETTINGS_DEFAULT_TASK_AREA_MODE_VALUE_SET,
     SETTINGS_DENSITY_VALUE_SET,
@@ -552,6 +553,22 @@ export const sanitizeMergedSettingsForSync = (
             };
             if (next.appearance.mobileQuickAccessView === undefined) {
                 delete next.appearance.mobileQuickAccessView;
+            }
+            didSanitizeAppearance = true;
+        }
+        const appearanceWithQuickAccess = next.appearance;
+        if (
+            appearanceWithQuickAccess
+            && appearanceWithQuickAccess.areaFilterStyle !== undefined
+            && !setContainsValue(SETTINGS_AREA_FILTER_STYLE_VALUE_SET, appearanceWithQuickAccess.areaFilterStyle)
+        ) {
+            next.appearance = {
+                ...fallbackAppearance,
+                ...appearanceWithQuickAccess,
+                areaFilterStyle: localSettings.appearance?.areaFilterStyle,
+            };
+            if (next.appearance.areaFilterStyle === undefined) {
+                delete next.appearance.areaFilterStyle;
             }
             didSanitizeAppearance = true;
         }

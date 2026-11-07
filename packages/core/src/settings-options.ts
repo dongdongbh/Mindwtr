@@ -17,6 +17,7 @@ type KeybindingStyleValue = NonNullable<AppData['settings']['keybindingStyle']>;
 type DensityValue = NonNullable<AppearanceSettings['density']>;
 type TextSizeValue = NonNullable<AppearanceSettings['textSize']>;
 type MobileQuickAccessViewValue = NonNullable<AppearanceSettings['mobileQuickAccessView']>;
+type AreaFilterStyleValue = NonNullable<AppearanceSettings['areaFilterStyle']>;
 type FocusGroupByValue = NonNullable<GtdSettings['focusGroupBy']>;
 type DefaultProjectFlowModeValue = NonNullable<GtdSettings['defaultProjectFlowMode']>;
 type DefaultTaskAreaModeValue = NonNullable<GtdSettings['defaultAreaMode']>;
@@ -72,6 +73,11 @@ const TEXT_SIZE_VALUE_FLAGS: Record<TextSizeValue, true> = {
     default: true,
     large: true,
     'extra-large': true,
+};
+
+const AREA_FILTER_STYLE_VALUE_FLAGS: Record<AreaFilterStyleValue, true> = {
+    list: true,
+    chips: true,
 };
 
 const MOBILE_QUICK_ACCESS_VIEW_VALUE_FLAGS: Record<MobileQuickAccessViewValue, true> = {
@@ -157,6 +163,9 @@ export const SETTINGS_TEXT_SIZE_VALUE_SET = new Set<TextSizeValue>(SETTINGS_TEXT
 
 export const SETTINGS_MOBILE_QUICK_ACCESS_VIEW_VALUES = Object.keys(MOBILE_QUICK_ACCESS_VIEW_VALUE_FLAGS) as MobileQuickAccessViewValue[];
 export const SETTINGS_MOBILE_QUICK_ACCESS_VIEW_VALUE_SET = new Set<MobileQuickAccessViewValue>(SETTINGS_MOBILE_QUICK_ACCESS_VIEW_VALUES);
+
+export const SETTINGS_AREA_FILTER_STYLE_VALUES = Object.keys(AREA_FILTER_STYLE_VALUE_FLAGS) as AreaFilterStyleValue[];
+export const SETTINGS_AREA_FILTER_STYLE_VALUE_SET = new Set<AreaFilterStyleValue>(SETTINGS_AREA_FILTER_STYLE_VALUES);
 
 export const SETTINGS_FOCUS_GROUP_BY_VALUES = Object.keys(FOCUS_GROUP_BY_VALUE_FLAGS) as FocusGroupByValue[];
 export const SETTINGS_FOCUS_GROUP_BY_VALUE_SET = new Set<FocusGroupByValue>(SETTINGS_FOCUS_GROUP_BY_VALUES);
