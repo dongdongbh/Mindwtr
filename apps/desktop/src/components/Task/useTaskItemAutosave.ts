@@ -90,7 +90,6 @@ export function useTaskItemAutosave({
             return;
         }
         const version = editVersionRef.current;
-        // A failed save is retried only after a newer edit, not by the timers.
         if (failedVersionRef.current === version || !isDirty()) return;
         savingRef.current = true;
         void latest.save()
@@ -158,7 +157,6 @@ export function useTaskItemAutosave({
     const flush = useCallback(async (): Promise<AutosaveFlushOutcome> => {
         const session = sessionRef.current;
         let wrote = false;
-        // Edits typed while a round is writing get another round; past the bound the exit falls back to the dialog.
         for (let round = 0; round < AUTOSAVE_FLUSH_MAX_ROUNDS; round += 1) {
             clearTimers();
             if (session) {

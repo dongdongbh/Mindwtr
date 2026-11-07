@@ -302,7 +302,6 @@ export function TaskItemEditor({
         <form
             ref={formRef}
             onSubmit={(event) => {
-                // Autosave exits go through onCancel even while importing, so the exit dialog can explain the wait.
                 if (autosave) { event.preventDefault(); onCancel(); return; }
                 if (isImportingFiles) { event.preventDefault(); return; }
                 onSubmit(event);

@@ -496,7 +496,6 @@ export function taskDraftToChangedSincePatch(
     if (!current) return statusOverride ? { status: statusOverride } : null;
     const previous = taskDraftToUpdatePatch(previousDraft, baselineTask, { attachments: options.previousAttachments }) ?? {};
 
-    // The serializer omits some fields when they equal the baseline, so an absent key means "baseline value".
     const fullValue = (side: Partial<Task>, key: keyof Task) => (key in side ? side[key] : baselineTask[key]);
     const patch: Partial<Task> = {};
     const keys = new Set([...Object.keys(current), ...Object.keys(previous)] as (keyof Task)[]);

@@ -42,7 +42,6 @@ export type TaskItemSubmitResult = (StoreActionResult & { outcome?: TaskItemSubm
 
 const BLOCKED: TaskItemSubmitResult = { success: false, outcome: 'blocked' };
 
-// A blank title would serialize as the opening title and undo an autosaved rename, so it keeps the last saved one.
 export const draftSinceLastSave = (draft: TaskDraft, base: IncrementalSaveBase): TaskDraft =>
     draft.title.trim() ? draft : { ...draft, title: base.draft.title };
 
@@ -105,8 +104,6 @@ export function useTaskItemSubmit({
                 showToast(message, 'error');
                 return { success: false, error: message, outcome: 'failed' };
             };
-            // Queued calls read the editor state when they run, not when they were requested.
-            // A dropped session (exit or discard reset the draft) must not write the reset draft back.
             const dropped = () => incrementalSessionRef?.current === null;
             const run = async (): Promise<TaskItemSubmitResult> => {
                 const opened = latestRef.current.baselineTask;
@@ -143,7 +140,6 @@ export function useTaskItemSubmit({
                     patch.timeSpentMinutes = options.timeSpentMinutesOverride;
                 }
 
-                // Merge against what the draft last saved, not the stored row: a synced token the draft never saw must not read as removed.
                 const lastSaved = taskDraftToUpdatePatch(session.base.draft, opened, { attachments: session.base.preparedAttachments });
                 const base: Task = { ...opened, ...lastSaved };
                 const attachmentSaveRequiresDurability = beginAttachmentSave();

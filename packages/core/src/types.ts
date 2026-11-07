@@ -360,7 +360,6 @@ export type DefaultTaskAreaMode = 'none' | 'fixed' | 'active';
 export interface GtdSettings {
     timeEstimatePresets?: TimeEstimate[];
     taskEditor?: TaskEditorSettings;
-    /** Desktop: the task editor saves edits as you make them; leaving it never asks. */
     taskEditorAutosave?: boolean;
     autoArchiveDays?: number;
     archiveRetentionDays?: number;

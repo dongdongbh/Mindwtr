@@ -24,7 +24,6 @@ export function registerTaskEditFlush(flush: () => Promise<unknown>): () => void
     };
 }
 
-// After this the store is flushed anyway, so other pending writes land even while the editor flush is still running.
 export const TASK_EDIT_CLOSE_FLUSH_TIMEOUT_MS = 3000;
 
 export async function flushForClose(flushStore: () => Promise<void>, onError?: (error: unknown) => void): Promise<void> {
@@ -39,7 +38,6 @@ export async function flushForClose(flushStore: () => Promise<void>, onError?: (
         clearTimeout(timer);
         if (timedOut) {
             await flushStore();
-            // Still pending until the editor settles, so the app's own close timeout decides how long a hung editor may hold the close.
             await editorFlush;
         }
     }
