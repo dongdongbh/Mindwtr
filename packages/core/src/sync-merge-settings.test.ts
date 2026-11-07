@@ -210,6 +210,37 @@ describe('mergeSettingsForSync > gtd.taskEditor', () => {
 
         expect(merged.gtd?.taskEditor).toEqual(layoutB);
     });
+
+    it('an incoming taskEditorAutosave merges by field and leaves the layout alone', () => {
+        const local: Settings = {
+            gtd: { taskEditor: layoutA },
+            syncPreferencesUpdatedAt: { gtd: NEWER },
+        };
+        const incoming: Settings = {
+            gtd: { taskEditorAutosave: true },
+            syncPreferencesUpdatedAt: { gtd: OLDER },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd?.taskEditorAutosave).toBe(true);
+        expect(merged.gtd?.taskEditor).toEqual(layoutA);
+    });
+
+    it('a non-boolean incoming taskEditorAutosave falls back to the local value', () => {
+        const local: Settings = {
+            gtd: { taskEditorAutosave: false },
+            syncPreferencesUpdatedAt: { gtd: OLDER },
+        };
+        const incoming: Settings = {
+            gtd: { taskEditorAutosave: 'yes' as never },
+            syncPreferencesUpdatedAt: { gtd: NEWER },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd?.taskEditorAutosave).toBe(false);
+    });
 });
 
 describe('mergeSettingsForSync > expanded GTD settings', () => {

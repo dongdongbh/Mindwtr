@@ -3047,6 +3047,8 @@ export const daOverrides: Record<string, string> = {
     'settings.taskEditorPresentationInlineDesc': 'Erstat opgavens række med editoren i den aktuelle liste.',
     'settings.taskEditorPresentationModal': 'Pop op-vindue',
     'settings.taskEditorPresentationModalDesc': 'Åbn editoren i et centreret vindue til koncentreret redigering.',
+    'settings.taskEditorAutosave': 'Gem ændringer automatisk',
+    'settings.taskEditorAutosaveDesc': 'Ændringer gemmes, mens du laver dem. Når du forlader editoren, bliver du aldrig spurgt, om du vil gemme eller kassere.',
     'settings.taskEditorSection': 'Sektion',
     'settings.taskEditorOpenByDefault': 'Åbn som standard',
     'settings.taskEditorDefaultOpenDesc':

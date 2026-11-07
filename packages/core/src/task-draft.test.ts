@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Task } from './types';
+import type { Attachment, Task } from './types';
 import { buildTaskEditUpdatePatch, createTaskEditDraft } from './task-editor-model';
 import * as logger from './logger';
 
@@ -8,8 +8,10 @@ import {
     createTaskDraft,
     isTaskDraftDirty,
     setTaskDraftField,
+    taskDraftToChangedSincePatch,
     taskDraftToChangedUpdatePatch,
     taskDraftToUpdatePatch,
+    type TaskDraft,
 } from './task-draft';
 
 const baseTask: Task = {
@@ -488,5 +490,85 @@ describe('reminder policy draft roundtrip', () => {
         expect(sent.reminderPolicy).toBe('send');
         const inherited = setTaskDraftField(sent, 'reminderPolicy', 'inherit');
         expect(inherited.reminderPolicy).toBe('inherit');
+    });
+});
+
+
+describe('taskDraftToChangedSincePatch', () => {
+    const draftOf = (task: Task, edits: Partial<TaskDraft> = {}): TaskDraft => ({ ...createTaskDraft(task), ...edits });
+
+    it('changed-since: A→B→A writes the value that returned to baseline', () => {
+        const previous = draftOf(baseTask, { title: 'B' });
+        expect(taskDraftToChangedSincePatch(draftOf(baseTask, { title: 'A' }), previous, baseTask)).toEqual({ title: 'A' });
+
+        const focusedPrevious = draftOf(baseTask, { focusedToday: true });
+        expect(taskDraftToChangedSincePatch(draftOf(baseTask), focusedPrevious, baseTask)).toEqual({ isFocusedToday: false });
+
+        const withDue: Task = { ...baseTask, dueDate: '2026-03-01' };
+        const duePrevious = draftOf(withDue, { dueDate: '2026-03-05' });
+        const patch = taskDraftToChangedSincePatch(draftOf(withDue, { dueDate: '' }), duePrevious, withDue);
+        expect(patch).toEqual({ dueDate: undefined });
+        expect(patch && 'dueDate' in patch).toBe(true);
+    });
+
+    it('changed-since: trailing space is not a change', () => {
+        const previous = draftOf(baseTask, { title: 'B' });
+        expect(taskDraftToChangedSincePatch(draftOf(baseTask, { title: 'B ' }), previous, baseTask)).toBeNull();
+    });
+
+    it('changed-since: untouched field differing from baseline stays out of the patch', () => {
+        const previous = draftOf(baseTask, { description: 'Second pass', title: 'B' });
+        const draft = draftOf(baseTask, { description: 'Second pass', title: 'C' });
+        expect(taskDraftToChangedSincePatch(draft, previous, baseTask)).toEqual({ title: 'C' });
+    });
+
+    it('changed-since: conditional fields fall back to the baseline value', () => {
+        const withLead: Task = { ...baseTask, dueReminderLeadMinutes: 10 };
+        const leadPrevious = draftOf(withLead, { dueReminderLeadMinutes: 20 });
+        expect(taskDraftToChangedSincePatch(draftOf(withLead), leadPrevious, withLead)).toEqual({ dueReminderLeadMinutes: 10 });
+
+        const defaultDraft = draftOf(baseTask);
+        const policyPrevious = draftOf(baseTask, { reminderPolicy: defaultDraft.reminderPolicy === 'skip' ? 'send' : 'skip' });
+        const patch = taskDraftToChangedSincePatch(defaultDraft, policyPrevious, baseTask);
+        expect(patch).toEqual({ reminderPolicy: undefined });
+        expect(patch && 'reminderPolicy' in patch).toBe(true);
+    });
+
+    it('changed-since: statusOverride is written even without other edits', () => {
+        const draft = draftOf(baseTask);
+        expect(draft.status).toBe('next');
+        expect(taskDraftToChangedSincePatch(draft, draftOf(baseTask), baseTask, { statusOverride: 'done' })).toEqual({ status: 'done' });
+        expect(taskDraftToChangedSincePatch(draft, draftOf(baseTask), baseTask)).toBeNull();
+    });
+
+    it('changed-since: project change cascades containers like the changed-update patch', () => {
+        const homed: Task = { ...baseTask, projectId: undefined, sectionId: undefined, areaId: 'area-1' };
+        const draft = setTaskDraftField(createTaskDraft(homed), 'projectId', 'project-2');
+        const patch = taskDraftToChangedSincePatch(draft, createTaskDraft(homed), homed);
+        const reference = taskDraftToChangedUpdatePatch(draft, homed);
+        expect(patch?.projectId).toBe('project-2');
+        expect(patch && 'areaId' in patch).toBe(reference !== null && 'areaId' in reference);
+        expect(patch?.areaId).toEqual(reference?.areaId);
+        expect(patch && 'sectionId' in patch).toBe(reference !== null && 'sectionId' in reference);
+        expect(patch?.sectionId).toEqual(reference?.sectionId);
+    });
+
+    it('changed-since: a dueDate change carries the relative start offset', () => {
+        const linked: Task = { ...baseTask, dueDate: '2026-03-10', relativeStartOffset: { amount: -1, unit: 'day' } };
+        const previous = createTaskDraft(linked);
+        const draft = setTaskDraftField(previous, 'dueDate', '2026-03-12');
+        const patch = taskDraftToChangedSincePatch(draft, previous, linked);
+        expect(patch).toMatchObject({ dueDate: '2026-03-12', relativeStartOffset: { amount: -1, unit: 'day' } });
+    });
+
+    it('changed-since: attachments are compared against the previous save', () => {
+        const link = (id: string): Attachment => ({ id, kind: 'link', uri: `https://${id}`, title: id, createdAt: baseTask.createdAt, updatedAt: baseTask.updatedAt });
+        const previousAttachments = [link('a1')];
+        const draft = draftOf(baseTask);
+        const same = taskDraftToChangedSincePatch(draft, draft, baseTask, { attachments: [link('a1')], previousAttachments });
+        expect(same).toBeNull();
+
+        const added = taskDraftToChangedSincePatch(draft, draft, baseTask, { attachments: [link('a1'), link('a2')], previousAttachments });
+        expect(added).toEqual({ attachments: [link('a1'), link('a2')] });
     });
 });

@@ -156,6 +156,12 @@ describe('settings search key roster', () => {
         expect(getSettingsSearchEntryKeys('main')).toContain('globalQuickAddShortcut');
     });
 
+    it('indexes task editor autosave under the editor layout section, desktop-only', () => {
+        expect(SETTINGS_SEARCH_INDEX).toContainEqual({ pageId: 'gtd', key: 'taskEditorAutosave', section: 'taskEditorLayout' });
+        expect(SETTINGS_SEARCH_MOBILE_EXCLUSIONS).toHaveProperty('taskEditorAutosave');
+        expect(search('automatically').map((result) => result.title)).toContain('Save edits automatically');
+    });
+
     it('retains Timeline and AI/integration route identities', () => {
         expect(getSettingsSearchEntryKeys('gtd')).toContain('featureTimeline');
         expect(ALL_PAGE_IDS).toContain('ai');

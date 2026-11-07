@@ -2873,6 +2873,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': '現在のリストでタスクの行をエディタに置き換えます。',
         'settings.taskEditorPresentationModal': 'ポップアップ',
         'settings.taskEditorPresentationModalDesc': '画面中央にエディタを開きます。腰を据えて編集したいときに向いています。',
+        'settings.taskEditorAutosave': '編集内容を自動保存',
+        'settings.taskEditorAutosaveDesc': '変更は編集と同時に保存されます。エディタを閉じるときに、保存するか破棄するかを確認しません。',
         'settings.taskEditorSection': 'セクション',
         'settings.taskEditorOpenByDefault': '最初から開く',
         'settings.taskEditorDefaultOpenDesc': 'ここで選んだセクションは、まだ内容が入っていなくても最初から開いた状態になります。',

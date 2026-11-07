@@ -2572,6 +2572,8 @@ export const koOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': '현재 목록에서 할 일 행을 편집기로 바꿉니다.',
         'settings.taskEditorPresentationModal': '팝업',
         'settings.taskEditorPresentationModalDesc': '집중적인 편집을 위해 중앙 모달에서 에디터를 엽니다.',
+        'settings.taskEditorAutosave': '편집 내용 자동 저장',
+        'settings.taskEditorAutosaveDesc': '변경 사항은 편집하는 즉시 저장됩니다. 에디터를 나갈 때 저장할지 버릴지 묻지 않습니다.',
         'settings.taskEditorSection': '섹션',
         'settings.taskEditorOpenByDefault': '기본으로 열기',
         'settings.taskEditorDefaultOpenDesc': '콘텐츠가 없는 경우 할 일 에디터 섹션을 항상 확장된 상태로 유지합니다.',

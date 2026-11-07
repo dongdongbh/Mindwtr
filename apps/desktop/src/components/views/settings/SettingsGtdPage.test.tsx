@@ -91,6 +91,44 @@ describe('SettingsGtdPage', () => {
         });
     });
 
+    it('turns task editor autosave on and keeps GTD keys another device changed after render', async () => {
+        const updateSettings = useTaskStore.getState().updateSettings;
+        const t = getEnglishSettingsLabels();
+        useTaskStore.setState({ settings: { gtd: { defaultProjectFlowMode: 'parallel' } } });
+        const { getByRole } = render(
+            <SettingsGtdPage t={t} language="en" settings={useTaskStore.getState().settings} updateSettings={updateSettings}
+                showSaved={vi.fn()} autoArchiveDays={7} areas={[]} />
+        );
+        fireEvent.click(getByRole('button', { name: new RegExp(t.taskEditorLayout) }));
+        const toggle = getByRole('switch', { name: t.taskEditorAutosave });
+        expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+        const finish = holdSyncSave(() => useTaskStore.setState({
+            settings: { gtd: { defaultProjectFlowMode: 'parallel', autoArchiveDays: 3 } },
+        }));
+        fireEvent.click(toggle);
+        await finish();
+
+        await waitFor(() => {
+            expect(useTaskStore.getState().settings.gtd).toEqual({
+                defaultProjectFlowMode: 'parallel',
+                autoArchiveDays: 3,
+                taskEditorAutosave: true,
+            });
+        });
+    });
+
+    it('shows task editor autosave as on when the setting is enabled', () => {
+        const t = getEnglishSettingsLabels();
+        const { getByRole } = render(
+            <SettingsGtdPage t={t} language="en" settings={{ gtd: { taskEditorAutosave: true } }}
+                updateSettings={vi.fn().mockResolvedValue(undefined)} showSaved={vi.fn()} autoArchiveDays={7} areas={[]} />
+        );
+        fireEvent.click(getByRole('button', { name: new RegExp(t.taskEditorLayout) }));
+
+        expect(getByRole('switch', { name: t.taskEditorAutosave })).toHaveAttribute('aria-checked', 'true');
+    });
+
     it('saves the default project flow mode', async () => {
         const updateSettings = vi.fn().mockResolvedValue(undefined);
         const showSaved = vi.fn();

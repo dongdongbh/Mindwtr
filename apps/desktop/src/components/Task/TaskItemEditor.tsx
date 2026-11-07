@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type DragEvent, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type DragEvent, type FormEvent, type ReactNode, type Ref } from 'react';
 import { ContextualHelp } from '../ContextualHelp';
 import { ArrowRight, Check, FolderPlus, HelpCircle, Layers, MapPin, Rows3, Trash2 } from 'lucide-react';
 import {
@@ -85,6 +85,8 @@ interface TaskItemEditorProps {
     onSubmit: (e: FormEvent) => void;
     isImportingFiles?: boolean;
     onFilesDropped?: (files: File[]) => void;
+    autosave?: boolean;
+    formRef?: Ref<HTMLFormElement>;
 }
 
 function appendCommaToken(value: string, token: string): string {
@@ -146,6 +148,8 @@ export function TaskItemEditor({
     onSubmit,
     isImportingFiles = false,
     onFilesDropped,
+    autosave = false,
+    formRef,
 }: TaskItemEditorProps) {
 
 
@@ -296,7 +300,10 @@ export function TaskItemEditor({
 
     return (
         <form
+            ref={formRef}
             onSubmit={(event) => {
+                // Autosave exits go through onCancel even while importing, so the exit dialog can explain the wait.
+                if (autosave) { event.preventDefault(); onCancel(); return; }
                 if (isImportingFiles) { event.preventDefault(); return; }
                 onSubmit(event);
             }}
@@ -311,6 +318,7 @@ export function TaskItemEditor({
                 if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                     event.preventDefault();
                     event.stopPropagation();
+                    if (autosave) { onCancel(); return; }
                     const form = event.currentTarget as HTMLFormElement;
                     if (typeof form.requestSubmit === 'function') {
                         form.requestSubmit();
@@ -601,25 +609,27 @@ export function TaskItemEditor({
                 )}
                 <div className="flex flex-wrap gap-2 ml-auto">
                     <button
-                        disabled={isImportingFiles}
+                        disabled={!autosave && isImportingFiles}
                         type="submit"
                         className={cn(
                             'bg-primary text-primary-foreground hover:bg-primary/90',
                             isModalEditor ? 'min-h-10 rounded-md px-4 py-2 text-sm' : 'rounded px-3 py-1.5 text-xs',
                         )}
                     >
-                        {t('common.save')}
+                        {autosave ? t('common.close') : t('common.save')}
                     </button>
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        className={cn(
-                            'bg-muted text-muted-foreground hover:bg-muted/80',
-                            isModalEditor ? 'min-h-10 rounded-md px-4 py-2 text-sm' : 'rounded px-3 py-1.5 text-xs',
-                        )}
-                    >
-                        {t('common.cancel')}
-                    </button>
+                    {!autosave && (
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className={cn(
+                                'bg-muted text-muted-foreground hover:bg-muted/80',
+                                isModalEditor ? 'min-h-10 rounded-md px-4 py-2 text-sm' : 'rounded px-3 py-1.5 text-xs',
+                            )}
+                        >
+                            {t('common.cancel')}
+                        </button>
+                    )}
                 </div>
             </div>
         </form>

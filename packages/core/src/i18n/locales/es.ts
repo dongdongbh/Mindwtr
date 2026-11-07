@@ -2798,6 +2798,8 @@ export const esOverrides: Record<string, string> = {
 'settings.taskEditorPresentationInlineDesc': "Sustituye la fila de la tarea por el editor en la lista actual.",
 'settings.taskEditorPresentationModal': "Ventana emergente",
 'settings.taskEditorPresentationModalDesc': "Abre el editor en una ventana centrada para una edición enfocada.",
+'settings.taskEditorAutosave': "Guardar cambios automáticamente",
+'settings.taskEditorAutosaveDesc': "Los cambios se guardan a medida que los haces. Al salir del editor nunca se pregunta si guardar o descartar.",
 'settings.taskEditorSection': "Sección",
 'settings.taskEditorOpenByDefault': "Abiertas por defecto",
 'settings.taskEditorDefaultOpenDesc': "Mantén expandidas estas secciones del editor de tareas cuando aún no tengan contenido.",

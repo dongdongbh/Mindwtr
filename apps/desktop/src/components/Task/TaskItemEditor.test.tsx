@@ -1,4 +1,5 @@
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { createTaskDraft, type Area, type Task } from '@mindwtr/core';
 
@@ -87,6 +88,7 @@ const translations: Record<string, string> = {
     'common.delete': 'Delete',
     'common.save': 'Save',
     'common.cancel': 'Cancel',
+    'common.close': 'Close',
     'viewSections.add': 'New section…',
     'viewSections.nameHint': 'Section name',
     'viewSections.namePlaceholder': 'Books to read',
@@ -601,6 +603,55 @@ describe('TaskItemEditor AI panels', () => {
         );
 
         expect(getByText('Rate limited by the provider')).toBeInTheDocument();
+    });
+});
+
+describe('TaskItemEditor autosave footer', () => {
+    it('shows a single Close submit button instead of Save and Cancel', () => {
+        const { getByRole, queryByRole } = render(<TaskItemEditor {...baseProps} autosave />);
+
+        expect(getByRole('button', { name: 'Close' })).toHaveAttribute('type', 'submit');
+        expect(queryByRole('button', { name: 'Save' })).toBeNull();
+        expect(queryByRole('button', { name: 'Cancel' })).toBeNull();
+    });
+
+    it('closes through onCancel when Enter submits the form from a field', async () => {
+        const onCancel = vi.fn();
+        const onSubmit = vi.fn();
+        const { getByRole } = render(<TaskItemEditor {...baseProps} autosave onCancel={onCancel} onSubmit={onSubmit} />);
+
+        await userEvent.type(getByRole('combobox', { name: 'Task title' }), '{Enter}');
+
+        expect(onCancel).toHaveBeenCalledOnce();
+        expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('closes through onCancel on Cmd+Enter and Close even while files import', () => {
+        const onCancel = vi.fn();
+        const onSubmit = vi.fn();
+        const { getByRole } = render(
+            <TaskItemEditor {...baseProps} autosave isImportingFiles onCancel={onCancel} onSubmit={onSubmit} />
+        );
+
+        fireEvent.keyDown(getByRole('combobox', { name: 'Task title' }), { key: 'Enter', metaKey: true });
+        const close = getByRole('button', { name: 'Close' });
+        expect(close).toBeEnabled();
+        fireEvent.click(close);
+
+        expect(onCancel).toHaveBeenCalledTimes(2);
+        expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('keeps Save and Cancel without the autosave prop', () => {
+        const onCancel = vi.fn();
+        const onSubmit = vi.fn();
+        const { getByRole, queryByRole } = render(<TaskItemEditor {...baseProps} onCancel={onCancel} onSubmit={onSubmit} />);
+
+        expect(queryByRole('button', { name: 'Close' })).toBeNull();
+        fireEvent.click(getByRole('button', { name: 'Save' }));
+        expect(onSubmit).toHaveBeenCalledOnce();
+        fireEvent.click(getByRole('button', { name: 'Cancel' }));
+        expect(onCancel).toHaveBeenCalledOnce();
     });
 });
 

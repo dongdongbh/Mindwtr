@@ -2786,6 +2786,8 @@ export const deOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': 'Ersetzt die Aufgabenzeile in der aktuellen Liste durch den Editor.',
         'settings.taskEditorPresentationModal': 'Dialogfenster',
         'settings.taskEditorPresentationModalDesc': 'Öffnet den Editor in einem zentrierten Dialog für fokussiertes Bearbeiten.',
+        'settings.taskEditorAutosave': 'Änderungen automatisch speichern',
+        'settings.taskEditorAutosaveDesc': 'Änderungen werden gespeichert, während Du sie machst. Beim Verlassen des Editors wirst Du nie gefragt, ob Du speichern oder verwerfen möchtest.',
         'settings.taskEditorSection': 'Abschnitt',
         'settings.testConnection': 'Verbindung testen',
         'settings.testFolder': 'Ordner testen',

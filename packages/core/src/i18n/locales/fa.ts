@@ -2842,6 +2842,8 @@ export const faOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': 'ردیف کار را در فهرست فعلی با ویرایشگر جایگزین کن.',
         'settings.taskEditorPresentationModal': 'پنجره بازشو',
         'settings.taskEditorPresentationModalDesc': 'ویرایشگر را در یک پنجره میان‌صفحه برای ویرایش متمرکز باز کن.',
+        'settings.taskEditorAutosave': 'ذخیره خودکار ویرایش‌ها',
+        'settings.taskEditorAutosaveDesc': 'تغییرات همزمان با ویرایش ذخیره می‌شوند. هنگام خروج از ویرایشگر هرگز درباره ذخیره یا نادیده گرفتن تغییرات پرسیده نمی‌شود.',
         'settings.taskEditorSection': 'بخش',
         'settings.taskEditorOpenByDefault': 'باز شدن به‌طور پیش‌فرض',
         'settings.taskEditorDefaultOpenDesc': 'این بخش‌های ویرایشگر کار را هر زمان که هنوز محتوایی ندارند باز نگه دار.',

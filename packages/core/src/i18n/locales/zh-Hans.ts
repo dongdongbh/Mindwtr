@@ -2804,6 +2804,8 @@ export const zhHans: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': '在当前列表中用编辑器替换任务所在行。',
         'settings.taskEditorPresentationModal': '弹窗',
         'settings.taskEditorPresentationModalDesc': '在居中的弹窗中打开编辑器，适合专注编辑。',
+        'settings.taskEditorAutosave': '自动保存编辑',
+        'settings.taskEditorAutosaveDesc': '修改会在编辑时自动保存。离开编辑器时不会再询问保存还是放弃。',
         'settings.taskEditorSection': '分组',
         'settings.taskEditorOpenByDefault': '默认展开',
         'settings.taskEditorDefaultOpenDesc': '让这些任务编辑分组在没有现有内容时也默认展开。',

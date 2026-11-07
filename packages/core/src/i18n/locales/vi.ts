@@ -1583,6 +1583,8 @@ export const viOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': 'Thay hàng nhiệm vụ bằng trình chỉnh sửa trong danh sách hiện tại.',
         'settings.taskEditorPresentationModal': 'Cửa sổ bật lên',
         'settings.taskEditorPresentationModalDesc': 'Mở trình chỉnh sửa trong hộp thoại giữa màn hình để tập trung chỉnh sửa.',
+        'settings.taskEditorAutosave': 'Tự động lưu chỉnh sửa',
+        'settings.taskEditorAutosaveDesc': 'Thay đổi được lưu ngay khi bạn thực hiện. Khi rời trình chỉnh sửa, ứng dụng không bao giờ hỏi lưu hay hủy.',
         'settings.taskEditorSection': 'Phần',
         'settings.taskEditorOpenByDefault': 'Mở theo mặc định',
         'settings.taskEditorDefaultOpenDesc': 'Giữ các phần này của trình chỉnh sửa nhiệm vụ luôn mở khi chúng chưa có nội dung.',

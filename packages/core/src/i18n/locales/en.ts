@@ -2876,6 +2876,8 @@ export const en: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': 'Replace the task row with the editor in the current list.',
         'settings.taskEditorPresentationModal': 'Pop-up',
         'settings.taskEditorPresentationModalDesc': 'Open the editor in a centered modal for focused editing.',
+        'settings.taskEditorAutosave': 'Save edits automatically',
+        'settings.taskEditorAutosaveDesc': 'Changes save as you make them. Leaving the editor never asks to save or discard.',
         'settings.taskEditorSection': 'Section',
         'settings.taskEditorOpenByDefault': 'Open by default',
         'settings.taskEditorDefaultOpenDesc': 'Keep these task editor sections expanded whenever they do not already have content.',

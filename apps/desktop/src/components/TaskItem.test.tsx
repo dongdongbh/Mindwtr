@@ -8,6 +8,18 @@ import { Area, Project, Section, Task, configureDateFormatting, safeFormatDate, 
 import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { holdSyncSave } from '../test/hold-sync-save';
+import { runAfterTaskEditExit } from './Task/task-edit-session';
+import { takeUndoableAction } from '../lib/undo-registry';
+
+const attachmentImportControl = vi.hoisted(() => ({ pending: null as Promise<never> | null }));
+
+vi.mock('../lib/attachment-import', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../lib/attachment-import')>();
+    return {
+        ...actual,
+        importDroppedFileAttachment: (file: File) => attachmentImportControl.pending ?? actual.importDroppedFileAttachment(file),
+    };
+});
 
 const mockTask: Task = {
     id: '1',
@@ -3080,5 +3092,354 @@ describe('TaskItem', () => {
         });
 
         expect(commits.length).toBeGreaterThan(1);
+    });
+});
+
+describe('TaskItem editor autosave', () => {
+    const autosaveTask: Task = { ...mockTask, id: 'autosave-task', title: 'Original title', status: 'next' };
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        attachmentImportControl.pending = null;
+    });
+    beforeEach(() => {
+        act(() => {
+            useTaskStore.setState(initialTaskState, true);
+            useUiStore.setState(initialUiState, true);
+        });
+        useUiStore.setState({ ...useUiStore.getState(), editingTaskId: null, expandedTaskIds: {} });
+    });
+
+    const setupAutosave = (tasks: Task[] = [autosaveTask]) => {
+        const realUpdateTask = useTaskStore.getState().updateTask;
+        const updateTask = vi.fn(realUpdateTask);
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks,
+                _allTasks: tasks,
+                _tasksById: new Map(tasks.map((task) => [task.id, task])),
+                settings: { ...state.settings, gtd: { ...state.settings?.gtd, taskEditorAutosave: true } },
+                updateTask,
+            }));
+        });
+        const flushSave = vi.spyOn(core, 'flushPendingSave').mockResolvedValue(undefined);
+        return { updateTask, realUpdateTask, flushSave };
+    };
+    const stored = (id: string) => useTaskStore.getState()._allTasks.find((task) => task.id === id);
+    const renderRow = (task: Task = autosaveTask) => render(
+        <LanguageProvider>
+            <TaskItem task={task} />
+        </LanguageProvider>
+    );
+    const openEditor = (view: ReturnType<typeof render>) => {
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+    };
+    const exitDialog = (view: ReturnType<typeof render>) => view.queryByRole('dialog', { name: /unsaved changes/i });
+    const startImport = (view: ReturnType<typeof render>) => {
+        attachmentImportControl.pending = new Promise<never>(() => {});
+        const form = view.container.querySelector('form')!;
+        const dataTransfer = { types: ['Files'], files: [new File(['x'], 'slow.txt')] } as unknown as DataTransfer;
+        const runtime = window as unknown as { __TAURI_INTERNALS__?: unknown };
+        runtime.__TAURI_INTERNALS__ = {};
+        try {
+            fireEvent.dragOver(form, { dataTransfer });
+            fireEvent.drop(form, { dataTransfer });
+        } finally {
+            delete runtime.__TAURI_INTERNALS__;
+        }
+    };
+
+    it('saves edits and leaves for another task without the unsaved-changes dialog', async () => {
+        const { updateTask } = setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        fireEvent.change(view.getByDisplayValue('Original title'), { target: { value: 'Edited title' } });
+
+        const next = vi.fn();
+        act(() => runAfterTaskEditExit(next));
+
+        await waitFor(() => expect(next).toHaveBeenCalledOnce());
+        expect(updateTask).toHaveBeenCalledWith(autosaveTask.id, expect.objectContaining({ title: 'Edited title' }));
+        expect(exitDialog(view)).toBeNull();
+        expect(view.queryByDisplayValue('Edited title')).toBeNull();
+    });
+
+    it('writes A after A, autosaved B, A in an editor opened through setEditingTaskId', async () => {
+        setupAutosave();
+        const view = renderRow();
+        await act(async () => {
+            useUiStore.getState().setEditingTaskId(autosaveTask.id);
+            await new Promise((resolve) => window.setTimeout(resolve, 0));
+        });
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'Changed title' } });
+        fireEvent.focusOut(input);
+        await waitFor(() => expect(stored(autosaveTask.id)?.title).toBe('Changed title'));
+
+        fireEvent.change(input, { target: { value: 'Original title' } });
+        fireEvent.keyDown(input, { key: 'Escape' });
+
+        await waitFor(() => expect(view.queryByDisplayValue('Original title')).toBeNull());
+        expect(stored(autosaveTask.id)?.title).toBe('Original title');
+        expect(exitDialog(view)).toBeNull();
+    });
+
+    it('opens the clicked task after an outside pointerdown once the held flush settles', async () => {
+        const other: Task = { ...autosaveTask, id: 'autosave-other', title: 'Other task' };
+        const { flushSave } = setupAutosave([autosaveTask, other]);
+        const view = render(
+            <LanguageProvider>
+                <div data-testid="row-a"><TaskItem task={autosaveTask} /></div>
+                <div data-testid="row-b"><TaskItem task={other} /></div>
+            </LanguageProvider>
+        );
+        fireEvent.click(within(view.getByTestId('row-a')).getAllByRole('button', { name: /edit/i })[0]);
+        const flush = createDeferred<void>();
+        flushSave.mockImplementation(() => flush.promise);
+
+        const otherEdit = within(view.getByTestId('row-b')).getAllByRole('button', { name: /edit/i })[0];
+        fireEvent.pointerDown(otherEdit);
+        fireEvent.click(otherEdit);
+        expect(view.getByDisplayValue('Original title')).toBeInTheDocument();
+
+        await act(async () => { flush.resolve(); });
+
+        await waitFor(() => expect(within(view.getByTestId('row-b')).getByDisplayValue('Other task')).toBeInTheDocument());
+        expect(view.queryByDisplayValue('Original title')).toBeNull();
+        expect(exitDialog(view)).toBeNull();
+    });
+
+    it.each([
+        { outcome: 'resolves', fail: false },
+        { outcome: 'rejects', fail: true },
+    ])('closes a clean editor on outside pointerdown only after the flush $outcome', async ({ fail }) => {
+        const { flushSave, updateTask } = setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        let settle!: () => void;
+        flushSave.mockImplementation(() => new Promise<void>((resolve, reject) => {
+            settle = fail ? () => reject(new Error('Disk unavailable')) : resolve;
+        }));
+
+        fireEvent.pointerDown(document.body);
+        await waitFor(() => expect(flushSave).toHaveBeenCalled());
+        expect(view.getByDisplayValue('Original title')).toBeInTheDocument();
+
+        await act(async () => { settle(); });
+
+        if (fail) {
+            await waitFor(() => expect(exitDialog(view)).toBeInTheDocument());
+            expect(view.getByDisplayValue('Original title')).toBeInTheDocument();
+        } else {
+            await waitFor(() => expect(view.queryByDisplayValue('Original title')).toBeNull());
+            expect(exitDialog(view)).toBeNull();
+        }
+        expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('shows the exit dialog when flushing on Escape fails', async () => {
+        const { flushSave } = setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'Edited title' } });
+        flushSave.mockRejectedValue(new Error('Disk unavailable'));
+
+        fireEvent.keyDown(input, { key: 'Escape' });
+
+        await waitFor(() => expect(exitDialog(view)).toBeInTheDocument());
+        expect(view.getByDisplayValue('Edited title')).toBeInTheDocument();
+    });
+
+    it('shows the exit dialog when Escape is pressed during a file import', async () => {
+        setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        startImport(view);
+
+        fireEvent.keyDown(view.getByDisplayValue('Original title'), { key: 'Escape' });
+
+        await waitFor(() => expect(exitDialog(view)).toBeInTheDocument());
+        expect(view.getByDisplayValue('Original title')).toBeInTheDocument();
+    });
+
+    it('keeps the editor open when Save in the exit dialog runs during a file import', async () => {
+        const { updateTask } = setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        startImport(view);
+        fireEvent.keyDown(view.getByDisplayValue('Original title'), { key: 'Escape' });
+        const dialog = await waitFor(() => {
+            const shown = exitDialog(view);
+            expect(shown).toBeInTheDocument();
+            return shown!;
+        });
+
+        await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save' })); });
+
+        expect(view.getByDisplayValue('Original title')).toBeInTheDocument();
+        expect(updateTask).not.toHaveBeenCalled();
+    });
+
+    it('saves the typed title before Delete, so Undo restores it', async () => {
+        const inboxTask: Task = { ...autosaveTask, status: 'inbox' };
+        setupAutosave([inboxTask]);
+        const view = renderRow(inboxTask);
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        input.focus();
+        fireEvent.change(input, { target: { value: 'Typed before delete' } });
+        fireEvent.click(view.getByRole('button', { name: /^delete$/i }));
+
+        await waitFor(() => expect(stored(inboxTask.id)?.deletedAt).toBeTruthy());
+        expect(stored(inboxTask.id)?.title).toBe('Typed before delete');
+
+        await act(async () => { takeUndoableAction()?.(); });
+
+        await waitFor(() => expect(stored(inboxTask.id)?.deletedAt).toBeFalsy());
+        expect(stored(inboxTask.id)?.title).toBe('Typed before delete');
+    });
+
+    it('deletes a row without an open editor right away, without flushing', async () => {
+        const doneTask: Task = { ...autosaveTask, status: 'done' };
+        const { flushSave } = setupAutosave([doneTask]);
+        const view = renderRow(doneTask);
+
+        fireEvent.click(view.getByRole('button', { name: 'Delete task' }));
+
+        await waitFor(() => expect(stored(doneTask.id)?.deletedAt).toBeTruthy());
+        expect(flushSave).not.toHaveBeenCalled();
+    });
+
+    it('does not write again on Escape after a title with a trailing space autosaved', async () => {
+        const { updateTask } = setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'Spaced title ' } });
+        fireEvent.focusOut(input);
+        await waitFor(() => expect(stored(autosaveTask.id)?.title).toBe('Spaced title'));
+
+        fireEvent.keyDown(input, { key: 'Escape' });
+
+        await waitFor(() => expect(view.queryByDisplayValue('Spaced title ')).toBeNull());
+        expect(updateTask).toHaveBeenCalledOnce();
+        expect(exitDialog(view)).toBeNull();
+    });
+
+    it('writes the unsaved title together with a status change to done', async () => {
+        setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        input.focus();
+        fireEvent.change(input, { target: { value: 'Finished title' } });
+        const done = within(view.getByRole('group', { name: 'Task status' })).getByRole('button', { name: 'Done' });
+        done.focus();
+        fireEvent.click(done);
+
+        await waitFor(() => expect(stored(autosaveTask.id)).toMatchObject({ title: 'Finished title', status: 'done' }));
+    });
+
+    it('writes the unsaved title alone when the row turns read-only', async () => {
+        const { updateTask } = setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        input.focus();
+        fireEvent.change(input, { target: { value: 'Typed before read-only' } });
+        expect(updateTask).not.toHaveBeenCalled();
+
+        view.rerender(
+            <LanguageProvider>
+                <TaskItem task={autosaveTask} readOnly />
+            </LanguageProvider>
+        );
+
+        await waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        expect(updateTask.mock.calls[0][1]).toEqual({ title: 'Typed before read-only' });
+        expect(view.queryByDisplayValue('Typed before read-only')).toBeNull();
+    });
+
+    it('keeps the autosaved title when the title is cleared before exit', async () => {
+        setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'Renamed title' } });
+        fireEvent.focusOut(input);
+        await waitFor(() => expect(stored(autosaveTask.id)?.title).toBe('Renamed title'));
+
+        fireEvent.change(input, { target: { value: '' } });
+        fireEvent.keyDown(input, { key: 'Escape' });
+
+        await waitFor(() => expect(view.queryByRole('combobox', { name: /task title/i })).toBeNull());
+        expect(stored(autosaveTask.id)?.title).toBe('Renamed title');
+        expect(exitDialog(view)).toBeNull();
+    });
+
+    it('autosaves other fields while the title is blank', async () => {
+        setupAutosave();
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'Renamed title' } });
+        fireEvent.focusOut(input);
+        await waitFor(() => expect(stored(autosaveTask.id)?.title).toBe('Renamed title'));
+
+        fireEvent.change(input, { target: { value: '' } });
+        const someday = within(view.getByRole('group', { name: 'Task status' })).getByRole('button', { name: 'Someday' });
+        someday.focus();
+        fireEvent.click(someday);
+
+        await waitFor(() => expect(stored(autosaveTask.id)?.status).toBe('someday'));
+        expect(stored(autosaveTask.id)?.title).toBe('Renamed title');
+    });
+
+    it('saves text typed while the exit save is still writing before it closes', async () => {
+        const { updateTask, realUpdateTask } = setupAutosave();
+        const held = createDeferred<void>();
+        updateTask.mockImplementationOnce(async (...args) => {
+            await held.promise;
+            return realUpdateTask(...args);
+        });
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'Exit draft' } });
+        fireEvent.keyDown(input, { key: 'Escape' });
+        await waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        fireEvent.change(input, { target: { value: 'Typed during exit' } });
+
+        await act(async () => { held.resolve(); });
+
+        await waitFor(() => expect(view.queryByDisplayValue('Typed during exit')).toBeNull());
+        expect(stored(autosaveTask.id)?.title).toBe('Typed during exit');
+        expect(exitDialog(view)).toBeNull();
+    });
+
+    it('closes on Cmd+Enter while an autosave is pending and writes the latest draft', async () => {
+        const { updateTask, realUpdateTask } = setupAutosave();
+        const held = createDeferred<void>();
+        updateTask.mockImplementationOnce(async (...args) => {
+            await held.promise;
+            return realUpdateTask(...args);
+        });
+        const view = renderRow();
+        openEditor(view);
+        const input = view.getByDisplayValue('Original title');
+        fireEvent.change(input, { target: { value: 'First draft' } });
+        fireEvent.focusOut(input);
+        await waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        fireEvent.change(input, { target: { value: 'Latest draft' } });
+
+        fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+        await act(async () => { held.resolve(); });
+
+        await waitFor(() => expect(view.queryByDisplayValue('Latest draft')).toBeNull());
+        expect(updateTask).toHaveBeenLastCalledWith(autosaveTask.id, expect.objectContaining({ title: 'Latest draft' }));
+        expect(stored(autosaveTask.id)?.title).toBe('Latest draft');
+        expect(exitDialog(view)).toBeNull();
     });
 });

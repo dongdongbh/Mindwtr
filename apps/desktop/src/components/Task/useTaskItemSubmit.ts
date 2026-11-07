@@ -1,6 +1,8 @@
 import { useCallback, useRef } from 'react';
 import {
+    taskDraftToChangedSincePatch,
     taskDraftToChangedUpdatePatch,
+    taskDraftToUpdatePatch,
     flushPendingSave,
     saveTaskDraftOntoLatest,
     useTaskStore,
@@ -30,7 +32,19 @@ type UseTaskItemSubmitParams = {
     beginAttachmentSave: () => boolean;
     cancelAttachmentSaveBeforeStoreUpdate: () => void;
     settlePersistedAttachmentSave: (attachments: Attachment[]) => void;
+    incrementalSessionRef?: React.MutableRefObject<IncrementalSaveSession | null>;
 };
+
+export type IncrementalSaveBase = { draft: TaskDraft; rawAttachments: Attachment[] | undefined; preparedAttachments: Attachment[] | undefined };
+export type IncrementalSaveSession = { baselineTask: Task; base: IncrementalSaveBase; tail: Promise<unknown> };
+export type TaskItemSubmitOutcome = 'saved' | 'noop' | 'blocked' | 'failed';
+export type TaskItemSubmitResult = (StoreActionResult & { outcome?: TaskItemSubmitOutcome }) | undefined;
+
+const BLOCKED: TaskItemSubmitResult = { success: false, outcome: 'blocked' };
+
+// A blank title would serialize as the opening title and undo an autosaved rename, so it keeps the last saved one.
+export const draftSinceLastSave = (draft: TaskDraft, base: IncrementalSaveBase): TaskDraft =>
+    draft.title.trim() ? draft : { ...draft, title: base.draft.title };
 
 
 const saveDraftOnLatest = async (id: string, base: Task, patch: Partial<Task>, beforeWrite?: () => void) => {
@@ -74,14 +88,117 @@ export function useTaskItemSubmit({
     beginAttachmentSave,
     cancelAttachmentSaveBeforeStoreUpdate,
     settlePersistedAttachmentSave,
+    incrementalSessionRef,
 }: UseTaskItemSubmitParams) {
 
     const savedRef = useRef<{ opened: Task; saved: Task } | null>(null);
     const inFlightRef = useRef<Promise<StoreActionResult | undefined> | null>(null);
-    const latestRef = useRef({ draft, editAttachments, baselineTask });
-    latestRef.current = { draft, editAttachments, baselineTask };
-    return useCallback((event?: React.FormEvent, options?: TaskItemSubmitOptions) => {
+    const latestRef = useRef({ draft, editAttachments, baselineTask, isImportingFiles, prepareAttachmentsForSave });
+    latestRef.current = { draft, editAttachments, baselineTask, isImportingFiles, prepareAttachmentsForSave };
+    return useCallback((event?: React.FormEvent, options?: TaskItemSubmitOptions): Promise<TaskItemSubmitResult> => {
         event?.preventDefault();
+        const session = incrementalSessionRef?.current;
+        if (session) {
+            const failWithAttachmentError = (error: unknown): TaskItemSubmitResult => {
+                const message = webAttachmentUploadMessage(error, t);
+                setAttachmentError?.(message);
+                showToast(message, 'error');
+                return { success: false, error: message, outcome: 'failed' };
+            };
+            // Queued calls read the editor state when they run, not when they were requested.
+            // A dropped session (exit or discard reset the draft) must not write the reset draft back.
+            const dropped = () => incrementalSessionRef?.current === null;
+            const run = async (): Promise<TaskItemSubmitResult> => {
+                const opened = latestRef.current.baselineTask;
+                if (dropped() || latestRef.current.isImportingFiles || session.baselineTask !== opened) return BLOCKED;
+                const generation = getAttachmentDraftGeneration?.();
+                const isCurrent = () => generation === getAttachmentDraftGeneration?.();
+                const { editAttachments: rawAttachments, prepareAttachmentsForSave: prepare } = latestRef.current;
+                let preparedAttachments = rawAttachments;
+                try {
+                    if (prepare) preparedAttachments = await prepare();
+                } catch (error) {
+                    if (!isCurrent()) return BLOCKED;
+                    return failWithAttachmentError(error);
+                }
+                const latest = latestRef.current;
+                if (dropped() || !isCurrent() || latest.baselineTask !== opened) return BLOCKED;
+                const draft = draftSinceLastSave(latest.draft, session.base);
+                const nextBase: IncrementalSaveBase = { draft, rawAttachments, preparedAttachments };
+                const changed = taskDraftToChangedSincePatch(draft, session.base.draft, opened, {
+                    statusOverride: options?.statusOverride,
+                    attachments: preparedAttachments,
+                    previousAttachments: session.base.preparedAttachments,
+                });
+                const hasOverride = options?.completedAtOverride !== undefined || (!!options && 'timeSpentMinutesOverride' in options);
+                if (!changed && !hasOverride) {
+                    session.base = nextBase;
+                    return { success: true, outcome: 'noop' };
+                }
+                const patch = changed ?? {};
+                if (options?.completedAtOverride !== undefined) {
+                    patch.completedAt = options.completedAtOverride;
+                }
+                if (options && 'timeSpentMinutesOverride' in options) {
+                    patch.timeSpentMinutes = options.timeSpentMinutesOverride;
+                }
+
+                // Merge against what the draft last saved, not the stored row: a synced token the draft never saw must not read as removed.
+                const lastSaved = taskDraftToUpdatePatch(session.base.draft, opened, { attachments: session.base.preparedAttachments });
+                const base: Task = { ...opened, ...lastSaved };
+                const attachmentSaveRequiresDurability = beginAttachmentSave();
+                try { retainWebAttachmentsBeforeStore?.(preparedAttachments ?? []); }
+                catch (error) {
+                    cancelAttachmentSaveBeforeStoreUpdate();
+                    return failWithAttachmentError(error);
+                }
+                let written: Awaited<ReturnType<typeof saveDraftOnLatest>>;
+                try {
+                    written = await saveDraftOnLatest(task.id, base, patch, () => {
+                        if (!isCurrent()) throw new Error('attachments.webUploadChanged');
+                        retainWebAttachmentsBeforeStore?.(preparedAttachments ?? []);
+                    });
+                } catch (error) {
+                    if (!isCurrent()) return BLOCKED;
+                    return failWithAttachmentError(error);
+                }
+                const { result, saved } = written;
+                if (result.success) {
+                    session.base = nextBase;
+                    if (saved) savedRef.current = { opened, saved };
+                }
+                if (!isCurrent()) return BLOCKED;
+                if (!result.success) {
+                    cancelAttachmentSaveBeforeStoreUpdate();
+                    showToast(result.error || t('task.updateFailed'), 'error');
+                    return { ...result, outcome: 'failed' };
+                }
+                if (attachmentSaveRequiresDurability) {
+                    try {
+                        await flushPendingSave();
+                    } catch (error) {
+                        if (!isCurrent()) return BLOCKED;
+                        const message = error instanceof Error ? error.message : String(error || t('task.updateFailed'));
+                        showToast(message, 'error');
+                        return { success: false, error: message, outcome: 'failed' };
+                    }
+                    if (!isCurrent()) return BLOCKED;
+                    settlePersistedAttachmentSave(saved?.attachments ?? rawAttachments ?? task.attachments ?? []);
+                }
+                const changedDuringSave = latestRef.current.draft !== latest.draft
+                    || latestRef.current.editAttachments !== latest.editAttachments;
+                if (!options?.keepEditing && !changedDuringSave) {
+                    setIsEditing(false);
+                    if (editingTaskId === task.id) {
+                        setEditingTaskId(null);
+                    }
+                }
+                return { ...result, outcome: 'saved' };
+            };
+            const queued = session.tail.catch(() => {}).then(run);
+            session.tail = queued;
+            return queued;
+        }
         if (inFlightRef.current) return inFlightRef.current;
         if (isImportingFiles) return Promise.resolve(undefined);
         const generation = getAttachmentDraftGeneration?.();
@@ -188,5 +305,6 @@ export function useTaskItemSubmit({
         showToast,
         t,
         task,
+        incrementalSessionRef,
     ]);
 }

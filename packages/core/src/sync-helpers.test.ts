@@ -96,6 +96,7 @@ const GTD_SYNCED_FIELD_SAMPLE_VALUES: Record<GtdSyncedFieldKey, GtdSettings[GtdS
         sectionOpen: { scheduling: true },
         defaultsVersion: 4,
     },
+    taskEditorAutosave: true,
     viewSections: {
         someday: [{ id: 'books', title: 'Books to read', order: 0 }],
     },

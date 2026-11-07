@@ -2800,6 +2800,8 @@ export const huOverrides: Record<string, string> = {
     'settings.taskEditorPresentationInlineDesc': 'A feladat sorát a szerkesztő váltja fel az aktuális listában.',
     'settings.taskEditorPresentationModal': 'Felugró ablak',
     'settings.taskEditorPresentationModalDesc': 'Nyissa meg a szerkesztőt egy középre igazított felugró ablakban a koncentrált szerkesztéshez.',
+    'settings.taskEditorAutosave': 'Módosítások automatikus mentése',
+    'settings.taskEditorAutosaveDesc': 'A módosítások szerkesztés közben azonnal mentésre kerülnek. A szerkesztő elhagyásakor nem jelenik meg kérdés a mentésről vagy az elvetésről.',
     'settings.taskEditorSection': 'Szakasz',
     'settings.taskEditorOpenByDefault': 'Alapértelmezetten nyitva',
     'settings.taskEditorDefaultOpenDesc': 'Tartsa kibontva ezeket a feladatszerkesztő szakaszokat, amikor még nincs bennük tartalom.',

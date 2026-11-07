@@ -88,6 +88,8 @@ type Labels = {
     taskEditorPresentationInlineDesc: string;
     taskEditorPresentationModal: string;
     taskEditorPresentationModalDesc: string;
+    taskEditorAutosave: string;
+    taskEditorAutosaveDesc: string;
     taskEditorLayoutReset: string;
     taskEditorSection: string;
     taskEditorDefaultOpen: string;
@@ -211,6 +213,7 @@ export function SettingsGtdPage({
     const taskEditorPresentation: TaskEditorPresentation = safeSettings.gtd?.taskEditor?.presentation === 'modal'
         ? 'modal'
         : 'inline';
+    const taskEditorAutosave = safeSettings.gtd?.taskEditorAutosave === true;
     const defaultCaptureMethod = safeSettings.gtd?.defaultCaptureMethod ?? 'text';
     const defaultAreaMode = getDefaultTaskAreaMode(safeSettings);
     const sortedAreas = [...areas]
@@ -984,6 +987,21 @@ export function SettingsGtdPage({
                             })}
                         </div>
                     </SettingField>
+                    <SettingRow
+                        settingsKey="taskEditorAutosave"
+                        title={t.taskEditorAutosave}
+                        description={t.taskEditorAutosaveDesc}
+                        className="rounded-md border border-border bg-muted/20 p-3 gap-6"
+                    >
+                        <Switch
+                            aria-label={t.taskEditorAutosave}
+                            checked={taskEditorAutosave}
+                            onCheckedChange={() => {
+                                const next = !taskEditorAutosave;
+                                saveGtdFromLatest(() => ({ taskEditorAutosave: next }), 'Failed to update task editor autosave');
+                            }}
+                        />
+                    </SettingRow>
                     <div className="flex justify-end">
                         <button
                             type="button"

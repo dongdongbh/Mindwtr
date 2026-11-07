@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTaskDraft, useTaskStore, type Attachment, type Task } from '@mindwtr/core';
 
-import { useTaskItemSubmit } from './useTaskItemSubmit';
+import { useTaskItemSubmit, type IncrementalSaveSession, type TaskItemSubmitResult } from './useTaskItemSubmit';
 import { holdSyncSave } from '../../test/hold-sync-save';
 
 const flushPendingSaveMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -368,4 +368,302 @@ it('blocks every save path while file import is pending', async () => {
     await expect(result.current(undefined, { keepEditing: true })).resolves.toBeUndefined();
     expect(updateTask).not.toHaveBeenCalled();
     expect(setIsEditing).not.toHaveBeenCalled();
+});
+
+describe('useTaskItemSubmit incremental mode', () => {
+    const createSession = (opened: Task): IncrementalSaveSession => ({
+        baselineTask: opened,
+        base: { draft: createTaskDraft(opened), rawAttachments: opened.attachments, preparedAttachments: opened.attachments },
+        tail: Promise.resolve(),
+    });
+    type SubmitParams = Parameters<typeof useTaskItemSubmit>[0];
+    type Props = { title: string; isImportingFiles?: boolean; baselineTask?: Task; tags?: string[]; contexts?: string[] };
+    let realUpdateTask: ReturnType<typeof useTaskStore.getState>['updateTask'];
+    let updateTask: ReturnType<typeof vi.fn<ReturnType<typeof useTaskStore.getState>['updateTask']>>;
+
+    beforeEach(() => {
+        flushPendingSaveMock.mockReset();
+        flushPendingSaveMock.mockResolvedValue(undefined);
+        useTaskStore.setState({ _allTasks: [task] });
+        realUpdateTask = useTaskStore.getState().updateTask;
+        updateTask = vi.fn(realUpdateTask);
+        useTaskStore.setState({ updateTask });
+    });
+    afterEach(() => {
+        useTaskStore.setState(initialTaskState, true);
+    });
+
+    const holdNextUpdate = () => {
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        updateTask.mockImplementationOnce(async (id, updates) => {
+            await held;
+            return realUpdateTask(id, updates);
+        });
+        return () => release();
+    };
+
+    const renderIncremental = (overrides: Partial<SubmitParams> = {}, initialProps: Props = { title: task.title }) => {
+        const sessionRef = { current: createSession(task) as IncrementalSaveSession | null };
+        const params = {
+            baselineTask: task, task, editAttachments: undefined, editingTaskId: task.id,
+            setEditingTaskId: vi.fn(), setIsEditing: vi.fn(), showToast: vi.fn(), t: (key: string) => key,
+            beginAttachmentSave: vi.fn(() => false), cancelAttachmentSaveBeforeStoreUpdate: vi.fn(),
+            settlePersistedAttachmentSave: vi.fn(), incrementalSessionRef: sessionRef, ...overrides,
+        };
+        const hook = renderHook((props: Props) => useTaskItemSubmit({
+            ...params,
+            baselineTask: props.baselineTask ?? params.baselineTask,
+            draft: createTaskDraft({ ...task, title: props.title, tags: props.tags ?? task.tags, contexts: props.contexts ?? task.contexts }),
+            isImportingFiles: props.isImportingFiles ?? params.isImportingFiles,
+        }), { initialProps });
+        return { ...hook, sessionRef, params };
+    };
+
+    it('incremental: patch since last save', async () => {
+        const { result, rerender } = renderIncremental();
+        rerender({ title: 'B' });
+        await act(async () => { await result.current(undefined, { keepEditing: true }); });
+        rerender({ title: task.title });
+        let outcome: TaskItemSubmitResult;
+        await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+        expect(updateTask).toHaveBeenNthCalledWith(1, task.id, { title: 'B' });
+        expect(updateTask).toHaveBeenNthCalledWith(2, task.id, { title: task.title });
+        expect(outcome!).toMatchObject({ success: true, outcome: 'saved' });
+        expect(useTaskStore.getState()._tasksById.get(task.id)?.title).toBe(task.title);
+    });
+
+    it('incremental: queue keeps options', async () => {
+        const { result, rerender } = renderIncremental();
+        rerender({ title: 'B' });
+        const release = holdNextUpdate();
+        let first!: Promise<TaskItemSubmitResult>;
+        let second!: Promise<TaskItemSubmitResult>;
+        act(() => {
+            first = result.current(undefined, { keepEditing: true });
+            second = result.current(undefined, { statusOverride: 'done', keepEditing: true });
+        });
+        expect(second).not.toBe(first);
+        let outcome: TaskItemSubmitResult;
+        await act(async () => {
+            release();
+            await first;
+            outcome = await second;
+        });
+        expect(updateTask).toHaveBeenCalledTimes(2);
+        expect(updateTask.mock.calls[1][1]).toMatchObject({ status: 'done' });
+        expect(outcome!).toMatchObject({ success: true, outcome: 'saved' });
+    });
+
+    it('incremental: A→B→A→Done', async () => {
+        const { result, rerender } = renderIncremental();
+        rerender({ title: 'B' });
+        await act(async () => { await result.current(undefined, { keepEditing: true }); });
+        rerender({ title: task.title });
+        await act(async () => { await result.current(undefined, { statusOverride: 'done' }); });
+        expect(updateTask).toHaveBeenLastCalledWith(task.id, expect.objectContaining({ title: task.title, status: 'done' }));
+    });
+
+    it('incremental: Done without edits', async () => {
+        const { result } = renderIncremental();
+        let outcome: TaskItemSubmitResult;
+        await act(async () => { outcome = await result.current(undefined, { statusOverride: 'done' }); });
+        expect(updateTask).toHaveBeenCalledWith(task.id, { status: 'done' });
+        expect(outcome!).toMatchObject({ success: true, outcome: 'saved' });
+    });
+
+    it('incremental: base from written draft', async () => {
+        const { result, rerender, sessionRef } = renderIncremental();
+        rerender({ title: 'B' });
+        const release = holdNextUpdate();
+        let pending!: Promise<TaskItemSubmitResult>;
+        act(() => { pending = result.current(undefined, { keepEditing: true }); });
+        await vi.waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        rerender({ title: 'C' });
+        await act(async () => { release(); await pending; });
+        expect(sessionRef.current?.base.draft.title).toBe('B');
+    });
+
+    it('incremental: queued save is blocked once the session is dropped', async () => {
+        const { result, rerender, sessionRef } = renderIncremental();
+        rerender({ title: 'B' });
+        const release = holdNextUpdate();
+        let first!: Promise<TaskItemSubmitResult>;
+        let second!: Promise<TaskItemSubmitResult>;
+        act(() => { first = result.current(undefined, { keepEditing: true }); });
+        await vi.waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        rerender({ title: 'C' });
+        act(() => { second = result.current(undefined, { keepEditing: true }); });
+        sessionRef.current = null;
+        rerender({ title: task.title });
+        let outcome: TaskItemSubmitResult;
+        await act(async () => { release(); await first; outcome = await second; });
+        expect(outcome!).toEqual({ success: false, outcome: 'blocked' });
+        expect(updateTask).toHaveBeenCalledOnce();
+    });
+
+    it('incremental: fresh values in queue', async () => {
+        const { result, rerender } = renderIncremental();
+        rerender({ title: 'B' });
+        const release = holdNextUpdate();
+        let first!: Promise<TaskItemSubmitResult>;
+        let second!: Promise<TaskItemSubmitResult>;
+        act(() => { first = result.current(undefined, { keepEditing: true }); });
+        await vi.waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        rerender({ title: 'C' });
+        act(() => { second = result.current(undefined, { keepEditing: true }); });
+        rerender({ title: 'C', isImportingFiles: true });
+        let outcome: TaskItemSubmitResult;
+        await act(async () => { release(); await first; outcome = await second; });
+        expect(outcome!).toEqual({ success: false, outcome: 'blocked' });
+        expect(updateTask).toHaveBeenCalledOnce();
+    });
+
+    describe.each([
+        { field: 'tags' as const, remote: '#remote', local: '#local' },
+        { field: 'contexts' as const, remote: '@remote', local: '@local' },
+    ])('incremental: $field synced while editing', ({ field, remote, local }) => {
+        const stored = () => useTaskStore.getState()._tasksById.get(task.id)?.[field];
+
+        it('keeps a synced token when a later autosave adds a local one', async () => {
+            const { result, rerender } = renderIncremental();
+            await act(async () => { await realUpdateTask(task.id, { [field]: [remote] }); });
+            rerender({ title: 'B' });
+            await act(async () => { await result.current(undefined, { keepEditing: true }); });
+            rerender({ title: 'B', [field]: [local] });
+            await act(async () => { await result.current(undefined, { keepEditing: true }); });
+            expect(stored()).toEqual(expect.arrayContaining([remote, local]));
+            expect(stored()).toHaveLength(2);
+        });
+
+        it('still removes a token the user removed', async () => {
+            const { result, rerender } = renderIncremental();
+            await act(async () => { await realUpdateTask(task.id, { [field]: [remote] }); });
+            rerender({ title: task.title, [field]: [local] });
+            await act(async () => { await result.current(undefined, { keepEditing: true }); });
+            expect(stored()).toEqual(expect.arrayContaining([remote, local]));
+            rerender({ title: task.title, [field]: [] });
+            await act(async () => { await result.current(undefined, { keepEditing: true }); });
+            expect(stored()).toEqual([remote]);
+        });
+    });
+
+    describe('incremental: outcomes', () => {
+        it('returns noop for an empty patch', async () => {
+            const { result } = renderIncremental();
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toEqual({ success: true, outcome: 'noop' });
+            expect(updateTask).not.toHaveBeenCalled();
+        });
+
+        it('writes an override without other edits', async () => {
+            const { result } = renderIncremental();
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { timeSpentMinutesOverride: 5, keepEditing: true }); });
+            expect(updateTask).toHaveBeenCalledWith(task.id, { timeSpentMinutes: 5 });
+            expect(outcome!).toMatchObject({ success: true, outcome: 'saved' });
+        });
+
+        it('returns blocked while files import', async () => {
+            const { result } = renderIncremental({}, { title: 'B', isImportingFiles: true });
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toEqual({ success: false, outcome: 'blocked' });
+            expect(updateTask).not.toHaveBeenCalled();
+        });
+
+        it('returns blocked when the attachment generation changes', async () => {
+            let generation = 0;
+            const setAttachmentError = vi.fn();
+            const finish = holdSyncSave(() => undefined);
+            const { result } = renderIncremental({ getAttachmentDraftGeneration: () => generation, setAttachmentError }, { title: 'B' });
+            let pending!: Promise<TaskItemSubmitResult>;
+            await act(async () => { pending = result.current(undefined, { keepEditing: true }); await Promise.resolve(); });
+            generation += 1;
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { await finish(); outcome = await pending; });
+            expect(outcome!).toEqual({ success: false, outcome: 'blocked' });
+            expect(updateTask).not.toHaveBeenCalled();
+            expect(setAttachmentError).not.toHaveBeenCalled();
+        });
+
+        it('returns blocked when the baseline changes', async () => {
+            let finish!: (attachments: Attachment[]) => void;
+            const prepareAttachmentsForSave = vi.fn(() => new Promise<Attachment[]>((resolve) => { finish = resolve; }));
+            const { result, rerender } = renderIncremental({ prepareAttachmentsForSave }, { title: 'B' });
+            let pending!: Promise<TaskItemSubmitResult>;
+            act(() => { pending = result.current(undefined, { keepEditing: true }); });
+            await vi.waitFor(() => expect(prepareAttachmentsForSave).toHaveBeenCalledOnce());
+            rerender({ title: 'B', baselineTask: { ...task } });
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { finish([]); outcome = await pending; });
+            expect(outcome!).toEqual({ success: false, outcome: 'blocked' });
+            expect(updateTask).not.toHaveBeenCalled();
+        });
+
+        it('returns failed when attachment preparation fails', async () => {
+            const showToast = vi.fn();
+            const { result } = renderIncremental({ showToast, prepareAttachmentsForSave: async () => { throw new Error('offline'); } }, { title: 'B' });
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toMatchObject({ success: false, outcome: 'failed', error: expect.stringContaining('attachments.webUploadRetry') });
+            expect(showToast).toHaveBeenCalledWith(expect.stringContaining('attachments.webUploadRetry'), 'error');
+            expect(updateTask).not.toHaveBeenCalled();
+        });
+
+        it('returns failed when retaining attachments fails', async () => {
+            const showToast = vi.fn();
+            const cancelAttachmentSaveBeforeStoreUpdate = vi.fn();
+            const { result } = renderIncremental({
+                showToast, cancelAttachmentSaveBeforeStoreUpdate,
+                retainWebAttachmentsBeforeStore: () => { throw new Error('attachments.webUploadChanged'); },
+            }, { title: 'B' });
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toMatchObject({ success: false, outcome: 'failed' });
+            expect(cancelAttachmentSaveBeforeStoreUpdate).toHaveBeenCalled();
+            expect(showToast).toHaveBeenCalledWith(expect.any(String), 'error');
+            expect(updateTask).not.toHaveBeenCalled();
+        });
+
+        it('returns failed when the store update fails', async () => {
+            const showToast = vi.fn();
+            updateTask.mockResolvedValueOnce({ success: false, error: 'nope' });
+            const { result, sessionRef } = renderIncremental({ showToast }, { title: 'B' });
+            const baseBefore = sessionRef.current?.base;
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toEqual({ success: false, error: 'nope', outcome: 'failed' });
+            expect(showToast).toHaveBeenCalledWith('nope', 'error');
+            expect(sessionRef.current?.base).toBe(baseBefore);
+        });
+
+        it('returns failed when attachment durability fails', async () => {
+            flushPendingSaveMock.mockRejectedValueOnce(new Error('sqlite unavailable'));
+            const showToast = vi.fn();
+            const { result } = renderIncremental({ showToast, beginAttachmentSave: vi.fn(() => true) }, { title: 'B' });
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toEqual({ success: false, error: 'sqlite unavailable', outcome: 'failed' });
+            expect(showToast).toHaveBeenCalledWith('sqlite unavailable', 'error');
+        });
+
+        it('returns saved and moves the base after a write', async () => {
+            const { result, sessionRef } = renderIncremental({}, { title: 'B' });
+            let outcome: TaskItemSubmitResult;
+            await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+            expect(outcome!).toMatchObject({ success: true, outcome: 'saved' });
+            expect(sessionRef.current?.base.draft.title).toBe('B');
+        });
+    });
+
+    it('falls back to the regular save when the session ref is empty', async () => {
+        const { result, sessionRef } = renderIncremental({}, { title: 'B' });
+        sessionRef.current = null;
+        let outcome: TaskItemSubmitResult;
+        await act(async () => { outcome = await result.current(undefined, { keepEditing: true }); });
+        expect(outcome).not.toHaveProperty('outcome');
+        expect(updateTask).toHaveBeenCalledWith(task.id, { title: 'B' });
+    });
 });

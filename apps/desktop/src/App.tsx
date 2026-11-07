@@ -60,7 +60,7 @@ import { Dialog, DialogBody, DialogFooter } from './components/ui/Dialog';
 import { useLanguage } from './contexts/language-context';
 import { KeybindingProvider } from './contexts/keybinding-context';
 import { QuickAddModal } from './components/QuickAddModal';
-import { runAfterTaskEditExit } from './components/Task/task-edit-session';
+import { flushForClose, runAfterTaskEditExit } from './components/Task/task-edit-session';
 import { CloseBehaviorModal } from './components/CloseBehaviorModal';
 import { PersistenceFailureBanner } from './components/PersistenceFailureBanner';
 import { startDesktopNotifications, stopDesktopNotifications } from './lib/notification-service';
@@ -755,7 +755,7 @@ function App() {
 
 
         await beginCloseFlush({
-            flush: flushPendingSave,
+            flush: () => flushForClose(flushPendingSave, (error) => void logError(error, { scope: 'app', step: 'Save failed' })),
             timeoutMs: CLOSE_FLUSH_TIMEOUT_MS,
             logStep: (step) => {
                 void logInfo(`Close trace: ${step}`, { scope: 'app', force: true });
@@ -820,7 +820,7 @@ function App() {
         const unsubscribeExternalSync = SyncService.subscribeExternalSyncChange(setExternalSyncChange);
 
         const handleUnload = () => {
-            flushPendingSave().catch((error) => reportError('Save failed', error));
+            flushForClose(flushPendingSave, (error) => reportError('Save failed', error)).catch((error) => reportError('Save failed', error));
         };
         window.addEventListener('beforeunload', handleUnload);
         let unlistenClose: (() => void) | null = null;
@@ -840,7 +840,7 @@ function App() {
                             void logInfo(`Close trace: ${step}`, { scope: 'app', force: true });
                         };
                         const boundedCloseFlushPromise = beginCloseFlush({
-                            flush: flushPendingSave,
+                            flush: () => flushForClose(flushPendingSave, (error) => reportError('Save failed', error)),
                             timeoutMs: CLOSE_FLUSH_TIMEOUT_MS,
                             logStep,
                             reportError,

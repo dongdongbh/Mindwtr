@@ -2836,6 +2836,8 @@ export const svOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': 'Ersätt uppgiftens rad med redigeraren i den aktuella listan.',
         'settings.taskEditorPresentationModal': 'Popup',
         'settings.taskEditorPresentationModalDesc': 'Öppna redigeraren i en centrerad ruta för fokuserad redigering.',
+        'settings.taskEditorAutosave': 'Spara ändringar automatiskt',
+        'settings.taskEditorAutosaveDesc': 'Ändringar sparas medan du gör dem. När du lämnar redigeraren får du aldrig frågan om du vill spara eller kasta.',
         'settings.taskEditorSection': 'Sektion',
         'settings.taskEditorOpenByDefault': 'Öppna som standard',
         'settings.taskEditorDefaultOpenDesc': 'Håll de här sektionerna i uppgiftsredigeraren expanderade när de inte redan har innehåll.',

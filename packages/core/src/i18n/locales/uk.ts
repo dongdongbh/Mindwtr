@@ -2801,6 +2801,8 @@ export const ukOverrides: Record<string, string> = {
     "settings.taskEditorPresentationInlineDesc": "Замінити рядок завдання редактором у поточному списку.",
     "settings.taskEditorPresentationModal": "Спливаюче вікно",
     "settings.taskEditorPresentationModalDesc": "Відкрийте редактор у центрованому режимі для сфокусованого редагування.",
+    "settings.taskEditorAutosave": "Зберігати зміни автоматично",
+    "settings.taskEditorAutosaveDesc": "Зміни зберігаються одразу під час редагування. Під час виходу з редактора ніколи не запитується, чи зберегти зміни, чи відкинути їх.",
     "settings.taskEditorSection": "Розділ",
     "settings.taskEditorOpenByDefault": "Відкрити за умовчанням",
     "settings.taskEditorDefaultOpenDesc": "Тримайте ці розділи редактора завдань розгорнутими, якщо вони ще не мають вмісту.",

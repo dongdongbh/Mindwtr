@@ -478,3 +478,37 @@ export function taskDraftToChangedUpdatePatch(
     }
     return narrowed;
 }
+
+type TaskDraftChangedSinceOptions = {
+    statusOverride?: TaskStatus;
+    attachments?: Attachment[];
+    previousAttachments?: Attachment[];
+};
+
+export function taskDraftToChangedSincePatch(
+    draft: TaskDraft,
+    previousDraft: TaskDraft,
+    baselineTask: Task,
+    options: TaskDraftChangedSinceOptions = {},
+): Partial<Task> | null {
+    const { statusOverride } = options;
+    const current = taskDraftToUpdatePatch(draft, baselineTask, { attachments: options.attachments });
+    if (!current) return statusOverride ? { status: statusOverride } : null;
+    const previous = taskDraftToUpdatePatch(previousDraft, baselineTask, { attachments: options.previousAttachments }) ?? {};
+
+    // The serializer omits some fields when they equal the baseline, so an absent key means "baseline value".
+    const fullValue = (side: Partial<Task>, key: keyof Task) => (key in side ? side[key] : baselineTask[key]);
+    const patch: Partial<Task> = {};
+    const keys = new Set([...Object.keys(current), ...Object.keys(previous)] as (keyof Task)[]);
+    for (const key of keys) {
+        const value = fullValue(current, key);
+        if (!areSerializedTaskFieldValuesEqual(value, fullValue(previous, key))) {
+            (patch as Record<keyof Task, unknown>)[key] = value;
+        }
+    }
+    if (current.relativeStartOffset && ('startTime' in patch || 'dueDate' in patch)) {
+        patch.relativeStartOffset = current.relativeStartOffset;
+    }
+    if (statusOverride) patch.status = statusOverride;
+    return Object.keys(patch).length > 0 ? patch : null;
+}

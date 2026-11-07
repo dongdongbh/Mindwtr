@@ -67,6 +67,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
 
 
         { key: 'taskEditorPresentation', section: 'taskEditorLayout' },
+        { key: 'taskEditorAutosave', section: 'taskEditorLayout' },
     ],
     manage: ['manage', 'manageAreas', 'managePeople', 'manageSomedaySections', 'manageContexts', 'manageTags'],
     notifications: [
@@ -279,6 +280,7 @@ export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
     inboxDefaultMode: 'Mobile inbox processing has no guided/quick default-mode row.',
     inboxTwoMinuteFirst: 'Mobile inbox processing has no two-minute-rule ordering row.',
     taskEditorPresentation: 'Desktop-only inline/modal task-editor choice; the mobile editor has one fixed presentation.',
+    taskEditorAutosave: 'Desktop-only: the mobile editor keeps its Save button.',
     attachmentsCleanup: 'Desktop-only attachments cleanup section.',
     localApiServer: 'No local API server on mobile.',
     localApiPort: 'Part of the desktop-only local API server above.',

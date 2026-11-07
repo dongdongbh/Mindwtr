@@ -2377,6 +2377,8 @@ export const csOverrides: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': 'Nahradit řádek úkolu editorem v aktuálním seznamu.',
         'settings.taskEditorPresentationModal': 'Vyskakovací okno',
         'settings.taskEditorPresentationModalDesc': 'Otevřít editor ve vystředěném okně pro soustředěnou úpravu.',
+        'settings.taskEditorAutosave': 'Ukládat úpravy automaticky',
+        'settings.taskEditorAutosaveDesc': 'Změny se ukládají průběžně. Při opuštění editoru se vás nikdy nezeptá, zda změny uložit, nebo zahodit.',
         'settings.taskEditorSection': 'Sekce',
         'settings.taskEditorOpenByDefault': 'Otevřeno ve výchozím stavu',
         'settings.taskEditorDefaultOpenDesc': 'Nechat tyto sekce editoru úkolů rozbalené, i když ještě nemají obsah.',

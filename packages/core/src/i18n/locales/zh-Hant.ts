@@ -2804,6 +2804,8 @@ export const zhHant: Record<string, string> = {
         'settings.taskEditorPresentationInlineDesc': '在目前清單中以編輯器取代任務所在列。',
         'settings.taskEditorPresentationModal': '彈窗',
         'settings.taskEditorPresentationModalDesc': '在居中的彈窗中打開編輯器，適合專注編輯。',
+        'settings.taskEditorAutosave': '自動保存編輯',
+        'settings.taskEditorAutosaveDesc': '修改會在編輯時自動保存。離開編輯器時不會再詢問保存還是放棄。',
         'settings.taskEditorSection': '區段',
         'settings.taskEditorOpenByDefault': '預設展開',
         'settings.taskEditorDefaultOpenDesc': '讓這些任務編輯器區段在沒有內容時保持展開。',
