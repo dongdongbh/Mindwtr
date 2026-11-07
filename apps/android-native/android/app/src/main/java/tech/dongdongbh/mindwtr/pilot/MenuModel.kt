@@ -189,6 +189,14 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     var bulkBusy by mutableStateOf<String?>(null); private set
 
+    var projectBulk by mutableStateOf<JSONObject?>(null); private set
+    var projectBulkView by mutableStateOf<JSONObject?>(null); private set
+    var projectShown by mutableStateOf(false)
+    private var projectBulkReads = 0
+    private val projectSelecting get() = projectShown && projectBulk != null
+    val bulkList: String? get() = if (projectSelecting) "project" else list
+    val bulkView: JSONObject? get() = if (projectSelecting) projectBulkView else page?.bulk
+
     override var pickerFound by mutableStateOf<JSONObject?>(null); private set
 
     val settings = SettingsModel(this, saved)
@@ -1101,9 +1109,10 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
 
     private fun bulkInput(list: String): JSONObject? {
-        val bulk = own(list).optJSONObject("bulk")?.takeIf { list in BULK_LISTS } ?: return null
+        val bulk = (if (list == "project") projectBulk?.takeIf { projectShown } else own(list).optJSONObject("bulk")?.takeIf { list in BULK_LISTS }) ?: return null
         val open = dialog
         return JSONObject().put("list", list).put("anchorId", bulk.opt("anchorId") ?: JSONObject.NULL).put("rangeSelectMode", bulk.optBoolean("range")).apply {
+            if (list == "project") put("params", bulk.getJSONObject("params"))
             bulk.optJSONArray("except")?.let { put("selectAll", JSONObject().put("except", it)) } ?: put("taskIds", bulk.optJSONArray("selected") ?: JSONArray())
             if (open?.optString("kind") == "organize") {
                 put("organize", JSONObject().put("draft", open.optJSONObject("draft") ?: JSONObject()))
@@ -1127,7 +1136,61 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
 
+    fun projectBulkRow(row: TaskRow, params: JSONObject?, readOnly: Boolean): RowActions? {
+        if (readOnly || params == null) return null
+        val selecting = projectSelecting && projectBulk?.getJSONObject("params")?.optString("projectId") == params.optString("projectId")
+        return RowActions(selecting = selecting, selected = selecting && row.id in projectBulkView?.optJSONArray("selectedIds").ids(),
+            select = { projectBulkTap(row.id, params) })
+    }
+
+
+    private fun projectBulkTap(taskId: String, params: JSONObject) {
+        val kept = projectBulk?.takeIf { it.getJSONObject("params").optString("projectId") == params.optString("projectId") }
+        val range = kept?.optBoolean("range") == true
+        projectBulk = JSONObject((kept ?: JSONObject().put("selected", JSONArray())).toString()).put("params", params).put("range", false)
+        readProjectBulk(JSONObject().put("selectionEdit", JSONObject().put("taskId", taskId).put("range", range)))
+    }
+
+
+    private fun readProjectBulk(bulkEdit: JSONObject? = null) = whenIdle {
+        val input = bulkInput("project")?.apply {
+            bulkEdit?.optJSONObject("selectionEdit")?.let { put("selectionEdit", it) }
+            bulkEdit?.optJSONObject("organizeEdit")?.let { optJSONObject("organize")?.put("edit", it) }
+        } ?: return@whenIdle
+        val ticket = ++projectBulkReads
+        shell.perform { runtime ->
+            val view = try { runtime.menuRead("bulk", input.toString()) } catch (failure: Exception) {
+                if (failure.message?.startsWith("INVALID_INPUT") != true) throw failure
+                shell.ui { if (ticket == projectBulkReads) endBulk("project") }
+                return@perform
+            }
+            shell.ui { if (ticket == projectBulkReads && projectBulk != null) showProjectBulk(view) }
+        }
+    }
+
+
+    private fun showProjectBulk(view: JSONObject) {
+        projectBulkView = view
+        projectBulk = projectBulk?.let { JSONObject(it.toString()).put("selected", view.getJSONArray("selectedIds")).put("anchorId", view.opt("anchorId") ?: JSONObject.NULL) }
+        view.optJSONObject("organize")?.let { organize ->
+            dialog?.takeIf { it.optString("kind") == "organize" }?.let { keepDialog(JSONObject(it.toString()).put("draft", organize.getJSONObject("draft"))) }
+        }
+    }
+
+
+    fun followProjectBulk(params: JSONObject?) {
+        val kept = projectBulk ?: return
+        if (params == null || kept.getJSONObject("params").optString("projectId") != params.optString("projectId")) return endBulk("project")
+        projectBulk = JSONObject(kept.toString()).put("params", params)
+        readProjectBulk()
+    }
+
+
+    private fun bulkReload(bulkEdit: JSONObject? = null) = if (projectSelecting) readProjectBulk(bulkEdit) else reload(bulkEdit = bulkEdit)
+
+
     fun bulkTap(taskId: String) {
+        if (projectSelecting) return projectBulkTap(taskId, projectBulk!!.getJSONObject("params"))
         val list = list?.takeIf { it in BULK_LISTS } ?: return
         val bulk = own(list).optJSONObject("bulk") ?: JSONObject().put("selected", JSONArray())
         val except = bulk.optJSONArray("except")?.ids()
@@ -1142,6 +1205,10 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
 
     fun bulkRange() {
+        if (projectSelecting) {
+            projectBulk = projectBulk?.let { JSONObject(it.toString()).put("range", !it.optBoolean("range")) }
+            return readProjectBulk()
+        }
         val list = list?.takeIf { it in BULK_LISTS } ?: return
         editOwn(list) { optJSONObject("bulk")?.let { it.put("range", !it.optBoolean("range")) } }
         reload()
@@ -1156,6 +1223,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
 
     fun endBulk(list: String) {
+        if (list == "project") {
+            ++projectBulkReads
+            projectBulk = null
+            projectBulkView = null
+            for (kind in listOf("organize", "bulkTag", "tokens", "confirm")) closeDialog(kind)
+            return
+        }
         editOwn(list) { remove("bulk") }
         loaded?.takeIf { it.list == list }?.let { loaded = it.withBulk(null) }
     }
@@ -1168,40 +1242,40 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
 
     fun bulkDelete() {
-        val bulk = page?.bulk ?: return
+        val bulk = bulkView ?: return
         bulkBusy = "delete"
         confirm(bulk.getJSONObject("deleteConfirmation"), bulkPayload(JSONObject().put("type", "trashTasks")) ?: return, "bulkAction")
     }
 
 
     private fun bulkPayload(action: JSONObject): JSONObject? {
-        val list = list ?: return null
-        val bulk = page?.bulk ?: return null
+        val list = bulkList ?: return null
+        val bulk = bulkView ?: return null
         val target = JSONObject(action.toString()).apply {
 
             bulk.optJSONObject("selectAll")?.let { put("selectAll", it) }
                 ?: put("taskIds", bulk.getJSONArray("selectedIds")).put("taskRevisions", bulk.getJSONObject("taskRevisions"))
         }
-        return JSONObject().put("list", list).put("action", target)
+        return JSONObject().put("list", list).put("action", target).apply { if (list == "project") put("params", projectBulk!!.getJSONObject("params")) }
     }
 
 
     fun openRemoveTag() {
         keepDialog(JSONObject().put("kind", "tokens").put("list", "bulk").put("text", "").put("picked", JSONArray()))
-        reload()
+        bulkReload()
     }
 
 
     fun openOrganize() {
         keepDialog(JSONObject().put("kind", "organize").put("draft", JSONObject()))
-        reload()
+        bulkReload()
     }
 
 
     fun organizeEdit(edit: JSONObject) {
 
         if (edit.optString("type") == "setStatus" || edit.optString("field") == "delegateWho") dialog?.let { keepDialog(JSONObject(it.toString()).apply { remove("validation") }) }
-        reload(bulkEdit = JSONObject().put("organizeEdit", edit))
+        bulkReload(JSONObject().put("organizeEdit", edit))
     }
 
     private var organizeTyped = 0
@@ -1222,13 +1296,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     fun organizePicker(kind: String?) {
         dialog?.let { keepDialog(JSONObject(it.toString()).apply { remove("query"); remove("createFailed"); if (kind == null) remove("picker") else put("picker", kind) }) }
-        if (kind != null) reload()
+        if (kind != null) bulkReload()
     }
 
     fun organizeQuery(text: String) {
         dialog?.let { keepDialog(JSONObject(it.toString()).put("query", text).apply { remove("createFailed") }) }
         val mine = ++organizeTyped
-        main.postDelayed({ if (mine == organizeTyped) reload() }, 200)
+        main.postDelayed({ if (mine == organizeTyped) bulkReload() }, 200)
     }
 
 
@@ -1236,19 +1310,19 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         shell.failedAction?.takeIf { it.kind == "bulkCreate" }?.let { return retry(it) }
         val open = dialog?.takeIf { it.optString("kind") == "organize" } ?: return
         val kind = open.menuText("picker") ?: return
-        val list = list ?: return
+        val list = bulkList ?: return
         if (!idle) return
         keepDialog(JSONObject(open.toString()).put("creating", true).apply { remove("createFailed") })
         create(FailedAction("bulkCreate", UUID.randomUUID().toString(), JSONObject().put("list", list).put("kind", kind).put("name", name)
-            .put("draft", open.optJSONObject("draft") ?: JSONObject()).toString()))
+            .put("draft", open.optJSONObject("draft") ?: JSONObject()).apply { if (list == "project") put("params", projectBulk!!.getJSONObject("params")) }.toString()))
     }
 
 
     fun organizeSubmit() {
         ++organizeTyped
-        reload()
+        bulkReload()
         whenIdle {
-            val submit = page?.bulk?.optJSONObject("picker")?.optJSONObject("submit") ?: return@whenIdle
+            val submit = bulkView?.optJSONObject("picker")?.optJSONObject("submit") ?: return@whenIdle
             submit.optJSONObject("edit")?.let { edit -> organizePicker(null); organizeEdit(edit) } ?: submit.menuText("create")?.let(::organizeCreate)
         }
     }
@@ -1259,14 +1333,14 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         ++organizeTyped
         for (field in open.keys().asSequence().toList()) if (field.startsWith("typed:")) {
             val typed = open.getString(field)
-            if (page?.bulk?.optJSONObject("organize")?.getJSONObject("draft")?.optString(field.removePrefix("typed:")) != typed) {
-                reload(bulkEdit = JSONObject().put("organizeEdit", JSONObject().put("type", "setText").put("field", field.removePrefix("typed:")).put("value", typed)))
+            if (bulkView?.optJSONObject("organize")?.getJSONObject("draft")?.optString(field.removePrefix("typed:")) != typed) {
+                bulkReload(JSONObject().put("organizeEdit", JSONObject().put("type", "setText").put("field", field.removePrefix("typed:")).put("value", typed)))
             }
         }
         whenIdle {
-            val organize = page?.bulk?.optJSONObject("organize") ?: return@whenIdle
+            val organize = bulkView?.optJSONObject("organize") ?: return@whenIdle
 
-            val review = page?.bulk?.takeIf { list == "review" }
+            val review = bulkView?.takeIf { bulkList == "review" }
             if (!organize.getBoolean("canApply")) dialog?.let { keepDialog(JSONObject(it.toString()).put("validation", true)) }
             else if (review != null) { bulkBusy = "organize"; act("reviewAction", organizeTasks(review.getJSONArray("selectedIds").ids(), organize.getJSONObject("draft"), review.getJSONObject("taskRevisions"))) }
             else bulkAction(JSONObject().put("type", "organize").put("draft", organize.getJSONObject("draft")), "organize")
@@ -1280,10 +1354,12 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         closeDialog("organize")
         closeDialog("bulkTag")
         if (reply.optBoolean("changed")) endBulk(list)
+        if (list == "project") shell.refreshProjects()
         reply.optJSONObject("toast")?.let { toast ->
             val undo = toast.optJSONObject("undo")
             shell.showToast(toast, undo?.getString("label")) {
-                undo?.let { whenIdle { bulkBusy = "undo"; act("bulkAction", JSONObject().put("list", list).put("action", it.getJSONObject("action"))) } }
+                val params = JSONObject(action.title).optJSONObject("params")
+                undo?.let { whenIdle { bulkBusy = "undo"; act("bulkAction", JSONObject().put("list", list).put("action", it.getJSONObject("action")).apply { params?.let { kept -> put("params", kept) } }) } }
             }
         }
     }

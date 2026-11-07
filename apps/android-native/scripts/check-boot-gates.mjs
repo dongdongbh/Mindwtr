@@ -2188,7 +2188,7 @@ assert.match(projectsUi, /val open = !collapsible \|\| \(if \(bucket == "deferre
 assert.match(projectsUi, /val areaKey = group\.areaId \?: "no-area"/);
 
 assert.match(projectsUi, /val completable = detail\?\.readOnly == false/);
-assert.match(projectsUi, /TaskRowItem\(model, entry\.row, status = RowStatus\.Badge, completable = completable,\s*note = entry\.sequenceCue\?\.let\(CUE_KEYS::get\)\?\.let\(::t\), available = entry\.sequenceCue == "available"\)/);
+assert.match(projectsUi, /TaskRowItem\(model, entry\.row, status = RowStatus\.Badge, completable = completable,\s*note = entry\.sequenceCue\?\.let\(CUE_KEYS::get\)\?\.let\(::t\), available = entry\.sequenceCue == "available",\s*actions = menu\.projectBulkRow\(entry\.row, bulkParams, readOnly = !completable\)\)/);
 
 assert.match(model, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+return if \(start == null\) view else readProject\(runtime, id, null, depth\)/);
 assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) keepProject\(null\)\s+project = detail/,
@@ -2810,7 +2810,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /"bulkAction" -> bulkDone\(action, reply\)\s+"focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> \{\s+if \(action\.kind == "focusSave" && JSONObject\(action\.title\)\.optString\("view"\) == "contexts"\) \{[\s\S]{0,600}else focusControls\.done\(action, reply\)/);
     assert.match(menuModel, /fun bulkAction\(action: JSONObject, busy: String\) \{\s+bulkBusy = busy\s+act\("bulkAction", bulkPayload\(action\) \?: return\)/);
     assert.match(menuModel, /confirm\(bulk\.getJSONObject\("deleteConfirmation"\), bulkPayload\(JSONObject\(\)\.put\("type", "trashTasks"\)\) \?: return, "bulkAction"\)/, 'a bulk delete asks core\'s question first');
-    assert.match(menuModel, /undo\?\.let \{ whenIdle \{ bulkBusy = "undo"; act\("bulkAction", JSONObject\(\)\.put\("list", list\)\.put\("action", it\.getJSONObject\("action"\)\)\) \} \}/, 'Undo is core\'s restoreTasks, a new request UUID');
+    assert.match(menuModel, /undo\?\.let \{ whenIdle \{ bulkBusy = "undo"; act\("bulkAction", JSONObject\(\)\.put\("list", list\)\.put\("action", it\.getJSONObject\("action"\)\)\.apply \{ params\?\.let \{ kept -> put\("params", kept\) \} \}\) \} \}/, 'Undo is core\'s restoreTasks, a new request UUID, with a Project selection\'s params');
     assert.match(menuModel, /if \(reply\.optBoolean\("changed"\)\) endBulk\(list\)/, 'an action that changed something leaves selection mode');
     assert.match(focusModelKt, /private fun command\(kind: String, input: JSONObject\) = menu\.command\(kind, JSONObject\(input\.toString\(\)\)\.put\("controls", state\)\)/);
     assert.match(focusModelKt, /menu\.create\(FailedAction\("focusSave", open\.getString\("requestId"\), JSONObject\(\)\.put\("controls", state\)\.put\("name", name\)\.toString\(\)\)\)/,

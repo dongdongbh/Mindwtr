@@ -68,6 +68,9 @@ import type { Area, Project, Task, TaskStatus } from './types';
 
 export type NativeBulkList = 'inbox' | 'waiting' | 'someday' | 'reference' | 'done';
 const BULK_LISTS: readonly NativeBulkList[] = ['inbox', 'waiting', 'someday', 'reference', 'done'];
+export type NativeBulkWriteList = NativeBulkList | 'project';
+type BulkWriteScope<L extends string> = { list: L; params?: undefined } | { list: 'project'; params: ProjectBulkParams };
+const BULK_WRITE_LISTS: readonly NativeBulkWriteList[] = [...BULK_LISTS, 'project'];
 export type NativeBulkReadList = NativeBulkList | 'project' | 'review' | 'contexts';
 const BULK_READ_LISTS: readonly NativeBulkReadList[] = [...BULK_LISTS, 'project', 'review', 'contexts'];
 const BULK_READ_SCREENS: Record<NativeBulkReadList, (typeof TASK_LIST_BULK_SCREENS)[keyof typeof TASK_LIST_BULK_SCREENS]> = {
@@ -407,7 +410,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
     };
 
 
-    const resolveTarget = (list: NativeBulkList, action: Record<string, unknown>): { taskIds: string[]; current: boolean } | NativeHostResult<never> => {
+    const resolveTarget = (list: NativeBulkWriteList, action: Record<string, unknown>): { taskIds: string[]; current: boolean } | NativeHostResult<never> => {
         if (action.taskIds !== undefined && action.selectAll !== undefined) return fail('INVALID_INPUT', 'Send taskIds or selectAll, not both');
         if (action.selectAll === undefined) {
             if (!isIdList(action.taskIds)) return fail('INVALID_INPUT', 'Task IDs or Select all are required');
@@ -613,19 +616,19 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
 
         async createBulkOrganizeDestination(input: {
             requestId: string;
-            list: NativeBulkList | 'review';
             kind: 'project' | 'area';
             name: string;
             draft?: Partial<BulkOrganizeDraft>;
-        }): Promise<NativeHostResult<NativeBulkOrganizeCreateResult>> {
+        } & BulkWriteScope<NativeBulkList | 'review'>): Promise<NativeHostResult<NativeBulkOrganizeCreateResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
 
 
             const draft = isObjectRecord(input) ? readBulkOrganizeDraftShape(input.draft) : null;
-            if (!isObjectRecord(input) || (input.list !== 'review' && (!BULK_LISTS.includes(input.list) || !TASK_LIST_BULK_SCREENS[input.list].organize))
-                || (input.kind !== 'project' && input.kind !== 'area') || !isText(input.name) || !input.name.trim() || !draft) {
-                return fail('INVALID_INPUT', 'A request UUID, a list that offers Bulk organize, a project or area name and a valid draft are required');
+            if (!isObjectRecord(input) || (input.list !== 'review' && (!BULK_WRITE_LISTS.includes(input.list) || !TASK_LIST_BULK_SCREENS[input.list].organize))
+                || (input.kind !== 'project' && input.kind !== 'area') || !isText(input.name) || !input.name.trim() || !draft
+                || (input.list === 'project' ? !readProjectBulkParams(input.params) || !listRows('project', input.params).ok : input.params !== undefined)) {
+                return fail('INVALID_INPUT', 'A request UUID, a list that offers Bulk organize, a project or area name and a valid draft are required; a Project selection also needs its editable task view params');
             }
             const { kind, requestId } = input;
             const name = input.name.trim();
@@ -665,15 +668,16 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
         },
 
 
-        async runBulkAction(input: { requestId: string; list: NativeBulkList; action: NativeBulkAction }): Promise<NativeHostResult<NativeListActionResult<NativeBulkAction>>> {
+        async runBulkAction(input: { requestId: string; action: NativeBulkAction } & BulkWriteScope<NativeBulkList>): Promise<NativeHostResult<NativeListActionResult<NativeBulkAction>>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (!isObjectRecord(input) || !BULK_LISTS.includes(input.list) || !isObjectRecord(input.action)) {
-                return fail('INVALID_INPUT', 'A request UUID, a list and an action are required');
+            if (!isObjectRecord(input) || !BULK_WRITE_LISTS.includes(input.list) || !isObjectRecord(input.action)
+                || (input.list === 'project' ? (input.action as Record<string, unknown>).selectAll !== undefined || !readProjectBulkParams(input.params) : input.params !== undefined)) {
+                return fail('INVALID_INPUT', 'A request UUID, a list and an action are required; a Project selection also needs its task view params and no Select all');
             }
             const { list } = input;
             const action = input.action as NativeBulkAction & Record<string, unknown>;
-            return receipts.run(input.requestId, JSON.stringify(['bulk', list, action]), async (): Promise<ActionOutcome> => {
+            return receipts.run(input.requestId, JSON.stringify(['bulk', list, action, ...(list === 'project' ? [input.params] : [])]), async (): Promise<ActionOutcome> => {
                 const screen = TASK_LIST_BULK_SCREENS[list];
                 const t = deps.t();
                 const state = useTaskStore.getState();
@@ -699,6 +703,12 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                         return task?.deletedAt && !task.purgedAt;
                     })) {
                     return unchanged();
+                }
+                if (list === 'project' && isIdList(action.taskIds)) {
+                    const rows = listRows('project', input.params);
+                    if (!rows.ok) return rows;
+                    const inProject = new Set(selectableIds(rows.value.rows));
+                    if (action.taskIds.some((id) => !inProject.has(id))) return fail('INVALID_INPUT', 'Every task must be an editable task of this Project');
                 }
                 const target = resolveTarget(list, action);
                 if ('ok' in target) return target;

@@ -457,8 +457,20 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
     val c = LocalTheme.current.colors
     val detail = project
     val completable = detail?.readOnly == false
+    val bulkParams = detail?.takeIf { !it.readOnly && it.projectId == openProjectId }?.let { shown ->
+        JSONObject().put("projectId", shown.projectId).put("showCompleted", shown.controls?.optBoolean("showCompleted") == true)
+            .put("completedCollapsed", shown.controls?.optBoolean("completedCollapsed") == true)
+            .put("filters", shown.listFilters?.optJSONObject("filters")?.optJSONObject("state") ?: JSONObject()).put("filterSheetOpen", false)
+    }
+    val selection = menu.projectBulkView?.takeIf { menu.projectBulk != null }
+    BackHandler(enabled = menu.projectBulk != null && menu.dialog == null && failedAction == null) { menu.endBulk("project") }
     LaunchedEffect(openProjectId) { projectDetails.follow(openProjectId) }
-    DisposableEffect(Unit) { onDispose { projectDetails.closeOverlays() } }
+    LaunchedEffect(bulkParams?.toString(), detail?.revision) { menu.followProjectBulk(bulkParams) }
+    LaunchedEffect(projectDetails.reorderMode) { if (projectDetails.reorderMode) menu.endBulk("project") }
+    DisposableEffect(Unit) {
+        menu.projectShown = true
+        onDispose { menu.projectShown = false; projectDetails.closeOverlays() }
+    }
     Column(modifier) {
 
 
@@ -542,6 +554,11 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 info.viewportStartOffset, info.viewportEndOffset) } }.collect { if (!projectDetails.reorderMode) projectDetails.viewedTaskId = it }
         }
 
+        if (selection != null && !projectDetails.reorderMode) {
+            val reorder = { menu.endBulk("project"); projectDetails.toggleReorder() }
+            BulkBar(model, selection, reorder.takeIf { detail?.controls?.optBoolean("hasReorderTargets") == true && !projectDetails.customSort })
+        }
+
         if (projectDetails.reorderMode) {
 
 
@@ -565,7 +582,8 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                     }
                     is DetailTask -> item(key = "task:${entry.row.id}") {
                         TaskRowItem(model, entry.row, status = RowStatus.Badge, completable = completable,
-                            note = entry.sequenceCue?.let(CUE_KEYS::get)?.let(::t), available = entry.sequenceCue == "available")
+                            note = entry.sequenceCue?.let(CUE_KEYS::get)?.let(::t), available = entry.sequenceCue == "available",
+                            actions = menu.projectBulkRow(entry.row, bulkParams, readOnly = !completable))
                     }
                 }
 

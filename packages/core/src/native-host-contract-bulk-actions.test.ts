@@ -776,7 +776,7 @@ describe('native host contract: selection mode', () => {
                 requestId: requestId(), list: 'inbox', kind: 'project', name: 'Garden', ...input,
             } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             await refused({ list: 'waiting' });
-            await refused({ list: 'project' });
+            await refused({ list: 'contexts' });
             await refused({ kind: 'tag' });
             await refused({ name: '   ' });
             await refused({ name: 7 });

@@ -65,8 +65,14 @@ import org.json.JSONObject
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BulkBar(model: InboxViewModel) = with(model.menu) {
-
     val bulk = page?.bulk?.takeIf { list in BULK_LISTS } ?: return
+    BulkBar(model, bulk)
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun BulkBar(model: InboxViewModel, bulk: JSONObject, reorder: (() -> Unit)? = null) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
     val bar = bulk.getJSONObject("bar")
@@ -83,7 +89,7 @@ fun BulkBar(model: InboxViewModel) = with(model.menu) {
                 Text(busyLabels.optString(running, bar.getString("busyLabel")), style = rnText(11, 500), color = c.secondaryText)
             }
             val exit = bar.getJSONObject("exit")
-            BulkExitButton(exit.getString("accessibilityLabel"), exit.getBoolean("enabled") && !model.busy) { list?.let(::endBulk) }
+            BulkExitButton(exit.getString("accessibilityLabel"), exit.getBoolean("enabled") && !model.busy) { bulkList?.let(::endBulk) }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (option in bar.menuObjects("statuses")) {
@@ -93,8 +99,9 @@ fun BulkBar(model: InboxViewModel) = with(model.menu) {
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (reorder != null) BarButton(t("projects.reorderTasks"), idle, c.filterBg, c.text, action = reorder)
             val all = bulk.getInt("selectableCount")
-            BarButton(labels.getString("selectAll"), idle && all > 0 && bulk.getInt("selectedCount") < all, c.filterBg, c.text) { bulkSelectAll() }
+            if (bulk.optString("list") != "project") BarButton(labels.getString("selectAll"), idle && all > 0 && bulk.getInt("selectedCount") < all, c.filterBg, c.text) { bulkSelectAll() }
             bar.optJSONObject("moveToSection")?.let { move ->
                 BarButton(move.getString("label"), enabled(move), c.filterBg, c.text) {
                     bulk.optJSONObject("moveToSection")?.let { openMove(it.getJSONArray("taskIds").ids(), it.getJSONObject("taskRevisions")) }
@@ -146,7 +153,7 @@ internal fun BarButton(label: String, enabled: Boolean, background: Color, color
 
 @Composable
 fun AddTagDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
-    val text = page?.bulk?.getJSONObject("addTag") ?: return
+    val text = bulkView?.getJSONObject("addTag") ?: return
     val c = LocalTheme.current.colors
     val typed = open.optString("text")
     val canSave = idle && typed.isNotBlank()
@@ -202,7 +209,7 @@ internal fun ModalInput(value: String, placeholder: String, description: String,
 
 @Composable
 fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
-    val organize = page?.bulk?.optJSONObject("organize") ?: return
+    val organize = bulkView?.optJSONObject("organize") ?: return
     val theme = LocalTheme.current
     val c = theme.colors
     val locked = !idle
@@ -263,7 +270,7 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     .clickable(enabled = !model.busy) { keepDialog(null) }.padding(horizontal = 12.dp, vertical = 10.dp))
                 val apply = organize.getString("applyLabel")
 
-                val canApply = !locked && (page?.bulk?.let { it.optInt("selectedCount", it.optJSONArray("selectedIds")?.length() ?: 0) } ?: 0) > 0
+                val canApply = !locked && (bulkView?.let { it.optInt("selectedCount", it.optJSONArray("selectedIds")?.length() ?: 0) } ?: 0) > 0
                 Row(Modifier.fade(if (canApply) 1f else 0.6f).heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp)).background(theme.filledBg)
                     .clearAndSetSemantics { contentDescription = apply; role = Role.Button; if (canApply) onClick { organizeApply(); true } else disabled() }
                     .clickable(enabled = canApply) { organizeApply() }.padding(horizontal = 14.dp),
@@ -357,8 +364,8 @@ private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject,
 private fun OrganizePicker(model: InboxViewModel, open: JSONObject, kind: String) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
-    val picker = page?.bulk?.optJSONObject("picker")?.takeIf { it.getString("kind") == kind }
-    val organize = page?.bulk?.optJSONObject("organize") ?: return
+    val picker = bulkView?.optJSONObject("picker")?.takeIf { it.getString("kind") == kind }
+    val organize = bulkView?.optJSONObject("organize") ?: return
     val title = organize.getJSONObject(kind).getString("label")
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { organizePicker(null) }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {

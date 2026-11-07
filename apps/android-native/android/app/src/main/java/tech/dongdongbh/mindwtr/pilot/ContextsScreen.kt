@@ -224,7 +224,7 @@ internal fun MenuModel.toggleRow(list: String, id: String) {
 
 private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
     if (open.optString("list") == "bulk") {
-        val bar = page?.bulk ?: return null
+        val bar = bulkView ?: return null
         val remove = bar.optJSONObject("removeTag") ?: return null
         val tokens = JSONArray().apply { for (item in bar.optJSONObject("picker")?.menuObjects("items").orEmpty()) put(item.getString("value")) }
         return JSONObject().put("title", remove.getString("title")).put("placeholder", remove.getString("placeholder"))
