@@ -283,7 +283,7 @@ class MainActivity : FragmentActivity() {
 
                 if (writable && openProjectId != null && projectDetails.projectId == openProjectId) ProjectDetailsDialogs(model)
 
-                if (writable && screen == Screen.Projects && openProjectId != null && menu.projectBulk != null && menu.projectShown) MenuDialogs(model)
+                if (writable && screen == Screen.Projects && openProjectId != null && menu.screen == null && menu.projectBulk != null && menu.projectShown) MenuDialogs(model)
 
                 if (writable) NextActionPrompt(model)
 

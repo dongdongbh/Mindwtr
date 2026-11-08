@@ -216,6 +216,18 @@ try {
     check(isOn(taskRow(nodes, BETA)) && !isOn(taskRow(nodes, GAMMA)), `a tap adds ${BETA}; ${GAMMA} stays unpicked`);
     shot('project-selection-light');
 
+    const organizeOpen = (current) => Boolean(withDescription(current, en['bulk.applyToSelected']));
+    nodes = await tapExpecting(withDescription(nodes, en['bulk.organize']), organizeOpen, 'the Organize dialog');
+    await back();
+    nodes = await waitFor('Organize closed', (current) => !organizeOpen(current), 10_000);
+    check(selecting(nodes, 2) && inProject(nodes), 'Back with Organize open closes Organize only: the selection and the project stay');
+    const addTagOpen = (current) => Boolean(textNode(current, en['bulk.addTag']));
+    nodes = await tapExpecting(withDescription(nodes, en['bulk.addTag']), addTagOpen, 'the Add tag dialog');
+    await back();
+    if (addTagOpen(await screen())) await back();
+    nodes = await waitFor('Add tag closed', (current) => !addTagOpen(current), 10_000);
+    check(selecting(nodes, 2) && inProject(nodes), 'Back with Add tag open closes Add tag only: the selection and the project stay');
+
     const before = Object.fromEntries(seen.tasks.map((entry) => [entry.title, entry.rev]));
     nodes = await tapExpecting(withDescription(nodes, moveLabel('waiting')), (current) => !selectionShown(current), 'the move landed and selection ended');
     await waitFor(`${ALPHA} and ${BETA} stored in Waiting`, () => {

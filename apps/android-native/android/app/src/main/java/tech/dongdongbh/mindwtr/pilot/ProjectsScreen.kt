@@ -463,7 +463,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             .put("filters", shown.listFilters?.optJSONObject("filters")?.optJSONObject("state") ?: JSONObject()).put("filterSheetOpen", false)
     }
     val selection = menu.projectBulkView?.takeIf { menu.projectBulk != null }
-    BackHandler(enabled = menu.projectBulk != null && menu.dialog == null && failedAction == null) { menu.endBulk("project") }
+    BackHandler(enabled = menu.projectBulk != null && failedAction == null) { if (menu.dialog != null) menu.backInDialog() else menu.endBulk("project") }
     LaunchedEffect(openProjectId) { projectDetails.follow(openProjectId) }
     LaunchedEffect(bulkParams?.toString(), detail?.revision) { menu.followProjectBulk(bulkParams) }
     LaunchedEffect(projectDetails.reorderMode) { if (projectDetails.reorderMode) menu.endBulk("project") }

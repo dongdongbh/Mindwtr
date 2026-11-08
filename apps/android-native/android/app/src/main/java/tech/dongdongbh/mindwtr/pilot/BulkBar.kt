@@ -99,7 +99,7 @@ fun BulkBar(model: InboxViewModel, bulk: JSONObject, reorder: (() -> Unit)? = nu
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (reorder != null) BarButton(t("projects.reorderTasks"), idle, c.filterBg, c.text, action = reorder)
+            if (reorder != null) BarButton(t("projects.reorderTasks"), idle, c.filterBg, c.text, tag = "task-list-reorder-shortcut", action = reorder)
             val all = bulk.getInt("selectableCount")
             if (bulk.optString("list") != "project") BarButton(labels.getString("selectAll"), idle && all > 0 && bulk.getInt("selectedCount") < all, c.filterBg, c.text) { bulkSelectAll() }
             bar.optJSONObject("moveToSection")?.let { move ->
@@ -136,11 +136,12 @@ internal fun BulkExitButton(label: String, enabled: Boolean, onExit: () -> Unit)
 
 @Composable
 internal fun BarButton(label: String, enabled: Boolean, background: Color, color: Color, description: String = label, selected: Boolean? = null,
-                      weight: Int = 600, icon: ImageVector? = null, action: () -> Unit) {
+                      weight: Int = 600, icon: ImageVector? = null, tag: String? = null, action: () -> Unit) {
     Row(Modifier.fade(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(6.dp)).background(background)
         .clearAndSetSemantics {
             contentDescription = description; role = Role.Button
             selected?.let { this.selected = it }
+            tag?.let { testTag = it }
             if (enabled) onClick { action(); true } else disabled()
         }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 10.dp, vertical = 6.dp),

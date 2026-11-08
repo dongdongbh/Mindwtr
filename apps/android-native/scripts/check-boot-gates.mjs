@@ -2188,6 +2188,12 @@ assert.match(projectsUi, /val open = !collapsible \|\| \(if \(bucket == "deferre
 assert.match(projectsUi, /val areaKey = group\.areaId \?: "no-area"/);
 
 assert.match(projectsUi, /val completable = detail\?\.readOnly == false/);
+assert.match(projectsUi, /BackHandler\(enabled = menu\.projectBulk != null && failedAction == null\) \{ if \(menu\.dialog != null\) menu\.backInDialog\(\) else menu\.endBulk\("project"\) \}/,
+    'Back in a project closes a selection dialog first, then leaves selection, before it leaves the project (#1415)');
+assert.match(source('MainActivity.kt'), /screen == Screen\.Projects && openProjectId != null && menu\.screen == null && menu\.projectBulk != null && menu\.projectShown\) MenuDialogs\(model\)/,
+    'a project selection draws the menu dialogs once: not again over a menu screen, which draws its own');
+assert.match(source('InboxViewModel.kt'), /fun closeProject\(\) \{\s+keepProject\(null\)\s+keepProjectReturn\(null\)\s+menu\.endBulk\("project"\)/, 'closing a project ends its selection, so reopening starts clean');
+assert.match(bulkUi, /BarButton\(t\("projects\.reorderTasks"\), idle, c\.filterBg, c\.text, tag = "task-list-reorder-shortcut", action = reorder\)/, 'the bar\'s Reorder carries RN\'s test ID');
 assert.match(projectsUi, /TaskRowItem\(model, entry\.row, status = RowStatus\.Badge, completable = completable,\s*note = entry\.sequenceCue\?\.let\(CUE_KEYS::get\)\?\.let\(::t\), available = entry\.sequenceCue == "available",\s*actions = menu\.projectBulkRow\(entry\.row, bulkParams, readOnly = !completable\)\)/);
 
 assert.match(model, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+return if \(start == null\) view else readProject\(runtime, id, null, depth\)/);

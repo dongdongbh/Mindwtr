@@ -2227,6 +2227,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun closeProject() {
         keepProject(null)
         keepProjectReturn(null)
+        menu.endBulk("project")
         project = null
 
         projectDetails.follow(null)
