@@ -215,6 +215,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `daily-review-step-scroll-today`, `daily-review-step-scroll-focus`, `daily-review-step-scroll-inbox`, `daily-review-step-scroll-waiting`, `daily-review-completed-scroll`, `daily-review-footer`
 - Code: `apps/mobile/app/daily-review.tsx`, `apps/mobile/components/daily-review-modal.tsx`
 - Checks: `apps/mobile/components/daily-review-modal.test.tsx`, `apps/mobile/components/daily-review-modal.parity.test.tsx`
+- Notes: Waiting For follows a valid review date, falling back to the task's start date; future dates defer the prompt.
 
 ## Weekly Review and share card
 
@@ -222,7 +223,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `review-completed-scroll`, `review-complete-project-` (+ project id), `review-confirm-complete-project`, `review-share-card-button`, `share-card-preview`, `share-card-message`, `share-card-reflection`, `share-card-style-` (+ style), `share-card-export`, `share-card-close`
 - Code: `apps/mobile/components/review-modal.tsx`, `apps/mobile/components/review/useReviewModalController.ts`, `apps/mobile/components/share-card-modal.tsx`, `apps/mobile/app/weekly-review.tsx`
 - Checks: `apps/mobile/components/review-modal.test.tsx`, `apps/mobile/components/review-modal.parity.test.tsx`, `apps/mobile/components/share-card-modal.test.tsx`
-- Notes: The Start Review picker opens the review in place. Only a review notification opens the `/weekly-review` route.
+- Notes: The Start Review picker opens the review in place. Only a review notification opens the `/weekly-review` route. Waiting For follows a valid review date, falling back to the task's start date; future dates stay under Not due yet.
 
 ## History: Done and Archived
 

@@ -269,7 +269,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Reach: Sidebar › Review › Daily Review. Steps include Process Inbox and Today’s Focus.
 - Code: `apps/desktop/src/components/views/review/DailyReviewModal.tsx`
 - Checks: `e2e/review.spec.ts`, `apps/desktop/src/components/views/review/DailyReviewModal.test.tsx`
-- Notes: The focus step obeys the Today's focus limit. Finishing the guide does not mark individual reminders reviewed.
+- Notes: The focus step obeys the Today's focus limit. Waiting For follows a valid review date, falling back to the task's start date; future dates defer the prompt. Finishing the guide does not mark individual reminders reviewed.
 
 ## Weekly Review
 
@@ -277,7 +277,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Shortcuts: `gr` opens Review (Vim, Standard), `Alt+R` (Emacs).
 - Code: `apps/desktop/src/components/views/ReviewView.tsx`, `apps/desktop/src/components/views/review/WeeklyReviewModal.tsx`, `apps/desktop/src/components/views/review/ReviewHeader.tsx`, `apps/desktop/src/components/views/review/ReviewTaskList.tsx`, `apps/desktop/src/components/views/review/ReviewFiltersBar.tsx`, `apps/desktop/src/components/ShareCardDialog.tsx`
 - Checks: `e2e/review.spec.ts`, `e2e/share-card.spec.ts`, `e2e/person-review.spec.ts`, `apps/desktop/src/components/views/ReviewView.test.tsx`, `apps/desktop/src/components/views/review/WeeklyReviewModal.test.tsx`, `apps/desktop/src/components/ShareCardDialog.test.tsx`
-- Notes: Settings › GTD › Weekly review flow can add a contexts step. The share card holds only the date and the user's note, never task data.
+- Notes: Settings › GTD › Weekly review flow can add a contexts step. Waiting For follows a valid review date, falling back to the task's start date; future dates stay under Not due yet. The share card holds only the date and the user's note, never task data.
 
 ## Onboarding
 

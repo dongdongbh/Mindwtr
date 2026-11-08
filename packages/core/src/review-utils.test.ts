@@ -223,6 +223,69 @@ describe('partitionByReviewDate', () => {
     });
 });
 
+describe('Waiting For review scheduling', () => {
+    const reviewNow = new Date(2026, 10, 8, 12);
+    const cases: { name: string; dates: Partial<Task>; group: 'due' | 'scheduled' | 'unscheduled' }[] = [
+        { name: 'no dates', dates: {}, group: 'unscheduled' },
+        { name: 'invalid dates', dates: { reviewAt: 'invalid', startTime: 'invalid' }, group: 'unscheduled' },
+        { name: 'invalid review only', dates: { reviewAt: '2026-02-30' }, group: 'unscheduled' },
+        { name: 'invalid start only', dates: { startTime: 'invalid' }, group: 'unscheduled' },
+        { name: 'future start day', dates: { startTime: '2026-11-09' }, group: 'scheduled' },
+        { name: 'today start day', dates: { startTime: '2026-11-08' }, group: 'due' },
+        { name: 'past start day', dates: { startTime: '2026-11-07' }, group: 'due' },
+        { name: 'future start time today', dates: { startTime: '2026-11-08T12:01' }, group: 'scheduled' },
+        { name: 'start time now', dates: { startTime: '2026-11-08T12:00' }, group: 'due' },
+        { name: 'past start time today', dates: { startTime: '2026-11-08T11:59' }, group: 'due' },
+        { name: 'past review overrides future start', dates: { reviewAt: '2026-11-07', startTime: '2026-11-09' }, group: 'due' },
+        { name: 'today review overrides future start', dates: { reviewAt: '2026-11-08', startTime: '2026-11-09' }, group: 'due' },
+        { name: 'future review overrides past start', dates: { reviewAt: '2026-11-09', startTime: '2026-11-07' }, group: 'scheduled' },
+        { name: 'future review time overrides past start', dates: { reviewAt: '2026-11-08T12:01', startTime: '2026-11-07' }, group: 'scheduled' },
+        { name: 'review time now overrides future start', dates: { reviewAt: '2026-11-08T12:00', startTime: '2026-11-09' }, group: 'due' },
+        { name: 'past review time overrides future start', dates: { reviewAt: '2026-11-08T11:59', startTime: '2026-11-09' }, group: 'due' },
+        { name: 'invalid review falls back to future start', dates: { reviewAt: 'invalid', startTime: '2026-11-09' }, group: 'scheduled' },
+        { name: 'invalid review falls back to due start', dates: { reviewAt: 'invalid', startTime: '2026-11-08' }, group: 'due' },
+        { name: 'valid review with invalid start', dates: { reviewAt: '2026-11-09', startTime: 'invalid' }, group: 'scheduled' },
+    ];
+
+    it.each(cases)('$name controls both review flows without changing the task', ({ dates, group }) => {
+        const task = createTask({ status: 'waiting', ...dates });
+        const before = structuredClone(task);
+        const daily = getDailyReviewBuckets([task], [], { now: reviewNow });
+        const weekly = getWeeklyReviewBuckets([task], [], { now: reviewNow });
+
+        expect(daily.waiting).toEqual(group === 'scheduled' ? [] : [task]);
+        expect(weekly.waitingGroups).toEqual({
+            due: group === 'due' ? [task] : [],
+            scheduled: group === 'scheduled' ? [task] : [],
+            unscheduled: group === 'unscheduled' ? [task] : [],
+        });
+        expect(buildReviewSteps(daily, { kind: 'daily' }).find((step) => step.id === 'waiting')?.hasWork)
+            .toBe(group !== 'scheduled');
+        expect(buildReviewSteps(weekly, { kind: 'weekly' }).find((step) => step.id === 'waiting')?.hasWork)
+            .toBe(group !== 'scheduled');
+        expect(task).toEqual(before);
+    });
+
+    it('preserves deleted-task and inactive-project exclusions without inheriting project dates', () => {
+        const active = createProject({ id: 'active', startDate: '2026-12-01' });
+        const inactive = createProject({ id: 'inactive', status: 'someday' });
+        const deletedProject = createProject({ id: 'deleted-project', deletedAt: staleUpdatedAt });
+        const tasks = [
+            createTask({ id: 'live', status: 'waiting', projectId: active.id }),
+            createTask({ id: 'inactive-task', status: 'waiting', projectId: inactive.id }),
+            createTask({ id: 'deleted-project-task', status: 'waiting', projectId: deletedProject.id }),
+            createTask({ id: 'deleted-task', status: 'waiting', deletedAt: staleUpdatedAt }),
+            createTask({ id: 'next-task', status: 'next' }),
+        ];
+        const projects = [active, inactive, deletedProject];
+
+        expect(getDailyReviewBuckets(tasks, projects, { now: reviewNow }).waiting.map((task) => task.id)).toEqual(['live']);
+        expect(getWeeklyReviewBuckets(tasks, projects, { now: reviewNow }).waitingGroups).toEqual({
+            due: [], scheduled: [], unscheduled: [tasks[0]],
+        });
+    });
+});
+
 describe('getAdvancedReviewDate', () => {
     const localNow = new Date(2026, 5, 10, 15, 30);
 

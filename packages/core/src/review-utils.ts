@@ -55,6 +55,10 @@ function isFutureDate(value: string | undefined | null, now: Date): boolean {
     return date ? date.getTime() > now.getTime() : false;
 }
 
+function getWaitingReviewDate(task: Pick<Task, 'reviewAt' | 'startTime'>): string | undefined {
+    return safeParseDate(task.reviewAt) ? task.reviewAt : task.startTime;
+}
+
 export type ReviewSchedulePartition<T> = {
     due: T[];
     scheduled: T[];
@@ -65,14 +69,16 @@ export type ReviewSchedulePartition<T> = {
 export function partitionByReviewDate<T extends { reviewAt?: string | null }>(
     items: T[],
     now: Date = new Date(),
+    reviewDate: (item: T) => string | undefined | null = (item) => item.reviewAt,
 ): ReviewSchedulePartition<T> {
     const due: T[] = [];
     const scheduled: T[] = [];
     const unscheduled: T[] = [];
     items.forEach((item) => {
-        if (isDueForReview(item.reviewAt, now)) {
+        const date = reviewDate(item);
+        if (isDueForReview(date, now)) {
             due.push(item);
-        } else if (isFutureDate(item.reviewAt, now)) {
+        } else if (isFutureDate(date, now)) {
             scheduled.push(item);
         } else {
             unscheduled.push(item);
@@ -367,7 +373,9 @@ export function getDailyReviewBuckets(
 
     const inbox = activeTasks.filter((task) => task.status === 'inbox');
     const focused = activeTasks.filter((task) => task.isFocusedToday && shouldShowTaskForStart(task, opts));
-    const waiting = sortTasksBy(activeTasks.filter((task) => task.status === 'waiting'), opts.sortBy);
+    const waiting = sortTasksBy(activeTasks.filter((task) => (
+        task.status === 'waiting' && !isFutureDate(getWaitingReviewDate(task), now)
+    )), opts.sortBy);
 
     const dueToday = sortTasksBy(activeTasks.filter((task) => {
         const due = safeParseDueDate(task.dueDate);
@@ -462,7 +470,7 @@ export function getWeeklyReviewBuckets(
     const inboxTasks = weekly.inbox;
     const waitingTasks = tasks.filter((task) => task.status === 'waiting' && !task.deletedAt && isTaskInActiveProject(task, projectMap));
     const somedayTasks = tasks.filter((task) => task.status === 'someday' && !task.deletedAt && isTaskInActiveProject(task, projectMap));
-    const waitingGroups = partitionByReviewDate(waitingTasks, now);
+    const waitingGroups = partitionByReviewDate(waitingTasks, now, getWaitingReviewDate);
     const somedayGroups = partitionByReviewDate(somedayTasks, now);
 
     const contextGroupsByName = new Map<string, Task[]>();
