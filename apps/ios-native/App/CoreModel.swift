@@ -2307,6 +2307,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var foregroundSyncIntent: ForegroundSyncIntent?
     private var foregroundSyncOwner: ForegroundSyncOwner?
     private var foregroundSyncTask: Task<Void, Never>?
+    private var foregroundSyncHold = UIBackgroundTaskIdentifier.invalid
+    private var foregroundSyncHoldClaim = 0
+    private var foregroundSyncHoldStartedAt = Date()
     private var archiveRetentionRequested = false
     private var archiveRetentionWake: Task<Void, Never>?
 
@@ -2645,7 +2648,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     suspendEntityLinks()
                     entityLinkBusyOwner = nil
                 }
-                cancelForegroundSync()
+                cancelForegroundSync(holdingRunningSync: false)
                 foregroundSyncIntent = nil
                 startupSyncCompletedHost = nil
                 completedStartupToken = nil
@@ -10910,7 +10913,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         admitForegroundSync()
     }
 
-    func cancelForegroundSync() {
+    func cancelForegroundSync(holdingRunningSync: Bool = true) {
         cancelNativeDropboxAuthorization()
         taskCardPresentationGeneration += 1
         retireRowTaskBackdatePresentation()
@@ -10921,10 +10924,58 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         foregroundSyncIntent?.foregroundRequested = false
         foregroundSyncGeneration += 1
         retireReferenceProjectNextActionOffer()
-        foregroundSyncTask?.cancel()
+        if holdingRunningSync, let running = foregroundSyncTask { holdForegroundSyncInBackground(running) }
+        else {
+            foregroundSyncTask?.cancel()
+            endForegroundSyncHold(foregroundSyncHoldClaim, outcome: "aborted")
+        }
         archiveRetentionWake?.cancel()
         archiveRetentionWake = nil
         archiveRetentionRequested = false
+    }
+
+    private func holdForegroundSyncInBackground(_ running: Task<Void, Never>) {
+        guard foregroundSyncHold == .invalid else { return }
+        foregroundSyncHoldClaim += 1
+        foregroundSyncHoldStartedAt = Date()
+        let claim = foregroundSyncHoldClaim
+        foregroundSyncHold = UIApplication.shared.beginBackgroundTask(withName: "Mindwtr sync") { [weak self] in
+            Task { @MainActor in
+                guard let self, self.foregroundSyncHoldClaim == claim else { return }
+                running.cancel()
+                self.endForegroundSyncHold(claim, outcome: "expired")
+            }
+        }
+        guard foregroundSyncHold != .invalid else { running.cancel(); return }
+        Task { [weak self] in
+            await running.value
+            guard let self, self.foregroundSyncHoldClaim == claim, self.foregroundSyncHold != .invalid else { return }
+            await self.logForegroundSyncHold(outcome: "finished", heldMs: self.foregroundSyncHeldMs)
+            self.endForegroundSyncHold(claim, outcome: "finished", logged: true)
+        }
+    }
+
+    private var foregroundSyncHeldMs: String { String(Int(Date().timeIntervalSince(foregroundSyncHoldStartedAt) * 1_000)) }
+
+    private func endForegroundSyncHold(_ claim: Int, outcome: String, logged: Bool = false) {
+        guard claim == foregroundSyncHoldClaim, foregroundSyncHold != .invalid else { return }
+        let heldMs = foregroundSyncHeldMs
+        UIApplication.shared.endBackgroundTask(foregroundSyncHold)
+        foregroundSyncHold = .invalid
+        if outcome == "finished" && UIApplication.shared.applicationState == .active {
+            refreshRequested = true
+            admitRequestedRefresh()
+        }
+        admitNotificationResponses()
+        if !logged { Task { await logForegroundSyncHold(outcome: outcome, heldMs: heldMs) } }
+    }
+
+    private func logForegroundSyncHold(outcome: String, heldMs: String) async {
+        guard let currentHost = host else { return }
+        _ = try? await currentHost.call("logLine", argumentsJSON: json([
+            "Native iOS background sync hold ended",
+            try json(["releaseCheck": "v1.3.9/ios-background-sync-hold", "outcome": outcome, "heldMs": heldMs]),
+        ]))
     }
 
     private var surfaceRefreshAllowed: Bool {
@@ -16046,7 +16097,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         notificationResponseBusyOwner = nil
         suspendEntityLinks()
         entityLinkBusyOwner = nil
-        cancelForegroundSync()
+        cancelForegroundSync(holdingRunningSync: false)
         foregroundSyncIntent = nil
         foregroundSyncBackgroundObserved = false
         startupSyncCompletedHost = nil

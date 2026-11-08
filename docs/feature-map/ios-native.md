@@ -292,7 +292,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `sync-screen`, `sync-url`, `sync-username`, `sync-password`, `sync-token`, `sync-status`, `sync-reload`, `sync-error`, `sync-restart-gate`
 - Code: `apps/ios-native/App/SettingsScreen.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeHTTPJobs.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeCryptoJobs.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeSecretJobs.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testNativeSync…, testNativeEncryption…, testNativeSelfHosted…, testNativeWebDAV…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeForegroundSyncTests.swift`
-- Notes: An unconfirmed sync result blocks editing and shows a "close and reopen" screen (`sync-restart-gate`). Only WebDAV and self-hosted have forms here. Mixed-client sync is not accepted yet.
+- Notes: An unconfirmed sync result blocks editing and shows a "close and reopen" screen (`sync-restart-gate`). Only WebDAV and self-hosted have forms here. Mixed-client sync is not accepted yet. A sync that is running when the app leaves the foreground keeps going on iOS background time until it finishes or iOS ends the time (#1432).
 
 ## Apple Reminders import
 
