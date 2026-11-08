@@ -108,6 +108,7 @@ import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -263,7 +264,7 @@ class MainActivity : FragmentActivity() {
 
                             Box(Modifier.fillMaxSize().navigationBarsPadding()) {
 
-                                if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 78.dp))
+                                if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = tabToastBottomAboveNavigationBar()))
                                 capture?.let { CapturePopup(model, it) }
                                 if (areaSheet) AreaSheet(model)
 
@@ -424,6 +425,16 @@ fun OwedRetry(model: InboxViewModel) {
     if (model.failedAction != null) RetryButton(model::retryOwed, !model.busy, "owed-retry")
 }
 
+
+@Composable
+private fun tabToastBottomAboveNavigationBar(): Dp {
+    val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    return rnTabToastBottom(navigation) - navigation
+}
+
+internal fun tabBarHeight(navigation: Dp): Dp = 66.dp + if (navigation >= 20.dp) navigation - 12.dp else 0.dp
+
+internal fun rnTabToastBottom(navigation: Dp): Dp = tabBarHeight(navigation) + 12.dp
 
 @Composable
 private fun TabBar(model: InboxViewModel) {

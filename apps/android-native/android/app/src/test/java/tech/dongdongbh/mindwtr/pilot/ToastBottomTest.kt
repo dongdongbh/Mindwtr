@@ -11,4 +11,10 @@ class ToastBottomTest {
         assertEquals(32.dp, rnToastBottom(16.dp))
         assertEquals(64.dp, rnToastBottom(48.dp))
     }
+
+    @Test fun aTabToastSits12DpAboveTheTabBarAsRnsDoes() {
+        assertEquals(78.dp, rnTabToastBottom(16.dp))
+        assertEquals(114.dp, rnTabToastBottom(48.dp))
+        assertEquals(tabBarHeight(48.dp) + 12.dp, rnTabToastBottom(48.dp))
+    }
 }
