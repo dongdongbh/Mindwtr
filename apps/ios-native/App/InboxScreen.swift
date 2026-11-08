@@ -1739,7 +1739,7 @@ private struct TaskRowSwipeButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var symbol: String {
         switch action.text("id") {
-        case "done": return "checkmark.circle"
+        case "done": return "circle"
         case "focus": return action.flag("focused") ? "star.fill" : "star"
         case "organize": return "folder"
         case "dates": return "calendar"

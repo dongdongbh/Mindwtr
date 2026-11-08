@@ -55,7 +55,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `inbox-scroll`, `inbox-process-primary`, `inbox-mind-sweep-primary`, `inbox-mind-sweep-accessory`, `inbox-chips-clear`, `inbox-sort-close`, `inbox-group-close`, `inbox-more`
 - Code: `apps/ios-native/App/InboxScreen.swift`, `apps/ios-native/App/ListFilterControls.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testInboxSort…, testInboxFilters…, testTask157InboxCompletion…)
-- Notes: Inbox filters last for the session only and reset on restart.
+- Notes: Inbox filters last for the session only and reset on restart. Swiping a task row shows Done and Focus on one side and Organize, Dates and Delete on the other; Done uses an empty circle, as in RN (#1480).
 
 ## Inbox bulk selection
 
