@@ -11141,6 +11141,38 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 && projectError == nil && projectFilterError == nil)) { scheduleProjectFilterRead() }
     }
 
+    func displayClockMinutePassed() {
+        guard workspaceAdmissionsOpen, ready, !appLock.concealed, surfaceRefreshAllowed,
+              !projectNotesDirty, !projectNotesWritePending,
+              let changesAt = Self.earliestRowChange(displayClockSurface),
+              changesAt <= Date().timeIntervalSince1970 * 1_000 else { return }
+        refreshRequested = true
+        admitRequestedRefresh()
+    }
+
+    private var displayClockSurface: CoreObject {
+        switch selectedSurface {
+        case .inbox: return inbox
+        case .focus: return focus
+        case .waiting: return waiting
+        case .someday: return someday
+        case .reference: return reference
+        case .contexts: return contexts
+        case .savedSearch: return savedSearch
+        case .project: return projectDetail
+        case .board: return boardView
+        case .calendar: return calendarView
+        default: return [:]
+        }
+    }
+
+    private static func earliestRowChange(_ value: Any) -> Double? {
+        if let list = value as? [Any] { return list.compactMap(earliestRowChange).min() }
+        guard let object = value as? CoreObject else { return nil }
+        let own = (object["meta"] as? CoreObject)?["validUntil"] as? Double
+        return (object.values.compactMap(earliestRowChange) + [own].compactMap { $0 }).min()
+    }
+
     private func admitRequestedRefresh() {
         guard refreshRequested, reminderCaptureHandoverOwner == nil,
               workspaceAdmissionsOpen, ready, !busy, !retryNeeded else { return }

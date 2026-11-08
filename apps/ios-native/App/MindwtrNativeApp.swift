@@ -1629,6 +1629,15 @@ private struct AppLockRoot: View {
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
             model.reminderClockChanged(); model.searchClockChanged()
         }
+        .task(id: workspaceReady && phase == .active) {
+            guard workspaceReady, phase == .active else { return }
+            while !Task.isCancelled {
+                let elapsed = (Date().timeIntervalSince1970 * 1_000).truncatingRemainder(dividingBy: 60_000)
+                try? await Task.sleep(nanoseconds: UInt64(60_000 - elapsed + 1) * 1_000_000)
+                guard !Task.isCancelled else { return }
+                model.displayClockMinutePassed()
+            }
+        }
         .task(id: "\(workspaceReady)-\(lock.nonce)-\(phase == .active)-\(lock.authenticating)") {
             guard workspaceReady, phase == .active else { return }
             await lock.autoUnlock(label: model.label)
