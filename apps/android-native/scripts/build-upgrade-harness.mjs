@@ -156,6 +156,9 @@ try {
     const nativeApk = resolve(apks, 'native-upgradetest-153.apk');
     sign(resolve(nativeDir, 'app/build/outputs/apk/play/upgradetest/app-play-upgradetest.apk'), nativeApk);
 
+    const previous = existsSync(resolve(apks, 'manifest.json')) ? JSON.parse(readFileSync(resolve(apks, 'manifest.json'), 'utf8')) : {};
+    const keptParity = !parityCommit && previous.rnParity && existsSync(previous.rnParity.path)
+        ? { rnParitySource: previous.rnParitySource, rnParity: describe(previous.rnParity.path, 151, true) } : {};
     const result = {
         package: PKG,
         rnSource: V132,
@@ -165,7 +168,7 @@ try {
         rn154: describe(rnApk(RECOVERY_COMMIT, 154), 154, true),
         rnFixSource: RN_FIX_COMMIT,
         rn155: describe(rnApk(RN_FIX_COMMIT, 155), 155, true),
-        ...(parityCommit ? { rnParitySource: parityCommit, rnParity: describe(rnApk(parityCommit, 151), 151, true) } : {}),
+        ...(parityCommit ? { rnParitySource: parityCommit, rnParity: describe(rnApk(parityCommit, 151), 151, true) } : keptParity),
     };
     if (new Set([result.rn152.signer, result.native153.signer, result.rn154.signer, result.rn155.signer, result.rnParity?.signer ?? result.rn152.signer]).size !== 1) {
         fail('the APKs have different signers');
