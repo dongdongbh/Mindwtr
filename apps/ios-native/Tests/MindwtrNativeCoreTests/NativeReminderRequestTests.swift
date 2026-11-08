@@ -281,7 +281,7 @@ final class NativeReminderRequestTests: XCTestCase {
             XCTAssertEqual(category.actions.map(\.identifier), identifiers)
             XCTAssertTrue(category.options.isEmpty)
             for action in category.actions {
-                XCTAssertEqual(action.options, action.identifier == dismiss ? [.foreground] : [])
+                XCTAssertEqual(action.options, [], "No action opens the app, Dismiss included (#1386)")
                 XCTAssertNotNil(NativeReminderResponse.capture(request, deliveredAt: Date(timeIntervalSince1970: 1_000),
                     receivedAt: Date(timeIntervalSince1970: 1_001), actionIdentifier: action.identifier, namespace: namespace))
             }

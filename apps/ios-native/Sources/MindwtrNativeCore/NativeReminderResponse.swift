@@ -16,7 +16,7 @@ public struct NativeReminderResponse: Codable, Equatable, Sendable {
     public static func categories() -> Set<UNNotificationCategory> {
         let complete = UNNotificationAction(identifier: completeActionIdentifier, title: "Complete", options: [])
         let snooze = UNNotificationAction(identifier: snoozeActionIdentifier, title: "Snooze", options: [])
-        let dismiss = UNNotificationAction(identifier: dismissActionIdentifier, title: "Dismiss", options: [.foreground])
+        let dismiss = UNNotificationAction(identifier: dismissActionIdentifier, title: "Dismiss", options: [])
         return Set((1...3).map { flags in
             var actions: [UNNotificationAction] = []
             if flags & 1 != 0 { actions.append(complete) }

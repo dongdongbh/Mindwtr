@@ -8506,6 +8506,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !appLockRecoveryPending && !Task.isCancelled
     }
 
+    private var reminderDismissAppState: String {
+        switch UIApplication.shared.applicationState {
+        case .active: return "active"
+        case .inactive: return "inactive"
+        default: return "background"
+        }
+    }
+
     private var notificationResponseForeground: Bool {
         UIApplication.shared.applicationState == .active && !appLock.concealed && !appLock.authenticating
     }
@@ -9449,7 +9457,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             await recordNotificationResponse(owner, action: action.rawValue, outcome: "admitting")
             guard notificationResponseCurrent(owner) else { throw CancellationError() }
             switch action {
-            case .dismiss: notificationResponseRetry?.terminalOutcome = "confirmed"
+            case .dismiss:
+                notificationResponseRetry?.terminalOutcome = "confirmed"
+                _ = try? await owner.host.call("logLine", argumentsJSON: json([
+                    "Native iOS reminder dismissed",
+                    try json(["releaseCheck": "v1.3.9/ios-reminder-dismiss-background", "appState": reminderDismissAppState]),
+                ]))
             case .complete, .snooze:
                 guard notificationResponseContextClean else { notificationResponseRetry = nil; return false }
                 do {

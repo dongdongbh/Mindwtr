@@ -265,7 +265,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Notifications and reminders
 
-- Reach: Settings › Notifications. Reminder notifications offer Open, Complete and Snooze.
+- Reach: Settings › Notifications. Reminder notifications offer Open, Complete, Snooze and Dismiss. Dismiss, Complete and Snooze run without opening Mindwtr, as in RN (#1386).
 - Selectors: `notifications-title`, `notifications-scroll`, `notifications-time-wheel`, `notifications-picker-done`
 - Code: `apps/ios-native/App/SettingsScreen.swift`, `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeReminderResponse.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeReminderEffects.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testNativeNotificationsSettings…, testNativeReminderResponse…), `apps/ios-native/Tests/MindwtrNativeCoreTests/ReminderResponseRouteHostTests.swift`
