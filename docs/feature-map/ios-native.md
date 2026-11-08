@@ -134,10 +134,10 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 ## Projects
 
 - Reach: Menu › Projects (or the Quick Access tab when it is set to Projects) › a project. Project Details holds the actions menu (Complete, Duplicate, Delete, Cancel project), Sections, Notes, Tags, Area, attachments and task view options (Show completed, Sort, Filters, Order).
-- Selectors: `projects-scroll`, `projects-create-title`, `projects-create-add`, `projects-tag-filter-toggle`, `project-detail-title`, `project-back`, `project-actions-menu`, `project-sections-open`, `project-notes-input`, `project-tags-open`, `project-area-open`, `project-task-view-options-button`, `project-attachment-add-link`
+- Selectors: `projects-scroll`, `projects-create-title`, `projects-create-add`, `projects-tag-filter-toggle`, `project-detail-title`, `project-back`, `project-actions-menu`, `project-sections-open`, `project-notes-input`, `project-tags-open`, `project-area-open`, `project-task-view-options-button`, `project-attachment-add-link`, `project-bulk-reorder`
 - Code: `apps/ios-native/App/ProjectsScreen.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testProjectSection…, testProjectNotes…, testProjectTags…, testProjectCompleted…, testProjectFile…, testProjectDownload…)
-- Notes: Archived projects open as read-only previews. Pending Notes save before any view-control change or file action.
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testProjectSection…, testProjectNotes…, testProjectTags…, testProjectCompleted…, testProjectFile…, testProjectDownload…, testProjectSelectionReorderOpensTaskOrderAndClearsSelection)
+- Notes: Archived projects open as read-only previews. Pending Notes save before any view-control change or file action. Long-press a task to select; the selection bar shows Reorder when the project has default sort and something to reorder, as in RN (#1477). Reorder leaves selection and opens the task order list.
 
 ## Areas
 

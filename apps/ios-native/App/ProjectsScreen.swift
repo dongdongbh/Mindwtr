@@ -1544,6 +1544,13 @@ struct ProjectDetailScreen: View {
                         .accessibilityLabel(option.text("accessibilityLabel"))
                         .accessibilityIdentifier("project-bulk-status-" + option.text("status"))
                     }
+                    if model.projectSelectionReorderVisible {
+                        Button { resignProjectNotesInput(); Task { await model.reorderFromProjectSelection() } } label: {
+                            projectBulkActionLabel(model.label("projects.reorderTasks"))
+                        }
+                        .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectSelectionReorderEnabled)
+                        .accessibilityIdentifier("project-bulk-reorder")
+                    }
                     Button { model.openProjectBulkOrganize() } label: {
                         projectBulkActionLabel(model.projectBulk.object("bar").object("organize").text("label"))
                     }

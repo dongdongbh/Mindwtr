@@ -18571,6 +18571,27 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
+    func testProjectSelectionReorderOpensTaskOrderAndClearsSelection() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", "ead8d6f2-f4c3-4cef-abdc-56e6ec2fb5a5"]
+        app.launch(); defer { app.terminate() }
+        openProjectTaskSortTest(app)
+        let row = task192Reveal(app, "task-title-acc031d9-9cac-4296-8420-840bcd17a562", buttons: true,
+                                scrollID: "project-detail-scroll", scans: 80)
+        task740InboxStatusReady(row); row.press(forDuration: 0.8)
+        XCTAssertTrue(app.staticTexts["project-bulk-count"].waitForExistence(timeout: 20))
+        let reorder = task192Reveal(app, "project-bulk-reorder", buttons: true, scrollID: "project-bulk-actions-scroll",
+                                    horizontal: true, scans: 20)
+        XCTAssertEqual(reorder.label, "Reorder")
+        boardEnabled(reorder); reorder.tap()
+        XCTAssertTrue(app.tables["project-task-order-list"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["project-bulk-count"].waitForNonExistence(timeout: 10))
+        let done = app.buttons["project-task-order-done"]
+        boardEnabled(done); done.tap()
+        boardEnabled(app.buttons["project-task-view-options-button"])
+        XCTAssertFalse(app.staticTexts["project-bulk-count"].exists)
+    }
+
     func testProjectDetailsExpansionWithTaskOrder() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "ead8d6f2-f4c3-4cef-abdc-56e6ec2fb5a5"]

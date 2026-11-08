@@ -3721,16 +3721,18 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var projectAttachmentRemoveEnabled: Bool {
         projectAttachmentAddOpenEnabled && !projectAttachmentLinkPresented
     }
-    var projectViewOpenEnabled: Bool {
-        projectViewCurrent && !projectAttachmentOpening && projectAttachmentDownloadOwner == nil
+    var projectViewOpenEnabled: Bool { projectViewOpenable(inSelection: false) }
+    private func projectViewOpenable(inSelection: Bool) -> Bool {
+        projectViewReady(inSelection: inSelection) && !projectAttachmentOpening && projectAttachmentDownloadOwner == nil
     }
     var projectAttachmentDownloadEnabled: Bool {
         projectViewOpenEnabled && projectAttachmentDownloadContextClean
             && foregroundSyncSceneActive && UIApplication.shared.applicationState == .active
             && projectAttachmentsVisible && !projectAttachmentLoading && projectFileOpenPresentation == nil
     }
-    private var projectViewCurrent: Bool {
-        projectActionsCurrent && !projectSelectionMode && !projectBulkCompositionBlocked && pendingProjectView == nil && projectFilterPendingEdit == nil
+    private var projectViewCurrent: Bool { projectViewReady(inSelection: false) }
+    private func projectViewReady(inSelection: Bool) -> Bool {
+        projectActionsCurrent && projectSelectionMode == inSelection && !projectBulkCompositionBlocked && pendingProjectView == nil && projectFilterPendingEdit == nil
             && !projectFilterNeedsRead && !capturePresented && !areaPickerPresented
             && !areaManagerPresented && !morePresented && !projectSectionsPresented && !projectAreaPresented
             && !projectTagsPresented && projectDateField == nil && !projectStatusOpen
@@ -3750,10 +3752,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && projectFilterPicker.text("viewRevision") == projectDetail.text("revision")
     }
     var projectTaskOrderPending: Bool { projectTaskOrderRequest != nil }
-    var projectTaskOrderOpenEnabled: Bool {
-        projectViewOpenEnabled && !projectDetail.flag("readOnly")
-            && projectDetail.object("controls").flag("hasReorderTargets")
-            && projectTaskSortOptions.text("effectiveSortBy") == "default"
+    var projectTaskOrderOpenEnabled: Bool { projectTaskOrderOpenable(inSelection: false) }
+    private func projectTaskOrderOpenable(inSelection: Bool) -> Bool {
+        projectViewOpenable(inSelection: inSelection) && projectSelectionReorderVisible
     }
     var projectTaskOrderInputEnabled: Bool {
         ready && selectedSurface == .project && projectCurrent && projectTaskOrderPresented
@@ -20008,6 +20009,25 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     func openProjectTaskOrder() async {
         guard await flushProjectNotesEdit(), projectViewOptionsPresented, projectTaskOrderOpenEnabled else { return }
         projectViewOptionsPresented = false
+        await presentProjectTaskOrder()
+    }
+
+    var projectSelectionReorderVisible: Bool {
+        !projectDetail.flag("readOnly") && projectDetail.object("controls").flag("hasReorderTargets")
+            && projectTaskSortOptions.text("effectiveSortBy") == "default"
+    }
+    var projectSelectionReorderEnabled: Bool {
+        projectTaskOrderOpenable(inSelection: true) && projectSelectionExitEnabled && !busy
+    }
+
+    func reorderFromProjectSelection() async {
+        guard projectSelectionReorderEnabled else { return }
+        leaveProjectTaskSelection()
+        guard await flushProjectNotesEdit(), projectTaskOrderOpenEnabled else { return }
+        await presentProjectTaskOrder()
+    }
+
+    private func presentProjectTaskOrder() async {
         projectTaskOrderPresented = true
         busy = true
         defer { finishOperation() }
