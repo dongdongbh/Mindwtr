@@ -134,6 +134,7 @@ internal class PomodoroAlarms(private val context: Context) {
 
 
     fun plan(host: CoreHost): String = synchronized(LOCK) {
+        if (Workspace.sandbox) return "sandbox"
         val now = System.currentTimeMillis()
         book.prune(now)
         val notifications = context.getSystemService(NotificationManager::class.java)

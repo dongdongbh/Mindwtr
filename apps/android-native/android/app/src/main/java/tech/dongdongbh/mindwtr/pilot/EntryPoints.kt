@@ -162,6 +162,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
 
 
     fun pump(): Unit = with(shell) {
+        if (Workspace.sandbox) return
         if (hold.holds(locked, queue.head(), ::held)) return
         val entry = lifecycle.next(!ready, workOpen) ?: return
         if (workOpen) return peek(entry)

@@ -2,6 +2,7 @@ package tech.dongdongbh.mindwtr.pilot
 
 import android.content.Context
 import android.content.Intent
+import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.io.File
 
 
@@ -41,6 +42,22 @@ internal object Workspace {
     fun scratch(context: Context) = File(context.noBackupFilesDir, "sandbox")
 
 
+    fun dir(context: Context, name: String, sandbox: Boolean = this.sandbox) =
+        if (sandbox) File(scratch(context), name) else File(context.noBackupFilesDir, name)
+
+
+    fun begin(context: Context, scratch: File = scratch(context)): Boolean {
+        val wiped = !scratch.exists() || scratch.deleteRecursively()
+        viewPrefs(context, sandbox = true).edit().clear().commit()
+        return wiped && scratch.mkdirs()
+    }
+
+
+    fun freshBootFiles(scratch: File): Boolean =
+        (scratch.isDirectory || scratch.mkdirs()) && listOf("sandbox.db", "sandbox.db-wal", "sandbox.db-shm", "journal", "RKStorage", "RKStorage-wal", "RKStorage-shm")
+            .map { File(scratch, it) }.all { !it.exists() || it.deleteRecursively() }
+
+
     fun store(context: Context): RequestStore = object : RequestStore {
         private val prefs = context.getSharedPreferences(BOOT_PREFS, Context.MODE_PRIVATE)
         override fun read(): String? = prefs.getString(REQUEST_KEY, null)
@@ -56,4 +73,13 @@ internal object Workspace {
         context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         Runtime.getRuntime().exit(0)
     }
+}
+
+
+internal object SandboxReminders : CoreHost.Reminders {
+    override fun apply(plan: String): Int = 0
+    override fun permissionGranted(): Boolean = false
+    override fun cleanupRn(): Int = 0
+    override fun receiverCounts(): String = """{"dropped":0,"notQueued":0}"""
+    override fun ledger(): String = """{"fired":[],"shown":[]}"""
 }

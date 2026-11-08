@@ -108,12 +108,9 @@ internal object ProcessCoreHost {
     private fun open(app: Application, language: String?, sandboxRequest: String?): CoreHost {
         application = app
         val scratch = Workspace.scratch(app)
-        check(!scratch.exists() || scratch.deleteRecursively()) { "The last sandbox scratch files were not removed" }
         val sandbox = sandboxRequest != null
-        if (sandbox) {
-            check(scratch.mkdirs()) { "The sandbox scratch folder was not created" }
-            Workspace.viewPrefs(app, sandbox = true).edit().clear().commit()
-        }
+        if (!sandbox) check(!scratch.exists() || scratch.deleteRecursively()) { "The last sandbox scratch files were not removed" }
+        else check(Workspace.freshBootFiles(scratch)) { "The sandbox boot files were not reset" }
 
 
         val legacy = if (BuildConfig.RN_STORAGE && !sandbox) {
@@ -168,13 +165,14 @@ internal object ProcessCoreHost {
         return CoreHost(files.database, legacy?.let { app.dataDir }, HostIo(app),
             files.journal, deviceStore(app, keyValue, sandbox), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
             keyValue, HostFiles(app.filesDir, app.cacheDir, content = AndroidContentSource(app)), installer,
-            ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
-            HostWidgets(app) { appState },
-            scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
-            backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
+            if (sandbox) SandboxReminders else ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
+            if (sandbox) null else HostWidgets(app) { appState },
+            scheduleBackgroundSync = if (sandbox) null else { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
+            backups = BackupOperations(Workspace.dir(app, "backup-operations", sandbox), if (sandbox) Workspace.dir(app, "snapshots", true) else File(app.filesDir, "snapshots"),
+                maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
             calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
             appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)),
-            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(File(app.filesDir, "GmailCapture")),
+            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(if (sandbox) Workspace.dir(app, "GmailCapture", true) else File(app.filesDir, "GmailCapture")),
             voice = HostVoice.forApp(app)::call)
     }
 

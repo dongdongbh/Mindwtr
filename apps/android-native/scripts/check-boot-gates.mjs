@@ -753,8 +753,27 @@ const inboxUi = source('InboxScreen.kt');
 const bulkUi = source('BulkBar.kt');
 
 const processHost = source('ProcessCoreHost.kt');
-assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+check\(!scratch\.exists\(\) \|\| scratch\.deleteRecursively\(\)\) \{[^}]*\}\s+val sandbox = sandboxRequest != null/,
-    'every start removes the last sandbox scratch files (its journal, database and key-value store) before any workspace opens');
+assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+val sandbox = sandboxRequest != null\s+if \(!sandbox\) check\(!scratch\.exists\(\) \|\| scratch\.deleteRecursively\(\)\) \{[^}]*\}\s+else check\(Workspace\.freshBootFiles\(scratch\)\)/,
+    'a real start removes every sandbox scratch file (journal, database, key-value store, drafts) before it opens; a sandbox start resets its own boot files');
+assert.match(source('InboxViewModel.kt'), /private val sandboxRequest = Workspace\.take\(Workspace\.store\(app\)\)\?\.also \{ check\(Workspace\.begin\(app\)\)/,
+    'taking a sandbox request empties the scratch folder before any draft store opens in it');
+for (const name of ['editor', 'process-inbox', 'capture', 'menu', 'capture-modal']) {
+    assert.match(source('InboxViewModel.kt'), new RegExp(`Workspace\\.dir\\(app, "${name}", sandboxed\\)`), `the ${name} drafts live in the sandbox's scratch folder while it is open, so none reaches the real workspace`);
+}
+const hostDeps = processHost.slice(processHost.indexOf('private fun host('));
+assert.match(hostDeps, /if \(sandbox\) SandboxReminders else ReminderAlarms\(/, 'the sandbox arms and cancels no reminder alarm; the real alarms stay as they are');
+assert.match(hostDeps, /if \(sandbox\) null else HostWidgets\(app\)/, 'the sandbox publishes nothing to the widgets');
+assert.match(hostDeps, /scheduleBackgroundSync = if \(sandbox\) null else/, 'the sandbox schedules no background sync');
+assert.match(hostDeps, /backups = BackupOperations\(Workspace\.dir\(app, "backup-operations", sandbox\), if \(sandbox\) Workspace\.dir\(app, "snapshots", true\)/, 'the sandbox keeps no backup work in the real folders');
+assert.match(hostDeps, /HostGmailReceipts\(if \(sandbox\) Workspace\.dir\(app, "GmailCapture", true\)/, 'the sandbox keeps no Gmail receipts in the real folder');
+assert.match(source('Workspace.kt'), /object SandboxReminders : CoreHost\.Reminders \{\s+override fun apply\(plan: String\): Int = 0/);
+assert.match(source('EntryPoints.kt'), /fun pump\(\): Unit = with\(shell\) \{\s+if \(Workspace\.sandbox\) return/, 'shares, shortcuts and notification taps wait in the real queue until the real workspace is back; a tap never opens a sample task');
+assert.match(source('PomodoroAlarms.kt'), /fun plan\(host: CoreHost\): String = synchronized\(LOCK\) \{\s+if \(Workspace\.sandbox\) return "sandbox"/, 'the sandbox plans no Pomodoro alarm');
+assert.match(source('CoreWork.kt'), /override fun doWork\(\): Result \{\s+val app = applicationContext as Application\s+if \(Workspace\.sandbox\) return Result\.success\(\)/, 'a background job in a sandbox process does nothing');
+for (const receiver of ['Reminders.kt', 'PomodoroAlarms.kt']) {
+    const body = source(receiver).slice(source(receiver).search(/class \w*AlarmReceiver : BroadcastReceiver/));
+    assert.doesNotMatch(body.slice(0, body.indexOf('\n}\n')), /Workspace\./, `${receiver}'s alarm receiver posts the real notification from its stored payload in either workspace`);
+}
 assert.match(processHost, /val files = Workspace\.files\([\s\S]{0,300}?, scratch, sandbox = sandbox\)/, 'the sandbox opens its own scratch database, journal and key-value store');
 const sandboxStart = processHost.slice(processHost.indexOf('if (sandboxRequest != null) {\n                val opened'), processHost.indexOf('runtime.start(coreBundle(app), legacy?.bootState'));
 assert.match(sandboxStart, /if \(opened\.optString\("workspace"\) != "sandbox"\) throw SandboxRequestExpired\(\)[\s\S]*return runtime/, 'an expired request opens the real workspace instead');
@@ -911,7 +930,7 @@ assert.match(rowUi, /val canComplete = writable && !busy &&\s*\(failedAction == 
 
 assert.match(model, /private var editorKey: String\? = saved\.get<String>\("editorKey"\)/);
 assert.doesNotMatch(code(model), /saved\["editor(?!Key)/, 'no editor model or draft in the Bundle');
-assert.match(model, /EditorDrafts\(File\(app\.noBackupFilesDir, "editor"\)\)/);
+assert.match(model, /EditorDrafts\(Workspace\.dir\(app, "editor", sandboxed\)\)/);
 assert.match(model, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\(key\)\)\)/);
 assert.match(model, /TaskEditor\.restore\(readEditor\(runtime, draft\.getString\("id"\)\), draft\)/);
 assert.match(editorUi, /put\("bases", JSONObject\(edited\.keys\.associateWith \{ base\(it\) \}\)\)/);
@@ -976,7 +995,7 @@ assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 
 
 assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE && !sandbox\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = if \(sandbox\) HostInstaller\(File\(scratch, "files"\), File\(scratch, "cache"\)\) else HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val files = Workspace\.files\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), File\(app\.filesDir, "journal"\),\s*app\.getDatabasePath\("RKStorage"\), scratch, sandbox = sandbox\)\s*val runtime = host\(app, files, legacy, installer, sandbox\)\s*try \{[\s\S]{0,1400}?runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
-assert.match(owner, /val keyValue = RnKeyValue\(files\.keyValue\)\s*return CoreHost\(files\.database, legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*files\.journal, deviceStore\(app, keyValue, sandbox\), File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\),\s*voice = HostVoice\.forApp\(app\)::call\)/);
+assert.match(owner, /val keyValue = RnKeyValue\(files\.keyValue\)\s*return CoreHost\(files\.database, legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*files\.journal, deviceStore\(app, keyValue, sandbox\), File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*if \(sandbox\) SandboxReminders else ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*if \(sandbox\) null else HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = if \(sandbox\) null else \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),[\s\S]{0,400}?calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\([^\n]*\),\s*voice = HostVoice\.forApp\(app\)::call\)/);
 
 
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
@@ -2298,7 +2317,7 @@ assert.match(model, /if \(UPDATE_REFUSALS\.any \{ message\.startsWith\(it\) \}\)
     'a refused answer wrote nothing, so no request is owed');
 assert.match(model, /saved\["processing"\] = value != null/);
 assert.doesNotMatch(code(model), /saved\["processing"\] = (?!value != null)/, 'the Bundle holds only whether Process Inbox is open');
-assert.match(model, /ProcessingStore\(File\(app\.noBackupFilesDir, "process-inbox"\)\)/);
+assert.match(model, /ProcessingStore\(Workspace\.dir\(app, "process-inbox", sandboxed\)\)/);
 assert.match(processUi, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
 
 assert.match(model, /val now = processing\?\.takeIf \{ it\.sessionId == current\.sessionId && it\.edits\.firstOrNull\(\) === next \}/);
@@ -2354,7 +2373,7 @@ assert.match(model, /failedAction = action\s+when \(action\.kind\) \{ "capture" 
 assert.match(model, /if \(action\.kind in CAPTURE_KINDS\) storedCapture\?\.let \{ keepCapture\(it\.copy\(pending = action\)\) \}/, 'a new screen reopens the popup on an owed capture, never re-sends it');
 assert.match(model, /saved\["capturing"\] = value != null/);
 assert.doesNotMatch(code(model), /saved\["capturing"\] = (?!value != null)|saved\["(draft|captureId|submittedTitle)"\]/, 'the Bundle holds only whether the popup is open');
-assert.match(model, /CaptureStore\(File\(app\.noBackupFilesDir, "capture"\)\)/);
+assert.match(model, /CaptureStore\(Workspace\.dir\(app, "capture", sandboxed\)\)/);
 assert.match(captureUi, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
 
 
@@ -2514,7 +2533,7 @@ for (const [name, text] of Object.entries(menuScreens)) {
 
 assert.match(menuModel, /fun saveCreate\(\) \{\s+val action = createAction\(\) \?: return\s+if \(shell\.busy \|\| \(shell\.failedAction != null && shell\.failedAction != action\)\) return\s+store\.write\(action\)\s+send\(action\)/);
 assert.match(menuModel, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
-assert.match(model, /val menu = MenuModel\(this, saved, prefs, File\(app\.noBackupFilesDir, "menu"\)\)/);
+assert.match(model, /val menu = MenuModel\(this, saved, prefs, Workspace\.dir\(app, "menu", sandboxed\)\)/);
 assert.match(menuModel, /store\.read\(\)\?\.let \{ pending ->\s+if \(shell\.failedAction == null\) \{\s+shell\.owe\(pending\)\s+send\(pending\)/);
 assert.match(model, /if \(reopenCapture != null\) resumeCapture\(reopenCapture\) else captureStore\.delete\(\)\s+menu\.start\(sheet\)/);
 assert.match(menuModel, /if \(refused && action\.kind in CREATES\) shell\.ui \{ store\.delete\(\) \}/, 'a refused create wrote nothing: its record goes');
@@ -3015,6 +3034,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
     assert.match(settingsModel, /fun deviceStore\(prefs: SharedPreferences\) = DeviceWrites\(\{ prefs\.all \}, \{ changes ->\s+prefs\.edit\(\)\.apply \{[^\n]*\}\.commit\(\)\s+\}\)/);
     assert.match(settingsModel, /fun deviceStore\(app: Context, keyValue: RnKeyValue, sandbox: Boolean = false\): DeviceWrites \{\s+val prefs = Workspace\.viewPrefs\(app, sandbox\)/);
+    assert.match(source('Workspace.kt'), /fun dir\(context: Context, name: String, sandbox: Boolean = this\.sandbox\) =\s+if \(sandbox\) File\(scratch\(context\), name\) else File\(context\.noBackupFilesDir, name\)/,
+        'a work folder is the real one outside the sandbox and the same name under the sandbox scratch folder inside it');
     assert.match(source('Workspace.kt'), /fun viewPrefs\(context: Context, sandbox: Boolean = this\.sandbox\) =\s+context\.getSharedPreferences\(if \(sandbox\) SANDBOX_VIEW_PREFS else DEVICE_PREFS, Context\.MODE_PRIVATE\)/,
         'the device and view-state preferences are the real file outside the sandbox and a separate file inside it');
     assert.match(settingsModel, /private fun store\(writes: JSONArray\) = deviceStore\(prefs\)\.store\(writes, null, replay = false\)/);
@@ -3029,7 +3050,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
             assert.match(devicesTest, new RegExp(`@Test fun ${name}\\(\\)`));
         }
     }
-    assert.match(model, /private val prefs = Workspace\.viewPrefs\(app, sandbox = Workspace\.sandbox \|\| sandboxRequest != null\)/);
+    assert.match(model, /private val prefs = Workspace\.viewPrefs\(app, sandbox = sandboxed\)/);
     assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
     assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
@@ -3523,7 +3544,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 
     assert.match(entryKt, /private val locked: Boolean get\(\) = shell\.lock\.enabled && shell\.lock\.locked/);
-    assert.match(entryKt, /fun pump\(\): Unit = with\(shell\) \{\s+if \(hold\.holds\(locked, queue\.head\(\), ::held\)\) return\s+val entry = lifecycle\.next\(!ready, workOpen\)/);
+    assert.match(entryKt, /fun pump\(\): Unit = with\(shell\) \{\s+if \(Workspace\.sandbox\) return\s+if \(hold\.holds\(locked, queue\.head\(\), ::held\)\) return\s+val entry = lifecycle\.next\(!ready, workOpen\)/);
     assert.match(entryKt, /val entry = lifecycle\.next\(!ready, workOpen\) \?: return\s+if \(workOpen\) return peek\(entry\)/);
 
     assert.match(entryKt, /private fun peek\(entry: EntryQueue\.Entry\) \{[\s\S]{0,400}runtime\.menuRead\("entryPoint", entry\.input\)[\s\S]{0,300}\?\.takeIf \{ it\.optJSONObject\("contextAutomation"\) != null \}/);
@@ -3840,7 +3861,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
     assert.match(modalKt, /saved\["captureModal"\] = value != null/);
     assert.match(modalKt, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(text\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
-    assert.match(model, /val captureModal = CaptureModalModel\(this, saved, File\(app\.noBackupFilesDir, "capture-modal"\)\)/);
+    assert.match(model, /val captureModal = CaptureModalModel\(this, saved, Workspace\.dir\(app, "capture-modal", sandboxed\)\)/);
 
     assert.match(model, /menu\.start\(sheet\)\s+captureModal\.resume\(\)/);
 
@@ -10214,7 +10235,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(gradle, /getByName\("play"\)\.java\.srcDir\(layout\.buildDirectory\.dir\("generated\/rnGmail\/main\/java"\)\)/);
     assert.match(gradle, /getByName\("testPlay"\)\.java\.srcDir\(layout\.buildDirectory\.dir\("generated\/rnGmail\/test\/java"\)\)/);
 
-    assert.match(source('ProcessCoreHost.kt'), /gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\)/);
+    assert.match(source('ProcessCoreHost.kt'), /gmailReceipts = HostGmailReceipts\(if \(sandbox\) Workspace\.dir\(app, "GmailCapture", true\) else File\(app\.filesDir, "GmailCapture"\)\)/);
     assert.match(receiptsKt, /BundledSQLiteDriver\(\)\.open\(file\.path\)/);
 
 

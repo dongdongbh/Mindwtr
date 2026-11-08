@@ -59,4 +59,25 @@ class WorkspaceTest {
         assertFalse(sandbox.journal.exists())
         assertTrue(WriteJournal(real.journal, syncDirectory = {}).pending().isEmpty())
     }
+
+
+    @Test fun aSandboxBootResetsOnlyItsOwnBootFilesAndKeepsItsDrafts() {
+        val scratch = File(folder.root, "no_backup/sandbox")
+        val drafts = File(scratch, "editor/draft.json").apply { parentFile.mkdirs(); writeText("{}") }
+        for (name in listOf("sandbox.db", "sandbox.db-wal", "RKStorage")) File(scratch, name).writeText("old")
+        File(scratch, "journal").mkdirs()
+        assertTrue(Workspace.freshBootFiles(scratch))
+        assertTrue(drafts.exists())
+        for (name in listOf("sandbox.db", "sandbox.db-wal", "RKStorage", "journal")) assertFalse(File(scratch, name).exists())
+    }
+
+
+    @Test fun theSandboxArmsNoAlarmAndReportsNothingFired() {
+        assertEquals(0, SandboxReminders.apply("""{"schedule":[{"id":1}],"cancel":[2]}"""))
+        assertFalse(SandboxReminders.permissionGranted())
+        assertEquals(0, SandboxReminders.cleanupRn())
+        assertEquals("""{"dropped":0,"notQueued":0}""", SandboxReminders.receiverCounts())
+        assertEquals("""{"fired":[],"shown":[]}""", SandboxReminders.ledger())
+    }
 }
+

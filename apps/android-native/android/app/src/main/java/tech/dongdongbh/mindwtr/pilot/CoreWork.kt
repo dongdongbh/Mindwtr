@@ -114,6 +114,7 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
 
     override fun doWork(): Result {
         val app = applicationContext as Application
+        if (Workspace.sandbox) return Result.success()
         val input = inputData.keyValueMap.filterKeys { it != JOB }.mapValues { it.value as? String }
         var booted: CoreHost? = null
 

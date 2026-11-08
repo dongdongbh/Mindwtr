@@ -199,8 +199,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var openProjectId by mutableStateOf(saved.get<String>("project")); private set
     var projectReturn = projectReturnOf(saved.get<String>("projectReturn")); private set
     var project by mutableStateOf<ProjectDetail?>(null); private set
-    private val sandboxRequest = Workspace.take(Workspace.store(app))
-    private val prefs = Workspace.viewPrefs(app, sandbox = Workspace.sandbox || sandboxRequest != null)
+    private val sandboxRequest = Workspace.take(Workspace.store(app))?.also { check(Workspace.begin(app)) { "The sandbox scratch folder was not prepared" } }
+    private val sandboxed = Workspace.sandbox || sandboxRequest != null
+    private val prefs = Workspace.viewPrefs(app, sandbox = sandboxed)
 
     var focusView by mutableStateOf(FocusViewState.read(prefs)); private set
 
@@ -231,7 +232,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
 
     var editor by mutableStateOf<TaskEditor?>(null); private set
-    private val drafts = EditorDrafts(File(app.noBackupFilesDir, "editor"))
+    private val drafts = EditorDrafts(Workspace.dir(app, "editor", sandboxed))
 
     private var editorKey: String? = saved.get<String>("editorKey")
 
@@ -257,17 +258,17 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     private var highlightJob: Job? = null
 
     var processing by mutableStateOf<InboxProcessing?>(null); private set
-    private val processingStore = ProcessingStore(File(app.noBackupFilesDir, "process-inbox"))
-    private val captureStore = CaptureStore(File(app.noBackupFilesDir, "capture"))
+    private val processingStore = ProcessingStore(Workspace.dir(app, "process-inbox", sandboxed))
+    private val captureStore = CaptureStore(Workspace.dir(app, "capture", sandboxed))
     private val snapshots = File(app.filesDir, "snapshots")
 
     var processingMode by mutableStateOf(readProcessingMode(prefs)); private set
 
-    val menu = MenuModel(this, saved, prefs, File(app.noBackupFilesDir, "menu"))
+    val menu = MenuModel(this, saved, prefs, Workspace.dir(app, "menu", sandboxed))
 
     val lock = AppLock(this)
 
-    val captureModal = CaptureModalModel(this, saved, File(app.noBackupFilesDir, "capture-modal"))
+    val captureModal = CaptureModalModel(this, saved, Workspace.dir(app, "capture-modal", sandboxed))
 
     val prompts = StartupPromptsModel(this)
 

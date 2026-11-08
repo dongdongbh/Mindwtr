@@ -91,7 +91,7 @@ class PomodoroModel(private val shell: InboxViewModel) {
     private var feedback: JSONObject? = null
 
     private val app: Application get() = shell.getApplication()
-    private val prefs get() = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val prefs get() = app.getSharedPreferences(if (Workspace.sandbox) "$PREFS-sandbox" else PREFS, Context.MODE_PRIVATE)
 
     val collapsed: Boolean get() = prefs.getBoolean(COLLAPSED, false)
 
