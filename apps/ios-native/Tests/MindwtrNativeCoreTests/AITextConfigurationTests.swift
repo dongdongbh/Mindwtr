@@ -720,8 +720,8 @@ final class AITextConfigurationTests: XCTestCase {
         let outcome = try await core.setAITextConfiguration(session: opened.id, request: request(opened, .model("owned model")), readmission: { true })
         guard case .saved = outcome else { return XCTFail("Expected owned scalar save") }
         let advanced = try await core.readAITextSetupOptions(session: opened.id); XCTAssertEqual(advanced.model, "owned model")
-        let timeout = try await core.readAIRequestTimeoutOptions()
-        _ = try await core.setAIRequestTimeout(.init(requestId: UUID().uuidString.lowercased(), value: timeout.value == 60 ? 120 : 60, expected: timeout.expected), readmission: { true })
+        let timeout = try await core.readAIReadmittedSettingOptions(NativeAIRequestTimeoutRequest.self)
+        _ = try await core.setAIReadmittedSetting(NativeAIRequestTimeoutRequest(requestId: UUID().uuidString.lowercased(), value: timeout.value == 60 ? 120 : 60, expected: timeout.expected), readmission: { true })
         await failure { _ = try await core.readAITextSetupOptions(session: opened.id) }
         await failure { _ = try await core.saveAITextEndpoint(session: opened.id, value: "https://fixture.invalid/v1", expected: advanced.expected) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))

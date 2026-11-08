@@ -5051,11 +5051,13 @@ const poll = async (state, id) => {
     }
     const swift = readFileSync(resolve(app, '../ios-native/Sources/MindwtrNativeCore/CoreHost.swift'), 'utf8');
     assert.match(swift, /case \.aiRequestTimeout\?: throw CoreHostRejection\(message: "INVALID_INPUT: AI timeout requires its private facade"\)/);
-    assert.match(swift, /func setAIRequestTimeout\(_ request: NativeAIRequestTimeoutRequest,/);
+    assert.match(swift, /extension NativeAIRequestTimeoutRequest: NativeAIReadmittedSettingRequest \{\n    public static var setting: NativeAIReadmittedSetting \{ \.requestTimeout \}\n    public static func options\(_ raw: String\) throws -> NativeAIRequestTimeoutOptions \{[^\n]*\}\n    public static func reply\(_ raw: String\) throws -> NativeAIRequestTimeoutResult \{/);
+    assert.match(swift, /func setAIReadmittedSetting<Request: NativeAIReadmittedSettingRequest>\(_ request: Request,/);
 
     const requireTypedAITimeoutFacade = source => {
-        assert.match(source, /public func readAIRequestTimeoutOptions\(\) async throws -> NativeAIRequestTimeoutOptions/);
-        assert.match(source, /public func setAIRequestTimeout\(_ request: NativeAIRequestTimeoutRequest,\s*readmission:/);
+        assert.match(source, /public func readAIReadmittedSettingOptions<Request: NativeAIReadmittedSettingRequest>\(_ request: Request\.Type\) async throws -> Request\.Options/);
+        assert.match(source, /extension NativeAIRequestTimeoutRequest: NativeAIReadmittedSettingRequest \{\n    public static var setting: NativeAIReadmittedSetting \{ \.requestTimeout \}\n    public static func options\(_ raw: String\) throws -> NativeAIRequestTimeoutOptions \{[^\n]*\}\n    public static func reply\(_ raw: String\) throws -> NativeAIRequestTimeoutResult \{/);
+        assert.match(source, /public func setAIReadmittedSetting<Request: NativeAIReadmittedSettingRequest>\(_ request: Request,\s*readmission:[^\n]*-> Request\.Reply/);
         assert.match(source, /public init\(requestId: String, value: Int, expected: NativeAIRequestTimeoutWitness\)/);
         for (const name of ['Witness', 'Request', 'Options', 'Result'])
             assert.match(source, new RegExp('public struct NativeAIRequestTimeout' + name + ':'));
@@ -5063,23 +5065,24 @@ const poll = async (state, id) => {
             const dto = new RegExp('public struct NativeAIRequestTimeout' + name + ':([\\s\\S]*?)\\n}').exec(source)?.[1];
             assert(dto);
             assert.deepEqual([...dto.matchAll(/\n    public (?:let|var) (\w+):/g)].map(match => match[1]), fields);
-            assert.doesNotMatch(dto, /public func (?:json|validated)/);
+            assert.doesNotMatch(dto, name === 'Request' ? /public func validated/ : /public func (?:json|validated)/);
         }
         const witness = source.slice(source.indexOf('public struct NativeAIRequestTimeoutWitness:'), source.indexOf('public struct NativeAIRequestTimeoutRequest:'));
         assert.match(witness, /^public struct NativeAIRequestTimeoutWitness: Sendable, Equatable \{/);
         assert.doesNotMatch(witness, /public (?:let|var|func|init)/);
-        assert.doesNotMatch(source, /public func (?:probeAIRequestTimeoutOutcome|readAIProviderDeviceState|invokeAIRequestTimeoutRead)/);
-        assert.doesNotMatch(source, /public func (?:setAIRequestTimeout|readAIRequestTimeoutOptions)\([^)]*(?:requestJSON|argumentsJSON)/);
+        assert.doesNotMatch(source, /public func (?:probeAIReadmittedSettingOutcome|readAIProviderDeviceState|invokeAIReadmittedSettingRead)/);
+        assert.doesNotMatch(source, /public func (?:setAIReadmittedSetting|readAIReadmittedSettingOptions)(?:<[^>]*>)?\([^)]*(?:requestJSON|argumentsJSON)/);
         assert.match(source, /case \.aiRequestTimeout\?: throw CoreHostRejection\(message: "INVALID_INPUT: AI timeout requires its private facade"\)/);
     };
     requireTypedAITimeoutFacade(swift);
     for (const [before, after] of [
-        ['public func readAIRequestTimeoutOptions()', 'func readAIRequestTimeoutOptions()'],
-        ['public func setAIRequestTimeout(_ request:', 'func setAIRequestTimeout(_ request:'],
+        ['public func readAIReadmittedSettingOptions<', 'func readAIReadmittedSettingOptions<'],
+        ['public func setAIReadmittedSetting<', 'func setAIReadmittedSetting<'],
+        ['public static var setting: NativeAIReadmittedSetting { .requestTimeout }', 'public static var setting: NativeAIReadmittedSetting { .reasoningEffort }'],
         ['public init(requestId: String, value: Int, expected:', 'init(requestId: String, value: Int, expected:'],
         ['    let stamp: String?', '    public let stamp: String?'],
         ['public struct NativeAIRequestTimeoutWitness: Sendable, Equatable', 'public struct NativeAIRequestTimeoutWitness: Decodable, Sendable, Equatable'],
-        ['    func probeAIRequestTimeoutOutcome(', '    public func probeAIRequestTimeoutOutcome('],
+        ['    func probeAIReadmittedSettingOutcome<', '    public func probeAIReadmittedSettingOutcome<'],
         ['case .aiRequestTimeout?: throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade")', 'case .aiRequestTimeout?: break'],
     ]) {
         const target = before === '    let stamp: String?'

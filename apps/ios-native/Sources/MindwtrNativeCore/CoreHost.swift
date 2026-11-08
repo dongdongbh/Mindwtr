@@ -365,7 +365,7 @@ public struct NativeAIReasoningEffortRequest: Sendable, Equatable {
     public init(requestId: String, value: NativeAIReasoningEffortValue, expected: NativeAIReasoningEffortWitness) {
         self.requestId = requestId; self.value = value; self.expected = expected
     }
-    func json() throws -> String {
+    public func json() throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: ["requestId": requestId, "value": value.rawValue, "expected": expected.object], options: [.sortedKeys]), as: UTF8.self)
     }
 }
@@ -442,7 +442,7 @@ public struct NativeAIGeminiThinkingBudgetRequest: Sendable, Equatable {
     public init(requestId: String, value: NativeAIGeminiThinkingBudgetValue, expected: NativeAIGeminiThinkingBudgetWitness) {
         self.requestId = requestId; self.value = value; self.expected = expected
     }
-    func json() throws -> String {
+    public func json() throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: ["requestId": requestId, "value": value.rawValue, "expected": expected.object], options: [.sortedKeys]), as: UTF8.self)
     }
 }
@@ -472,6 +472,60 @@ public struct NativeAIGeminiThinkingBudgetResult: Decodable, Sendable, Equatable
         }
         return result
     }
+}
+
+public enum NativeAIReadmittedSetting: String, CaseIterable, Sendable {
+    case requestTimeout = "iosAIRequestTimeout", reasoningEffort = "iosAIReasoningEffort", geminiThinkingBudget = "iosAIGeminiThinkingBudget"
+    var subject: String {
+        switch self {
+        case .requestTimeout: return "AI timeout"
+        case .reasoningEffort: return "AI reasoning effort"
+        case .geminiThinkingBudget: return "AI Gemini thinking budget"
+        }
+    }
+    var commitMethod: String { rawValue + "Commit" }
+    init?(commitMethod: String) {
+        guard let setting = Self.allCases.first(where: { $0.commitMethod == commitMethod }) else { return nil }
+        self = setting
+    }
+    var admissionTurn: HostAdmission.Turns {
+        switch self {
+        case .requestTimeout: return .aiRequestTimeout
+        case .reasoningEffort: return .aiReasoningEffort
+        case .geminiThinkingBudget: return .aiGeminiThinkingBudget
+        }
+    }
+    public var fixtureArgument: String {
+        switch self {
+        case .requestTimeout: return "--native-ai-timeout-fixture"
+        case .reasoningEffort: return "--native-ai-reasoning-fixture"
+        case .geminiThinkingBudget: return "--native-ai-gemini-fixture"
+        }
+    }
+}
+
+public protocol NativeAIReadmittedSettingRequest: Sendable, Equatable {
+    associatedtype Options: Sendable, Equatable
+    associatedtype Reply: Sendable, Equatable
+    static var setting: NativeAIReadmittedSetting { get }
+    func json() throws -> String
+    static func options(_ raw: String) throws -> Options
+    static func reply(_ raw: String) throws -> Reply
+}
+extension NativeAIRequestTimeoutRequest: NativeAIReadmittedSettingRequest {
+    public static var setting: NativeAIReadmittedSetting { .requestTimeout }
+    public static func options(_ raw: String) throws -> NativeAIRequestTimeoutOptions { try NativeAIRequestTimeoutOptions.validated(raw) }
+    public static func reply(_ raw: String) throws -> NativeAIRequestTimeoutResult { try NativeAIRequestTimeoutResult.validated(raw) }
+}
+extension NativeAIReasoningEffortRequest: NativeAIReadmittedSettingRequest {
+    public static var setting: NativeAIReadmittedSetting { .reasoningEffort }
+    public static func options(_ raw: String) throws -> NativeAIReasoningEffortOptions { try NativeAIReasoningEffortOptions.validated(raw) }
+    public static func reply(_ raw: String) throws -> NativeAIReasoningEffortResult { try NativeAIReasoningEffortResult.validated(raw) }
+}
+extension NativeAIGeminiThinkingBudgetRequest: NativeAIReadmittedSettingRequest {
+    public static var setting: NativeAIReadmittedSetting { .geminiThinkingBudget }
+    public static func options(_ raw: String) throws -> NativeAIGeminiThinkingBudgetOptions { try NativeAIGeminiThinkingBudgetOptions.validated(raw) }
+    public static func reply(_ raw: String) throws -> NativeAIGeminiThinkingBudgetResult { try NativeAIGeminiThinkingBudgetResult.validated(raw) }
 }
 
 public enum NativeAITextConfigurationChange: Sendable, Equatable {
@@ -835,7 +889,7 @@ public struct NativeAIRequestTimeoutRequest: Sendable, Equatable {
     public init(requestId: String, value: Int, expected: NativeAIRequestTimeoutWitness) {
         self.requestId = requestId; self.value = value; self.expected = expected
     }
-    func json() throws -> String {
+    public func json() throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: ["requestId": requestId, "value": value, "expected": expected.object], options: [.sortedKeys]), as: UTF8.self)
     }
 }
@@ -868,28 +922,9 @@ public struct NativeAIRequestTimeoutResult: Decodable, Sendable, Equatable {
 }
 
 #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-public struct NativeAIRequestTimeoutFixtureState: Sendable {
+public struct NativeAIReadmittedSettingFixtureState: Sendable {
     public let failureInjected: Bool
     public let exactRequestRetried: Bool
-
-    public let commitAttempts: Int
-    public let journalRetired: Bool
-}
-#endif
-#if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-public struct NativeAIReasoningEffortFixtureState: Sendable {
-    public let failureInjected: Bool
-    public let exactRequestRetried: Bool
-
-    public let commitAttempts: Int
-    public let journalRetired: Bool
-}
-#endif
-#if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-public struct NativeAIGeminiThinkingBudgetFixtureState: Sendable {
-    public let failureInjected: Bool
-    public let exactRequestRetried: Bool
-
     public let commitAttempts: Int
     public let journalRetired: Bool
 }
@@ -1601,136 +1636,56 @@ public final class CoreHost: @unchecked Sendable {
         _ = try await aiTextSensitive(session: session, op: "clear-credential", expected: expected)
     }
 
-    public func readAIRequestTimeoutOptions() async throws -> NativeAIRequestTimeoutOptions {
+    public func readAIReadmittedSettingOptions<Request: NativeAIReadmittedSettingRequest>(_ request: Request.Type) async throws -> Request.Options {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
-        return try await perform { try NativeAIRequestTimeoutOptions.validated($0.readAIRequestTimeoutOptions()) }
+        let setting = Request.setting
+        let raw = try await perform { try $0.readAIReadmittedSettingOptions(setting) }
+        return try Request.options(raw)
     }
-    func probeAIRequestTimeoutOutcome(_ request: NativeAIRequestTimeoutRequest) async throws -> NativeAIRequestTimeoutResult {
+    func probeAIReadmittedSettingOutcome<Request: NativeAIReadmittedSettingRequest>(_ request: Request) async throws -> Request.Reply {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
-        let raw = try request.json()
-        return try await perform { try NativeAIRequestTimeoutResult.validated($0.probeAIRequestTimeoutOutcome(requestJSON: raw)) }
+        let setting = Request.setting, raw = try request.json()
+        let reply = try await perform { try $0.probeAIReadmittedSettingOutcome(setting, requestJSON: raw) }
+        return try Request.reply(reply)
     }
-    public func setAIRequestTimeout(_ request: NativeAIRequestTimeoutRequest,
-        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAIRequestTimeoutResult {
+    public func setAIReadmittedSetting<Request: NativeAIReadmittedSettingRequest>(_ request: Request,
+        readmission: @escaping @Sendable () async -> Bool) async throws -> Request.Reply {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
+        let setting = Request.setting
         let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
         if Task.isCancelled { cancellation.cancel() }
-        return try await withTaskCancellationHandler {
+        let reply: String = try await withTaskCancellationHandler {
             let result: Result<String, Error>
             var retry = false
             do {
-                let admission = try await perform { try $0.beginAIRequestTimeout(id, requestJSON: raw, cancellation: cancellation) }
+                let admission = try await perform { try $0.beginAIReadmittedSetting(setting, id, requestJSON: raw, cancellation: cancellation) }
                 retry = admission.retry
                 if let replay = admission.replay { result = .success(replay) }
                 else {
                     guard !cancellation.isCancelled, await notificationAuthorization.readmit(id, check: readmission), !cancellation.isCancelled else {
-                        if retry { throw HostFailure("AI timeout save still requires exact retry") }
-                        throw CoreHostRejection(message: "STALE_REVISION: AI timeout edit is no longer current")
+                        if retry { throw HostFailure(setting.subject + " save still requires exact retry") }
+                        throw CoreHostRejection(message: "STALE_REVISION: " + setting.subject + " edit is no longer current")
                     }
-                    result = .success(try await perform { try $0.commitAIRequestTimeout(id) })
+                    result = .success(try await perform { try $0.commitAIReadmittedSetting(setting, id) })
                 }
             } catch { result = .failure(error) }
-            _ = try? await perform(reminderOwned: true) { $0.finishAIRequestTimeout(id) }
-            return try NativeAIRequestTimeoutResult.validated(result.get())
+            _ = try? await perform(reminderOwned: true) { $0.finishAIReadmittedSetting(id) }
+            return try result.get()
         } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(id) }
+        return try Request.reply(reply)
     }
 
     #if DEBUG
-    func aiReasoningEffortQueueFenceForTests() -> () -> Void {
+    func aiReadmittedSettingQueueFenceForTests() -> () -> Void {
         let ownedQueue = queue
         return { dispatchPrecondition(condition: .notOnQueue(ownedQueue)); ownedQueue.sync {} }
     }
     #endif
-
-    public func readAIReasoningEffortOptions() async throws -> NativeAIReasoningEffortOptions {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try await perform { try NativeAIReasoningEffortOptions.validated($0.readAIReasoningEffortOptions()) }
-    }
-    func probeAIReasoningEffortOutcome(_ request: NativeAIReasoningEffortRequest) async throws -> NativeAIReasoningEffortResult {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        let raw = try request.json()
-        return try await perform { try NativeAIReasoningEffortResult.validated($0.probeAIReasoningEffortOutcome(requestJSON: raw)) }
-    }
-    public func setAIReasoningEffort(_ request: NativeAIReasoningEffortRequest,
-        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAIReasoningEffortResult {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
-        localAttachmentRequests.register(cancellation, id: id)
-        defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
-        if Task.isCancelled { cancellation.cancel() }
-        return try await withTaskCancellationHandler {
-            let result: Result<String, Error>
-            var retry = false
-            do {
-                let admission = try await perform { try $0.beginAIReasoningEffort(id, requestJSON: raw, cancellation: cancellation) }
-                retry = admission.retry
-                if let replay = admission.replay { result = .success(replay) }
-                else {
-                    guard !cancellation.isCancelled, await notificationAuthorization.readmit(id, check: readmission), !cancellation.isCancelled else {
-                        if retry { throw HostFailure("AI reasoning effort save still requires exact retry") }
-                        throw CoreHostRejection(message: "STALE_REVISION: AI reasoning effort edit is no longer current")
-                    }
-                    result = .success(try await perform { try $0.commitAIReasoningEffort(id) })
-                }
-            } catch { result = .failure(error) }
-            _ = try? await perform(reminderOwned: true) { $0.finishAIReasoningEffort(id) }
-            return try NativeAIReasoningEffortResult.validated(result.get())
-        } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(id) }
-    }
-
-    #if DEBUG
-    func aiGeminiThinkingBudgetQueueFenceForTests() -> () -> Void {
-        let ownedQueue = queue
-        return { dispatchPrecondition(condition: .notOnQueue(ownedQueue)); ownedQueue.sync {} }
-    }
-    #endif
-
-    public func readAIGeminiThinkingBudgetOptions() async throws -> NativeAIGeminiThinkingBudgetOptions {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try await perform { try NativeAIGeminiThinkingBudgetOptions.validated($0.readAIGeminiThinkingBudgetOptions()) }
-    }
-    func probeAIGeminiThinkingBudgetOutcome(_ request: NativeAIGeminiThinkingBudgetRequest) async throws -> NativeAIGeminiThinkingBudgetResult {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        let raw = try request.json()
-        return try await perform { try NativeAIGeminiThinkingBudgetResult.validated($0.probeAIGeminiThinkingBudgetOutcome(requestJSON: raw)) }
-    }
-    public func setAIGeminiThinkingBudget(_ request: NativeAIGeminiThinkingBudgetRequest,
-        readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAIGeminiThinkingBudgetResult {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
-        localAttachmentRequests.register(cancellation, id: id)
-        defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
-        if Task.isCancelled { cancellation.cancel() }
-        return try await withTaskCancellationHandler {
-            let result: Result<String, Error>
-            var retry = false
-            do {
-                let admission = try await perform { try $0.beginAIGeminiThinkingBudget(id, requestJSON: raw, cancellation: cancellation) }
-                retry = admission.retry
-                if let replay = admission.replay { result = .success(replay) }
-                else {
-                    guard !cancellation.isCancelled, await notificationAuthorization.readmit(id, check: readmission), !cancellation.isCancelled else {
-                        if retry { throw HostFailure("AI Gemini thinking budget save still requires exact retry") }
-                        throw CoreHostRejection(message: "STALE_REVISION: AI Gemini thinking budget edit is no longer current")
-                    }
-                    result = .success(try await perform { try $0.commitAIGeminiThinkingBudget(id) })
-                }
-            } catch { result = .failure(error) }
-            _ = try? await perform(reminderOwned: true) { $0.finishAIGeminiThinkingBudget(id) }
-            return try NativeAIGeminiThinkingBudgetResult.validated(result.get())
-        } onCancel: { cancellation.cancel(); self.notificationAuthorization.cancelReadmission(id) }
-    }
 
     func readAIProviderDeviceState() async throws -> NativeAIProviderDeviceState {
         try beginOuterAdmission()
@@ -2763,35 +2718,15 @@ public final class CoreHost: @unchecked Sendable {
         try beginOuterAdmission(); defer { finishOuterAdmission() }
         try await perform { try $0.restoreIsolatedCaptureAIFixture() }
     }
-    public func configureIsolatedAIRequestTimeoutCommitFailureOnce() async throws {
+    public func configureIsolatedAIReadmittedSettingCommitFailureOnce(_ setting: NativeAIReadmittedSetting) async throws {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
-        return try await perform { try $0.configureIsolatedAIRequestTimeoutCommitFailureOnce() }
+        return try await perform { try $0.configureIsolatedAIReadmittedSettingCommitFailureOnce(setting) }
     }
-    public func isolatedAIRequestTimeoutFixtureState() async throws -> NativeAIRequestTimeoutFixtureState {
+    public func isolatedAIReadmittedSettingFixtureState(_ setting: NativeAIReadmittedSetting) async throws -> NativeAIReadmittedSettingFixtureState {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
-        return try await perform { try $0.isolatedAIRequestTimeoutFixtureState() }
-    }
-    public func configureIsolatedAIReasoningEffortCommitFailureOnce() async throws {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try await perform { try $0.configureIsolatedAIReasoningEffortCommitFailureOnce() }
-    }
-    public func isolatedAIReasoningEffortFixtureState() async throws -> NativeAIReasoningEffortFixtureState {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try await perform { try $0.isolatedAIReasoningEffortFixtureState() }
-    }
-    public func configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce() async throws {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try await perform { try $0.configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce() }
-    }
-    public func isolatedAIGeminiThinkingBudgetFixtureState() async throws -> NativeAIGeminiThinkingBudgetFixtureState {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try await perform { try $0.isolatedAIGeminiThinkingBudgetFixtureState() }
+        return try await perform { try $0.isolatedAIReadmittedSettingFixtureState(setting) }
     }
     #endif
     #if DEBUG && os(iOS) && targetEnvironment(simulator)
@@ -4428,7 +4363,8 @@ private final class Engine: @unchecked Sendable {
     private static let aiTextConfigurationCommitMethods: Set<String> = ["iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2"]
     private static func aiTextConfigurationMethod(_ suffix: String, version: Int) -> String { "iosAITextConfiguration" + suffix + (version == 2 ? "V2" : "") }
     private static func aiTextConfigurationVersion(_ command: PendingCommand) -> Int { command.method == "iosAITextConfigurationCommitV2" ? 2 : 1 }
-    private final class AIRequestTimeoutTurn {
+    private final class AIReadmittedSettingTurn {
+        let setting: NativeAIReadmittedSetting
         let id: UUID
         let runtime: JSContext
         let connection: SQLiteBridge
@@ -4438,70 +4374,22 @@ private final class Engine: @unchecked Sendable {
         let cancellation: NativeAttachmentCancellation
         let requestJSON: String?
         let retry: Bool
-        init(id: UUID, runtime: JSContext, connection: SQLiteBridge, library: OwnedDiscardIdentity, generation: UInt64,
+        init(setting: NativeAIReadmittedSetting, id: UUID, runtime: JSContext, connection: SQLiteBridge, library: OwnedDiscardIdentity, generation: UInt64,
              epoch: Int64, cancellation: NativeAttachmentCancellation, requestJSON: String?, retry: Bool) {
-            self.id = id; self.runtime = runtime; self.connection = connection; self.library = library
+            self.setting = setting; self.id = id; self.runtime = runtime; self.connection = connection; self.library = library
             self.generation = generation; self.epoch = epoch; self.cancellation = cancellation; self.requestJSON = requestJSON; self.retry = retry
         }
     }
-    private var aiRequestTimeoutTurn: AIRequestTimeoutTurn?
-    private var aiRequestTimeoutOwnerAccess = false
-    private var aiRequestTimeoutRetired = false
+    private var aiReadmittedSettingTurn: AIReadmittedSettingTurn?
+    private var aiReadmittedSettingOwnerAccess: Set<NativeAIReadmittedSetting> = []
+    private var aiReadmittedSettingRetired: Set<NativeAIReadmittedSetting> = []
     #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-    private var aiRequestTimeoutFixtureOriginal: String?
-    private var aiRequestTimeoutFixtureArmed = false
-    private var aiRequestTimeoutFixtureSQLCommitAttempts = 0
-    private var aiRequestTimeoutFixtureExactRetry = false
-    #endif
-    private final class AIReasoningEffortTurn {
-        let id: UUID
-        let runtime: JSContext
-        let connection: SQLiteBridge
-        let library: OwnedDiscardIdentity
-        let generation: UInt64
-        let epoch: Int64
-        let cancellation: NativeAttachmentCancellation
-        let requestJSON: String?
-        let retry: Bool
-        init(id: UUID, runtime: JSContext, connection: SQLiteBridge, library: OwnedDiscardIdentity, generation: UInt64,
-             epoch: Int64, cancellation: NativeAttachmentCancellation, requestJSON: String?, retry: Bool) {
-            self.id = id; self.runtime = runtime; self.connection = connection; self.library = library
-            self.generation = generation; self.epoch = epoch; self.cancellation = cancellation; self.requestJSON = requestJSON; self.retry = retry
-        }
+    private struct AIReadmittedSettingFixture {
+        var original: String?
+        var commitAttempts = 0
+        var exactRetry = false
     }
-    private var aiReasoningEffortTurn: AIReasoningEffortTurn?
-    private var aiReasoningEffortOwnerAccess = false
-    private var aiReasoningEffortRetired = false
-    #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-    private var aiReasoningEffortFixtureOriginal: String?
-    private var aiReasoningEffortFixtureArmed = false
-    private var aiReasoningEffortFixtureSQLCommitAttempts = 0
-    private var aiReasoningEffortFixtureExactRetry = false
-    #endif
-    private final class AIGeminiThinkingBudgetTurn {
-        let id: UUID
-        let runtime: JSContext
-        let connection: SQLiteBridge
-        let library: OwnedDiscardIdentity
-        let generation: UInt64
-        let epoch: Int64
-        let cancellation: NativeAttachmentCancellation
-        let requestJSON: String?
-        let retry: Bool
-        init(id: UUID, runtime: JSContext, connection: SQLiteBridge, library: OwnedDiscardIdentity, generation: UInt64,
-             epoch: Int64, cancellation: NativeAttachmentCancellation, requestJSON: String?, retry: Bool) {
-            self.id = id; self.runtime = runtime; self.connection = connection; self.library = library
-            self.generation = generation; self.epoch = epoch; self.cancellation = cancellation; self.requestJSON = requestJSON; self.retry = retry
-        }
-    }
-    private var aiGeminiThinkingBudgetTurn: AIGeminiThinkingBudgetTurn?
-    private var aiGeminiThinkingBudgetOwnerAccess = false
-    private var aiGeminiThinkingBudgetRetired = false
-    #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-    private var aiGeminiThinkingBudgetFixtureOriginal: String?
-    private var aiGeminiThinkingBudgetFixtureArmed = false
-    private var aiGeminiThinkingBudgetFixtureSQLCommitAttempts = 0
-    private var aiGeminiThinkingBudgetFixtureExactRetry = false
+    private var aiReadmittedSettingFixtures: [NativeAIReadmittedSetting: AIReadmittedSettingFixture] = [:]
     #endif
     private final class DeviceCalendarSettingTurn {
         let runtime: JSContext
@@ -5811,17 +5699,9 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke(Self.aiTextConfigurationMethod("Validate", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
             if case .success(let value) = command.terminal { try validateAITextConfigurationAcknowledgment(command, value: value) }
         }
-        if let command = pending, command.method == "iosAIRequestTimeoutCommit" {
-            _ = try invoke("iosAIRequestTimeoutValidate", arguments: journalArguments(command))
-            if case .success(let value) = command.terminal { try validateAIRequestTimeoutAcknowledgment(command, value: value) }
-        }
-        if let command = pending, command.method == "iosAIReasoningEffortCommit" {
-            _ = try invoke("iosAIReasoningEffortValidate", arguments: journalArguments(command))
-            if case .success(let value) = command.terminal { try validateAIReasoningEffortAcknowledgment(command, value: value) }
-        }
-        if let command = pending, command.method == "iosAIGeminiThinkingBudgetCommit" {
-            _ = try invoke("iosAIGeminiThinkingBudgetValidate", arguments: journalArguments(command))
-            if case .success(let value) = command.terminal { try validateAIGeminiThinkingBudgetAcknowledgment(command, value: value) }
+        if let command = pending, let setting = NativeAIReadmittedSetting(commitMethod: command.method) {
+            _ = try invoke(setting.rawValue + "Validate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateAIReadmittedSettingAcknowledgment(setting, command, value: value) }
         }
         if let command = pending, let operation = CalendarSubscriptionOperation(commitMethod: command.method) {
             _ = try invoke(operation.rawValue + "Validate", arguments: journalArguments(command))
@@ -8091,8 +7971,7 @@ private final class Engine: @unchecked Sendable {
             try requireVoiceBinding(binding)
             guard try selectedVoiceProvider(binding).rawValue == turn.session.provider.rawValue else { throw Self.aiModelDiscoveryUnavailable }
         } else { _ = try requireAIConfigurationSession(turn.session.id) }
-        guard captureAITurn == nil, aiTextConfigurationTurn == nil, aiRequestTimeoutTurn == nil,
-              aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, pending == nil,
+        guard captureAITurn == nil, aiTextConfigurationTurn == nil, aiReadmittedSettingTurn == nil, pending == nil,
               retainedOrdinaryTurn == nil, providerCopy == nil, ordinaryMutationDepth == 0, !cleanupOwed,
               !foregroundCleanupActive, foregroundCleanupCancellation == nil,
               try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
@@ -8363,7 +8242,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func makeAITextConfigurationTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool, version: Int = 1) throws {
         guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
-        guard !aiTextConfigurationRetired, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiTextConfigurationTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+        guard !aiTextConfigurationRetired, aiConfigurationTurn == nil, aiReadmittedSettingTurn == nil, aiTextConfigurationTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
               let runtime = context, let storage = deviceStorage, let connection = database, let library = calendarPushDatabaseBinding,
               try Self.bindingIdentity(databaseURL) == library else {
             throw CoreHostRejection(message: "STALE_REVISION: AI text configuration owner is unavailable; reload before editing")
@@ -8464,7 +8343,7 @@ private final class Engine: @unchecked Sendable {
         guard aiConfigurationConsentRetry == nil || pending != nil else {
             throw CoreHostRejection(message: "NOT_READY: AI consent recording requires its selected retry")
         }
-        guard aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiTextConfigurationTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+        guard aiConfigurationTurn == nil, aiReadmittedSettingTurn == nil, aiTextConfigurationTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
             throw CoreHostRejection(message: "NOT_READY: AI text configuration edit is unavailable")
         }
         try requireNoAttachmentDraft(); try denyCleanupOwner()
@@ -8550,23 +8429,72 @@ private final class Engine: @unchecked Sendable {
         try invokeAITextConfigurationRead(Self.aiTextConfigurationMethod("Commit", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
     }
 
-    private static func aiRequestTimeoutRequest(_ raw: String) throws -> [String: Any] {
+    private static func aiReadmittedSettingRequest(_ setting: NativeAIReadmittedSetting, _ raw: String) throws -> [String: Any] {
         guard raw.utf8.count <= 2048, try NativeJSON.hasUniqueObjectKeys(raw),
               let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               Set(request.keys) == Set(["requestId", "value", "expected"]), let id = request["requestId"] as? String,
               let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id,
-              isInteger(request["value"]), let value = request["value"] as? Int, [30, 60, 120, 300].contains(value) else {
-            throw HostFailure("INVALID_INPUT: A bounded AI timeout request is required")
+              aiReadmittedSettingValueIsBounded(setting, request["value"]) else {
+            throw HostFailure("INVALID_INPUT: A bounded " + setting.subject + " request is required")
         }
-        _ = try NativeAIRequestTimeoutWitness.validated(request["expected"])
+        switch setting {
+        case .requestTimeout: _ = try NativeAIRequestTimeoutWitness.validated(request["expected"])
+        case .reasoningEffort: _ = try NativeAIReasoningEffortWitness.validated(request["expected"])
+        case .geminiThinkingBudget: _ = try NativeAIGeminiThinkingBudgetWitness.validated(request["expected"])
+        }
         return request
     }
-    private func makeAIRequestTimeoutTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool) throws {
+    private static func aiReadmittedSettingValueIsBounded(_ setting: NativeAIReadmittedSetting, _ value: Any?) -> Bool {
+        switch setting {
+        case .requestTimeout:
+            guard isInteger(value), let seconds = value as? Int else { return false }
+            return [30, 60, 120, 300].contains(seconds)
+        case .reasoningEffort:
+            guard let effort = value as? String else { return false }
+            return NativeAIReasoningEffortValue(rawValue: effort) != nil
+        case .geminiThinkingBudget:
+            guard isInteger(value), let budget = value as? Int else { return false }
+            return NativeAIGeminiThinkingBudgetValue(rawValue: budget) != nil
+        }
+    }
+    private static func validateAIReadmittedSettingOptions(_ setting: NativeAIReadmittedSetting, _ raw: String) throws {
+        switch setting {
+        case .requestTimeout: _ = try NativeAIRequestTimeoutOptions.validated(raw)
+        case .reasoningEffort: _ = try NativeAIReasoningEffortOptions.validated(raw)
+        case .geminiThinkingBudget: _ = try NativeAIGeminiThinkingBudgetOptions.validated(raw)
+        }
+    }
+    private static func validateAIReadmittedSettingResult(_ setting: NativeAIReadmittedSetting, _ value: String, request: [String: Any], changed: Bool) throws {
+        let matches: Bool
+        switch setting {
+        case .requestTimeout:
+            let result = try NativeAIRequestTimeoutResult.validated(value)
+            let witness = try NativeAIRequestTimeoutWitness.validated(request["expected"])
+            let requested = request["value"] as? Int
+            let unchangedProof = witness.timeoutPresent && witness.timeout == result.value
+            matches = result.value == requested && result.changed == changed && (changed || unchangedProof)
+        case .reasoningEffort:
+            let result = try NativeAIReasoningEffortResult.validated(value)
+            let witness = try NativeAIReasoningEffortWitness.validated(request["expected"])
+            let requested = request["value"] as? String
+            let unchangedProof = witness.effortPresent && witness.effort?.rawValue == result.value.rawValue
+            matches = result.value.rawValue == requested && result.changed == changed && (changed || unchangedProof)
+        case .geminiThinkingBudget:
+            let result = try NativeAIGeminiThinkingBudgetResult.validated(value)
+            let witness = try NativeAIGeminiThinkingBudgetWitness.validated(request["expected"])
+            let requested = request["value"] as? Int
+            let unchangedProof = witness.budgetPresent && witness.budget == result.value.rawValue
+            matches = result.value.rawValue == requested && result.changed == changed && (changed || unchangedProof)
+        }
+        guard matches else { throw HostFailure("Malformed " + setting.subject + " acknowledgment") }
+    }
+    private func makeAIReadmittedSettingTurn(_ setting: NativeAIReadmittedSetting, _ id: UUID, requestJSON: String?,
+                                             cancellation: NativeAttachmentCancellation, retry: Bool) throws {
         guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiRequestTimeoutRetired, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiReadmittedSettingRetired.contains(setting), aiReadmittedSettingTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
               let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
               try Self.bindingIdentity(databaseURL) == library else {
-            throw CoreHostRejection(message: "STALE_REVISION: AI timeout owner is unavailable; reload before editing")
+            throw CoreHostRejection(message: "STALE_REVISION: " + setting.subject + " owner is unavailable; reload before editing")
         }
         try requireNoAttachmentDraft(); try denyCleanupOwner()
         guard calendarAccessTurn == nil, calendarPushTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
@@ -8574,414 +8502,119 @@ private final class Engine: @unchecked Sendable {
               providerCopy == nil, retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
               projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
               !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
-            throw CoreHostRejection(message: "NOT_READY: AI timeout edit is unavailable")
+            throw CoreHostRejection(message: "NOT_READY: " + setting.subject + " edit is unavailable")
         }
-        aiRequestTimeoutTurn = .init(id: id, runtime: runtime, connection: connection, library: library, generation: attachmentGeneration,
-            epoch: try captureLinesDataVersion(), cancellation: cancellation, requestJSON: requestJSON, retry: retry)
+        aiReadmittedSettingTurn = .init(setting: setting, id: id, runtime: runtime, connection: connection, library: library,
+            generation: attachmentGeneration, epoch: try captureLinesDataVersion(), cancellation: cancellation, requestJSON: requestJSON, retry: retry)
     }
-    private func requireAIRequestTimeoutTurn(checkCancellation: Bool = true) throws {
-        guard let turn = aiRequestTimeoutTurn, !aiRequestTimeoutRetired, started, !closed, lockFD >= 0,
+    private func requireAIReadmittedSettingTurn(_ setting: NativeAIReadmittedSetting, checkCancellation: Bool = true) throws {
+        guard let turn = aiReadmittedSettingTurn, turn.setting == setting, !aiReadmittedSettingRetired.contains(setting), started, !closed, lockFD >= 0,
               context === turn.runtime, database === turn.connection, attachmentGeneration == turn.generation,
               try Self.bindingIdentity(databaseURL) == turn.library, try captureLinesDataVersion() == turn.epoch else {
-            aiRequestTimeoutRetired = true
-            throw HostFailure("STALE_REVISION: AI timeout owner changed; reload before editing")
+            aiReadmittedSettingRetired.insert(setting)
+            throw HostFailure("STALE_REVISION: " + setting.subject + " owner changed; reload before editing")
         }
         if checkCancellation && turn.cancellation.isCancelled {
-            throw HostFailure("CANCELLED: AI timeout edit is no longer current")
+            throw HostFailure("CANCELLED: " + setting.subject + " edit is no longer current")
         }
     }
-    private func invokeAIRequestTimeoutRead(_ method: String, arguments: [Any]) throws -> String {
-        try requireAIRequestTimeoutTurn()
-        guard let runtime = aiRequestTimeoutTurn?.runtime else { throw HostFailure("NOT_READY: AI timeout owner is unavailable") }
-        let owner: @convention(block) () -> String = { [unowned self] in
-            self.guarded { try self.requireAIRequestTimeoutTurn(); return "" } ?? "!MindwtrNativeError:AI timeout owner is unavailable"
-        }
-        do {
-            runtime.exception = nil
-            guard let ownerValue = JSValue(object: owner, in: runtime), runtime.exception == nil else {
-                throw HostFailure("NOT_READY: AI timeout owner callback is unavailable")
-            }
-            let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiRequestTimeoutTurn?.cancellation)
-
-            try requireAIRequestTimeoutTurn(checkCancellation: method != "iosAIRequestTimeoutCommit")
-            return value
-        } catch {
-
-            let message = (error as? HostFailure)?.message
-            let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
-                || message?.hasPrefix("CANCELLED:") == true
-            if method != "iosAIRequestTimeoutCommit" || !uncertainSave {
-                aiRequestTimeoutRetired = true
-            }
-            throw error
-        }
-    }
-    func readAIRequestTimeoutOptions() throws -> String {
-        try requireCalendarAdmission()
-        let id = UUID()
-        try makeAIRequestTimeoutTurn(id, requestJSON: nil, cancellation: NativeAttachmentCancellation(), retry: false)
-        defer { finishAIRequestTimeout(id) }
-        aiRequestTimeoutOwnerAccess = true; defer { aiRequestTimeoutOwnerAccess = false }
-        let raw = try invokeAIRequestTimeoutRead("iosAIRequestTimeoutOptions", arguments: ["{}"])
-        _ = try NativeAIRequestTimeoutOptions.validated(raw); return raw
-    }
-    func probeAIRequestTimeoutOutcome(requestJSON: String) throws -> String {
-        try requireCalendarAdmission()
-        let request = try Self.aiRequestTimeoutRequest(requestJSON)
-        do {
-            let value = try invoke("iosAIRequestTimeoutRetryOutcome", arguments: [requestJSON])
-            try validateAIRequestTimeoutResult(value, request: request, changed: true); return value
-        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
-            throw CoreHostRejection(message: error.message)
-        }
-    }
-    func beginAIRequestTimeout(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
-            throw CoreHostRejection(message: "NOT_READY: AI timeout edit is unavailable")
-        }
-        try requireNoAttachmentDraft(); try denyCleanupOwner()
-        let request = try Self.aiRequestTimeoutRequest(requestJSON)
-        if let command = pending {
-            guard command.method == "iosAIRequestTimeoutCommit", let raw = try journalArguments(command).first as? String,
-                  let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Self.equalJSON(envelope["request"], request) else {
-                throw HostFailure("Previous changes require their exact retry")
-            }
-        } else {
-            try requireCalendarAdmission()
-            do {
-                let replay = try invoke("iosAIRequestTimeoutRetryOutcome", arguments: [requestJSON])
-                try validateAIRequestTimeoutResult(replay, request: request, changed: true); return (replay, false)
-            } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
-            catch let error as HostFailure where error.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: error.message) }
-        }
-        if cancellation.isCancelled {
-            if pending != nil { throw HostFailure("AI timeout save still requires exact retry") }
-            throw CoreHostRejection(message: "STALE_REVISION: AI timeout edit is no longer current")
-        }
-        try makeAIRequestTimeoutTurn(id, requestJSON: requestJSON, cancellation: cancellation, retry: pending != nil)
-        return (nil, pending != nil)
-    }
-    func commitAIRequestTimeout(_ id: UUID) throws -> String {
-        guard let turn = aiRequestTimeoutTurn, turn.id == id else { throw HostFailure("AI timeout owner is unavailable") }
-        aiRequestTimeoutOwnerAccess = true; defer { aiRequestTimeoutOwnerAccess = false }
-        do { try requireAIRequestTimeoutTurn() }
-        catch { if turn.retry { throw HostFailure("AI timeout save still requires exact retry") }; throw CoreHostRejection(message: error.localizedDescription) }
-        if turn.retry {
-            guard let terminal = try resolvePending() else { throw HostFailure("AI timeout save still requires exact retry") }
-            return try terminal.value()
-        }
-        guard let request = turn.requestJSON else { throw HostFailure("AI timeout request is unavailable") }
-        return try call("iosAIRequestTimeout", argumentsJSON: Self.ownedJSON([request]))
-    }
-    func finishAIRequestTimeout(_ id: UUID) { if aiRequestTimeoutTurn?.id == id { aiRequestTimeoutTurn = nil } }
-    private func validateAIRequestTimeoutResult(_ value: String, request: [String: Any], changed: Bool) throws {
-        let result = try NativeAIRequestTimeoutResult.validated(value)
-        let witness = try NativeAIRequestTimeoutWitness.validated(request["expected"])
-        guard result.value == request["value"] as? Int, result.changed == changed,
-              changed || (witness.timeoutPresent && witness.timeout == result.value) else { throw HostFailure("Malformed AI timeout acknowledgment") }
-    }
-    private func aiRequestTimeoutJournalRequest(_ command: PendingCommand) throws -> String {
-        guard let raw = try journalArguments(command).first as? String,
-              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
-              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed AI timeout journal") }
-        return try Self.ownedJSON(request)
-    }
-    private func validateAIRequestTimeoutAcknowledgment(_ command: PendingCommand, value: String) throws {
-        let request = try Self.aiRequestTimeoutRequest(aiRequestTimeoutJournalRequest(command))
-        try validateAIRequestTimeoutResult(value, request: request, changed: true)
-    }
-    private func invokeAIRequestTimeoutCommit(_ command: PendingCommand) throws -> String {
-        try invokeAIRequestTimeoutRead("iosAIRequestTimeoutCommit", arguments: journalArguments(command))
-    }
-
-    private static func aiReasoningEffortRequest(_ raw: String) throws -> [String: Any] {
-        guard raw.utf8.count <= 2048, try NativeJSON.hasUniqueObjectKeys(raw),
-              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
-              Set(request.keys) == Set(["requestId", "value", "expected"]), let id = request["requestId"] as? String,
-              let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id,
-              let value = request["value"] as? String, NativeAIReasoningEffortValue(rawValue: value) != nil else {
-            throw HostFailure("INVALID_INPUT: A bounded AI reasoning effort request is required")
-        }
-        _ = try NativeAIReasoningEffortWitness.validated(request["expected"])
-        return request
-    }
-    private func makeAIReasoningEffortTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool) throws {
-        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiReasoningEffortRetired, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
-              let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
-              try Self.bindingIdentity(databaseURL) == library else {
-            throw CoreHostRejection(message: "STALE_REVISION: AI reasoning effort owner is unavailable; reload before editing")
-        }
-        try requireNoAttachmentDraft(); try denyCleanupOwner()
-        guard calendarAccessTurn == nil, calendarPushTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
-              deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, encryptionUnlockTurn == nil,
-              providerCopy == nil, retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
-              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
-              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
-            throw CoreHostRejection(message: "NOT_READY: AI reasoning effort edit is unavailable")
-        }
-        aiReasoningEffortTurn = .init(id: id, runtime: runtime, connection: connection, library: library, generation: attachmentGeneration,
-            epoch: try captureLinesDataVersion(), cancellation: cancellation, requestJSON: requestJSON, retry: retry)
-    }
-    private func requireAIReasoningEffortTurn(checkCancellation: Bool = true) throws {
-        guard let turn = aiReasoningEffortTurn, !aiReasoningEffortRetired, started, !closed, lockFD >= 0,
-              context === turn.runtime, database === turn.connection, attachmentGeneration == turn.generation,
-              try Self.bindingIdentity(databaseURL) == turn.library, try captureLinesDataVersion() == turn.epoch else {
-            aiReasoningEffortRetired = true
-            throw HostFailure("STALE_REVISION: AI reasoning effort owner changed; reload before editing")
-        }
-        if checkCancellation && turn.cancellation.isCancelled {
-            throw HostFailure("CANCELLED: AI reasoning effort edit is no longer current")
-        }
-    }
-    private func invokeAIReasoningEffortRead(_ method: String, arguments: [Any]) throws -> String {
-        try requireAIReasoningEffortTurn()
-        guard let runtime = aiReasoningEffortTurn?.runtime else { throw HostFailure("NOT_READY: AI reasoning effort owner is unavailable") }
+    private func invokeAIReadmittedSettingRead(_ setting: NativeAIReadmittedSetting, _ method: String, arguments: [Any]) throws -> String {
+        try requireAIReadmittedSettingTurn(setting)
+        guard let runtime = aiReadmittedSettingTurn?.runtime else { throw HostFailure("NOT_READY: " + setting.subject + " owner is unavailable") }
+        let unavailable = "!MindwtrNativeError:" + setting.subject + " owner is unavailable"
         let owner: @convention(block) () -> String = { [weak self] in
-            guard let self else { return "!MindwtrNativeError:AI reasoning effort owner is unavailable" }
-            return self.guarded { try self.requireAIReasoningEffortTurn(); return "" } ?? "!MindwtrNativeError:AI reasoning effort owner is unavailable"
+            guard let self else { return unavailable }
+            return self.guarded { try self.requireAIReadmittedSettingTurn(setting); return "" } ?? unavailable
         }
         do {
             runtime.exception = nil
             guard let ownerValue = JSValue(object: owner, in: runtime), runtime.exception == nil else {
-                throw HostFailure("NOT_READY: AI reasoning effort owner callback is unavailable")
+                throw HostFailure("NOT_READY: " + setting.subject + " owner callback is unavailable")
             }
-            let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiReasoningEffortTurn?.cancellation)
-
-            try requireAIReasoningEffortTurn(checkCancellation: method != "iosAIReasoningEffortCommit")
+            let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiReadmittedSettingTurn?.cancellation)
+            try requireAIReadmittedSettingTurn(setting, checkCancellation: method != setting.commitMethod)
             return value
         } catch {
-
             let message = (error as? HostFailure)?.message
             let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
                 || message?.hasPrefix("CANCELLED:") == true
-            if method != "iosAIReasoningEffortCommit" || !uncertainSave {
-                aiReasoningEffortRetired = true
+            if method != setting.commitMethod || !uncertainSave {
+                aiReadmittedSettingRetired.insert(setting)
             }
             throw error
         }
     }
-    func readAIReasoningEffortOptions() throws -> String {
+    func readAIReadmittedSettingOptions(_ setting: NativeAIReadmittedSetting) throws -> String {
         try requireCalendarAdmission()
         let id = UUID()
-        try makeAIReasoningEffortTurn(id, requestJSON: nil, cancellation: NativeAttachmentCancellation(), retry: false)
-        defer { finishAIReasoningEffort(id) }
-        aiReasoningEffortOwnerAccess = true; defer { aiReasoningEffortOwnerAccess = false }
-        let raw = try invokeAIReasoningEffortRead("iosAIReasoningEffortOptions", arguments: ["{}"])
-        _ = try NativeAIReasoningEffortOptions.validated(raw); return raw
+        try makeAIReadmittedSettingTurn(setting, id, requestJSON: nil, cancellation: NativeAttachmentCancellation(), retry: false)
+        defer { finishAIReadmittedSetting(id) }
+        aiReadmittedSettingOwnerAccess.insert(setting); defer { aiReadmittedSettingOwnerAccess.remove(setting) }
+        let raw = try invokeAIReadmittedSettingRead(setting, setting.rawValue + "Options", arguments: ["{}"])
+        try Self.validateAIReadmittedSettingOptions(setting, raw); return raw
     }
-    func probeAIReasoningEffortOutcome(requestJSON: String) throws -> String {
+    func probeAIReadmittedSettingOutcome(_ setting: NativeAIReadmittedSetting, requestJSON: String) throws -> String {
         try requireCalendarAdmission()
-        let request = try Self.aiReasoningEffortRequest(requestJSON)
+        let request = try Self.aiReadmittedSettingRequest(setting, requestJSON)
         do {
-            let value = try invoke("iosAIReasoningEffortRetryOutcome", arguments: [requestJSON])
-            try validateAIReasoningEffortResult(value, request: request, changed: true); return value
+            let value = try invoke(setting.rawValue + "RetryOutcome", arguments: [requestJSON])
+            try Self.validateAIReadmittedSettingResult(setting, value, request: request, changed: true); return value
         } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
             throw CoreHostRejection(message: error.message)
         }
     }
-    func beginAIReasoningEffort(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
-            throw CoreHostRejection(message: "NOT_READY: AI reasoning effort edit is unavailable")
+    func beginAIReadmittedSetting(_ setting: NativeAIReadmittedSetting, _ id: UUID, requestJSON: String,
+                                  cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
+        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiReadmittedSettingTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
+            throw CoreHostRejection(message: "NOT_READY: " + setting.subject + " edit is unavailable")
         }
         try requireNoAttachmentDraft(); try denyCleanupOwner()
-        let request = try Self.aiReasoningEffortRequest(requestJSON)
+        let request = try Self.aiReadmittedSettingRequest(setting, requestJSON)
         if let command = pending {
-            guard command.method == "iosAIReasoningEffortCommit", let raw = try journalArguments(command).first as? String,
+            guard command.method == setting.commitMethod, let raw = try journalArguments(command).first as? String,
                   let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Self.equalJSON(envelope["request"], request) else {
                 throw HostFailure("Previous changes require their exact retry")
             }
         } else {
             try requireCalendarAdmission()
             do {
-                let replay = try invoke("iosAIReasoningEffortRetryOutcome", arguments: [requestJSON])
-                try validateAIReasoningEffortResult(replay, request: request, changed: true); return (replay, false)
+                let replay = try invoke(setting.rawValue + "RetryOutcome", arguments: [requestJSON])
+                try Self.validateAIReadmittedSettingResult(setting, replay, request: request, changed: true); return (replay, false)
             } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
             catch let error as HostFailure where error.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: error.message) }
         }
         if cancellation.isCancelled {
-            if pending != nil { throw HostFailure("AI reasoning effort save still requires exact retry") }
-            throw CoreHostRejection(message: "STALE_REVISION: AI reasoning effort edit is no longer current")
+            if pending != nil { throw HostFailure(setting.subject + " save still requires exact retry") }
+            throw CoreHostRejection(message: "STALE_REVISION: " + setting.subject + " edit is no longer current")
         }
-        try makeAIReasoningEffortTurn(id, requestJSON: requestJSON, cancellation: cancellation, retry: pending != nil)
+        try makeAIReadmittedSettingTurn(setting, id, requestJSON: requestJSON, cancellation: cancellation, retry: pending != nil)
         return (nil, pending != nil)
     }
-    func commitAIReasoningEffort(_ id: UUID) throws -> String {
-        guard let turn = aiReasoningEffortTurn, turn.id == id else { throw HostFailure("AI reasoning effort owner is unavailable") }
-        aiReasoningEffortOwnerAccess = true; defer { aiReasoningEffortOwnerAccess = false }
-        do { try requireAIReasoningEffortTurn() }
-        catch { if turn.retry { throw HostFailure("AI reasoning effort save still requires exact retry") }; throw CoreHostRejection(message: error.localizedDescription) }
+    func commitAIReadmittedSetting(_ setting: NativeAIReadmittedSetting, _ id: UUID) throws -> String {
+        guard let turn = aiReadmittedSettingTurn, turn.setting == setting, turn.id == id else { throw HostFailure(setting.subject + " owner is unavailable") }
+        aiReadmittedSettingOwnerAccess.insert(setting); defer { aiReadmittedSettingOwnerAccess.remove(setting) }
+        do { try requireAIReadmittedSettingTurn(setting) }
+        catch { if turn.retry { throw HostFailure(setting.subject + " save still requires exact retry") }; throw CoreHostRejection(message: error.localizedDescription) }
         if turn.retry {
-            guard let terminal = try resolvePending() else { throw HostFailure("AI reasoning effort save still requires exact retry") }
+            guard let terminal = try resolvePending() else { throw HostFailure(setting.subject + " save still requires exact retry") }
             return try terminal.value()
         }
-        guard let request = turn.requestJSON else { throw HostFailure("AI reasoning effort request is unavailable") }
-        return try call("iosAIReasoningEffort", argumentsJSON: Self.ownedJSON([request]))
+        guard let request = turn.requestJSON else { throw HostFailure(setting.subject + " request is unavailable") }
+        return try call(setting.rawValue, argumentsJSON: Self.ownedJSON([request]))
     }
-    func finishAIReasoningEffort(_ id: UUID) { if aiReasoningEffortTurn?.id == id { aiReasoningEffortTurn = nil } }
-    private func validateAIReasoningEffortResult(_ value: String, request: [String: Any], changed: Bool) throws {
-        let result = try NativeAIReasoningEffortResult.validated(value)
-        let witness = try NativeAIReasoningEffortWitness.validated(request["expected"])
-        guard result.value.rawValue == request["value"] as? String, result.changed == changed,
-              changed || (witness.effortPresent && witness.effort?.rawValue == result.value.rawValue) else { throw HostFailure("Malformed AI reasoning effort acknowledgment") }
-    }
-    private func aiReasoningEffortJournalRequest(_ command: PendingCommand) throws -> String {
+    func finishAIReadmittedSetting(_ id: UUID) { if aiReadmittedSettingTurn?.id == id { aiReadmittedSettingTurn = nil } }
+    private func aiReadmittedSettingJournalRequest(_ setting: NativeAIReadmittedSetting, _ command: PendingCommand) throws -> String {
         guard let raw = try journalArguments(command).first as? String,
               let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
-              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed AI reasoning effort journal") }
+              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed " + setting.subject + " journal") }
         return try Self.ownedJSON(request)
     }
-    private func validateAIReasoningEffortAcknowledgment(_ command: PendingCommand, value: String) throws {
-        let request = try Self.aiReasoningEffortRequest(aiReasoningEffortJournalRequest(command))
-        try validateAIReasoningEffortResult(value, request: request, changed: true)
+    private func validateAIReadmittedSettingAcknowledgment(_ setting: NativeAIReadmittedSetting, _ command: PendingCommand, value: String) throws {
+        let request = try Self.aiReadmittedSettingRequest(setting, aiReadmittedSettingJournalRequest(setting, command))
+        try Self.validateAIReadmittedSettingResult(setting, value, request: request, changed: true)
     }
-    private func invokeAIReasoningEffortCommit(_ command: PendingCommand) throws -> String {
-        try invokeAIReasoningEffortRead("iosAIReasoningEffortCommit", arguments: journalArguments(command))
-    }
-
-    private static func aiGeminiThinkingBudgetRequest(_ raw: String) throws -> [String: Any] {
-        guard raw.utf8.count <= 2048, try NativeJSON.hasUniqueObjectKeys(raw),
-              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
-              Set(request.keys) == Set(["requestId", "value", "expected"]), let id = request["requestId"] as? String,
-              let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id,
-              isInteger(request["value"]), let value = request["value"] as? Int, NativeAIGeminiThinkingBudgetValue(rawValue: value) != nil else {
-            throw HostFailure("INVALID_INPUT: A bounded AI Gemini thinking budget request is required")
-        }
-        _ = try NativeAIGeminiThinkingBudgetWitness.validated(request["expected"])
-        return request
-    }
-    private func makeAIGeminiThinkingBudgetTurn(_ id: UUID, requestJSON: String?, cancellation: NativeAttachmentCancellation, retry: Bool) throws {
-        guard taskAITurn == nil else { throw NativeTaskAIJSON.unavailable }
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !aiGeminiThinkingBudgetRetired, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0,
-              let runtime = context, let connection = database, let library = calendarPushDatabaseBinding,
-              try Self.bindingIdentity(databaseURL) == library else {
-            throw CoreHostRejection(message: "STALE_REVISION: AI Gemini thinking budget owner is unavailable; reload before editing")
-        }
-        try requireNoAttachmentDraft(); try denyCleanupOwner()
-        guard calendarAccessTurn == nil, calendarPushTurn == nil, notificationSettingTurn == nil, reminderEffectsTurn == nil,
-              deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil, encryptionUnlockTurn == nil,
-              providerCopy == nil, retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
-              projectDownloadAcknowledgedTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
-              !cleanupOwed, !foregroundCleanupActive, ordinaryMutationDepth == 0 else {
-            throw CoreHostRejection(message: "NOT_READY: AI Gemini thinking budget edit is unavailable")
-        }
-        aiGeminiThinkingBudgetTurn = .init(id: id, runtime: runtime, connection: connection, library: library, generation: attachmentGeneration,
-            epoch: try captureLinesDataVersion(), cancellation: cancellation, requestJSON: requestJSON, retry: retry)
-    }
-    private func requireAIGeminiThinkingBudgetTurn(checkCancellation: Bool = true) throws {
-        guard let turn = aiGeminiThinkingBudgetTurn, !aiGeminiThinkingBudgetRetired, started, !closed, lockFD >= 0,
-              context === turn.runtime, database === turn.connection, attachmentGeneration == turn.generation,
-              try Self.bindingIdentity(databaseURL) == turn.library, try captureLinesDataVersion() == turn.epoch else {
-            aiGeminiThinkingBudgetRetired = true
-            throw HostFailure("STALE_REVISION: AI Gemini thinking budget owner changed; reload before editing")
-        }
-        if checkCancellation && turn.cancellation.isCancelled {
-            throw HostFailure("CANCELLED: AI Gemini thinking budget edit is no longer current")
-        }
-    }
-    private func invokeAIGeminiThinkingBudgetRead(_ method: String, arguments: [Any]) throws -> String {
-        try requireAIGeminiThinkingBudgetTurn()
-        guard let runtime = aiGeminiThinkingBudgetTurn?.runtime else { throw HostFailure("NOT_READY: AI Gemini thinking budget owner is unavailable") }
-        let owner: @convention(block) () -> String = { [weak self] in
-            guard let self else { return "!MindwtrNativeError:AI Gemini thinking budget owner is unavailable" }
-            return self.guarded { try self.requireAIGeminiThinkingBudgetTurn(); return "" } ?? "!MindwtrNativeError:AI Gemini thinking budget owner is unavailable"
-        }
-        do {
-            runtime.exception = nil
-            guard let ownerValue = JSValue(object: owner, in: runtime), runtime.exception == nil else {
-                throw HostFailure("NOT_READY: AI Gemini thinking budget owner callback is unavailable")
-            }
-            let value = try invoke(method, arguments: arguments + [ownerValue], localCancellation: aiGeminiThinkingBudgetTurn?.cancellation)
-
-            try requireAIGeminiThinkingBudgetTurn(checkCancellation: method != "iosAIGeminiThinkingBudgetCommit")
-            return value
-        } catch {
-
-            let message = (error as? HostFailure)?.message
-            let uncertainSave = message?.hasPrefix("SAVE_FAILED:") == true || error is CancellationError
-                || message?.hasPrefix("CANCELLED:") == true
-            if method != "iosAIGeminiThinkingBudgetCommit" || !uncertainSave {
-                aiGeminiThinkingBudgetRetired = true
-            }
-            throw error
-        }
-    }
-    func readAIGeminiThinkingBudgetOptions() throws -> String {
-        try requireCalendarAdmission()
-        let id = UUID()
-        try makeAIGeminiThinkingBudgetTurn(id, requestJSON: nil, cancellation: NativeAttachmentCancellation(), retry: false)
-        defer { finishAIGeminiThinkingBudget(id) }
-        aiGeminiThinkingBudgetOwnerAccess = true; defer { aiGeminiThinkingBudgetOwnerAccess = false }
-        let raw = try invokeAIGeminiThinkingBudgetRead("iosAIGeminiThinkingBudgetOptions", arguments: ["{}"])
-        _ = try NativeAIGeminiThinkingBudgetOptions.validated(raw); return raw
-    }
-    func probeAIGeminiThinkingBudgetOutcome(requestJSON: String) throws -> String {
-        try requireCalendarAdmission()
-        let request = try Self.aiGeminiThinkingBudgetRequest(requestJSON)
-        do {
-            let value = try invoke("iosAIGeminiThinkingBudgetRetryOutcome", arguments: [requestJSON])
-            try validateAIGeminiThinkingBudgetResult(value, request: request, changed: true); return value
-        } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") || error.message.hasPrefix("INVALID_INPUT:") {
-            throw CoreHostRejection(message: error.message)
-        }
-    }
-    func beginAIGeminiThinkingBudget(_ id: UUID, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> (replay: String?, retry: Bool) {
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, started, !closed, !recoveryActivationPending, lockFD >= 0 else {
-            throw CoreHostRejection(message: "NOT_READY: AI Gemini thinking budget edit is unavailable")
-        }
-        try requireNoAttachmentDraft(); try denyCleanupOwner()
-        let request = try Self.aiGeminiThinkingBudgetRequest(requestJSON)
-        if let command = pending {
-            guard command.method == "iosAIGeminiThinkingBudgetCommit", let raw = try journalArguments(command).first as? String,
-                  let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any], Self.equalJSON(envelope["request"], request) else {
-                throw HostFailure("Previous changes require their exact retry")
-            }
-        } else {
-            try requireCalendarAdmission()
-            do {
-                let replay = try invoke("iosAIGeminiThinkingBudgetRetryOutcome", arguments: [requestJSON])
-                try validateAIGeminiThinkingBudgetResult(replay, request: request, changed: true); return (replay, false)
-            } catch let error as HostFailure where error.message.hasPrefix("STALE_REVISION:") { }
-            catch let error as HostFailure where error.message.hasPrefix("INVALID_INPUT:") { throw CoreHostRejection(message: error.message) }
-        }
-        if cancellation.isCancelled {
-            if pending != nil { throw HostFailure("AI Gemini thinking budget save still requires exact retry") }
-            throw CoreHostRejection(message: "STALE_REVISION: AI Gemini thinking budget edit is no longer current")
-        }
-        try makeAIGeminiThinkingBudgetTurn(id, requestJSON: requestJSON, cancellation: cancellation, retry: pending != nil)
-        return (nil, pending != nil)
-    }
-    func commitAIGeminiThinkingBudget(_ id: UUID) throws -> String {
-        guard let turn = aiGeminiThinkingBudgetTurn, turn.id == id else { throw HostFailure("AI Gemini thinking budget owner is unavailable") }
-        aiGeminiThinkingBudgetOwnerAccess = true; defer { aiGeminiThinkingBudgetOwnerAccess = false }
-        do { try requireAIGeminiThinkingBudgetTurn() }
-        catch { if turn.retry { throw HostFailure("AI Gemini thinking budget save still requires exact retry") }; throw CoreHostRejection(message: error.localizedDescription) }
-        if turn.retry {
-            guard let terminal = try resolvePending() else { throw HostFailure("AI Gemini thinking budget save still requires exact retry") }
-            return try terminal.value()
-        }
-        guard let request = turn.requestJSON else { throw HostFailure("AI Gemini thinking budget request is unavailable") }
-        return try call("iosAIGeminiThinkingBudget", argumentsJSON: Self.ownedJSON([request]))
-    }
-    func finishAIGeminiThinkingBudget(_ id: UUID) { if aiGeminiThinkingBudgetTurn?.id == id { aiGeminiThinkingBudgetTurn = nil } }
-    private func validateAIGeminiThinkingBudgetResult(_ value: String, request: [String: Any], changed: Bool) throws {
-        let result = try NativeAIGeminiThinkingBudgetResult.validated(value)
-        let witness = try NativeAIGeminiThinkingBudgetWitness.validated(request["expected"])
-        guard result.value.rawValue == request["value"] as? Int, result.changed == changed,
-              changed || (witness.budgetPresent && witness.budget == result.value.rawValue) else { throw HostFailure("Malformed AI Gemini thinking budget acknowledgment") }
-    }
-    private func aiGeminiThinkingBudgetJournalRequest(_ command: PendingCommand) throws -> String {
-        guard let raw = try journalArguments(command).first as? String,
-              let envelope = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
-              let request = envelope["request"] as? [String: Any] else { throw HostFailure("Malformed AI Gemini thinking budget journal") }
-        return try Self.ownedJSON(request)
-    }
-    private func validateAIGeminiThinkingBudgetAcknowledgment(_ command: PendingCommand, value: String) throws {
-        let request = try Self.aiGeminiThinkingBudgetRequest(aiGeminiThinkingBudgetJournalRequest(command))
-        try validateAIGeminiThinkingBudgetResult(value, request: request, changed: true)
-    }
-    private func invokeAIGeminiThinkingBudgetCommit(_ command: PendingCommand) throws -> String {
-        try invokeAIGeminiThinkingBudgetRead("iosAIGeminiThinkingBudgetCommit", arguments: journalArguments(command))
+    private func invokeAIReadmittedSettingCommit(_ setting: NativeAIReadmittedSetting, _ command: PendingCommand) throws -> String {
+        try invokeAIReadmittedSettingRead(setting, setting.commitMethod, arguments: journalArguments(command))
     }
 
     func readAISettingsProjection() throws -> NativeAISettingsProjection {
@@ -9823,8 +9456,7 @@ private final class Engine: @unchecked Sendable {
     private func requireTaskAIPreflight(lease: NativeTaskAIEditorLease) throws {
         try requireCalendarAdmission()
         guard lease.isCurrent, taskAITurn == nil, aiConfigurationSession == nil, aiConfigurationTurn == nil,
-              aiTextConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil,
-              aiGeminiThinkingBudgetTurn == nil else { throw NativeTaskAIJSON.unavailable }
+              aiTextConfigurationTurn == nil, aiReadmittedSettingTurn == nil else { throw NativeTaskAIJSON.unavailable }
     }
 
     func readTaskAIOptions(_ raw: String, lease: NativeTaskAIEditorLease) throws -> String {
@@ -9870,7 +9502,7 @@ private final class Engine: @unchecked Sendable {
                       self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
                       self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true,
                       self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil,
-                      self.aiRequestTimeoutTurn == nil, self.aiReasoningEffortTurn == nil, self.aiGeminiThinkingBudgetTurn == nil,
+                      self.aiReadmittedSettingTurn == nil,
                       self.captureAITurn == nil, !self.cleanupOwed, !self.foregroundCleanupActive,
                       try Self.bindingIdentity(self.databaseURL) == library,
                       try Self.taskAIEqual(self.taskAIWitness(input, contextIDs: contextIDs), witness) else { throw NativeTaskAIJSON.unavailable }
@@ -9924,8 +9556,8 @@ private final class Engine: @unchecked Sendable {
                       self.workspaceMode == .personal, self.started, !self.closed, !self.localRequests.isClosing,
                       self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
                       self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true,
-                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil, self.aiRequestTimeoutTurn == nil,
-                      self.aiReasoningEffortTurn == nil, self.aiGeminiThinkingBudgetTurn == nil, self.captureAITurn == nil,
+                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil, self.aiReadmittedSettingTurn == nil,
+                      self.captureAITurn == nil,
                       !self.cleanupOwed, !self.foregroundCleanupActive, try self.editorDrafts.read() == nil,
                       try Self.bindingIdentity(self.databaseURL) == library,
                       try Self.taskAIEqual(self.reviewAIDurableWitness(canonical), witness) else { throw NativeTaskAIJSON.unavailable }
@@ -10330,8 +9962,8 @@ private final class Engine: @unchecked Sendable {
                       self.workspaceMode == .personal, self.started, !self.closed, !self.localRequests.isClosing,
                       self.attachmentGeneration == generation, self.lockFD >= 0, !self.recoveryActivationPending,
                       self.taskAIRuntimeLanguage.map({ Self.ownedEqual($0, language) }) == true,
-                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil, self.aiRequestTimeoutTurn == nil,
-                      self.aiReasoningEffortTurn == nil, self.aiGeminiThinkingBudgetTurn == nil, self.captureAITurn == nil,
+                      self.aiConfigurationTurn == nil, self.aiTextConfigurationTurn == nil, self.aiReadmittedSettingTurn == nil,
+                      self.captureAITurn == nil,
                       !self.cleanupOwed, !self.foregroundCleanupActive, try self.editorDrafts.read() == nil,
                       try Self.bindingIdentity(self.databaseURL) == library,
                       try Self.taskAIEqual(self.inboxAIDurableWitness(id), witness) else { throw NativeTaskAIJSON.unavailable }
@@ -10608,16 +10240,12 @@ private final class Engine: @unchecked Sendable {
         if notificationSettingTurn != nil { active.insert(.notificationSetting) }
         if aiConfigurationTurn != nil { active.insert(.aiConfiguration) }
         if aiTextConfigurationTurn != nil { active.insert(.aiTextConfiguration) }
-        if aiRequestTimeoutTurn != nil { active.insert(.aiRequestTimeout) }
-        if aiReasoningEffortTurn != nil { active.insert(.aiReasoningEffort) }
-        if aiGeminiThinkingBudgetTurn != nil { active.insert(.aiGeminiThinkingBudget) }
+        if let turn = aiReadmittedSettingTurn { active.insert(turn.setting.admissionTurn) }
         if deviceCalendarSettingTurn != nil { active.insert(.deviceCalendarSetting) }
         var ownerAccess: HostAdmission.Turns = []
         if notificationSettingOwnerAccess { ownerAccess.insert(.notificationSetting) }
         if aiTextConfigurationOwnerAccess { ownerAccess.insert(.aiTextConfiguration) }
-        if aiRequestTimeoutOwnerAccess { ownerAccess.insert(.aiRequestTimeout) }
-        if aiReasoningEffortOwnerAccess { ownerAccess.insert(.aiReasoningEffort) }
-        if aiGeminiThinkingBudgetOwnerAccess { ownerAccess.insert(.aiGeminiThinkingBudget) }
+        for setting in aiReadmittedSettingOwnerAccess { ownerAccess.insert(setting.admissionTurn) }
         if reminderOwnerAccess { ownerAccess.insert(.reminderEffects) }
         return HostAdmission(active: active, ownerAccess: ownerAccess,
                              calendarSubscriptionOperation: calendarSubscriptionSettingTurn?.operation.rawValue)
@@ -14845,7 +14473,7 @@ private final class Engine: @unchecked Sendable {
         let mutation = registered?.journaled == true
         if method == "gettingStarted" {
             guard editorAttempt == nil, try editorDrafts.read() == nil, aiConfigurationTurn == nil, aiTextConfigurationTurn == nil,
-                  aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, taskAITurn == nil else {
+                  aiReadmittedSettingTurn == nil, taskAITurn == nil else {
                 throw CoreHostRejection(message: "NOT_READY: Getting Started requires the current ready Data page")
             }
             if pending == nil { try requireCalendarAdmission() }
@@ -15815,17 +15443,9 @@ private final class Engine: @unchecked Sendable {
             guard aiTextConfigurationOwnerAccess else { throw HostFailure("AI text configuration owner is unavailable") }
             try requireAITextConfigurationTurn()
         }
-        if method == "iosAIRequestTimeout" {
-            guard aiRequestTimeoutOwnerAccess else { throw HostFailure("AI timeout owner is unavailable") }
-            try requireAIRequestTimeoutTurn()
-        }
-        if method == "iosAIReasoningEffort" {
-            guard aiReasoningEffortOwnerAccess else { throw HostFailure("AI reasoning effort owner is unavailable") }
-            try requireAIReasoningEffortTurn()
-        }
-        if method == "iosAIGeminiThinkingBudget" {
-            guard aiGeminiThinkingBudgetOwnerAccess else { throw HostFailure("AI Gemini thinking budget owner is unavailable") }
-            try requireAIGeminiThinkingBudgetTurn()
+        if let setting = NativeAIReadmittedSetting(rawValue: method) {
+            guard aiReadmittedSettingOwnerAccess.contains(setting) else { throw HostFailure(setting.subject + " owner is unavailable") }
+            try requireAIReadmittedSettingTurn(setting)
         }
         if command.method == "backupDocumentCommit" {
             try requireBackupDocumentMutationAllowed(command, arguments: backupDocumentArguments(command))
@@ -15856,9 +15476,7 @@ private final class Engine: @unchecked Sendable {
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
             if Self.aiTextConfigurationCommitMethods.contains(command.method) { terminal = .success(try invokeAITextConfigurationCommit(command)) }
-            else if command.method == "iosAIRequestTimeoutCommit" { terminal = .success(try invokeAIRequestTimeoutCommit(command)) }
-            else if command.method == "iosAIReasoningEffortCommit" { terminal = .success(try invokeAIReasoningEffortCommit(command)) }
-            else if command.method == "iosAIGeminiThinkingBudgetCommit" { terminal = .success(try invokeAIGeminiThinkingBudgetCommit(command)) }
+            else if let setting = NativeAIReadmittedSetting(commitMethod: command.method) { terminal = .success(try invokeAIReadmittedSettingCommit(setting, command)) }
             else if CalendarSubscriptionOperation(commitMethod: command.method) != nil { terminal = .success(try invokeCalendarSubscriptionSettingCommit(command)) }
             else { terminal = .success(try command.method == "deviceCalendarSettingCommit"
                 ? invokeDeviceCalendarSettingCommit(command) : invoke(command.method, arguments: replay)) }
@@ -16704,98 +16322,36 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: Self.aiTextConfigurationMethod("Commit", version: version), argumentsJSON: encoded)
                 _ = try invoke(Self.aiTextConfigurationMethod("Validate", version: Self.aiTextConfigurationVersion(command)), arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "iosAIRequestTimeout" {
+        } else if let setting = NativeAIReadmittedSetting(rawValue: method) {
             do {
-                let value = try invokeAIRequestTimeoutRead("iosAIRequestTimeoutPrepare", arguments: args)
-                guard aiRequestTimeoutTurn?.cancellation.isCancelled == false else {
-                    throw CoreHostRejection(message: "STALE_REVISION: AI timeout edit is no longer current")
+                let value = try invokeAIReadmittedSettingRead(setting, setting.rawValue + "Prepare", arguments: args)
+                guard aiReadmittedSettingTurn?.cancellation.isCancelled == false else {
+                    throw CoreHostRejection(message: "STALE_REVISION: " + setting.subject + " edit is no longer current")
                 }
                 guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
                       let kind = response["kind"] as? String,
                       let original = args.first as? String,
                       let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
-                    throw HostFailure("Malformed AI timeout write preparation")
+                    throw HostFailure("Malformed " + setting.subject + " write preparation")
                 }
                 if kind == "noop" {
                     guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
-                        throw HostFailure("Malformed no-write AI timeout result")
+                        throw HostFailure("Malformed no-write " + setting.subject + " result")
                     }
-                    try validateAIRequestTimeoutResult(Self.ownedJSON(result), request: submitted, changed: false)
+                    try Self.validateAIReadmittedSettingResult(setting, Self.ownedJSON(result), request: submitted, changed: false)
                     return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
                 }
                 guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
                       let prepared = response["prepared"] as? [String: Any],
                       let request = prepared["request"] as? [String: Any], Self.equalJSON(request, submitted) else {
-                    throw HostFailure("Malformed prepared AI timeout write")
+                    throw HostFailure("Malformed prepared " + setting.subject + " write")
                 }
                 let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
-                guard commit.utf8.count <= 8_192 else { throw HostFailure("INVALID_INPUT: Prepared AI timeout write is too large") }
+                guard commit.utf8.count <= 8_192 else { throw HostFailure("INVALID_INPUT: Prepared " + setting.subject + " write is too large") }
                 let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
-                guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared AI timeout write journal is too large") }
-                command = PendingCommand(version: 2, method: "iosAIRequestTimeoutCommit", argumentsJSON: encoded)
-                _ = try invoke("iosAIRequestTimeoutValidate", arguments: journalArguments(command))
-            } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "iosAIReasoningEffort" {
-            do {
-                let value = try invokeAIReasoningEffortRead("iosAIReasoningEffortPrepare", arguments: args)
-                guard aiReasoningEffortTurn?.cancellation.isCancelled == false else {
-                    throw CoreHostRejection(message: "STALE_REVISION: AI reasoning effort edit is no longer current")
-                }
-                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
-                      let kind = response["kind"] as? String,
-                      let original = args.first as? String,
-                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
-                    throw HostFailure("Malformed AI reasoning effort write preparation")
-                }
-                if kind == "noop" {
-                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
-                        throw HostFailure("Malformed no-write AI reasoning effort result")
-                    }
-                    try validateAIReasoningEffortResult(Self.ownedJSON(result), request: submitted, changed: false)
-                    return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
-                }
-                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
-                      let prepared = response["prepared"] as? [String: Any],
-                      let request = prepared["request"] as? [String: Any], Self.equalJSON(request, submitted) else {
-                    throw HostFailure("Malformed prepared AI reasoning effort write")
-                }
-                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
-                guard commit.utf8.count <= 8_192 else { throw HostFailure("INVALID_INPUT: Prepared AI reasoning effort write is too large") }
-                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
-                guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared AI reasoning effort write journal is too large") }
-                command = PendingCommand(version: 2, method: "iosAIReasoningEffortCommit", argumentsJSON: encoded)
-                _ = try invoke("iosAIReasoningEffortValidate", arguments: journalArguments(command))
-            } catch { throw CoreHostRejection(message: error.localizedDescription) }
-        } else if method == "iosAIGeminiThinkingBudget" {
-            do {
-                let value = try invokeAIGeminiThinkingBudgetRead("iosAIGeminiThinkingBudgetPrepare", arguments: args)
-                guard aiGeminiThinkingBudgetTurn?.cancellation.isCancelled == false else {
-                    throw CoreHostRejection(message: "STALE_REVISION: AI Gemini thinking budget edit is no longer current")
-                }
-                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
-                      let kind = response["kind"] as? String,
-                      let original = args.first as? String,
-                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any] else {
-                    throw HostFailure("Malformed AI Gemini thinking budget write preparation")
-                }
-                if kind == "noop" {
-                    guard Set(response.keys) == Set(["kind", "result"]), let result = response["result"] as? [String: Any] else {
-                        throw HostFailure("Malformed no-write AI Gemini thinking budget result")
-                    }
-                    try validateAIGeminiThinkingBudgetResult(Self.ownedJSON(result), request: submitted, changed: false)
-                    return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
-                }
-                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
-                      let prepared = response["prepared"] as? [String: Any],
-                      let request = prepared["request"] as? [String: Any], Self.equalJSON(request, submitted) else {
-                    throw HostFailure("Malformed prepared AI Gemini thinking budget write")
-                }
-                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
-                guard commit.utf8.count <= 8_192 else { throw HostFailure("INVALID_INPUT: Prepared AI Gemini thinking budget write is too large") }
-                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
-                guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared AI Gemini thinking budget write journal is too large") }
-                command = PendingCommand(version: 2, method: "iosAIGeminiThinkingBudgetCommit", argumentsJSON: encoded)
-                _ = try invoke("iosAIGeminiThinkingBudgetValidate", arguments: journalArguments(command))
+                guard encoded.utf8.count <= 18_192 else { throw HostFailure("INVALID_INPUT: Prepared " + setting.subject + " write journal is too large") }
+                command = PendingCommand(version: 2, method: setting.commitMethod, argumentsJSON: encoded)
+                _ = try invoke(setting.rawValue + "Validate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if let operation = CalendarSubscriptionOperation(rawValue: method) {
             do {
@@ -17952,14 +17508,12 @@ private final class Engine: @unchecked Sendable {
     func retryPending() throws -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
         guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, !(pending.map { Self.aiTextConfigurationCommitMethods.contains($0.method) } ?? false) else { throw CoreHostRejection(message: "NOT_READY: AI text configuration save requires its exact typed retry") }
-        guard aiRequestTimeoutTurn == nil, pending?.method != "iosAIRequestTimeoutCommit" else {
-            throw CoreHostRejection(message: "NOT_READY: AI timeout save requires its exact typed retry")
-        }
-        guard aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, pending?.method != "iosAIReasoningEffortCommit" else {
-            throw CoreHostRejection(message: "NOT_READY: AI reasoning effort save requires its exact typed retry")
-        }
-        guard aiGeminiThinkingBudgetTurn == nil, pending?.method != "iosAIGeminiThinkingBudgetCommit" else {
-            throw CoreHostRejection(message: "NOT_READY: AI Gemini thinking budget save requires its exact typed retry")
+        let readmittedTurn = aiReadmittedSettingTurn?.setting
+        for setting in NativeAIReadmittedSetting.allCases {
+            let turnBlocks = readmittedTurn == setting || (setting == .reasoningEffort && readmittedTurn == .geminiThinkingBudget)
+            guard !turnBlocks, pending?.method != setting.commitMethod else {
+                throw CoreHostRejection(message: "NOT_READY: " + setting.subject + " save requires its exact typed retry")
+            }
         }
         guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
         guard notificationSettingTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Settings edit is still awaiting its owner") }
@@ -18182,38 +17736,13 @@ private final class Engine: @unchecked Sendable {
             }
             return try finish(command, with: terminal)
         }
-        if command.method == "iosAIRequestTimeoutCommit", recoveryActivationPending {
+        if let setting = NativeAIReadmittedSetting(commitMethod: command.method), recoveryActivationPending {
             let terminal: TerminalResult
             do {
-                let value = try invoke("iosAIRequestTimeoutRetryOutcome", arguments: [aiRequestTimeoutJournalRequest(command)])
-                try validateAIRequestTimeoutAcknowledgment(command, value: value)
+                let value = try invoke(setting.rawValue + "RetryOutcome", arguments: [aiReadmittedSettingJournalRequest(setting, command)])
+                try validateAIReadmittedSettingAcknowledgment(setting, command, value: value)
                 terminal = .success(value)
             } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-
-                terminal = .rejected(failure.message)
-            }
-            return try finish(command, with: terminal)
-        }
-        if command.method == "iosAIReasoningEffortCommit", recoveryActivationPending {
-            let terminal: TerminalResult
-            do {
-                let value = try invoke("iosAIReasoningEffortRetryOutcome", arguments: [aiReasoningEffortJournalRequest(command)])
-                try validateAIReasoningEffortAcknowledgment(command, value: value)
-                terminal = .success(value)
-            } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-
-                terminal = .rejected(failure.message)
-            }
-            return try finish(command, with: terminal)
-        }
-        if command.method == "iosAIGeminiThinkingBudgetCommit", recoveryActivationPending {
-            let terminal: TerminalResult
-            do {
-                let value = try invoke("iosAIGeminiThinkingBudgetRetryOutcome", arguments: [aiGeminiThinkingBudgetJournalRequest(command)])
-                try validateAIGeminiThinkingBudgetAcknowledgment(command, value: value)
-                terminal = .success(value)
-            } catch let failure as HostFailure where failure.message.hasPrefix("STALE_REVISION:") {
-
                 terminal = .rejected(failure.message)
             }
             return try finish(command, with: terminal)
@@ -18338,9 +17867,7 @@ private final class Engine: @unchecked Sendable {
             else if command.method == "projectLifecycleCommit" { replay = try projectLifecycleJournalArguments(command) }
             else { replay = try journalArguments(command) }
             if Self.aiTextConfigurationCommitMethods.contains(command.method) { value = try invokeAITextConfigurationCommit(command) }
-            else if command.method == "iosAIRequestTimeoutCommit" { value = try invokeAIRequestTimeoutCommit(command) }
-            else if command.method == "iosAIReasoningEffortCommit" { value = try invokeAIReasoningEffortCommit(command) }
-            else if command.method == "iosAIGeminiThinkingBudgetCommit" { value = try invokeAIGeminiThinkingBudgetCommit(command) }
+            else if let setting = NativeAIReadmittedSetting(commitMethod: command.method) { value = try invokeAIReadmittedSettingCommit(setting, command) }
             else { value = try command.method == "backupDocumentCommit"
                 ? invokeBackupDocumentReplay(command, arguments: replay) : invoke(command.method, arguments: replay) }
         }
@@ -18703,39 +18230,15 @@ private final class Engine: @unchecked Sendable {
                 }
             }
         }
-        if command.method == "iosAIRequestTimeoutCommit" {
-            _ = try invoke("iosAIRequestTimeoutValidate", arguments: journalArguments(command))
+        if let setting = NativeAIReadmittedSetting(commitMethod: command.method) {
+            _ = try invoke(setting.rawValue + "Validate", arguments: journalArguments(command))
             if case .success(let value) = terminal {
-                let proven = try invoke("iosAIRequestTimeoutRetryOutcome", arguments: [aiRequestTimeoutJournalRequest(command)])
-                try validateAIRequestTimeoutAcknowledgment(command, value: proven)
-                try validateAIRequestTimeoutAcknowledgment(command, value: value)
+                let proven = try invoke(setting.rawValue + "RetryOutcome", arguments: [aiReadmittedSettingJournalRequest(setting, command)])
+                try validateAIReadmittedSettingAcknowledgment(setting, command, value: proven)
+                try validateAIReadmittedSettingAcknowledgment(setting, command, value: value)
                 guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
                                      try NativeJSON.jsonObject(with: Data(value.utf8))) else {
-                    throw HostFailure("SAVE_FAILED: AI timeout outcome cannot be verified")
-                }
-            }
-        }
-        if command.method == "iosAIReasoningEffortCommit" {
-            _ = try invoke("iosAIReasoningEffortValidate", arguments: journalArguments(command))
-            if case .success(let value) = terminal {
-                let proven = try invoke("iosAIReasoningEffortRetryOutcome", arguments: [aiReasoningEffortJournalRequest(command)])
-                try validateAIReasoningEffortAcknowledgment(command, value: proven)
-                try validateAIReasoningEffortAcknowledgment(command, value: value)
-                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
-                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
-                    throw HostFailure("SAVE_FAILED: AI reasoning effort outcome cannot be verified")
-                }
-            }
-        }
-        if command.method == "iosAIGeminiThinkingBudgetCommit" {
-            _ = try invoke("iosAIGeminiThinkingBudgetValidate", arguments: journalArguments(command))
-            if case .success(let value) = terminal {
-                let proven = try invoke("iosAIGeminiThinkingBudgetRetryOutcome", arguments: [aiGeminiThinkingBudgetJournalRequest(command)])
-                try validateAIGeminiThinkingBudgetAcknowledgment(command, value: proven)
-                try validateAIGeminiThinkingBudgetAcknowledgment(command, value: value)
-                guard Self.equalJSON(try NativeJSON.jsonObject(with: Data(proven.utf8)),
-                                     try NativeJSON.jsonObject(with: Data(value.utf8))) else {
-                    throw HostFailure("SAVE_FAILED: AI Gemini thinking budget outcome cannot be verified")
+                    throw HostFailure("SAVE_FAILED: " + setting.subject + " outcome cannot be verified")
                 }
             }
         }
@@ -19481,14 +18984,8 @@ private final class Engine: @unchecked Sendable {
                 _ = try? invoke("iosAITextConfigurationAcknowledged", arguments: ["settings-saved", provider ?? "openai", kind])
             }
         }
-        if command.method == "iosAIRequestTimeoutCommit", case .success = terminal {
-            _ = try? invoke("iosAIRequestTimeoutAcknowledged", arguments: [])
-        }
-        if command.method == "iosAIReasoningEffortCommit", case .success = terminal {
-            _ = try? invoke("iosAIReasoningEffortAcknowledged", arguments: [])
-        }
-        if command.method == "iosAIGeminiThinkingBudgetCommit", case .success = terminal {
-            _ = try? invoke("iosAIGeminiThinkingBudgetAcknowledged", arguments: [])
+        if let setting = NativeAIReadmittedSetting(commitMethod: command.method), case .success = terminal {
+            _ = try? invoke(setting.rawValue + "Acknowledged", arguments: [])
         }
         if command.method == "notificationSettingCommit", case .success = terminal {
             _ = try? invoke("notificationSettingAcknowledged", arguments: [])
@@ -25661,7 +25158,7 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments(Self.aiTextConfigurationMethod("", version: Self.aiTextConfigurationVersion(command)), String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
-        if command.method == "iosAIRequestTimeoutCommit" {
+        if let setting = NativeAIReadmittedSetting(commitMethod: command.method) {
             guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
             guard command.argumentsJSON.utf8.count <= 49_152, try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
                   let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
@@ -25672,44 +25169,10 @@ private final class Engine: @unchecked Sendable {
                   let prepared = input["prepared"] as? [String: Any],
                   Set(prepared.keys) == Set(["version", "request"]), Self.isInteger(prepared["version"], equalTo: 1),
                   let original = prepared["request"] as? [String: Any], Self.equalJSON(request, original) else {
-                throw HostFailure("Malformed prepared AI timeout journal")
+                throw HostFailure("Malformed prepared " + setting.subject + " journal")
             }
             let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
-            _ = try arguments("iosAIRequestTimeout", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
-            return args
-        }
-        if command.method == "iosAIReasoningEffortCommit" {
-            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
-            guard command.argumentsJSON.utf8.count <= 49_152, try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
-                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
-                  args[0].utf8.count <= 8_192, try NativeJSON.hasUniqueObjectKeys(args[0]),
-                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
-                  Set(input.keys) == Set(["request", "prepared"]),
-                  let request = input["request"] as? [String: Any],
-                  let prepared = input["prepared"] as? [String: Any],
-                  Set(prepared.keys) == Set(["version", "request"]), Self.isInteger(prepared["version"], equalTo: 1),
-                  let original = prepared["request"] as? [String: Any], Self.equalJSON(request, original) else {
-                throw HostFailure("Malformed prepared AI reasoning effort journal")
-            }
-            let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
-            _ = try arguments("iosAIReasoningEffort", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
-            return args
-        }
-        if command.method == "iosAIGeminiThinkingBudgetCommit" {
-            guard !retainedOrdinary else { throw Self.retainedOrdinaryFailure }
-            guard command.argumentsJSON.utf8.count <= 49_152, try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
-                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
-                  args[0].utf8.count <= 8_192, try NativeJSON.hasUniqueObjectKeys(args[0]),
-                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
-                  Set(input.keys) == Set(["request", "prepared"]),
-                  let request = input["request"] as? [String: Any],
-                  let prepared = input["prepared"] as? [String: Any],
-                  Set(prepared.keys) == Set(["version", "request"]), Self.isInteger(prepared["version"], equalTo: 1),
-                  let original = prepared["request"] as? [String: Any], Self.equalJSON(request, original) else {
-                throw HostFailure("Malformed prepared AI Gemini thinking budget journal")
-            }
-            let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
-            _ = try arguments("iosAIGeminiThinkingBudget", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
+            _ = try arguments(setting.rawValue, String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
         if command.method == "generalPreferenceCommit" {
@@ -28361,17 +27824,9 @@ private final class Engine: @unchecked Sendable {
             if method == "iosAITextConfigurationV2" { _ = try Self.aiTextConfigurationRequestV2(raw) }
             else { _ = try Self.aiTextConfigurationRequest(raw) }
         }
-        if method == "iosAIRequestTimeout" {
-            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: AI timeout requires one request") }
-            _ = try Self.aiRequestTimeoutRequest(raw)
-        }
-        if method == "iosAIReasoningEffort" {
-            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: AI reasoning effort requires one request") }
-            _ = try Self.aiReasoningEffortRequest(raw)
-        }
-        if method == "iosAIGeminiThinkingBudget" {
-            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: AI Gemini thinking budget requires one request") }
-            _ = try Self.aiGeminiThinkingBudgetRequest(raw)
+        if let setting = NativeAIReadmittedSetting(rawValue: method) {
+            guard let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: " + setting.subject + " requires one request") }
+            _ = try Self.aiReadmittedSettingRequest(setting, raw)
         }
         if method == "notificationSetting" {
             guard let encoded = args.first as? String else { throw HostFailure("INVALID_INPUT: Notification setting requires one request") }
@@ -30810,7 +30265,7 @@ private final class Engine: @unchecked Sendable {
     private func aiSummaryCheckpointSettled(cancellation: NativeAttachmentCancellation) throws -> String {
         _ = try requireIsolatedAISummaryCheckpoint()
         try requireCalendarAdmission(); _ = try requireDeviceStorageAdmission()
-        guard aiSummaryCheckpointConfigured, !invoking, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, calendarPushTurn == nil,
+        guard aiSummaryCheckpointConfigured, !invoking, aiReadmittedSettingTurn == nil, calendarPushTurn == nil,
               try Self.bindingIdentity(databaseURL) == calendarPushDatabaseBinding,
               let context, let host = context.objectForKeyedSubscript("MindwtrHost") else { throw NativeAISummaryEvidence.unavailable }
         guard let connection = database, let library = calendarPushDatabaseBinding else { throw NativeAISummaryEvidence.unavailable }
@@ -31179,14 +30634,14 @@ private final class Engine: @unchecked Sendable {
         captureAIFixtureChange = nil
     }
 
-    private func requireIsolatedAIRequestTimeoutFixture() throws {
+    private func requireIsolatedAIReadmittedSettingFixture(_ setting: NativeAIReadmittedSetting) throws {
         let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
         let arguments = ProcessInfo.processInfo.arguments
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
         let selection = try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: Bundle.main.bundleIdentifier,
             supportURL: support, homeURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: .deviceTest)
         guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
-              arguments.contains("--native-ai-timeout-fixture"),
+              arguments.contains(setting.fixtureArgument),
               case let .isolated(selectedDatabase, selectedContainer, namespace, selectedID) = selection,
               selectedID.uuidString.lowercased() == identifier,
               selectedDatabase.resolvingSymlinksInPath() == databaseURL.resolvingSymlinksInPath(),
@@ -31196,185 +30651,44 @@ private final class Engine: @unchecked Sendable {
               Self.ownedDiscardUUID(identifier) == identifier,
               deviceStorageLocation?.bundleIdentifier == namespace,
               faults?.secretService == "mindwtr.native-keychain.fixture." + identifier else {
-            throw HostFailure("Isolated AI timeout fixture is unavailable")
+            throw HostFailure("Isolated " + setting.subject + " fixture is unavailable")
         }
     }
-    func configureIsolatedAIRequestTimeoutCommitFailureOnce() throws {
-        try requireIsolatedAIRequestTimeoutFixture()
-        guard !started, !closed, !invoking, pending == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil,
-              !aiRequestTimeoutFixtureArmed, let faults, faults.beforeSQL == nil, faults.afterSQL == nil,
+    func configureIsolatedAIReadmittedSettingCommitFailureOnce(_ setting: NativeAIReadmittedSetting) throws {
+        try requireIsolatedAIReadmittedSettingFixture(setting)
+        guard !started, !closed, !invoking, pending == nil, aiReadmittedSettingTurn == nil,
+              aiReadmittedSettingFixtures[setting] == nil, let faults, faults.beforeSQL == nil, faults.afterSQL == nil,
               try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else {
-            throw HostFailure("Isolated AI timeout fixture is unavailable")
+            throw HostFailure("Isolated " + setting.subject + " fixture is unavailable")
         }
-        aiRequestTimeoutFixtureArmed = true
-        faults.beforeSQL = { [unowned self] sql in
-            guard sql == "COMMIT", self.pending?.method == "iosAIRequestTimeoutCommit" else { return }
-            self.aiRequestTimeoutFixtureSQLCommitAttempts += 1
-            guard let turn = self.aiRequestTimeoutTurn, let request = turn.requestJSON else {
-                throw HostFailure("Isolated AI timeout COMMIT interrupted")
-            }
-
-            try self.requireAIRequestTimeoutTurn(checkCancellation: false)
-            guard let command = self.pending, let envelopeRaw = try self.journalArguments(command).first as? String,
-                  let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else {
-                throw HostFailure("Isolated AI timeout COMMIT interrupted")
-            }
-            let submitted = try Self.aiRequestTimeoutRequest(request)
-            guard Self.equalJSON(envelope["request"], submitted) else {
-                throw HostFailure("Isolated AI timeout COMMIT interrupted")
-            }
-            if let original = self.aiRequestTimeoutFixtureOriginal {
-                guard request == original else { throw HostFailure("Isolated AI timeout COMMIT interrupted") }
-            } else {
-                guard !turn.retry else { throw HostFailure("Isolated AI timeout COMMIT interrupted") }
-                self.aiRequestTimeoutFixtureOriginal = request
-            }
-
-            guard turn.retry else { throw HostFailure("Isolated AI timeout COMMIT interrupted") }
-            self.aiRequestTimeoutFixtureExactRetry = true
-        }
-    }
-    func isolatedAIRequestTimeoutFixtureState() throws -> NativeAIRequestTimeoutFixtureState {
-        try requireIsolatedAIRequestTimeoutFixture()
-        guard aiRequestTimeoutFixtureArmed, !closed else { throw HostFailure("Isolated AI timeout fixture is unavailable") }
-        let journalAbsent = try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil
-        return .init(failureInjected: aiRequestTimeoutFixtureOriginal != nil,
-            exactRequestRetried: aiRequestTimeoutFixtureExactRetry, commitAttempts: aiRequestTimeoutFixtureSQLCommitAttempts,
-            journalRetired: pending == nil && journalAbsent)
-    }
-    #endif
-
-    #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-    private func requireIsolatedAIReasoningEffortFixture() throws {
-        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
-        let arguments = ProcessInfo.processInfo.arguments
-        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-        let selection = try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: Bundle.main.bundleIdentifier,
-            supportURL: support, homeURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: .deviceTest)
-        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
-              arguments.contains("--native-ai-reasoning-fixture"),
-              case let .isolated(selectedDatabase, selectedContainer, namespace, selectedID) = selection,
-              selectedID.uuidString.lowercased() == identifier,
-              selectedDatabase.resolvingSymlinksInPath() == databaseURL.resolvingSymlinksInPath(),
-              selectedContainer.resolvingSymlinksInPath() == directory.resolvingSymlinksInPath(),
-              databaseURL.lastPathComponent == "mindwtr.sqlite",
-              directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
-              Self.ownedDiscardUUID(identifier) == identifier,
-              deviceStorageLocation?.bundleIdentifier == namespace,
-              faults?.secretService == "mindwtr.native-keychain.fixture." + identifier else {
-            throw HostFailure("Isolated AI reasoning effort fixture is unavailable")
-        }
-    }
-    func configureIsolatedAIReasoningEffortCommitFailureOnce() throws {
-        try requireIsolatedAIReasoningEffortFixture()
-        guard !started, !closed, !invoking, pending == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil,
-              !aiReasoningEffortFixtureArmed, let faults, faults.beforeSQL == nil, faults.afterSQL == nil,
-              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else {
-            throw HostFailure("Isolated AI reasoning effort fixture is unavailable")
-        }
-        aiReasoningEffortFixtureArmed = true
+        aiReadmittedSettingFixtures[setting] = AIReadmittedSettingFixture()
+        let interrupted = HostFailure("Isolated " + setting.subject + " COMMIT interrupted")
         faults.beforeSQL = { [weak self] sql in
-            guard let self else { throw HostFailure("Isolated AI reasoning effort COMMIT interrupted") }
-            guard sql == "COMMIT", self.pending?.method == "iosAIReasoningEffortCommit" else { return }
-            self.aiReasoningEffortFixtureSQLCommitAttempts += 1
-            guard let turn = self.aiReasoningEffortTurn, let request = turn.requestJSON else {
-                throw HostFailure("Isolated AI reasoning effort COMMIT interrupted")
-            }
-
-            try self.requireAIReasoningEffortTurn(checkCancellation: false)
+            guard let self else { throw interrupted }
+            guard sql == "COMMIT", self.pending?.method == setting.commitMethod else { return }
+            self.aiReadmittedSettingFixtures[setting]?.commitAttempts += 1
+            guard let turn = self.aiReadmittedSettingTurn, turn.setting == setting, let request = turn.requestJSON else { throw interrupted }
+            try self.requireAIReadmittedSettingTurn(setting, checkCancellation: false)
             guard let command = self.pending, let envelopeRaw = try self.journalArguments(command).first as? String,
-                  let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else {
-                throw HostFailure("Isolated AI reasoning effort COMMIT interrupted")
-            }
-            let submitted = try Self.aiReasoningEffortRequest(request)
-            guard Self.equalJSON(envelope["request"], submitted) else {
-                throw HostFailure("Isolated AI reasoning effort COMMIT interrupted")
-            }
-            if let original = self.aiReasoningEffortFixtureOriginal {
-                guard request == original else { throw HostFailure("Isolated AI reasoning effort COMMIT interrupted") }
+                  let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else { throw interrupted }
+            let submitted = try Self.aiReadmittedSettingRequest(setting, request)
+            guard Self.equalJSON(envelope["request"], submitted) else { throw interrupted }
+            if let original = self.aiReadmittedSettingFixtures[setting]?.original {
+                guard request == original else { throw interrupted }
             } else {
-                guard !turn.retry else { throw HostFailure("Isolated AI reasoning effort COMMIT interrupted") }
-                self.aiReasoningEffortFixtureOriginal = request
+                guard !turn.retry else { throw interrupted }
+                self.aiReadmittedSettingFixtures[setting]?.original = request
             }
-
-            guard turn.retry else { throw HostFailure("Isolated AI reasoning effort COMMIT interrupted") }
-            self.aiReasoningEffortFixtureExactRetry = true
+            guard turn.retry else { throw interrupted }
+            self.aiReadmittedSettingFixtures[setting]?.exactRetry = true
         }
     }
-    func isolatedAIReasoningEffortFixtureState() throws -> NativeAIReasoningEffortFixtureState {
-        try requireIsolatedAIReasoningEffortFixture()
-        guard aiReasoningEffortFixtureArmed, !closed else { throw HostFailure("Isolated AI reasoning effort fixture is unavailable") }
+    func isolatedAIReadmittedSettingFixtureState(_ setting: NativeAIReadmittedSetting) throws -> NativeAIReadmittedSettingFixtureState {
+        try requireIsolatedAIReadmittedSettingFixture(setting)
+        guard let fixture = aiReadmittedSettingFixtures[setting], !closed else { throw HostFailure("Isolated " + setting.subject + " fixture is unavailable") }
         let journalAbsent = try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil
-        return .init(failureInjected: aiReasoningEffortFixtureOriginal != nil,
-            exactRequestRetried: aiReasoningEffortFixtureExactRetry, commitAttempts: aiReasoningEffortFixtureSQLCommitAttempts,
-            journalRetired: pending == nil && journalAbsent)
-    }
-    #endif
-
-    #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-    private func requireIsolatedAIGeminiThinkingBudgetFixture() throws {
-        let directory = databaseURL.deletingLastPathComponent(), identifier = directory.lastPathComponent
-        let arguments = ProcessInfo.processInfo.arguments
-        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-        let selection = try NativeLaunchSelection.resolve(arguments: arguments, bundleIdentifier: Bundle.main.bundleIdentifier,
-            supportURL: support, homeURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true), mode: .deviceTest)
-        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
-              arguments.contains("--native-ai-gemini-fixture"),
-              case let .isolated(selectedDatabase, selectedContainer, namespace, selectedID) = selection,
-              selectedID.uuidString.lowercased() == identifier,
-              selectedDatabase.resolvingSymlinksInPath() == databaseURL.resolvingSymlinksInPath(),
-              selectedContainer.resolvingSymlinksInPath() == directory.resolvingSymlinksInPath(),
-              databaseURL.lastPathComponent == "mindwtr.sqlite",
-              directory.deletingLastPathComponent().lastPathComponent == "NativeUITests",
-              Self.ownedDiscardUUID(identifier) == identifier,
-              deviceStorageLocation?.bundleIdentifier == namespace,
-              faults?.secretService == "mindwtr.native-keychain.fixture." + identifier else {
-            throw HostFailure("Isolated AI Gemini thinking budget fixture is unavailable")
-        }
-    }
-    func configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce() throws {
-        try requireIsolatedAIGeminiThinkingBudgetFixture()
-        guard !started, !closed, !invoking, pending == nil, aiGeminiThinkingBudgetTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil,
-              !aiGeminiThinkingBudgetFixtureArmed, let faults, faults.beforeSQL == nil, faults.afterSQL == nil,
-              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil else {
-            throw HostFailure("Isolated AI Gemini thinking budget fixture is unavailable")
-        }
-        aiGeminiThinkingBudgetFixtureArmed = true
-        faults.beforeSQL = { [weak self] sql in
-            guard let self else { throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted") }
-            guard sql == "COMMIT", self.pending?.method == "iosAIGeminiThinkingBudgetCommit" else { return }
-            self.aiGeminiThinkingBudgetFixtureSQLCommitAttempts += 1
-            guard let turn = self.aiGeminiThinkingBudgetTurn, let request = turn.requestJSON else {
-                throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted")
-            }
-
-            try self.requireAIGeminiThinkingBudgetTurn(checkCancellation: false)
-            guard let command = self.pending, let envelopeRaw = try self.journalArguments(command).first as? String,
-                  let envelope = try NativeJSON.jsonObject(with: Data(envelopeRaw.utf8)) as? [String: Any] else {
-                throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted")
-            }
-            let submitted = try Self.aiGeminiThinkingBudgetRequest(request)
-            guard Self.equalJSON(envelope["request"], submitted) else {
-                throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted")
-            }
-            if let original = self.aiGeminiThinkingBudgetFixtureOriginal {
-                guard request == original else { throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted") }
-            } else {
-                guard !turn.retry else { throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted") }
-                self.aiGeminiThinkingBudgetFixtureOriginal = request
-            }
-
-            guard turn.retry else { throw HostFailure("Isolated AI Gemini thinking budget COMMIT interrupted") }
-            self.aiGeminiThinkingBudgetFixtureExactRetry = true
-        }
-    }
-    func isolatedAIGeminiThinkingBudgetFixtureState() throws -> NativeAIGeminiThinkingBudgetFixtureState {
-        try requireIsolatedAIGeminiThinkingBudgetFixture()
-        guard aiGeminiThinkingBudgetFixtureArmed, !closed else { throw HostFailure("Isolated AI Gemini thinking budget fixture is unavailable") }
-        let journalAbsent = try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil
-        return .init(failureInjected: aiGeminiThinkingBudgetFixtureOriginal != nil,
-            exactRequestRetried: aiGeminiThinkingBudgetFixtureExactRetry, commitAttempts: aiGeminiThinkingBudgetFixtureSQLCommitAttempts,
-            journalRetired: pending == nil && journalAbsent)
+        return .init(failureInjected: fixture.original != nil, exactRequestRetried: fixture.exactRetry,
+            commitAttempts: fixture.commitAttempts, journalRetired: pending == nil && journalAbsent)
     }
     #endif
 
@@ -34513,7 +33827,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         guard started, !closed, context != nil, database != nil, lockFD >= 0,
               !localRequests.isClosing, !fileSyncCloseFailed, !reminderSourceStale,
-              !aiTextConfigurationRetired, !aiRequestTimeoutRetired, !aiReasoningEffortRetired, !aiGeminiThinkingBudgetRetired else { throw CoreHostRetirementError.unavailable }
+              !aiTextConfigurationRetired, aiReadmittedSettingRetired.isEmpty else { throw CoreHostRetirementError.unavailable }
         guard !recoveryActivationPending, !unresolvedAppLockRecovery, pending == nil,
               cleanupTurn == nil, !foregroundCleanupActive, foregroundCleanupCancellation == nil,
               retainedOrdinaryTurn == nil, ordinaryMutationDepth == 0,
@@ -34522,9 +33836,7 @@ private final class Engine: @unchecked Sendable {
               fileSyncTurn == nil, reminderEffectsTurn == nil, pomodoroAlarmTurn == nil,
               notificationSettingTurn == nil, !notificationSettingOwnerAccess,
               aiTextConfigurationTurn == nil, !aiTextConfigurationOwnerAccess, aiConfigurationTurn == nil,
-              aiRequestTimeoutTurn == nil, !aiRequestTimeoutOwnerAccess,
-              aiReasoningEffortTurn == nil, !aiReasoningEffortOwnerAccess,
-              aiGeminiThinkingBudgetTurn == nil, !aiGeminiThinkingBudgetOwnerAccess,
+              aiReadmittedSettingTurn == nil, aiReadmittedSettingOwnerAccess.isEmpty,
               deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil,
               calendarPushTurn == nil, retainedCalendarPushTurn == nil, calendarFileCaptureTurn == nil,
               calendarAccessTurn == nil, reminderSnoozeMutation == nil, !reminderOwnerAccess,
@@ -34605,9 +33917,7 @@ private final class Engine: @unchecked Sendable {
         aiTextConfigurationTurn = nil; aiTextConfigurationOwnerAccess = false; aiTextConfigurationRetired = false
         aiConfigurationTurn?.cancellation.cancel(); aiConfigurationTurn?.discovery?.http.shutdown()
         aiConfigurationTurn = nil; aiConfigurationSession = nil
-        aiRequestTimeoutTurn = nil; aiRequestTimeoutOwnerAccess = false; aiRequestTimeoutRetired = false
-        aiReasoningEffortTurn = nil; aiReasoningEffortOwnerAccess = false; aiReasoningEffortRetired = false
-        aiGeminiThinkingBudgetTurn = nil; aiGeminiThinkingBudgetOwnerAccess = false; aiGeminiThinkingBudgetRetired = false
+        aiReadmittedSettingTurn = nil; aiReadmittedSettingOwnerAccess = []; aiReadmittedSettingRetired = []
         captureAITurn?.live = false; captureAITurn = nil
         notificationSettingTurn = nil; notificationSettingOwnerAccess = false
         deviceCalendarSettingTurn = nil

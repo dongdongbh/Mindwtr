@@ -236,6 +236,26 @@ extension Dictionary where Key == String, Value == Any {
     func number(_ key: String) -> Int { self[key] as? Int ?? 0 }
 }
 
+private enum AIReadmittedSettingWrite: Equatable, Sendable {
+    case requestTimeout(NativeAIRequestTimeoutRequest)
+    case reasoningEffort(NativeAIReasoningEffortRequest)
+    case geminiThinkingBudget(NativeAIGeminiThinkingBudgetRequest)
+    var setting: NativeAIReadmittedSetting {
+        switch self {
+        case .requestTimeout: return .requestTimeout
+        case .reasoningEffort: return .reasoningEffort
+        case .geminiThinkingBudget: return .geminiThinkingBudget
+        }
+    }
+    func save(on host: CoreHost, readmission: @escaping @Sendable () async -> Bool) async throws -> Bool {
+        switch self {
+        case .requestTimeout(let request): return try await host.setAIReadmittedSetting(request, readmission: readmission).value == request.value
+        case .reasoningEffort(let request): return try await host.setAIReadmittedSetting(request, readmission: readmission).value == request.value
+        case .geminiThinkingBudget(let request): return try await host.setAIReadmittedSetting(request, readmission: readmission).value == request.value
+        }
+    }
+}
+
 @MainActor
 final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     enum Surface: Equatable { case inbox, focus, review, calendar, board, search, projects, project, waiting, someday, reference, history, trash, contexts, savedSearch, settings }
@@ -611,21 +631,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var settingsAIOptions: NativeAIRequestTimeoutOptions?
     @Published private(set) var settingsAIOptionsFailed = false
     @Published private(set) var settingsAISaveFailed = false
-    private var settingsAITimeoutRequest: NativeAIRequestTimeoutRequest?
-    private var settingsAITimeoutHost: CoreHost?
-    private var settingsAITimeoutOperationID: UUID?
+    private var settingsAIWrite: AIReadmittedSettingWrite?
+    private var settingsAIWriteHost: CoreHost?
+    private var settingsAIWriteOperationID: UUID?
     @Published private(set) var settingsAIEffortOptions: NativeAIReasoningEffortOptions?
     @Published private(set) var settingsAIEffortOptionsFailed = false
     @Published private(set) var settingsAIEffortSaveFailed = false
-    private var settingsAIEffortRequest: NativeAIReasoningEffortRequest?
-    private var settingsAIEffortHost: CoreHost?
-    private var settingsAIEffortOperationID: UUID?
     @Published private(set) var settingsAIGeminiOptions: NativeAIGeminiThinkingBudgetOptions?
     @Published private(set) var settingsAIGeminiOptionsFailed = false
     @Published private(set) var settingsAIGeminiSaveFailed = false
-    private var settingsAIGeminiRequest: NativeAIGeminiThinkingBudgetRequest?
-    private var settingsAIGeminiHost: CoreHost?
-    private var settingsAIGeminiOperationID: UUID?
     private var settingsAISession = UUID()
     private var settingsAIReadID: UUID?
     @Published private var settingsAITask: Task<Void, Never>?
@@ -7051,8 +7065,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && calendarSettingTask == nil && calendarSettingWaiter == nil && calendarSettingsCloseTask == nil
             && settingsSyncDirectoryOwner == nil && settingsSyncDirectoryTask == nil && settingsSyncDirectoryPickerID == nil
             && settingsSyncEncryptionOwner == nil && settingsSyncEncryptionTask == nil && !settingsSyncChecking
-            && settingsAITask == nil && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil
-            && settingsAITimeoutHost == nil && settingsAIEffortHost == nil && settingsAIGeminiHost == nil
+            && settingsAITask == nil && settingsAIWrite == nil && settingsAIWriteHost == nil
             && settingsAITextTask == nil && settingsAITextOwner == nil && settingsAITextRetirementTasks.isEmpty
             && settingsVoiceTask == nil && settingsVoiceLocalTask == nil && settingsVoiceOwner == nil
             && (voiceCaptureOwner == nil || captureVoiceTask != nil || captureVoiceEventsTask != nil || !voiceRetirementTasks.isEmpty)
@@ -7674,17 +7687,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     if arguments.contains("--native-ai-summary-proof") { try await host!.configureIsolatedAISummaryCheckpoint() }
                     if arguments.contains("--native-ai-timeout-fixture"), arguments.contains("--native-ai-timeout-commit-failure-once"),
                        !settingsAITimeoutFixtureConfigured {
-                        try await host!.configureIsolatedAIRequestTimeoutCommitFailureOnce()
+                        try await host!.configureIsolatedAIReadmittedSettingCommitFailureOnce(.requestTimeout)
                         settingsAITimeoutFixtureConfigured = true
                     }
                     if arguments.contains("--native-ai-reasoning-fixture"), arguments.contains("--native-ai-reasoning-commit-failure-once"),
                        !settingsAIEffortFixtureConfigured {
-                        try await host!.configureIsolatedAIReasoningEffortCommitFailureOnce()
+                        try await host!.configureIsolatedAIReadmittedSettingCommitFailureOnce(.reasoningEffort)
                         settingsAIEffortFixtureConfigured = true
                     }
                     if arguments.contains("--native-ai-gemini-fixture"), arguments.contains("--native-ai-gemini-commit-failure-once"),
                        !settingsAIGeminiFixtureConfigured {
-                        try await host!.configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce()
+                        try await host!.configureIsolatedAIReadmittedSettingCommitFailureOnce(.geminiThinkingBudget)
                         settingsAIGeminiFixtureConfigured = true
                     }
                     if arguments.contains("--native-pomodoro-alarm-fixture") {
@@ -8149,8 +8162,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             ready = true
-            retryNeeded = projectFileAddPending || projectFileAvailabilityPending || settingsAITimeoutRequest != nil || settingsAIEffortRequest != nil || settingsAIGeminiRequest != nil
-            if settingsAITimeoutRequest != nil || settingsAIEffortRequest != nil || settingsAIGeminiRequest != nil { error = label("settings.feedback.actionFailed") }
+            retryNeeded = projectFileAddPending || projectFileAvailabilityPending || settingsAIWrite != nil
+            if settingsAIWrite != nil { error = label("settings.feedback.actionFailed") }
             await reconcileTaskAttachmentPresentation()
             if let reply = backupDocumentRecoveredReply, let currentHost = host {
                 try await acceptBackupDocumentReply(reply, from: currentHost)
@@ -11289,8 +11302,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         catch { self.error = error.localizedDescription }
     }
 
-    var settingsAICanOpen: Bool { settingsVoiceTask == nil && settingsVoiceLocalTask == nil && settingsVoiceOwner == nil && settingsAITask == nil && settingsAITextTask == nil && (settingsAITextOwner == nil || settingsAITextHasRetainedConsentRetry) && settingsAITextRetirementTasks.isEmpty && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil }
-    var settingsAICanCancel: Bool { settingsAIPresented && (settingsVoicePresented || settingsAITextPresented || settingsAITimeoutRequest != nil || settingsAIEffortRequest != nil || settingsAIGeminiRequest != nil) && !retryNeeded }
+    var settingsAICanOpen: Bool { settingsVoiceTask == nil && settingsVoiceLocalTask == nil && settingsVoiceOwner == nil && settingsAITask == nil && settingsAITextTask == nil && (settingsAITextOwner == nil || settingsAITextHasRetainedConsentRetry) && settingsAITextRetirementTasks.isEmpty && settingsAIWrite == nil }
+    var settingsAICanCancel: Bool { settingsAIPresented && (settingsVoicePresented || settingsAITextPresented || settingsAIWrite != nil) && !retryNeeded }
     var settingsVoiceWorking: Bool { settingsVoiceTask != nil || settingsVoiceLocalTask != nil }
     var settingsVoiceLocalWorking: Bool { settingsVoiceLocalTask != nil }
     var settingsVoiceLocalDownloading: Bool { settingsVoiceLocalOperation == .download }
@@ -12186,14 +12199,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var settingsAITimeoutCanChoose: Bool {
         guard let currentHost = host else { return false }
         return settingsAIAdvanced && settingsAIOptions != nil && settingsAITask == nil
-            && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && !busy && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
+            && settingsAIWrite == nil && !busy && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
     }
 
     func openAISettingsSummary() {
         guard ready, selectedSurface == .settings, settingsAdvancedPresented, !settingsAIPresented,
               !busy, !retryNeeded, !appLock.concealed, !settingsCalendarPresented,
               !settingsSyncPresented, !settingsSyncRestartRequired, settingsAITask == nil,
-              settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil,
+              settingsAIWrite == nil,
               UIApplication.shared.applicationState == .active else { return }
         observeDiagnosticsConcealment()
         settingsSearchTask?.cancel(); settingsSearchGeneration += 1
@@ -12225,13 +12238,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private func aiSettingsSummaryCurrent(_ capturedHost: CoreHost, session: UUID) -> Bool {
         host === capturedHost && settingsAISession == session && ready && settingsAIPresented
             && selectedSurface == .settings && !appLock.concealed && !retryNeeded && !Task.isCancelled
-            && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil
+            && settingsAIWrite == nil
             && UIApplication.shared.applicationState == .active
     }
 
     func retryAISettingsSummary() {
         guard !settingsAITextHasRetainedConsentRetry else { return }
-        guard let currentHost = host, settingsAITask == nil, settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, !busy,
+        guard let currentHost = host, settingsAITask == nil, settingsAIWrite == nil, !busy,
               aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
         let session = settingsAISession, id = UUID()
         settingsAIReadID = id; settingsAILoading = true; settingsAIReadFailed = false
@@ -12283,7 +12296,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func toggleAIAdvanced() {
-        guard !settingsAITextHasRetainedConsentRetry, settingsAITask == nil, settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, !busy, !retryNeeded else { return }
+        guard !settingsAITextHasRetainedConsentRetry, settingsAITask == nil, settingsAIWrite == nil, !busy, !retryNeeded else { return }
         settingsAIAdvanced.toggle()
         settingsAIOptions = nil; settingsAIOptionsFailed = false
         if settingsAIAdvanced { retryAIRequestTimeoutOptions() }
@@ -12291,7 +12304,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAIRequestTimeoutOptions() {
         guard let currentHost = host, settingsAIAdvanced, settingsAITask == nil,
-              settingsAITimeoutRequest == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, !busy,
+              settingsAIWrite == nil, !busy,
               aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
         let session = settingsAISession, id = UUID()
         settingsAIReadID = id; settingsAIOptions = nil; settingsAIOptionsFailed = false
@@ -12306,7 +12319,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private func readAIRequestTimeoutOptions(_ currentHost: CoreHost, session: UUID) async {
         do {
-            let options = try await currentHost.readAIRequestTimeoutOptions()
+            let options = try await currentHost.readAIReadmittedSettingOptions(NativeAIRequestTimeoutRequest.self)
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
             if settingsAIOptionsTestFailureOnce {
                 settingsAIOptionsTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
@@ -12323,96 +12336,98 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     func saveAIRequestTimeout(_ value: Int) {
         guard settingsAITimeoutCanChoose, let currentHost = host, let options = settingsAIOptions,
               [30, 60, 120, 300].contains(value) else { return }
-        settingsAITimeoutRequest = .init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected)
-        settingsAITimeoutHost = currentHost
+        settingsAIWrite = .requestTimeout(.init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected))
+        settingsAIWriteHost = currentHost
         settingsAIOptions = nil
-        beginAIRequestTimeoutOperation()
+        beginAIReadmittedSettingOperation()
     }
 
-    private func beginAIRequestTimeoutOperation() {
-        guard !busy, settingsAITask == nil, settingsAITimeoutOperationID == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil,
-              let request = settingsAITimeoutRequest, let currentHost = settingsAITimeoutHost,
+    private func beginAIReadmittedSettingOperation() {
+        guard !busy, settingsAITask == nil, settingsAIWriteOperationID == nil,
+              let write = settingsAIWrite, let currentHost = settingsAIWriteHost,
               host === currentHost, ready, settingsAIPresented, selectedSurface == .settings,
               !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
         let operation = UUID(), session = settingsAISession, wasUncertain = retryNeeded
-        settingsAITimeoutOperationID = operation; busy = true; settingsAISaveFailed = false
+        settingsAIWriteOperationID = operation; busy = true; setAIReadmittedSettingSaveFailed(write.setting, false)
         settingsAITask = Task { [weak self] in
             guard let self else { return }
             defer {
-                if self.settingsAITimeoutOperationID == operation {
-                    self.settingsAITimeoutOperationID = nil; self.settingsAITask = nil
+                if self.settingsAIWriteOperationID == operation {
+                    self.settingsAIWriteOperationID = nil; self.settingsAITask = nil
                     self.finishOperation()
                 }
             }
             do {
-                let result = try await currentHost.setAIRequestTimeout(request, readmission: { [weak self] in
+                let accepted = try await write.save(on: currentHost, readmission: { [weak self] in
                     guard let self else { return false }
-                    return await self.aiRequestTimeoutReadmission(currentHost, request: request, operation: operation, session: session)
+                    return await self.aiReadmittedSettingReadmission(currentHost, write: write, operation: operation, session: session)
                 })
-                guard self.settingsAITimeoutOperationID == operation,
-                      self.settingsAITimeoutRequest == request, self.settingsAITimeoutHost === currentHost,
-                      result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
-
-                self.settingsAITimeoutRequest = nil; self.settingsAITimeoutHost = nil
+                guard self.settingsAIWriteOperationID == operation,
+                      self.settingsAIWrite == write, self.settingsAIWriteHost === currentHost,
+                      accepted else { throw CocoaError(.coderReadCorrupt) }
+                self.settingsAIWrite = nil; self.settingsAIWriteHost = nil
                 self.retryNeeded = false; self.error = nil
                 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                await self.readAIRequestTimeoutFixtureState(currentHost, session: session)
+                await self.readAIReadmittedSettingFixtureState(write.setting, currentHost, session: session)
                 #endif
                 if self.aiSettingsSummaryCurrent(currentHost, session: session) {
-                    await self.refreshAISettingsAfterTimeout(currentHost, session: session)
+                    await self.refreshAISettingsAfterReadmittedSetting(write.setting, currentHost, session: session)
                 }
             } catch {
-                guard self.settingsAITimeoutOperationID == operation,
-                      self.settingsAITimeoutRequest == request, self.settingsAITimeoutHost === currentHost else { return }
-
-
+                guard self.settingsAIWriteOperationID == operation,
+                      self.settingsAIWrite == write, self.settingsAIWriteHost === currentHost else { return }
                 if self.isDefiniteRejection(error) && !wasUncertain {
-                    self.settingsAITimeoutRequest = nil; self.settingsAITimeoutHost = nil
+                    self.settingsAIWrite = nil; self.settingsAIWriteHost = nil
                     self.retryNeeded = false; self.error = nil
                     if self.aiSettingsSummaryCurrent(currentHost, session: session) {
-                        self.settingsAISaveFailed = true
-                        await self.refreshAISettingsAfterTimeout(currentHost, session: session)
+                        self.setAIReadmittedSettingSaveFailed(write.setting, true)
+                        await self.refreshAISettingsAfterReadmittedSetting(write.setting, currentHost, session: session)
                     }
                 } else {
                     self.retryNeeded = true
                     self.error = self.label("settings.feedback.actionFailed")
                     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                    await self.readAIRequestTimeoutFixtureState(currentHost, session: session)
+                    await self.readAIReadmittedSettingFixtureState(write.setting, currentHost, session: session)
                     #endif
                     if self.host === currentHost && self.settingsAISession == session && self.settingsAIPresented {
-                        self.settingsAISaveFailed = true
+                        self.setAIReadmittedSettingSaveFailed(write.setting, true)
                     }
                 }
             }
         }
     }
 
-    private func aiRequestTimeoutReadmission(_ currentHost: CoreHost, request: NativeAIRequestTimeoutRequest,
-                                            operation: UUID, session: UUID) async -> Bool {
+    private func aiReadmittedSettingReadmission(_ currentHost: CoreHost, write: AIReadmittedSettingWrite,
+                                                operation: UUID, session: UUID) async -> Bool {
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-        if settingsAITimeoutTestHoldOnce {
-            settingsAITimeoutTestHoldOnce = false; settingsAITimeoutTestHeld = true
+        if takeAIReadmittedSettingTestHold(write.setting) {
+            setAIReadmittedSettingTestHeld(write.setting, true)
             try? await Task.sleep(nanoseconds: 8_000_000_000)
-            settingsAITimeoutTestHeld = false
+            setAIReadmittedSettingTestHeld(write.setting, false)
         }
         #endif
-        return host === currentHost && settingsAITimeoutHost === currentHost && settingsAITimeoutRequest == request
-            && settingsAITimeoutOperationID == operation && settingsAISession == session && ready
-            && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil
+        return host === currentHost && settingsAIWriteHost === currentHost && settingsAIWrite == write
+            && settingsAIWriteOperationID == operation && settingsAISession == session && ready
             && settingsAIPresented && selectedSurface == .settings && !appLock.concealed && !Task.isCancelled
             && UIApplication.shared.applicationState == .active
     }
 
-    private func refreshAISettingsAfterTimeout(_ currentHost: CoreHost, session: UUID) async {
+    private func setAIReadmittedSettingSaveFailed(_ setting: NativeAIReadmittedSetting, _ failed: Bool) {
+        switch setting {
+        case .requestTimeout: settingsAISaveFailed = failed
+        case .reasoningEffort: settingsAIEffortSaveFailed = failed
+        case .geminiThinkingBudget: settingsAIGeminiSaveFailed = failed
+        }
+    }
+
+    private func refreshAISettingsAfterReadmittedSetting(_ setting: NativeAIReadmittedSetting, _ currentHost: CoreHost, session: UUID) async {
         settingsAIProjection = nil; settingsAIOptions = nil; settingsAIEffortOptions = nil; settingsAIGeminiOptions = nil
         settingsAILoading = true; settingsAIReadFailed = false
         defer { if settingsAISession == session { settingsAILoading = false } }
         do {
             let projection = try await currentHost.readAISettingsProjection()
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-            if settingsAITimeoutRefreshTestFailureOnce {
-                settingsAITimeoutRefreshTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
-            }
+            if takeAIReadmittedSettingRefreshTestFailure(setting) { throw CocoaError(.coderReadCorrupt) }
             #endif
             guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
             settingsAIProjection = projection
@@ -12420,35 +12435,51 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
             settingsAIReadFailed = true
         }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai {
-            await readAIReasoningEffortOptions(currentHost, session: session)
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini {
-            await readAIGeminiThinkingBudgetOptions(currentHost, session: session)
+        let providers: [NativeAISettingsProjection.Provider] = setting == .geminiThinkingBudget ? [.gemini, .openai] : [.openai, .gemini]
+        for provider in providers where aiSettingsSummaryCurrent(currentHost, session: session) && settingsAIProjection?.aiProvider == provider {
+            if provider == .gemini { await readAIGeminiThinkingBudgetOptions(currentHost, session: session) }
+            else { await readAIReasoningEffortOptions(currentHost, session: session) }
         }
         if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced {
             await readAIRequestTimeoutOptions(currentHost, session: session)
         }
     }
 
-    func retryAIRequestTimeout() {
-        guard !busy, settingsAITask == nil, settingsAITimeoutOperationID == nil, settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil,
-              settingsAITimeoutRequest != nil, let capturedHost = settingsAITimeoutHost,
+    func retryAIReadmittedSetting() {
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if settingsAIGeminiRetryFixtureValue == "dispatch=gemini" {
+            let checks: [(String, Bool)] = [
+                ("busy", !busy), ("ai-task", settingsAITask == nil),
+                ("gemini-operation", settingsAIWriteOperationID == nil),
+                ("timeout-request", settingsAIWrite?.setting != .requestTimeout), ("effort-request", settingsAIWrite?.setting != .reasoningEffort),
+                ("gemini-request-missing", settingsAIWrite?.setting == .geminiThinkingBudget), ("retained-host-missing", settingsAIWriteHost != nil),
+                ("host-replaced", host === settingsAIWriteHost), ("not-ready", ready),
+                ("concealed", !appLock.concealed), ("application-inactive", UIApplication.shared.applicationState == .active),
+                ("sync-presented", !settingsSyncPresented), ("calendar-presented", !settingsCalendarPresented),
+                ("data-presented", !settingsDataPresented), ("recovery-visible", !taskRecoveryGateVisible),
+                ("sync-restart-required", !settingsSyncRestartRequired),
+            ]
+            settingsAIGeminiRetryAdmissionState += ";admission=" + (checks.first(where: { !$0.1 })?.0 ?? "admitted")
+        }
+        #endif
+        guard !busy, settingsAITask == nil, settingsAIWriteOperationID == nil,
+              let write = settingsAIWrite, let capturedHost = settingsAIWriteHost,
               host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
               !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
               !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
 
         if !settingsAIPresented {
             selectedSurface = .settings; settingsAdvancedPresented = true
-            settingsAISession = UUID(); settingsAIPresented = true; settingsAIAdvanced = true
+            settingsAISession = UUID(); settingsAIPresented = true
+            if write.setting == .requestTimeout { settingsAIAdvanced = true }
         }
-        beginAIRequestTimeoutOperation()
+        beginAIReadmittedSettingOperation()
     }
 
     var settingsAIReasoningCanChoose: Bool {
         guard let currentHost = host else { return false }
         return settingsAIProjection?.aiProvider == .openai && settingsAIEffortOptions != nil && settingsAITask == nil
-            && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && settingsAITimeoutRequest == nil && !busy
+            && settingsAIWrite == nil && !busy
             && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
     }
 
@@ -12463,7 +12494,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAIReasoningEffortOptions() {
         guard let currentHost = host, settingsAIProjection?.aiProvider == .openai, settingsAITask == nil,
-              settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil, !busy,
+              settingsAIWrite == nil, !busy,
               aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
         let session = settingsAISession, id = UUID()
         settingsAIReadID = id; settingsAIEffortOptions = nil; settingsAIEffortOptionsFailed = false
@@ -12478,7 +12509,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private func readAIReasoningEffortOptions(_ currentHost: CoreHost, session: UUID) async {
         do {
-            let options = try await currentHost.readAIReasoningEffortOptions()
+            let options = try await currentHost.readAIReadmittedSettingOptions(NativeAIReasoningEffortRequest.self)
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
             if settingsAIEffortOptionsTestFailureOnce {
                 settingsAIEffortOptionsTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
@@ -12494,133 +12525,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func saveAIReasoningEffort(_ value: NativeAIReasoningEffortValue) {
         guard settingsAIReasoningCanChoose, let currentHost = host, let options = settingsAIEffortOptions else { return }
-        settingsAIEffortRequest = .init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected)
-        settingsAIEffortHost = currentHost
+        settingsAIWrite = .reasoningEffort(.init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected))
+        settingsAIWriteHost = currentHost
         settingsAIEffortOptions = nil
-        beginAIReasoningEffortOperation()
-    }
-
-    private func beginAIReasoningEffortOperation() {
-        guard !busy, settingsAITask == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil, settingsAITimeoutOperationID == nil,
-              let request = settingsAIEffortRequest, let currentHost = settingsAIEffortHost,
-              host === currentHost, ready, settingsAIPresented, selectedSurface == .settings,
-              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
-        let operation = UUID(), session = settingsAISession, wasUncertain = retryNeeded
-        settingsAIEffortOperationID = operation; busy = true; settingsAIEffortSaveFailed = false
-        settingsAITask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.settingsAIEffortOperationID == operation {
-                    self.settingsAIEffortOperationID = nil; self.settingsAITask = nil
-                    self.finishOperation()
-                }
-            }
-            do {
-                let result = try await currentHost.setAIReasoningEffort(request, readmission: { [weak self] in
-                    guard let self else { return false }
-                    return await self.aiReasoningEffortReadmission(currentHost, request: request, operation: operation, session: session)
-                })
-                guard self.settingsAIEffortOperationID == operation,
-                      self.settingsAIEffortRequest == request, self.settingsAIEffortHost === currentHost,
-                      result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
-
-                self.settingsAIEffortRequest = nil; self.settingsAIEffortHost = nil
-                self.retryNeeded = false; self.error = nil
-                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                await self.readAIReasoningEffortFixtureState(currentHost, session: session)
-                #endif
-                if self.aiSettingsSummaryCurrent(currentHost, session: session) {
-                    await self.refreshAISettingsAfterReasoningEffort(currentHost, session: session)
-                }
-            } catch {
-                guard self.settingsAIEffortOperationID == operation,
-                      self.settingsAIEffortRequest == request, self.settingsAIEffortHost === currentHost else { return }
-
-
-                if self.isDefiniteRejection(error) && !wasUncertain {
-                    self.settingsAIEffortRequest = nil; self.settingsAIEffortHost = nil
-                    self.retryNeeded = false; self.error = nil
-                    if self.aiSettingsSummaryCurrent(currentHost, session: session) {
-                        self.settingsAIEffortSaveFailed = true
-                        await self.refreshAISettingsAfterReasoningEffort(currentHost, session: session)
-                    }
-                } else {
-                    self.retryNeeded = true
-                    self.error = self.label("settings.feedback.actionFailed")
-                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                    await self.readAIReasoningEffortFixtureState(currentHost, session: session)
-                    #endif
-                    if self.host === currentHost && self.settingsAISession == session && self.settingsAIPresented {
-                        self.settingsAIEffortSaveFailed = true
-                    }
-                }
-            }
-        }
-    }
-
-    private func aiReasoningEffortReadmission(_ currentHost: CoreHost, request: NativeAIReasoningEffortRequest,
-                                            operation: UUID, session: UUID) async -> Bool {
-        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-        if settingsAIEffortTestHoldOnce {
-            settingsAIEffortTestHoldOnce = false; settingsAIEffortTestHeld = true
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
-            settingsAIEffortTestHeld = false
-        }
-        #endif
-        return host === currentHost && settingsAIEffortHost === currentHost && settingsAIEffortRequest == request
-            && settingsAIEffortOperationID == operation && settingsAISession == session && ready
-            && settingsAITimeoutRequest == nil && settingsAITimeoutOperationID == nil
-            && settingsAIGeminiRequest == nil && settingsAIGeminiOperationID == nil
-            && settingsAIPresented && selectedSurface == .settings && !appLock.concealed && !Task.isCancelled
-            && UIApplication.shared.applicationState == .active
-    }
-
-    private func refreshAISettingsAfterReasoningEffort(_ currentHost: CoreHost, session: UUID) async {
-        settingsAIProjection = nil; settingsAIEffortOptions = nil; settingsAIOptions = nil; settingsAIGeminiOptions = nil
-        settingsAILoading = true; settingsAIReadFailed = false
-        defer { if settingsAISession == session { settingsAILoading = false } }
-        do {
-            let projection = try await currentHost.readAISettingsProjection()
-            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-            if settingsAIEffortRefreshTestFailureOnce {
-                settingsAIEffortRefreshTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
-            }
-            #endif
-            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
-            settingsAIProjection = projection
-        } catch {
-            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
-            settingsAIReadFailed = true
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai {
-            await readAIReasoningEffortOptions(currentHost, session: session)
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini {
-            await readAIGeminiThinkingBudgetOptions(currentHost, session: session)
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced {
-            await readAIRequestTimeoutOptions(currentHost, session: session)
-        }
-    }
-
-    func retryAIReasoningEffort() {
-        guard !busy, settingsAITask == nil, settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil && settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil, settingsAITimeoutOperationID == nil,
-              settingsAIEffortRequest != nil, let capturedHost = settingsAIEffortHost,
-              host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
-              !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
-              !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
-
-        if !settingsAIPresented {
-            selectedSurface = .settings; settingsAdvancedPresented = true
-            settingsAISession = UUID(); settingsAIPresented = true
-        }
-        beginAIReasoningEffortOperation()
+        beginAIReadmittedSettingOperation()
     }
 
     var settingsAIGeminiCanChoose: Bool {
         guard let currentHost = host else { return false }
         return settingsAIProjection?.aiProvider == .gemini && settingsAIGeminiOptions != nil && settingsAITask == nil
-            && settingsAIGeminiRequest == nil && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && !busy
+            && settingsAIWrite == nil && !busy
             && aiSettingsSummaryCurrent(currentHost, session: settingsAISession)
     }
 
@@ -12636,7 +12550,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAIGeminiThinkingBudgetOptions() {
         guard let currentHost = host, settingsAIProjection?.aiProvider == .gemini, settingsAITask == nil,
-              settingsAIGeminiRequest == nil, settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil, !busy,
+              settingsAIWrite == nil, !busy,
               aiSettingsSummaryCurrent(currentHost, session: settingsAISession) else { return }
         let session = settingsAISession, id = UUID()
         settingsAIReadID = id; settingsAIGeminiOptions = nil; settingsAIGeminiOptionsFailed = false
@@ -12651,7 +12565,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private func readAIGeminiThinkingBudgetOptions(_ currentHost: CoreHost, session: UUID) async {
         do {
-            let options = try await currentHost.readAIGeminiThinkingBudgetOptions()
+            let options = try await currentHost.readAIReadmittedSettingOptions(NativeAIGeminiThinkingBudgetRequest.self)
             #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
             if settingsAIGeminiOptionsTestFailureOnce {
                 settingsAIGeminiOptionsTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
@@ -12667,143 +12581,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func saveAIGeminiThinkingBudget(_ value: NativeAIGeminiThinkingBudgetValue) {
         guard settingsAIGeminiCanChoose, let currentHost = host, let options = settingsAIGeminiOptions else { return }
-        settingsAIGeminiRequest = .init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected)
-        settingsAIGeminiHost = currentHost
+        settingsAIWrite = .geminiThinkingBudget(.init(requestId: UUID().uuidString.lowercased(), value: value, expected: options.expected))
+        settingsAIWriteHost = currentHost
         settingsAIGeminiOptions = nil
-        beginAIGeminiThinkingBudgetOperation()
-    }
-
-    private func beginAIGeminiThinkingBudgetOperation() {
-        guard !busy, settingsAITask == nil, settingsAIGeminiOperationID == nil, settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil, settingsAITimeoutOperationID == nil && settingsAIEffortOperationID == nil,
-              let request = settingsAIGeminiRequest, let currentHost = settingsAIGeminiHost,
-              host === currentHost, ready, settingsAIPresented, selectedSurface == .settings,
-              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
-        let operation = UUID(), session = settingsAISession, wasUncertain = retryNeeded
-        settingsAIGeminiOperationID = operation; busy = true; settingsAIGeminiSaveFailed = false
-        settingsAITask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.settingsAIGeminiOperationID == operation {
-                    self.settingsAIGeminiOperationID = nil; self.settingsAITask = nil
-                    self.finishOperation()
-                }
-            }
-            do {
-                let result = try await currentHost.setAIGeminiThinkingBudget(request, readmission: { [weak self] in
-                    guard let self else { return false }
-                    return await self.aiGeminiThinkingBudgetReadmission(currentHost, request: request, operation: operation, session: session)
-                })
-                guard self.settingsAIGeminiOperationID == operation,
-                      self.settingsAIGeminiRequest == request, self.settingsAIGeminiHost === currentHost,
-                      result.value == request.value else { throw CocoaError(.coderReadCorrupt) }
-
-                self.settingsAIGeminiRequest = nil; self.settingsAIGeminiHost = nil
-                self.retryNeeded = false; self.error = nil
-                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                await self.readAIGeminiThinkingBudgetFixtureState(currentHost, session: session)
-                #endif
-                if self.aiSettingsSummaryCurrent(currentHost, session: session) {
-                    await self.refreshAISettingsAfterGeminiThinkingBudget(currentHost, session: session)
-                }
-            } catch {
-                guard self.settingsAIGeminiOperationID == operation,
-                      self.settingsAIGeminiRequest == request, self.settingsAIGeminiHost === currentHost else { return }
-
-
-                if self.isDefiniteRejection(error) && !wasUncertain {
-                    self.settingsAIGeminiRequest = nil; self.settingsAIGeminiHost = nil
-                    self.retryNeeded = false; self.error = nil
-                    if self.aiSettingsSummaryCurrent(currentHost, session: session) {
-                        self.settingsAIGeminiSaveFailed = true
-                        await self.refreshAISettingsAfterGeminiThinkingBudget(currentHost, session: session)
-                    }
-                } else {
-                    self.retryNeeded = true
-                    self.error = self.label("settings.feedback.actionFailed")
-                    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                    await self.readAIGeminiThinkingBudgetFixtureState(currentHost, session: session)
-                    #endif
-                    if self.host === currentHost && self.settingsAISession == session && self.settingsAIPresented {
-                        self.settingsAIGeminiSaveFailed = true
-                    }
-                }
-            }
-        }
-    }
-
-    private func aiGeminiThinkingBudgetReadmission(_ currentHost: CoreHost, request: NativeAIGeminiThinkingBudgetRequest,
-                                            operation: UUID, session: UUID) async -> Bool {
-        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-        if settingsAIGeminiTestHoldOnce {
-            settingsAIGeminiTestHoldOnce = false; settingsAIGeminiTestHeld = true
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
-            settingsAIGeminiTestHeld = false
-        }
-        #endif
-        return host === currentHost && settingsAIGeminiHost === currentHost && settingsAIGeminiRequest == request
-            && settingsAIGeminiOperationID == operation && settingsAISession == session && ready
-            && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAITimeoutOperationID == nil && settingsAIEffortOperationID == nil
-            && settingsAIPresented && selectedSurface == .settings && !appLock.concealed && !Task.isCancelled
-            && UIApplication.shared.applicationState == .active
-    }
-
-    private func refreshAISettingsAfterGeminiThinkingBudget(_ currentHost: CoreHost, session: UUID) async {
-        settingsAIProjection = nil; settingsAIGeminiOptions = nil; settingsAIOptions = nil; settingsAIEffortOptions = nil
-        settingsAILoading = true; settingsAIReadFailed = false
-        defer { if settingsAISession == session { settingsAILoading = false } }
-        do {
-            let projection = try await currentHost.readAISettingsProjection()
-            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-            if settingsAIGeminiRefreshTestFailureOnce {
-                settingsAIGeminiRefreshTestFailureOnce = false; throw CocoaError(.coderReadCorrupt)
-            }
-            #endif
-            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
-            settingsAIProjection = projection
-        } catch {
-            guard aiSettingsSummaryCurrent(currentHost, session: session) else { return }
-            settingsAIReadFailed = true
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .gemini {
-            await readAIGeminiThinkingBudgetOptions(currentHost, session: session)
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIProjection?.aiProvider == .openai {
-            await readAIReasoningEffortOptions(currentHost, session: session)
-        }
-        if aiSettingsSummaryCurrent(currentHost, session: session), settingsAIAdvanced {
-            await readAIRequestTimeoutOptions(currentHost, session: session)
-        }
-    }
-
-    func retryAIGeminiThinkingBudget() {
-        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-        if settingsAIGeminiRetryFixtureValue == "dispatch=gemini" {
-            let checks: [(String, Bool)] = [
-                ("busy", !busy), ("ai-task", settingsAITask == nil),
-                ("gemini-operation", settingsAIGeminiOperationID == nil),
-                ("timeout-request", settingsAITimeoutRequest == nil), ("effort-request", settingsAIEffortRequest == nil),
-                ("timeout-operation", settingsAITimeoutOperationID == nil), ("effort-operation", settingsAIEffortOperationID == nil),
-                ("gemini-request-missing", settingsAIGeminiRequest != nil), ("retained-host-missing", settingsAIGeminiHost != nil),
-                ("host-replaced", host === settingsAIGeminiHost), ("not-ready", ready),
-                ("concealed", !appLock.concealed), ("application-inactive", UIApplication.shared.applicationState == .active),
-                ("sync-presented", !settingsSyncPresented), ("calendar-presented", !settingsCalendarPresented),
-                ("data-presented", !settingsDataPresented), ("recovery-visible", !taskRecoveryGateVisible),
-                ("sync-restart-required", !settingsSyncRestartRequired),
-            ]
-            settingsAIGeminiRetryAdmissionState += ";admission=" + (checks.first(where: { !$0.1 })?.0 ?? "admitted")
-        }
-        #endif
-        guard !busy, settingsAITask == nil, settingsAIGeminiOperationID == nil, settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil, settingsAITimeoutOperationID == nil && settingsAIEffortOperationID == nil,
-              settingsAIGeminiRequest != nil, let capturedHost = settingsAIGeminiHost,
-              host === capturedHost, ready, !appLock.concealed, UIApplication.shared.applicationState == .active,
-              !settingsSyncPresented, !settingsCalendarPresented, !settingsDataPresented,
-              !taskRecoveryGateVisible, !settingsSyncRestartRequired else { return }
-
-        if !settingsAIPresented {
-            selectedSurface = .settings; settingsAdvancedPresented = true
-            settingsAISession = UUID(); settingsAIPresented = true
-        }
-        beginAIGeminiThinkingBudgetOperation()
+        beginAIReadmittedSettingOperation()
     }
 
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -12819,8 +12600,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && selectedSurface == .settings && settingsAdvancedPresented && !settingsAIPresented
             && operationContextClean && notificationResponseContextClean
             && settingsAITask == nil && settingsAIReadID == nil && !settingsAILoading
-            && settingsAITimeoutRequest == nil && settingsAITimeoutHost == nil && settingsAITimeoutOperationID == nil
-            && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil && settingsAIEffortHost == nil && settingsAIGeminiHost == nil && settingsAIEffortOperationID == nil && settingsAIGeminiOperationID == nil
+            && settingsAIWrite == nil && settingsAIWriteHost == nil && settingsAIWriteOperationID == nil
             && foregroundSyncOwner == nil && foregroundSyncTask == nil
             && pomodoroWork == nil && pomodoroWorkHost == nil && pomodoroCommand == nil
             && reminderLifecycleTask == nil && reminderLifecycleOwner == nil && reminderDebounceTask == nil
@@ -12877,34 +12657,50 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    private func readAIRequestTimeoutFixtureState(_ currentHost: CoreHost, session: UUID) async {
-        guard NativeAppLaunch.arguments.contains("--native-ai-timeout-fixture"),
-              let state = try? await currentHost.isolatedAIRequestTimeoutFixtureState(),
+    private func readAIReadmittedSettingFixtureState(_ setting: NativeAIReadmittedSetting, _ currentHost: CoreHost, session: UUID) async {
+        guard NativeAppLaunch.arguments.contains(setting.fixtureArgument),
+              let state = try? await currentHost.isolatedAIReadmittedSettingFixtureState(setting),
               host === currentHost, settingsAISession == session, settingsAIPresented,
               !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
-        settingsAITimeoutFixtureState = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+        let text = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+        switch setting {
+        case .requestTimeout: settingsAITimeoutFixtureState = text
+        case .reasoningEffort: settingsAIEffortFixtureState = text
+        case .geminiThinkingBudget: settingsAIGeminiFixtureState = text
+        }
     }
 
-    private func readAIReasoningEffortFixtureState(_ currentHost: CoreHost, session: UUID) async {
-        guard NativeAppLaunch.arguments.contains("--native-ai-reasoning-fixture"),
-              let state = try? await currentHost.isolatedAIReasoningEffortFixtureState(),
-              host === currentHost, settingsAISession == session, settingsAIPresented,
-              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
-        settingsAIEffortFixtureState = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+    private func takeAIReadmittedSettingTestHold(_ setting: NativeAIReadmittedSetting) -> Bool {
+        let hold: Bool
+        switch setting {
+        case .requestTimeout: hold = settingsAITimeoutTestHoldOnce; settingsAITimeoutTestHoldOnce = false
+        case .reasoningEffort: hold = settingsAIEffortTestHoldOnce; settingsAIEffortTestHoldOnce = false
+        case .geminiThinkingBudget: hold = settingsAIGeminiTestHoldOnce; settingsAIGeminiTestHoldOnce = false
+        }
+        return hold
     }
 
-    private func readAIGeminiThinkingBudgetFixtureState(_ currentHost: CoreHost, session: UUID) async {
-        guard NativeAppLaunch.arguments.contains("--native-ai-gemini-fixture"),
-              let state = try? await currentHost.isolatedAIGeminiThinkingBudgetFixtureState(),
-              host === currentHost, settingsAISession == session, settingsAIPresented,
-              !appLock.concealed, UIApplication.shared.applicationState == .active else { return }
-        settingsAIGeminiFixtureState = "failure=\(state.failureInjected);exact=\(state.exactRequestRetried);commits=\(state.commitAttempts);retired=\(state.journalRetired)"
+    private func setAIReadmittedSettingTestHeld(_ setting: NativeAIReadmittedSetting, _ held: Bool) {
+        switch setting {
+        case .requestTimeout: settingsAITimeoutTestHeld = held
+        case .reasoningEffort: settingsAIEffortTestHeld = held
+        case .geminiThinkingBudget: settingsAIGeminiTestHeld = held
+        }
+    }
+
+    private func takeAIReadmittedSettingRefreshTestFailure(_ setting: NativeAIReadmittedSetting) -> Bool {
+        let failure: Bool
+        switch setting {
+        case .requestTimeout: failure = settingsAITimeoutRefreshTestFailureOnce; settingsAITimeoutRefreshTestFailureOnce = false
+        case .reasoningEffort: failure = settingsAIEffortRefreshTestFailureOnce; settingsAIEffortRefreshTestFailureOnce = false
+        case .geminiThinkingBudget: failure = settingsAIGeminiRefreshTestFailureOnce; settingsAIGeminiRefreshTestFailureOnce = false
+        }
+        return failure
     }
 
     func retireAISettingsSummaryFixture(_ reason: String) {
-        guard settingsAITestHeld || settingsAITimeoutTestHeld || settingsAITimeoutRequest != nil
-                || settingsAIEffortTestHeld || settingsAIEffortRequest != nil
-                || settingsAIGeminiTestHeld || settingsAIGeminiRequest != nil, let selection = try? NativeAppLaunch.selection.get(),
+        guard settingsAITestHeld || settingsAITimeoutTestHeld || settingsAIEffortTestHeld || settingsAIGeminiTestHeld
+                || settingsAIWrite != nil, let selection = try? NativeAppLaunch.selection.get(),
               case .isolated = selection else { return }
         if reason == "lock" { appLock.readFailed() }
         else if reason == "host" {
@@ -43583,8 +43379,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
         if settingsAIGeminiRetryFixtureValue == "not-invoked" {
             let owners: [(String, Bool)] = [
-                ("effort", settingsAIEffortRequest != nil), ("gemini", settingsAIGeminiRequest != nil),
-                ("timeout", settingsAITimeoutRequest != nil), ("pomodoro", pomodoroCommand != nil),
+                ("effort", settingsAIWrite?.setting == .reasoningEffort), ("gemini", settingsAIWrite?.setting == .geminiThinkingBudget),
+                ("timeout", settingsAIWrite?.setting == .requestTimeout), ("pomodoro", pomodoroCommand != nil),
                 ("reminders", appleRemindersNeedsRetry), ("trash", trashBulkRequest != nil),
                 ("notification-response", notificationResponseRetry != nil), ("notification-setting", notificationSettingRequest != nil),
                 ("calendar-setting", calendarSettingRequest != nil), ("project-file-availability", projectFileAvailabilityPending),
@@ -43599,9 +43395,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if settingsVoiceOwner?.request != nil || settingsVoiceOwner?.endpointRequest != nil { retryVoiceSetting(); return }
         if voiceCaptureOwner?.requestJSON != nil { retryVoiceCaptureSave(); return }
         if settingsAITextOwner?.request != nil || settingsAITextOwner?.extraBodyAttempt != nil { retryAITextConfiguration(); return }
-        if settingsAIEffortRequest != nil { retryAIReasoningEffort(); return }
-        if settingsAIGeminiRequest != nil { retryAIGeminiThinkingBudget(); return }
-        if settingsAITimeoutRequest != nil { retryAIRequestTimeout(); return }
+        if settingsAIWrite != nil { retryAIReadmittedSetting(); return }
         if pomodoroCommand != nil { await retryPomodoro(); return }
         if appleRemindersNeedsRetry { retryAppleReminders(); return }
         if trashBulkRequest != nil { await retryTrashBulkRequest(); return }

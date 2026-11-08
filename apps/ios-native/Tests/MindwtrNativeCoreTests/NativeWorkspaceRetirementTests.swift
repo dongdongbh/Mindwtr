@@ -152,10 +152,10 @@ final class NativeWorkspaceRetirementTests: XCTestCase {
 
     func testTypedContinuationCommitsOnOriginalHostWhileCancelledRetirementWaits() async throws {
         let core = host(); _ = try await core.start(); try await capture(core)
-        let options = try await core.readAIRequestTimeoutOptions()
+        let options = try await core.readAIReadmittedSettingOptions(NativeAIRequestTimeoutRequest.self)
         let request = NativeAIRequestTimeoutRequest(requestId: UUID().uuidString.lowercased(), value: 60, expected: options.expected)
         let entered = expectation(description: "real typed readmission after Engine begin"), gate = WorkspaceReadmission(entered)
-        let work = Task { try await core.setAIRequestTimeout(request, readmission: { await gate.wait() }) }
+        let work = Task { try await core.setAIReadmittedSetting(request, readmission: { await gate.wait() }) }
         await fulfillment(of: [entered], timeout: 10)
         let state = WorkspaceObservation()
         let retiring = Task { let receipt = try await core.retireForWorkspaceTransition(); state.finish(); return receipt }
@@ -165,7 +165,7 @@ final class NativeWorkspaceRetirementTests: XCTestCase {
         let committed = try await work.value
         XCTAssertEqual(committed, .init(value: 60, changed: true), "The admitted typed commit/finish must retain original authority")
         _ = try await retiring.value; XCTAssertTrue(state.finished)
-        do { _ = try await core.setAIRequestTimeout(request, readmission: { true }); XCTFail("Expired original continuation must refuse") } catch { }
+        do { _ = try await core.setAIReadmittedSetting(request, readmission: { true }); XCTFail("Expired original continuation must refuse") } catch { }
     }
 
     func testActualTrailingSecretWorkerKeepsLockAndRetirementPendingUntilTerminal() async throws {
