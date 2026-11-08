@@ -73,9 +73,7 @@ const checkRnIdentity = (mobile) => {
 
 const buildRn = (commit, versionCodes) => {
 
-    if (out('git', ['-C', repo, 'show', `${commit}:bun.lock`]) !== readFileSync(resolve(repo, 'bun.lock'), 'utf8').trim()) {
-        fail(`bun.lock at ${commit} differs from this checkout; the node_modules link farm would not match it`);
-    }
+    const ownInstall = out('git', ['-C', repo, 'show', `${commit}:bun.lock`]) !== readFileSync(resolve(repo, 'bun.lock'), 'utf8').trim();
     const src = resolve(home, `rn-src-${commit.slice(0, 12)}`);
 
 
@@ -86,10 +84,15 @@ const buildRn = (commit, versionCodes) => {
     mkdirSync(src, { recursive: true });
     try {
         execFileSync('bash', ['-c', 'git -C "$1" archive "$2" | tar -x -C "$3"', 'archive', repo, commit, src], { stdio: 'inherit' });
-        linkFarm(resolve(repo, 'node_modules'), resolve(src, 'node_modules'), '@mindwtr');
-        mkdirSync(resolve(src, 'node_modules/@mindwtr'));
-        symlinkSync('../../packages/core', resolve(src, 'node_modules/@mindwtr/core'));
-        linkFarm(resolve(repo, 'apps/mobile/node_modules'), resolve(src, 'apps/mobile/node_modules'));
+        if (ownInstall) {
+            console.log(`bun.lock at ${commit.slice(0, 12)} differs from this checkout: its own frozen install`);
+            run('bun', ['install', '--frozen-lockfile'], { cwd: src, env: { ...env, BUN_TMPDIR: env.TMPDIR } });
+        } else {
+            linkFarm(resolve(repo, 'node_modules'), resolve(src, 'node_modules'), '@mindwtr');
+            mkdirSync(resolve(src, 'node_modules/@mindwtr'));
+            symlinkSync('../../packages/core', resolve(src, 'node_modules/@mindwtr/core'));
+            linkFarm(resolve(repo, 'apps/mobile/node_modules'), resolve(src, 'apps/mobile/node_modules'));
+        }
         run('git', ['apply', '--verbose', patchFor(commit)], { cwd: src });
         const mobile = resolve(src, 'apps/mobile');
 

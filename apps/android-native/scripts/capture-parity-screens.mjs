@@ -33,9 +33,9 @@ let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
 
-    const rnSide = A13_ONLY ? built.rn155 : built.rnParity ?? built.rn154;
+    const rnSide = built.rnParity ?? (A13_ONLY ? built.rn155 : built.rn154);
     apks = { rn: rnSide.path, native: built.native153.path };
-    console.log(`RN side: ${A13_ONLY ? 'rn155' : built.rnParity ? `rnParity from ${built.rnParitySource}` : `rn154 from ${built.recoverySource}`}`);
+    console.log(`RN side: ${built.rnParity ? `rnParity from ${built.rnParitySource}` : A13_ONLY ? 'rn155' : `rn154 from ${built.recoverySource}`}`);
 } catch {
     console.error(`REFUSED: no ${harness}/apks/manifest.json; run build-upgrade-harness.mjs first`);
     process.exit(2);
