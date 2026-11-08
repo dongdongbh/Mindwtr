@@ -37,7 +37,7 @@ data class RowSwipe(val target: String, val label: String, val icon: String)
 
 data class RowMeta(
     val parts: List<MetaPart>, val priority: String?, val statusLabel: String?, val canFocus: Boolean,
-    val swipe: RowSwipe, val rtl: Boolean, val accessibilityLabel: String, val hasDescription: Boolean = false,
+    val swipe: RowSwipe, val rtl: Boolean, val accessibilityLabel: String, val hasDescription: Boolean = false, val description: String? = null,
 
     val statusHidden: Boolean = false,
 
@@ -114,7 +114,7 @@ fun JSONObject.taskRow() = getJSONObject("meta").let { meta ->
             meta.text("priority"), meta.text("statusLabel"), meta.getBoolean("canFocus"),
             meta.getJSONObject("swipe").let { RowSwipe(it.getString("target"), it.getString("label"), it.getString("icon")) },
             meta.getString("textDirection") == "rtl", meta.getString("accessibilityLabel"),
-            !meta.text("descriptionPreview").isNullOrEmpty(), meta.optBoolean("statusHidden"),
+            !meta.text("descriptionPreview").isNullOrEmpty(), meta.optJSONObject("description")?.toString(), meta.optBoolean("statusHidden"),
             meta.takeIf { it.has("validUntil") && !it.isNull("validUntil") }?.getLong("validUntil")),
         text("revealLabel"), getBoolean("laterToday"), optString("taskRevision"), text("focusBlockedLabel"))
 }

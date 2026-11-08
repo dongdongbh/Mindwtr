@@ -69,7 +69,7 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
                 view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->
                     item(key = "empty") { EmptyLine(model, empty) }
                 }
-                items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge) } }
+                items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge, details = true) } }
                 if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
             }
         }

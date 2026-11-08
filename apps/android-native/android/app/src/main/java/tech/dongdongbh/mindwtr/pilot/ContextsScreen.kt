@@ -145,7 +145,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
         items(shown.items, key = { it.key }) { item ->
             val row = item.row ?: return@items
             Box(Modifier.padding(start = 16.dp, end = 16.dp, top = if (item === shown.items.first()) 16.dp else 0.dp)) {
-                TaskRowItem(model, row, status = RowStatus.Badge, actions = RowActions(
+                TaskRowItem(model, row, status = RowStatus.Badge, details = true, actions = RowActions(
                     status = { status -> act("contextsAction", setTaskStatus(row.id, status, row.taskRevision)) },
                     delete = { act("contextsAction", trashTask(row.id, row.taskRevision)) },
                     selecting = bulk != null, selected = row.id in selected, select = { toggleRow("contexts", row.id) },

@@ -39,6 +39,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
@@ -67,6 +69,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -90,6 +93,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
@@ -202,6 +206,12 @@ fun TaskRowItem(
                         }
                         if (showStar) StarButton(model, task, starBlocked?.takeIf { !task.isFocusedToday })
                     }
+                    if (details) meta.description?.let { json ->
+                        val description = remember(json) { JSONObject(json) }
+                        Text(inline(description.menuObjects("inline"), description.getJSONObject("labels"), c.tint, c.secondaryText, c.cardBg) { },
+                            style = rnText(12, 400), color = c.secondaryText, overflow = TextOverflow.Ellipsis,
+                            maxLines = if (task.status == "reference") 3 else 1, modifier = Modifier.padding(top = 2.dp).clearAndSetSemantics { })
+                    }
 
                     val parts = if (details) meta.parts else meta.parts.filter { !it.detail }
                     if (parts.isNotEmpty()) {
@@ -240,7 +250,7 @@ private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null) {
     val c = theme.colors
     when (part.kind) {
         "project", "area" -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(coreColorOrNull(part.dotColor) ?: c.tint))
+            Box(Modifier.size(6.dp).clip(CircleShape).background(theme.einkSafe(coreColorOrNull(part.dotColor) ?: c.tint)))
             MetaText(part.text, c.secondaryText, 500, Modifier.padding(start = 4.dp))
         }
         "projectDeadline", "dateIssue" -> MetaText(part.text, theme.metaAmber, 600, maxLines = if (part.kind == "dateIssue") 1 else 2)
@@ -340,9 +350,13 @@ fun FocusStar(focused: Boolean, disabled: Boolean, size: Int, modifier: Modifier
     val theme = LocalTheme.current
     Box(modifier, contentAlignment = Alignment.Center) {
         Icon(if (focused) Lucide.StarFilled else Lucide.Star, null, tint = if (focused) theme.star else theme.colors.secondaryText,
-            modifier = Modifier.size(size.dp).fade(if (focused) 1f else if (disabled) 0.3f else 0.6f))
+            modifier = Modifier.size(size.dp).fade(focusStarAlpha(focused, disabled)))
     }
 }
+
+internal fun focusStarAlpha(focused: Boolean, disabled: Boolean): Float = rnLucideStyleAlpha(if (focused) 1f else if (disabled) 0.3f else 0.6f)
+
+internal fun rnLucideStyleAlpha(opacity: Float): Float = opacity * opacity * opacity
 
 
 @Composable
@@ -380,7 +394,7 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
     val theme = LocalTheme.current
     val c = theme.colors
     BackHandler { showStatusMenu(null) }
-    Box(Modifier.fillMaxSize().background(theme.menuScrim).pointerInput(Unit) { detectTapGestures { showStatusMenu(null) } }
+    Box(Modifier.fillMaxSize().windowScrim(theme.menuScrim).pointerInput(Unit) { detectTapGestures { showStatusMenu(null) } }
         .padding(20.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().shadow(5.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
             .background(c.cardBg).pointerInput(Unit) { detectTapGestures { } }.padding(20.dp)) {
@@ -493,7 +507,7 @@ private fun DatesSheet(model: InboxViewModel) = with(model) {
     val theme = LocalTheme.current
     val c = theme.colors
     BackHandler { closeDates() }
-    Box(Modifier.fillMaxSize().background(theme.menuScrim).pointerInput(Unit) { detectTapGestures { closeDates() } }
+    Box(Modifier.fillMaxSize().windowScrim(theme.menuScrim).pointerInput(Unit) { detectTapGestures { closeDates() } }
         .padding(20.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().shadow(5.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
             .background(c.cardBg).pointerInput(Unit) { detectTapGestures { } }.padding(20.dp).testTag("dates-sheet")) {
@@ -544,6 +558,15 @@ private fun StatusMenuAction(label: String, enabled: Boolean, onClick: () -> Uni
         Text(label, style = rnText(14, 500), color = c.text, textAlign = TextAlign.Center)
     }
 }
+
+
+@Composable
+internal fun toastBottomAboveNavigationBar(): Dp {
+    val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    return rnToastBottom(navigation) - navigation
+}
+
+internal fun rnToastBottom(navigation: Dp): Dp = maxOf(navigation, 16.dp) + 16.dp
 
 
 data class Toast(val title: String?, val message: String, val tone: String, val action: String? = null, val onAction: () -> Unit = {})
@@ -651,7 +674,7 @@ private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, 
         shownTray = tray
         if (kept != offset.targetValue) offset.snapTo(kept)
     }
-    Box {
+    Box(if (offset.value != 0f) Modifier.clipToBounds() else Modifier) {
         if (tray != null && offset.value > 0f) TrayButtons(tray.swipeRight, Alignment.Start, shape, labels, isEnabled, press,
             onLongDone?.let { long -> { settle(0f); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); long() } })
         if (tray != null && offset.value < 0f) TrayButtons(tray.swipeLeft, Alignment.End, shape, labels, isEnabled, press, null)

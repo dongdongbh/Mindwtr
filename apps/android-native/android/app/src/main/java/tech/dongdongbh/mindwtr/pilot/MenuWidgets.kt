@@ -60,6 +60,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -107,7 +111,10 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
     ReadAgainAt(menu.page?.let { shown -> clockReadAt(shown.items.map { it.row }, shown.view) }) { menu.refresh() }
 
     BackHandler(enabled = failedAction == null) { if (menu.dialog != null) menu.backInDialog() else if (menu.page?.bulk != null) menu.list?.let(menu::endBulk) else menu.closeScreen() }
-    Box(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("menu-screen")) {
+    val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
+    val headerStrip = screen !in setOf(MenuScreen.Weekly, MenuScreen.Daily, MenuScreen.MindSweep)
+    Box(Modifier.fillMaxSize().background(c.bg).drawBehind { if (headerStrip) drawRect(c.cardBg, size = Size(size.width, statusBar.toFloat())) }.systemBarsPadding()
+        .semantics { testTagsAsResourceId = true }.testTag("menu-screen")) {
         when (screen) {
             MenuScreen.Weekly -> WeeklyReview(model)
             MenuScreen.Daily -> DailyReview(model)
@@ -151,7 +158,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
                         "widgetList" -> WidgetList(model)
                     }
                     if (screen == MenuScreen.Projects) ProjectsTab(model, Modifier.fillMaxSize())
-                    ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp))
+                    ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = toastBottomAboveNavigationBar()))
                 }
             }
         }
@@ -264,7 +271,7 @@ class Choice(val label: String, val selected: Boolean, val onClick: () -> Unit)
 fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>, dismiss: () -> Unit = { model.menu.keepDialog(null) }) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button, onClick = dismiss).padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).clickable(role = Role.Button, onClick = dismiss).padding(20.dp),
         contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 360.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardBg)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

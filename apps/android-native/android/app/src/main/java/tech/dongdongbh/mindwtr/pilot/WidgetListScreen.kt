@@ -29,7 +29,7 @@ fun WidgetList(model: InboxViewModel) = with(model.menu) {
                         modifier = Modifier.fillMaxWidth().padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite })
                 }
             }
-            items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge) } }
+            items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge, details = true) } }
             if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
         }
     }

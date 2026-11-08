@@ -158,7 +158,7 @@ private fun LazyListScope.dailyContent(model: InboxViewModel, shown: MenuPage) {
         val row = item.row ?: return@items
         val json = item.json
         val followUp = json.optJSONObject("followUp")
-        TaskRowItem(model, row, status = if (json.optBoolean("hideStatusBadge")) RowStatus.Hidden else RowStatus.Badge,
+        TaskRowItem(model, row, details = true, status = if (json.optBoolean("hideStatusBadge")) RowStatus.Hidden else RowStatus.Badge,
             star = if (json.optBoolean("showFocusToggle")) RowStar.Shown else RowStar.Hidden, actions = RowActions(
                 status = { status -> menu.act("reviewAction", setTaskStatus(row.id, status, row.taskRevision)) },
                 delete = { menu.act("reviewAction", trashTask(row.id, row.taskRevision)) },

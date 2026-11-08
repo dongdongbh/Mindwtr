@@ -267,7 +267,7 @@ private fun LazyListScope.stepHeading(icon: ImageVector, title: String, hint: St
 
 @Composable
 private fun ReviewRow(model: InboxViewModel, row: TaskRow) = with(model.menu) {
-    TaskRowItem(model, row, status = RowStatus.Badge, actions = RowActions(
+    TaskRowItem(model, row, status = RowStatus.Badge, details = true, actions = RowActions(
         status = { status -> act("reviewAction", setTaskStatus(row.id, status, row.taskRevision)) },
         delete = { act("reviewAction", trashTask(row.id, row.taskRevision)) },
     ))
@@ -492,7 +492,8 @@ private fun LazyListScope.projectEntries(model: InboxViewModel, list: List<MenuI
         val row = entry.row
         val id = open?.getString("id")
         if (entry.type == "later") {
-            item(key = "later:${entry.key}") { ReviewLater(model, entry.json, "weekly") }
+            val inOpen = id != null && entry.json.menuText("projectId") == id
+            item(key = "later:${entry.key}") { if (inOpen) ExpandedTask { ReviewLater(model, entry.json, "weekly") } else ReviewLater(model, entry.json, "weekly") }
         } else if (row == null) {
             open = entry.json.takeIf { it.getBoolean("expanded") }
             item(key = entry.key) { ProjectCard(model, entry.json, labels) }
@@ -551,7 +552,7 @@ fun WeeklyProjectCompletePrompt(model: InboxViewModel, completion: JSONObject) {
     val details = model.projectDetails
     val enabled = model.menu.idle
     BackHandler { details.dismissReviewCompletion() }
-    Box(Modifier.fillMaxSize().background(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = 20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp).testTag("review-complete-project-prompt")) {
@@ -674,10 +675,10 @@ fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu
 private fun PromptButton(label: String, color: Color, enabled: Boolean, filled: Boolean, onClick: () -> Unit) {
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(8.dp)
-    Text(label, style = rnText(14, 600), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(shape)
+    Text(label, style = rnText(14, 600), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(shape)
         .then(if (filled) Modifier.background(theme.filledBg) else Modifier.rnBorder(1.dp, theme.colors.border, shape))
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }
-        .padding(horizontal = 12.dp, vertical = 12.dp))
+        .padding(horizontal = 12.dp, vertical = 8.dp))
 }
 
 

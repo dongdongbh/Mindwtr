@@ -120,7 +120,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
                     "later" -> ReviewLater(model, item.json, "review")
                     else -> item.row?.let { row ->
                         Column(Modifier.padding(start = 30.dp, top = 8.dp)) {
-                            TaskRowItem(model, row, status = RowStatus.Badge, actions = RowActions(
+                            TaskRowItem(model, row, status = RowStatus.Badge, details = true, actions = RowActions(
                                 status = { status -> act("reviewAction", setTaskStatus(row.id, status, row.taskRevision)) },
                                 delete = { act("reviewAction", trashTask(row.id, row.taskRevision)) },
                                 selecting = bulk != null, selected = row.id in selected, select = { toggleRow("review", row.id) },
@@ -335,7 +335,8 @@ internal fun ReviewLater(model: InboxViewModel, item: JSONObject, list: String) 
     val expanded = item.getBoolean("expanded")
     val id = item.getString("id")
     val c = LocalTheme.current.colors
-    Row(Modifier.padding(start = 30.dp).heightIn(min = 44.dp)
+    val weekly = list == "weekly"
+    Row(Modifier.padding(start = if (weekly) 0.dp else 30.dp, top = if (weekly) 12.dp else 0.dp).heightIn(min = if (weekly) 32.dp else 44.dp)
         .clickable(enabled = idle, role = Role.Button) {
             editOwn(list) {
                 val ids = optJSONArray("expandedLaterProjectIds")?.let { values -> (0 until values.length()).map { values.getString(it) }.toMutableSet() } ?: mutableSetOf()
@@ -344,8 +345,10 @@ internal fun ReviewLater(model: InboxViewModel, item: JSONObject, list: String) 
             }
             refresh()
         }.semantics { stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") },
-        verticalAlignment = Alignment.CenterVertically) {
-        Icon(if (expanded) Lucide.ChevronDown else Lucide.ChevronRight, null, Modifier.size(16.dp), tint = c.secondaryText)
-        Text(item.getString("label"), style = rnText(13, 500), color = c.secondaryText)
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (weekly) 4.dp else 0.dp)) {
+        Icon(if (expanded) Lucide.ChevronDown else Lucide.ChevronRight, null, Modifier.size(if (weekly) 14.dp else 16.dp), tint = c.secondaryText)
+        val text = item.getString("label")
+        if (weekly) Text(text.uppercase(), style = rnText(12, 600, letterSpacing = 0.5f), color = c.secondaryText)
+        else Text(text, style = rnText(13, 500), color = c.secondaryText)
     }
 }

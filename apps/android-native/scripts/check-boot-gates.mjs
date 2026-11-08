@@ -858,6 +858,25 @@ assert.match(source('TaskEditor.kt'), /detectTapGestures \{ dismiss\(\) \} \}\.i
 assert.match(rowUi, /Text\(label, style = rnText\(14, 500\), color = c\.text, textAlign = TextAlign\.Center\)/);
 assert.doesNotMatch(rowUi, /split\(' '\)\.joinToString/, 'no capitalized words in the status menu rows');
 
+for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.menuScrim\)/],
+    ['TaskRowView.kt', /fun StatusMenu[\s\S]{0,600}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.menuScrim\)/],
+    ['TaskEditor.kt', /internal fun PickerDialog[\s\S]{0,300}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
+    ['MenuWidgets.kt', /fun ChoiceModal[\s\S]{0,300}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
+    ['WeeklyReviewScreen.kt', /fun WeeklyProjectCompletePrompt[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.promptScrim\)/]]) {
+    assert.match(source(file), opener, `${file}: the scrim dims the whole window and centers the card on it, as RN's Modal does`);
+}
+assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
+assert.match(rowUi, /background\(theme\.einkSafe\(coreColorOrNull\(part\.dotColor\) \?: c\.tint\)\)/, 'a row\'s project and area dot goes through einkSafe, as RN\'s row does');
+assert.match(rowUi, /if \(details\) meta\.description\?\.let \{ json ->[\s\S]{0,450}?maxLines = if \(task\.status == "reference"\) 3 else 1/, 'a row with details shows RN\'s one-line description preview');
+for (const file of ['ContextsScreen.kt', 'DailyReviewScreen.kt', 'ReviewScreen.kt', 'SavedSearchScreen.kt', 'WeeklyReviewScreen.kt', 'WidgetListScreen.kt']) {
+    assert.match(source(file), /TaskRowItem\(model, [^\n]*details = true/, `${file}: rows show details, as RN's row does by default`);
+}
+assert.match(reviewUi, /text\.uppercase\(\), style = rnText\(12, 600, letterSpacing = 0\.5f\)/, 'the Weekly Review\'s Later in sequence toggle reads as RN\'s uppercase heading');
+assert.match(weeklyUi, /if \(entry\.type == "later"\) \{\s+val inOpen = id != null && entry\.json\.menuText\("projectId"\) == id/, 'the Weekly Review keeps the open project\'s left rule through Later in sequence');
+assert.match(weeklyUi, /private fun PromptButton[\s\S]{0,800}?\.padding\(horizontal = 12\.dp, vertical = 8\.dp\)\)/, 'the completion prompt\'s buttons have RN\'s 8 dp vertical padding');
+assert.match(menuUi, /drawBehind \{ if \(headerStrip\) drawRect\(c\.cardBg, size = Size\(size\.width, statusBar\.toFloat\(\)\)\) \}\.systemBarsPadding\(\)/, 'a menu screen paints its status-bar strip in the header color, as RN does');
+assert.match(editorUi, /"destination" -> PickerDialog\(t\("task\.destination"\), \{ picker = null \}, search = \{/, 'the editor\'s Destination picker has RN\'s search field');
+assert.match(editorUi, /internal fun PickerHeading\(text: String\) \{\s+Text\(text, style = rnText\(16, 700\), color = LocalTheme\.current\.colors\.secondaryText\)/, 'picker headings sit at the list\'s left edge, as RN\'s do');
 assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
@@ -3273,7 +3292,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /"widgetList" -> JSONObject\(\)\.put\("id", own\.optString\("id"\)\)/);
     assert.match(menuModel, /MenuScreen\.WidgetList -> "widgetList"/);
     const widgetListKt = source('WidgetListScreen.kt');
-    assert.match(widgetListKt, /TaskRowItem\(model, it, status = RowStatus\.Badge\)/);
+    assert.match(widgetListKt, /TaskRowItem\(model, it, status = RowStatus\.Badge, details = true\)/);
     assert.doesNotMatch(code(widgetListKt), /getString\("(id|status|title)"\)|filter\s*\{|sorted/, 'the screen draws core\'s list, no policy of its own');
 }
 
@@ -3327,7 +3346,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /"savedSearch" -> JSONObject\(\)\.put\("id", own\.optString\("id"\)\)/);
     assert.match(savedSearchUi, /confirm\(delete\.getJSONObject\("confirm"\), JSONObject\(\)\.put\("id", view\.getString\("id"\)\), "savedSearchDelete"\)/);
     assert.match(menuModel, /"savedSearchDelete" -> if \(screen == MenuScreen\.SavedSearch && own\("savedSearch"\)\.optString\("id"\) == JSONObject\(action\.title\)\.getString\("id"\)\) closeScreen\(\)/);
-    assert.match(savedSearchUi, /TaskRowItem\(model, it, status = RowStatus\.Badge\)/, 'rows keep the lists\' own commands and editor');
+    assert.match(savedSearchUi, /TaskRowItem\(model, it, status = RowStatus\.Badge, details = true\)/, 'rows keep the lists\' own commands and editor');
 
 
     assert.match(sweepKt, /private fun <T> wholeView\(read: \(\) -> T\): T \{\s+repeat\(STALE_READS - 1\) \{\s+try \{\s+return read\(\)\s+\} catch \(failure: Exception\) \{\s+if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+\}\s+\}\s+return read\(\)/);

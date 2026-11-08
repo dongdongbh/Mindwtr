@@ -453,6 +453,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     val context = LocalContext.current
     var help by rememberSaveable { mutableStateOf(false) }
     var picker by rememberSaveable { mutableStateOf<String?>(null) }
+    var destinationQuery by rememberSaveable(picker) { mutableStateOf("") }
 
     var formViewport by remember { mutableIntStateOf(0) }
     val checklistFormScroll = rememberScrollState()
@@ -588,16 +589,23 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     }
 
     when (picker) {
-        "destination" -> PickerDialog(t("task.destination"), { picker = null }) {
+        "destination" -> PickerDialog(t("task.destination"), { picker = null }, search = {
+            ModalInput(destinationQuery, t("common.search"), t("task.destination"), Modifier.testTag("editor-destination-search")) { destinationQuery = it }
+        }) {
             PickerItem(t("common.none")) { editFields(mapOf("projectId" to "", "areaId" to "")); picker = null }
 
-            val (deferred, active) = editor.view.projects.partition { it.id in editor.view.deferredProjectIds }
+            val query = destinationQuery.trim().lowercase()
+            val projects = editor.view.projects.filter { query.isEmpty() || it.title.trim().lowercase().contains(query) }
+            val areas = editor.view.areas.filter { query.isEmpty() || it.title.lowercase().contains(query) }
+            val (deferred, active) = projects.partition { it.id in editor.view.deferredProjectIds }
             PickerHeading(t("nav.projects"))
             for (project in active) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
             if (deferred.isNotEmpty()) PickerHeading(t("projects.deferredSection"))
             for (project in deferred) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
             PickerHeading(t("taskEdit.areaLabel"))
-            for (area in editor.view.areas) PickerItem(area.title) { editFields(mapOf("projectId" to "", "areaId" to area.id)); picker = null }
+            for (area in areas) PickerItem(area.title) { editFields(mapOf("projectId" to "", "areaId" to area.id)); picker = null }
+            if (projects.isEmpty() && areas.isEmpty()) Text(t("common.noMatches"), style = rnText(16, 400), color = LocalTheme.current.colors.secondaryText,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite })
         }
 
         "status" -> PickerDialog(t("taskEdit.statusLabel"), { picker = null }) {
@@ -1556,7 +1564,7 @@ internal fun PickerDialog(title: String, dismiss: () -> Unit, search: (@Composab
     val c = theme.colors
     BackHandler(onBack = dismiss)
 
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.imePadding().padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
@@ -1589,5 +1597,5 @@ internal fun PickerItem(text: String, tag: String? = null, description: String? 
 
 @Composable
 internal fun PickerHeading(text: String) {
-    Text(text, style = rnText(16, 700), color = LocalTheme.current.colors.secondaryText, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+    Text(text, style = rnText(16, 700), color = LocalTheme.current.colors.secondaryText)
 }
