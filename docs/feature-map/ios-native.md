@@ -42,11 +42,11 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Capture
 
-- Reach: Tab bar › + (Add Task). The sheet has @ contexts, focus star, Area and note controls.
+- Reach: Tab bar › + (Add Task). The description field sits under the title at all times, as in RN (#1406). The sheet also has @ contexts, focus star and Area controls; More shows syntax help and date chips.
 - Shortcuts: Long-press the @ contexts button to reset contexts.
 - Selectors: `capture-input`, `capture-save`, `capture-save-edit`, `capture-add-another`, `capture-contexts`, `capture-focus`, `capture-area`, `capture-note`, `capture-close`, `capture-lines-create`
 - Code: `apps/ios-native/App/CaptureSheet.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testCapture…, testGtdCapture…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeCaptureLinesHostTests.swift`
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testCapture…, testGtdCapture…, testQuickCaptureShowsDescriptionUnderTitleWithoutMore), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeCaptureLinesHostTests.swift`
 - Notes: Input with several lines opens a confirmation that creates one task per line. Core prepares the task before the write, and restart retries that exact task without parsing the text again.
 
 ## Inbox

@@ -21153,6 +21153,29 @@ final class FoundationUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
+    func testQuickCaptureShowsDescriptionUnderTitleWithoutMore() {
+        let app = XCUIApplication()
+        app.launch()
+        let capture = app.buttons["capture-open"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: capture)
+        waitForExpectations(timeout: 30)
+        capture.tap()
+        let input = app.textViews["capture-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        let note = app.descendants(matching: .any).matching(identifier: "capture-note").firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 5), "The description field shows without opening More")
+        XCTAssertGreaterThanOrEqual(note.frame.minY, input.frame.maxY)
+        XCTAssertLessThan(note.frame.minY, app.descendants(matching: .any).matching(identifier: "capture-area").firstMatch.frame.minY)
+        note.tap()
+        note.typeText("Description typed before More")
+        XCTAssertEqual(note.value as? String, "Description typed before More")
+        app.buttons["capture-options"].tap()
+        XCTAssertEqual(note.value as? String, "Description typed before More")
+        app.buttons["capture-options"].tap()
+        XCTAssertTrue(note.exists, "Closing More keeps the description field")
+    }
+
     func testAreaScopeCycleAndPersistence() {
         let app = XCUIApplication()
         app.launch()

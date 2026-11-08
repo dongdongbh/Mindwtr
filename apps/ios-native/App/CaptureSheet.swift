@@ -155,6 +155,14 @@ struct CaptureSheet: View {
                     .accessibilityIdentifier(model.captureVoiceIsRecording ? "capture-voice-stop" : "capture-voice-record")
             }
 
+            TextField(copy.text("notePlaceholder"), text: $model.noteDraft, axis: .vertical)
+                .rnFont(15).lineLimit(1...4).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
+                .background(palette.input, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
+                .disabled(model.busy || model.retryNeeded).accessibilityLabel(copy.text("noteLabel"))
+                .accessibilityIdentifier("capture-note")
+                .padding(.top, 8)
+
             voiceControls
 
             if !model.capture.objects("preview").isEmpty {
@@ -190,13 +198,6 @@ struct CaptureSheet: View {
             if expanded {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(copy.text("noteLabel")).rnFont(12, .semibold).foregroundStyle(palette.secondary)
-                        TextField(copy.text("notePlaceholder"), text: $model.noteDraft, axis: .vertical)
-                            .rnFont(15).lineLimit(2...4).padding(12).frame(minHeight: 64)
-                            .background(palette.input, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
-                            .disabled(model.busy || model.retryNeeded).accessibilityLabel(copy.text("noteLabel"))
-                            .accessibilityIdentifier("capture-note")
                         Button { showSyntax.toggle() } label: {
                             HStack(spacing: 4) {
                                 AppIcon(name: "chevron", size: 14).rotationEffect(.degrees(showSyntax ? 180 : 0))
