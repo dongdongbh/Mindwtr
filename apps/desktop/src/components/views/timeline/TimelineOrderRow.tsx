@@ -39,13 +39,13 @@ export function TimelineOrderRow({ id, target, activeScope, pending, label, sele
             disabled={pending}
             onKeyDown={(event) => onKeyDown(event, target)}
             onClick={(event) => event.stopPropagation()}
-            className="flex h-full w-6 shrink-0 scroll-mt-11 cursor-grab touch-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-wait"
+            className="timeline-order-handle flex h-full w-6 shrink-0 scroll-mt-11 cursor-grab touch-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-wait"
         >
             <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
     );
     return (
-        <div ref={setNodeRef} className={cn(isDragging && 'opacity-50', (selected || isOver && !isDragging) && 'ring-2 ring-inset ring-primary')}>
+        <div ref={setNodeRef} className={cn('timeline-order-row', isDragging && 'opacity-50', (selected || isOver && !isDragging) && 'ring-2 ring-inset ring-primary')}>
             {children(handle)}
         </div>
     );

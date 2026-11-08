@@ -33,6 +33,16 @@ test('Timeline shares row ordering, preserves hidden tasks and dates, and refuse
     await page.goto('/?view=timeline');
     const handle = (id: string) => page.locator(`[data-testid="timeline-reorder-task"][data-task-id="${id}"]`);
     await expect(handle('task-a')).toBeVisible({ timeout: 30_000 });
+    await expect(handle('task-a')).toHaveCSS('opacity', '0');
+    const firstLabel = page.locator('[data-testid="timeline-row-label"][data-task-id="task-a"]');
+    await firstLabel.hover();
+    await expect(handle('task-a')).toHaveCSS('opacity', '1');
+    await expect(handle('task-c')).toHaveCSS('opacity', '0');
+    await page.getByRole('heading', { name: 'Timeline', exact: true }).hover();
+    await expect(handle('task-a')).toHaveCSS('opacity', '0');
+    await handle('task-a').focus();
+    await expect(handle('task-a')).toBeFocused();
+    await expect(handle('task-a')).toHaveCSS('opacity', '1');
     expect((await handle('task-a').boundingBox())!.y).toBeLessThan((await handle('task-c').boundingBox())!.y);
     const before = (await stored(page)).tasks.map((task: { id: string; dueDate?: string; startTime?: string }) => ({ id: task.id, due: task.dueDate, start: task.startTime }));
     const source = (await handle('task-c').boundingBox())!;
@@ -40,6 +50,8 @@ test('Timeline shares row ordering, preserves hidden tasks and dates, and refuse
     await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
     await page.mouse.down();
     await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 12 });
+    await expect(handle('task-c')).toHaveAttribute('aria-pressed', 'true');
+    await expect(handle('task-c')).toHaveCSS('opacity', '1');
     await page.mouse.up();
     await expect.poll(() => taskOrder(page)).toEqual(['task-c', 'task-a', 'hidden', 'task-b']);
 
@@ -65,6 +77,27 @@ test('Timeline shares row ordering, preserves hidden tasks and dates, and refuse
     expect((await handle('task-c').boundingBox())!.y).toBeLessThan((await handle('task-a').boundingBox())!.y);
     expect(await taskOrder(page)).toEqual(['task-c', 'task-a', 'hidden', 'task-b']);
     await page.screenshot({ path: testInfo.outputPath('timeline-shared-order.png') });
+});
+
+test.describe('Timeline touch handles', () => {
+    test.use({ hasTouch: true });
+
+    test('keeps task and project reorder handles visible without hover', async ({ page }) => {
+        await page.clock.setFixedTime(new Date('2026-10-14T12:00:00Z'));
+        await dismissOnboarding(page);
+        await page.addInitScript(() => {
+            const common = { createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' };
+            localStorage.setItem('mindwtr-data', JSON.stringify({
+                tasks: [{ ...common, id: 'touch-task', title: 'Touch action', status: 'next', projectId: 'touch-project', tags: [], contexts: [], dueDate: '2026-10-19' }],
+                projects: [{ ...common, id: 'touch-project', title: 'Touch project', status: 'active', order: 0, tagIds: [], startDate: '2026-10-14', dueDate: '2026-10-20' }],
+                sections: [], areas: [], people: [], settings: { language: 'en', features: { timeline: true } },
+            }));
+        });
+        await page.goto('/?view=timeline');
+        expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+        await expect(page.getByTestId('timeline-reorder-task')).toHaveCSS('opacity', '1');
+        await expect(page.getByTestId('timeline-reorder-project')).toHaveCSS('opacity', '1');
+    });
 });
 
 for (const taskCount of [40, 60]) {

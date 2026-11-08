@@ -882,6 +882,18 @@
   .project-progress::-webkit-progress-value { background: hsl(var(--primary)); }
   .project-progress::-moz-progress-bar { background: hsl(var(--primary)); }
 
+  @media (hover: hover) and (pointer: fine) {
+    .timeline-order-row .timeline-order-handle {
+      opacity: 0;
+    }
+
+    .timeline-order-row:hover .timeline-order-handle,
+    .timeline-order-row:focus-within .timeline-order-handle,
+    .timeline-order-handle[aria-pressed='true'] {
+      opacity: 1;
+    }
+  }
+
   .project-details-header {
     container-type: inline-size;
   }

@@ -1042,14 +1042,21 @@ export function TimelineView() {
             <SortableContext items={rows.map((row) => `timeline:${row.kind}:${row.key}`)} strategy={() => null}>
             <div className="sr-only" aria-live="assertive">{keyboardOrderAnnouncement}</div>
             <div className="flex h-full min-h-0 flex-col">
-                <div className="flex shrink-0 items-center justify-between pb-3">
-                    <div className="flex items-baseline gap-3">
-                        <h2 className="text-2xl font-bold tracking-tight">{tFallback(t, 'nav.timeline', 'Timeline')}</h2>
-                        <span className="text-xs text-muted-foreground">
+                <div className="flex h-11 shrink-0 items-center justify-between gap-3 pb-3">
+                    <div className="flex min-w-0 flex-1 items-baseline gap-3 overflow-hidden">
+                        <h2 className="shrink-0 whitespace-nowrap text-2xl font-bold tracking-tight">{tFallback(t, 'nav.timeline', 'Timeline')}</h2>
+                        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                             {taskRowCount} {t('common.tasks')}
                         </span>
+                        {dateEditing.preview && (
+                            <div role="status" data-testid="timeline-date-preview" className="min-w-0 truncate text-xs text-muted-foreground">
+                                {dateEditing.preview.dates
+                                    ? describeDates(t, dateEditing.preview.dates.start, dateEditing.preview.dates.due)
+                                    : t('timeline.dateEditFailed')}
+                            </div>
+                        )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                         <div ref={statusFilterRef}>
                             <button
                                 ref={statusTriggerRef}
@@ -1143,13 +1150,6 @@ export function TimelineView() {
                     </div>
                 </div>
 
-                {dateEditing.preview && (
-                    <div role="status" data-testid="timeline-date-preview" className="mb-2 text-xs text-muted-foreground">
-                        {dateEditing.preview.dates
-                            ? describeDates(t, dateEditing.preview.dates.start, dateEditing.preview.dates.due)
-                            : t('timeline.dateEditFailed')}
-                    </div>
-                )}
                 {!hasDatedWork ? (
                     <div>
                         <ListEmptyState

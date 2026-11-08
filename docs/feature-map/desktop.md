@@ -162,7 +162,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Selectors: `timeline-scroller`, `timeline-group`, `timeline-group-separator`, `timeline-row-label`, `timeline-bar`, `timeline-project-bar`, `timeline-move-${target.kind}`, `timeline-resize-${edge}`, `timeline-reorder-${target.kind}`, `timeline-date-preview`, `timeline-today-line`, `timeline-axis-major`, `timeline-axis-minor`, `timeline-gridline-minor`, `timeline-omitted-notice`
 - Code: `apps/desktop/src/components/views/TimelineView.tsx`, `apps/desktop/src/components/views/timeline/TimelineOrderRow.tsx`, `apps/desktop/src/lib/timeline-date-edit.ts`, `apps/desktop/src/lib/timeline-order.ts`
 - Checks: `e2e/timeline-editing.spec.ts`, `e2e/timeline-ordering.spec.ts`, `apps/desktop/src/components/views/TimelineView.test.tsx`, `apps/desktop/src/components/views/TimelineView.date-edit.test.tsx`
-- Notes: The feature is off by default; seed `settings.features.timeline = true`. `target.kind` is `task` or `project`; `edge` is the bar end being resized. Date drags preview first and save only on confirm. Cross-section drops are refused.
+- Notes: The feature is off by default; seed `settings.features.timeline = true`. `target.kind` is `task` or `project`; `edge` is the bar end being resized. Date drags preview beside the title without moving the table and save only on confirm. Mouse row handles appear on hover or keyboard focus and stay visible while reordering; touch handles stay visible. Cross-section drops are refused.
 
 ## History
 

@@ -39,25 +39,38 @@ test('Timeline previews dates before saving, supports undo/cancel, and includes 
     await expect(page.getByText('Cancelled milestone', { exact: true })).toHaveCount(0);
 
     const before = { start: '2026-10-11', due: '2026-10-15' };
+    const scroller = page.getByTestId('timeline-scroller');
+    const initialTableTop = (await scroller.boundingBox())!.y;
     const box = (await bar.boundingBox())!;
     const dayWidth = box.width / 5;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2 + dayWidth, box.y + box.height / 2, { steps: 5 });
+    await expect(page.getByTestId('timeline-date-preview')).toContainText('Start date:');
+    expect((await scroller.boundingBox())!.y).toBe(initialTableTop);
     expect(await readDates(page, 'editable')).toEqual(before);
     await page.mouse.up();
     await expect.poll(() => readDates(page, 'editable')).toEqual({ start: '2026-10-12', due: '2026-10-16' });
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect.poll(() => readDates(page, 'editable')).toEqual(before);
 
-    const cancelledBox = (await bar.boundingBox())!;
-    await page.mouse.move(cancelledBox.x + cancelledBox.width / 2, cancelledBox.y + cancelledBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(cancelledBox.x + cancelledBox.width / 2 + dayWidth, cancelledBox.y + cancelledBox.height / 2, { steps: 5 });
-    await page.keyboard.press('Escape');
-    await page.mouse.up();
-    expect(await readDates(page, 'editable')).toEqual(before);
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    for (const width of [1280, 900]) {
+        await page.setViewportSize({ width, height: 900 });
+        const tableTop = (await scroller.boundingBox())!.y;
+        const cancelledBox = (await bar.boundingBox())!;
+        await page.mouse.move(cancelledBox.x + cancelledBox.width / 2, cancelledBox.y + cancelledBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(cancelledBox.x + cancelledBox.width / 2 + cancelledBox.width / 5, cancelledBox.y + cancelledBox.height / 2, { steps: 5 });
+        await expect(page.getByTestId('timeline-date-preview')).toContainText('Start date:');
+        expect((await scroller.boundingBox())!.y).toBe(tableTop);
+        await page.keyboard.press('Escape');
+        await page.mouse.up();
+        await expect(page.getByTestId('timeline-date-preview')).toHaveCount(0);
+        expect((await scroller.boundingBox())!.y).toBe(tableTop);
+        expect(await readDates(page, 'editable')).toEqual(before);
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
     await bar.getByTestId('timeline-resize-due').focus();
     await page.keyboard.press('ArrowRight');
     await expect.poll(() => readDates(page, 'editable')).toEqual({ start: '2026-10-11', due: '2026-10-16' });
@@ -71,6 +84,8 @@ test('Timeline previews dates before saving, supports undo/cancel, and includes 
     await page.mouse.move(projectBox.x + projectBox.width / 2, projectBox.y + projectBox.height / 2);
     await page.mouse.down();
     await page.mouse.move(projectBox.x + projectBox.width / 2 + dayWidth, projectBox.y + projectBox.height / 2, { steps: 5 });
+    await expect(page.getByTestId('timeline-date-preview')).toContainText('Start date:');
+    expect((await scroller.boundingBox())!.y).toBe(initialTableTop);
     await page.mouse.up();
     await expect.poll(() => readDates(page, 'active', 'projects')).toEqual({ start: '2026-10-11', due: '2026-10-21' });
     expect(await readDates(page, 'editable')).toEqual(before);
