@@ -916,7 +916,7 @@ struct InboxScreen: View {
             HStack(spacing: 8) {
                 AppIcon(name: "chevron", size: 15).rotationEffect(.degrees(collapsed ? -90 : 0))
                     .foregroundStyle(palette.secondary).accessibilityHidden(true)
-                Circle().fill(group.flag("muted") ? palette.secondary : group.text("dotColor").isEmpty ? palette.tint : Color(hex: group.text("dotColor")))
+                Circle().fill(group.flag("muted") ? palette.secondary : palette.einkSafe(group.text("dotColor").isEmpty ? palette.tint : Color(hex: group.text("dotColor"))))
                     .frame(width: 8, height: 8).accessibilityHidden(true)
                 Text(group.text("title").uppercased()).rnFont(13, .bold).tracking(0.6).foregroundStyle(group.flag("muted") ? palette.secondary : palette.text)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
@@ -1751,7 +1751,7 @@ private struct TaskRowSwipeButton: View {
     private var color: Color {
         switch action.text("id") {
         case "delete": return palette.danger
-        case "focus": return Color(hex: "F59E0B")
+        case "focus": return palette.focusStar
         case "done": return palette.success
         case "dates": return palette.secondary
         default: return palette.tint
@@ -2591,7 +2591,7 @@ struct TaskCard: View {
                     beforeAction?()
                     Task { await model.setTaskFocus(row) }
                 } label: {
-                    AppFocusStar(focused: row.flag("isFocusedToday"), inactiveColor: palette.secondary, size: 20)
+                    AppFocusStar(focused: row.flag("isFocusedToday"), palette: palette, size: 20)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(!model.taskFocusInputEnabled(row) || !focusBlockedReason.isEmpty)
@@ -2610,7 +2610,7 @@ struct TaskCard: View {
             let kind = part.text("kind")
             if kind == "project" || kind == "area" {
                 var dot = AttributedString("● ")
-                dot.foregroundColor = part.text("dotColor").isEmpty ? palette.tint : Color(hex: part.text("dotColor"))
+                dot.foregroundColor = palette.einkSafe(part.text("dotColor").isEmpty ? palette.tint : Color(hex: part.text("dotColor")))
                 result += dot
             }
             var text = AttributedString(part.text("text") + (part.number("overflowCount") > 0 ? " +\(part.number("overflowCount"))" : ""))

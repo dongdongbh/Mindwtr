@@ -665,7 +665,7 @@ struct ProcessInboxSheet: View {
         return Button { Task { await model.editProcessInbox(value.object("edit")) } } label: {
             HStack(spacing: 6) {
                 if !value.text("color").isEmpty {
-                    Circle().fill(Color(hex: value.text("color"))).frame(width: 8, height: 8)
+                    Circle().fill(palette.einkSafe(Color(hex: value.text("color")))).frame(width: 8, height: 8)
                 }
                 Text(value.text("label")).rnFont(13, .semibold)
                     .fixedSize(horizontal: false, vertical: true)

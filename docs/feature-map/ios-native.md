@@ -246,6 +246,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `general-scroll`, `general-show-task-age`, `general-regional-toggle`, `general-app-lock`, `general-ios-search`, `general-picker-cancel`
 - Code: `apps/ios-native/App/SettingsScreen.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testGeneral…, testQuickAccess…)
+- Notes: The E-ink theme draws the Focus star, the swipe Focus action, and project, area and Focus group dots in black, as in RN (#1498). Color pickers keep their colors. Code: `AppPalette.einkSafe` in `apps/ios-native/App/Appearance.swift`.
 
 ## Settings › Manage
 

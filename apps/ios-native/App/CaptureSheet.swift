@@ -411,7 +411,7 @@ struct CaptureSheet: View {
             HStack(spacing: 6) {
                 AppFocusStar(focused: model.capture.object("focus").flag("selected"),
                              disabled: !model.capture.object("focus").flag("enabled"),
-                             inactiveColor: palette.secondary, size: 16)
+                             palette: palette, size: 16)
                 Text(model.capture.object("focus").text("label")).rnFont(12, .bold)
             }
             .padding(.horizontal, 12).frame(minHeight: 40)

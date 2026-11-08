@@ -5,6 +5,7 @@ struct AppPalette {
     let values: [String]
     let dark: Bool
     let material: Bool
+    let eink: Bool
     var bg: Color { color(0) }
     var card: Color { color(1) }
     var row: Color { color(2) }
@@ -20,12 +21,15 @@ struct AppPalette {
     var filter: Color { color(12) }
     var captureBackground: Color { material ? Color(hex: dark ? "00458B" : "D7E2FF") : tint }
     var captureForeground: Color { material ? Color(hex: dark ? "D7E2FF" : "001B3E") : onTint }
+    var focusStar: Color { einkSafe(Color(hex: "F59E0B")) }
+    func einkSafe(_ color: Color) -> Color { eink ? Color(hex: "000000") : color }
     private func color(_ index: Int) -> Color { Color(hex: values[index]) }
 
     init(theme: CoreObject, system: ColorScheme) {
         dark = theme.text("scheme").isEmpty ? system == .dark : theme.text("scheme") == "dark"
         material = theme.flag("material")
         let preset = theme.object("presets").text(dark ? "dark" : "light")
+        eink = preset == "eink"
         if let colors = Self.presets[preset] { values = colors }
         else if material {
             values = dark
@@ -97,12 +101,12 @@ struct AppIcon: View {
 struct AppFocusStar: View {
     let focused: Bool
     var disabled = false
-    let inactiveColor: Color
+    let palette: AppPalette
     var size: CGFloat = 22
 
     var body: some View {
         AppIcon(name: focused ? "star-filled" : "star", size: size)
-            .foregroundStyle(focused ? Color(hex: "#F59E0B") : inactiveColor)
+            .foregroundStyle(focused ? palette.focusStar : palette.secondary)
             .opacity(focused ? 1 : disabled ? 0.3 : 0.6)
     }
 }

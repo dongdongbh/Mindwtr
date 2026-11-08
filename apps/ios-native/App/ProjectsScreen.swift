@@ -281,7 +281,7 @@ struct ProjectsScreen: View {
                     if !group.text("areaIcon").isEmpty {
                         Text(group.text("areaIcon")).rnFont(14).accessibilityHidden(true)
                     } else if !group.text("areaColor").isEmpty {
-                        Circle().fill(Color(hex: group.text("areaColor"))).frame(width: 8, height: 8)
+                        Circle().fill(palette.einkSafe(Color(hex: group.text("areaColor")))).frame(width: 8, height: 8)
                             .overlay(Circle().stroke(palette.border, lineWidth: 1)).accessibilityHidden(true)
                     }
                     Text((group.text("areaName").isEmpty ? model.label("projects.noArea") : group.text("areaName")).uppercased())
@@ -326,7 +326,7 @@ struct ProjectsScreen: View {
                 .frame(minWidth: 20).accessibilityLabel(String(row.number("activeTaskCount")) + " " + model.label("common.tasks"))
             Button { Task { await model.setProjectFocus(row) } } label: {
                 AppFocusStar(focused: row.flag("isFocused"), disabled: row.flag("focusDisabled"),
-                             inactiveColor: palette.secondary, size: 18)
+                             palette: palette, size: 18)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(!model.projectFocusInputEnabled || row.flag("focusDisabled"))
@@ -403,8 +403,8 @@ private struct AreaManagerSheet: View {
                                 VStack(spacing: 0) {
                                     HStack(spacing: 4) {
                                         Button { model.toggleAreaColorPicker(area.text("id")) } label: {
-                                            Circle().fill(area.text("color").isEmpty
-                                                ? palette.tint : Color(hex: area.text("color")))
+                                            Circle().fill(palette.einkSafe(area.text("color").isEmpty
+                                                ? palette.tint : Color(hex: area.text("color"))))
                                                 .frame(width: 18, height: 18)
                                                 .frame(width: 44, height: 44).contentShape(Rectangle())
                                         }
@@ -3483,7 +3483,7 @@ private struct ProjectAreaSelectionSheet: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 if let color, !color.isEmpty {
-                    Circle().fill(Color(hex: color)).frame(width: 12, height: 12)
+                    Circle().fill(palette.einkSafe(Color(hex: color))).frame(width: 12, height: 12)
                         .overlay(Circle().stroke(palette.border, lineWidth: 1))
                         .accessibilityHidden(true)
                 }

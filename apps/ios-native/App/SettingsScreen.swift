@@ -3594,7 +3594,7 @@ struct SettingsScreen: View {
 
     private func areaRow(_ row: CoreObject, index: Int) -> some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 6).fill(Color(hex: row.text("color")))
+            RoundedRectangle(cornerRadius: 6).fill(palette.einkSafe(Color(hex: row.text("color"))))
                 .frame(width: 24, height: 24).accessibilityHidden(true)
             Text(row.text("name")).rnFont(15).foregroundStyle(palette.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
