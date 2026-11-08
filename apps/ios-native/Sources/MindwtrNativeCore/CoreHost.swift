@@ -10598,16 +10598,32 @@ private final class Engine: @unchecked Sendable {
     private var attachmentDraftEvidence: Bool {
         NativeAttachmentDraftCoordinator.hasEvidence(databaseURL: databaseURL)
     }
+    private var turnAdmission: HostAdmission {
+        var active: HostAdmission.Turns = []
+        if captureAITurn != nil { active.insert(.captureAI) }
+        if calendarAccessTurn != nil { active.insert(.calendarAccess) }
+        if calendarPushTurn != nil { active.insert(.calendarPush) }
+        if reminderEffectsTurn != nil { active.insert(.reminderEffects) }
+        if pomodoroAlarmTurn != nil { active.insert(.pomodoroAlarm) }
+        if notificationSettingTurn != nil { active.insert(.notificationSetting) }
+        if aiConfigurationTurn != nil { active.insert(.aiConfiguration) }
+        if aiTextConfigurationTurn != nil { active.insert(.aiTextConfiguration) }
+        if aiRequestTimeoutTurn != nil { active.insert(.aiRequestTimeout) }
+        if aiReasoningEffortTurn != nil { active.insert(.aiReasoningEffort) }
+        if aiGeminiThinkingBudgetTurn != nil { active.insert(.aiGeminiThinkingBudget) }
+        if deviceCalendarSettingTurn != nil { active.insert(.deviceCalendarSetting) }
+        var ownerAccess: HostAdmission.Turns = []
+        if notificationSettingOwnerAccess { ownerAccess.insert(.notificationSetting) }
+        if aiTextConfigurationOwnerAccess { ownerAccess.insert(.aiTextConfiguration) }
+        if aiRequestTimeoutOwnerAccess { ownerAccess.insert(.aiRequestTimeout) }
+        if aiReasoningEffortOwnerAccess { ownerAccess.insert(.aiReasoningEffort) }
+        if aiGeminiThinkingBudgetOwnerAccess { ownerAccess.insert(.aiGeminiThinkingBudget) }
+        if reminderOwnerAccess { ownerAccess.insert(.reminderEffects) }
+        return HostAdmission(active: active, ownerAccess: ownerAccess,
+                             calendarSubscriptionOperation: calendarSubscriptionSettingTurn?.operation.rawValue)
+    }
     private func requireNoAttachmentDraft() throws {
-        guard captureAITurn == nil else { throw HostFailure("Capture copilot request is still active") }
-        guard calendarAccessTurn == nil else { throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner") }
-        guard aiTextConfigurationTurn == nil || aiTextConfigurationOwnerAccess else { throw HostFailure("AI text configuration edit is still awaiting its owner") }
-        guard aiConfigurationTurn == nil else { throw HostFailure("AI text configuration operation is active") }
-        guard aiRequestTimeoutTurn == nil || aiRequestTimeoutOwnerAccess else { throw HostFailure("AI timeout edit is still awaiting its owner") }
-        guard aiReasoningEffortTurn == nil || aiReasoningEffortOwnerAccess else { throw HostFailure("AI reasoning effort edit is still awaiting its owner") }
-        guard aiGeminiThinkingBudgetTurn == nil || aiGeminiThinkingBudgetOwnerAccess else { throw HostFailure("AI Gemini thinking budget edit is still awaiting its owner") }
-        guard notificationSettingTurn == nil || notificationSettingOwnerAccess else { throw HostFailure("Notification edit is still awaiting its owner") }
-        guard (reminderEffectsTurn == nil && pomodoroAlarmTurn == nil) || reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
+        try turnAdmission.admitAttachmentDraft()
         try requireEncryptionUnlockTurn()
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil, projectDownloadTurn == nil else { throw Self.taskDownloadFailure }
         try denyCleanupOwner()
@@ -14781,11 +14797,6 @@ private final class Engine: @unchecked Sendable {
         guard method != "iosAISettingsProjection" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI projection requires its private read facade")
         }
-        guard registered?.facade != .voice else { throw NativeVoiceJSON.invalid }
-        guard registered?.facade != .aiTextConfiguration || (["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) && aiTextConfigurationOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade") }
-        guard registered?.facade != .aiRequestTimeout || (method == "iosAIRequestTimeout" && aiRequestTimeoutOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade") }
-        guard registered?.facade != .aiReasoningEffort || (method == "iosAIReasoningEffort" && aiReasoningEffortOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade") }
-        guard registered?.facade != .aiGeminiThinkingBudget || (method == "iosAIGeminiThinkingBudget" && aiGeminiThinkingBudgetOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade") }
         guard !["iosTaskAIOptions", "iosTaskAIRequest", "iosTaskAIWitness", "iosInboxAIWitness", "iosInboxAIRequest", "iosInboxAIApply", "iosReviewAIWitness", "iosReviewAIRequest", "iosReviewAIApply", "iosReviewAIOutcome", "iosReviewAIValidateApply"].contains(method), method != "reviewAISuggestionsWrite" || reviewAIApplyLease?.isCurrent == true else { throw NativeTaskAIJSON.invalid }
         guard !["iosShareCapturePrepare", "iosShareCaptureCommit", "iosShareCaptureOutcome", "iosWidgetCompletionPrepare", "iosWidgetCompletionValidate", "iosWidgetCompletionCommit", "iosWidgetCompletionOutcome"].contains(method),
               method != "shareCaptureSubmit" || shareCaptureLease?.isCurrent == true else { throw NativeShareError.unavailable }
@@ -14793,35 +14804,7 @@ private final class Engine: @unchecked Sendable {
         guard method != "iosAIProviderDeviceState" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI provider device metadata requires its private read facade")
         }
-        guard registered?.facade != .pomodoro || pomodoroOwned else { throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade") }
-        guard calendarPushTurn == nil, registered?.facade != .calendarPush else {
-            throw CoreHostRejection(message: "NOT_READY: Calendar push requires its current explicit owner")
-        }
-        guard calendarAccessTurn == nil, registered?.facade != .calendarAccess else {
-            throw CoreHostRejection(message: "NOT_READY: Calendar access requires its current explicit owner")
-        }
-        guard method != "iosPruneReceipts" else {
-            throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
-        }
-        guard registered?.facade != .reminderSnooze else {
-            throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
-        }
-        guard registered?.facade != .reminderCompletion || method == "reminderCompletionCommit" && reminderCompletionOwned else {
-            throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
-        }
-        guard reminderEffectsTurn == nil, pomodoroAlarmTurn == nil, registered?.facade != .reminder else { throw NativeReminderEffects.unavailable }
-        guard (calendarSubscriptionSettingTurn == nil || method == calendarSubscriptionSettingTurn?.operation.rawValue),
-              registered?.facade != .calendarSubscriptionSetting || method == calendarSubscriptionSettingTurn?.operation.rawValue else {
-            throw CoreHostRejection(message: "NOT_READY: Calendar subscription settings require their current explicit owner")
-        }
-        guard (deviceCalendarSettingTurn == nil || method == "deviceCalendarSetting"),
-              registered?.facade != .deviceCalendarSetting || (method == "deviceCalendarSetting" && deviceCalendarSettingTurn != nil) else {
-            throw CoreHostRejection(message: "NOT_READY: Device Calendar Settings require their current explicit owner")
-        }
-        guard (notificationSettingTurn == nil || notificationSettingOwnerAccess),
-              registered?.facade != .notificationSetting || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
-            throw CoreHostRejection(message: "NOT_READY: Notification Settings require their current explicit owner")
-        }
+        try turnAdmission.admitCall(method, pomodoroOwned: pomodoroOwned, reminderCompletionOwned: reminderCompletionOwned)
         try denyCleanupOwner()
         guard !["projectFileAvailabilityPreflight", "projectFileAvailabilityEncryptionAdmission", "projectFileAvailabilityWritePrepare", "projectFileAvailabilityWriteValidate", "projectFileAvailabilityWriteCommit", "iosProjectFilePrepareAvailability", "projectAttachmentCachedAvailabilityPreflight", "projectAttachmentCachedAvailability"].contains(method) else { throw Self.projectDownloadFailure }
         if started, !closed, pending?.method == Self.projectDownloadMethod || projectDownloadTurn != nil {
@@ -33309,10 +33292,7 @@ private final class Engine: @unchecked Sendable {
 
     private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil,
                         drainCalendarTest: Bool = false) throws -> String {
-        guard calendarAccessTurn == nil || method == "deviceCalendarAccessAcknowledged" else {
-            throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner")
-        }
-        guard (reminderEffectsTurn == nil && pomodoroAlarmTurn == nil) || reminderOwnerAccess && HostMethod.registry[method]?.facade == .reminder else { throw NativeReminderEffects.unavailable }
+        try turnAdmission.admitInvoke(method)
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()
@@ -33538,7 +33518,7 @@ private final class Engine: @unchecked Sendable {
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
         guard captureAITurn == nil else { throw Self.deviceStorageUnavailable }
         try requirePersonalWorkspace()
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard turnAdmission.active.isDisjoint(with: .deviceStorageExclusive) else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard taskDownloadTurn == nil, projectAvailabilityTurn == nil else { throw Self.deviceStorageUnavailable }
@@ -33662,7 +33642,7 @@ private final class Engine: @unchecked Sendable {
             turn.httpURL = nil
             return
         }
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard turnAdmission.active.isDisjoint(with: .deviceStorageExclusive) else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -33712,7 +33692,7 @@ private final class Engine: @unchecked Sendable {
     private func requireSecretAdmission(_ input: String) throws {
         guard captureAITurn == nil else { throw HostFailure("Capture copilot secure storage is read-only") }
         try requirePersonalWorkspace()
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard turnAdmission.active.isDisjoint(with: .deviceStorageExclusive) else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }
@@ -33771,7 +33751,7 @@ private final class Engine: @unchecked Sendable {
     private func requireCryptoAdmission(_ input: String) throws {
         guard captureAITurn == nil else { throw HostFailure("Capture copilot request is read-only") }
         try requirePersonalWorkspace()
-        guard aiTextConfigurationTurn == nil, aiConfigurationTurn == nil, aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
+        guard turnAdmission.active.isDisjoint(with: .deviceStorageExclusive) else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
         guard projectAvailabilityTurn == nil else { throw Self.foregroundSyncFailure }

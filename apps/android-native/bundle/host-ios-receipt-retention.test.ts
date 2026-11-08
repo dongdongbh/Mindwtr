@@ -95,7 +95,9 @@ describe('private iOS receipt retention bridge seam', () => {
     });
     it('seals the private selector from generic native dispatch and forwards both start branches', () => {
         const swift = readFileSync(new URL('../../ios-native/Sources/MindwtrNativeCore/CoreHost.swift', import.meta.url), 'utf8');
-        expect(swift.match(/guard method != "iosPruneReceipts"/g)).toHaveLength(2);
+        const admission = readFileSync(new URL('../../ios-native/Sources/MindwtrNativeCore/HostAdmission.swift', import.meta.url), 'utf8');
+        expect(swift.match(/guard method != "iosPruneReceipts"/g)).toHaveLength(1);
+        expect(admission.match(/guard method != "iosPruneReceipts"/g)).toHaveLength(1);
         expect(swift.match(/startupWindow\(retentionJSON: retentionJSON\)/g)).toHaveLength(2);
         expect(swift).toContain('invoke("iosPruneReceipts", arguments: [retentionJSON, (owedAppleReminderRequestID ?? owedPomodoroRequestID).map { $0 as Any } ?? NSNull(), owedInboxRequestIDs])');
         const retry = swift.slice(swift.indexOf('    func retryPending() throws'), swift.indexOf('    private func validateDraftAcknowledgment'));
