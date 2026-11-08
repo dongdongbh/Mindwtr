@@ -1279,11 +1279,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private lazy var gtdWorkflowWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
     private lazy var areaColorWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
     private lazy var settingsPersonDeleteWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var settingsTaxonomyWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var settingsPersonEditWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var settingsPersonCreateWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var areaOrderWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var projectFocusWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
 
-    private func runDurableWrite(_ runner: DurableWriteRunner<CoreHost>, retry: Bool,
+    private func runDurableWrite(_ runner: DurableWriteRunner<CoreHost>, retry: Bool, adoptingBusy: Bool = false,
                                  _ write: DurableWriteRunner<CoreHost>.Write) async {
         if retry, !busy, !ready { await start(); return }
-        if runner.run(retry: retry, write) { await runner.task?.value }
+        if runner.run(retry: retry, adoptingBusy: adoptingBusy, write) { await runner.task?.value }
     }
     private var notificationSettingEdit: CoreObject = [:]
     private var notificationSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
@@ -1457,7 +1462,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var settingsTaxonomyAwaitingRefresh = false
     @Published private(set) var settingsTaxonomyChecking = false
     private var settingsTaxonomyOriginalName = ""
-    private var settingsTaxonomyRequest: String?
     private var settingsTaxonomyAcknowledged = false
     private var settingsTaxonomyCheckCurrent = false
     private var settingsTaxonomySaveDisabled = true
@@ -1465,12 +1469,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var settingsTaxonomyActive: Bool { settingsTaxonomyKind != nil }
     var settingsTaxonomyPresented: Bool { settingsTaxonomyActive && settingsTaxonomyAction != "delete" }
     var settingsTaxonomyCanCancel: Bool {
-        settingsTaxonomyActive && !busy && !retryNeeded && settingsTaxonomyRequest == nil && !settingsTaxonomyAcknowledged
+        settingsTaxonomyActive && !busy && !retryNeeded && settingsTaxonomyWrite.pending == nil && !settingsTaxonomyAcknowledged
     }
     var settingsTaxonomyInputEnabled: Bool { settingsTaxonomyInputOpen && textInputAdmitted }
     private var settingsTaxonomyInputOpen: Bool {
         ready && selectedSurface == .settings && settingsManagePresented
-            && settingsTaxonomyActive && settingsTaxonomyRequest == nil && !settingsTaxonomyAcknowledged
+            && settingsTaxonomyActive && settingsTaxonomyWrite.pending == nil && !settingsTaxonomyAcknowledged
             && !settingsTaxonomyAwaitingRefresh && !settingsTaxonomyOptions.isEmpty && manageReadError == nil
     }
     var settingsTaxonomyCanSave: Bool {
@@ -2047,19 +2051,19 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         if settingsPersonCreateCheckDeferred {
             settingsPersonCreateCheckDeferred = false
-            if settingsPersonCreatePresented, settingsPersonCreateRequest == nil {
+            if settingsPersonCreatePresented, settingsPersonCreateWrite.pending == nil {
                 scheduleSettingsPersonCreateCheck(); families.append(("personCreateName", "rerun"))
             }
         }
         if settingsPersonEditCheckDeferred {
             settingsPersonEditCheckDeferred = false
-            if settingsPersonEditPresented, settingsPersonEditRequest == nil {
+            if settingsPersonEditPresented, settingsPersonEditWrite.pending == nil {
                 scheduleSettingsPersonEditCheck(); families.append(("personEditName", "rerun"))
             }
         }
         if settingsTaxonomyCheckDeferred {
             settingsTaxonomyCheckDeferred = false
-            if settingsTaxonomyPresented, settingsTaxonomyRequest == nil {
+            if settingsTaxonomyPresented, settingsTaxonomyWrite.pending == nil {
                 scheduleSettingsTaxonomyCheck(); families.append(("taxonomyName", "rerun"))
             }
         }
@@ -3309,7 +3313,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectCreateRequest: String?
     private var projectCreateRequestID: String?
     private var projectCreateOptionsCurrent = false
-    private var projectFocusRequest: String?
     private var projectFocusExpectedID: String?
     private var projectFocusDesired: Bool?
     private var projectRenameOptions: CoreObject = [:]
@@ -3371,14 +3374,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var areaCreateExpectedID: String?
     private var areaCreateOptionsCurrent = false
     private var areaCreateNameGeneration = 0
-    private var settingsPersonEditRequest: String?
     private var settingsPersonEditID: String?
     private var settingsPersonEditExpected: CoreObject = [:]
     private var settingsPersonEditNameGeneration = 0
     private var settingsPersonEditCheckCurrent = false
     private var settingsPersonEditSaveDisabled = true
     private var settingsPersonEditAcknowledged = false
-    private var settingsPersonCreateRequest: String?
     private var settingsPersonCreateExpectedID: String?
     private var settingsPersonCreateNameGeneration = 0
     private var settingsPersonCreateCheckCurrent = false
@@ -3387,7 +3388,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var settingsAreaCreateAcknowledged = false
     private var areaColorExpectedID: String?
     private var areaColorOptionsCurrent = false
-    private var areaOrderRequest: String?
     private var areaOrderExpectedIDs: [String]?
     private var areaOrderOptionsCurrent = false
     private var areaRenameOpeningExpected: CoreObject?
@@ -3932,7 +3932,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var projectAreaManagerOpenEnabled: Bool {
         projectAreaChoiceEnabled && !projectAreaCreatePresented && projectAreaCreatedID == nil
             && !areaManagerPresented && areaCreateRequest == nil && areaColorWrite.pending == nil
-            && areaOrderRequest == nil && areaRenameRequest == nil && areaDeleteRequest == nil
+            && areaOrderWrite.pending == nil && areaRenameRequest == nil && areaDeleteRequest == nil
     }
     var projectAreaCreateInputEnabled: Bool { projectAreaCreateInputOpen && textInputAdmitted }
     private var projectAreaCreateInputOpen: Bool {
@@ -4028,8 +4028,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var projectCreateInputEnabled: Bool { projectCreateInputOpen && textInputAdmitted }
     private var projectCreateInputOpen: Bool {
         ready && selectedSurface == .projects && projectCreateRequest == nil
-            && projectFocusRequest == nil
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && projectFocusWrite.pending == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaManagerPresented
             && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
     }
@@ -4049,14 +4049,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     func projectTagIsSelected(_ value: String) -> Bool {
         selectedProjectTagFilter.utf8.elementsEqual(value.utf8)
     }
-    var projectFocusPending: Bool { projectFocusRequest != nil }
+    var projectFocusPending: Bool { projectFocusWrite.pending != nil }
     var projectFocusInputEnabled: Bool {
         projectCreateInputEnabled && projectFocusReadError == nil
     }
     var settingsPersonEditInputEnabled: Bool { settingsPersonEditInputOpen && textInputAdmitted }
     private var settingsPersonEditInputOpen: Bool {
         ready && selectedSurface == .settings && settingsManagePresented && settingsPersonEditPresented
-            && settingsPersonEditRequest == nil
+            && settingsPersonEditWrite.pending == nil
             && !settingsPersonEditAwaitingRefresh && !settingsPersonEditExpected.isEmpty && manageReadError == nil
     }
     var settingsPersonEditCanSave: Bool {
@@ -4064,13 +4064,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !settingsPersonEditChecking && !settingsPersonEditSaveDisabled
     }
     var settingsPersonEditCanCancel: Bool {
-        settingsPersonEditPresented && !busy && !retryNeeded && settingsPersonEditRequest == nil
+        settingsPersonEditPresented && !busy && !retryNeeded && settingsPersonEditWrite.pending == nil
             && !settingsPersonEditAcknowledged
     }
     var settingsPersonCreateInputEnabled: Bool { settingsPersonCreateInputOpen && textInputAdmitted }
     private var settingsPersonCreateInputOpen: Bool {
         ready && selectedSurface == .settings && settingsManagePresented && settingsPersonCreatePresented
-            && settingsPersonCreateRequest == nil
+            && settingsPersonCreateWrite.pending == nil
             && !settingsPersonCreateAwaitingRefresh && manageReadError == nil
     }
     var settingsPersonCreateCanSave: Bool {
@@ -4078,7 +4078,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !settingsPersonCreateChecking && !settingsPersonCreateSaveDisabled
     }
     var settingsPersonCreateCanCancel: Bool {
-        settingsPersonCreatePresented && !busy && !retryNeeded && settingsPersonCreateRequest == nil
+        settingsPersonCreatePresented && !busy && !retryNeeded && settingsPersonCreateWrite.pending == nil
             && !settingsPersonCreateAcknowledged
     }
     var areaCreatePending: Bool { areaCreateRequest != nil }
@@ -4099,7 +4099,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !settingsAreaCreateAwaitingRefresh
     }
     var areaColorPending: Bool { areaColorWrite.pending != nil }
-    var areaOrderPending: Bool { areaOrderRequest != nil }
+    var areaOrderPending: Bool { areaOrderWrite.pending != nil }
     var areaRenamePending: Bool { areaRenameRequest != nil }
     var areaRenameEditing: Bool { areaRenameEditingID != nil }
     var settingsAreaEditActive: Bool { areaRenameFromSettings && areaRenameEditingID != nil }
@@ -4152,13 +4152,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var areaManagerCloseEnabled: Bool {
         areaManagerPresented && !busy && !retryNeeded && areaCreateRequest == nil
-            && areaColorWrite.pending == nil && areaOrderRequest == nil && areaRenameRequest == nil
+            && areaColorWrite.pending == nil && areaOrderWrite.pending == nil && areaRenameRequest == nil
             && areaDeleteRequest == nil && projectAreaRequest == nil && !areaRenameEditing
     }
     var areaCreateInputEnabled: Bool { areaCreateInputOpen && textInputAdmitted }
     private var areaCreateInputOpen: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaManagerProjectCompositionIdle
     }
@@ -4175,26 +4175,26 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var areaColorInputEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaColorReadError == nil && areaManagerProjectCompositionIdle
     }
     var areaOrderInputEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaOrderReadError == nil && areaManagerProjectCompositionIdle
     }
     var areaRenameOpenEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaOrderReadError == nil && areaManagerProjectCompositionIdle
     }
     var areaRenameInputEnabled: Bool { areaRenameInputOpen && textInputAdmitted }
     private var areaRenameInputOpen: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && areaRenameEditing
             && areaManagerOptionsCurrent && areaRenameReadError == nil && areaManagerProjectCompositionIdle
     }
@@ -4203,7 +4203,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var areaDeleteInputEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaDeleteReadError == nil && areaManagerProjectCompositionIdle
     }
@@ -19465,7 +19465,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard projectFocusInputEnabled, !displayed.text("id").isEmpty else { return }
         busy = true
         projectFocusError = nil
-        defer { finishOperation() }
+        var writeOwnsBusy = false
+        defer { if !writeOwnsBusy { finishOperation() } }
         let id = displayed.text("id")
         let selected: CoreObject
         do {
@@ -19504,34 +19505,50 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             return
         }
         let desired = !displayed.flag("isFocused")
-        let request: String
         do {
+            guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
             let expected: CoreObject = ["title": selected.text("title"), "status": selected.text("status"),
                                         "isFocused": selected["isFocused"]!, "rev": selected["rev"]!,
                                         "revBy": selected["revBy"]!, "updatedAt": selected.text("updatedAt")]
-            request = try json(["requestId": UUID().uuidString.lowercased(), "projectId": id,
-                                "focused": desired, "expected": expected])
-            projectFocusRequest = request
+            projectFocusWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "projectId": id,
+                                              "focused": desired, "expected": expected]), on: currentHost)
             projectFocusExpectedID = id
             projectFocusDesired = desired
         } catch {
             projectFocusReadError = error.localizedDescription
             return
         }
-        let result: CoreObject
-        do { result = try await query("projectFocusWrite", [request]) }
-        catch { await handleProjectFocusWriteError(error); return }
-        do { try acknowledgeProjectFocus(result) }
-        catch { await handleProjectFocusWriteError(error); return }
-        do { try await readSelectedSurface() }
-        catch {
-            projectFocusReadError = error.localizedDescription
-            self.error = error.localizedDescription
-        }
+        writeOwnsBusy = true
+        await runProjectFocusWrite(retry: false, adoptingBusy: true)
     }
 
-    private func acknowledgeProjectFocus(_ result: CoreObject) throws {
-        guard projectFocusRequest != nil, let id = projectFocusExpectedID,
+    private func runProjectFocusWrite(retry: Bool, adoptingBusy: Bool = false) async {
+        await runDurableWrite(projectFocusWrite, retry: retry, adoptingBusy: adoptingBusy, .init(
+            admit: { currentHost in self.host === currentHost },
+            dispatch: { _, request, _ in try self.json(await self.query("projectFocusWrite", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("projectFocusRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeProjectFocus(reply) },
+            fail: { failure, definite in
+                if definite {
+                    self.projectFocusExpectedID = nil
+                    self.projectFocusDesired = nil
+                }
+                self.projectFocusError = failure.localizedDescription
+                return failure.localizedDescription
+            },
+            refresh: { acknowledged in
+                do { try await self.readSelectedSurface() }
+                catch {
+                    self.projectFocusReadError = error.localizedDescription
+                    if acknowledged { self.error = error.localizedDescription }
+                }
+            },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeProjectFocus(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let id = projectFocusExpectedID,
               let desired = projectFocusDesired else { throw CocoaError(.coderReadCorrupt) }
         let blocked = result.count == 1 && result["blocked"] as? String == ""
         if !blocked {
@@ -19543,35 +19560,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             focusCurrent = false
             focusNeedsRead = true
         }
-        projectFocusRequest = nil
         projectFocusExpectedID = nil
         projectFocusDesired = nil
-        retryNeeded = false
         projectFocusError = nil
         projectFocusReadError = nil
-        error = nil
-    }
-
-    private func handleProjectFocusWriteError(_ failure: Error) async {
-        if projectFocusRequest != nil && isDefiniteRejection(failure) {
-            projectFocusRequest = nil
-            projectFocusExpectedID = nil
-            projectFocusDesired = nil
-            retryNeeded = false
-            projectFocusError = failure.localizedDescription
-            error = nil
-            do { try await readSelectedSurface() }
-            catch { projectFocusReadError = error.localizedDescription }
-        } else {
-            retryNeeded = projectFocusRequest != nil
-            projectFocusError = failure.localizedDescription
-            error = failure.localizedDescription
-        }
     }
 
     func retryProjectFocusRead() async {
         guard ready, selectedSurface == .projects, !areaManagerPresented, !busy, !retryNeeded,
-              projectFocusRequest == nil else { return }
+              projectFocusWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         do {
@@ -22105,12 +22102,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         Task {
             do { try await Task.sleep(nanoseconds: 120_000_000) } catch { return }
             guard generation == settingsTaxonomyNameGeneration, settingsTaxonomyPresented,
-                  settingsTaxonomyRequest == nil else { return }
+                  settingsTaxonomyWrite.pending == nil else { return }
             guard textInputAdmitted else { settingsTaxonomyCheckDeferred = true; return }
             do { try await readSettingsTaxonomyCheck(generation: generation) }
             catch {
                 guard generation == settingsTaxonomyNameGeneration, settingsTaxonomyPresented,
-                      settingsTaxonomyRequest == nil else { return }
+                      settingsTaxonomyWrite.pending == nil else { return }
                 settingsTaxonomyChecking = false
                 settingsTaxonomyReadError = error.localizedDescription
             }
@@ -22120,7 +22117,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private func readSettingsTaxonomyCheck(generation: Int) async throws {
         guard let kind = settingsTaxonomyKind else { throw CocoaError(.coderReadCorrupt) }
         let check = try await query("menuRead", ["manageTaxonomyCheck", try json(["kind": kind, "name": settingsTaxonomyName])])
-        guard generation == settingsTaxonomyNameGeneration, settingsTaxonomyPresented, settingsTaxonomyRequest == nil else { return }
+        guard generation == settingsTaxonomyNameGeneration, settingsTaxonomyPresented, settingsTaxonomyWrite.pending == nil else { return }
         guard check.count == 1, let disabled = check["saveDisabled"] as? Bool else { throw CocoaError(.coderReadCorrupt) }
         settingsTaxonomySaveDisabled = disabled
         settingsTaxonomyCheckCurrent = true
@@ -22129,57 +22126,53 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func saveSettingsTaxonomy() async {
-        guard settingsTaxonomyCanSave || settingsTaxonomyCanConfirm, let kind = settingsTaxonomyKind else { return }
+        guard settingsTaxonomyCanSave || settingsTaxonomyCanConfirm, let kind = settingsTaxonomyKind,
+              let currentHost = host else { return }
         settingsTaxonomyNameGeneration += 1
         settingsTaxonomyChecking = false
-        busy = true
-        defer { finishOperation() }
-        let request: String
         do {
-            request = try json(["requestId": UUID().uuidString.lowercased(), "kind": kind,
+            settingsTaxonomyWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "kind": kind,
                 "action": settingsTaxonomyAction, "name": settingsTaxonomyAction == "create" ? settingsTaxonomyName : settingsTaxonomyOriginalName,
                 "to": settingsTaxonomyAction == "rename" ? settingsTaxonomyName as Any : NSNull(),
-                "expected": settingsTaxonomyOptions.object("expected")])
-            settingsTaxonomyRequest = request
+                "expected": settingsTaxonomyOptions.object("expected")]), on: currentHost)
         } catch { settingsTaxonomyReadError = error.localizedDescription; return }
-        do { try acknowledgeSettingsTaxonomy(await query("manageTaxonomy", [request])) }
-        catch { await handleSettingsTaxonomyWriteError(error); return }
-        await refreshSettingsTaxonomy()
+        await runSettingsTaxonomyWrite(retry: false)
     }
 
-    private func acknowledgeSettingsTaxonomy(_ result: CoreObject) throws {
-        guard settingsTaxonomyRequest != nil, let kind = settingsTaxonomyKind,
+    private func runSettingsTaxonomyWrite(retry: Bool) async {
+        await runDurableWrite(settingsTaxonomyWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("manageTaxonomy", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("manageTaxonomyRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeSettingsTaxonomy(reply) },
+            fail: { failure, definite in
+                self.settingsTaxonomyError = failure.localizedDescription
+                if definite {
+                    self.settingsTaxonomyCheckCurrent = false
+                    self.settingsTaxonomyAwaitingRefresh = true
+                }
+                return failure.localizedDescription
+            },
+            refresh: { _ in await self.refreshSettingsTaxonomy() },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeSettingsTaxonomy(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let kind = settingsTaxonomyKind,
               result.count == 4, result.text("kind") == kind, result.text("action") == settingsTaxonomyAction,
               result.text("name").utf8.elementsEqual((settingsTaxonomyAction == "create" ? settingsTaxonomyName : settingsTaxonomyOriginalName).utf8),
               settingsTaxonomyAction == "delete" ? result["to"] is NSNull : result["to"] is String else {
             throw CocoaError(.coderReadCorrupt)
         }
-        settingsTaxonomyRequest = nil
         settingsTaxonomyAcknowledged = true
         settingsTaxonomyAwaitingRefresh = true
         settingsTaxonomyError = nil
         settingsTaxonomyReadError = nil
-        retryNeeded = false
-        error = nil
-    }
-
-    private func handleSettingsTaxonomyWriteError(_ failure: Error) async {
-        settingsTaxonomyError = failure.localizedDescription
-        if settingsTaxonomyRequest != nil && isDefiniteRejection(failure) {
-            settingsTaxonomyRequest = nil
-            settingsTaxonomyCheckCurrent = false
-            settingsTaxonomyAwaitingRefresh = true
-            retryNeeded = false
-            error = nil
-            await refreshSettingsTaxonomy()
-        } else {
-            retryNeeded = settingsTaxonomyRequest != nil
-            error = failure.localizedDescription
-        }
     }
 
     private func refreshSettingsTaxonomy() async {
-        guard settingsTaxonomyActive, selectedSurface == .settings, settingsManagePresented, settingsTaxonomyRequest == nil else { return }
+        guard settingsTaxonomyActive, selectedSurface == .settings, settingsManagePresented, settingsTaxonomyWrite.pending == nil else { return }
         do {
             try await readManageSettings()
             if settingsTaxonomyAcknowledged { dismissSettingsTaxonomy() }
@@ -22197,7 +22190,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retrySettingsTaxonomy() async {
         if retryNeeded { await retry(); return }
-        guard settingsTaxonomyActive, !busy, settingsTaxonomyRequest == nil else { return }
+        guard settingsTaxonomyActive, !busy, settingsTaxonomyWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         if settingsTaxonomyAwaitingRefresh { await refreshSettingsTaxonomy() }
@@ -22308,12 +22301,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         Task {
             do { try await Task.sleep(nanoseconds: 120_000_000) } catch { return }
             guard generation == settingsPersonEditNameGeneration,
-                  settingsPersonEditPresented, settingsPersonEditRequest == nil else { return }
+                  settingsPersonEditPresented, settingsPersonEditWrite.pending == nil else { return }
             guard textInputAdmitted else { settingsPersonEditCheckDeferred = true; return }
             do { try await readSettingsPersonEditCheck(generation: generation) }
             catch {
                 guard generation == settingsPersonEditNameGeneration, settingsPersonEditPresented,
-                      settingsPersonEditRequest == nil else { return }
+                      settingsPersonEditWrite.pending == nil else { return }
                 settingsPersonEditChecking = false
                 settingsPersonEditReadError = error.localizedDescription
             }
@@ -22324,7 +22317,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let name = settingsPersonEditName
         let check = try await query("menuRead", ["managePersonEditCheck", try json(["name": name])])
         guard generation == settingsPersonEditNameGeneration, settingsPersonEditPresented,
-              settingsPersonEditRequest == nil else { return }
+              settingsPersonEditWrite.pending == nil else { return }
         guard check.count == 1, let disabled = check["saveDisabled"] as? Bool else { throw CocoaError(.coderReadCorrupt) }
         settingsPersonEditSaveDisabled = disabled
         settingsPersonEditCheckCurrent = true
@@ -22333,59 +22326,52 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func saveSettingsPersonEdit() async {
-        guard settingsPersonEditCanSave, let personID = settingsPersonEditID else { return }
+        guard settingsPersonEditCanSave, let personID = settingsPersonEditID, let currentHost = host else { return }
         settingsPersonEditNameGeneration += 1
         settingsPersonEditChecking = false
-        busy = true
-        defer { finishOperation() }
-        let request: String
         do {
-            request = try json(["requestId": UUID().uuidString.lowercased(), "personId": personID,
+            settingsPersonEditWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "personId": personID,
                 "expected": settingsPersonEditExpected, "name": settingsPersonEditName,
-                "note": settingsPersonEditNote, "referenceLink": settingsPersonEditReference])
-            settingsPersonEditRequest = request
+                "note": settingsPersonEditNote, "referenceLink": settingsPersonEditReference]), on: currentHost)
         } catch {
             settingsPersonEditReadError = error.localizedDescription
             return
         }
-        do {
-            let result = try await query("managePersonEdit", [request])
-            try acknowledgeSettingsPersonEdit(result)
-        } catch { await handleSettingsPersonEditWriteError(error); return }
-        await refreshSettingsPersonEditing()
+        await runSettingsPersonEditWrite(retry: false)
     }
 
-    private func acknowledgeSettingsPersonEdit(_ result: CoreObject) throws {
-        guard settingsPersonEditRequest != nil, let id = settingsPersonEditID,
+    private func runSettingsPersonEditWrite(retry: Bool) async {
+        await runDurableWrite(settingsPersonEditWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("managePersonEdit", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("managePersonEditRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeSettingsPersonEdit(reply) },
+            fail: { failure, definite in
+                self.settingsPersonEditError = failure.localizedDescription
+                if definite {
+                    self.settingsPersonEditCheckCurrent = false
+                    self.settingsPersonEditAwaitingRefresh = true
+                }
+                return failure.localizedDescription
+            },
+            refresh: { _ in await self.refreshSettingsPersonEditing() },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeSettingsPersonEdit(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let id = settingsPersonEditID,
               result.count == 3, result.text("id") == id, !result.text("personId").isEmpty,
               result["name"] is String else { throw CocoaError(.coderReadCorrupt) }
-        settingsPersonEditRequest = nil
         settingsPersonEditAcknowledged = true
         settingsPersonEditAwaitingRefresh = true
         settingsPersonEditError = nil
         settingsPersonEditReadError = nil
-        retryNeeded = false
-        error = nil
-    }
-
-    private func handleSettingsPersonEditWriteError(_ failure: Error) async {
-        settingsPersonEditError = failure.localizedDescription
-        if settingsPersonEditRequest != nil && isDefiniteRejection(failure) {
-            settingsPersonEditRequest = nil
-            settingsPersonEditCheckCurrent = false
-            settingsPersonEditAwaitingRefresh = true
-            retryNeeded = false
-            error = nil
-            await refreshSettingsPersonEditing()
-        } else {
-            retryNeeded = settingsPersonEditRequest != nil
-            error = failure.localizedDescription
-        }
     }
 
     private func refreshSettingsPersonEditing() async {
         guard settingsPersonEditPresented, selectedSurface == .settings, settingsManagePresented,
-              settingsPersonEditRequest == nil else { return }
+              settingsPersonEditWrite.pending == nil else { return }
         do {
             try await readManageSettings()
             if settingsPersonEditAcknowledged { dismissSettingsPersonEdit() }
@@ -22402,7 +22388,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func retrySettingsPersonEditRead() async {
-        guard settingsPersonEditPresented, !busy, !retryNeeded, settingsPersonEditRequest == nil else { return }
+        guard settingsPersonEditPresented, !busy, !retryNeeded, settingsPersonEditWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         if settingsPersonEditAwaitingRefresh { await refreshSettingsPersonEditing() }
@@ -22489,12 +22475,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         Task {
             do { try await Task.sleep(nanoseconds: 120_000_000) } catch { return }
             guard generation == settingsPersonCreateNameGeneration,
-                  settingsPersonCreatePresented, settingsPersonCreateRequest == nil else { return }
+                  settingsPersonCreatePresented, settingsPersonCreateWrite.pending == nil else { return }
             guard textInputAdmitted else { settingsPersonCreateCheckDeferred = true; return }
             do { try await readSettingsPersonCreateCheck(generation: generation) }
             catch {
                 guard generation == settingsPersonCreateNameGeneration, settingsPersonCreatePresented,
-                      settingsPersonCreateRequest == nil else { return }
+                      settingsPersonCreateWrite.pending == nil else { return }
                 settingsPersonCreateChecking = false
                 settingsPersonCreateReadError = error.localizedDescription
             }
@@ -22505,7 +22491,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let name = settingsPersonCreateName
         let check = try await query("menuRead", ["managePersonCreateCheck", try json(["name": name])])
         guard generation == settingsPersonCreateNameGeneration, settingsPersonCreatePresented,
-              settingsPersonCreateRequest == nil else { return }
+              settingsPersonCreateWrite.pending == nil else { return }
         guard check.count == 3, check["nameTaken"] is Bool, let disabled = check["saveDisabled"] as? Bool,
               check["message"] is NSNull || check["message"] is String else { throw CocoaError(.coderReadCorrupt) }
         settingsPersonCreateSaveDisabled = disabled
@@ -22523,64 +22509,60 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         settingsPersonCreateNameGeneration += 1
         settingsPersonCreateChecking = false
         busy = true
-        defer { finishOperation() }
-        let request: String
         do {
             let resolved = try await query("managePersonCreateResolve", [try json(["requestId": id, "name": name])])
             guard resolved.count == 4, resolved["taken"] is Bool, resolved["normalizedName"] is String,
                   resolved["displayName"] is String,
                   !resolved.text("expectedPersonId").isEmpty else { throw CocoaError(.coderReadCorrupt) }
+            guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
             let expected = resolved.text("expectedPersonId")
-            request = try json(["requestId": id, "name": name, "note": note,
-                                "referenceLink": reference, "expectedPersonId": expected])
-            settingsPersonCreateRequest = request
+            settingsPersonCreateWrite.stage(try json(["requestId": id, "name": name, "note": note,
+                                                      "referenceLink": reference, "expectedPersonId": expected]), on: currentHost)
             settingsPersonCreateExpectedID = expected
         } catch {
             settingsPersonCreateCheckCurrent = false
             settingsPersonCreateReadError = error.localizedDescription
+            finishOperation()
             return
         }
-        do {
-            let result = try await query("managePersonCreate", [request])
-            try acknowledgeSettingsPersonCreate(result)
-        } catch { await handleSettingsPersonCreateWriteError(error); return }
-        await refreshSettingsPersonCreation()
+        await runSettingsPersonCreateWrite(retry: false, adoptingBusy: true)
     }
 
-    private func acknowledgeSettingsPersonCreate(_ result: CoreObject) throws {
-        guard settingsPersonCreateRequest != nil, let expected = settingsPersonCreateExpectedID,
+    private func runSettingsPersonCreateWrite(retry: Bool, adoptingBusy: Bool = false) async {
+        await runDurableWrite(settingsPersonCreateWrite, retry: retry, adoptingBusy: adoptingBusy, .init(
+            admit: { currentHost in self.host === currentHost },
+            dispatch: { _, request, _ in try self.json(await self.query("managePersonCreate", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("managePersonCreateRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeSettingsPersonCreate(reply) },
+            fail: { failure, definite in
+                self.settingsPersonCreateError = failure.localizedDescription
+                if definite {
+                    self.settingsPersonCreateExpectedID = nil
+                    self.settingsPersonCreateCheckCurrent = false
+                    self.settingsPersonCreateAwaitingRefresh = true
+                }
+                return failure.localizedDescription
+            },
+            refresh: { _ in await self.refreshSettingsPersonCreation() },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeSettingsPersonCreate(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let expected = settingsPersonCreateExpectedID,
               result.count == 2, result["created"] is Bool, result.text("id") == expected else {
             throw CocoaError(.coderReadCorrupt)
         }
-        settingsPersonCreateRequest = nil
         settingsPersonCreateExpectedID = nil
         settingsPersonCreateAcknowledged = true
         settingsPersonCreateAwaitingRefresh = true
         settingsPersonCreateError = nil
         settingsPersonCreateReadError = nil
-        retryNeeded = false
-        error = nil
-    }
-
-    private func handleSettingsPersonCreateWriteError(_ failure: Error) async {
-        settingsPersonCreateError = failure.localizedDescription
-        if settingsPersonCreateRequest != nil && isDefiniteRejection(failure) {
-            settingsPersonCreateRequest = nil
-            settingsPersonCreateExpectedID = nil
-            settingsPersonCreateCheckCurrent = false
-            settingsPersonCreateAwaitingRefresh = true
-            retryNeeded = false
-            error = nil
-            await refreshSettingsPersonCreation()
-        } else {
-            retryNeeded = settingsPersonCreateRequest != nil
-            error = failure.localizedDescription
-        }
     }
 
     private func refreshSettingsPersonCreation() async {
         guard settingsPersonCreatePresented, selectedSurface == .settings, settingsManagePresented,
-              settingsPersonCreateRequest == nil else { return }
+              settingsPersonCreateWrite.pending == nil else { return }
         do {
             try await readManageSettings()
             if settingsPersonCreateAcknowledged { dismissSettingsPersonCreate() }
@@ -22598,7 +22580,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func retrySettingsPersonCreateRead() async {
-        guard settingsPersonCreatePresented, !busy, !retryNeeded, settingsPersonCreateRequest == nil else { return }
+        guard settingsPersonCreatePresented, !busy, !retryNeeded, settingsPersonCreateWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         if settingsPersonCreateAwaitingRefresh { await refreshSettingsPersonCreation() }
@@ -22689,7 +22671,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard generation == areaCreateNameGeneration,
                   (forProject ? projectAreaCreatePresented : areaManagerPresented || settingsAreaCreatePresented),
-                  areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
+                  areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
                   areaRenameRequest == nil, areaDeleteRequest == nil else { return }
             do {
                 let result = try await query("areaCreateResolve", [try json([
@@ -22697,7 +22679,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 ])])
                 guard generation == areaCreateNameGeneration,
                       (forProject ? projectAreaCreatePresented : areaManagerPresented || settingsAreaCreatePresented),
-                      areaColorWrite.pending == nil, areaOrderRequest == nil,
+                      areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
                       areaRenameRequest == nil, areaDeleteRequest == nil else { return }
                 if forProject {
                     guard let normalizedName = result["normalizedName"] as? String else {
@@ -22711,7 +22693,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             } catch {
                 guard generation == areaCreateNameGeneration,
                       (forProject ? projectAreaCreatePresented : areaManagerPresented || settingsAreaCreatePresented),
-                      areaColorWrite.pending == nil, areaOrderRequest == nil,
+                      areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
                       areaRenameRequest == nil, areaDeleteRequest == nil else { return }
                 if forProject && error.localizedDescription.hasPrefix("INVALID_INPUT:") {
                     projectAreaCreateNameValid = false
@@ -22948,7 +22930,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaCreateRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23050,7 +23032,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaColorRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23080,75 +23062,65 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func changeAreaOrder(_ kind: String, areaID: String? = nil) async {
-        guard areaOrderInputEnabled, ["moveUp", "sortName", "sortColor"].contains(kind) else { return }
+        guard areaOrderInputEnabled, ["moveUp", "sortName", "sortColor"].contains(kind), let currentHost = host else { return }
         let rows = areaOrderOptions.objects("areas")
         if kind == "moveUp" {
             guard let areaID, let index = rows.firstIndex(where: { $0.text("id") == areaID }),
                   index > 0 else { return }
         } else { guard areaID == nil else { return } }
-        busy = true
         areaCreateNameGeneration += 1
         areaCreateNameChecking = false
         expandedAreaColorID = nil
         let intent: CoreObject = kind == "moveUp" ? ["kind": kind, "areaId": areaID!] : ["kind": kind]
         areaOrderIntent = intent
         areaOrderError = nil
-        defer { finishOperation() }
-        let request: String
         do {
-            request = try json(["requestId": UUID().uuidString.lowercased(),
-                                "intent": intent, "expectedAreas": rows])
-            areaOrderRequest = request
+            areaOrderWrite.stage(try json(["requestId": UUID().uuidString.lowercased(),
+                                           "intent": intent, "expectedAreas": rows]), on: currentHost)
             areaOrderExpectedIDs = rows.map { $0.text("id") }
         } catch {
             areaOrderReadError = error.localizedDescription
             return
         }
-        let result: CoreObject
-        do { result = try await query("areaOrder", [request]) }
-        catch { await handleAreaOrderWriteError(error); return }
-        do { try acknowledgeAreaOrder(result) }
-        catch { await handleAreaOrderWriteError(error); return }
-        do { try await refreshAreaManagerAfterWrite() }
-        catch {
-            areaOrderReadError = error.localizedDescription
-            self.error = error.localizedDescription
-        }
+        await runAreaOrderWrite(retry: false)
     }
 
-    private func acknowledgeAreaOrder(_ result: CoreObject) throws {
-        guard areaOrderRequest != nil, let expected = areaOrderExpectedIDs,
+    private func runAreaOrderWrite(retry: Bool) async {
+        await runDurableWrite(areaOrderWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("areaOrder", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("areaOrderRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeAreaOrder(reply) },
+            fail: { failure, definite in
+                if definite { self.areaOrderExpectedIDs = nil }
+                self.areaOrderError = failure.localizedDescription
+                return failure.localizedDescription
+            },
+            refresh: { acknowledged in
+                do { try await self.refreshAreaManagerAfterWrite() }
+                catch {
+                    self.areaOrderReadError = error.localizedDescription
+                    if acknowledged { self.error = error.localizedDescription }
+                }
+            },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeAreaOrder(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let expected = areaOrderExpectedIDs,
               result.count == 1, let ordered = result["orderedIds"] as? [String],
               ordered.count == expected.count, Set(ordered).count == ordered.count,
               Set(ordered) == Set(expected) else { throw CocoaError(.coderReadCorrupt) }
-        areaOrderRequest = nil
         areaOrderExpectedIDs = nil
-        retryNeeded = false
         areaOrderIntent = nil
         areaOrderError = nil
         areaOrderReadError = nil
-        error = nil
-    }
-
-    private func handleAreaOrderWriteError(_ failure: Error) async {
-        if areaOrderRequest != nil && isDefiniteRejection(failure) {
-            areaOrderRequest = nil
-            areaOrderExpectedIDs = nil
-            retryNeeded = false
-            areaOrderError = failure.localizedDescription
-            error = nil
-            do { try await refreshAreaManagerAfterWrite() }
-            catch { areaOrderReadError = error.localizedDescription }
-        } else {
-            retryNeeded = areaOrderRequest != nil
-            areaOrderError = failure.localizedDescription
-            error = failure.localizedDescription
-        }
     }
 
     func retryAreaOrderRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23212,7 +23184,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var areaRenameCanCancel: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && areaRenameEditing
             && !busy && !retryNeeded && areaCreateRequest == nil && areaColorWrite.pending == nil
-            && areaOrderRequest == nil && areaRenameRequest == nil && areaDeleteRequest == nil
+            && areaOrderWrite.pending == nil && areaRenameRequest == nil && areaDeleteRequest == nil
             && areaManagerProjectCompositionIdle
     }
 
@@ -23405,7 +23377,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaRenameRead() async {
         guard areaManagerPresented, areaRenameEditing, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23746,7 +23718,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaDeleteRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderWrite.pending == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -36306,7 +36278,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !projectFileAddOpening && projectFileImportClaim == nil
             && projectFileImportTask == nil && projectFileImporterID == nil && !projectFileImporterPresented
             && projectAttachmentWriteRequest == nil && projectNotesWriteRequest == nil
-            && projectCreateRequest == nil && projectFocusRequest == nil && projectRenameRequest == nil
+            && projectCreateRequest == nil && projectFocusWrite.pending == nil && projectRenameRequest == nil
             && projectFlowRequest == nil && projectTaskSortRequest == nil && projectTaskOrderRequest == nil
             && projectStatusRequest == nil && projectDateRequest == nil && projectAreaRequest == nil
             && projectTagsRequest == nil && projectSectionRequest == nil && projectSectionRenameRequest == nil
@@ -43393,10 +43365,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             await retryTaskAttachmentRecovery()
             return
         }
+        if projectFocusWrite.pending != nil { await runProjectFocusWrite(retry: true); return }
+        if areaOrderWrite.pending != nil { await runAreaOrderWrite(retry: true); return }
         if areaColorWrite.pending != nil { await runAreaColorWrite(retry: true); return }
         if settingsPersonDeleteWrite.pending != nil { await runSettingsPersonDeleteWrite(retry: true); return }
         if gtdWorkflowWrite.pending != nil { await runGtdWorkflowWrite(retry: true); return }
         if generalPreferenceWrite.pending != nil { await runGeneralPreferenceWrite(retry: true); return }
+        if settingsTaxonomyWrite.pending != nil { await runSettingsTaxonomyWrite(retry: true); return }
+        if settingsPersonEditWrite.pending != nil { await runSettingsPersonEditWrite(retry: true); return }
+        if settingsPersonCreateWrite.pending != nil { await runSettingsPersonCreateWrite(retry: true); return }
         guard !busy, !projectRenameEditing || projectRenameRequest != nil else { return }
         guard ready else { await start(); return }
         guard let retryHost = host else { return }
@@ -44428,18 +44405,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 showTaskAction(result, operation: "delete", source: "done")
                 return
             }
-            if let request = projectFocusRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("projectFocusRetryOutcome", [request]) }
-                try acknowledgeProjectFocus(result)
-                do { try await readSelectedSurface() }
-                catch {
-                    projectFocusReadError = error.localizedDescription
-                    self.error = error.localizedDescription
-                }
-                return
-            }
             if let request = areaRenameRequest {
                 let result: CoreObject
                 if let acknowledgment { result = try decode(acknowledgment) }
@@ -44472,47 +44437,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
                 return
             }
-            if let request = areaOrderRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("areaOrderRetryOutcome", [request]) }
-                try acknowledgeAreaOrder(result)
-                do { try await refreshAreaManagerAfterWrite() }
-                catch {
-                    areaOrderReadError = error.localizedDescription
-                    self.error = error.localizedDescription
-                }
-                return
-            }
             if let request = appLockRequest {
                 let result: CoreObject
                 if let acknowledgment { result = try decode(acknowledgment) }
                 else { result = try await query("appLockRetryOutcome", [request]) }
                 try await acknowledgeAppLock(result)
-                return
-            }
-            if let request = settingsTaxonomyRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("manageTaxonomyRetryOutcome", [request]) }
-                try acknowledgeSettingsTaxonomy(result)
-                await refreshSettingsTaxonomy()
-                return
-            }
-            if let request = settingsPersonEditRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("managePersonEditRetryOutcome", [request]) }
-                try acknowledgeSettingsPersonEdit(result)
-                await refreshSettingsPersonEditing()
-                return
-            }
-            if let request = settingsPersonCreateRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("managePersonCreateRetryOutcome", [request]) }
-                try acknowledgeSettingsPersonCreate(result)
-                await refreshSettingsPersonCreation()
                 return
             }
             if let request = areaCreateRequest {
@@ -44896,10 +44825,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 await handleDoneTaskDeleteError(error)
                 return
             }
-            if projectFocusRequest != nil {
-                await handleProjectFocusWriteError(error)
-                return
-            }
             if areaRenameRequest != nil {
                 await handleAreaRenameWriteError(error)
                 return
@@ -44908,28 +44833,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 await handleAreaDeleteWriteError(error)
                 return
             }
-            if areaOrderRequest != nil {
-                await handleAreaOrderWriteError(error)
-                return
-            }
             if appLockRequest != nil {
                 await handleAppLockError(error)
                 return
             }
             if dataSettingRequest != nil {
                 handleDataSettingError(error)
-                return
-            }
-            if settingsTaxonomyRequest != nil {
-                await handleSettingsTaxonomyWriteError(error)
-                return
-            }
-            if settingsPersonEditRequest != nil {
-                await handleSettingsPersonEditWriteError(error)
-                return
-            }
-            if settingsPersonCreateRequest != nil {
-                await handleSettingsPersonCreateWriteError(error)
                 return
             }
             if taskPersonCreatePending != nil {
@@ -46612,7 +46521,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             manageTaxonomyOptionsTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
-        if method == "manageTaxonomy", settingsTaxonomyRequest != nil, manageTaxonomyTestRefusals > 0 {
+        if method == "manageTaxonomy", settingsTaxonomyWrite.pending != nil, manageTaxonomyTestRefusals > 0 {
             manageTaxonomyTestRefusals -= 1
             throw SimulatedManageAreaRefusal()
         }
@@ -46626,7 +46535,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             managePersonEditOptionsTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
-        if method == "managePersonEdit", settingsPersonEditRequest != nil,
+        if method == "managePersonEdit", settingsPersonEditWrite.pending != nil,
            managePersonEditTestRefusals > 0 {
             managePersonEditTestRefusals -= 1
             throw SimulatedManageAreaRefusal()
@@ -46646,7 +46555,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             managePersonCreateOptionsTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
-        if method == "managePersonCreate", settingsPersonCreateRequest != nil,
+        if method == "managePersonCreate", settingsPersonCreateWrite.pending != nil,
            managePersonCreateTestRefusals > 0 {
             managePersonCreateTestRefusals -= 1
             throw SimulatedManagePersonCreateRefusal()

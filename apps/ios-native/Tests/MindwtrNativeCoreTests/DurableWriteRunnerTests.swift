@@ -192,4 +192,25 @@ final class DurableWriteRunnerTests: XCTestCase {
         XCTAssertEqual(recorder.begins, 1)
         XCTAssertEqual(recorder.finishes, 1)
     }
+
+    func testAdoptedBusyIsFinishedOnceWithoutBegin() async {
+        let recorder = Recorder(), transport = FakeTransport()
+        let runner = DurableWriteRunner<FakeTransport>(model: recorder.model)
+        recorder.busy = true
+        runner.stage("request-1", on: transport)
+        XCTAssertTrue(runner.run(retry: false, adoptingBusy: true, write(recorder)))
+        await runner.task?.value
+        XCTAssertEqual(recorder.events, ["dispatch:request-1", "ack:dispatched", "refresh", "ended"])
+        XCTAssertFalse(recorder.busy)
+        XCTAssertEqual(recorder.begins, 0)
+        XCTAssertEqual(recorder.finishes, 1)
+
+        recorder.busy = true
+        runner.stage("request-2", on: transport)
+        XCTAssertFalse(runner.run(retry: false, adoptingBusy: true, write(recorder, admit: false)))
+        XCTAssertFalse(recorder.busy)
+        XCTAssertEqual(recorder.begins, 0)
+        XCTAssertEqual(recorder.finishes, 2)
+        XCTAssertEqual(runner.pending?.request, "request-2")
+    }
 }

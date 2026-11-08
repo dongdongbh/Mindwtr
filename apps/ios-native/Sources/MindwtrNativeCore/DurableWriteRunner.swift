@@ -70,11 +70,14 @@ public final class DurableWriteRunner<Transport: DurableWriteTransport> {
     }
 
     @discardableResult
-    public func run(retry: Bool, _ write: Write) -> Bool {
-        guard !model.isBusy(), operation == nil, let pending, write.admit(pending.transport) else { return false }
+    public func run(retry: Bool, adoptingBusy: Bool = false, _ write: Write) -> Bool {
+        guard adoptingBusy || !model.isBusy(), operation == nil, let pending, write.admit(pending.transport) else {
+            if adoptingBusy { model.finish() }
+            return false
+        }
         let id = UUID()
         operation = id
-        model.begin()
+        if !adoptingBusy { model.begin() }
         task = Task { [weak self] in
             guard let self else { return }
             defer {
