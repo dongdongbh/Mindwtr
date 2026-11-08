@@ -857,7 +857,12 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     #else
     let options: URL.BookmarkCreationOptions = []
     #endif
-    let realBytes = try root.bookmarkData(options: options, includingResourceValuesForKeys: nil, relativeTo: nil)
+    let realBytes: Data
+    do { realBytes = try root.bookmarkData(options: options, includingResourceValuesForKeys: nil, relativeTo: nil) }
+    catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadUnknownError
+      && (error.userInfo[NSDebugDescriptionErrorKey] as? String)?.contains("ScopedBookmarksAgent") == true {
+      throw XCTSkip("Security-scoped bookmark creation needs a logged-in session's ScopedBookmarksAgent")
+    }
     let realCounts = Counts()
     let reconstructed = Owner(selection: .bookmark(realBytes), access: access(realCounts), diagnostic: { _ in realCounts.increment("admitted") })
     let realHandle = try await reconstructed.open()
