@@ -3361,7 +3361,7 @@ private struct InboxBulkOrganizeDialog: View {
                     pickerDate = value
                     if next != previous { model.setInboxBulkOrganizeText(field, value: next) }
                 }), displayedComponents: .date)
-                    .datePickerStyle(.wheel).labelsHidden().disabled(locked)
+                    .datePickerStyle(.graphical).labelsHidden().disabled(locked)
                     .accessibilityIdentifier(prefix + "-" + field + "-picker")
                 Button { dateField = nil } label: { Text(part.text("doneText")).frame(minHeight: 44).contentShape(Rectangle()) }
                     .buttonStyle(.plain).disabled(locked).accessibilityLabel(part.text("doneLabel"))

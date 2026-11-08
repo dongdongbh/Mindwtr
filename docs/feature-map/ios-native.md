@@ -97,7 +97,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
 - Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDuplicate…, testTaskShare…, testTaskCancellation…, testTaskDelete…, testTaskSkip…, testTaskPromotion…, testTaskPreview…, testGtdTaskEditor…)
-- Notes: Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview.
+- Notes: Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview. Date pickers for due, start, review and recurrence end show a month calendar; time pickers stay wheels, as in RN. Bulk Organize dates use the same month calendar.
 
 ## Task attachments
 

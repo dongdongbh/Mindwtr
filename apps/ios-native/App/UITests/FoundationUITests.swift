@@ -19773,7 +19773,9 @@ final class FoundationUITests: XCTestCase {
         let dueLabel = app.buttons["task-editor-dueDate"].value as? String ?? ""
         XCTAssertFalse(dueLabel.isEmpty)
         tap("task-editor-dueDate")
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "task-date-dueDate-picker").firstMatch.waitForExistence(timeout: 5))
+        let duePicker = app.descendants(matching: .any).matching(identifier: "task-date-dueDate-picker").firstMatch
+        XCTAssertTrue(duePicker.waitForExistence(timeout: 5))
+        XCTAssertEqual(duePicker.pickerWheels.count, 0, "Date-only pickers show a month calendar, as in RN")
         tap("task-date-dueDate-done")
         assertValue(app.buttons["task-editor-dueDate"], dueLabel)
         showScheduling()
@@ -20099,21 +20101,22 @@ final class FoundationUITests: XCTestCase {
         tap("task-recurrence-ends-until")
         let picker = app.datePickers["task-recurrence-until-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        let dayWheel = picker.pickerWheels.allElementsBoundByIndex.first { wheel in
-            guard let value = wheel.value as? String, let day = Int(value) else { return false }
-            return (1...31).contains(day)
-        }
-        XCTAssertNotNil(dayWheel, "The native date wheel must expose a day")
-        let day = Int(dayWheel!.value as! String)!
-        dayWheel!.adjust(toPickerWheelValue: String(day < 27 ? day + 1 : day - 1))
-        let wheelValues = picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }
+        XCTAssertEqual(picker.pickerWheels.count, 0, "Date-only pickers show a month calendar, not wheels")
+        let openedUntil = app.buttons["task-recurrence-until"].value as? String ?? ""
+        let calendarDays = picker.buttons.matching(NSPredicate(format: "label CONTAINS ', ' AND enabled == true")).allElementsBoundByIndex
+        XCTAssertGreaterThanOrEqual(calendarDays.count, 2, "The month calendar must expose its days")
+        calendarDays.first!.tap()
+        let untilChanged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", openedUntil),
+                                                     object: app.buttons["task-recurrence-until"])
+        if XCTWaiter.wait(for: [untilChanged], timeout: 5) != .completed { calendarDays.last!.tap() }
         tap("task-recurrence-until-done")
         let untilLabel = app.buttons["task-recurrence-until"].value as? String ?? ""
         XCTAssertFalse(untilLabel.isEmpty)
+        XCTAssertNotEqual(untilLabel, openedUntil)
         saveAndOpen(relaunch: true)
         tap("task-recurrence-until")
         assertValue(app.buttons["task-recurrence-until"], untilLabel)
-        XCTAssertEqual(picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }, wheelValues)
+        XCTAssertEqual(picker.pickerWheels.count, 0)
         tap("task-recurrence-until-done")
         tap("task-recurrence-rule-none", upward: false)
         saveAndOpen(relaunch: true)

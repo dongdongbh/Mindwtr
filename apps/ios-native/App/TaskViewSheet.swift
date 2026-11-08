@@ -2420,18 +2420,25 @@ private struct TaskScheduleField: View {
                 }
                 .buttonStyle(.plain).accessibilityIdentifier(prefix + "-done")
             }
-            DatePicker(label, selection: Binding(get: { pickerValue }, set: { date in
-                let mode = pickerMode
-                let value = TaskDatePickerComponents.string(date, time: mode == "time")
-                let previous = TaskDatePickerComponents.string(pickerValue, time: mode == "time")
-                pickerValue = date
-                guard value != previous else { return }
-                model.setTaskPickedDate(field, mode: mode, value: value)
-            }), displayedComponents: pickerMode == "time" ? .hourAndMinute : .date)
-                .datePickerStyle(.wheel).labelsHidden().tint(palette.tint)
-                .accessibilityLabel(label).accessibilityIdentifier(prefix + "-picker")
+            Group {
+                if pickerMode == "time" { inlineDatePicker.datePickerStyle(.wheel) }
+                else { inlineDatePicker.datePickerStyle(.graphical) }
+            }
+            .labelsHidden().tint(palette.tint)
+            .accessibilityLabel(label).accessibilityIdentifier(prefix + "-picker")
         }
         .padding(.top, 8)
+    }
+
+    private var inlineDatePicker: some View {
+        DatePicker(label, selection: Binding(get: { pickerValue }, set: { date in
+            let mode = pickerMode
+            let value = TaskDatePickerComponents.string(date, time: mode == "time")
+            let previous = TaskDatePickerComponents.string(pickerValue, time: mode == "time")
+            pickerValue = date
+            guard value != previous else { return }
+            model.setTaskPickedDate(field, mode: mode, value: value)
+        }), displayedComponents: pickerMode == "time" ? .hourAndMinute : .date)
     }
 }
 
@@ -2815,7 +2822,7 @@ private struct TaskRecurrenceField: View {
                 guard value != previous else { return }
                 model.setTaskRecurrenceUntil(value)
             }), displayedComponents: .date)
-                .datePickerStyle(.wheel).labelsHidden().tint(palette.tint)
+                .datePickerStyle(.graphical).labelsHidden().tint(palette.tint)
                 .accessibilityLabel(model.label("recurrence.endsOnDate")).accessibilityIdentifier("task-recurrence-until-picker")
         }
     }
