@@ -1076,7 +1076,8 @@ const owedFresh = async (rn, activity, where) => {
     await stopApp();
     device.launch(activity);
     if (rn) {
-        await waitFor('the RN tabs', (current) => current.some((node) => node['content-desc'] === 'Menu'), 60_000);
+        await waitFor('the RN app to draw', (current) => current.some((node) => (node.package ?? PKG) === PKG && Boolean(node.text || node['content-desc'])), 60_000);
+        await sleep(2000);
         openLink(where);
         return;
     }
@@ -1195,11 +1196,12 @@ const shootOwed = async (prefix, suffix, rn, activity) => {
         await tap(button(start, en['review.startReview']));
         const choice = await waitFor('the Weekly Review choice', (current) => Boolean(button(current, en['review.openGuide'])), 15_000);
         await tap(button(choice, en['review.openGuide']));
-        const onProjects = (current) => tagged(current, 'review-step-title')?.text === en['review.projectsStep']
-            || (rn && hasText(current, en['review.projectsStep']));
-        let nodes = await waitFor('the Weekly Review', (current) => Boolean(owedLabeled(current, en['review.nextStepBtn'])), 20_000);
+        const onProjects = (current) => hasText(current, en['review.projectsStep'])
+            || [en['review.projectsStep'], en['projects.title']].includes(tagged(current, 'review-step-title')?.text);
+        const next = (current) => owedLabeled(current, en['review.next']) ?? owedLabeled(current, en['review.nextStepBtn']);
+        let nodes = await waitFor('the Weekly Review', (current) => Boolean(next(current)), 20_000);
         for (let step = 0; step < 10 && !onProjects(nodes); step += 1) {
-            await tap(owedLabeled(nodes, en['review.nextStepBtn']) ?? fail('no Next Step'));
+            await tap(next(nodes) ?? fail('no Next'));
             await sleep(1500);
             nodes = await screen();
         }
@@ -1245,13 +1247,14 @@ const shootOwed = async (prefix, suffix, rn, activity) => {
 
     await attempt('folded group', async () => {
         await owedFresh(rn, activity, 'focus');
-        const heading = (current) => current.find((node) => node.text === en['agenda.overdue'] || (node['content-desc'] ?? '').startsWith(en['agenda.overdue']));
-        const nodes = await waitFor(`the ${en['agenda.overdue']} heading`, (current) => Boolean(heading(current)) && Boolean(inList(current, T.invoice)), 30_000);
+        const label = en['agenda.nextActions'];
+        const heading = (current) => current.find((node) => (node.text ?? '').startsWith(label) || (node['content-desc'] ?? '').startsWith(label));
+        const nodes = await waitFor(`the ${label} heading`, (current) => Boolean(heading(current)) && Boolean(inList(current, T.numbers)), 30_000);
         await tap(heading(nodes));
-        await shoot(`${prefix}-focus-folded-${suffix}`, (current) => Boolean(heading(current)) && !inList(current, T.invoice));
+        await shoot(`${prefix}-focus-folded-${suffix}`, (current) => Boolean(heading(current)) && !inList(current, T.numbers));
         const again = heading(await screen());
         if (again) await tap(again);
-        await waitFor(`${T.invoice} unfolded`, (current) => Boolean(inList(current, T.invoice)), 15_000);
+        await waitFor(`${T.numbers} unfolded`, (current) => Boolean(inList(current, T.numbers)), 15_000);
     });
 
     await attempt('saved search Sort', async () => {
