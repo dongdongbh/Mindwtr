@@ -2604,26 +2604,25 @@ public final class CoreHost: @unchecked Sendable {
         }
         guard !["iosTaskAIOptions", "iosTaskAIRequest", "iosTaskAIWitness", "iosInboxAIWitness", "iosInboxAIRequest", "iosInboxAIApply", "iosReviewAIWitness", "iosReviewAIRequest", "iosReviewAIApply", "iosReviewAIOutcome", "iosReviewAIValidateApply", "reviewAISuggestionsWrite", "widgetCompletionSubmit", "shareCaptureSubmit", "iosShareCapturePrepare", "iosShareCaptureCommit", "iosShareCaptureOutcome", "iosWidgetCompletionPrepare", "iosWidgetCompletionValidate", "iosWidgetCompletionCommit", "iosWidgetCompletionOutcome"].contains(method) else { throw NativeTaskAIJSON.invalid }
         guard method != "iosAISummaryCheckpointSettled" else { throw CoreHostRejection(message: "INVALID_INPUT: AI summary checkpoint requires fixture authority") }
-        guard !Engine.pomodoroFacadeMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade") }
         guard method != "iosPruneReceipts" else {
             throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
         }
-        guard !Engine.reminderSnoozeMethods.contains(method) else {
-            throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
+        switch HostMethod.registry[method]?.facade {
+        case .pomodoro?: throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade")
+        case .reminderSnooze?: throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
+        case .reminderCompletion?: throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
+        case .reminder?: throw NativeReminderEffects.unavailable
+        case .voice?: throw NativeVoiceJSON.invalid
+        case .aiTextConfiguration?: throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade")
+        case .aiRequestTimeout?: throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade")
+        case .aiReasoningEffort?: throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade")
+        case .aiGeminiThinkingBudget?: throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade")
+        case .notificationSetting?: throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade")
+        case .deviceCalendarSetting?: throw CoreHostRejection(message: "INVALID_INPUT: Device Calendar Settings require their explicit facade")
+        case .calendarSubscriptionSetting?: throw CoreHostRejection(message: "INVALID_INPUT: Calendar subscription settings require their explicit facade")
+        case .calendarAccess?: throw CoreHostRejection(message: "INVALID_INPUT: Calendar access requires its explicit facade")
+        case .calendarPush?, nil: break
         }
-        guard !Engine.reminderCompletionMethods.contains(method) else {
-            throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
-        }
-        guard !Engine.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
-        guard !Engine.voiceMethods.contains(method) else { throw NativeVoiceJSON.invalid }
-        guard !Engine.aiTextConfigurationMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade") }
-        guard !Engine.aiRequestTimeoutMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade") }
-        guard !Engine.aiReasoningEffortMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade") }
-        guard !Engine.aiGeminiThinkingBudgetMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade") }
-        guard !Engine.notificationSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Notification Settings require their explicit facade") }
-        guard !Engine.deviceCalendarSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Device Calendar Settings require their explicit facade") }
-        guard !Engine.calendarSubscriptionSettingMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar subscription settings require their explicit facade") }
-        guard !Engine.calendarAccessMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Calendar access requires its explicit facade") }
         return try await perform { try $0.call(method, argumentsJSON: argumentsJSON) }
     }
 
@@ -4353,10 +4352,6 @@ private final class Engine: @unchecked Sendable {
             switch commit { case "iosVoiceSettingsCommit": self = .settings; case "iosVoiceCaptureCommit": self = .capture; case "iosVoiceResultCommit": self = .result; default: return nil }
         }
     }
-    fileprivate static let voiceMethods: Set<String> = Set(["Settings", "Capture", "Result"].flatMap { action in
-        ["Prepare", "Validate", "Commit", "Recover", "RetryOutcome"].map { "iosVoice" + action + $0 }
-    } + ["iosVoiceModelDiscovery", "iosVoiceSettingsOptions", "iosVoiceRuntimeOptions", "iosVoiceWhisperModel", "iosVoiceWhisperLanguage", "iosVoiceOpenAIRuntime", "iosVoiceEndpointSessionOpen", "iosVoiceEndpointSessionClose", "iosVoiceEndpointSensitive", "iosVoiceGeminiRequestBuild", "iosVoiceGeminiResponseDecode",
-         "iosVoiceOpenAITranscriptionBuild", "iosVoiceOpenAITranscriptionDecode", "iosVoiceOpenAIParseBuild", "iosVoiceOpenAIParseDecode", "iosVoiceAcknowledged"])
     fileprivate final class VoiceBinding: @unchecked Sendable {
         let runtime: JSContext, connection: SQLiteBridge, storage: NativeDeviceKV, library: OwnedDiscardIdentity, generation: UInt64
         var live = true
@@ -4433,7 +4428,6 @@ private final class Engine: @unchecked Sendable {
     private static let aiTextConfigurationCommitMethods: Set<String> = ["iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2"]
     private static func aiTextConfigurationMethod(_ suffix: String, version: Int) -> String { "iosAITextConfiguration" + suffix + (version == 2 ? "V2" : "") }
     private static func aiTextConfigurationVersion(_ command: PendingCommand) -> Int { command.method == "iosAITextConfigurationCommitV2" ? 2 : 1 }
-    fileprivate static let aiTextConfigurationMethods: Set<String> = ["iosAITextModelDiscovery", "iosAIAnthropicThinkingOptions", "iosAITextConfiguration", "iosAITextConfigurationOptions", "iosAITextConfigurationPrepare", "iosAITextConfigurationValidate", "iosAITextConfigurationCommit", "iosAITextConfigurationRetryOutcome", "iosAITextConfigurationAcknowledged", "iosAITextConfigurationSensitive", "iosAITextConfigurationSessionOpen", "iosAITextConfigurationSessionCheck", "iosAITextConfigurationSessionRefresh", "iosAITextConfigurationSessionClose", "iosAITextConfigurationV2", "iosAITextConfigurationOptionsV2", "iosAITextConfigurationPrepareV2", "iosAITextConfigurationValidateV2", "iosAITextConfigurationCommitV2", "iosAITextConfigurationRetryOutcomeV2", "iosAITextConfigurationConsentTargetV2", "iosAITextConfigurationSensitiveV2", "iosAITextConfigurationSessionOpenV2"]
     private final class AIRequestTimeoutTurn {
         let id: UUID
         let runtime: JSContext
@@ -4459,8 +4453,6 @@ private final class Engine: @unchecked Sendable {
     private var aiRequestTimeoutFixtureSQLCommitAttempts = 0
     private var aiRequestTimeoutFixtureExactRetry = false
     #endif
-    fileprivate static let aiRequestTimeoutMethods: Set<String> = ["iosAIRequestTimeout", "iosAIRequestTimeoutOptions",
-        "iosAIRequestTimeoutPrepare", "iosAIRequestTimeoutValidate", "iosAIRequestTimeoutCommit", "iosAIRequestTimeoutRetryOutcome", "iosAIRequestTimeoutAcknowledged"]
     private final class AIReasoningEffortTurn {
         let id: UUID
         let runtime: JSContext
@@ -4486,8 +4478,6 @@ private final class Engine: @unchecked Sendable {
     private var aiReasoningEffortFixtureSQLCommitAttempts = 0
     private var aiReasoningEffortFixtureExactRetry = false
     #endif
-    fileprivate static let aiReasoningEffortMethods: Set<String> = ["iosAIReasoningEffort", "iosAIReasoningEffortOptions",
-        "iosAIReasoningEffortPrepare", "iosAIReasoningEffortValidate", "iosAIReasoningEffortCommit", "iosAIReasoningEffortRetryOutcome", "iosAIReasoningEffortAcknowledged"]
     private final class AIGeminiThinkingBudgetTurn {
         let id: UUID
         let runtime: JSContext
@@ -4513,8 +4503,6 @@ private final class Engine: @unchecked Sendable {
     private var aiGeminiThinkingBudgetFixtureSQLCommitAttempts = 0
     private var aiGeminiThinkingBudgetFixtureExactRetry = false
     #endif
-    fileprivate static let aiGeminiThinkingBudgetMethods: Set<String> = ["iosAIGeminiThinkingBudget", "iosAIGeminiThinkingBudgetOptions",
-        "iosAIGeminiThinkingBudgetPrepare", "iosAIGeminiThinkingBudgetValidate", "iosAIGeminiThinkingBudgetCommit", "iosAIGeminiThinkingBudgetRetryOutcome", "iosAIGeminiThinkingBudgetAcknowledged"]
     private final class DeviceCalendarSettingTurn {
         let runtime: JSContext
         let storage: NativeDeviceKV
@@ -4582,8 +4570,6 @@ private final class Engine: @unchecked Sendable {
     private var calendarPushReady: [String] = []
     private let calendarPushReplyGeneration = UUID().uuidString.lowercased()
     private var calendarPushReplySequence: UInt64 = 0
-    private static let calendarPushMethods: Set<String> = ["iosCalendarPushStart", "iosCalendarPushStop",
-        "iosCalendarPushRun", "iosCalendarPushSetting", "iosCalendarPushDiagnostic"]
     private static let calendarPushStateNames = ["enabled", "calendar-id", "target-calendar-id", "color", "creation-intent"]
         .map { "mindwtr:calendar-push-sync:" + $0 }
     private var calendarPushObserver: (id: UUID, generation: UInt64, callback: @Sendable ([String]?) -> Void)?
@@ -4595,12 +4581,6 @@ private final class Engine: @unchecked Sendable {
         let cancellation: NativeAttachmentCancellation
     }
     private var calendarFileCaptureTurn: CalendarFileCaptureTurn?
-    fileprivate static let calendarSubscriptionSettingMethods: Set<String> = ["calendarSubscriptionSetting",
-        "calendarSubscriptionSettingOptions", "calendarSubscriptionSettingPrepare", "calendarSubscriptionSettingValidate",
-        "calendarSubscriptionSettingCommit", "calendarSubscriptionSettingRetryOutcome", "calendarSubscriptionSettingAcknowledged",
-        "calendarSubscriptionAdd", "calendarSubscriptionAddPrepare", "calendarSubscriptionAddValidate",
-        "calendarSubscriptionAddCommit", "calendarSubscriptionAddRetryOutcome", "calendarSubscriptionAddAcknowledged",
-        "calendarSubscriptionFileAddRequest"]
     private static let calendarSubscriptionSettingRequestLimit = 1_048_576
     private static let calendarSubscriptionSettingEnvelopeLimit = 4_194_304
     private static let calendarSubscriptionSettingOptionsLimit = 2_000_000
@@ -4623,20 +4603,10 @@ private final class Engine: @unchecked Sendable {
         }
     }
     private var calendarAccessTurn: CalendarAccessTurn?
-    fileprivate static let calendarAccessMethods: Set<String> = ["grantDeviceCalendarAccess", "deviceCalendarAccessAcknowledged"]
-    fileprivate static let deviceCalendarSettingMethods: Set<String> = ["deviceCalendarSetting", "deviceCalendarSettingPrepare",
-        "deviceCalendarSettingValidate", "deviceCalendarSettingCommit", "deviceCalendarSettingRetryOutcome", "deviceCalendarSettingAcknowledged"]
     private static let deviceCalendarSettingCellLimit = 1024 * 1024
     private static let deviceCalendarSettingEnvelopeLimit = 4 * 1024 * 1024
     private static let deviceCalendarSettingArgumentsLimit = 12_000_000
     private static let deviceCalendarSettingJournalLimit = 24_000_000
-    fileprivate static let notificationSettingMethods: Set<String> = ["notificationSetting", "notificationSettingOptions",
-        "notificationSettingPrepare", "notificationSettingValidate", "notificationSettingCommit", "notificationSettingRetryOutcome",
-        "notificationSettingAcknowledged"]
-    fileprivate static let reminderCompletionMethods: Set<String> = ["reminderCompletionCommit", "reminderCompletionProbe",
-        "reminderCompletionRetry", "reminderCompletionAcknowledged"]
-    fileprivate static let reminderSnoozeMethods: Set<String> = ["reminderSnoozePrepare", "reminderSnoozeValidate",
-        "reminderSnoozeCommit", "reminderSnoozeProbe", "reminderSnoozeRetry", "reminderSnoozeAcknowledged"]
     private var reminderSnoozeMutation: (arguments: String, storage: NativeDeviceKV, runtime: JSContext,
         generation: UInt64, before: [String?], after: [String?], confirm: Bool)?
     private var reminderOwnerAccess = false
@@ -4671,9 +4641,6 @@ private final class Engine: @unchecked Sendable {
     }
     private var searchObserver: SearchObserver?
     private static let reminderMapNames = ["mindwtr:local:alarms:v1", "mindwtr:native:reminders:v1"]
-    fileprivate static let reminderMethods = Set(["iosReminderBegin", "iosReminderCurrent", "iosReminderPrepare", "iosReminderAcknowledged", "iosReminderEnd",
-        "iosReminderObserve", "iosReminderObservation", "iosReminderDisposeObservation",
-        "iosPomodoroAlarmBegin", "iosPomodoroAlarmCurrent", "iosPomodoroAlarmPrepare", "iosPomodoroAlarmDispatchPrepare", "iosPomodoroAlarmAcknowledged", "iosPomodoroAlarmEnd"])
     private struct ProviderCopyTurn {
         var receipt: NativeAttachmentFiles.ProviderCacheCopyReceipt?
         var photoCaptureID: UUID? = nil
@@ -4881,116 +4848,6 @@ private final class Engine: @unchecked Sendable {
     var faults: HostIOFaults?
     #endif
 
-    private static let methods: [String: Int] = [
-        "pomodoroPanelReadHost": 1, "pomodoroAlarmReadHost": 0, "pomodoroSessionReadHost": 0, "pomodoroTransitionWrite": 1, "pomodoroTransitionRetryOutcome": 1, "pomodoroTasks": 1,
-        "logLine": 2,
-        "dataSetting": 1, "gettingStarted": 1,
-        "archiveRetentionOptions": 0, "archiveRetentionReview": 1,
-        "window": 3, "inboxView": 1, "focus": 1, "focusWindow": 4, "theme": 1, "areaFilter": 0, "setAreaFilter": 1,
-        "captureOpen": 0, "captureView": 1, "captureEdit": 1, "captureSubmit": 1, "captureCopilotSubmit": 1, "captureCopilotEdit": 1, "captureLinesSubmit": 1,
-        "language": 2, "languageSaved": 2, "strings": 1, "complete": 1, "taskView": 1, "taskShare": 1, "taskOpenTab": 1, "taskViewReferenceTarget": 1, "editorModel": 1, "taskEditorDraftDirection": 1, "taskEditorResumeCheck": 1, "taskEditorSectionHelp": 0, "taskAttachmentList": 1, "taskAttachmentOpen": 1, "taskAttachmentLinks": 1, "taskAttachmentRemove": 1, "editDraft": 1, "saveDraft": 1, "search": 1,
-        "projects": 0, "projectDetail": 4, "projectNotes": 4, "projectAttachmentList": 1, "projectAttachmentOpen": 1, "projectCreateOptions": 0, "projectCreate": 1, "projectCreateRetryOutcome": 1,
-        "projectSectionOptions": 1, "projectSectionCreate": 1, "projectSectionCreateRetryOutcome": 1,
-        "projectSectionRenameOptions": 1, "projectSectionRename": 1, "projectSectionRenameRetryOutcome": 1,
-        "projectSectionDeleteOptions": 1, "projectSectionDelete": 1, "projectSectionDeleteRetryOutcome": 1,
-        "projectSectionOrderOptions": 1, "projectSectionOrder": 1, "projectSectionOrderRetryOutcome": 1,
-        "appLockOptions": 1, "appLock": 1, "appLockRetryOutcome": 1,
-        "gtdWorkflowOptions": 1, "gtdPomodoroOptions": 1, "gtdArchiveOptions": 1, "gtdReviewOptions": 1, "gtdInboxOptions": 1, "gtdCaptureAreaOptions": 1, "gtdCaptureParseOptions": 1, "gtdCaptureAudioOptions": 1, "gtdTaskEditorOpenOptions": 1, "gtdTaskEditorPresetOptions": 1, "gtdTaskEditorFieldOptions": 1, "gtdWorkflowDraft": 1, "gtdWorkflow": 1, "gtdWorkflowRetryOutcome": 1,
-        "shareCaptureSubmit": 1, "iosShareCaptureDraft": 1, "iosEntityOpen": 1, "iosProductionWidgetTaskOpen": 1, "iosWatchSnapshot": 0, "iosWatchIngest": 1, "iosWatchAudioIngest": 1, "watchPomodoroSubmit": 1, "iosWidgetNextSnapshot": 0, "iosWidgetNextActionSnapshot": 0, "iosWidgetFamilySnapshot": 1, "widgetCompletionSubmit": 1, "iosSearchSnapshot": 0, "iosSearchObservation": 0, "iosSearchOpen": 1, "iosNotificationOpen": 1, "iosAITextConfigurationV2": 1, "iosAITextConfiguration": 1, "iosAIRequestTimeout": 1, "iosAIReasoningEffort": 1, "iosAIGeminiThinkingBudget": 1, "notificationSetting": 1, "reminderCompletionCommit": 1, "reminderSnoozeCommit": 4,
-        "appLockDelayOptions": 1, "generalPreferenceOptions": 1, "generalPreference": 1, "generalPreferenceRetryOutcome": 1, "deviceCalendarSetting": 1, "calendarSubscriptionSetting": 1, "calendarSubscriptionAdd": 1,
-        "manageTaxonomyOptions": 1, "manageTaxonomy": 1, "manageTaxonomyRetryOutcome": 1,
-        "managePersonEditOptions": 1, "managePersonEdit": 1, "managePersonEditRetryOutcome": 1,
-        "managePersonDeleteOptions": 1, "managePersonDelete": 1, "managePersonDeleteRetryOutcome": 1,
-        "managePersonCreateResolve": 1, "managePersonCreate": 1, "managePersonCreateRetryOutcome": 1,
-        "areaCreateOptions": 0, "areaCreateResolve": 1, "areaCreate": 1, "manageAreaCreate": 1, "areaCreateRetryOutcome": 1,
-        "areaColorOptions": 0, "areaColor": 1, "areaColorRetryOutcome": 1,
-        "areaRename": 1, "areaRenameRetryOutcome": 1, "manageAreaEdit": 1, "manageAreaEditRetryOutcome": 1,
-        "areaOrderOptions": 0, "areaOrder": 1, "areaOrderRetryOutcome": 1,
-        "areaDeleteOptions": 0, "areaDelete": 1, "areaDeleteRetryOutcome": 1,
-        "manageAreaDelete": 1, "manageAreaDeleteRetryOutcome": 1,
-        "projectFocusOptions": 1, "projectFocusWrite": 1, "projectFocusRetryOutcome": 1,
-        "focusGroupOptions": 1, "focusGroupWrite": 1, "focusGroupRetryOutcome": 1,
-        "taskListSortOptions": 1, "taskListSortWrite": 1, "taskListSortRetryOutcome": 1,
-        "unassignedAreaColorOptions": 1, "unassignedAreaColorWrite": 1, "unassignedAreaColorRetryOutcome": 1,
-        "somedaySectionCreateOptions": 1, "somedaySectionCreateWrite": 1, "somedaySectionCreateRetryOutcome": 1,
-        "somedaySectionRenameOptions": 1, "somedaySectionRenameWrite": 1, "somedaySectionRenameRetryOutcome": 1,
-        "somedaySectionDeleteOptions": 1, "somedaySectionDeleteWrite": 1, "somedaySectionDeleteRetryOutcome": 1,
-        "somedaySectionOrderOptions": 1, "somedaySectionOrderWrite": 1, "somedaySectionOrderRetryOutcome": 1,
-        "somedaySectionTaskOptions": 1, "somedaySectionTaskPrepare": 1, "somedaySectionTaskCommit": 1, "somedaySectionTaskRetryOutcome": 1,
-        "taskCancellationUndo": 1, "taskCompletion": 1, "taskCompletionUndo": 1,
-        "taskCompletionRetryOutcome": 1,
-        "taskCompletionUndoRetryOutcome": 1,
-        "archivedTaskRestoreWrite": 1, "archivedTaskRestoreRetryOutcome": 1,
-        "archivedTasksRestoreWrite": 1, "archivedTasksRestoreRetryOutcome": 1,
-        "trashItemsRestoreWrite": 1, "trashItemsRestoreRetryOutcome": 1, "trashItemsPurgeWrite": 1, "trashItemsPurgeRetryOutcome": 1, "trashSelection": 1,
-        "inboxTasksMoveWrite": 1, "inboxTasksMoveRetryOutcome": 1, "inboxTasksMoveNotice": 1,
-        "projectTasksMoveWrite": 1, "projectTasksMoveRetryOutcome": 1, "projectTasksMoveNotice": 1,
-        "referenceTasksMoveWrite": 1, "referenceTasksMoveRetryOutcome": 1, "referenceTasksMoveNotice": 1,
-        "inboxTasksRemoveTagWrite": 1, "inboxTasksRemoveTagRetryOutcome": 1,
-        "projectTasksRemoveTagWrite": 1, "projectTasksRemoveTagRetryOutcome": 1,
-        "inboxTasksOrganizeWrite": 1, "inboxTasksOrganizeRetryOutcome": 1,
-        "projectTasksOrganizeWrite": 1, "projectTasksOrganizeRetryOutcome": 1,
-        "inboxOrganizeDestinationCreateWrite": 1, "inboxOrganizeDestinationCreateRetryOutcome": 1,
-        "projectOrganizeDestinationCreateWrite": 1, "projectOrganizeDestinationCreateRetryOutcome": 1,
-        "inboxTasksAddTagWrite": 1, "inboxTasksAddTagRetryOutcome": 1,
-        "projectTasksAddTagWrite": 1, "projectTasksAddTagRetryOutcome": 1, "inboxBulkTagInput": 2,
-        "referenceTasksAddTagWrite": 1, "referenceTasksAddTagRetryOutcome": 1,
-        "referenceTasksRemoveTagWrite": 1, "referenceTasksRemoveTagRetryOutcome": 1, "referenceBulkTagInput": 2,
-        "archivedTasksDeleteWrite": 1, "archivedTasksDeleteRetryOutcome": 1,
-        "archivedTasksDeleteUndoWrite": 1, "archivedTasksDeleteUndoRetryOutcome": 1,
-        "projectTasksDeleteWrite": 1, "projectTasksDeleteRetryOutcome": 1,
-        "projectTasksDeleteUndoWrite": 1, "projectTasksDeleteUndoRetryOutcome": 1,
-        "taskDelete": 1, "taskDeleteReceiptOutcome": 1, "taskDeleteUndo": 1, "taskDeleteUndoReceiptOutcome": 1, "taskPromote": 1, "trashTaskRestoreWrite": 1, "trashTaskRestoreRetryOutcome": 1,
-        "trashProjectRestoreWrite": 1, "trashProjectRestoreRetryOutcome": 1,
-        "projectDeleteWrite": 1, "projectDeleteRetryOutcome": 1, "projectDeleteReceiptOutcome": 1, "projectDeleteUndo": 1, "projectDeleteUndoRetryOutcome": 1,
-        "projectDuplicateWrite": 1, "projectDuplicateRetryOutcome": 1,
-        "projectLifecycleWrite": 1, "projectLifecycleRetryOutcome": 1, "projectLifecycleReceiptOutcome": 1,
-        "reviewTaskWrite": 1,
-        "rowQuickStatusOptions": 1, "rowQuickStatusWrite": 1, "rowQuickStatusRetryOutcome": 1,
-        "inlineChecklistWrite": 1, "inlineChecklistRetryOutcome": 1,
-        "doneTaskStatusOptions": 1, "doneTaskStatusWrite": 1, "doneTaskStatusRetryOutcome": 1,
-        "referenceTaskBackdateOptions": 1, "referenceTaskBackdate": 1, "referenceTaskBackdateRetryOutcome": 1,
-        "taskChecklistMoveOptions": 1, "taskChecklistMove": 1, "taskChecklistMoveRetryOutcome": 1,
-        "taskChecklistMoveUndo": 1, "taskChecklistMoveUndoRetryOutcome": 1,
-        "taskPromoteOptions": 1, "taskPromoteUndoWrite": 1, "taskPromoteUndoRetryOutcome": 1,
-        "projectToSectionOptions": 1, "projectToSectionWrite": 1, "projectToSectionRetryOutcome": 1,
-        "projectToSectionUndoWrite": 1, "projectToSectionUndoRetryOutcome": 1,
-        "taskRowSwipeActions": 1, "rowTaskFocus": 1, "rowTaskFocusRetryOutcome": 1,
-        "rowTaskDates": 1, "rowTaskDatesRetryOutcome": 1,
-        "rowTaskDestinationOptions": 1, "rowTaskDestination": 1, "rowTaskDestinationRetryOutcome": 1,
-        "rowTaskBackdateOptions": 1, "rowTaskBackdate": 1, "rowTaskBackdateRetryOutcome": 1,
-        "referenceTaskDestinationOptions": 1, "referenceTaskDestination": 1, "referenceTaskDestinationRetryOutcome": 1,
-        "referenceProjectNextActionOptions": 1, "referenceProjectNextActionInput": 1, "referenceProjectNextAction": 1, "referenceProjectNextActionRetryOutcome": 1,
-        "doneTaskCompletedAtOptions": 1, "doneTaskCompletedAtWrite": 1, "doneTaskCompletedAtRetryOutcome": 1,
-        "archiveTaskCompletedAtOptions": 1, "archiveTaskCompletedAtWrite": 1, "archiveTaskCompletedAtRetryOutcome": 1,
-        "somedaySectionMoveOptions": 1, "somedaySectionMoveWrite": 1, "somedaySectionMoveUndo": 1,
-        "somedaySectionMoveRetryOutcome": 1, "somedaySectionMoveUndoRetryOutcome": 1,
-        "somedaySectionBulkMoveOptions": 1, "somedaySectionBulkMoveWrite": 1, "somedaySectionBulkMoveUndo": 1,
-        "somedaySectionBulkMoveRetryOutcome": 1, "somedaySectionBulkMoveUndoRetryOutcome": 1,
-        "taskFocusOptions": 1, "taskFocusWrite": 1, "taskFocusRetryOutcome": 1,
-        "focusOrderOptions": 1, "focusOrderWrite": 1, "focusOrderRetryOutcome": 1,
-        "focusSavedFilterOptions": 1, "focusSavedFilterWrite": 1, "focusSavedFilterRetryOutcome": 1,
-        "savedSearchSortOptions": 1, "savedSearchOptions": 1, "savedSearchWrite": 1, "savedSearchRetryOutcome": 1,
-        "projectRenameOptions": 1, "projectRenameWrite": 1, "projectRenameRetryOutcome": 1,
-        "projectFlowOptions": 1, "projectFlowModeOptions": 1, "projectSectionFlowOptions": 1, "projectFlowWrite": 1, "projectFlowRetryOutcome": 1,
-        "projectTaskSortOptions": 1, "projectTaskSortWrite": 1, "projectTaskSortRetryOutcome": 1,
-        "projectTaskOrderWrite": 1, "projectTaskOrderRetryOutcome": 1,
-        "projectNotesEditOptions": 1, "projectNotesReferenceTarget": 1, "projectNotesDraftDirection": 1, "projectNotesWrite": 1, "projectNotesWriteRetryOutcome": 1,
-        "projectTagsEditOptions": 1, "projectTagsWrite": 1, "projectTagsWriteRetryOutcome": 1,
-        "projectAttachmentEditOptions": 1, "projectAttachmentWrite": 1, "projectAttachmentWriteRetryOutcome": 1,
-        "projectFileRemoveWrite": 1, "projectFileRemoveWriteRetryOutcome": 1,
-        "projectStatusOptions": 1, "projectStatusWrite": 1, "projectStatusRetryOutcome": 1,
-        "projectDateOptions": 1, "projectDateWrite": 1, "projectDateRetryOutcome": 1,
-        "projectAreaOptions": 1, "projectAreaWrite": 1, "projectAreaRetryOutcome": 1,
-        "menuRead": 2, "archiveTaskSelection": 1, "doneBulkTagInput": 2, "destinationPicker": 1, "editorSuggestions": 4, "calendarPreference": 1, "calendarUnschedule": 1, "calendarDelete": 1, "boardAction": 1,
-        "calendarComposerOpen": 1, "calendarComposerEdit": 1, "calendarComposerSave": 1, "calendarEventTaskCreate": 1,
-        "mindSweepGuide": 1, "mindSweepAdd": 1, "weeklyReviewProjectTaskOptions": 1, "weeklyReviewProjectTaskWrite": 1, "reviewAISuggestionsWrite": 1,
-        "inboxStart": 1, "inboxStartDetailed": 1, "inboxStep": 1, "inboxEditorReload": 1, "inboxEnd": 1,
-        "inboxCommit": 1, "inboxSkip": 1, "inboxAfterCommit": 1,
-        "inboxUndo": 1, "inboxUndoRetryOutcome": 1,
-        "checklistEdit": 1, "checklistSave": 1, "checklistReset": 1,
-    ]
-    private static let mutations: Set<String> = ["taskPromoteUndoWrite", "projectToSectionWrite", "projectToSectionUndoWrite", "rowTaskFocus", "rowTaskDates", "rowTaskDestination", "taskChecklistMove", "taskChecklistMoveUndo", "rowQuickStatusWrite", "inlineChecklistWrite", "watchPomodoroSubmit", "iosWatchIngest", "iosWatchAudioIngest", "widgetCompletionSubmit", "shareCaptureSubmit", "reviewAISuggestionsWrite", "iosAITextConfigurationV2", "iosAITextConfiguration", "iosAIRequestTimeout", "iosAIReasoningEffort", "iosAIGeminiThinkingBudget", "pomodoroTransitionWrite", "calendarSubscriptionAdd", "calendarSubscriptionSetting", "deviceCalendarSetting", "reminderSnoozeCommit", "reminderCompletionCommit", "notificationSetting", "dataSetting", "gettingStarted", "referenceTasksRemoveTagWrite", "referenceTasksAddTagWrite", "inboxTasksAddTagWrite", "projectTasksAddTagWrite", "inboxTasksRemoveTagWrite", "projectTasksRemoveTagWrite", "inboxTasksOrganizeWrite", "projectTasksOrganizeWrite", "inboxOrganizeDestinationCreateWrite", "projectOrganizeDestinationCreateWrite", "referenceTasksMoveWrite", "inboxTasksMoveWrite", "projectTasksMoveWrite", "referenceTaskDestination", "referenceProjectNextAction", "referenceTaskBackdate", "rowTaskBackdate", "archivedTasksDeleteWrite", "archivedTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksDeleteUndoWrite", "archivedTasksRestoreWrite", "trashItemsRestoreWrite", "trashItemsPurgeWrite", "archiveTaskCompletedAtWrite", "doneTaskCompletedAtWrite", "doneTaskStatusWrite", "archivedTaskRestoreWrite", "taskCompletion", "taskCompletionUndo", "taskDelete", "taskDeleteUndo", "taskPromote", "trashTaskRestoreWrite", "trashProjectRestoreWrite", "projectDeleteWrite", "projectDeleteUndo", "projectDuplicateWrite", "projectLifecycleWrite", "reviewTaskWrite", "taskCancellationUndo", "captureSubmit", "captureCopilotSubmit", "captureLinesSubmit", "complete", "setAreaFilter", "saveDraft", "calendarUnschedule", "calendarDelete", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit", "somedaySectionMoveWrite", "somedaySectionMoveUndo", "somedaySectionBulkMoveWrite", "somedaySectionBulkMoveUndo", "boardAction", "calendarComposerSave", "calendarEventTaskCreate", "mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectSectionCreate", "projectSectionRename", "projectSectionDelete", "projectSectionOrder", "areaCreate", "manageAreaCreate", "managePersonCreate", "appLock", "gtdWorkflow", "generalPreference", "manageTaxonomy", "managePersonEdit", "managePersonDelete", "areaColor", "areaRename", "manageAreaEdit", "areaOrder", "areaDelete", "manageAreaDelete", "projectFocusWrite", "taskFocusWrite", "focusOrderWrite", "focusSavedFilterWrite", "savedSearchWrite", "projectRenameWrite", "projectFlowWrite", "projectTaskSortWrite", "projectTaskOrderWrite", "projectNotesWrite", "projectTagsWrite", "projectAttachmentWrite", "projectFileRemoveWrite", "projectStatusWrite", "projectDateWrite", "projectAreaWrite"]
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
 
@@ -6725,7 +6582,7 @@ private final class Engine: @unchecked Sendable {
         scheduleAttachmentIdle()
     }
     private func reminderInvoke(_ method: String, _ arguments: [Any], cancellation: NativeAttachmentCancellation? = nil) throws -> String {
-        guard Self.reminderMethods.contains(method), !reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
+        guard HostMethod.registry[method]?.facade == .reminder, !reminderOwnerAccess else { throw NativeReminderEffects.unavailable }
         reminderOwnerAccess = true; defer { reminderOwnerAccess = false }
         return try invoke(method, arguments: arguments, localCancellation: cancellation)
     }
@@ -9414,7 +9271,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func invokeVoice(_ method: String, _ arguments: [Any], binding: VoiceBinding,
         cancellation: NativeAttachmentCancellation = NativeAttachmentCancellation()) throws -> String {
-        guard Self.voiceMethods.contains(method) else { throw NativeVoiceJSON.invalid }
+        guard HostMethod.registry[method]?.facade == .voice else { throw NativeVoiceJSON.invalid }
         try requireVoiceBinding(binding, cancellation: cancellation)
         let owner: @convention(block) () -> String = { [unowned self] in
             self.guarded { try self.requireVoiceBinding(binding, cancellation: cancellation); return "" }
@@ -14917,17 +14774,18 @@ private final class Engine: @unchecked Sendable {
     private func call(_ method: String, argumentsJSON: String, editorAttempt: EditorDraftAttempt?,
         reminderCompletionOwned: Bool = false, pomodoroOwned: Bool = false, watchOwned: Bool = false) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        let registered = HostMethod.registry[method]
         guard method != "gettingStartedOutcome" else { throw CoreHostRejection(message: "INVALID_INPUT: Getting Started outcome requires its journal") }
         guard !["iosWatchIngestOutcome", "iosWatchPomodoroPrepare", "iosWatchAudioOutcome", "iosWatchAudioNeedsTranscript", "iosWatchOpenAIRuntime"].contains(method), !["iosWatchIngest", "iosWatchAudioIngest", "watchPomodoroSubmit"].contains(method) || watchOwned else { throw NativeWatchBatch.invalid }
         guard method != "iosAISummaryCheckpointSettled" else { throw CoreHostRejection(message: "INVALID_INPUT: AI summary checkpoint requires fixture authority") }
         guard method != "iosAISettingsProjection" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI projection requires its private read facade")
         }
-        guard !Self.voiceMethods.contains(method) else { throw NativeVoiceJSON.invalid }
-        guard !Self.aiTextConfigurationMethods.contains(method) || (["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) && aiTextConfigurationOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade") }
-        guard !Self.aiRequestTimeoutMethods.contains(method) || (method == "iosAIRequestTimeout" && aiRequestTimeoutOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade") }
-        guard !Self.aiReasoningEffortMethods.contains(method) || (method == "iosAIReasoningEffort" && aiReasoningEffortOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade") }
-        guard !Self.aiGeminiThinkingBudgetMethods.contains(method) || (method == "iosAIGeminiThinkingBudget" && aiGeminiThinkingBudgetOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade") }
+        guard registered?.facade != .voice else { throw NativeVoiceJSON.invalid }
+        guard registered?.facade != .aiTextConfiguration || (["iosAITextConfiguration", "iosAITextConfigurationV2"].contains(method) && aiTextConfigurationOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI text configuration requires its private facade") }
+        guard registered?.facade != .aiRequestTimeout || (method == "iosAIRequestTimeout" && aiRequestTimeoutOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade") }
+        guard registered?.facade != .aiReasoningEffort || (method == "iosAIReasoningEffort" && aiReasoningEffortOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI reasoning effort requires its private facade") }
+        guard registered?.facade != .aiGeminiThinkingBudget || (method == "iosAIGeminiThinkingBudget" && aiGeminiThinkingBudgetOwnerAccess) else { throw CoreHostRejection(message: "INVALID_INPUT: AI Gemini thinking budget requires its private facade") }
         guard !["iosTaskAIOptions", "iosTaskAIRequest", "iosTaskAIWitness", "iosInboxAIWitness", "iosInboxAIRequest", "iosInboxAIApply", "iosReviewAIWitness", "iosReviewAIRequest", "iosReviewAIApply", "iosReviewAIOutcome", "iosReviewAIValidateApply"].contains(method), method != "reviewAISuggestionsWrite" || reviewAIApplyLease?.isCurrent == true else { throw NativeTaskAIJSON.invalid }
         guard !["iosShareCapturePrepare", "iosShareCaptureCommit", "iosShareCaptureOutcome", "iosWidgetCompletionPrepare", "iosWidgetCompletionValidate", "iosWidgetCompletionCommit", "iosWidgetCompletionOutcome"].contains(method),
               method != "shareCaptureSubmit" || shareCaptureLease?.isCurrent == true else { throw NativeShareError.unavailable }
@@ -14935,33 +14793,33 @@ private final class Engine: @unchecked Sendable {
         guard method != "iosAIProviderDeviceState" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI provider device metadata requires its private read facade")
         }
-        guard !Self.pomodoroFacadeMethods.contains(method) || pomodoroOwned else { throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade") }
-        guard calendarPushTurn == nil, !Self.calendarPushMethods.contains(method) else {
+        guard registered?.facade != .pomodoro || pomodoroOwned else { throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade") }
+        guard calendarPushTurn == nil, registered?.facade != .calendarPush else {
             throw CoreHostRejection(message: "NOT_READY: Calendar push requires its current explicit owner")
         }
-        guard calendarAccessTurn == nil, !Self.calendarAccessMethods.contains(method) else {
+        guard calendarAccessTurn == nil, registered?.facade != .calendarAccess else {
             throw CoreHostRejection(message: "NOT_READY: Calendar access requires its current explicit owner")
         }
         guard method != "iosPruneReceipts" else {
             throw CoreHostRejection(message: "INVALID_INPUT: Receipt retention requires startup ownership")
         }
-        guard !Self.reminderSnoozeMethods.contains(method) else {
+        guard registered?.facade != .reminderSnooze else {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder Snooze requires its explicit facade")
         }
-        guard !Self.reminderCompletionMethods.contains(method) || method == "reminderCompletionCommit" && reminderCompletionOwned else {
+        guard registered?.facade != .reminderCompletion || method == "reminderCompletionCommit" && reminderCompletionOwned else {
             throw CoreHostRejection(message: "INVALID_INPUT: Reminder completion requires its explicit facade")
         }
-        guard reminderEffectsTurn == nil, pomodoroAlarmTurn == nil, !Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard reminderEffectsTurn == nil, pomodoroAlarmTurn == nil, registered?.facade != .reminder else { throw NativeReminderEffects.unavailable }
         guard (calendarSubscriptionSettingTurn == nil || method == calendarSubscriptionSettingTurn?.operation.rawValue),
-              !Self.calendarSubscriptionSettingMethods.contains(method) || method == calendarSubscriptionSettingTurn?.operation.rawValue else {
+              registered?.facade != .calendarSubscriptionSetting || method == calendarSubscriptionSettingTurn?.operation.rawValue else {
             throw CoreHostRejection(message: "NOT_READY: Calendar subscription settings require their current explicit owner")
         }
         guard (deviceCalendarSettingTurn == nil || method == "deviceCalendarSetting"),
-              !Self.deviceCalendarSettingMethods.contains(method) || (method == "deviceCalendarSetting" && deviceCalendarSettingTurn != nil) else {
+              registered?.facade != .deviceCalendarSetting || (method == "deviceCalendarSetting" && deviceCalendarSettingTurn != nil) else {
             throw CoreHostRejection(message: "NOT_READY: Device Calendar Settings require their current explicit owner")
         }
         guard (notificationSettingTurn == nil || notificationSettingOwnerAccess),
-              !Self.notificationSettingMethods.contains(method) || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
+              registered?.facade != .notificationSetting || (method == "notificationSetting" && notificationSettingOwnerAccess) else {
             throw CoreHostRejection(message: "NOT_READY: Notification Settings require their current explicit owner")
         }
         try denyCleanupOwner()
@@ -15001,7 +14859,7 @@ private final class Engine: @unchecked Sendable {
                 freshPomodoroRequest = try capturePomodoroRequest(Self.pomodoroRequest(values[0]))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else { freshPomodoroRequest = nil }
-        let mutation = Self.mutations.contains(method)
+        let mutation = registered?.journaled == true
         if method == "gettingStarted" {
             guard editorAttempt == nil, try editorDrafts.read() == nil, aiConfigurationTurn == nil, aiTextConfigurationTurn == nil,
                   aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, taskAITurn == nil else {
@@ -15198,7 +15056,7 @@ private final class Engine: @unchecked Sendable {
         guard pending == nil else { throw HostFailure("SAVE_FAILED: A pending command requires exact retry") }
         if pomodoroOwned, method == "pomodoroPanelReadHost" { return try invoke("pomodoroPanelRead", arguments: args) }
         if pomodoroOwned, method == "pomodoroAlarmReadHost" { return try invoke("pomodoroAlarmRead", arguments: []) }
-        guard Self.mutations.contains(method) else {
+        guard mutation else {
             if method == "iosSearchObservation" {
                 let observation = try searchObservation()
                 return try Self.ownedJSON(["ready": observation.ready, "revision": observation.revision,
@@ -23576,7 +23434,6 @@ private final class Engine: @unchecked Sendable {
     }
 
     private static let pomodoroMethod = "pomodoroTransitionCommit"
-    static let pomodoroFacadeMethods: Set<String> = ["pomodoroPanelReadHost", "pomodoroAlarmReadHost", "pomodoroSessionReadHost", "pomodoroTransitionWrite", "pomodoroTransitionRetryOutcome"]
     private static let pomodoroFailure = HostFailure("Pomodoro transition requires its exact retained request")
     private static let pomodoroJournalLimit = 12_000_000
 
@@ -26990,23 +26847,24 @@ private final class Engine: @unchecked Sendable {
             }
             return args
         }
-        guard let count = Self.methods[method],
-              let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [Any], args.count == count else {
+        guard let kinds = HostMethod.registry[method]?.arguments,
+              let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [Any], args.count == kinds.count else {
             throw HostFailure("Invalid or unavailable core method arguments")
         }
 
-        for (index, argument) in args.enumerated() {
-            if (method == "window" && index < 2) || method == "focus"
-                || (["focusWindow", "projectDetail", "projectNotes"].contains(method) && (index == 1 || index == 2))
-                || (method == "editorSuggestions" && index == 3) {
+        for (argument, kind) in zip(args, kinds) {
+            switch kind {
+            case .integer:
                 guard Self.isInteger(argument) else {
                     throw HostFailure("Core numeric arguments must be integers")
                 }
-            } else if ["doneBulkTagInput", "referenceBulkTagInput", "inboxBulkTagInput"].contains(method) && index == 1 {
+            case .tagCount:
                 guard Self.isInteger(argument), let count = argument as? NSNumber, count.doubleValue >= 0, count.doubleValue <= 10_000 else {
                     throw HostFailure("INVALID_INPUT: Bulk tag count must be an integer from 0 to 10000")
                 }
-            } else if !(argument is String) { throw HostFailure("Core arguments must be strings") }
+            case .string:
+                if !(argument is String) { throw HostFailure("Core arguments must be strings") }
+            }
         }
         if method == "reviewAISuggestionsWrite" {
             guard let raw = args.first as? String else { throw NativeTaskAIJSON.invalid }; _ = try NativeReviewAIJSON.apply(raw)
@@ -33454,7 +33312,7 @@ private final class Engine: @unchecked Sendable {
         guard calendarAccessTurn == nil || method == "deviceCalendarAccessAcknowledged" else {
             throw CoreHostRejection(message: "NOT_READY: Calendar access is still awaiting its owner")
         }
-        guard (reminderEffectsTurn == nil && pomodoroAlarmTurn == nil) || reminderOwnerAccess && Self.reminderMethods.contains(method) else { throw NativeReminderEffects.unavailable }
+        guard (reminderEffectsTurn == nil && pomodoroAlarmTurn == nil) || reminderOwnerAccess && HostMethod.registry[method]?.facade == .reminder else { throw NativeReminderEffects.unavailable }
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
         try requireProjectFileAddTurn()

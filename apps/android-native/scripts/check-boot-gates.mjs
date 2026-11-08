@@ -5050,7 +5050,7 @@ const poll = async (state, id) => {
             assert.equal((await poll(state, state.MindwtrHost[dispatch](route, '{}'))).ok, false);
     }
     const swift = readFileSync(resolve(app, '../ios-native/Sources/MindwtrNativeCore/CoreHost.swift'), 'utf8');
-    assert.match(swift, /guard !Engine\.aiRequestTimeoutMethods\.contains\(method\)/);
+    assert.match(swift, /case \.aiRequestTimeout\?: throw CoreHostRejection\(message: "INVALID_INPUT: AI timeout requires its private facade"\)/);
     assert.match(swift, /func setAIRequestTimeout\(_ request: NativeAIRequestTimeoutRequest,/);
 
     const requireTypedAITimeoutFacade = source => {
@@ -5070,7 +5070,7 @@ const poll = async (state, id) => {
         assert.doesNotMatch(witness, /public (?:let|var|func|init)/);
         assert.doesNotMatch(source, /public func (?:probeAIRequestTimeoutOutcome|readAIProviderDeviceState|invokeAIRequestTimeoutRead)/);
         assert.doesNotMatch(source, /public func (?:setAIRequestTimeout|readAIRequestTimeoutOptions)\([^)]*(?:requestJSON|argumentsJSON)/);
-        assert.match(source, /guard !Engine\.aiRequestTimeoutMethods\.contains\(method\)/);
+        assert.match(source, /case \.aiRequestTimeout\?: throw CoreHostRejection\(message: "INVALID_INPUT: AI timeout requires its private facade"\)/);
     };
     requireTypedAITimeoutFacade(swift);
     for (const [before, after] of [
@@ -5080,7 +5080,7 @@ const poll = async (state, id) => {
         ['    let stamp: String?', '    public let stamp: String?'],
         ['public struct NativeAIRequestTimeoutWitness: Sendable, Equatable', 'public struct NativeAIRequestTimeoutWitness: Decodable, Sendable, Equatable'],
         ['    func probeAIRequestTimeoutOutcome(', '    public func probeAIRequestTimeoutOutcome('],
-        ['guard !Engine.aiRequestTimeoutMethods.contains(method)', 'guard true'],
+        ['case .aiRequestTimeout?: throw CoreHostRejection(message: "INVALID_INPUT: AI timeout requires its private facade")', 'case .aiRequestTimeout?: break'],
     ]) {
         const target = before === '    let stamp: String?'
             ? swift.slice(swift.indexOf('public struct NativeAIRequestTimeoutWitness:'), swift.indexOf('public struct NativeAIRequestTimeoutRequest:')) : swift;
