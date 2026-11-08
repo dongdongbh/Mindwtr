@@ -28,7 +28,7 @@ val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "
 
 
 internal fun staleMoveLine(kind: String, message: String?): String? =
-    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus", "taskChecklistMove") && it.startsWith("STALE_REVISION") }
+    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove", "taskDatesSave", "taskSwipeFocus", "taskChecklistMove", "taskChecklistMoveUndo") && it.startsWith("STALE_REVISION") }
         ?.substringAfter(": ", "")?.ifEmpty { null }
 
 

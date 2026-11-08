@@ -13,6 +13,13 @@ class StaleMoveTest {
         }
     }
 
+    @Test fun aStaleChecklistMoveOrUndoShowsCoresLineInsteadOfLockingWrites() {
+        for (kind in listOf("taskChecklistMove", "taskChecklistMoveUndo")) {
+            assertEquals(kind, "Task not found", staleMoveLine(kind, "STALE_REVISION: Task not found"))
+        }
+        assertNull(staleMoveLine("taskChecklistMoveUndo", "SAVE_FAILED: disk full"))
+    }
+
     @Test fun otherRefusalsAndCommandsAreNotThisToast() {
         assertNull(staleMoveLine("taskDestinationMove", "INVALID_INPUT: That project cannot take tasks"))
         assertNull(staleMoveLine("somedayProjectMove", null))

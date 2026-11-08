@@ -4,7 +4,7 @@ import { fail, isObjectRecord } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
 import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
 import { useTaskStore } from './store';
-import { canMoveTaskToChecklist, getChecklistMoveTargets, isChecklistMoveTarget } from './task-checklist-move';
+import { canMoveTaskToChecklist, checklistItemIdForMovedTask, getChecklistMoveTargets, isChecklistMoveTarget } from './task-checklist-move';
 
 type Translate = (key: string) => string;
 
@@ -44,18 +44,26 @@ export function createChecklistMoveMethods(deps: {
         const source = state._tasksById.get(sourceId);
         return Boolean(source) && canMoveTaskToChecklist(source!, resolveQuickCaptureDefaultAreaId(state.settings, state.areas));
     };
+    const undoable = ({ sourceId, targetId }: MoveRequest): boolean => {
+        const state = useTaskStore.getState();
+        const source = state._tasksById.get(sourceId);
+        const itemId = checklistItemIdForMovedTask(sourceId);
+        return Boolean(source?.deletedAt && !source.purgedAt)
+            || Boolean(state._tasksById.get(targetId)?.checklist?.some((item) => item.id === itemId));
+    };
     const readRequest = (input: unknown): MoveRequest | null => (
         isObjectRecord(input) && typeof input.requestId === 'string' && deps.requestIdPattern.test(input.requestId) && id(input.sourceId) && id(input.targetId)
             ? { requestId: input.requestId, sourceId: input.sourceId, targetId: input.targetId } : null
     );
 
     return {
-        getChecklistMoveTargets(input: { sourceId: string; query: string }): NativeHostResult<NativeChecklistMoveTargets> {
+        getChecklistMoveTargets(input: { sourceId: string; query: string; eligibleOnly?: boolean }): NativeHostResult<NativeChecklistMoveTargets> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || !id(input.sourceId) || typeof input.query !== 'string') return fail('INVALID_INPUT', 'A source task and a search text are required');
             const t = deps.t();
-            const rows = getChecklistMoveTargets(useTaskStore.getState().tasks, input.sourceId, input.query).map((task) => ({
+            const listed = input.eligibleOnly === true ? [] : getChecklistMoveTargets(useTaskStore.getState().tasks, input.sourceId, input.query);
+            const rows = listed.map((task) => ({
                 id: task.id,
                 title: task.title,
                 progress: task.checklist?.length ? `${task.checklist.filter((item) => item.isCompleted).length}/${task.checklist.length}` : null,
@@ -65,7 +73,7 @@ export function createChecklistMoveMethods(deps: {
                 title: tFallback(t, 'task.addToChecklist', 'Add to checklist…'),
                 searchLabel: tFallback(t, 'common.search', 'Search'),
                 cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
-                noMatches: rows.length === 0 ? tFallback(t, 'common.noMatches', 'No matches') : null,
+                noMatches: rows.length === 0 && input.eligibleOnly !== true ? tFallback(t, 'common.noMatches', 'No matches') : null,
                 rows,
             } };
         },
@@ -95,6 +103,7 @@ export function createChecklistMoveMethods(deps: {
             if (!request) return fail('INVALID_INPUT', 'A request UUID, a source task and a target task are required');
             const { requestId, ...rest } = request;
             return receipts.run<{ id: string }>(requestId, JSON.stringify(['taskChecklistMoveUndo', rest]), async () => {
+                if (!undoable(request)) return fail('STALE_REVISION', 'Task not found');
                 const written = await runStoreWrite(() => useTaskStore.getState().undoMoveTaskToChecklist(request.sourceId, request.targetId));
                 return settleWrite(written, { id: request.sourceId });
             });

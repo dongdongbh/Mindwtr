@@ -15,6 +15,11 @@ class RefusedCommandTest {
         assertTrue(refusedUnwritten("inboxDecisionUndo", "ACTION_FAILED: Process Inbox Undo failed"))
     }
 
+    @Test fun aStaleChecklistMoveOrUndoOwesNothing() {
+        for (kind in listOf("taskChecklistMove", "taskChecklistMoveUndo")) assertTrue(kind, refusedUnwritten(kind, "STALE_REVISION: Task not found"))
+        assertFalse(refusedUnwritten("taskChecklistMoveUndo", "SAVE_FAILED: disk full"))
+    }
+
     @Test fun aFailedSaveStaysOwed() {
         for (kind in listOf("complete", "completeUndo", "inboxDecisionUndo", "update")) assertFalse(kind, refusedUnwritten(kind, "SAVE_FAILED: disk full"))
 

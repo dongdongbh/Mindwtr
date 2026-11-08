@@ -47,6 +47,12 @@ describe('native host contract: an Inbox title into another task\'s checklist (R
         expect(eligible('next')).toBe(false);
     });
 
+    it('the status menu\'s eligibility read lists no targets, so a large library still answers at once', async () => {
+        const { host } = await openHost([task('plain'), task('target', { status: 'next' })]);
+        expect(value(host.getChecklistMoveTargets({ sourceId: 'plain', query: '', eligibleOnly: true }))).toMatchObject({ eligible: true, rows: [], noMatches: null });
+        expect(value(host.getChecklistMoveTargets({ sourceId: 'target', query: '', eligibleOnly: true })).eligible).toBe(false);
+    });
+
     it('lists open tasks other than the source, ones with a checklist first, with their progress, filtered by the search', async () => {
         const { host } = await openHost([task('Eggs'), task('Groceries', { status: 'next', checklist: [{ id: 'c1', title: 'Milk', isCompleted: true }, { id: 'c2', title: 'Bread', isCompleted: false }] }),
             task('Plan trip', { status: 'next' }), task('Done one', { status: 'done' }), task('Gone', { status: 'next', deletedAt: NOW })]);
@@ -89,6 +95,19 @@ describe('native host contract: an Inbox title into another task\'s checklist (R
         expect(bad.ok ? '' : bad.error.code).toBe('INVALID_INPUT');
         await flushPendingSave();
         expect(writes()).toBe(0);
+    });
+
+    it('a second Undo with nothing left to undo is refused as stale, not as a failed action, and nothing is written', async () => {
+        const { host, writes } = await openHost([task('src', { title: 'Eggs' }), task('target', { status: 'next' })]);
+        value(await host.moveTaskToChecklist(move('src', 'target')));
+        value(await host.undoMoveTaskToChecklist(move('src', 'target')));
+        await flushPendingSave();
+        const after = writes();
+        const again = await host.undoMoveTaskToChecklist(move('src', 'target'));
+        expect(again.ok ? '' : `${again.error.code}: ${again.error.message}`).toBe('STALE_REVISION: Task not found');
+        await flushPendingSave();
+        expect(writes()).toBe(after);
+        expect(stored('src').deletedAt).toBeUndefined();
     });
 
     it('a retried request id moves once', async () => {

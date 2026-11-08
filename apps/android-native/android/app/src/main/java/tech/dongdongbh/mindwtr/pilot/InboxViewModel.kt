@@ -1265,7 +1265,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun showStatusMenu(task: TaskRow?) {
         statusMenu = task
         checklistMoveEligible = null
-        if (task != null && task.status == "inbox") readChecklistTargets(task.id, "") { reply -> if (statusMenu?.id == task.id) checklistMoveEligible = task.id.takeIf { reply.getBoolean("eligible") } }
+        if (task != null && task.status == "inbox") readChecklistTargets(task.id, "", eligibleOnly = true) { reply -> if (statusMenu?.id == task.id) checklistMoveEligible = task.id.takeIf { reply.getBoolean("eligible") } }
     }
 
     var checklistMoveEligible by mutableStateOf<String?>(null); private set
@@ -1300,12 +1300,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     internal fun checklistMoved(sourceId: String, targetId: String, toast: JSONObject) {
         showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5_200) {
-            menu.command("taskChecklistMoveUndo", JSONObject().put("sourceId", sourceId).put("targetId", targetId))
+            menu.whenIdle { menu.command("taskChecklistMoveUndo", JSONObject().put("sourceId", sourceId).put("targetId", targetId)) }
         }
     }
 
-    private fun readChecklistTargets(sourceId: String, query: String, apply: (JSONObject) -> Unit) {
-        background(listOf(Part.MenuDialog), { runtime -> runtime.menuRead("checklistTargets", JSONObject().put("sourceId", sourceId).put("query", query).toString()) }) { reply, _ -> apply(reply) }
+    private fun readChecklistTargets(sourceId: String, query: String, eligibleOnly: Boolean = false, apply: (JSONObject) -> Unit) {
+        val input = JSONObject().put("sourceId", sourceId).put("query", query).apply { if (eligibleOnly) put("eligibleOnly", true) }
+        background(listOf(Part.MenuDialog), { runtime -> runtime.menuRead("checklistTargets", input.toString()) }) { reply, _ -> apply(reply) }
     }
 
 
