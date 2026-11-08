@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { isSameDay, isToday } from 'date-fns';
-import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Minus, Plus, Search } from 'lucide-react';
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Minus, Plus, Search } from 'lucide-react';
 import {
     formatI18nTemplate,
     getCalendarDayOfMonth,
@@ -35,16 +35,19 @@ import { collectCalendarKeyboardTasks } from './calendar/calendar-keyboard-tasks
 import { CalendarOpenTaskModal, CalendarTaskComposerModal } from './calendar/CalendarModals';
 import { CalendarPlanningPanel } from './calendar/CalendarPlanningPanel';
 import { CalendarDeadlineLane } from './calendar/CalendarDeadlineLane';
+import { CalendarOverviewGrid } from './calendar/CalendarOverviewGrid';
 import { CalendarSelectedDayPanel } from './calendar/CalendarSelectedDayPanel';
 import { TaskQuickActionMenuHost } from '../Task/useTaskQuickActionMenuProps';
 import {
     CALENDAR_TIMELINE_DAY_COUNT_MAX,
     CALENDAR_TIMELINE_DAY_COUNT_MIN,
+    CALENDAR_VIEW_MODE_ORDER,
     DESKTOP_DAY_END_HOUR,
     DESKTOP_DAY_START_HOUR,
     DESKTOP_GRID_SNAP_MINUTES,
     DESKTOP_HOUR_HEIGHT,
     dayKey,
+    isCalendarTimelineViewMode,
     type CalendarCellItem,
     type CalendarViewMode,
 } from './calendar/calendar-primitives';
@@ -90,7 +93,9 @@ export function CalendarView() {
         getAllDayItemsForDay,
         getCalendarItemsForDate,
         handleMonthChange,
+        handleNextDay,
         handleNextMonth,
+        handlePrevDay,
         handlePrevMonth,
         handleToday,
         handleViewModeChange,
@@ -103,6 +108,7 @@ export function CalendarView() {
         openDayViewForDate,
         openQuickAddForStart,
         openTaskFromCalendar,
+        overviewMonthGrids,
         resolveText,
         scheduleDays,
         selectCalendarDate,
@@ -230,15 +236,15 @@ export function CalendarView() {
             })
             .catch((error) => reportError('Failed to remove task from calendar', error));
     }, [t, updateTask]);
-    const timelineScrollKey = viewMode === 'day' || viewMode === 'week'
+    const timelineScrollKey = isCalendarTimelineViewMode(viewMode)
         ? `${viewMode}:${timelineDays.map(dayKey).join('|')}`
         : '';
     const deadlineRenderLogged = useRef(new Set<string>());
-    const visibleTimedDeadlineCount = (viewMode === 'day' || viewMode === 'week')
+    const visibleTimedDeadlineCount = isCalendarTimelineViewMode(viewMode)
         ? timelineDays.reduce((count, day) => count + getTimedDeadlinesForDay(day).length, 0)
         : 0;
     useEffect(() => {
-        if ((viewMode !== 'day' && viewMode !== 'week') || !visibleTimedDeadlineCount || deadlineRenderLogged.current.has(viewMode)) return;
+        if (!isCalendarTimelineViewMode(viewMode) || !visibleTimedDeadlineCount || deadlineRenderLogged.current.has(viewMode)) return;
         deadlineRenderLogged.current.add(viewMode);
         void logInfo('Calendar timed deadline markers rendered', {
             scope: 'calendar',
@@ -253,20 +259,49 @@ export function CalendarView() {
 
         }
     }, []);
-    const periodNavigationLabels = viewMode === 'day'
-        ? {
+    const periodNavigationLabels: Record<CalendarViewMode, { previous: string; next: string }> = {
+        day: {
             previous: resolveText('calendar.prevDay', 'Previous day'),
             next: resolveText('calendar.nextDay', 'Next day'),
-        }
-        : viewMode === 'week'
-            ? {
-                previous: resolveText('calendar.prevWeek', 'Previous week'),
-                next: resolveText('calendar.nextWeek', 'Next week'),
-            }
-            : {
-                previous: resolveText('calendar.prevMonth', 'Previous month'),
-                next: resolveText('calendar.nextMonth', 'Next month'),
-            };
+        },
+        threeDay: {
+            previous: resolveText('calendar.prevThreeDays', 'Previous three days'),
+            next: resolveText('calendar.nextThreeDays', 'Next three days'),
+        },
+        week: {
+            previous: resolveText('calendar.prevWeek', 'Previous week'),
+            next: resolveText('calendar.nextWeek', 'Next week'),
+        },
+        month: {
+            previous: resolveText('calendar.prevMonth', 'Previous month'),
+            next: resolveText('calendar.nextMonth', 'Next month'),
+        },
+        quarter: {
+            previous: resolveText('calendar.prevQuarter', 'Previous quarter'),
+            next: resolveText('calendar.nextQuarter', 'Next quarter'),
+        },
+        year: {
+            previous: resolveText('calendar.prevYear', 'Previous year'),
+            next: resolveText('calendar.nextYear', 'Next year'),
+        },
+        schedule: {
+            previous: resolveText('calendar.prevMonth', 'Previous month'),
+            next: resolveText('calendar.nextMonth', 'Next month'),
+        },
+    };
+    const viewModeLabels: Record<CalendarViewMode, string> = {
+        day: resolveText('calendar.day', 'Day'),
+        threeDay: resolveText('calendar.threeDay', '3 days'),
+        week: resolveText('calendar.week', 'Week'),
+        month: resolveText('calendar.month', 'Month'),
+        quarter: resolveText('calendar.quarter', 'Quarter'),
+        year: resolveText('calendar.year', 'Year'),
+        schedule: resolveText('calendar.schedule', 'Schedule'),
+    };
+    const dayStepLabels = {
+        previous: resolveText('calendar.stepPrevDay', 'Step back one day'),
+        next: resolveText('calendar.stepNextDay', 'Step forward one day'),
+    };
 
     useLayoutEffect(() => {
         const scroller = timelineScrollRef.current;
@@ -328,17 +363,14 @@ export function CalendarView() {
                         <CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />
                         {resolveText('calendar.today', 'Today')}
                     </button>
-                    <div className="grid w-full grid-cols-2 rounded-md border border-border bg-card p-1 sm:inline-flex sm:w-auto">
-                        {([
-                            ['day', resolveText('calendar.day', 'Day')],
-                            ['week', resolveText('calendar.week', 'Week')],
-                            ['month', resolveText('calendar.month', 'Month')],
-                            ['schedule', resolveText('calendar.schedule', 'Schedule')],
-                        ] as Array<[CalendarViewMode, string]>).map(([mode, label]) => (
+                    <div className="flex w-full flex-wrap items-center gap-1 rounded-md border border-border bg-card p-1 sm:w-auto">
+                        {CALENDAR_VIEW_MODE_ORDER.map((mode) => (
                             <button
                                 key={mode}
                                 type="button"
+                                data-calendar-view-mode={mode}
                                 onClick={() => handleViewModeChange(mode)}
+                                aria-pressed={viewMode === mode}
                                 className={cn(
                                     "h-7 rounded px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40",
                                     viewMode === mode
@@ -346,7 +378,7 @@ export function CalendarView() {
                                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                 )}
                             >
-                                {label}
+                                {viewModeLabels[mode]}
                             </button>
                         ))}
                     </div>
@@ -387,12 +419,13 @@ export function CalendarView() {
                     <div className="flex w-full items-center gap-1 rounded-md border border-border bg-card p-1 sm:w-auto">
                         <button
                             type="button"
+                            data-calendar-period-prev
                             onClick={handlePrevMonth}
                             className="inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            aria-label={periodNavigationLabels.previous}
-                            title={periodNavigationLabels.previous}
+                            aria-label={periodNavigationLabels[viewMode].previous}
+                            title={periodNavigationLabels[viewMode].previous}
                         >
-                            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                            <ChevronsLeft className="h-4 w-4" aria-hidden="true" />
                         </button>
                         <div className="relative min-w-0 flex-1 sm:flex-none">
                             <button
@@ -439,12 +472,43 @@ export function CalendarView() {
                         </div>
                         <button
                             type="button"
+                            data-calendar-period-next
                             onClick={handleNextMonth}
                             className="inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            aria-label={periodNavigationLabels.next}
-                            title={periodNavigationLabels.next}
+                            aria-label={periodNavigationLabels[viewMode].next}
+                            title={periodNavigationLabels[viewMode].next}
                         >
-                            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                            <ChevronsRight className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                    </div>
+                    <div
+                        data-calendar-day-step
+                        role="group"
+                        aria-label={resolveText('calendar.dayStepGroup', 'One-day navigation')}
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-dashed border-primary/50 bg-primary/5 p-1"
+                    >
+                        <button
+                            type="button"
+                            data-calendar-day-step-prev
+                            onClick={handlePrevDay}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded text-primary hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            aria-label={dayStepLabels.previous}
+                            title={dayStepLabels.previous}
+                        >
+                            <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                        <span aria-hidden="true" className="min-w-[1.75rem] text-center text-[10px] font-semibold uppercase tracking-wide text-primary">
+                            1d
+                        </span>
+                        <button
+                            type="button"
+                            data-calendar-day-step-next
+                            onClick={handleNextDay}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded text-primary hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            aria-label={dayStepLabels.next}
+                            title={dayStepLabels.next}
+                        >
+                            <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
                         </button>
                     </div>
                 </div>
@@ -707,7 +771,22 @@ export function CalendarView() {
                 </div>
                 )}
 
-                {(viewMode === 'day' || viewMode === 'week') && (
+                {(viewMode === 'quarter' || viewMode === 'year') && (
+                    <CalendarOverviewGrid
+                        months={overviewMonthGrids}
+                        calendarSystem={calendarSystem}
+                        locale={locale}
+                        weekdayHeaders={weekdayHeaders}
+                        getCalendarItemsForDate={getCalendarItemsForDate}
+                        selectedDate={selectedDate}
+                        referenceDate={currentMonth}
+                        onOpenDay={openDayViewForDate}
+                        onDayKeyDown={handleOpenDayKeyDown}
+                        resolveText={resolveText}
+                    />
+                )}
+
+                {isCalendarTimelineViewMode(viewMode) && (
                     <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm"
                         onScroll={(event) => {
 

@@ -32,12 +32,12 @@ describe('stageCalendarDropLanding', () => {
     });
 
 
-    it('keeps month mode on the current month without selecting a day', () => {
-        setUrl('?calendarView=month&calendarDate=2026-01-05&calendarMonth=2026-01');
+    it.each(['month', 'quarter', 'year'])('keeps %s mode on the current month without selecting a day', (mode) => {
+        setUrl(`?calendarView=${mode}&calendarDate=2026-01-05&calendarMonth=2026-01`);
 
         stageCalendarDropLanding(NOW);
 
-        expect(params().get('calendarView')).toBe('month');
+        expect(params().get('calendarView')).toBe(mode);
         expect(params().get('calendarMonth')).toBe('2026-07');
         expect(params().get('calendarDate')).toBeNull();
     });

@@ -11,6 +11,9 @@ export const DESKTOP_HOUR_HEIGHT = 56;
 export const DESKTOP_GRID_SNAP_MINUTES = 15;
 
 export const CALENDAR_DAYS_IN_WEEK = 7;
+export const CALENDAR_THREE_DAY_COUNT = 3;
+export const CALENDAR_QUARTER_MONTH_COUNT = 3;
+export const CALENDAR_YEAR_MONTH_COUNT = 12;
 
 
 export const CALENDAR_TIMELINE_DAY_COUNT_MIN = 2;
@@ -27,7 +30,51 @@ export const coerceCalendarTimelineDayCount = (value?: number | null): number =>
 
 export type CalendarCellItem = CalendarDayItem;
 
-export type CalendarViewMode = 'day' | 'week' | 'month' | 'schedule';
+export type CalendarViewMode = 'day' | 'threeDay' | 'week' | 'month' | 'quarter' | 'year' | 'schedule';
+
+/**
+ * The desktop calendar's mode order. The shared core still exposes only the four
+ * modes the mobile screen and the native host contract can render; desktop keeps
+ * its own list so a synced/unknown value cannot leak into those screens.
+ */
+export const CALENDAR_VIEW_MODE_ORDER: readonly CalendarViewMode[] = [
+    'day', 'threeDay', 'week', 'month', 'quarter', 'year', 'schedule',
+];
+
+export const coerceDesktopCalendarViewMode = (value?: string | null): CalendarViewMode => (
+    CALENDAR_VIEW_MODE_ORDER.find((mode) => mode === value) ?? 'month'
+);
+
+export const needsDesktopCalendarSelectedDate = (viewMode: CalendarViewMode): boolean => (
+    viewMode === 'day' || viewMode === 'threeDay' || viewMode === 'week' || viewMode === 'schedule'
+);
+
+export const isCalendarTimelineViewMode = (viewMode: CalendarViewMode): boolean => (
+    viewMode === 'day' || viewMode === 'threeDay' || viewMode === 'week'
+);
+
+export const isCalendarOverviewViewMode = (viewMode: CalendarViewMode): boolean => (
+    viewMode === 'quarter' || viewMode === 'year'
+);
+
+export const getCalendarOverviewMonthCount = (viewMode: CalendarViewMode): number => (
+    viewMode === 'year' ? CALENDAR_YEAR_MONTH_COUNT
+        : viewMode === 'quarter' ? CALENDAR_QUARTER_MONTH_COUNT
+            : 0
+);
+
+export const getCalendarTimelineDayCount = (viewMode: CalendarViewMode, timelineDayCount: number): number => (
+    viewMode === 'day' ? 1
+        : viewMode === 'threeDay' ? CALENDAR_THREE_DAY_COUNT
+            : timelineDayCount
+);
+
+export const getCalendarPeriodMonthDelta = (viewMode: CalendarViewMode): number => (
+    viewMode === 'month' ? 1
+        : viewMode === 'quarter' ? CALENDAR_QUARTER_MONTH_COUNT
+            : viewMode === 'year' ? CALENDAR_YEAR_MONTH_COUNT
+                : 0
+);
 
 export type CalendarTimedItem =
     | { durationMinutes: number; end: Date; id: string; kind: 'task'; start: Date; task: Task; title: string }

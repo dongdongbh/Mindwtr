@@ -656,11 +656,13 @@ export function useDesktopCalendarController() {
                     break;
                 case 'ArrowLeft':
                     consume();
-                    nav.handlePrevMonth();
+                    if (event.shiftKey) nav.handlePrevDay();
+                    else nav.handlePrevMonth();
                     break;
                 case 'ArrowRight':
                     consume();
-                    nav.handleNextMonth();
+                    if (event.shiftKey) nav.handleNextDay();
+                    else nav.handleNextMonth();
                     break;
                 case 'n':
                     consume();
@@ -702,7 +704,9 @@ export function useDesktopCalendarController() {
         getTaskAccentColor,
         getTimedDeadlinesForDay,
         handleMonthChange: nav.handleMonthChange,
+        handleNextDay: nav.handleNextDay,
         handleNextMonth: nav.handleNextMonth,
+        handlePrevDay: nav.handlePrevDay,
         handlePrevMonth: nav.handlePrevMonth,
         handleToday: nav.handleToday,
         handleViewModeChange: nav.handleViewModeChange,
@@ -720,6 +724,7 @@ export function useDesktopCalendarController() {
         openQuickAddForStart: composer.openQuickAddForStart,
         openTask,
         openTaskFromCalendar,
+        overviewMonthGrids: nav.overviewMonthGrids,
         planningTasks,
         projects,
         quickAddSuggestionTokens,

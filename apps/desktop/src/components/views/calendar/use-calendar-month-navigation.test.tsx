@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { addDays, addWeeks, subDays, subWeeks } from 'date-fns';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { dayKey } from './calendar-primitives';
+import { dayKey, type CalendarViewMode } from './calendar-primitives';
 import { useCalendarMonthNavigation, type CalendarMonthNavigationOptions } from './use-calendar-month-navigation';
 
 const renderNavigation = (overrides: Partial<CalendarMonthNavigationOptions> = {}) => {
@@ -63,9 +63,12 @@ describe('useCalendarMonthNavigation', () => {
 
     const stepCases = [
         { mode: 'day', prev: subDays(new Date(2026, 3, 3), 1), next: addDays(new Date(2026, 3, 3), 1), keepsSelection: true },
+        { mode: 'threeDay', prev: subDays(new Date(2026, 3, 3), 3), next: addDays(new Date(2026, 3, 3), 3), keepsSelection: true },
         { mode: 'week', prev: subWeeks(new Date(2026, 3, 3), 1), next: addWeeks(new Date(2026, 3, 3), 1), keepsSelection: true },
         { mode: 'schedule', prev: subWeeks(new Date(2026, 3, 3), 2), next: addWeeks(new Date(2026, 3, 3), 2), keepsSelection: true },
         { mode: 'month', prev: new Date(2026, 2, 3), next: new Date(2026, 4, 3), keepsSelection: false },
+        { mode: 'quarter', prev: new Date(2026, 0, 3), next: new Date(2026, 6, 3), keepsSelection: false },
+        { mode: 'year', prev: new Date(2025, 3, 3), next: new Date(2027, 3, 3), keepsSelection: false },
     ] as const;
 
     for (const { mode, prev, next, keepsSelection } of stepCases) {
@@ -267,4 +270,70 @@ describe('useCalendarMonthNavigation', () => {
         act(() => result.current.handleToday());
         expect(result.current.isMonthPickerOpen).toBe(false);
     });
+
+    it.each(['threeDay', 'quarter', 'year'])('restores the %s view from the URL', (mode) => {
+        window.history.replaceState(null, '', `/?calendarView=${mode}&calendarMonth=2026-04`);
+
+        const { result } = renderNavigation();
+
+        expect(result.current.viewMode).toBe(mode);
+        expect(window.location.search).toContain(`calendarView=${mode}`);
+    });
+
+    it('falls back to month for an unknown calendar view', () => {
+        window.history.replaceState(null, '', '/?calendarView=agenda');
+
+        const { result } = renderNavigation();
+
+        expect(result.current.viewMode).toBe('month');
+    });
+
+    it('shows exactly three days in the three-day timeline', () => {
+        const { result } = renderNavigation();
+
+        act(() => result.current.handleViewModeChange('threeDay'));
+
+        expect(result.current.timelineDays.map(dayKey)).toEqual([
+            '2026-04-03', '2026-04-04', '2026-04-05',
+        ]);
+        expect(dayKey(result.current.visibleRange.start)).toBe('2026-04-03');
+        expect(dayKey(result.current.visibleRange.end)).toBe('2026-04-05');
+    });
+
+    it('builds three months for a quarter and twelve months for a year', () => {
+        const { result } = renderNavigation();
+        const monthKeys = () => result.current.overviewMonths.map((month) => `${month.getFullYear()}-${month.getMonth()}`);
+
+        act(() => result.current.handleViewModeChange('quarter'));
+        expect(monthKeys()).toEqual(['2026-3', '2026-4', '2026-5']);
+        expect(result.current.overviewMonthGrids).toHaveLength(3);
+        expect(dayKey(result.current.visibleRange.start)).toBe('2026-04-01');
+        expect(dayKey(result.current.visibleRange.end)).toBe('2026-06-30');
+
+        act(() => result.current.handleViewModeChange('year'));
+        expect(monthKeys()).toEqual(Array.from({ length: 12 }, (_, index) => `2026-${index}`));
+        expect(result.current.overviewMonthGrids).toHaveLength(12);
+        expect(dayKey(result.current.visibleRange.start)).toBe('2026-01-01');
+        expect(dayKey(result.current.visibleRange.end)).toBe('2026-12-31');
+    });
+
+    it.each([
+        'day', 'threeDay', 'week', 'month', 'quarter', 'year', 'schedule',
+    ] as Array<CalendarViewMode>)(
+        'steps %s by exactly one day with the day-step navigation',
+        (mode) => {
+            const { result, onNavigate } = renderNavigation();
+
+            act(() => result.current.handleViewModeChange(mode));
+            act(() => result.current.handleNextDay());
+
+            expect(dayKey(result.current.currentMonth)).toBe('2026-04-04');
+
+            act(() => result.current.handlePrevDay());
+            act(() => result.current.handlePrevDay());
+
+            expect(dayKey(result.current.currentMonth)).toBe('2026-04-02');
+            expect(onNavigate).toHaveBeenCalled();
+        }
+    );
 });

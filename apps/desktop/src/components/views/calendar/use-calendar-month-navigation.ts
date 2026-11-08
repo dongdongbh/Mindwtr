@@ -10,16 +10,13 @@ import {
     format,
     startOfDay,
     startOfWeek,
-    subDays,
-    subWeeks,
 } from 'date-fns';
 import {
     addCalendarMonths as addCalendarSystemMonths,
-    coerceCalendarViewMode,
     endOfCalendarMonth,
+    getCalendarMonthIndex,
     getCalendarYear,
     isSameCalendarMonth,
-    needsCalendarSelectedDate,
     setCalendarMonthIndex,
     setCalendarYear,
     startOfCalendarMonth,
@@ -37,7 +34,13 @@ import {
     CALENDAR_DAYS_IN_WEEK,
     CALENDAR_TIMELINE_DAY_COUNT_DEFAULT,
     coerceCalendarTimelineDayCount,
+    coerceDesktopCalendarViewMode,
     dayKey,
+    getCalendarOverviewMonthCount,
+    getCalendarPeriodMonthDelta,
+    getCalendarTimelineDayCount,
+    isCalendarOverviewViewMode,
+    needsDesktopCalendarSelectedDate,
     type CalendarViewMode,
 } from './calendar-primitives';
 import { getWorkspaceCache } from '../../../lib/workspace-cache';
@@ -87,9 +90,9 @@ const getInitialCalendarState = (fallback: Date): { currentMonth: Date; selected
         return { currentMonth: fallback, selectedDate: null, viewMode: 'month' };
     }
     const params = new URLSearchParams(window.location.search);
-    const viewMode = coerceCalendarViewMode(params.get(CALENDAR_VIEW_PARAM));
+    const viewMode = coerceDesktopCalendarViewMode(params.get(CALENDAR_VIEW_PARAM));
     const selectedDate = parseCalendarDateParam(params.get(CALENDAR_DATE_PARAM))
-        ?? (needsCalendarSelectedDate(viewMode) ? new Date(fallback) : null);
+        ?? (needsDesktopCalendarSelectedDate(viewMode) ? new Date(fallback) : null);
     const monthDate = parseCalendarDateParam(`${params.get(CALENDAR_MONTH_PARAM) ?? ''}-01`);
     return {
         currentMonth: selectedDate ?? monthDate ?? fallback,
@@ -147,32 +150,59 @@ export function useCalendarMonthNavigation({
     });
 
 
+    const overviewMonths = useMemo(() => {
+        if (!isCalendarOverviewViewMode(viewMode)) return [];
+        const count = getCalendarOverviewMonthCount(viewMode);
+        const firstMonth = viewMode === 'year'
+            ? addCalendarSystemMonths(currentCalendarMonth, -getCalendarMonthIndex(currentCalendarMonth, calendarSystem), calendarSystem)
+            : currentCalendarMonth;
+        return Array.from({ length: count }, (_, index) => addCalendarSystemMonths(firstMonth, index, calendarSystem));
+    }, [calendarSystem, currentCalendarMonth, viewMode]);
+    const overviewMonthGrids = useMemo(() => overviewMonths.map((month) => {
+        const monthStart = startOfCalendarMonth(month, calendarSystem);
+        const monthEnd = endOfCalendarMonth(monthStart, calendarSystem);
+        return {
+            month: monthStart,
+            days: eachDayOfInterval({
+                start: startOfWeek(monthStart, { weekStartsOn }),
+                end: endOfWeek(monthEnd, { weekStartsOn }),
+            }),
+        };
+    }), [calendarSystem, overviewMonths, weekStartsOn]);
+
+    const effectiveTimelineDayCount = getCalendarTimelineDayCount(viewMode, timelineDayCount);
     const timelineStart = useMemo(
-        () => timelineDayCount === CALENDAR_DAYS_IN_WEEK
+        () => viewMode === 'week' && effectiveTimelineDayCount === CALENDAR_DAYS_IN_WEEK
             ? startOfWeek(currentMonth, { weekStartsOn })
             : startOfDay(currentMonth),
-        [currentMonth, timelineDayCount, weekStartsOn]
+        [currentMonth, effectiveTimelineDayCount, viewMode, weekStartsOn]
     );
     const visibleRange = useMemo(() => {
         if (viewMode === 'day') {
             return { start: currentMonth, end: currentMonth };
         }
-        if (viewMode === 'week') {
-            return { start: timelineStart, end: addDays(timelineStart, timelineDayCount - 1) };
+        if (viewMode === 'threeDay' || viewMode === 'week') {
+            return { start: timelineStart, end: addDays(timelineStart, effectiveTimelineDayCount - 1) };
         }
         if (viewMode === 'schedule') {
             return { start: currentMonth, end: addDays(currentMonth, 60) };
+        }
+        if (overviewMonths.length > 0) {
+            return {
+                start: startOfCalendarMonth(overviewMonths[0]!, calendarSystem),
+                end: endOfCalendarMonth(overviewMonths[overviewMonths.length - 1]!, calendarSystem),
+            };
         }
         return {
             start: currentCalendarMonth,
             end: endOfCalendarMonth(currentCalendarMonth, calendarSystem),
         };
-    }, [calendarSystem, currentCalendarMonth, currentMonth, timelineDayCount, timelineStart, viewMode]);
+    }, [calendarSystem, currentCalendarMonth, currentMonth, effectiveTimelineDayCount, overviewMonths, timelineStart, viewMode]);
     const timelineDays = useMemo(
         () => viewMode === 'day'
             ? [currentMonth]
-            : Array.from({ length: timelineDayCount }, (_, index) => addDays(timelineStart, index)),
-        [currentMonth, timelineDayCount, timelineStart, viewMode]
+            : Array.from({ length: effectiveTimelineDayCount }, (_, index) => addDays(timelineStart, index)),
+        [currentMonth, effectiveTimelineDayCount, timelineStart, viewMode]
     );
     const scheduleDays = useMemo(
         () => eachDayOfInterval({ start: visibleRange.start, end: visibleRange.end }),
@@ -192,13 +222,18 @@ export function useCalendarMonthNavigation({
             day: 'numeric',
             year: 'numeric',
         });
-        if (viewMode === 'week') {
-            const end = addDays(timelineStart, timelineDayCount - 1);
+        if (viewMode === 'threeDay' || viewMode === 'week') {
+            const end = addDays(timelineStart, effectiveTimelineDayCount - 1);
             return `${timelineStart.toLocaleDateString(calendarLocale, { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString(calendarLocale, { month: 'short', day: 'numeric', year: 'numeric' })}`;
         }
         if (viewMode === 'schedule') {
             return `${visibleRange.start.toLocaleDateString(calendarLocale, { month: 'short', day: 'numeric' })} - ${visibleRange.end.toLocaleDateString(calendarLocale, { month: 'short', day: 'numeric', year: 'numeric' })}`;
         }
+        if (viewMode === 'quarter' && overviewMonths.length > 0) {
+            const end = overviewMonths[overviewMonths.length - 1]!;
+            return `${currentCalendarMonth.toLocaleDateString(calendarLocale, { month: 'short' })} - ${end.toLocaleDateString(calendarLocale, { month: 'short', year: 'numeric' })}`;
+        }
+        if (viewMode === 'year') return String(currentYear);
         return currentCalendarMonth.toLocaleDateString(calendarLocale, { month: 'long', year: 'numeric' });
     })();
     const yearOptions = useMemo(
@@ -208,7 +243,7 @@ export function useCalendarMonthNavigation({
 
     const selectCalendarDate = (date: Date) => {
         setSelectedDate(date);
-        if (viewMode !== 'week' && !isSameCalendarMonth(date, currentMonth, calendarSystem)) {
+        if (viewMode !== 'week' && viewMode !== 'threeDay' && !isSameCalendarMonth(date, currentMonth, calendarSystem)) {
             setCurrentMonth(date);
         }
     };
@@ -238,42 +273,42 @@ export function useCalendarMonthNavigation({
         onNavigate();
         setCurrentMonth((prev) => setCalendarYear(prev, yearValue, calendarSystem));
     };
-    const handlePrevMonth = () => {
+    const stepCalendarPeriod = (direction: -1 | 1) => {
         onNavigate();
         setIsMonthPickerOpen(false);
-        const next = viewMode === 'day'
-            ? subDays(currentMonth, 1)
-            : viewMode === 'week'
-            ? subDays(currentMonth, timelineDayCount)
+        const monthDelta = getCalendarPeriodMonthDelta(viewMode);
+        const next = monthDelta !== 0
+            ? addCalendarSystemMonths(currentMonth, direction * monthDelta, calendarSystem)
             : viewMode === 'schedule'
-            ? subWeeks(currentMonth, 2)
-            : addCalendarSystemMonths(currentMonth, -1, calendarSystem);
+                ? addWeeks(currentMonth, direction * 2)
+                : addDays(currentMonth, direction * effectiveTimelineDayCount);
         setCurrentMonth(next);
-        setSelectedDate(needsCalendarSelectedDate(viewMode) ? next : null);
+        setSelectedDate(needsDesktopCalendarSelectedDate(viewMode) ? next : null);
     };
-    const handleNextMonth = () => {
+    const handlePrevMonth = () => stepCalendarPeriod(-1);
+    const handleNextMonth = () => stepCalendarPeriod(1);
+
+    /** The second navigation pair always nudges the anchor by exactly one day. */
+    const stepCalendarDay = (direction: -1 | 1) => {
         onNavigate();
         setIsMonthPickerOpen(false);
-        const next = viewMode === 'day'
-            ? addDays(currentMonth, 1)
-            : viewMode === 'week'
-            ? addDays(currentMonth, timelineDayCount)
-            : viewMode === 'schedule'
-            ? addWeeks(currentMonth, 2)
-            : addCalendarSystemMonths(currentMonth, 1, calendarSystem);
+        const next = addDays(currentMonth, direction);
         setCurrentMonth(next);
-        setSelectedDate(needsCalendarSelectedDate(viewMode) ? next : null);
+        setSelectedDate(needsDesktopCalendarSelectedDate(viewMode) ? next : null);
     };
+    const handlePrevDay = () => stepCalendarDay(-1);
+    const handleNextDay = () => stepCalendarDay(1);
+
     const handleToday = () => {
         const nextToday = new Date();
         setCurrentMonth(nextToday);
-        setSelectedDate(needsCalendarSelectedDate(viewMode) ? nextToday : null);
+        setSelectedDate(needsDesktopCalendarSelectedDate(viewMode) ? nextToday : null);
         onNavigate();
         setIsMonthPickerOpen(false);
     };
     const handleViewModeChange = (nextMode: CalendarViewMode) => {
         setViewMode(nextMode);
-        if (needsCalendarSelectedDate(nextMode)) {
+        if (needsDesktopCalendarSelectedDate(nextMode)) {
             const nextDate = selectedDate ?? new Date();
             setSelectedDate(nextDate);
             setCurrentMonth(nextDate);
@@ -289,7 +324,9 @@ export function useCalendarMonthNavigation({
         currentYear,
         days,
         handleMonthChange,
+        handleNextDay,
         handleNextMonth,
+        handlePrevDay,
         handlePrevMonth,
         handleToday,
         handleViewModeChange,
@@ -297,6 +334,8 @@ export function useCalendarMonthNavigation({
         isMonthPickerOpen,
         monthNames,
         openDayViewForDate,
+        overviewMonthGrids,
+        overviewMonths,
         revealDate,
         scheduleDays,
         selectCalendarDate,

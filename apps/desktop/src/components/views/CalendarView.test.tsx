@@ -241,8 +241,11 @@ describe('CalendarView', () => {
 
     it.each([
         ['day', 'Previous day', 'Next day'],
+        ['threeDay', 'Previous three days', 'Next three days'],
         ['week', 'Previous week', 'Next week'],
         ['month', 'Previous month', 'Next month'],
+        ['quarter', 'Previous quarter', 'Next quarter'],
+        ['year', 'Previous year', 'Next year'],
         ['schedule', 'Previous month', 'Next month'],
     ])('labels %s navigation for the period it changes', async (viewMode, previousLabel, nextLabel) => {
         window.history.replaceState(null, '', `/?calendarView=${viewMode}&calendarDate=2026-04-03`);
@@ -252,6 +255,41 @@ describe('CalendarView', () => {
 
         expect(screen.getByRole('button', { name: previousLabel })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: nextLabel })).toBeInTheDocument();
+    });
+
+    it('offers a separate, clearly labelled one-day navigation pair', async () => {
+        window.history.replaceState(null, '', '/?calendarView=threeDay&calendarDate=2026-04-03');
+
+        renderCalendar();
+        await flushCalendarEffects();
+
+        expect(screen.getByRole('group', { name: 'One-day navigation' })).toBeInTheDocument();
+        expect(document.querySelector('[data-calendar-period-prev]')).not.toBeNull();
+        expect(document.querySelector('[data-calendar-day-step]')).not.toBeNull();
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Step forward one day' }));
+            await Promise.resolve();
+        });
+        expect(window.location.search).toContain('calendarDate=2026-04-04');
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Next three days' }));
+            await Promise.resolve();
+        });
+        expect(window.location.search).toContain('calendarDate=2026-04-07');
+    });
+
+    it.each([
+        ['quarter', 3],
+        ['year', 12],
+    ] as Array<[string, number]>)('draws the %s view with %i month grids', async (viewMode, monthCount) => {
+        window.history.replaceState(null, '', `/?calendarView=${viewMode}&calendarMonth=2026-04`);
+
+        renderCalendar();
+        await flushCalendarEffects();
+
+        expect(document.querySelectorAll('[data-calendar-overview-month]')).toHaveLength(monthCount);
     });
 
     it('keeps week columns aligned beside the scrollbar and the midnight label visible', async () => {
