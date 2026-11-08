@@ -73,10 +73,13 @@ internal object ProcessCoreHost {
     }
 
 
-    fun get(app: Application, language: String? = null): CoreHost {
+    val booted: Boolean get() = synchronized(this) { boot != null }
+
+
+    fun get(app: Application, language: String? = null, sandboxRequest: String? = null): CoreHost {
         var starter = false
         val task = synchronized(this) {
-            boot ?: FutureTask { start(app, language) }.also {
+            boot ?: FutureTask { start(app, language, sandboxRequest) }.also {
                 boot = it
                 boots += 1
                 starter = true
@@ -95,29 +98,48 @@ internal object ProcessCoreHost {
         return host
     }
 
-    private fun start(app: Application, language: String?): CoreHost {
+    private class SandboxRequestExpired : Exception()
+
+
+    private fun start(app: Application, language: String?, sandboxRequest: String?): CoreHost =
+        try { open(app, language, sandboxRequest) } catch (_: SandboxRequestExpired) { open(app, language, null) }
+
+
+    private fun open(app: Application, language: String?, sandboxRequest: String?): CoreHost {
         application = app
+        val scratch = Workspace.scratch(app)
+        check(!scratch.exists() || scratch.deleteRecursively()) { "The last sandbox scratch files were not removed" }
+        val sandbox = sandboxRequest != null
+        if (sandbox) {
+            check(scratch.mkdirs()) { "The sandbox scratch folder was not created" }
+            Workspace.viewPrefs(app, sandbox = true).edit().clear().commit()
+        }
 
 
-        val legacy = if (BuildConfig.RN_STORAGE) {
+        val legacy = if (BuildConfig.RN_STORAGE && !sandbox) {
             LegacyRnStoreGuard.requireClear(app.dataDir, File(app.cacheDir, "legacy-rn-guard"))
         } else {
             null
         }
-        val installer = HostInstaller(app.filesDir, app.cacheDir)
-        val keyValue = RnKeyValue(app.getDatabasePath("RKStorage"))
-        val runtime = CoreHost(legacy?.database ?: File(app.filesDir, "mindwtr-native-dev.db"), legacy?.let { app.dataDir }, HostIo(app),
-            File(app.filesDir, "journal"), deviceStore(app, keyValue), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
-            keyValue, HostFiles(app.filesDir, app.cacheDir, content = AndroidContentSource(app)), installer,
-            ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
-            HostWidgets(app) { appState },
-            scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
-            backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
-            calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
-            appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)),
-            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(File(app.filesDir, "GmailCapture")),
-            voice = HostVoice.forApp(app)::call)
+        val installer = if (sandbox) HostInstaller(File(scratch, "files"), File(scratch, "cache")) else HostInstaller(app.filesDir, app.cacheDir)
+        val files = Workspace.files(legacy?.database ?: File(app.filesDir, "mindwtr-native-dev.db"), File(app.filesDir, "journal"),
+            app.getDatabasePath("RKStorage"), scratch, sandbox = sandbox)
+        val runtime = host(app, files, legacy, installer, sandbox)
         try {
+            if (sandboxRequest != null) {
+                val opened = runtime.start(coreBundle(app), sandboxRequest = sandboxRequest)
+                if (opened.optString("workspace") != "sandbox") throw SandboxRequestExpired()
+                val sampleLanguage = opened.optString("language").ifEmpty { null }
+                val sampleTheme = opened.optString("theme").ifEmpty { null }
+                Workspace.viewPrefs(app, sandbox = true).edit().apply {
+                    sampleLanguage?.let { putString(LANGUAGE_KEY, it) }
+                    sampleTheme?.let { putString(THEME_KEY, it) }
+                }.commit()
+                setLanguage(runtime, sampleLanguage ?: language)
+                loadTheme(runtime, sampleTheme)
+                Workspace.opened(sandbox = true)
+                return runtime
+            }
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "", legacy?.preflight == true)
 
             if (legacy != null) {
@@ -138,6 +160,22 @@ internal object ProcessCoreHost {
             runCatching { runtime.close() }
             throw failure
         }
+    }
+
+
+    private fun host(app: Application, files: Workspace.Files, legacy: LegacyRnStoreGuard.Opened?, installer: HostInstaller, sandbox: Boolean): CoreHost {
+        val keyValue = RnKeyValue(files.keyValue)
+        return CoreHost(files.database, legacy?.let { app.dataDir }, HostIo(app),
+            files.journal, deviceStore(app, keyValue, sandbox), File(app.filesDir, DiagnosticsLogFile.RELATIVE_PATH),
+            keyValue, HostFiles(app.filesDir, app.cacheDir, content = AndroidContentSource(app)), installer,
+            ReminderAlarms(app, keyValue, checkpointRnState = { if (legacy != null) LegacyRnStoreGuard.checkpointRnState(app.dataDir) }),
+            HostWidgets(app) { appState },
+            scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
+            backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
+            calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
+            appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)),
+            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(File(app.filesDir, "GmailCapture")),
+            voice = HostVoice.forApp(app)::call)
     }
 
 

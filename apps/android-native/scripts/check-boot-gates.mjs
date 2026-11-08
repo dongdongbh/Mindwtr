@@ -751,6 +751,18 @@ const reviewScreens = { contextsUi, trashUi, reviewUi, weeklyUi, dailyUi, listAc
 
 const inboxUi = source('InboxScreen.kt');
 const bulkUi = source('BulkBar.kt');
+
+const processHost = source('ProcessCoreHost.kt');
+assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+check\(!scratch\.exists\(\) \|\| scratch\.deleteRecursively\(\)\) \{[^}]*\}\s+val sandbox = sandboxRequest != null/,
+    'every start removes the last sandbox scratch files (its journal, database and key-value store) before any workspace opens');
+assert.match(processHost, /val files = Workspace\.files\([\s\S]{0,300}?, scratch, sandbox = sandbox\)/, 'the sandbox opens its own scratch database, journal and key-value store');
+const sandboxStart = processHost.slice(processHost.indexOf('if (sandboxRequest != null) {\n                val opened'), processHost.indexOf('runtime.start(coreBundle(app), legacy?.bootState'));
+assert.match(sandboxStart, /if \(opened\.optString\("workspace"\) != "sandbox"\) throw SandboxRequestExpired\(\)[\s\S]*return runtime/, 'an expired request opens the real workspace instead');
+assert.doesNotMatch(sandboxStart, /replay\(|recovered\(|recoverInstalls\(|deferredWidgets/, 'the sandbox replays no journal and recovers nothing into any database');
+assert.match(source('core/CoreHost.kt'), /if \(sandboxRequest != null\) return@onEngine callAsync\("bootSandbox", sandboxRequest/, 'a sandbox start boots the in-memory sample workspace, not the SQLite workspace');
+assert.match(source('InboxViewModel.kt'), /if \(sandboxRequest != null && ProcessCoreHost\.booted\) \{\s+Workspace\.store\(getApplication\(\)\)\.write\(sandboxRequest\)\s+Workspace\.restart\(getApplication\(\)\)/,
+    'a request found after a receiver or worker booted the process personal restarts the process; the workspace never changes mid-process');
+assert.doesNotMatch(source('CoreWork.kt'), /Workspace\.take|sandboxRequest/, 'only the app screen consumes a sandbox request, never the background worker');
 const focusControlsUi = source('FocusControls.kt');
 const focusModelKt = source('FocusModel.kt');
 
@@ -963,7 +975,8 @@ const kotlinFiles = [activity, model, owner, editorUi, focusUi, projectsUi, labe
 assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 
 
-assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app, keyValue\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\),\s*voice = HostVoice\.forApp\(app\)::call\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
+assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE && !sandbox\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = if \(sandbox\) HostInstaller\(File\(scratch, "files"\), File\(scratch, "cache"\)\) else HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val files = Workspace\.files\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), File\(app\.filesDir, "journal"\),\s*app\.getDatabasePath\("RKStorage"\), scratch, sandbox = sandbox\)\s*val runtime = host\(app, files, legacy, installer, sandbox\)\s*try \{[\s\S]{0,1400}?runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
+assert.match(owner, /val keyValue = RnKeyValue\(files\.keyValue\)\s*return CoreHost\(files\.database, legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*files\.journal, deviceStore\(app, keyValue, sandbox\), File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\),\s*voice = HostVoice\.forApp\(app\)::call\)/);
 
 
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
@@ -1144,7 +1157,7 @@ for (const line of bridgeCallbacks) assert.match(line, /^bridge\.setProperty\("\
     assert.match(kv, /PRAGMA user_version"\)\.use \{ it\.step\(\); it\.getLong\(0\) \} == 0L\) \{[\s\S]*?connection\.exec\(CREATE\)\s+connection\.exec\("PRAGMA user_version = 1"\)/);
     assert.match(kv, /connection\.exec\("PRAGMA synchronous = FULL"\)/);
     assert.match(kv, /private fun write\(work: \(SQLiteConnection\) -> Unit\) = open<Unit> \{ connection ->\s+connection\.exec\("BEGIN IMMEDIATE"\)/);
-    assert.match(owner, /RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)/, 'the key-value store is RN\'s own RKStorage');
+    assert.match(owner, /app\.getDatabasePath\("RKStorage"\), scratch, sandbox = sandbox\)[\s\S]*val keyValue = RnKeyValue\(files\.keyValue\)/, 'the key-value store is RN\'s own RKStorage (a scratch copy only in the sandbox)');
     for (const name of ['kvGet', 'kvSet', 'kvRemove', 'kvMultiGet', 'kvMultiSet', 'kvMultiRemove']) {
         assert(bridgeCallbacks.some((line) => line.startsWith(`bridge.setProperty("${name}", guarded { args -> `)), `${name} is guarded`);
     }
@@ -3001,7 +3014,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 
     assert.match(settingsModel, /fun deviceStore\(prefs: SharedPreferences\) = DeviceWrites\(\{ prefs\.all \}, \{ changes ->\s+prefs\.edit\(\)\.apply \{[^\n]*\}\.commit\(\)\s+\}\)/);
-    assert.match(settingsModel, /fun deviceStore\(app: Context, keyValue: RnKeyValue\): DeviceWrites \{\s+val prefs = app\.getSharedPreferences\(DEVICE_PREFS, Context\.MODE_PRIVATE\)/);
+    assert.match(settingsModel, /fun deviceStore\(app: Context, keyValue: RnKeyValue, sandbox: Boolean = false\): DeviceWrites \{\s+val prefs = Workspace\.viewPrefs\(app, sandbox\)/);
+    assert.match(source('Workspace.kt'), /fun viewPrefs\(context: Context, sandbox: Boolean = this\.sandbox\) =\s+context\.getSharedPreferences\(if \(sandbox\) SANDBOX_VIEW_PREFS else DEVICE_PREFS, Context\.MODE_PRIVATE\)/,
+        'the device and view-state preferences are the real file outside the sandbox and a separate file inside it');
     assert.match(settingsModel, /private fun store\(writes: JSONArray\) = deviceStore\(prefs\)\.store\(writes, null, replay = false\)/);
     {
         const devicesKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/DeviceWrites.kt'), 'utf8');
@@ -3014,11 +3029,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
             assert.match(devicesTest, new RegExp(`@Test fun ${name}\\(\\)`));
         }
     }
-    assert.match(model, /app\.getSharedPreferences\(DEVICE_PREFS, /);
+    assert.match(model, /private val prefs = Workspace\.viewPrefs\(app, sandbox = Workspace\.sandbox \|\| sandboxRequest != null\)/);
     assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
     assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
-    assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\)\)\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
+    assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\), sandboxRequest\)\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
     for (const [kotlin, file, core] of [['LANGUAGE_KEY', 'i18n/i18n-constants.ts', 'LANGUAGE_STORAGE_KEY'], ['THEME_KEY', 'general-settings-model.ts', 'MOBILE_THEME_STORAGE_KEY'],
         ['MANAGE_SECTIONS_KEY', 'manage-settings-model.ts', 'MANAGE_OPEN_SECTIONS_STORAGE_KEY'], ['TASK_OPEN_MODE_KEY', 'gtd-settings-model.ts', 'MOBILE_TASK_OPEN_MODE_STORAGE_KEY']]) {
         const value = new RegExp(`export const ${core} = '([^']+)'`).exec(coreFile(file))[1];

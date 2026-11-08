@@ -167,6 +167,9 @@ import {
     webdavPutFile,
     webdavPutJson,
 } from '@mindwtr/core';
+import { acquireWorkspaceTransitionLock, createSandboxBootRequest, createSandboxStorage, initializeSandboxRuntime, parseSandboxBootRequest } from '../../../packages/core/src/sandbox';
+import { createSandboxData } from '../../../packages/core/src/sandbox-data';
+import { waitForSyncDocumentOperationsIdle } from '../../../packages/core/src/data-transfer-transaction';
 import { countTasksForIconBadge } from '../../../packages/core/src/task-icon-badge';
 import { syncPassphraseBytes } from '../../../packages/core/src/sync-crypto';
 import { createNativeAbout } from './host-about';
@@ -1104,6 +1107,7 @@ const logLegacyImport = (plan: ReturnType<typeof planLegacyJsonImport>, rnState:
 };
 
 
+let sandboxSwitch: (() => void) | null = null;
 const requireSaved = () => {
     const failure = useTaskStore.getState().persistenceFailure;
     if (failure) throw new Error('SAVE_FAILED: Previous changes could not be saved; retry before continuing');
@@ -3054,6 +3058,56 @@ globalThis.MindwtrHost = {
 
     bootRecovery(legacyState: string, legacyBackup: string, writeJournal = '', budgetJSON = ''): string {
         return boot(legacyState, legacyBackup, true, writeJournal === 'journaled', budgetJSON);
+    },
+
+    sandboxRequest(json: string): string {
+        return submit(async () => {
+            const input = JSON.parse(json) as { language?: unknown; theme?: unknown };
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INVALID_INPUT: Sandbox display settings must be an object');
+            const release = sandboxSwitch ? null : acquireWorkspaceTransitionLock();
+            if (!release) throw new Error('BUSY: A workspace switch is already running');
+            try {
+                if (!isSandboxMode()) {
+                    requireSaved();
+                    await flushPendingSave();
+                    await waitForSyncDocumentOperationsIdle();
+                    const status = getPersistenceStatus();
+                    if (status.failed || status.queued > 0 || status.inFlight || status.immediate > 0 || status.retrying) {
+                        throw new Error('SAVE_FAILED: Personal data has unsaved changes');
+                    }
+                }
+                const settings = { ...useTaskStore.getState().settings,
+                    ...(typeof input.language === 'string' ? { language: input.language } : {}),
+                    ...(typeof input.theme === 'string' ? { theme: input.theme } : {}) } as Parameters<typeof createSandboxBootRequest>[0];
+                sandboxSwitch = release;
+                return { request: createSandboxBootRequest(settings) };
+            } catch (error) {
+                release();
+                throw error;
+            }
+        });
+    },
+
+    sandboxRelease(): string {
+        return submit(async () => {
+            sandboxSwitch?.();
+            sandboxSwitch = null;
+            return { released: true };
+        });
+    },
+
+    bootSandbox(raw: string): string {
+        return submit(async () => {
+            const settings = parseSandboxBootRequest(raw || null);
+            if (!settings) return { workspace: 'personal' };
+            initializeSandboxRuntime(true);
+            setStorageAdapter(createSandboxStorage(createSandboxData({ settings })));
+            unwrap(await contract.activate({ writeSafetyReady: true }));
+            if (settings.language) unwrap(await contract.setLanguage({ storedLanguage: settings.language, systemLocale: null }));
+            logInfo('Native Android sandbox opened', { scope: 'sandbox', force: true,
+                context: { releaseCheck: 'v1.3.9/native-sandbox', outcome: 'entered' } });
+            return { workspace: 'sandbox', language: settings.language ?? null, theme: settings.theme ?? null };
+        });
     },
 
     resumeActivation(): string {

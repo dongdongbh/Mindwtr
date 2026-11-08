@@ -199,7 +199,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var openProjectId by mutableStateOf(saved.get<String>("project")); private set
     var projectReturn = projectReturnOf(saved.get<String>("projectReturn")); private set
     var project by mutableStateOf<ProjectDetail?>(null); private set
-    private val prefs = app.getSharedPreferences(DEVICE_PREFS, android.content.Context.MODE_PRIVATE)
+    private val sandboxRequest = Workspace.take(Workspace.store(app))
+    private val prefs = Workspace.viewPrefs(app, sandbox = Workspace.sandbox || sandboxRequest != null)
 
     var focusView by mutableStateOf(FocusViewState.read(prefs)); private set
 
@@ -461,8 +462,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         Thread({
             try {
 
+                if (sandboxRequest != null && ProcessCoreHost.booted) {
+                    Workspace.store(getApplication()).write(sandboxRequest)
+                    Workspace.restart(getApplication())
+                }
                 debugProperty("boot_delay_ms").toLongOrNull()?.let(Thread::sleep)
-                val runtime = ProcessCoreHost.get(getApplication(), prefs.getString(LANGUAGE_KEY, null))
+                val runtime = ProcessCoreHost.get(getApplication(), prefs.getString(LANGUAGE_KEY, null), sandboxRequest)
 
                 applyDeviceChoices(runtime, prefs)
                 applySyncedChoices(runtime, prefs)

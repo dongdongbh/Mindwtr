@@ -175,7 +175,7 @@ class CoreHost(
     }
 
 
-    fun start(bundle: CoreBundle, legacyState: String = "", legacyBackup: String = "", preflight: Boolean = false): JSONObject {
+    fun start(bundle: CoreBundle, legacyState: String = "", legacyBackup: String = "", preflight: Boolean = false, sandboxRequest: String? = null): JSONObject {
         val opened = FutureTask {
             val database = traced("core:sqliteOpen") { SqliteBridge(databaseFile) }
             try {
@@ -235,6 +235,7 @@ class CoreHost(
                 activationOwed = pendingBackupIds().isNotEmpty()
 
                 val bootDeadline = sized(OPERATION_DEADLINE_MS, libraryFileBytes())
+                if (sandboxRequest != null) return@onEngine callAsync("bootSandbox", sandboxRequest, deadlineMs = bootDeadline)
                 (if (activationOwed) callAsync("bootRecovery", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline)
                 else callAsync("boot", legacyState, legacyBackup, "journaled", storageBudget(), deadlineMs = bootDeadline)).also { netCheck() }
             } catch (failure: Throwable) {

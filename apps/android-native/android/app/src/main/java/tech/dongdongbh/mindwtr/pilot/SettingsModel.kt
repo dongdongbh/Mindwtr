@@ -49,8 +49,8 @@ fun deviceStore(prefs: SharedPreferences) = DeviceWrites({ prefs.all }, { change
 })
 
 
-fun deviceStore(app: Context, keyValue: RnKeyValue): DeviceWrites {
-    val prefs = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+fun deviceStore(app: Context, keyValue: RnKeyValue, sandbox: Boolean = false): DeviceWrites {
+    val prefs = Workspace.viewPrefs(app, sandbox)
     return routedDeviceStore({ prefs.all }, { changes ->
         prefs.edit().apply { changes.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
     }, keyValue)
