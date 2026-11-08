@@ -28457,21 +28457,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -29211,21 +29202,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -29275,21 +29257,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -29341,21 +29314,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        true,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -29388,15 +29352,7 @@
      "calendarExpanded": null,
      "editor": null,
      "inboxProcessing": false,
-     "writes": [
-      [
-       "updateTask",
-       "w-parcel",
-       {
-        "reviewAt": "2026-09-23"
-       }
-      ]
-     ],
+     "writes": [],
      "storage": [],
      "closes": 0,
      "pushes": [],
@@ -29407,21 +29363,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        true,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -29805,21 +29752,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -29882,21 +29820,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -30125,21 +30054,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -30467,21 +30387,12 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 4",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
      ],
      "rows": [
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
-       ]
-      ],
       [
        "w-vendor",
        false,
@@ -30687,7 +30598,7 @@
       "Daily Review",
       "Waiting For",
       "Step 3 of 5",
-      "3 tasks",
+      "2 tasks",
       "Follow up on anything that’s due.",
       "Back",
       "Next Step"
@@ -30709,15 +30620,6 @@
        [
         true,
         "Follow up today: Invoice from Alice"
-       ]
-      ],
-      [
-       "w-parcel",
-       false,
-       false,
-       [
-        false,
-        "Follow up today: Parcel delivery"
        ]
       ]
      ],
