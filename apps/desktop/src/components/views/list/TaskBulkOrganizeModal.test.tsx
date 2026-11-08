@@ -107,6 +107,13 @@ describe('TaskBulkOrganizeModal', () => {
         ensureDestinationSavedMock.mockResolvedValue(undefined);
     });
 
+    it('uses the translated bulk organize label for the heading', () => {
+        const { getByRole } = renderModal({
+            t: (key) => key === 'bulk.organize' ? '批量整理' : key,
+        });
+        expect(getByRole('heading', { name: '批量整理' })).toBeInTheDocument();
+    });
+
     it('selects existing context and tag suggestions alongside manually typed tokens without applying on Enter', () => {
         act(() => useTaskStore.setState({ _allTasks: [tokenTask('known')] }));
         const { getByLabelText, getByRole, onApply } = renderModal();

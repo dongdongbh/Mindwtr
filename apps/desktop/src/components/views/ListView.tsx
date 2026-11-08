@@ -1640,8 +1640,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             areas={areas}
             isApplying={isBulkOrganizing}
             t={t}
-            titleKey={isInbox ? 'bulk.organizeInbox' : 'bulk.organizeTasks'}
-            titleFallback={isInbox ? 'Bulk organize Inbox' : 'Bulk organize tasks'}
             onCancel={() => setBulkOrganizeOpen(false)}
             onApply={handleApplyTaskBulkOrganize}
         />

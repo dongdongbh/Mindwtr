@@ -68,8 +68,8 @@ export function TaskBulkOrganizeModal({
     sectionScope,
     isApplying,
     t,
-    titleKey = 'bulk.organizeTasks',
-    titleFallback = 'Bulk organize tasks',
+    titleKey = 'bulk.organize',
+    titleFallback = 'Bulk organize',
     onApply,
     onCancel,
 }: TaskBulkOrganizeModalProps) {
