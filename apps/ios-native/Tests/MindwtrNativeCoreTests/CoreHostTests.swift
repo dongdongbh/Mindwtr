@@ -1470,6 +1470,28 @@ final class CoreHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
+    func testDestinationPickerAndEditorListSomedayProjectsAfterActiveOnes() async throws {
+        let id = try await seedDestinationTask()
+        let sqlite = try SQLiteBridge(url: database)
+        _ = try sqlite.execute("UPDATE projects SET status = 'someday' WHERE id = ?", parametersJSON: json(["destination-project-a"]))
+        sqlite.close()
+        let core = host()
+        _ = try await core.start()
+        let editor = try object(await core.call("editorModel", argumentsJSON: json([id])))
+        let options = try XCTUnwrap((editor["options"] as? [String: Any])?["projects"] as? [[String: Any]])
+        XCTAssertEqual(options.compactMap { $0["id"] as? String }, ["destination-project-b", "destination-project-a"])
+        XCTAssertEqual(options.compactMap { $0["deferred"] as? Bool }, [false, true])
+        let draft = try XCTUnwrap(editor["draft"] as? [String: Any])
+        let model = try object(await core.call("destinationPicker", argumentsJSON: json([json(["id": id, "draft": draft, "query": ""])])))
+        let groups = try XCTUnwrap((model["destination"] as? [String: Any])?["groups"] as? [[String: Any]])
+        XCTAssertEqual(groups.compactMap { $0["kind"] as? String }, ["none", "project", "project", "area"])
+        let projectGroups = groups.filter { $0["kind"] as? String == "project" }
+        XCTAssertEqual(projectGroups.map { (($0["choices"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String } },
+                       [["destination-project-b"], ["destination-project-a"]])
+        XCTAssertEqual(projectGroups.last?["label"] as? String, "Someday / Waiting")
+        await core.close()
+    }
+
     func testDestinationExactReplayAfterFailedCommitAndLostAcknowledgmentRetainsNewMetadata() async throws {
         for afterCommit in [false, true] {
             let id = try await seedDestinationTask()

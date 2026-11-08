@@ -779,7 +779,7 @@ const contract = createNativeHostContract({
             return { status: result?.status === 'generation-conflict' ? 'generation-conflict' as const : 'unavailable' as const };
         } };
     },
-    ...(globalThis.__mindwtrHostPlatform !== 'ios' ? { projectPickerGroups: true } : {}),
+    projectPickerGroups: true,
     ...(nativeAbout ? { about: nativeAbout } : {}),
     ...(persistentCapture ? { persistentCapture } : {}) });
 

@@ -69,10 +69,10 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 ## Process Inbox
 
 - Reach: Inbox › Process Inbox (N). The sheet walks one item at a time.
-- Selectors: `process-inbox-sheet`, `process-inbox-title`, `process-inbox-next-action`, `process-inbox-skip`, `process-inbox-delegate-who`, `process-inbox-project-search`, `process-inbox-close`, `process-inbox-toast`
+- Selectors: `process-inbox-sheet`, `process-inbox-title`, `process-inbox-next-action`, `process-inbox-skip`, `process-inbox-delegate-who`, `process-inbox-project-search`, `process-inbox-deferred-projects`, `process-inbox-close`, `process-inbox-toast`
 - Code: `apps/ios-native/App/ProcessInboxSheet.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testProcessInbox…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeProcessInboxUndoHostTests.swift`
-- Notes: Filing, completion and Trash offer Undo for about 5.2 seconds. Settings › GTD › Inbox controls the two-minute prompt and the layout. Incubate and the "Back to clarify" label use a calendar-clock icon, as in RN (#1339).
+- Notes: Filing, completion and Trash offer Undo for about 5.2 seconds. Settings › GTD › Inbox controls the two-minute prompt and the layout. Incubate and the "Back to clarify" label use a calendar-clock icon, as in RN (#1339). The project step lists Someday and Waiting projects after the active ones, under a "Someday / Waiting" heading (`process-inbox-deferred-projects`).
 
 ## Today's Focus
 
@@ -97,7 +97,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
 - Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDuplicate…, testTaskShare…, testTaskCancellation…, testTaskDelete…, testTaskSkip…, testTaskPromotion…, testTaskPreview…, testGtdTaskEditor…)
-- Notes: Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview. Date pickers for due, start, review and recurrence end show a month calendar; time pickers stay wheels, as in RN. Bulk Organize dates use the same month calendar.
+- Notes: Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview. Date pickers for due, start, review and recurrence end show a month calendar; time pickers stay wheels, as in RN. Bulk Organize dates use the same month calendar. The Destination picker (`task-destination-choice-project-<id>`) lists Someday and Waiting projects in their own "Someday / Waiting" group after the active projects.
 
 ## Task attachments
 

@@ -431,7 +431,17 @@ struct ProcessInboxSheet: View {
                             }
                         }
                     }
-                    options(project.objects("projects"), prefix: "process-inbox-project")
+                    let projects = project.objects("projects")
+                    let deferredFrom = project.object("deferredFrom")
+                    let split = min(max(deferredFrom.number("index"), 0), projects.count)
+                    if deferredFrom.isEmpty || split == projects.count {
+                        options(projects, prefix: "process-inbox-project")
+                    } else {
+                        options(Array(projects[..<split]), prefix: "process-inbox-project")
+                        Text(deferredFrom.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                            .accessibilityAddTraits(.isHeader).accessibilityIdentifier("process-inbox-deferred-projects")
+                        options(Array(projects[split...]), prefix: "process-inbox-project", offset: split)
+                    }
                 }
             }
             .sectionCard(palette)
@@ -652,10 +662,10 @@ struct ProcessInboxSheet: View {
             .accessibilityLabel(label)
     }
 
-    private func options(_ values: [CoreObject], prefix: String) -> some View {
+    private func options(_ values: [CoreObject], prefix: String, offset: Int = 0) -> some View {
         AppChipFlow {
             ForEach(values.indices, id: \.self) { index in
-                option(values[index], id: prefix + "-\(index)")
+                option(values[index], id: prefix + "-\(offset + index)")
             }
         }
     }
