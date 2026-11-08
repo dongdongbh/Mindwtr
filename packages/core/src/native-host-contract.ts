@@ -53,7 +53,7 @@ import { computeGlobalSearchResults, type DuePreset, type GlobalSearchScope } fr
 import { clearGlobalSearchActiveChip, DEFAULT_GLOBAL_SEARCH_FILTERS, fetchGlobalSearchAdapterResults, getGlobalSearchActiveChips, getGlobalSearchFilterOptions, getGlobalSearchResultDate, getGlobalSearchTaskListTarget, resolveSavedSearch, GLOBAL_SEARCH_DUE_OPTIONS, GLOBAL_SEARCH_SCOPE_OPTIONS, GLOBAL_SEARCH_STATUS_OPTIONS, type GlobalSearchFilterState } from './global-search-model';
 import type { SearchProjectResult } from './storage';
 import { createSearchHighlighter } from './search-highlight';
-import { configureDateFormatting, createDateFormatter, hasTimeComponent, normalizeClockTimeInput, safeParseDate, setHostSystemLocale, type DateFormatter, type DateFormattingConfig } from './date';
+import { configureDateFormatting, createDateFormatter, hasTimeComponent, normalizeClockTimeInput, normalizeSystemDateFormat, safeParseDate, setHostSystemLocale, type DateFormatter, type DateFormattingConfig } from './date';
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './schedule-utils';
 import { WEEKDAY_ORDER } from './recurrence-constants';
 import {
@@ -1070,6 +1070,8 @@ export function createNativeHostContract(options: {
     const processId = generateUUID();
     let language: Language = 'en';
     let systemLocale: string | null = null;
+    let systemDateFormat: string | null = null;
+    const localeRevision = () => (systemDateFormat ? `${systemLocale ?? ''}|${systemDateFormat}` : systemLocale ?? '');
     let translate = getTranslator(language);
     let readyAdapter: StorageAdapter | null = null;
     let generation = 0;
@@ -1156,7 +1158,7 @@ export function createNativeHostContract(options: {
 
 
     const displayRevision = (now: Date) => (
-        `${settingsRevision()}:${language}:${systemLocale ?? ''}:${formatLocalDate(now)}:${Math.floor(now.getTime() / 60_000)}`
+        `${settingsRevision()}:${language}:${localeRevision()}:${formatLocalDate(now)}:${Math.floor(now.getTime() / 60_000)}`
     );
 
     const focusRevision = (now: Date) => `${revision()}:${displayRevision(now)}`;
@@ -1225,6 +1227,7 @@ export function createNativeHostContract(options: {
             calendarSystem: settings.calendarSystem,
             timeFormat: settings.timeFormat,
             systemLocale,
+            ...(systemDateFormat ? { systemDateFormat } : {}),
         };
     };
 
@@ -1285,7 +1288,7 @@ export function createNativeHostContract(options: {
         try {
             zone = `${now.getTimezoneOffset()}/${new Intl.DateTimeFormat().resolvedOptions().timeZone}/${formatLocalDate(now)}`;
         } catch {                         }
-        const key = `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}:${zone}\u0000${controls ? paramsKey(controls) : 'flat'}`;
+        const key = `${revision()}:${settingsRevision()}:${language}:${localeRevision()}:${zone}\u0000${controls ? paramsKey(controls) : 'flat'}`;
         const nowMs = now.getTime();
         if (options.focusModelCache === false || zone === null || cachedFocusKey !== key
             || !(nowMs >= cachedFocusBuiltAt && nowMs < cachedFocusValidUntil)) {
@@ -1736,7 +1739,7 @@ export function createNativeHostContract(options: {
             getProjectDetailFilterView: (input) => contract.getProjectDetailFilterView(input),
             getContextsView: (input) => contract.getContextsView(input as never),
             getReviewOverview: (input) => contract.getReviewOverview(input as never) },
-        pickerRevision: () => `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}`,
+        pickerRevision: () => `${revision()}:${settingsRevision()}:${language}:${localeRevision()}`,
     });
 
     const bulkSelectionShown = (request: { source: string; params: Record<string, unknown>; taskIds: string[]; taskRevisions: Record<string, string> }): boolean => {
@@ -2208,6 +2211,16 @@ export function createNativeHostContract(options: {
             } catch (error) {
                 return fail('ACTION_FAILED', error instanceof Error ? error.message : String(error));
             }
+        },
+
+
+        setSystemDateFormat(input: { systemDateFormat: string | null }): NativeHostResult<{ systemDateFormat: string | null }> {
+            if (!input || (input.systemDateFormat !== null && typeof input.systemDateFormat !== 'string')) {
+                return fail('INVALID_INPUT', 'The system date format must be a string or null');
+            }
+            systemDateFormat = normalizeSystemDateFormat(input.systemDateFormat) ?? null;
+            applyDateFormatting();
+            return { ok: true, value: { systemDateFormat } };
         },
 
 

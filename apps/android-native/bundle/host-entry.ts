@@ -3291,6 +3291,20 @@ globalThis.MindwtrHost = {
         });
     },
 
+    iosSystemDateFormat(format: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof format !== 'string' || format.length > 128) {
+                throw new Error('INVALID_INPUT: The system date format must be a bounded string');
+            }
+            const applied = unwrap(contract.setSystemDateFormat({ systemDateFormat: format || null }));
+            try {
+                logInfo('System date format configured', { scope: 'regional-format', force: true,
+                    context: { releaseCheck: 'v1.3.9/ios-native-system-date-format', outcome: applied.systemDateFormat ? 'native' : 'locale-fallback' } });
+            } catch { }
+            return applied;
+        });
+    },
+
 
     widgetsRefresh(mode = ''): string {
         return submit(async () => ({ published: (mode === 'leave' ? widgets?.flush() : widgets?.publish()) ?? false }));

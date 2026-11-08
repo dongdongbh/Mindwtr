@@ -245,8 +245,8 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Reach: Settings › General. Theme, Language, Show task age, Quick access view, Week starts on, Date format, Time format, Calendar system, App lock, Show tasks in system search.
 - Selectors: `general-scroll`, `general-show-task-age`, `general-regional-toggle`, `general-app-lock`, `general-ios-search`, `general-picker-cancel`
 - Code: `apps/ios-native/App/SettingsScreen.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testGeneral…, testQuickAccess…)
-- Notes: The E-ink theme draws the Focus star, the swipe Focus action, and project, area and Focus group dots in black, as in RN (#1498). Color pickers keep their colors. Code: `AppPalette.einkSafe` in `apps/ios-native/App/Appearance.swift`.
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testGeneral…, testQuickAccess…), `packages/core/src/native-host-contract-system-date-format.test.ts`
+- Notes: The E-ink theme draws the Focus star, the swipe Focus action, and project, area and Focus group dots in black, as in RN (#1498). Color pickers keep their colors. Code: `AppPalette.einkSafe` in `apps/ios-native/App/Appearance.swift`. Date format System follows the iOS Region short date, as the RN app does. The app sends the device pattern to core at startup and on each refresh.
 
 ## Settings › Manage
 

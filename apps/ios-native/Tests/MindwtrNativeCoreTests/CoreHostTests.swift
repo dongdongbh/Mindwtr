@@ -1492,6 +1492,23 @@ final class CoreHostTests: XCTestCase {
         await core.close()
     }
 
+    func testSystemDateFormatAcceptsTheDeviceShortDatePatternAndFallsBackOnARejectedOne() async throws {
+        let core = host()
+        _ = try await core.start()
+        _ = try await core.call("language", argumentsJSON: json(["en", "en-US"]))
+        let accepted = try object(await core.call("iosSystemDateFormat", argumentsJSON: json(["d.M.yyyy"])))
+        XCTAssertEqual(Set(accepted.keys), Set(["systemDateFormat"]))
+        XCTAssertEqual(accepted["systemDateFormat"] as? String, "d.M.yyyy")
+        for rejected in ["", "yy/M/d"] {
+            let fallback = try object(await core.call("iosSystemDateFormat", argumentsJSON: json([rejected])))
+            XCTAssertTrue(fallback["systemDateFormat"] is NSNull)
+        }
+        await expectFailure("INVALID_INPUT") {
+            _ = try await core.call("iosSystemDateFormat", argumentsJSON: self.json([String(repeating: "d", count: 129)]))
+        }
+        await core.close()
+    }
+
     func testDestinationExactReplayAfterFailedCommitAndLostAcknowledgmentRetainsNewMetadata() async throws {
         for afterCommit in [false, true] {
             let id = try await seedDestinationTask()

@@ -33298,7 +33298,7 @@ extension FoundationUITests {
             XCTAssertEqual(destination.value as? String, index < 3 ? "Task743 Created Project" : "Task743 Old Project")
             if index < 3 {
                 task743Section(app, "task-editor-section-scheduling")
-                for (field, day) in [("startTime", "03/10/2031"), ("dueDate", "03/12/2031"), ("reviewAt", "03/14/2031")] {
+                for (field, day) in [("startTime", "3/10/31"), ("dueDate", "3/12/31"), ("reviewAt", "3/14/31")] {
                     let date = app.buttons["task-editor-" + field]
                     revealPagedElement(app, date, in: app.scrollViews["task-editor-scroll"], outerEdge: true)
                     XCTAssertEqual(date.value as? String, day)
@@ -35451,7 +35451,7 @@ extension FoundationUITests {
             if index < 3 {
                 task743Section(app, "task-editor-section-scheduling")
                 let due = app.buttons["task-editor-dueDate"]
-                revealPagedElement(app, due, in: app.scrollViews["task-editor-scroll"], outerEdge: true); XCTAssertEqual(due.value as? String, "03/12/2031")
+                revealPagedElement(app, due, in: app.scrollViews["task-editor-scroll"], outerEdge: true); XCTAssertEqual(due.value as? String, "3/12/31")
             }
             boardTap(app, "task-view-close"); XCTAssertFalse(app.buttons["task-editor-discard"].exists); boardTap(app, "search-close")
         }

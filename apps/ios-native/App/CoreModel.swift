@@ -16607,6 +16607,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
 
         _ = try await query("language", [uiLanguage, Locale.current.identifier])
+        _ = try await query("iosSystemDateFormat", [Self.systemShortDateFormat()])
         if uiLanguage != currentLanguage || strings.isEmpty { try await readStrings() }
         currentLanguage = uiLanguage
         if !writes.isEmpty {
@@ -16614,6 +16615,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if preferenceDefaults.object(forKey: key) as? String != uiLanguage { preferenceDefaults.set(uiLanguage, forKey: key) }
             storedLanguage = uiLanguage
         }
+    }
+
+    private static func systemShortDateFormat() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        let format: String = formatter.dateFormat ?? ""
+        return format.utf16.count <= 128 ? format : ""
     }
 
     private static let labelKeys: [String] = Bundle.main.url(forResource: "label-keys", withExtension: "json")
