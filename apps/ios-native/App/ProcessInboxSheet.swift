@@ -136,8 +136,12 @@ struct ProcessInboxSheet: View {
     private var captureCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !capture.text("returningLabel").isEmpty {
-                Text(capture.text("returningLabel")).rnFont(12, .semibold).foregroundStyle(palette.secondary)
-                    .accessibilityIdentifier("process-inbox-returning")
+                HStack(spacing: 6) {
+                    Image(systemName: choiceSymbol("incubate")).font(.system(size: 13)).accessibilityHidden(true)
+                    Text(capture.text("returningLabel")).rnFont(12, .semibold)
+                        .accessibilityIdentifier("process-inbox-returning")
+                }
+                .foregroundStyle(palette.secondary)
             }
             textInput("title", label: capture.text("titleLabel"), multiline: true)
                 .accessibilityIdentifier("process-inbox-title")
@@ -308,7 +312,7 @@ struct ProcessInboxSheet: View {
         case "later": return "clock"
         case "delegate": return "person"
         case "someday": return "cloud"
-        case "incubate": return "leaf"
+        case "incubate": return "calendar.badge.clock"
         case "reference": return "bookmark"
         case "trash": return "trash"
         default: return "chevron.right"
