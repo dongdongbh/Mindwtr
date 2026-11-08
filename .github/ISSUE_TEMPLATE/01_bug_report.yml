@@ -6,6 +6,12 @@ body:
   - type: markdown
     attributes:
       value: |
+        **Please include diagnostics logs with your bug report.** Logs are especially important for sync, reminders, crashes, and problems we cannot reproduce. They help us identify what happened and avoid a round of follow-up questions.
+
+        In **Settings → Data → Diagnostics**, enable **Debug logging**, reproduce the problem if safe, then use **Share log** (mobile) or **Save log** (desktop). Attach the exported file below. If you cannot collect logs, explain why in the diagnostics field; you can still submit the report.
+  - type: markdown
+    attributes:
+      value: |
         If this is mainly a sync or data problem, the **Sync / Data Issue** form gets it triaged faster.
   - type: dropdown
     id: platform
@@ -123,13 +129,24 @@ body:
       label: Last version where this worked
       description: Leave empty if it never worked or you do not know.
   - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics logs (strongly recommended)
+      description: |
+        Attach the log file by dragging it into this box. Include the approximate time of the problem and your timezone. For problems involving multiple devices, attach a log from each affected device and identify which is which.
+
+        Logs stay on your device until you share them and redact common credentials. Review files before posting: GitHub issues are public. Do not attach a full task database or backup. Instructions: https://docs.mindwtr.app/data-sync/diagnostics-logs
+
+        If logs are unavailable, explain why (for example, the app will not open). For a purely visual issue, a screenshot or recording plus a short explanation is fine.
+      placeholder: Attach logs here, or explain why you cannot provide them.
+    validations:
+      required: true
+  - type: textarea
     id: evidence
     attributes:
-      label: Screenshots, recordings, logs
+      label: Screenshots / screen recording
       description: |
-        Screenshots, a short recording, or logs. Drag files into the box to attach them.
-
-        **Logs:** go to **Settings → Data → Diagnostics**, turn on **Debug logging**, reproduce the issue, then attach the log: **Share log** on mobile, **Save log** on desktop (v1.3.2 and later; on older versions attach the file shown at **Log file**). Logs stay on your device and redact common credentials. Details: https://docs.mindwtr.app/data-sync/diagnostics-logs
+        Screenshots or a short recording. Drag files into the box to attach them.
 
         **Recording without your private tasks:** **Settings → Data → Open sandbox**, then **Enter sandbox**. It loads fictional tasks; leave it from the sandbox banner. Sample data may not reproduce a bug that involves your own data, attachments or sync.
   - type: textarea

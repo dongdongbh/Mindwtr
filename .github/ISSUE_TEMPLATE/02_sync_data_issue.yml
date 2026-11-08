@@ -3,6 +3,12 @@ description: Report sync conflicts, missing data, duplicated tasks, or attachmen
 title: "[SYNC] "
 labels: ["bug", "area:sync", "status:needs-triage"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please include diagnostics logs with your bug report.** Logs are especially important for sync, reminders, crashes, and problems we cannot reproduce. They help us identify what happened and avoid a round of follow-up questions.
+
+        In **Settings → Data → Diagnostics**, enable **Debug logging**, reproduce the problem if safe, then use **Share log** (mobile) or **Save log** (desktop). Attach the exported file below. If you cannot collect logs, explain why in the diagnostics field; you can still submit the report.
   - type: dropdown
     id: platform
     attributes:
@@ -106,8 +112,13 @@ body:
   - type: textarea
     id: diagnostics
     attributes:
-      label: Diagnostic data
+      label: Diagnostics logs (strongly recommended)
       description: |
-        Very helpful: sync logs from all affected devices, example task or attachment ids if visible, the approximate time window (with timezone and local time on each device), and whether it happens on every sync or only sometimes.
+        Attach the log file by dragging it into this box. Include the approximate time of the problem and your timezone. For problems involving multiple devices, attach a log from each affected device and identify which is which.
 
-        How to collect logs: https://docs.mindwtr.app/data-sync/diagnostics-logs
+        Logs stay on your device until you share them and redact common credentials. Review files before posting: GitHub issues are public. Do not attach a full task database or backup. Instructions: https://docs.mindwtr.app/data-sync/diagnostics-logs
+
+        If logs are unavailable, explain why (for example, the app will not open). For a purely visual issue, a screenshot or recording plus a short explanation is fine.
+      placeholder: Attach logs here, or explain why you cannot provide them.
+    validations:
+      required: true
