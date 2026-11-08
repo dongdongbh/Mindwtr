@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, chipOn, connect, EDGE_SAFE_X, evidenced, fail, hasText, inEditor, inList, mainList, Stopped, switchOn, tab, tabSelected, withDescription } from './device.mjs';
+import { box, button, check, chipOn, connect, EDGE_SAFE_X, evidenced, fail, hasText, inEditor, inList, mainList, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { icsCalendar, serveCalendar } from './calendar-feed-server.mjs';
 
 const [serial] = process.argv.slice(2);
@@ -29,6 +29,8 @@ const A13_ONLY = process.env.PARITY_ONLY === '13a';
 const GTD_HUB_ONLY = process.env.PARITY_ONLY === 'gtd-hub';
 const SMALL2_ONLY = process.env.PARITY_ONLY === 'small2';
 const STATUS_MENU_ONLY = process.env.PARITY_ONLY === 'status-menu';
+const OWED_ONLY = process.env.PARITY_ONLY === 'owed';
+const EINK_ONLY = process.env.PARITY_ONLY === 'eink';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -146,6 +148,15 @@ const buildFixture = () => execFileSync('bun', ['-e', `
     // Pass R2's shots: the weekly review on (its day picker opens).
     if (process.env.FIXTURE_R2 === '1') await store().updateSettings({ weeklyReviewEnabled: true });
     // Pass R2b's shots: the Pomodoro card on Focus, with its Link task row.
+    if (process.env.FIXTURE_OWED === '1' || process.env.FIXTURE_EINK === '1') {
+        const outline = store()._allTasks.find((task) => task.title === T.outline);
+        await store().updateTask(outline.id, { checklist: [
+            { id: 'parity-check-1', title: 'Pull the sales figures', isCompleted: true },
+            { id: 'parity-check-2', title: 'Write the summary', isCompleted: false },
+        ] });
+        await store().updateSettings({ savedSearches: [{ id: 'parity-search', name: 'Kitchen work', query: 'kitchen' }] });
+    }
+    if (process.env.FIXTURE_EINK === '1') await store().updateSettings({ theme: 'eink' });
     if (process.env.FIXTURE_R2B === '1') await store().updateSettings({ features: { ...(store().settings.features ?? {}), pomodoro: true },
         gtd: { ...(store().settings.gtd ?? {}), pomodoro: { ...(store().settings.gtd?.pomodoro ?? {}), linkTask: true } } });
     await flushPendingSave();
@@ -155,7 +166,8 @@ const buildFixture = () => execFileSync('bun', ['-e', `
     console.log(store()._allTasks.filter((task) => !task.deletedAt).length);
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, FIXTURE_DB: fixture, FIXTURE_TITLES: JSON.stringify(T), FIXTURE_TRASHED: TRASHED,
-    FIXTURE_FEED: JSON.stringify(CALENDAR_FEED), FIXTURE_FILE_TITLE: ATTACHMENT_FILE.title, FIXTURE_FILE_URI: ATTACHMENT_FILE.uri, FIXTURE_FILE_SIZE: String(ATTACHMENT_FILE.bytes.length), FIXTURE_R2: R2_ONLY ? '1' : '', FIXTURE_R2B: R2B_ONLY ? '1' : '' } }).trim().split('\n').pop();
+    FIXTURE_FEED: JSON.stringify(CALENDAR_FEED), FIXTURE_FILE_TITLE: ATTACHMENT_FILE.title, FIXTURE_FILE_URI: ATTACHMENT_FILE.uri, FIXTURE_FILE_SIZE: String(ATTACHMENT_FILE.bytes.length), FIXTURE_R2: R2_ONLY ? '1' : '', FIXTURE_R2B: R2B_ONLY ? '1' : '',
+    FIXTURE_OWED: OWED_ONLY ? '1' : '', FIXTURE_EINK: EINK_ONLY ? '1' : '' } }).trim().split('\n').pop();
 
 
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-parity-ui.xml' });
@@ -1054,6 +1066,207 @@ const shootD1b = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
+const owedLabeled = (nodes, label) => nodes.findLast((node) => node.text === label || node['content-desc'] === label);
+const owedAction = (action) => en['task.aria.action'].replace('{{action}}', action);
+const OWED_TRAY = { done: owedAction(en['status.done']), dates: owedAction(en['task.dates']), delete: en['task.aria.delete'] };
+const OWED_SEARCH = 'Kitchen work';
+const OWED_CHECKLIST_ITEM = 'Write the summary';
+
+const owedFresh = async (rn, activity, where) => {
+    await stopApp();
+    device.launch(activity);
+    if (rn) {
+        await waitFor('the RN tabs', (current) => current.some((node) => node['content-desc'] === 'Menu'), 60_000);
+        openLink(where);
+        return;
+    }
+    const name = { focus: 'Focus', inbox: 'Inbox', projects: 'Projects' }[where] ?? 'Inbox';
+    const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, name)), 60_000);
+    if (!tabSelected(tabs, name)) await tap(tab(tabs, name));
+    if (where === 'review' || where === 'search') {
+        const menu = await waitFor('the Menu tab', (current) => Boolean(tab(current, 'Menu')), 30_000);
+        await tap(tab(menu, 'Menu'));
+        const tile = where === 'review' ? en['nav.review'] : OWED_SEARCH;
+        const sheet = await waitFor(`the ${tile} tile`, (current) => Boolean(withDescription(current, tile)), 15_000);
+        await tap(withDescription(sheet, tile));
+    }
+};
+
+const owedTray = async (prefix, suffix, rn, activity, withDates) => {
+    const swipeRow = async (side) => {
+        const nodes = await waitFor(`${T.milk} in Focus`, (current) => Boolean(inList(current, T.milk)), 45_000);
+        const [x1, y1, x2, y2] = box(inList(nodes, T.milk));
+        const y = Math.round((y1 + y2) / 2);
+        const from = side === 'right' ? Math.max(x1 + 10, EDGE_SAFE_X) : Math.min(x2 - 10, x1 + x2 - EDGE_SAFE_X);
+        requireAppFront();
+        sh(`input swipe ${from} ${y} ${side === 'right' ? from + 440 : from - 440} ${y} 400`);
+        return y;
+    };
+    const action = (current, y, id) => current.find((node) => ((node['resource-id'] ?? '').endsWith(`swipe-${id}`) || node['content-desc'] === OWED_TRAY[id])
+        && box(node)[1] <= y && box(node)[3] >= y);
+    await owedFresh(rn, activity, 'focus');
+    let y = await swipeRow('right');
+    await shoot(`${prefix}-swipe-tray-right-${suffix}`, (current) => Boolean(action(current, y, 'done')));
+    await owedFresh(rn, activity, 'focus');
+    y = await swipeRow('left');
+    await shoot(`${prefix}-swipe-tray-left-${suffix}`, (current) => Boolean(action(current, y, 'delete')));
+    if (!withDates) return;
+    await tap(action(await screen(), y, 'dates') ?? fail(`no ${en['task.dates']} in the tray`));
+    await shoot(`${prefix}-swipe-tray-dates-${suffix}`, (current) => hasText(current, en['filters.taskDates']));
+};
+
+const shootEink = async (prefix, rn, activity) => {
+    const attempt = owedAttempt(prefix, 'eink');
+    await attempt('Focus star', async () => {
+        await owedFresh(rn, activity, 'focus');
+        await shoot(`${prefix}-focus-eink`, (current) => Boolean(inList(current, T.outline)));
+    });
+    await attempt('swipe tray', () => owedTray(prefix, 'eink', rn, activity, false));
+};
+
+const owedAttempt = (prefix, suffix) => async (name, run) => {
+    try { await run(); } catch (error) {
+        if (error instanceof Stopped) throw error;
+        console.log(`warn - ${prefix} ${name} (${suffix}): ${error.message}`);
+    }
+};
+
+const shootOwed = async (prefix, suffix, rn, activity) => {
+    const attempt = owedAttempt(prefix, suffix);
+    await attempt('swipe tray', () => owedTray(prefix, suffix, rn, activity, true));
+
+    await attempt('row checklist', async () => {
+        await owedFresh(rn, activity, 'focus');
+        const badge = (current) => {
+            const row = inList(current, T.outline);
+            if (!row) return undefined;
+            const top = box(row)[1];
+            return current.filter((node) => ((node['resource-id'] ?? '').endsWith('row-checklist-toggle') || node['content-desc'] === en['checklist.progress'])
+                && box(node)[1] > top).sort((a, z) => box(a)[1] - box(z)[1])[0];
+        };
+        const nodes = await waitFor(`${T.outline}'s checklist badge`, (current) => Boolean(badge(current)), 45_000);
+        await tap(badge(nodes));
+        await shoot(`${prefix}-row-checklist-${suffix}`, (current) => Boolean(owedLabeled(current, OWED_CHECKLIST_ITEM)));
+    });
+
+    await attempt('add to checklist', async () => {
+        await owedFresh(rn, activity, 'inbox');
+        const label = en['task.aria.changeStatus'].replace(/\{\{?status\}?\}/, en['status.inbox']);
+        const beside = (current) => {
+            const row = current.find((node) => node.text === T.call);
+            if (!row) return undefined;
+            const [, top, , bottom] = box(row);
+            return current.find((node) => node['content-desc'] === label && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
+        };
+        let nodes = await waitFor(`the status control beside "${T.call}"`, (current) => Boolean(beside(current)), 30_000);
+        await tap(beside(nodes));
+        nodes = await waitFor('the status menu', (current) => hasText(current, en['task.copyTaskId']), 15_000);
+        await tap(owedLabeled(nodes, en['task.addToChecklist']) ?? fail(`no "${en['task.addToChecklist']}" in the status menu`));
+        await shoot(`${prefix}-checklist-picker-${suffix}`, (current) => hasText(current, en['task.addToChecklist']) && !hasText(current, en['task.copyTaskId']));
+        const picker = await screen();
+        const target = [T.receipts, T.gift, T.article, T.dentist, T.bikes, T.milk, T.mom].map((title) => owedLabeled(picker, title)).find(Boolean)
+            ?? fail('no target task in the picker');
+        await tap(target);
+        const added = en['task.addedToChecklist'];
+        await shoot(`${prefix}-checklist-toast-${suffix}`, (current) => current.some((node) => (node.text ?? '').includes(added) || (node['content-desc'] ?? '').includes(added)));
+        const undo = owedLabeled(await screen(), en['common.undo']);
+        if (undo) await tap(undo);
+        await sleep(1500);
+    });
+
+    await attempt('editor Destination', async () => {
+        await owedFresh(rn, activity, 'focus');
+        const nodes = await waitFor(`${EDITOR_TASK} in Focus`, (current) => Boolean(inList(current, EDITOR_TASK)), 45_000);
+        await tap(inList(nodes, EDITOR_TASK));
+        const formShown = (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === EDITOR_TASK) && (rn || inEditor(current));
+        const open = await waitFor(`the editor for ${EDITOR_TASK}`, (current) => formShown(current) || Boolean(button(current, 'Edit')), 30_000);
+        if (!formShown(open)) await tap(button(open, 'Edit'));
+        await hideKeyboard();
+        const field = (current) => current.find((node) => node.text === 'Quarterly report' && node.class !== 'android.widget.EditText');
+        let form = await waitFor('the editor form', formShown, 15_000);
+        for (let swipe = 0; swipe < 5 && !field(form); swipe += 1) form = await device.swipe(form, 'down');
+        await tap(field(form) ?? fail('no Project field reading Quarterly report'));
+        await shoot(`${prefix}-editor-destination-${suffix}`, (current) => hasText(current, 'Kitchen renovation') && hasText(current, 'Plan summer trip'));
+    });
+
+    await attempt('Weekly Review Complete', async () => {
+        await owedFresh(rn, activity, 'review');
+        const start = await waitFor('Start Review', (current) => Boolean(button(current, en['review.startReview'])), 20_000);
+        await tap(button(start, en['review.startReview']));
+        const choice = await waitFor('the Weekly Review choice', (current) => Boolean(button(current, en['review.openGuide'])), 15_000);
+        await tap(button(choice, en['review.openGuide']));
+        const onProjects = (current) => tagged(current, 'review-step-title')?.text === en['review.projectsStep']
+            || (rn && hasText(current, en['review.projectsStep']));
+        let nodes = await waitFor('the Weekly Review', (current) => Boolean(owedLabeled(current, en['review.nextStepBtn'])), 20_000);
+        for (let step = 0; step < 10 && !onProjects(nodes); step += 1) {
+            await tap(owedLabeled(nodes, en['review.nextStepBtn']) ?? fail('no Next Step'));
+            await sleep(1500);
+            nodes = await screen();
+        }
+        if (!onProjects(nodes)) fail(`no "${en['review.projectsStep']}" step`);
+        const link = (current) => current.find((node) => /review-complete-project-/.test(node['resource-id'] ?? '')) ?? owedLabeled(current, en['projects.complete']);
+        const card = nodes.find((node) => node['content-desc'] === 'Kitchen renovation' || node.text === 'Kitchen renovation');
+        if (!link(nodes) && card) {
+            const [x1, , , y2] = box(card);
+            requireAppFront();
+            sh(`input tap ${x1 + 60} ${y2 - 40}`);
+            await sleep(1500);
+            nodes = await screen();
+        }
+        for (let swipe = 0; swipe < 6 && !link(nodes); swipe += 1) nodes = await device.swipe(nodes, 'down');
+        await shoot(`${prefix}-weekly-complete-link-${suffix}`, (current) => Boolean(link(current)));
+        await tap(link(await screen()) ?? fail(`no ${en['projects.complete']} link`));
+        await shoot(`${prefix}-weekly-complete-prompt-${suffix}`, (current) => hasText(current, en['projects.completeConfirm']));
+        const cancel = owedLabeled(await screen(), en['common.cancel']);
+        if (cancel) await tap(cancel);
+        await sleep(1000);
+    });
+
+    await attempt('Projects menus', async () => {
+        await owedFresh(rn, activity, 'projects');
+        const more = `${en['common.more']}: Kitchen renovation`;
+        let nodes = await waitFor(`the "${more}" button`, (current) => Boolean(withDescription(current, more)), 30_000);
+        await tap(withDescription(nodes, more));
+        await shoot(`${prefix}-projects-row-menu-${suffix}`, (current) => Boolean(owedLabeled(current, en['projects.areaLabel'])));
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(1200);
+        const heading = `${en['projects.manageAreas']}: Home`;
+        nodes = await waitFor(`the "${heading}" button`, (current) => Boolean(withDescription(current, heading)), 15_000);
+        await tap(withDescription(nodes, heading));
+        const rename = `${en['projects.renameArea']}: Home`;
+        if (rn) {
+            nodes = await waitFor(en['projects.manageAreas'], (current) => Boolean(withDescription(current, rename)), 15_000);
+            await shoot(`${prefix}-projects-area-manage-${suffix}`, (current) => Boolean(withDescription(current, rename)));
+            await tap(withDescription(await screen(), rename));
+        }
+        await shoot(`${prefix}-projects-area-rename-${suffix}`, (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === 'Home'));
+    });
+
+    await attempt('folded group', async () => {
+        await owedFresh(rn, activity, 'focus');
+        const heading = (current) => current.find((node) => node.text === en['agenda.overdue'] || (node['content-desc'] ?? '').startsWith(en['agenda.overdue']));
+        const nodes = await waitFor(`the ${en['agenda.overdue']} heading`, (current) => Boolean(heading(current)) && Boolean(inList(current, T.invoice)), 30_000);
+        await tap(heading(nodes));
+        await shoot(`${prefix}-focus-folded-${suffix}`, (current) => Boolean(heading(current)) && !inList(current, T.invoice));
+        const again = heading(await screen());
+        if (again) await tap(again);
+        await waitFor(`${T.invoice} unfolded`, (current) => Boolean(inList(current, T.invoice)), 15_000);
+    });
+
+    await attempt('saved search Sort', async () => {
+        await owedFresh(rn, activity, rn ? 'saved-search/parity-search' : 'search');
+        const sort = (current) => current.find((node) => (node['content-desc'] ?? '').startsWith(`${en['sort.label']}: `));
+        await shoot(`${prefix}-saved-search-${suffix}`, (current) => Boolean(sort(current)) && hasText(current, T.tiles));
+        await tap(sort(await screen()) ?? fail('no Sort control'));
+        await shoot(`${prefix}-saved-search-sort-${suffix}`, (current) => !sort(current) || current.length > 0);
+    });
+
+    if (suffix === 'light') await attempt('pull bar', async () => {
+        await owedFresh(rn, activity, 'focus');
+        await shootSmall2(prefix, rn);
+    });
+};
 const SCREENS = [
     { name: 'inbox', link: 'inbox', tab: 'Inbox', text: T.call },
     { name: 'focus', link: 'focus', tab: 'Focus', text: T.outline },
@@ -1097,6 +1310,8 @@ try {
             await stopApp();
             device.launch(RN_ACTIVITY);
         }
+        if (OWED_ONLY) { await shootOwed('rn', mode === 'yes' ? 'dark' : 'light', true, RN_ACTIVITY); continue; }
+        if (EINK_ONLY) { if (mode === 'no') await shootEink('rn', true, RN_ACTIVITY); continue; }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('rn', true); continue; }
         if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('rn', true); continue; }
@@ -1145,6 +1360,8 @@ try {
     }
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
+        if (OWED_ONLY) { await shootOwed('native', mode === 'yes' ? 'dark' : 'light', false, NATIVE_ACTIVITY); continue; }
+        if (EINK_ONLY) { if (mode === 'no') await shootEink('native', false, NATIVE_ACTIVITY); continue; }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('native', false); continue; }
         if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('native', false); continue; }
