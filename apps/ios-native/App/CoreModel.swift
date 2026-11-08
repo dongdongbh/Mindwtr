@@ -1266,15 +1266,22 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var notificationSettingAwaitingRefresh = false
     private var notificationSettingExpected: CoreObject = [:]
     private var notificationSettingsSession = UUID()
-    private var notificationSettingRequest: String?
+    private lazy var durableWriteModel = DurableWriteModel(
+        isBusy: { [weak self] in self?.busy ?? true },
+        begin: { [weak self] in self?.busy = true },
+        finish: { [weak self] in self?.finishOperation() },
+        setRetryNeeded: { [weak self] needed, error in
+            guard let self else { return }
+            self.retryNeeded = needed
+            self.error = error
+        },
+        isDefiniteRejection: { [weak self] failure in self?.isDefiniteRejection(failure) ?? false })
+    private lazy var notificationSettingWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
     private var notificationSettingEdit: CoreObject = [:]
-    private var notificationSettingHost: CoreHost?
-    private var notificationSettingOwner: UUID?
-    private var notificationSettingTask: Task<Void, Never>?
     private var notificationSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
     private var notificationSettingsApplicationActive = false
     var notificationSettingActive: Bool {
-        notificationSettingOwner != nil || notificationSettingRequest != nil || notificationSettingAwaitingRefresh
+        notificationSettingWrite.operation != nil || notificationSettingWrite.pending != nil || notificationSettingAwaitingRefresh
     }
     var notificationSettingEnabled: Bool {
         ready && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
@@ -7027,7 +7034,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             inboxFilterReadTask, inboxBulkRemoveTask, inboxBulkOrganizeTask, inboxBulkOrganizePickerTask, inboxBulkTagReadTask,
             pomodoroWork, pomodoroWake, settingsAITask, settingsAITextTask, settingsVoiceTask, settingsVoiceLocalTask, settingsAboutTask, gettingStartedTask,
             settingsSyncReadTask, settingsSyncEncryptionTask, settingsSyncDirectoryTask, settingsDropboxTask, appleRemindersAutoTask, appleRemindersTask,
-            gtdPomodoroNoticeTask, notificationSettingTask, calendarSettingTask, calendarSettingsCloseTask, projectFilterReadTask,
+            gtdPomodoroNoticeTask, notificationSettingWrite.task, calendarSettingTask, calendarSettingsCloseTask, projectFilterReadTask,
             referenceBulkTagReadTask, referenceBulkRemoveTask, doneBulkTagReadTask, doneBulkRemoveTask, taskFileImportTask,
             taskAttachmentDownloadTask, foregroundSyncTask, archiveRetentionWake, reminderLifecycleTask, reminderDebounceTask, reminderTopUpTask,
             calendarPushLifecycleTask, calendarPushStopTask, searchLifecycleTask, searchDeadlineTask, notificationResponseTask,
@@ -7061,7 +7068,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && notificationResponseContextClean && !backupDocumentPending && !backupTransferActive
             && !calendarFileImporterPresented && calendarFileImporterID == nil
             && !notificationSettingActive && !calendarSettingActive && calendarSubscriptionRuntimeRecovery == nil
-            && notificationSettingTask == nil && notificationSettingWaiter == nil
+            && notificationSettingWrite.task == nil && notificationSettingWaiter == nil
             && calendarSettingTask == nil && calendarSettingWaiter == nil && calendarSettingsCloseTask == nil
             && settingsSyncDirectoryOwner == nil && settingsSyncDirectoryTask == nil && settingsSyncDirectoryPickerID == nil
             && settingsSyncEncryptionOwner == nil && settingsSyncEncryptionTask == nil && !settingsSyncChecking
@@ -16160,13 +16167,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         notificationSettingWaiter = nil
         let current = notificationSettingsCurrent(owner: waiter.owner)
         waiter.continuation.resume(returning: current)
-        if !current { notificationSettingTask?.cancel() }
+        if !current { notificationSettingWrite.task?.cancel() }
     }
 
     func cancelNotificationSettingsIntent() {
         notificationSettingsApplicationActive = false
         notificationSettingsSession = UUID()
-        notificationSettingTask?.cancel()
+        notificationSettingWrite.task?.cancel()
         if let waiter = notificationSettingWaiter {
             notificationSettingWaiter = nil
             waiter.continuation.resume(returning: false)
@@ -16175,20 +16182,20 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     private func notificationSettingsCurrent(owner: UUID) -> Bool {
-        notificationSettingOwner == owner && host === notificationSettingHost && ready
+        notificationSettingWrite.operation == owner && host === notificationSettingWrite.pending?.transport && ready
             && selectedSurface == .settings && settingsNotificationsPresented && !appLock.concealed
             && notificationSettingsApplicationActive && UIApplication.shared.applicationState == .active
     }
 
     private func waitForNotificationSettingsReadmission(owner: UUID, session: UUID) async -> Bool {
         guard !Task.isCancelled, notificationSettingsSession == session,
-              notificationSettingOwner == owner, host === notificationSettingHost,
+              notificationSettingWrite.operation == owner, host === notificationSettingWrite.pending?.transport,
               ready, selectedSurface == .settings, settingsNotificationsPresented, !appLock.concealed else { return false }
         if notificationSettingsCurrent(owner: owner) { return true }
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled, notificationSettingsSession == session,
-                      notificationSettingOwner == owner, host === notificationSettingHost,
+                      notificationSettingWrite.operation == owner, host === notificationSettingWrite.pending?.transport,
                       ready, selectedSurface == .settings, settingsNotificationsPresented, !appLock.concealed else {
                     continuation.resume(returning: false)
                     return
@@ -16234,93 +16241,67 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard notificationSettingEnabled, let currentHost = host,
               let expected = notificationSettingExpected[edit.text("type")] as? CoreObject else { return }
         do {
-            notificationSettingRequest = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected])
+            notificationSettingWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected]), on: currentHost)
             notificationSettingEdit = edit
-            notificationSettingHost = currentHost
             beginNotificationSettingOperation(retry: false)
         } catch { notificationSettingError = error.localizedDescription }
     }
 
     private func beginNotificationSettingOperation(retry: Bool) {
-        guard !busy, notificationSettingOwner == nil, let request = notificationSettingRequest,
-              let currentHost = notificationSettingHost, host === currentHost, ready, !appLock.concealed else { return }
-        let owner = UUID(), session = notificationSettingsSession
-        notificationSettingOwner = owner
-        notificationSettingError = nil
-        busy = true
-        notificationSettingTask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.notificationSettingOwner == owner {
-                    self.notificationSettingOwner = nil
-                    self.notificationSettingTask = nil
-                    if let waiter = self.notificationSettingWaiter, waiter.owner == owner {
-                        self.notificationSettingWaiter = nil
-                        waiter.continuation.resume(returning: false)
-                    }
-                    self.finishOperation()
-                }
-            }
-            do {
-                let reply: String
-                if retry {
-                    if let acknowledged = try await currentHost.retryPending() { reply = acknowledged }
-                    else { reply = try await currentHost.probeNotificationSettingOutcome(requestJSON: request) }
-                } else {
-                    reply = try await currentHost.setNotificationSetting(requestJSON: request, readmission: { [weak self] in
-                        guard let self else { return false }
-                        return await self.waitForNotificationSettingsReadmission(owner: owner, session: session)
-                    })
-                }
-                try self.acknowledgeNotificationSetting(self.decode(reply), request: request, from: currentHost)
-                if !Task.isCancelled { await self.refreshNotificationSettings() }
-            } catch { await self.handleNotificationSettingError(error, request: request, from: currentHost) }
-        }
+        let session = notificationSettingsSession
+        let started = notificationSettingWrite.run(retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready && !self.appLock.concealed },
+            dispatch: { currentHost, request, owner in
+                try await currentHost.setNotificationSetting(requestJSON: request, readmission: { [weak self] in
+                    guard let self else { return false }
+                    return await self.waitForNotificationSettingsReadmission(owner: owner, session: session)
+                })
+            },
+            retryOutcome: { currentHost, request in try await currentHost.probeNotificationSettingOutcome(requestJSON: request) },
+            acknowledge: { reply in try self.acknowledgeNotificationSetting(reply) },
+            fail: { failure, definite in self.recordNotificationSettingFailure(failure, definite: definite) },
+            refresh: { await self.refreshNotificationSettings() },
+            ended: { owner in self.resumeNotificationSettingWaiter(owner: owner) }))
+        if started { notificationSettingError = nil }
     }
 
-    private func acknowledgeNotificationSetting(_ result: CoreObject, request: String, from currentHost: CoreHost) throws {
-        guard notificationSettingRequest == request, notificationSettingHost === currentHost,
-              Set(result.keys) == Set(["type", "value", "changed"]), result.text("type") == notificationSettingEdit.text("type"),
+    private func acknowledgeNotificationSetting(_ reply: String) throws {
+        let result = try decode(reply)
+        guard Set(result.keys) == Set(["type", "value", "changed"]), result.text("type") == notificationSettingEdit.text("type"),
               let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID(),
               try json(["value": result["value"] ?? NSNull()]) == json(["value": notificationSettingEdit["value"] ?? NSNull()]) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        notificationSettingRequest = nil
-        notificationSettingHost = nil
         notificationSettingEdit = [:]
         notificationSettingAwaitingRefresh = settingsNotificationsPresented
         notificationSettingError = nil
-        retryNeeded = false
-        error = nil
     }
 
-    private func handleNotificationSettingError(_ failure: Error, request: String, from currentHost: CoreHost) async {
-        guard notificationSettingRequest == request, notificationSettingHost === currentHost else { return }
+    private func recordNotificationSettingFailure(_ failure: Error, definite: Bool) -> String {
         notificationSettingError = failure.localizedDescription
-        if isDefiniteRejection(failure) {
-            notificationSettingRequest = nil
-            notificationSettingHost = nil
+        if definite {
             notificationSettingEdit = [:]
             notificationSettingAwaitingRefresh = settingsNotificationsPresented
-            retryNeeded = false
-            error = nil
-            if !Task.isCancelled { await refreshNotificationSettings() }
-        } else {
-            retryNeeded = true
-            error = failure.localizedDescription
         }
+        return failure.localizedDescription
+    }
+
+    private func resumeNotificationSettingWaiter(owner: UUID) {
+        guard let waiter = notificationSettingWaiter, waiter.owner == owner else { return }
+        notificationSettingWaiter = nil
+        waiter.continuation.resume(returning: false)
     }
 
     private func refreshNotificationSettings() async {
         guard settingsNotificationsPresented, selectedSurface == .settings, !appLock.concealed,
-              notificationSettingRequest == nil else { return }
+              notificationSettingWrite.pending == nil else { return }
         do { try await readNotificationSettings() }
         catch { notificationSettingReadError = error.localizedDescription }
     }
 
     func retryNotificationSettings() {
-        guard !busy, notificationSettingOwner == nil, !appLock.concealed else { return }
-        if notificationSettingRequest != nil { beginNotificationSettingOperation(retry: true); return }
+        guard !busy, notificationSettingWrite.operation == nil, !appLock.concealed else { return }
+        if notificationSettingWrite.pending != nil { beginNotificationSettingOperation(retry: true); return }
         guard settingsNotificationsPresented else { return }
         busy = true
         Task { [weak self] in
@@ -43382,7 +43363,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 ("effort", settingsAIWrite?.setting == .reasoningEffort), ("gemini", settingsAIWrite?.setting == .geminiThinkingBudget),
                 ("timeout", settingsAIWrite?.setting == .requestTimeout), ("pomodoro", pomodoroCommand != nil),
                 ("reminders", appleRemindersNeedsRetry), ("trash", trashBulkRequest != nil),
-                ("notification-response", notificationResponseRetry != nil), ("notification-setting", notificationSettingRequest != nil),
+                ("notification-response", notificationResponseRetry != nil), ("notification-setting", notificationSettingWrite.pending != nil),
                 ("calendar-setting", calendarSettingRequest != nil), ("project-file-availability", projectFileAvailabilityPending),
                 ("project-file-add", projectFileAddPending), ("task-attachment", taskAttachmentSaveRequest != nil),
             ]
@@ -43400,7 +43381,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if appleRemindersNeedsRetry { retryAppleReminders(); return }
         if trashBulkRequest != nil { await retryTrashBulkRequest(); return }
         if notificationResponseRetry != nil { await retryNotificationResponses(); return }
-        if notificationSettingRequest != nil { retryNotificationSettings(); return }
+        if notificationSettingWrite.pending != nil { retryNotificationSettings(); return }
         if calendarSettingRequest != nil { retryCalendarSettings(); return }
         if projectFileAvailabilityPending {
             await retryProjectFileAvailability()
