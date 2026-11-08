@@ -38,7 +38,7 @@ public final class DurableWriteRunner<Transport: DurableWriteTransport> {
         public let retryOutcome: @MainActor (Transport, _ request: String) async throws -> String
         public let acknowledge: @MainActor (_ reply: String) throws -> Void
         public let fail: @MainActor (Error, _ definite: Bool) -> String
-        public let refresh: @MainActor () async -> Void
+        public let refresh: @MainActor (_ acknowledged: Bool) async -> Void
         public let ended: @MainActor (_ operation: UUID) -> Void
 
         public init(admit: @escaping @MainActor (Transport) -> Bool,
@@ -46,7 +46,7 @@ public final class DurableWriteRunner<Transport: DurableWriteTransport> {
                     retryOutcome: @escaping @MainActor (Transport, _ request: String) async throws -> String,
                     acknowledge: @escaping @MainActor (_ reply: String) throws -> Void,
                     fail: @escaping @MainActor (Error, _ definite: Bool) -> String,
-                    refresh: @escaping @MainActor () async -> Void,
+                    refresh: @escaping @MainActor (_ acknowledged: Bool) async -> Void,
                     ended: @escaping @MainActor (_ operation: UUID) -> Void) {
             self.admit = admit
             self.dispatch = dispatch
@@ -103,7 +103,7 @@ public final class DurableWriteRunner<Transport: DurableWriteTransport> {
             try write.acknowledge(reply)
             pending = nil
             model.setRetryNeeded(false, nil)
-            if !Task.isCancelled { await write.refresh() }
+            if !Task.isCancelled { await write.refresh(true) }
         } catch {
             guard holds(attempt) else { return }
             let definite = model.isDefiniteRejection(error)
@@ -111,7 +111,7 @@ public final class DurableWriteRunner<Transport: DurableWriteTransport> {
             if definite {
                 pending = nil
                 model.setRetryNeeded(false, nil)
-                if !Task.isCancelled { await write.refresh() }
+                if !Task.isCancelled { await write.refresh(false) }
             } else {
                 model.setRetryNeeded(true, message)
             }

@@ -53,8 +53,8 @@ final class DurableWriteRunnerTests: XCTestCase {
         }, fail: { _, definite in
             recorder.events.append(definite ? "rejected" : "uncertain")
             return "failed"
-        }, refresh: {
-            recorder.events.append("refresh")
+        }, refresh: { acknowledged in
+            recorder.events.append(acknowledged ? "refresh" : "refresh:rejected")
         }, ended: { _ in
             recorder.events.append("ended")
         })
@@ -89,7 +89,7 @@ final class DurableWriteRunnerTests: XCTestCase {
         var script = Script()
         script.dispatch = { throw CoreHostRejection(message: "refused") }
         _ = await run(runner, retry: false, write(recorder, script))
-        XCTAssertEqual(recorder.events, ["dispatch:request-1", "rejected", "refresh", "ended"])
+        XCTAssertEqual(recorder.events, ["dispatch:request-1", "rejected", "refresh:rejected", "ended"])
         XCTAssertNil(runner.pending)
         XCTAssertFalse(recorder.retryNeeded)
         XCTAssertNil(recorder.error)
@@ -117,6 +117,19 @@ final class DurableWriteRunnerTests: XCTestCase {
         XCTAssertNil(runner.pending)
         XCTAssertFalse(recorder.retryNeeded)
         XCTAssertNil(recorder.error)
+    }
+
+    func testRetryRejectionRefreshesAsRejected() async {
+        let recorder = Recorder(), transport = FakeTransport()
+        let runner = DurableWriteRunner<FakeTransport>(model: recorder.model)
+        runner.stage("request-1", on: transport)
+        var script = Script()
+        script.retryOutcome = { throw CoreHostRejection(message: "refused") }
+        _ = await run(runner, retry: true, write(recorder, script))
+        XCTAssertEqual(transport.retryPendingCalls, 1)
+        XCTAssertEqual(recorder.events, ["outcome:request-1", "rejected", "refresh:rejected", "ended"])
+        XCTAssertNil(runner.pending)
+        XCTAssertFalse(recorder.retryNeeded)
     }
 
     func testRetryWithoutPendingReplyProbesRetryOutcome() async {

@@ -1113,10 +1113,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var settingsPersonDeleteError: String?
     @Published private(set) var settingsPersonDeleteAwaitingRefresh = false
     @Published private(set) var settingsPersonDeleteID: String?
-    private var settingsPersonDeleteRequest: String?
     var settingsPersonDeleteActive: Bool { settingsPersonDeleteID != nil }
     var settingsPersonDeleteCanCancel: Bool {
-        settingsPersonDeleteActive && !busy && !retryNeeded && settingsPersonDeleteRequest == nil
+        settingsPersonDeleteActive && !busy && !retryNeeded && settingsPersonDeleteWrite.pending == nil
             && !settingsPersonDeleteAwaitingRefresh
     }
     var settingsPersonDeleteCanConfirm: Bool {
@@ -1165,9 +1164,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var gtdWorkflowAwaitingRefresh = false
     @Published private(set) var gtdScheduleDraft = ""
     private var gtdWorkflowExpected: CoreObject = [:]
-    private var gtdWorkflowRequest: String?
     private var gtdWorkflowEdit: CoreObject = [:]
-    var gtdWorkflowPending: Bool { gtdWorkflowRequest != nil || gtdWorkflowAwaitingRefresh }
+    var gtdWorkflowPending: Bool { gtdWorkflowWrite.pending != nil || gtdWorkflowAwaitingRefresh }
     var gtdWorkflowDraftDirty: Bool { gtdPomodoroDraftDirty || (settingsGtdPresented && !settingsGtdPomodoroPresented && !settingsGtdArchivePresented && !settingsGtdReviewPresented && !settingsGtdInboxPresented && !settingsGtdCapturePresented && !settingsGtdTaskEditorPresented && gtdScheduleDraft != gtdWorkflow.object("defaultScheduleTime").text("value")) }
     var gtdWorkflowEnabled: Bool { gtdWorkflowTypingOpen && textInputAdmitted }
     private var gtdWorkflowTypingOpen: Bool {
@@ -1277,6 +1275,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         },
         isDefiniteRejection: { [weak self] failure in self?.isDefiniteRejection(failure) ?? false })
     private lazy var notificationSettingWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var generalPreferenceWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var gtdWorkflowWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var areaColorWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var settingsPersonDeleteWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+
+    private func runDurableWrite(_ runner: DurableWriteRunner<CoreHost>, retry: Bool,
+                                 _ write: DurableWriteRunner<CoreHost>.Write) async {
+        if retry, !busy, !ready { await start(); return }
+        if runner.run(retry: retry, write) { await runner.task?.value }
+    }
     private var notificationSettingEdit: CoreObject = [:]
     private var notificationSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
     private var notificationSettingsApplicationActive = false
@@ -1432,10 +1440,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var generalPreferencePicker: String?
     @Published private(set) var generalRegionalOpen = false
     private var generalPreferenceExpected: CoreObject = [:]
-    private var generalPreferenceRequest: String?
     private var generalPreferenceEdit: CoreObject = [:]
     private var generalPreferenceAcknowledged = false
-    var generalPreferenceActive: Bool { generalPreferenceRequest != nil || generalPreferenceAwaitingRefresh || appLockActive || gtdWorkflowPending || gtdWorkflowDraftDirty }
+    var generalPreferenceActive: Bool { generalPreferenceWrite.pending != nil || generalPreferenceAwaitingRefresh || appLockActive || gtdWorkflowPending || gtdWorkflowDraftDirty }
     var generalPreferenceEnabled: Bool {
         ready && selectedSurface == .settings && settingsGeneralPresented && !busy && !retryNeeded
             && !generalPreferenceActive && generalPreferenceReadError == nil && !generalSettings.isEmpty
@@ -3378,7 +3385,6 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var settingsPersonCreateSaveDisabled = true
     private var settingsPersonCreateAcknowledged = false
     private var settingsAreaCreateAcknowledged = false
-    private var areaColorRequest: String?
     private var areaColorExpectedID: String?
     private var areaColorOptionsCurrent = false
     private var areaOrderRequest: String?
@@ -3925,7 +3931,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var projectAreaManagerOpenEnabled: Bool {
         projectAreaChoiceEnabled && !projectAreaCreatePresented && projectAreaCreatedID == nil
-            && !areaManagerPresented && areaCreateRequest == nil && areaColorRequest == nil
+            && !areaManagerPresented && areaCreateRequest == nil && areaColorWrite.pending == nil
             && areaOrderRequest == nil && areaRenameRequest == nil && areaDeleteRequest == nil
     }
     var projectAreaCreateInputEnabled: Bool { projectAreaCreateInputOpen && textInputAdmitted }
@@ -4023,7 +4029,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectCreateInputOpen: Bool {
         ready && selectedSurface == .projects && projectCreateRequest == nil
             && projectFocusRequest == nil
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaManagerPresented
             && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
     }
@@ -4092,7 +4098,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         settingsAreaCreatePresented && !busy && !retryNeeded && areaCreateRequest == nil
             && !settingsAreaCreateAwaitingRefresh
     }
-    var areaColorPending: Bool { areaColorRequest != nil }
+    var areaColorPending: Bool { areaColorWrite.pending != nil }
     var areaOrderPending: Bool { areaOrderRequest != nil }
     var areaRenamePending: Bool { areaRenameRequest != nil }
     var areaRenameEditing: Bool { areaRenameEditingID != nil }
@@ -4146,13 +4152,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var areaManagerCloseEnabled: Bool {
         areaManagerPresented && !busy && !retryNeeded && areaCreateRequest == nil
-            && areaColorRequest == nil && areaOrderRequest == nil && areaRenameRequest == nil
+            && areaColorWrite.pending == nil && areaOrderRequest == nil && areaRenameRequest == nil
             && areaDeleteRequest == nil && projectAreaRequest == nil && !areaRenameEditing
     }
     var areaCreateInputEnabled: Bool { areaCreateInputOpen && textInputAdmitted }
     private var areaCreateInputOpen: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaManagerProjectCompositionIdle
     }
@@ -4169,26 +4175,26 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var areaColorInputEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaColorReadError == nil && areaManagerProjectCompositionIdle
     }
     var areaOrderInputEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaOrderReadError == nil && areaManagerProjectCompositionIdle
     }
     var areaRenameOpenEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaOrderReadError == nil && areaManagerProjectCompositionIdle
     }
     var areaRenameInputEnabled: Bool { areaRenameInputOpen && textInputAdmitted }
     private var areaRenameInputOpen: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && areaRenameEditing
             && areaManagerOptionsCurrent && areaRenameReadError == nil && areaManagerProjectCompositionIdle
     }
@@ -4197,7 +4203,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     var areaDeleteInputEnabled: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && !busy && !retryNeeded
-            && areaCreateRequest == nil && areaColorRequest == nil && areaOrderRequest == nil
+            && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderRequest == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaRenameEditing
             && areaManagerOptionsCurrent && areaDeleteReadError == nil && areaManagerProjectCompositionIdle
     }
@@ -14078,24 +14084,47 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     private func saveGtdWorkflow(_ edit: CoreObject) async {
-        guard gtdWorkflowEnabled, let expected = gtdWorkflowExpected[edit.text("type") == "taskEditorSectionOpen" ? edit.text("section") : edit.text("type")] as? CoreObject else { return }
+        guard gtdWorkflowEnabled, let currentHost = host,
+              let expected = gtdWorkflowExpected[edit.text("type") == "taskEditorSectionOpen" ? edit.text("section") : edit.text("type")] as? CoreObject else { return }
         gtdWorkflowEdit = edit
         gtdWorkflowError = nil
-        busy = true
-        defer { finishOperation() }
         do {
-            let request = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected])
-            gtdWorkflowRequest = request
-            try acknowledgeGtdWorkflow(await query("gtdWorkflow", [request]))
-            try await readGtdSettings()
-        } catch { await handleGtdWorkflowError(error) }
+            gtdWorkflowWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected]), on: currentHost)
+        } catch {
+            gtdWorkflowError = error.localizedDescription
+            gtdWorkflowReadError = error.localizedDescription
+            return
+        }
+        await runGtdWorkflowWrite(retry: false)
     }
 
-    private func acknowledgeGtdWorkflow(_ result: CoreObject) throws {
+    private func runGtdWorkflowWrite(retry: Bool) async {
+        await runDurableWrite(gtdWorkflowWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("gtdWorkflow", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("gtdWorkflowRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeGtdWorkflow(reply) },
+            fail: { failure, definite in
+                self.gtdWorkflowError = failure.localizedDescription
+                if definite { self.gtdWorkflowAwaitingRefresh = true }
+                return failure.localizedDescription
+            },
+            refresh: { acknowledged in
+                do { try await self.readGtdSettings() }
+                catch {
+                    if acknowledged && !retry { self.gtdWorkflowError = error.localizedDescription }
+                    self.gtdWorkflowReadError = error.localizedDescription
+                }
+            },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeGtdWorkflow(_ reply: String) throws {
+        let result = try decode(reply)
         let editing = gtdWorkflowEdit.text("type") == "taskEditorSectionOpen"
         let resetting = gtdWorkflowEdit.text("type") == "taskEditorReset"
         let fieldEdit = ["taskEditorFieldVisible", "taskEditorFieldSection", "taskEditorOrder"].contains(gtdWorkflowEdit.text("type"))
-        guard gtdWorkflowRequest != nil, Set(result.keys) == Set(resetting ? ["type", "changed"] : editing ? ["type", "section", "value", "changed"] : fieldEdit ? ["type", "field", "value", "changed"] : ["type", "value", "changed"]),
+        guard Set(result.keys) == Set(resetting ? ["type", "changed"] : editing ? ["type", "section", "value", "changed"] : fieldEdit ? ["type", "field", "value", "changed"] : ["type", "value", "changed"]),
               !editing || result.text("section") == gtdWorkflowEdit.text("section"),
               !fieldEdit || result.text("field") == gtdWorkflowEdit.text("field"),
               result.text("type") == gtdWorkflowEdit.text("type"), result["changed"] is Bool,
@@ -14109,33 +14138,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 self?.gtdPomodoroNotice = nil
             }
         }
-        gtdWorkflowRequest = nil
         gtdWorkflowAwaitingRefresh = true
         gtdWorkflowError = nil
-        retryNeeded = false
-        error = nil
-    }
-
-    private func handleGtdWorkflowError(_ failure: Error) async {
-        gtdWorkflowError = failure.localizedDescription
-        if gtdWorkflowRequest != nil && isDefiniteRejection(failure) {
-            gtdWorkflowRequest = nil
-            retryNeeded = false
-            error = nil
-            gtdWorkflowAwaitingRefresh = true
-            do { try await readGtdSettings() }
-            catch { gtdWorkflowReadError = error.localizedDescription }
-        } else if gtdWorkflowRequest != nil {
-            retryNeeded = true
-            error = failure.localizedDescription
-        } else {
-            gtdWorkflowReadError = failure.localizedDescription
-        }
     }
 
     func retryGtdWorkflow() async {
         if retryNeeded { await retry(); return }
-        guard settingsGtdPresented, !busy, gtdWorkflowRequest == nil else { return }
+        guard settingsGtdPresented, !busy, gtdWorkflowWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         do { try await readGtdSettings(); gtdWorkflowError = nil }
@@ -16260,7 +16269,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             retryOutcome: { currentHost, request in try await currentHost.probeNotificationSettingOutcome(requestJSON: request) },
             acknowledge: { reply in try self.acknowledgeNotificationSetting(reply) },
             fail: { failure, definite in self.recordNotificationSettingFailure(failure, definite: definite) },
-            refresh: { await self.refreshNotificationSettings() },
+            refresh: { _ in await self.refreshNotificationSettings() },
             ended: { owner in self.resumeNotificationSettingWaiter(owner: owner) }))
         if started { notificationSettingError = nil }
     }
@@ -16557,53 +16566,52 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func saveGeneralPreference(_ edit: CoreObject) async {
-        guard generalPreferenceEnabled else { return }
+        guard generalPreferenceEnabled, let currentHost = host else { return }
         let expected = edit.text("type") == "appLockRelockDelay"
             ? appLockDelayExpected : generalPreferenceExpected.object(edit.text("type"))
         guard !expected.isEmpty else { return }
         generalPreferenceEdit = edit
         generalPreferenceAcknowledged = false
         generalPreferenceError = nil
-        busy = true
-        defer { finishOperation() }
         do {
-            let request = try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected])
-            generalPreferenceRequest = request
-            try acknowledgeGeneralPreference(await query("generalPreference", [request]))
-        } catch { await handleGeneralPreferenceError(error); return }
-        await refreshGeneralPreference()
+            generalPreferenceWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "edit": edit, "expected": expected]), on: currentHost)
+        } catch {
+            generalPreferenceError = error.localizedDescription
+            self.error = error.localizedDescription
+            return
+        }
+        await runGeneralPreferenceWrite(retry: false)
     }
 
-    private func acknowledgeGeneralPreference(_ result: CoreObject) throws {
-        guard generalPreferenceRequest != nil, Set(result.keys) == Set(["type", "value", "changed"]),
+    private func runGeneralPreferenceWrite(retry: Bool) async {
+        await runDurableWrite(generalPreferenceWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("generalPreference", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("generalPreferenceRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeGeneralPreference(reply) },
+            fail: { failure, definite in
+                self.generalPreferenceError = failure.localizedDescription
+                if definite { self.generalPreferenceAwaitingRefresh = true }
+                return failure.localizedDescription
+            },
+            refresh: { _ in await self.refreshGeneralPreference() },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeGeneralPreference(_ reply: String) throws {
+        let result = try decode(reply)
+        guard Set(result.keys) == Set(["type", "value", "changed"]),
               result.text("type") == generalPreferenceEdit.text("type"), result["changed"] is Bool,
               try json(["value": result["value"] ?? NSNull()]) == json(["value": generalPreferenceEdit["value"] ?? NSNull()]) else {
             throw CocoaError(.coderReadCorrupt)
         }
-        generalPreferenceRequest = nil
         generalPreferenceAcknowledged = true
         generalPreferenceAwaitingRefresh = true
         generalPreferenceError = nil
-        retryNeeded = false
-        error = nil
-    }
-
-    private func handleGeneralPreferenceError(_ failure: Error) async {
-        generalPreferenceError = failure.localizedDescription
-        if generalPreferenceRequest != nil && isDefiniteRejection(failure) {
-            generalPreferenceRequest = nil
-            generalPreferenceAwaitingRefresh = true
-            retryNeeded = false
-            error = nil
-            await refreshGeneralPreference()
-        } else {
-            retryNeeded = generalPreferenceRequest != nil
-            error = failure.localizedDescription
-        }
     }
 
     private func refreshGeneralPreference() async {
-        guard settingsGeneralPresented, generalPreferenceRequest == nil else { return }
+        guard settingsGeneralPresented, generalPreferenceWrite.pending == nil else { return }
         do {
             if generalPreferenceEdit.text("type") == "language" {
                 try await readLanguage()
@@ -16630,7 +16638,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryGeneralPreference() async {
         if retryNeeded { await retry(); return }
-        guard settingsGeneralPresented, !busy, generalPreferenceRequest == nil else { return }
+        guard settingsGeneralPresented, !busy, generalPreferenceWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         await refreshGeneralPreference()
@@ -22681,7 +22689,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard generation == areaCreateNameGeneration,
                   (forProject ? projectAreaCreatePresented : areaManagerPresented || settingsAreaCreatePresented),
-                  areaCreateRequest == nil, areaColorRequest == nil, areaOrderRequest == nil,
+                  areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
                   areaRenameRequest == nil, areaDeleteRequest == nil else { return }
             do {
                 let result = try await query("areaCreateResolve", [try json([
@@ -22689,7 +22697,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 ])])
                 guard generation == areaCreateNameGeneration,
                       (forProject ? projectAreaCreatePresented : areaManagerPresented || settingsAreaCreatePresented),
-                      areaColorRequest == nil, areaOrderRequest == nil,
+                      areaColorWrite.pending == nil, areaOrderRequest == nil,
                       areaRenameRequest == nil, areaDeleteRequest == nil else { return }
                 if forProject {
                     guard let normalizedName = result["normalizedName"] as? String else {
@@ -22703,7 +22711,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             } catch {
                 guard generation == areaCreateNameGeneration,
                       (forProject ? projectAreaCreatePresented : areaManagerPresented || settingsAreaCreatePresented),
-                      areaColorRequest == nil, areaOrderRequest == nil,
+                      areaColorWrite.pending == nil, areaOrderRequest == nil,
                       areaRenameRequest == nil, areaDeleteRequest == nil else { return }
                 if forProject && error.localizedDescription.hasPrefix("INVALID_INPUT:") {
                     projectAreaCreateNameValid = false
@@ -22940,7 +22948,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaCreateRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorRequest == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -22979,80 +22987,70 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func changeAreaColor(_ id: String, color: String?) async {
-        guard areaColorInputEnabled,
+        guard areaColorInputEnabled, let currentHost = host,
               let row = areaColorOptions.objects("areas").first(where: { $0.text("id") == id }),
               color.map({ (areaColorOptions["colors"] as? [String])?.contains($0) == true }) ?? true else { return }
-        busy = true
         areaCreateNameGeneration += 1
         areaCreateNameChecking = false
         expandedAreaColorID = nil
         areaColorIntentID = id
         areaColorIntentColor = color
         areaColorError = nil
-        defer { finishOperation() }
-        let request: String
         do {
             let expected: CoreObject = ["name": row.text("name"), "color": row["color"] ?? NSNull(),
                                         "rev": row["rev"] ?? NSNull(), "revBy": row["revBy"] ?? NSNull(),
                                         "updatedAt": row.text("updatedAt")]
             let requestedColor: Any = color.map { $0 as Any } ?? NSNull()
-            request = try json(["requestId": UUID().uuidString.lowercased(), "areaId": id,
-                                "color": requestedColor, "expected": expected])
-            areaColorRequest = request
+            areaColorWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "areaId": id,
+                                           "color": requestedColor, "expected": expected]), on: currentHost)
             areaColorExpectedID = id
         } catch {
             areaColorReadError = error.localizedDescription
             return
         }
-        let result: CoreObject
-        do { result = try await query("areaColor", [request]) }
-        catch { await handleAreaColorWriteError(error); return }
-        do { try acknowledgeAreaColor(result) }
-        catch { await handleAreaColorWriteError(error); return }
-        do {
-            try await refreshAreaManagerAfterWrite()
-        } catch {
-            areaColorReadError = error.localizedDescription
-            self.error = error.localizedDescription
-        }
+        await runAreaColorWrite(retry: false)
     }
 
-    private func acknowledgeAreaColor(_ result: CoreObject) throws {
-        guard areaColorRequest != nil, let expected = areaColorExpectedID,
+    private func runAreaColorWrite(retry: Bool) async {
+        await runDurableWrite(areaColorWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("areaColor", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("areaColorRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeAreaColor(reply) },
+            fail: { failure, definite in
+                self.areaColorError = failure.localizedDescription
+                if definite {
+                    self.areaColorExpectedID = nil
+                    self.expandedAreaColorID = self.areaColorIntentID
+                }
+                return failure.localizedDescription
+            },
+            refresh: { acknowledged in
+                do { try await self.refreshAreaManagerAfterWrite() }
+                catch {
+                    self.areaColorReadError = error.localizedDescription
+                    if acknowledged { self.error = error.localizedDescription }
+                }
+            },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeAreaColor(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let expected = areaColorExpectedID,
               result.count == 2, result.text("id") == expected,
               (areaColorIntentColor.map { result["color"] as? String == $0 }
                   ?? (result["color"] is NSNull)) else { throw CocoaError(.coderReadCorrupt) }
-        areaColorRequest = nil
         areaColorExpectedID = nil
-        retryNeeded = false
         areaColorIntentID = nil
         areaColorIntentColor = nil
         areaColorError = nil
         areaColorReadError = nil
-        error = nil
-    }
-
-    private func handleAreaColorWriteError(_ failure: Error) async {
-        if areaColorRequest != nil && isDefiniteRejection(failure) {
-            areaColorRequest = nil
-            areaColorExpectedID = nil
-            retryNeeded = false
-            areaColorError = failure.localizedDescription
-            expandedAreaColorID = areaColorIntentID
-            error = nil
-            do {
-                try await refreshAreaManagerAfterWrite()
-            } catch { areaColorReadError = error.localizedDescription }
-        } else {
-            retryNeeded = areaColorRequest != nil
-            areaColorError = failure.localizedDescription
-            error = failure.localizedDescription
-        }
     }
 
     func retryAreaColorRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorRequest == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23150,7 +23148,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaOrderRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorRequest == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23213,7 +23211,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     var areaRenameCanCancel: Bool {
         ready && areaManagerPresented && areaManagerContextCurrent && areaRenameEditing
-            && !busy && !retryNeeded && areaCreateRequest == nil && areaColorRequest == nil
+            && !busy && !retryNeeded && areaCreateRequest == nil && areaColorWrite.pending == nil
             && areaOrderRequest == nil && areaRenameRequest == nil && areaDeleteRequest == nil
             && areaManagerProjectCompositionIdle
     }
@@ -23407,7 +23405,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaRenameRead() async {
         guard areaManagerPresented, areaRenameEditing, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorRequest == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -23493,29 +23491,45 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func confirmSettingsPersonDelete() async {
-        guard settingsPersonDeleteCanConfirm, let id = settingsPersonDeleteID else { return }
-        busy = true
+        guard settingsPersonDeleteCanConfirm, let id = settingsPersonDeleteID, let currentHost = host else { return }
         settingsPersonDeleteError = nil
-        defer { finishOperation() }
         do {
-            let request = try json(["requestId": UUID().uuidString.lowercased(), "personId": id,
-                                    "expected": settingsPersonDeleteOptions.object("expected")])
-            settingsPersonDeleteRequest = request
-            let result = try await query("managePersonDelete", [request])
-            try acknowledgeSettingsPersonDelete(result)
-            await refreshManageAfterPersonDelete()
-        } catch { await handleSettingsPersonDeleteWriteError(error) }
+            settingsPersonDeleteWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "personId": id,
+                                                      "expected": settingsPersonDeleteOptions.object("expected")]), on: currentHost)
+        } catch {
+            settingsPersonDeleteError = error.localizedDescription
+            self.error = error.localizedDescription
+            return
+        }
+        await runSettingsPersonDeleteWrite(retry: false)
     }
 
-    private func acknowledgeSettingsPersonDelete(_ result: CoreObject) throws {
-        guard settingsPersonDeleteRequest != nil, let id = settingsPersonDeleteID,
+    private func runSettingsPersonDeleteWrite(retry: Bool) async {
+        await runDurableWrite(settingsPersonDeleteWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost && self.ready },
+            dispatch: { _, request, _ in try self.json(await self.query("managePersonDelete", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("managePersonDeleteRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeSettingsPersonDelete(reply) },
+            fail: { failure, definite in
+                if definite { self.settingsPersonDeleteOptions = [:] }
+                self.settingsPersonDeleteError = failure.localizedDescription
+                return failure.localizedDescription
+            },
+            refresh: { acknowledged in
+                if acknowledged { await self.refreshManageAfterPersonDelete(); return }
+                do { try await self.readManageSettings() }
+                catch { self.manageReadError = error.localizedDescription }
+            },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeSettingsPersonDelete(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let id = settingsPersonDeleteID,
               result.count == 1, result.text("personId") == id else { throw CocoaError(.coderReadCorrupt) }
-        settingsPersonDeleteRequest = nil
         settingsPersonDeleteAwaitingRefresh = true
         settingsPersonDeleteOptions = [:]
         settingsPersonDeleteError = nil
-        retryNeeded = false
-        error = nil
     }
 
     private func refreshManageAfterPersonDelete() async {
@@ -23530,26 +23544,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch { settingsPersonDeleteError = error.localizedDescription }
     }
 
-    private func handleSettingsPersonDeleteWriteError(_ failure: Error) async {
-        if settingsPersonDeleteRequest != nil && isDefiniteRejection(failure) {
-            settingsPersonDeleteRequest = nil
-            settingsPersonDeleteOptions = [:]
-            retryNeeded = false
-            settingsPersonDeleteError = failure.localizedDescription
-            error = nil
-            do { try await readManageSettings() }
-            catch { manageReadError = error.localizedDescription }
-        } else {
-            retryNeeded = settingsPersonDeleteRequest != nil
-            settingsPersonDeleteError = failure.localizedDescription
-            error = failure.localizedDescription
-        }
-    }
-
     func retrySettingsPersonDelete() async {
         if retryNeeded { await retry(); return }
         guard selectedSurface == .settings, settingsManagePresented, settingsPersonDeleteActive,
-              !busy, settingsPersonDeleteRequest == nil else { return }
+              !busy, settingsPersonDeleteWrite.pending == nil else { return }
         busy = true
         defer { finishOperation() }
         if settingsPersonDeleteAwaitingRefresh {
@@ -23748,7 +23746,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func retryAreaDeleteRead() async {
         guard areaManagerPresented, !busy, !retryNeeded,
-              areaCreateRequest == nil, areaColorRequest == nil, areaOrderRequest == nil,
+              areaCreateRequest == nil, areaColorWrite.pending == nil, areaOrderRequest == nil,
               areaRenameRequest == nil, areaDeleteRequest == nil else { return }
         busy = true
         defer { finishOperation() }
@@ -43395,6 +43393,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             await retryTaskAttachmentRecovery()
             return
         }
+        if areaColorWrite.pending != nil { await runAreaColorWrite(retry: true); return }
+        if settingsPersonDeleteWrite.pending != nil { await runSettingsPersonDeleteWrite(retry: true); return }
+        if gtdWorkflowWrite.pending != nil { await runGtdWorkflowWrite(retry: true); return }
+        if generalPreferenceWrite.pending != nil { await runGeneralPreferenceWrite(retry: true); return }
         guard !busy, !projectRenameEditing || projectRenameRequest != nil else { return }
         guard ready else { await start(); return }
         guard let retryHost = host else { return }
@@ -44482,49 +44484,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
                 return
             }
-            if let request = areaColorRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("areaColorRetryOutcome", [request]) }
-                try acknowledgeAreaColor(result)
-                do {
-                    try await refreshAreaManagerAfterWrite()
-                } catch {
-                    areaColorReadError = error.localizedDescription
-                    self.error = error.localizedDescription
-                }
-                return
-            }
-            if let request = settingsPersonDeleteRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("managePersonDeleteRetryOutcome", [request]) }
-                try acknowledgeSettingsPersonDelete(result)
-                await refreshManageAfterPersonDelete()
-                return
-            }
             if let request = appLockRequest {
                 let result: CoreObject
                 if let acknowledgment { result = try decode(acknowledgment) }
                 else { result = try await query("appLockRetryOutcome", [request]) }
                 try await acknowledgeAppLock(result)
-                return
-            }
-            if let request = gtdWorkflowRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("gtdWorkflowRetryOutcome", [request]) }
-                try acknowledgeGtdWorkflow(result)
-                do { try await readGtdSettings() }
-                catch { gtdWorkflowReadError = error.localizedDescription }
-                return
-            }
-            if let request = generalPreferenceRequest {
-                let result: CoreObject
-                if let acknowledgment { result = try decode(acknowledgment) }
-                else { result = try await query("generalPreferenceRetryOutcome", [request]) }
-                try acknowledgeGeneralPreference(result)
-                await refreshGeneralPreference()
                 return
             }
             if let request = settingsTaxonomyRequest {
@@ -44948,28 +44912,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 await handleAreaOrderWriteError(error)
                 return
             }
-            if areaColorRequest != nil {
-                await handleAreaColorWriteError(error)
-                return
-            }
-            if settingsPersonDeleteRequest != nil {
-                await handleSettingsPersonDeleteWriteError(error)
-                return
-            }
             if appLockRequest != nil {
                 await handleAppLockError(error)
                 return
             }
-            if gtdWorkflowRequest != nil {
-                await handleGtdWorkflowError(error)
-                return
-            }
             if dataSettingRequest != nil {
                 handleDataSettingError(error)
-                return
-            }
-            if generalPreferenceRequest != nil {
-                await handleGeneralPreferenceError(error)
                 return
             }
             if settingsTaxonomyRequest != nil {
@@ -46614,7 +46562,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             managePersonDeleteOptionsTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
-        if method == "managePersonDelete", settingsPersonDeleteRequest != nil,
+        if method == "managePersonDelete", settingsPersonDeleteWrite.pending != nil,
            managePersonDeleteTestRefusals > 0 {
             managePersonDeleteTestRefusals -= 1
             throw SimulatedManageAreaRefusal()
@@ -46644,7 +46592,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             gtdWorkflowTestReadFailures -= 1
             throw CocoaError(.fileReadUnknown)
         }
-        if method == "gtdWorkflow", gtdWorkflowRequest != nil, gtdWorkflowTestRefusals > 0 {
+        if method == "gtdWorkflow", gtdWorkflowWrite.pending != nil, gtdWorkflowTestRefusals > 0 {
             gtdWorkflowTestRefusals -= 1
             throw SimulatedManageAreaRefusal()
         }
@@ -46656,7 +46604,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             generalPreferenceOptionsTestFailure = false
             throw CocoaError(.fileReadUnknown)
         }
-        if method == "generalPreference", generalPreferenceRequest != nil, generalPreferenceTestRefusals > 0 {
+        if method == "generalPreference", generalPreferenceWrite.pending != nil, generalPreferenceTestRefusals > 0 {
             generalPreferenceTestRefusals -= 1
             throw SimulatedManageAreaRefusal()
         }
