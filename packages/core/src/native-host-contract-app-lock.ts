@@ -1,5 +1,5 @@
 import type { GeneralSettingsModel } from './general-settings-model';
-import { readAreaDurableData } from './native-host-contract-area-durable';
+import { readAreaDurableData, readDurableSettings } from './native-host-contract-area-durable';
 import type { NativeHostResult } from './native-host-contract';
 import { detach, exact, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
@@ -90,8 +90,8 @@ export function createAppLockMethods(deps: { readiness: () => NativeHostResult<n
         async getAppLockOptions(input: unknown): Promise<NativeHostResult<AppLockOptions>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             if (!record(input) || !exact(input, [])) return fail('INVALID_INPUT', 'App lock options take an empty object');
-            const read = await readAreaDurableData(); if (!read.ok) return read;
-            const settings = read.value.authority.snapshot.settings;
+            const read = await readDurableSettings(); if (!read.ok) return read;
+            const settings = read.value;
             const expected = appLockWitness(settings);
             if (!expected) return fail('INVALID_INPUT', 'Saved App lock flag is malformed');
             const value = expected.value === true;

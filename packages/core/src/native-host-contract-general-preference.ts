@@ -6,7 +6,7 @@ import { generalPreferenceWitness, legacyGeneralPreferenceNumber,
 import { SETTINGS_THEME_VALUES } from './settings-options';
 import { SUPPORTED_LANGUAGES } from './i18n/i18n-constants';
 import { taskEditValuesEqual } from './json-value-equality';
-import { readAreaDurableData, createAreaSaveGuard } from './native-host-contract-area-durable';
+import { readAreaDurableData, readDurableSettings, createAreaSaveGuard } from './native-host-contract-area-durable';
 import type { NativeHostResult } from './native-host-contract';
 import { detach, exact, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
@@ -112,8 +112,8 @@ export function createGeneralPreferenceMethods(deps: { readiness: () => NativeHo
         }>> {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             if (!record(input) || !exact(input, [])) return fail('INVALID_INPUT', 'App lock delay takes an empty object');
-            const read = await readAreaDurableData(); if (!read.ok) return read;
-            const settings = read.value.authority.snapshot.settings;
+            const read = await readDurableSettings(); if (!read.ok) return read;
+            const settings = read.value;
             const expected = generalPreferenceWitness(settings, 'appLockRelockDelay');
             if (!expected) return fail('INVALID_INPUT', 'Saved App lock delay is malformed');
             return { ok: true, value: { row: deps.model(settings).privacy.appLockRelockDelay, expected,

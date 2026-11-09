@@ -2,6 +2,8 @@ import type { NativeHostResult } from './native-host-contract';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { taskEditValuesEqual } from './json-value-equality';
 import { buildSaveSnapshot } from './store-helpers';
+import { NativeReceiptSqliteAdapter } from './native-request-receipts';
+import type { AppSettings } from './types';
 import type { PreparedAreaAuthority, PreparedNativeSaveBoundary, TaskStore } from './store-types';
 
 const failure = (code: 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
@@ -18,13 +20,29 @@ export async function readAreaDurableData(allowFailedSave = false, rawTasks = fa
         if (!allowFailedSave || !state.persistenceFailure) await flushPendingSave();
         snapshot = await adapter.getData(rawTasks ? { rawTasks: true } : undefined);
     } catch { return failure('SAVE_FAILED', 'Area operation could not read saved data'); }
+    if (storeMoved(adapter, state)) return failure('STALE_REVISION', 'Area data changed while reading saved data');
+    return { ok: true, value: { adapter, authority: { snapshot, state } } };
+}
+
+function storeMoved(adapter: ReturnType<typeof getStorageAdapter>, state: TaskStore): boolean {
     const current = useTaskStore.getState();
-    if (getStorageAdapter() !== adapter || current._allTasks !== state._allTasks
+    return getStorageAdapter() !== adapter || current._allTasks !== state._allTasks
         || current._allAreas !== state._allAreas || current._allProjects !== state._allProjects
         || current._allSections !== state._allSections || current._allPeople !== state._allPeople
-        || current.settings !== state.settings || current.lastDataChangeAt !== state.lastDataChangeAt)
-        return failure('STALE_REVISION', 'Area data changed while reading saved data');
-    return { ok: true, value: { adapter, authority: { snapshot, state } } };
+        || current.settings !== state.settings || current.lastDataChangeAt !== state.lastDataChangeAt;
+}
+
+export async function readDurableSettings(): Promise<NativeHostResult<AppSettings>> {
+    const adapter = getStorageAdapter();
+    if (adapter instanceof NativeReceiptSqliteAdapter && adapter.concurrentWritesGuarded) {
+        const state = useTaskStore.getState();
+        try { await flushPendingSave(); } catch { return failure('SAVE_FAILED', 'Area operation could not read saved data'); }
+        const light = await adapter.readRowBaseline().catch(() => null);
+        if (light) return storeMoved(adapter, state) ? failure('STALE_REVISION', 'Area data changed while reading saved data')
+            : { ok: true, value: light.settings };
+    }
+    const read = await readAreaDurableData();
+    return read.ok ? { ok: true, value: read.value.authority.snapshot.settings } : read;
 }
 
 

@@ -1,5 +1,20 @@
 # Performance and stability handoff
 
+## Native iOS (SwiftUI + JavaScriptCore host), November 8
+
+Full evidence: [native iOS cold start, 2026-11-08](native-ios-startup-2026-11-08.md). iPhone 12, optimized marker build of `8d0b42aad`, and the
+`mixed-v1` 5k and 1k libraries.
+
+- **Baseline:** cold first frame takes 158 ms (5k) and 160 ms (1k). Inbox first content takes 1656 ms (5k) and 854 ms (1k), median of n = 8.
+  Nearly all of the growth comes before the first screen read.
+- **Fix:** the App lock option reads used to load the whole library twice on every cold start and every tab tap. They now use the light
+  saved-settings read. In the Bun/JavaScriptCore replay at 5k, the time to the first screen read drops from 1109 to 761 ms.
+- **Open:**
+  - Measure the fix on the phone.
+  - Run warm start, tab switch, editor, capture and scroll; an iOS update alert stopped them.
+  - Run the RN head-to-head, which needs dd's approval for the Mindwtr Dev data swap.
+  - `boot`'s row JSON is 72% NULL; a column-and-array format is the next lead.
+
 ## Native Android (Kotlin + QuickJS host), October 26-27
 
 Full evidence: [native Android startup and interactions, 2026-10-26](native-android-startup-2026-10-26.md). Galaxy S23, Benchmark builds,
