@@ -83,6 +83,7 @@ describe('inline checklist durable row edits', () => {
         } finally { await s.close(); }
     });
     it('appends to a Done list and reopens it through shared policy', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const s = await openSqliteHost(seed({ status: 'done', taskMode: 'list', completedAt: NOW,
             checklist: source().checklist!.map(i => ({ ...i, isCompleted: true })) }));
         try { const e = await prepare(s, request('append')); value(await s.host.commitPreparedInlineChecklistWrite(e));
