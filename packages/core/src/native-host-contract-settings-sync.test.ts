@@ -2876,7 +2876,105 @@ describe('native host contract: Settings › Sync activation without some attach
         expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
     });
 
-    it('answers at once with React Native\'s error toast on a host that cannot answer the question (iOS today)', async () => {
+    const deferring = async () => {
+        const started = await start({ os: 'ios' });
+        started.dev.host.defersMissingFilesQuestion = true;
+        value(await started.contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
+        return started;
+    };
+    const saveWebDav = async (contract: Awaited<ReturnType<typeof start>>['contract']) => value(await contract.saveSyncBackend({
+        requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision, webdav: { ...webdavFields, password: 'pw' },
+    }));
+    const continued = () => device.calls.filter((call) => call[0] === 'logInfo'
+        && (call[2] as Record<string, string>).releaseCheck === 'v1.3.9/ios-sync-missing-files-continue').map((call) => call[2]);
+
+    it('returns the save with React Native\'s question open on a deferring host, and Continue activates with exactly those files', async () => {
+        const { dev, contract } = await deferring();
+        const probes = refusing(dev);
+
+        const first = await saveWebDav(contract);
+        const question = value(contract.getSyncSettings()).missingFiles;
+
+        expect(first.toasts).toEqual([]);
+        expect(probes).toEqual([null]);
+        expect(question).toEqual({ questionId: expect.any(String), ...prompt });
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+        expect(contract.answerSyncMissingFiles({ questionId: question!.questionId, continue: true })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+
+        value(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), questionId: question!.questionId }));
+
+        expect(probes).toEqual([null, ['att-1']]);
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBe(webdavFields.url);
+        expect(value(contract.getSyncSettings()).missingFiles).toBeNull();
+        expect(continued()).toEqual([{ releaseCheck: 'v1.3.9/ios-sync-missing-files-continue', count: '1', outcome: 'activated' }]);
+    });
+
+    it('warns about an insecure HTTP server once, on the save, and not again on Continue', async () => {
+        const { dev, contract } = await deferring();
+        const probes = refusing(dev);
+        const insecure = (toasts: { title: string }[]) => toasts.filter((toast) => toast.title === en['settings.syncMobile.insecureHttpEnabled']);
+        const first = value(await contract.saveSyncBackend({
+            requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision,
+            webdav: { ...webdavFields, url: 'http://dav.example.com/mindwtr', password: 'pw', allowInsecureHttp: true },
+        }));
+        const question = value(contract.getSyncSettings()).missingFiles!;
+
+        const continued = value(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), questionId: question.questionId }));
+
+        expect(insecure(first.toasts)).toHaveLength(1);
+        expect(insecure(continued.toasts)).toEqual([]);
+        expect(probes).toEqual([null, ['att-1']]);
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBe('http://dav.example.com/mindwtr');
+    });
+
+    it('keeps the old configuration on Cancel, and refuses to continue a question that is not open', async () => {
+        const { dev, contract } = await deferring();
+        const probes = refusing(dev);
+        await saveWebDav(contract);
+        const question = value(contract.getSyncSettings()).missingFiles!;
+
+        value(contract.answerSyncMissingFiles({ questionId: question.questionId, continue: false }));
+
+        expect(value(contract.getSyncSettings()).missingFiles).toBeNull();
+        expect(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), questionId: question.questionId }))
+            .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(probes).toEqual([null]);
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+        expect(continued()).toEqual([]);
+    });
+
+    it('refuses the accepted list when the location now misses another file, and asks again with the new list', async () => {
+        const { dev, contract } = await deferring();
+        const other = { ...files[0]!, id: 'att-2', title: 'other.pdf' };
+        const probes = refusing(dev, [files[0]!, other]);
+        await saveWebDav(contract);
+        const question = value(contract.getSyncSettings()).missingFiles!;
+
+        value(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), questionId: question.questionId }));
+        const again = value(contract.getSyncSettings()).missingFiles;
+
+        expect(probes).toEqual([null, ['att-1']]);
+        expect(again?.questionId).not.toBe(question.questionId);
+        expect(again?.message).toBe(en['settings.syncMissingFilesBody'].replace('{files}', '• scan.pdf (Tax return)\n• other.pdf (Tax return)'));
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+        expect(continued()).toEqual([{ releaseCheck: 'v1.3.9/ios-sync-missing-files-continue', count: '1', outcome: 'asked-again' }]);
+    });
+
+    it('drops an open question when another Sync action starts, so Continue cannot activate a different choice', async () => {
+        const { dev, contract } = await deferring();
+        refusing(dev);
+        await saveWebDav(contract);
+        const question = value(contract.getSyncSettings()).missingFiles!;
+
+        value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'selfhosted' }));
+
+        expect(value(contract.getSyncSettings()).missingFiles).toBeNull();
+        expect(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), questionId: question.questionId }))
+            .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+    });
+
+    it('answers at once with React Native\'s error toast on a host that neither waits for nor defers the question', async () => {
         const { dev, contract } = await start({ os: 'ios' });
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
         const probes = refusing(dev);

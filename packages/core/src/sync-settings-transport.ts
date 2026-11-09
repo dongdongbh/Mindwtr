@@ -1000,6 +1000,10 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
 
     const handleSync = (options?: SyncSettingsActionOptions): Promise<void> => runSync(host.params(), options);
 
+    const handleContinueWithoutFiles = (acceptMissingAttachmentIds: readonly string[]): Promise<void> => (
+        runSync(host.params(), undefined, { insecureWarned: true, acceptMissingAttachmentIds })
+    );
+
     const discardSupersededActivationProof = (sequence: number): boolean => {
         if (sequence === backendWrites) return false;
         try {
@@ -1013,7 +1017,11 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
     };
 
 
-    const runSync = async (p: SyncSettingsTransportParams, options?: SyncSettingsActionOptions, flags: { insecureWarned?: boolean } = {}) => {
+    const runSync = async (
+        p: SyncSettingsTransportParams,
+        options?: SyncSettingsActionOptions,
+        flags: { insecureWarned?: boolean; acceptMissingAttachmentIds?: readonly string[] } = {},
+    ) => {
         const { t, tr, showToast, showSettingsWarning, showSettingsErrorToast } = p;
         remember(options?.webdav?.password, options?.cloud?.token);
         rememberUrl(options?.webdav?.url);
@@ -1217,7 +1225,10 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
                 const probeSyncPath = effectiveBackend === 'file' ? effectiveSyncPath || undefined : undefined;
                 let probeResult = await host.performSync(
                     probeSyncPath,
-                    { activationProbe: true, manual: true, configOverride }
+                    {
+                        activationProbe: true, manual: true, configOverride,
+                        ...(flags.acceptMissingAttachmentIds ? { acceptMissingAttachmentIds: flags.acceptMissingAttachmentIds } : {}),
+                    }
                 );
                 if (discardSupersededActivationProof(activationSequence)) return;
                 const missingAttachments = probeResult.success ? undefined : probeResult.activationMissingAttachments;
@@ -1630,6 +1641,7 @@ export function createSyncSettingsTransport(host: SyncSettingsTransportHost) {
         handleSelectSyncBackend,
         handleSetSyncPath,
         handleSync,
+        handleContinueWithoutFiles,
         handleTestConnection,
         handleTestDropboxConnection,
 

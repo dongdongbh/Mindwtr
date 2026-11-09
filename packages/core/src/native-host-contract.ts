@@ -1036,7 +1036,7 @@ const applyNativeTaskDraftEdit = (
 
 export const NATIVE_CONTRACT_SYNC_SCREEN_METHODS: ReadonlySet<string> = new Set([
     'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection',
-    'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'answerSyncMissingFiles',
+    'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'answerSyncMissingFiles', 'continueSyncWithoutFiles',
 ]);
 
 

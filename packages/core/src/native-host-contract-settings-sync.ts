@@ -105,6 +105,7 @@ export type NativeSyncSettingsHost = {
 
 
     answersMissingFilesQuestion?: boolean;
+    defersMissingFilesQuestion?: boolean;
     clearSyncConfigCache(): void;
 
     reconcileBackgroundSync(): Promise<unknown>;
@@ -325,7 +326,7 @@ type Screen = {
     retirementUncertain: boolean;
     unsubscribe: () => void;
 
-    question: { id: string; files: ActivationMissingAttachment[]; answer: (accepted: boolean) => void } | null;
+    question: { id: string; files: ActivationMissingAttachment[]; answer: (accepted: boolean) => void; deferred?: true } | null;
 };
 
 
@@ -476,6 +477,24 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 };
                 current.generation += 1;
             }) } : {}),
+            ...(host.defersMissingFilesQuestion ? {
+                confirmActivationWithoutFiles: async (files: ActivationMissingAttachment[]) => {
+                    const current = screen;
+                    if (!current || current.host !== host) return false;
+                    const id = generateUUID();
+                    current.question = {
+                        id,
+                        files,
+                        deferred: true,
+                        answer: () => {
+                            if (current.question?.id === id) current.question = null;
+                            current.generation += 1;
+                        },
+                    };
+                    current.generation += 1;
+                    return false;
+                },
+            } : {}),
         };
     };
 
@@ -1212,6 +1231,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         if (receipt) return Promise.resolve(receipt);
         const result = (async (): Promise<NativeHostResult<NativeSyncCommandResult>> => {
             if (screen !== current) return fail('ACTION_FAILED', 'Settings › Sync was closed; open it again');
+            if (current.question?.deferred) current.question = null;
             let cleanupUnconfirmed = false;
             try {
                 const refused = await run();
@@ -1455,8 +1475,34 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 return fail('INVALID_INPUT', 'The question\'s id and the answer are required');
             }
             if (current.question?.id !== input.questionId) return fail('ACTION_FAILED', 'This question is no longer open; read the screen again');
+            if (current.question.deferred && input.continue) return fail('INVALID_INPUT', 'Continue this question with continueSyncWithoutFiles');
             current.question.answer(input.continue);
             return { ok: true, value: null };
+        },
+
+
+        async continueSyncWithoutFiles(input: { requestId: string; questionId: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
+            const opened = openedScreen();
+            if (!opened.ok) return opened;
+            const current = opened.value;
+            if (!isObjectRecord(input) || !isRequestId(input.requestId) || !isText(input.questionId, 100)) {
+                return fail('INVALID_INPUT', 'A request UUID and the question\'s id are required');
+            }
+            const question = current.question?.deferred && current.question.id === input.questionId ? current.question : null;
+            return runScreenAction(input.requestId, ['continueSyncWithoutFiles', input.questionId], current, async () => {
+                if (!question) return fail('ACTION_FAILED', 'This question is no longer open; read the screen again');
+                await current.transport.handleContinueWithoutFiles(question.files.map((file) => file.id));
+                const outcome = current.question ? 'asked-again' : current.transport.getProven().pending ? 'not-activated' : 'activated';
+                try {
+                    await current.host.log.info('Sync location activated without missing attachment files', {
+                        scope: 'native-sync', force: true,
+                        extra: { releaseCheck: 'v1.3.9/ios-sync-missing-files-continue', count: String(question.files.length), outcome },
+                    });
+                } catch {
+
+                }
+                return undefined;
+            });
         },
 
 
