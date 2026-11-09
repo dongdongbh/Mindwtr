@@ -2279,11 +2279,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     @Published private(set) var completedStartupToken: UUID?
     private enum ForegroundSyncReason {
-        case startup, resume, pull, retention
+        case startup, resume, pull, retention, background
         var command: String {
             switch self {
             case .startup: return "syncStored"
-            case .resume: return "syncResume"
+            case .resume, .background: return "syncResume"
             case .pull: return "syncPull"
             case .retention: return "archiveRetention"
             }
@@ -2310,6 +2310,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var foregroundSyncHold = UIBackgroundTaskIdentifier.invalid
     private var foregroundSyncHoldClaim = 0
     private var foregroundSyncHoldStartedAt = Date()
+    private let backgroundSync = NativeBackgroundTaskScheduler.sync
+    private var backgroundSyncRun: NativeBackgroundSync.Run?
+    private var backgroundSyncStartAttempted = false
     private var archiveRetentionRequested = false
     private var archiveRetentionWake: Task<Void, Never>?
 
@@ -10925,8 +10928,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         foregroundSyncIntent?.foregroundRequested = false
         foregroundSyncGeneration += 1
         retireReferenceProjectNextActionOffer()
-        if holdingRunningSync, let running = foregroundSyncTask { holdForegroundSyncInBackground(running) }
-        else {
+        if holdingRunningSync, let running = foregroundSyncTask {
+            if foregroundSyncOwner?.reason != .background { holdForegroundSyncInBackground(running) }
+        } else {
             foregroundSyncTask?.cancel()
             endForegroundSyncHold(foregroundSyncHoldClaim, outcome: "aborted")
         }
@@ -10977,6 +10981,154 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             "Native iOS background sync hold ended",
             try json(["releaseCheck": "v1.3.9/ios-background-sync-hold", "outcome": outcome, "heldMs": heldMs]),
         ]))
+    }
+
+    func scheduleBackgroundSync() {
+        guard workspaceAdmissionsOpen, settingsSyncAvailable, ready, let currentHost = host,
+              currentHost.workspaceMode == .personal else { return }
+        Task { [weak self] in
+            guard let wanted = try? await currentHost.backgroundSyncWanted() else { return }
+            self?.backgroundSync.schedule(wanted)
+        }
+    }
+
+    func receiveBackgroundSync(_ run: NativeBackgroundSync.Run) {
+        if let previous = backgroundSyncRun { skipBackgroundSync(previous, "replaced") }
+        backgroundSyncRun = run
+        backgroundSyncStartAttempted = false
+        run.armDeadline(after: NativeBackgroundSync.deadline) { [weak self] in
+            Task { @MainActor in await self?.logBackgroundSync(run, .expired, "deadline") }
+        }
+        admitBackgroundSync()
+    }
+
+    func backgroundSyncExpired(_ run: NativeBackgroundSync.Run) {
+        Task { await logBackgroundSync(run, .expired, "system") }
+    }
+
+    private var backgroundSyncRefusal: String? {
+        guard let currentHost = host, completedStartupToken != nil, startupSyncCompletedHost === currentHost else { return "not-ready" }
+        if currentHost.workspaceMode != .personal { return "sandbox" }
+        if settingsSyncRestartRequired { return "restart-required" }
+        if retryNeeded { return "retry-needed" }
+        if appLockRecoveryPending { return "app-lock-recovery" }
+        if foregroundSyncOwner != nil || foregroundSyncTask != nil { return "sync-running" }
+        if busy || reminderCaptureHandoverOwner != nil { return "busy" }
+        if !operationContextClean { return "editing" }
+        return nil
+    }
+
+    private func admitBackgroundSync() {
+        guard let run = backgroundSyncRun else { return }
+        guard run.outcome == nil else { backgroundSyncRun = nil; return }
+        guard workspaceAdmissionsOpen else { return skipBackgroundSync(run, "workspace") }
+        guard ready else {
+            guard reminderCaptureHandoverOwner == nil, !busy else { return }
+            guard !backgroundSyncStartAttempted, !retryNeeded else { return skipBackgroundSync(run, "not-ready") }
+            backgroundSyncStartAttempted = true
+            Task { [weak self] in
+                await self?.start()
+                self?.admitBackgroundSync()
+            }
+            return
+        }
+        if let refusal = backgroundSyncRefusal { return skipBackgroundSync(run, refusal) }
+        guard let currentHost = host, let token = completedStartupToken else { return skipBackgroundSync(run, "not-ready") }
+        guard !backgroundSync.coolingDown else { return skipBackgroundSync(run, "cooldown") }
+        backgroundSyncRun = nil
+        let owner = ForegroundSyncOwner(id: UUID(), host: currentHost, startupToken: token, reason: .background,
+            generation: foregroundSyncGeneration)
+        foregroundSyncOwner = owner
+        busy = true
+        let task = Task { [weak self] in
+            guard let self else { run.end(.failed); return }
+            await self.performBackgroundSync(run, owner: owner)
+        }
+        foregroundSyncTask = task
+        run.onCancel { task.cancel() }
+    }
+
+    private func performBackgroundSync(_ run: NativeBackgroundSync.Run, owner: ForegroundSyncOwner) async {
+        defer {
+            if foregroundSyncOwner?.id == owner.id {
+                let current = backgroundSyncCurrent(owner)
+                foregroundSyncTask = nil
+                foregroundSyncOwner = nil
+                if host === owner.host {
+                    if current { finishOperation() }
+                    else { busy = false; refreshRequested = false; admitNotificationResponses() }
+                }
+            }
+        }
+        let wanted: Bool
+        do { wanted = try await owner.host.backgroundSyncWanted() }
+        catch { return await skipBackgroundSyncRun(run, "unavailable") }
+        guard wanted else {
+            run.unwanted()
+            return await skipBackgroundSyncRun(run, "not-configured")
+        }
+        guard backgroundSyncCurrent(owner) else { return await skipBackgroundSyncRun(run, "superseded") }
+        let result: CoreObject
+        do {
+            result = try decode(try await owner.host.foregroundSync(command: owner.reason.command, requestJSON: "{}"))
+            try validateForegroundSyncReply(result)
+        } catch is CancellationError {
+            return await finishBackgroundSync(run, .failed, "cancelled")
+        } catch {
+            requireSettingsSyncRestart(owner.host)
+            return await finishBackgroundSync(run, .failed, "unconfirmed")
+        }
+        let value = result.object("value")
+        guard result.flag("ok"), value.flag("success") else {
+            return await finishBackgroundSync(run, .failed, "sync-failed")
+        }
+        guard !value.flag("skipped") else { return await finishBackgroundSync(run, .finished, "paced") }
+        let reminders = await replanRemindersAfterBackgroundSync(owner) ? "replanned" : "failed"
+        if UIApplication.shared.applicationState == .active { refreshRequested = true }
+        await finishBackgroundSync(run, .finished, "synced", reminders: reminders)
+    }
+
+    private func replanRemindersAfterBackgroundSync(_ owner: ForegroundSyncOwner) async -> Bool {
+        guard backgroundSyncCurrent(owner) else { return false }
+        do {
+            _ = try validateReminderLifecycleReply(try await owner.host.reconcileReminders())
+            return true
+        } catch { return false }
+    }
+
+    private func backgroundSyncCurrent(_ owner: ForegroundSyncOwner) -> Bool {
+        workspaceAdmissionsOpen && host === owner.host && startupSyncCompletedHost === owner.host
+            && completedStartupToken == owner.startupToken && foregroundSyncOwner?.id == owner.id && !Task.isCancelled
+            && ready && !retryNeeded && !settingsSyncRestartRequired && !appLockRecoveryPending
+    }
+
+    private func skipBackgroundSync(_ run: NativeBackgroundSync.Run, _ reason: String) {
+        if backgroundSyncRun === run { backgroundSyncRun = nil }
+        Task { await skipBackgroundSyncRun(run, reason) }
+    }
+
+    private func skipBackgroundSyncRun(_ run: NativeBackgroundSync.Run, _ reason: String) async {
+        guard run.end(.skipped) else { return }
+        await logBackgroundSync(run, .skipped, reason)
+    }
+
+    private func finishBackgroundSync(_ run: NativeBackgroundSync.Run, _ outcome: NativeBackgroundSync.Outcome,
+                                      _ detail: String, reminders: String = "unchanged") async {
+        guard run.outcome == nil else { return }
+        await logBackgroundSync(run, outcome, detail, reminders: reminders)
+        run.end(outcome)
+    }
+
+    private func logBackgroundSync(_ run: NativeBackgroundSync.Run, _ outcome: NativeBackgroundSync.Outcome,
+                                   _ detail: String, reminders: String = "unchanged") async {
+        guard let currentHost = host else {
+            NSLog("Native iOS background sync ended releaseCheck=v1.3.9/ios-background-sync outcome=\(outcome.rawValue) detail=\(detail) reminders=\(reminders) durationMs=\(run.durationMs)")
+            return
+        }
+        _ = try? await currentHost.call("logLine", argumentsJSON: json(["Native iOS background sync ended", try json([
+            "releaseCheck": "v1.3.9/ios-background-sync", "outcome": outcome.rawValue, "detail": detail,
+            "reminders": reminders, "durationMs": String(run.durationMs),
+        ])]))
     }
 
     private var surfaceRefreshAllowed: Bool {
@@ -46929,7 +47081,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         return error is CoreHostRejection
     }
     private func finishOperation(wakeWidget: Bool = true) {
-        guard workspaceAdmissionsOpen else { busy = false; return }
+        guard workspaceAdmissionsOpen else { busy = false; admitBackgroundSync(); return }
         if pomodoroWorkHost == nil {
 
 
@@ -46944,6 +47096,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             requestQuickCaptureIntent()
             admitAppleRemindersAutoImport()
             gmailCapture.admit()
+            admitBackgroundSync()
             #if DEBUG && targetEnvironment(simulator)
             publishTrashBulkTestState()
             #endif

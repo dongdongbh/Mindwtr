@@ -33,6 +33,14 @@
         <string>mind water</string>
       </dict>
     </array>
+    <key>UIBackgroundModes</key>
+    <array>
+      <string>processing</string>
+    </array>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+      <string>com.expo.modules.backgroundtask.processing</string>
+    </array>
     <key>NSMicrophoneUsageDescription</key>
     <string>Mindwtr uses the microphone to capture voice notes.</string>
     <key>NSRemindersUsageDescription</key>

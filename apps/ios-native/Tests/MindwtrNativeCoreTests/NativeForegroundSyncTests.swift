@@ -135,6 +135,26 @@ final class NativeForegroundSyncTests: XCTestCase {
         await cold.close()
     }
 
+    func testBackgroundSyncWantedReadsOnlyTheStoredBackendAndProvider() async throws {
+        let cases: [(String?, String?, Bool)] = [("webdav", nil, true), ("cloud", nil, true), ("cloud", "selfhosted", true),
+            ("cloud", "dropbox", false), ("cloudkit", nil, false), ("off", nil, false), (nil, nil, false)]
+        for (backend, provider, wanted) in cases {
+            try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            var values = ["unknown": "preserve 🧠"]
+            if let backend { values["@mindwtr_sync_backend"] = backend }
+            if let provider { values["@mindwtr_cloud_provider"] = provider }
+            try Data(json(values).utf8).write(to: manifest)
+            let before = try Data(contentsOf: manifest)
+            let (host, state) = makeHost()
+            _ = try await host.start()
+            let actual = try await host.backgroundSyncWanted()
+            XCTAssertEqual(actual, wanted, "backend=\(backend ?? "absent") provider=\(provider ?? "absent")")
+            XCTAssertTrue(state.recorded.isEmpty, "Deciding the schedule never reads a secret")
+            XCTAssertEqual(try Data(contentsOf: manifest), before, "Deciding the schedule writes nothing")
+            await host.close()
+        }
+    }
+
     func testStoredOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
         try await assertStoredSkip(backend: "off")
     }

@@ -1997,6 +1997,12 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    public func backgroundSyncWanted() async throws -> Bool {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.backgroundSyncWanted() }
+    }
+
     public func readTaskAIOptions(requestJSON: String, lease: NativeTaskAIEditorLease) async throws -> String {
         try beginOuterAdmission(); defer { finishOuterAdmission() }
         return try await perform { try $0.readTaskAIOptions(requestJSON, lease: lease) }
@@ -29796,6 +29802,11 @@ private final class Engine: @unchecked Sendable {
         guard let container = NativeCloudKitBridge.configuredContainer else { return nil }
         let bridge = try NativeCloudKitBridge(containerIdentifier: container, files: files)
         return NativeCloudKitJobs(registry: localRequests, perform: { try await bridge.call($0) }, cancel: { await bridge.cancel() })
+    }
+
+    func backgroundSyncWanted() throws -> Bool {
+        let stored = try requireDeviceStorageAdmission().multiGet(["@mindwtr_sync_backend", "@mindwtr_cloud_provider"])
+        return NativeBackgroundSync.wanted(backend: stored[0].1, cloudProvider: stored[1].1)
     }
 
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {

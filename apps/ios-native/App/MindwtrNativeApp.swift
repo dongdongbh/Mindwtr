@@ -1,4 +1,5 @@
 import SwiftUI
+import BackgroundTasks
 import CoreSpotlight
 import LocalAuthentication
 import UIKit
@@ -857,6 +858,16 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
 
     func application(_ application: UIApplication,
                      willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        _ = BGTaskScheduler.shared.register(forTaskWithIdentifier: NativeBackgroundSync.identifier, using: .main) { task in
+            let run = NativeBackgroundTaskScheduler.sync.begin { success in
+                task.expirationHandler = nil
+                task.setTaskCompleted(success: success)
+            }
+            task.expirationHandler = {
+                if run.end(.expired) { Task { @MainActor in NativeAppModel.shared.backgroundSyncExpired(run) } }
+            }
+            Task { @MainActor in NativeAppModel.shared.receiveBackgroundSync(run) }
+        }
         guard let selection = try? NativeAppLaunch.selection.get() else { return true }
         if case let .standard(_, _, namespace) = selection,
            namespace == NativeWidgetNextCache.namespace, Bundle.main.bundleIdentifier == namespace {
@@ -907,6 +918,18 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
         submit(response, original: callbacks, completion: completion)
     }
     #endif
+}
+
+final class NativeBackgroundTaskScheduler: NativeBackgroundSyncScheduling {
+    static let sync = NativeBackgroundSync(scheduler: NativeBackgroundTaskScheduler())
+    func submit(identifier: String, earliestBeginDate: Date) throws {
+        let request = BGProcessingTaskRequest(identifier: identifier)
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        request.earliestBeginDate = earliestBeginDate
+        try BGTaskScheduler.shared.submit(request)
+    }
+    func cancel(identifier: String) { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier) }
 }
 
 @MainActor
@@ -1514,6 +1537,7 @@ private struct AppLockRoot: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
             _ = model.dropboxAuthorizationSceneChanged(.background)
+            model.scheduleBackgroundSync()
             model.cancelAppleRemindersIntent()
             model.cancelNotificationSettingsIntent()
             model.cancelCalendarSettingsIntent()
