@@ -29800,6 +29800,7 @@ private final class Engine: @unchecked Sendable {
 
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        var cancelSettled = false
         do {
             try denyCleanupOwner()
             guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction"].contains(command),
@@ -29827,7 +29828,7 @@ private final class Engine: @unchecked Sendable {
                         pickedBookmark: nil, cancellation: cancellation)
                 }
             }
-            try cancellation.check()
+            if cancellation.isCancelled { cancelSettled = true; throw CancellationError() }
             let generation = attachmentGeneration
             var scopeLive = true
             let cloudKit = try makeCloudKitJobs()
@@ -29911,10 +29912,14 @@ private final class Engine: @unchecked Sendable {
                 try requireEncryptionUnlockTurn()
                 return result
             }
-            let result = try invokeForegroundWithDropbox(command: command, requestJSON: requestJSON, cleanup: callback, cancellation: cancellation)
+            let result = try invokeForegroundWithDropbox(command: command, requestJSON: requestJSON, cleanup: callback,
+                cancellation: cancellation, cancelledReply: { cancelSettled = $0 })
             try denyCleanupOwner()
             return result
         } catch {
+            if NativeSyncTurnCancellation.isClean(error, command: command, cleanupOwed: cleanupOwed, settled: cancelSettled) {
+                throw CancellationError()
+            }
             throw cleanupOwed ? Self.cleanupFailure : Self.foregroundSyncFailure
         }
     }
@@ -29946,9 +29951,11 @@ private final class Engine: @unchecked Sendable {
         return turn
     }
     private func invokeForegroundWithDropbox(command: String, requestJSON: String, cleanup: JSValue,
-                                            cancellation: NativeAttachmentCancellation) throws -> String {
+                                            cancellation: NativeAttachmentCancellation,
+                                            cancelledReply: ((Bool) -> Void)? = nil) throws -> String {
         guard let turn = dropboxTurn else {
-            return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup], localCancellation: cancellation)
+            return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup], localCancellation: cancellation,
+                cancelledReply: cancelledReply)
         }
         let control: @convention(block) (JSValue) -> String = { [weak self, weak turn] value in
             guard let self, let turn else { return "!MindwtrNativeError:Dropbox capability is unavailable" }
@@ -29959,7 +29966,8 @@ private final class Engine: @unchecked Sendable {
             } catch { return "!MindwtrNativeError:Dropbox capability is unavailable" }
         }
         guard let callback = JSValue(object: control, in: turn.runtime), let undefined = JSValue(undefinedIn: turn.runtime) else { throw Self.foregroundSyncFailure }
-        return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup, undefined, callback], localCancellation: cancellation)
+        return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup, undefined, callback], localCancellation: cancellation,
+            cancelledReply: cancelledReply)
     }
 
     private static let encryptionUnlockConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url",
@@ -32605,7 +32613,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func invoke(_ method: String, arguments: [Any], localCancellation: NativeAttachmentCancellation? = nil,
-                        drainCalendarTest: Bool = false) throws -> String {
+                        drainCalendarTest: Bool = false, cancelledReply: ((Bool) -> Void)? = nil) throws -> String {
         try turnAdmission.admitInvoke(method)
         try denyCleanupOwner()
         try requireRetainedOrdinaryTurn(requirePreparation: true)
@@ -32717,6 +32725,7 @@ private final class Engine: @unchecked Sendable {
                       let envelope = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String: Any],
                       let ok = envelope["ok"] as? Bool else { throw HostFailure("Malformed core response") }
                 if cancelled {
+                    cancelledReply?(ok)
                     throw CancellationError()
                 }
                 if !ok { throw HostFailure(envelope["error"] as? String ?? "Core command failed") }

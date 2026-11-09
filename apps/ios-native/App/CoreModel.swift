@@ -11069,7 +11069,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     self.foregroundSyncOwner = nil
                     if self.host === owner.host {
                         if current { self.finishOperation() }
-                        else { self.busy = false; self.refreshRequested = false }
+                        else { self.busy = false; self.refreshRequested = false; self.admitNotificationResponses() }
                     }
                 }
             }
@@ -11108,6 +11108,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     syncSucceeded = result.flag("ok") && result.object("value").flag("success")
                     self.archiveRetentionRequested = true
                 }
+            } catch is CancellationError {
+                await self.logSyncCancelledCleanly(owner.reason.command)
+                return
             } catch {
                 self.requireSettingsSyncRestart(owner.host)
                 return
@@ -11132,6 +11135,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 self.error = self.label("settings.feedback.actionFailed")
             }
         }
+    }
+
+    private func logSyncCancelledCleanly(_ operation: String) async {
+        guard let currentHost = host else { return }
+        _ = try? await currentHost.call("logLine", argumentsJSON: json([
+            "Native iOS sync cancelled without a restart",
+            try json(["releaseCheck": "v1.3.9/ios-sync-clean-cancel", "operation": operation]),
+        ]))
     }
 
     private func foregroundSyncCurrent(_ owner: ForegroundSyncOwner) -> Bool {

@@ -21,6 +21,7 @@ private final class ForegroundDAVProtocol: URLProtocol {
         if store == nil { Self.unexpected += 1 }
         Self.lock.unlock()
         guard let store else { client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)); return }
+        store.waitIfHeld()
         let response = store.respond(request, body: upload())
         let http = HTTPURLResponse(url: request.url!, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: response.headers)!
         client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
@@ -57,7 +58,19 @@ private final class ForegroundDAVStore: @unchecked Sendable {
     private var getStatuses: [String: Int] = [:]
     private var declaredLengths: [String: Int] = [:]
     private var omitCollectionHrefSlash = false
+    private var held: (reached: DispatchSemaphore, release: DispatchSemaphore)?
     init(expectedAuthorization: String) { self.expectedAuthorization = expectedAuthorization }
+    func holdNextRequest() -> (reached: DispatchSemaphore, release: DispatchSemaphore) {
+        let gate = (reached: DispatchSemaphore(value: 0), release: DispatchSemaphore(value: 0))
+        lock.lock(); held = gate; lock.unlock()
+        return gate
+    }
+    func waitIfHeld() {
+        lock.lock(); let gate = held; held = nil; lock.unlock()
+        guard let gate else { return }
+        gate.reached.signal()
+        _ = gate.release.wait(timeout: .now() + 30)
+    }
     var recorded: [Request] { lock.lock(); defer { lock.unlock() }; return requests }
     var unexpectedCount: Int { lock.lock(); defer { lock.unlock() }; return unexpected }
     func bytes(_ path: String) -> Data? { lock.lock(); defer { lock.unlock() }; return objects[path]?.bytes }
@@ -700,6 +713,31 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         await cold.close()
         XCTAssertEqual(try markers("v1.3.5/ios-stored-sync").count, 2)
         try assertDiagnostics()
+    }
+
+    func testCancelledStoredSyncThatSavedIsACleanCancellationAndTheNextSyncRuns() async throws {
+        try await seed()
+        let setup = core()
+        try await openAndTest(setup); try await save(setup); await setup.close()
+        let host = core()
+        _ = try await host.start()
+        let gate = remote.holdNextRequest()
+        let operation = Task { try await host.foregroundSync(command: "syncStored", requestJSON: "{}") }
+        XCTAssertEqual(gate.reached.wait(timeout: .now() + 30), .success, "The stored cycle must reach the network")
+        operation.cancel()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        gate.release.signal()
+        do {
+            _ = try await operation.value
+            XCTFail("A cancelled sync cannot report a result")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "A cancelled turn that saved must not need a restart: \(error)")
+        }
+        let read = try object(await host.call("menuRead", argumentsJSON: json(["dataSettings", "{}"])))
+        XCTAssertNotNil(read["diagnostics"], "The cancelled turn left the store saved and ordinary reads admitted")
+        let pulled = try await command(host, "syncPull")
+        XCTAssertEqual(pulled["success"] as? Bool, true)
+        await host.close()
     }
 
     func testResumeUsesStoredCycleCompletionCadenceWithoutDeferredNetwork() async throws {
