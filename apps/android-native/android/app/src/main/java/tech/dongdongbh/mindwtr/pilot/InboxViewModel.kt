@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import android.app.Application
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -2206,6 +2207,14 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         saved["project"] = id
     }
 
+
+    internal fun followMarkdownLink(context: Context, target: JSONObject) {
+        when (target.getString("kind")) {
+            "external" -> openExternalLink(context, target.getString("href"), { t(it) }) { outcome -> anyTime({ it.logLinkHandoff(outcome, "markdown") }, {}) }
+            "task" -> openEditor(target.getString("id"), "view")
+            "project" -> openProject(target.getString("id"))
+        }
+    }
 
     fun openProject(id: String) {
         if (id != openProjectId) { projectCompletedCollapsed = true; projectDetails.resetFilters() }

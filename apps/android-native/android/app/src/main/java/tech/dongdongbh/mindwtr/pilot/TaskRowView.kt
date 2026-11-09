@@ -195,7 +195,7 @@ fun TaskRowItem(
                                         listOfNotNull(editCompleted?.let { edit -> CustomAccessibilityAction(t("task.editCompletedAt")) { edit(); true } })
                                     if (all.isNotEmpty()) customActions = all
                                 })
-                        if (meta.parts.any { it.kind == "recurrence" }) {
+                        if (!details && meta.parts.any { it.kind == "recurrence" }) {
                             Icon(Lucide.Repeat, null, tint = c.secondaryText,
                                 modifier = Modifier.padding(start = 4.dp).size(12.dp))
                         }
@@ -208,7 +208,8 @@ fun TaskRowItem(
                     }
                     if (details) meta.description?.let { json ->
                         val description = remember(json) { JSONObject(json) }
-                        Text(inline(description.menuObjects("inline"), description.getJSONObject("labels"), c.tint, c.secondaryText, c.cardBg) { },
+                        val context = LocalContext.current
+                        Text(inline(description.menuObjects("inline"), description.getJSONObject("labels"), c.tint, c.secondaryText, c.cardBg) { target -> followMarkdownLink(context, target) },
                             style = rnText(12, 400), color = c.secondaryText, overflow = TextOverflow.Ellipsis,
                             maxLines = if (task.status == "reference") 3 else 1, modifier = Modifier.padding(top = 2.dp).clearAndSetSemantics { })
                     }

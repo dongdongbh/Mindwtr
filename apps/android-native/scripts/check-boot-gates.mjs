@@ -867,7 +867,7 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
 }
 assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
 assert.match(rowUi, /background\(theme\.einkSafe\(coreColorOrNull\(part\.dotColor\) \?: c\.tint\)\)/, 'a row\'s project and area dot goes through einkSafe, as RN\'s row does');
-assert.match(rowUi, /if \(details\) meta\.description\?\.let \{ json ->[\s\S]{0,450}?maxLines = if \(task\.status == "reference"\) 3 else 1/, 'a row with details shows RN\'s one-line description preview');
+assert.match(rowUi, /if \(details\) meta\.description\?\.let \{ json ->[\s\S]{0,700}?maxLines = if \(task\.status == "reference"\) 3 else 1/, 'a row with details shows RN\'s one-line description preview');
 for (const file of ['ContextsScreen.kt', 'DailyReviewScreen.kt', 'ReviewScreen.kt', 'SavedSearchScreen.kt', 'WeeklyReviewScreen.kt', 'WidgetListScreen.kt']) {
     assert.match(source(file), /TaskRowItem\(model, [^\n]*details = true/, `${file}: rows show details, as RN's row does by default`);
 }
@@ -880,6 +880,10 @@ assert.match(editorUi, /internal fun PickerHeading\(text: String\) \{\s+Text\(te
 assert.match(activity, /if \(capture == null\) ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(\)\)\)/, 'a tab toast sits 12 dp above the tab bar from the screen bottom, as RN\'s overlay does');
 assert.match(activity, /internal fun tabBarHeight\(navigation: Dp\): Dp = 66\.dp \+ if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp[\s\S]{0,2000}?val inset = if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp\s+Row\(Modifier\.fillMaxWidth\(\)\.height\(66\.dp \+ inset\)/, 'the toast reads the tab bar\'s own height rule');
 assert.match(menuUi, /ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = toastBottomAboveNavigationBar\(\)\)\)/, 'a menu screen toast sits where RN\'s overlay puts it');
+assert.match(editorUi, /internal fun PickerDialog[\s\S]{0,400}?windowScrim\(theme\.pickerScrim\)[^\n]*\.padding\(WindowInsets\.ime\.asPaddingValues\(\)\)/, 'a centered picker pads by the whole keyboard height, so its card never sits under the keyboard on 3-button navigation');
+assert.match(rowUi, /if \(!details && meta\.parts\.any \{ it\.kind == "recurrence" \}\)/, 'a row with details shows its repeat only as a meta part, as RN does');
+assert.match(rowUi, /description\.getJSONObject\("labels"\), c\.tint, c\.secondaryText, c\.cardBg\) \{ target -> followMarkdownLink\(context, target\) \}/, 'a description-line link opens its project, task or URL, as RN\'s does');
+assert.match(editorUi, /destinationMatches\(destinationQuery, it\.title\)/, 'the editor Destination search filters with the shared rule');
 assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
@@ -9938,7 +9942,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const attachmentLink = /if \(plan\.getString\("kind"\) == "link"\) \{([\s\S]*?)\n    \}/.exec(source('Attachments.kt'))?.[1] ?? '';
     assert.match(attachmentLink, /openExternalLink\(context, uri, t, \{ failure -> Log\.w\(CoreHost\.TAG, attachmentLaunchLog\("link", uri, failure\)\) \}, diagnostic\)/, 'a failed attachment link offers Copy link');
     assert.doesNotMatch(attachmentLink, /failedMessage/);
-    for (const file of ['TaskEditor.kt', 'ProjectDetails.kt']) {
+    for (const file of ['TaskEditor.kt', 'ProjectDetails.kt', 'InboxViewModel.kt']) {
         assert.match(source(file), /openExternalLink\(context, target\.getString\("href"\)/, `${file}'s external links offer Copy link`);
         assert.doesNotMatch(source(file), /runCatching \{ context\.startActivity\(Intent\(Intent\.ACTION_VIEW, (?:original|target\.getString\("href"\))/);
     }

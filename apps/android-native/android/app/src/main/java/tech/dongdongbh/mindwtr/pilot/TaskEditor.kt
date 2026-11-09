@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -594,9 +597,8 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
         }) {
             PickerItem(t("common.none")) { editFields(mapOf("projectId" to "", "areaId" to "")); picker = null }
 
-            val query = destinationQuery.trim().lowercase()
-            val projects = editor.view.projects.filter { query.isEmpty() || it.title.trim().lowercase().contains(query) }
-            val areas = editor.view.areas.filter { query.isEmpty() || it.title.lowercase().contains(query) }
+            val projects = editor.view.projects.filter { destinationMatches(destinationQuery, it.title) }
+            val areas = editor.view.areas.filter { destinationMatches(destinationQuery, it.title) }
             val (deferred, active) = projects.partition { it.id in editor.view.deferredProjectIds }
             PickerHeading(t("nav.projects"))
             for (project in active) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
@@ -1564,7 +1566,7 @@ internal fun PickerDialog(title: String, dismiss: () -> Unit, search: (@Composab
     val c = theme.colors
     BackHandler(onBack = dismiss)
 
-    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.imePadding().padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.padding(WindowInsets.ime.asPaddingValues()).padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
@@ -1593,6 +1595,11 @@ internal fun PickerItem(text: String, tag: String? = null, description: String? 
         .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
         Text(text, style = rnText(16, 400), color = c.text)
     }
+}
+
+internal fun destinationMatches(query: String, title: String): Boolean {
+    val needle = query.trim().lowercase()
+    return needle.isEmpty() || title.trim().lowercase().contains(needle)
 }
 
 @Composable
