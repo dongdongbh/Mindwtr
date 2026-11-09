@@ -119,7 +119,7 @@ private fun LazyListScope.infoBox(count: Int, unit: String, description: String)
 private fun LazyListScope.dailyEmpty(icon: ImageVector, text: String) = item(key = "empty") {
     val c = LocalTheme.current.colors
     Column(Modifier.fillMaxWidth().padding(vertical = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(48.dp).fade(0.9f))
+        Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(48.dp).fade(rnLucideStyleAlpha(0.9f)))
         Text(text, style = rnText(14, 400, 20), color = c.secondaryText, textAlign = TextAlign.Center)
     }
 }

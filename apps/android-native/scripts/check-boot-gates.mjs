@@ -931,6 +931,7 @@ assert.match(editorUi, /internal fun PickerDialog[\s\S]{0,400}?windowScrim\(them
 assert.match(rowUi, /if \(!details && meta\.parts\.any \{ it\.kind == "recurrence" \}\)/, 'a row with details shows its repeat only as a meta part, as RN does');
 assert.match(rowUi, /description\.getJSONObject\("labels"\), c\.tint, c\.secondaryText, c\.cardBg\) \{ target -> followMarkdownLink\(context, target\) \}/, 'a description-line link opens its project, task or URL, as RN\'s does');
 assert.match(editorUi, /destinationMatches\(destinationQuery, it\.title\)/, 'the editor Destination search filters with the shared rule');
+assert.match(source('DailyReviewScreen.kt'), /Modifier\.size\(48\.dp\)\.fade\(rnLucideStyleAlpha\(0\.9f\)\)/, 'the Daily Review empty icon is as faint as RN\'s lucide icon with style opacity 0.9, which renders at 0.9 cubed');
 assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');

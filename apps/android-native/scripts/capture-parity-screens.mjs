@@ -31,6 +31,7 @@ const SMALL2_ONLY = process.env.PARITY_ONLY === 'small2';
 const STATUS_MENU_ONLY = process.env.PARITY_ONLY === 'status-menu';
 const OWED_ONLY = process.env.PARITY_ONLY === 'owed';
 const EINK_ONLY = process.env.PARITY_ONLY === 'eink';
+const DAILY_EMPTY_ONLY = process.env.PARITY_ONLY === 'daily-empty';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -157,6 +158,7 @@ const buildFixture = () => execFileSync('bun', ['-e', `
         await store().updateSettings({ savedSearches: [{ id: 'parity-search', name: 'Kitchen work', query: 'kitchen' }] });
     }
     if (process.env.FIXTURE_EINK === '1') await store().updateSettings({ theme: 'eink' });
+    if (process.env.FIXTURE_DAILY_EMPTY === '1') await store().updateTask(store()._allTasks.find((task) => task.title === T.outline).id, { isFocusedToday: false });
     if (process.env.FIXTURE_R2B === '1') await store().updateSettings({ features: { ...(store().settings.features ?? {}), pomodoro: true },
         gtd: { ...(store().settings.gtd ?? {}), pomodoro: { ...(store().settings.gtd?.pomodoro ?? {}), linkTask: true } } });
     await flushPendingSave();
@@ -167,7 +169,7 @@ const buildFixture = () => execFileSync('bun', ['-e', `
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, FIXTURE_DB: fixture, FIXTURE_TITLES: JSON.stringify(T), FIXTURE_TRASHED: TRASHED,
     FIXTURE_FEED: JSON.stringify(CALENDAR_FEED), FIXTURE_FILE_TITLE: ATTACHMENT_FILE.title, FIXTURE_FILE_URI: ATTACHMENT_FILE.uri, FIXTURE_FILE_SIZE: String(ATTACHMENT_FILE.bytes.length), FIXTURE_R2: R2_ONLY ? '1' : '', FIXTURE_R2B: R2B_ONLY ? '1' : '',
-    FIXTURE_OWED: OWED_ONLY ? '1' : '', FIXTURE_EINK: EINK_ONLY ? '1' : '' } }).trim().split('\n').pop();
+    FIXTURE_OWED: OWED_ONLY ? '1' : '', FIXTURE_EINK: EINK_ONLY ? '1' : '', FIXTURE_DAILY_EMPTY: DAILY_EMPTY_ONLY ? '1' : '' } }).trim().split('\n').pop();
 
 
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-parity-ui.xml' });
@@ -1116,6 +1118,23 @@ const owedTray = async (prefix, suffix, rn, activity, withDates) => {
     await shoot(`${prefix}-swipe-tray-dates-${suffix}`, (current) => hasText(current, en['filters.taskDates']));
 };
 
+const shootDailyEmpty = async (prefix, suffix, rn, activity) => {
+    await owedFresh(rn, activity, 'review');
+    const start = await waitFor('Start Review', (current) => Boolean(button(current, en['review.startReview'])), 20_000);
+    await tap(button(start, en['review.startReview']));
+    const choice = await waitFor('the Daily Review choice', (current) => Boolean(button(current, en['dailyReview.title'])), 15_000);
+    await tap(button(choice, en['dailyReview.title']));
+    const hint = en['agenda.focusHint'].split('{{')[0];
+    const onFocusEmpty = (current) => current.some((node) => (node.text ?? '').startsWith(hint));
+    for (let step = 0; step < 4; step += 1) {
+        const nodes = await waitFor('a Daily Review step', (current) => onFocusEmpty(current) || Boolean(owedLabeled(current, en['review.nextStepBtn'])), 20_000);
+        if (onFocusEmpty(nodes)) break;
+        await tap(owedLabeled(nodes, en['review.nextStepBtn']));
+        await sleep(1500);
+    }
+    await shoot(`${prefix}-daily-focus-empty-${suffix}`, onFocusEmpty);
+};
+
 const shootEink = async (prefix, rn, activity) => {
     const attempt = owedAttempt(prefix, 'eink');
     await attempt('Focus star', async () => {
@@ -1315,6 +1334,7 @@ try {
         }
         if (OWED_ONLY) { await shootOwed('rn', mode === 'yes' ? 'dark' : 'light', true, RN_ACTIVITY); continue; }
         if (EINK_ONLY) { if (mode === 'no') await shootEink('rn', true, RN_ACTIVITY); continue; }
+        if (DAILY_EMPTY_ONLY) { await shootDailyEmpty('rn', mode === 'yes' ? 'dark' : 'light', true, RN_ACTIVITY); continue; }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('rn', true); continue; }
         if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('rn', true); continue; }
@@ -1365,6 +1385,7 @@ try {
         if (mode === 'yes') await setNight('yes');
         if (OWED_ONLY) { await shootOwed('native', mode === 'yes' ? 'dark' : 'light', false, NATIVE_ACTIVITY); continue; }
         if (EINK_ONLY) { if (mode === 'no') await shootEink('native', false, NATIVE_ACTIVITY); continue; }
+        if (DAILY_EMPTY_ONLY) { await shootDailyEmpty('native', mode === 'yes' ? 'dark' : 'light', false, NATIVE_ACTIVITY); continue; }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('native', false); continue; }
         if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('native', false); continue; }
