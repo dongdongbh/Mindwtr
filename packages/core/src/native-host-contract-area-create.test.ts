@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAreaCreateMethods, type NativeAreaCreateRequest } from './native-host-contract-area-create';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Area } from './types';
@@ -69,7 +69,8 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean, recove
     return { methods, data: () => data, saves: () => saves };
 }
 
-afterEach(async () => { await flushPendingSave(); resetForTests(); });
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
+afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Area create', () => {
     it.each([1, 2] as const)('accepts default gray and cold-replays an exact v%s Area creation journal', async (version) => {

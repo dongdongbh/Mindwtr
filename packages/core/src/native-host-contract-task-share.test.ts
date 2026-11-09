@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createNativeHostContract } from './native-host-contract';
 import { taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -47,7 +47,9 @@ const request = (id = 't-share') => {
         checklist: row.checklist ?? [] };
 };
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => {
+    vi.useRealTimers();
     await flushPendingSave();
     resetForTests();
     vi.restoreAllMocks();

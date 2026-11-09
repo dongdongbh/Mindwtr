@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -7,7 +7,8 @@ import type { AppData, Area, Project, Section, Task } from './types';
 const AT = '2026-10-01T12:00:00.000Z';
 const DELETED = '2026-10-02T12:00:00.000Z';
 
-const RECENTLY_DONE = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+const CLOCK = '2026-11-01T12:00:00.000Z';
+const RECENTLY_DONE = new Date(Date.parse(CLOCK) - 24 * 60 * 60 * 1000).toISOString();
 const REQUEST_ID = '4bebf523-dd4e-40dc-9fce-37e456295d49';
 const ID = 'trash-restore-task';
 const copy = <T,>(data: T): T => JSON.parse(JSON.stringify(data)) as T;
@@ -71,6 +72,7 @@ async function open(start: AppData, shouldFail: () => boolean = () => false, rec
     return { host, current, request, prepare, reopen, data: () => durable, saves: () => saves };
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(CLOCK)); });
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.useRealTimers(); });
 
 describe('prepared single Task restore from Trash', () => {

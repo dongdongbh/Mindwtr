@@ -39,6 +39,8 @@ afterEach(async () => {
 
 describe('convertTaskToSection (RN store) frozen fixture', () => {
     it('writes the same section, checklist tasks, deleted source and settings as HEAD', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-10-26T09:30:00.000Z'));
         await open({
             tasks: [
                 task('source', { title: '  Pack the kitchen ', description: ' Boxes are in the garage. ', projectId: 'p',
@@ -58,8 +60,6 @@ describe('convertTaskToSection (RN store) frozen fixture', () => {
             settings: { deviceId: 'device-a', analyticsProfileId: 'profile', taskReminderDefault: 'skip' },
         });
         ids = 0;
-        vi.useFakeTimers({ toFake: ['Date'] });
-        vi.setSystemTime(new Date('2026-10-26T09:30:00.000Z'));
         const result = await useTaskStore.getState().convertTaskToSection('source');
         vi.useRealTimers();
         const state = useTaskStore.getState();

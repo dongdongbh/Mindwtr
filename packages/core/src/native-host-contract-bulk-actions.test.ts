@@ -789,6 +789,7 @@ describe('native host contract: selection mode', () => {
     });
 
     it('is NOT_READY before native storage is activated', async () => {
+        freezeClock();
         const log: unknown[] = [];
         await seedBulkActionsStore(fixture, log);
         const host = createNativeHostContract();

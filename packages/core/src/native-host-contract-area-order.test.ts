@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_SYNC_REVISION } from './sync-revision';
 import { createAreaOrderMethods, type NativeAreaOrderRequest } from './native-host-contract-area-order';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -44,6 +44,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
     return { methods, request, data: () => data, saves: () => saves };
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Area order', () => {

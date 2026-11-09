@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProjectFlowMethods, type NativeProjectFlowRequest } from './native-host-contract-project-flow';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { PROJECT_SQLITE_COLUMNS, projectToSqliteRow } from './project-sync-schema';
@@ -51,6 +51,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
     return { methods, request, sectionRequest, data: () => data, saves: () => saves };
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Project flow', () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProjectSectionOrderMethods } from './native-host-contract-project-section-order';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Project, Section, Task } from './types';
@@ -56,7 +56,8 @@ async function open(sections = [section('a', 0), section('b', 1024), section('c'
         fail: (value: boolean) => { failSave = value; } };
 }
 
-afterEach(async () => { try { await flushPendingSave(); } catch {                                     }
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
+afterEach(async () => { vi.useRealTimers(); try { await flushPendingSave(); } catch {                                     }
     resetForTests(); });
 
 describe('prepared native Project Section order', () => {

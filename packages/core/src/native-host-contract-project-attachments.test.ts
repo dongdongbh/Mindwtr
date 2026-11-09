@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProjectAttachmentWriteMethods, type NativeProjectAttachmentWriteRequest } from './native-host-contract-project-attachments';
 import { requestRowId } from './native-request-receipts';
 import { openSqliteHost } from './screen-parity.replay';
@@ -48,6 +48,7 @@ async function open(initial: Partial<AppData> = {}, fail?: () => boolean) {
     return { methods, request, data: () => data, saves: () => saves };
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Project URL attachment edits', () => {

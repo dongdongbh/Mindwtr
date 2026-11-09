@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPersonCreateMethods, type NativePersonCreateRequest } from './native-host-contract-person-create';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Person } from './types';
@@ -42,6 +42,7 @@ const freeze = (methods: ReturnType<typeof createPersonCreateMethods>, input = r
     if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
     return structuredClone({ request: input, prepared: plan.value.prepared });
 };
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('prepared native Person create', () => {

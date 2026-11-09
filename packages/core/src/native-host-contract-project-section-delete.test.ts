@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProjectSectionDeleteMethods, type NativePreparedProjectSectionDelete,
     type NativeProjectSectionDeleteRequest } from './native-host-contract-project-section-delete';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -57,6 +57,7 @@ async function open(initial: Partial<AppData> = {}, failing?: () => boolean) {
     return { methods, request, prepare, data: () => data, saves: () => saves };
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => { vi.useRealTimers(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared native Project Section delete', () => {

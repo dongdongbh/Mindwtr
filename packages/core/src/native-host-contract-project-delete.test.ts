@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Area, Project, Section, Task } from './types';
@@ -63,6 +63,7 @@ async function open(start: AppData = initial(), shouldFail: () => boolean = () =
         data: () => durable, reopen: async () => open(durable, shouldFail), state: () => useTaskStore.getState() };
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-01T12:00:00.000Z')); });
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.useRealTimers(); });
 
 const insertSectionOnlyRow = (id: string) => {

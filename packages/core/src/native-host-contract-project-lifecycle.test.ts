@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,7 +13,8 @@ import type { AppData, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
 
-const DONE_AT = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+const CLOCK = '2026-11-01T12:00:00.000Z';
+const DONE_AT = new Date(Date.parse(CLOCK) - 24 * 60 * 60 * 1000).toISOString();
 const ID = 'project-lifecycle';
 const COMPLETE_ID = '8bebf523-dd4e-40dc-9fce-37e456295d49';
 const REACTIVATE_ID = '9bebf523-dd4e-40dc-9fce-37e456295d49';
@@ -88,6 +89,7 @@ async function peerEditTask(id: string, updates: Partial<Task>) {
     await flushPendingSave();
 }
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(CLOCK)); });
 afterEach(async () => { await flushPendingSave(); resetForTests(); vi.useRealTimers(); });
 
 describe('prepared Project Complete and Reactivate', () => {
