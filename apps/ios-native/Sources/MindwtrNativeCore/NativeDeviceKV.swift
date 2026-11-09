@@ -20,7 +20,7 @@ final class NativeDeviceKV {
         "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1", "@mindwtr_dropbox_last_rev",
         "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
         "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars", "mindwtr-system-calendar-settings",
-        "mindwtr-update-available", "mindwtr-update-last-check", "mindwtr-update-latest",
+        "mindwtr-update-available", "mindwtr-update-last-check", "mindwtr-update-latest", "mindwtr-unreachable-attachments",
     ].map { Data($0.utf8) })
     private static let removableSecrets: Set<Data> = Set([
         "@mindwtr_webdav_password", "@mindwtr_cloud_token", "@mindwtr_sync_encryption_key_v1", "@mindwtr_dropbox_tokens",

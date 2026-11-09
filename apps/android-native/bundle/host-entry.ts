@@ -8795,12 +8795,15 @@ globalThis.MindwtrHost = {
                 || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) throw unavailable();
             const input = JSON.parse(json) as Record<string, unknown>;
             if (!input || typeof input !== 'object' || Array.isArray(input)
-                || !['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'selectSyncBackend', 'pickSyncFolder', 'syncNow', 'syncPull'].includes(name)) throw unavailable();
+                || !['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'selectSyncBackend', 'pickSyncFolder', 'syncNow', 'syncPull',
+                    'continueSyncWithoutFiles'].includes(name)) throw unavailable();
             if (name === 'selectSyncBackend' && !['off', 'file'].includes(input.option as string)) throw unavailable();
             if (['pickSyncFolder', 'syncNow'].includes(name)
                 && (typeof input.revision !== 'string' || !input.revision || input.revision.length > 100
                     || Object.keys(input).some((field) => !['requestId', 'revision'].includes(field)))) throw unavailable();
             if (name === 'syncPull' && Object.keys(input).length !== 0) throw unavailable();
+            if (name === 'continueSyncWithoutFiles' && (Object.keys(input).length !== 3 || typeof input.picked !== 'boolean'
+                || typeof input.requestId !== 'string' || typeof input.questionId !== 'string')) throw unavailable();
             requireSaved();
             const persistence = getPersistenceStatus();
             if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying) throw unavailable();
@@ -8817,7 +8820,9 @@ globalThis.MindwtrHost = {
                     }, { force: true }); } catch { }
                     return { ok: true as const, value };
                 }
+                if (name === 'continueSyncWithoutFiles' && input.picked) await directory.pickSyncFolder();
                 const result = name === 'syncSettings' ? contract.getSyncSettings(input)
+                    : name === 'continueSyncWithoutFiles' ? await contract.continueSyncWithoutFiles({ requestId: input.requestId as string, questionId: input.questionId as string })
                     : await MENU_COMMANDS[name as SyncScreenCommand](input as never);
                 if (result.ok && (name === 'syncSettings' || name === 'openSyncSettings')) {
                     const model = result.value as import('../../../packages/core/src/native-host-contract-settings-sync').NativeSyncSettings;
@@ -8835,7 +8840,8 @@ globalThis.MindwtrHost = {
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || (name !== 'archiveRetention' && !globalThis.__mindwtrSyncSecrets)) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox'];
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
+                'answerSyncMissingFiles', 'continueSyncWithoutFiles'];
             if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
                 || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
                 throw new Error('INVALID_INPUT: Invalid selected Project availability target');
@@ -8847,7 +8853,11 @@ globalThis.MindwtrHost = {
             try { input = JSON.parse(json) as Record<string, unknown>; }
             catch { throw new Error('INVALID_INPUT: Invalid foreground sync request'); }
             if (!input || typeof input !== 'object' || Array.isArray(input)
-                || ['syncStored', 'syncResume', 'syncPull'].includes(name) && Object.keys(input).length !== 0) throw new Error('INVALID_INPUT: Invalid foreground sync request');
+                || ['syncStored', 'syncResume', 'syncPull'].includes(name) && Object.keys(input).length !== 0
+                || name === 'answerSyncMissingFiles' && (Object.keys(input).length !== 2 || typeof input.questionId !== 'string' || typeof input.continue !== 'boolean')
+                || name === 'continueSyncWithoutFiles' && (Object.keys(input).length !== 2 || typeof input.questionId !== 'string' || typeof input.requestId !== 'string')) {
+                throw new Error('INVALID_INPUT: Invalid foreground sync request');
+            }
             if (name === 'projectAttachmentDownload' && (Object.keys(input).length !== 3
                 || ['projectId', 'attachmentId', 'revision'].some((field) => {
                     const value = input[field];
@@ -8929,7 +8939,7 @@ globalThis.MindwtrHost = {
                 const selfHosted = stored === 'cloud' && isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY));
                 const dropboxSelected = !!dropboxConfig && stored === 'cloud' && (await keyValue.get(CLOUD_PROVIDER_KEY))?.trim() === 'dropbox';
                 const cloudKitSelected = stored === 'cloudkit' && iosCloudKitAvailable();
-                const fileMetadata = stored === 'file' && ['openSyncSettings', 'syncSettings', 'closeSyncSettings'].includes(name);
+                const fileMetadata = stored === 'file' && ['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'answerSyncMissingFiles'].includes(name);
                 if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted && !cloudKitSelected && !dropboxSelected && !fileMetadata) return refused;
                 if (cloudKitSyncNow && !cloudKitSelected) return refused;
                 if (['syncStored', 'syncResume', 'syncPull'].includes(name) && stored !== 'webdav' && !selfHosted
@@ -8964,7 +8974,9 @@ globalThis.MindwtrHost = {
                     if (!shown.ok || shown.value.panel?.kind !== 'cloudkit') return refused;
                 }
                 if (iosManualSync) iosManualSync.settingsHost.encryption.mode = dropboxSelected ? 'saved-dropbox' : 'saved-webdav-or-local';
+                const continuing = name === 'continueSyncWithoutFiles' ? contract.getSyncSettings({}) : null;
                 if (name === 'selectSyncBackend' && input.option === 'selfhosted'
+                    || continuing?.ok === true && continuing.value.panel?.kind === 'selfhosted'
                     || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && input.selfHosted !== undefined
                     || ['syncStored', 'syncResume', 'syncPull', 'projectAttachmentDownload'].includes(name) && selfHosted) {
                     try { await iosManualSync!.assertSelfHostedSyncAdmission(); }
@@ -9015,6 +9027,7 @@ globalThis.MindwtrHost = {
                 }
                 const result = downloadResult ?? (storedResult ? { ok: true as const, value: storedResult }
                     : name === 'syncSettings' ? contract.getSyncSettings(input)
+                    : name === 'continueSyncWithoutFiles' ? await contract.continueSyncWithoutFiles(input as never)
                     : await MENU_COMMANDS[name as SyncScreenCommand](input as never));
 
                 if (result.ok && result.value && typeof result.value === 'object' && 'backend' in result.value) {

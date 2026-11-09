@@ -860,6 +860,17 @@ struct SettingsScreen: View {
             Button(model.label("common.cancel"), role: .cancel) { syncBackendPending = nil }
                 .accessibilityIdentifier("sync-reload-cancel")
         } message: { Text("Your typed Sync fields will be discarded.") }
+        .alert(model.settingsSyncMissingFiles?.text("title") ?? "", isPresented: Binding(
+            get: { model.settingsSyncMissingFiles != nil },
+            set: { presented in
+                if !presented { DispatchQueue.main.async { model.answerSettingsSyncMissingFiles(proceed: false) } }
+            }
+        ), presenting: model.settingsSyncMissingFiles) { prompt in
+            Button(prompt.text("cancelLabel"), role: .cancel) { model.answerSettingsSyncMissingFiles(proceed: false) }
+                .accessibilityIdentifier("sync-missing-files-cancel")
+            Button(prompt.text("continueLabel")) { model.answerSettingsSyncMissingFiles(proceed: true) }
+                .accessibilityIdentifier("sync-missing-files-continue")
+        } message: { prompt in Text(prompt.text("message")) }
         .alert(model.somedaySectionDeleteOptions.object("text").text("title"),
                isPresented: $deleteConfirmPresented) {
             Button(model.somedaySectionDeleteOptions.object("text").text("cancelLabel"), role: .cancel) {

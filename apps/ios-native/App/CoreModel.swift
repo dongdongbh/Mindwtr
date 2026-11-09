@@ -873,6 +873,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             session: settingsSyncSession, generation: settingsSyncGeneration, foreground: foregroundSyncGeneration)
         let command = settingsSync.object("panel").flag("connected") ? "disconnectDropbox" : "connectDropbox"
         settingsDropboxOwner = owner; settingsSyncError = nil; settingsSyncStatus = nil; busy = true
+        settingsSyncMissingFilesRoute = (false, nil)
         refreshNativeDropboxAuthorization()
         let task = Task { await runSettingsDropbox(owner, command: command) }
         settingsDropboxTask = task
@@ -917,6 +918,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private var settingsSyncDirectoryOwner: SettingsSyncDirectoryOwner?
     private var settingsSyncDirectoryTask: Task<Void, Never>?
+    private var settingsSyncMissingFilesRoute: (directory: Bool, bookmark: Data?) = (false, nil)
+    @Published private var settingsSyncMissingFilesAnswered: String?
+    var settingsSyncMissingFiles: CoreObject? {
+        guard settingsSyncCanEdit, !settingsSyncChecking, !settingsSyncOpeningRevision.isEmpty, host != nil,
+              let prompt = settingsSync["missingFiles"] as? CoreObject,
+              let question = prompt["questionId"] as? String, !question.isEmpty, question != settingsSyncMissingFilesAnswered,
+              ["title", "message", "continueLabel", "cancelLabel"].allSatisfy({ prompt[$0] is String }) else { return nil }
+        return prompt
+    }
     @Published private(set) var settingsSyncDirectoryPickerID: UUID?
     private var settingsSyncOpeningRevision = ""
     private var settingsSyncValidatedURL = ""
@@ -13580,6 +13590,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         settingsSyncValidatedURL = ""
         settingsSyncValidatedTokenDraft = nil
         settingsSync = [:]
+        settingsSyncMissingFilesRoute = (false, nil)
         settingsSyncStatus = nil
         settingsSyncError = nil
         if settingsSyncPresented { settingsSyncNeedsReload = true }
@@ -13879,6 +13890,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
         settingsSyncGeneration += 1
         settingsSyncError = nil; settingsSyncStatus = nil
+        settingsSyncMissingFilesRoute = (false, nil)
         busy = true
         defer { finishOperation() }
         guard let result = await callSettingsSync("selectSyncBackend",
@@ -13950,6 +13962,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             var input = extra
             input["requestId"] = owner.id.uuidString.lowercased()
             if command == "pickSyncFolder" || command == "syncNow" { input["revision"] = owner.revision }
+            if command != "continueSyncWithoutFiles" { settingsSyncMissingFilesRoute = (true, bookmark) }
             accepted = true
             let raw = try await owner.host.foregroundDirectorySyncSettings(command: command, requestJSON: try json(input), pickedBookmark: bookmark)
             guard settingsSyncDirectoryCurrent(owner) else { throw CancellationError() }
@@ -14012,6 +14025,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
         settingsSyncGeneration += 1
         settingsSyncError = nil; settingsSyncStatus = nil
+        if action != "test" { settingsSyncMissingFilesRoute = (false, nil) }
         busy = true
         defer { finishOperation() }
         guard let result = await callSettingsSync(command, input: input, host: capturedHost),
@@ -14019,6 +14033,43 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let succeeded = adoptSettingsSyncToasts(value)
         archiveRetentionRequested = true
         await readSettingsSyncModel(resetDraft: succeeded && action != "test")
+    }
+
+    func answerSettingsSyncMissingFiles(proceed: Bool) {
+        guard let prompt = settingsSyncMissingFiles, let capturedHost = host else { return }
+        let question = prompt.text("questionId"), route = settingsSyncMissingFilesRoute
+        if proceed && route.directory {
+            guard let owner = newSettingsSyncDirectoryOwner() else { return }
+            settingsSyncMissingFilesAnswered = question
+            let task = Task { await runSettingsSyncDirectory(owner, command: "continueSyncWithoutFiles",
+                extra: ["questionId": question, "picked": route.bookmark != nil], bookmark: route.bookmark) }
+            settingsSyncDirectoryTask = task
+            return
+        }
+        settingsSyncMissingFilesAnswered = question
+        let session = settingsSyncSession
+        settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
+        settingsSyncGeneration += 1
+        settingsSyncError = nil; settingsSyncStatus = nil
+        busy = true
+        Task {
+            defer { finishOperation() }
+            let command = proceed ? "continueSyncWithoutFiles" : "answerSyncMissingFiles"
+            let input: CoreObject = proceed ? ["requestId": UUID().uuidString.lowercased(), "questionId": question]
+                : ["questionId": question, "continue": false]
+            guard let result = await callSettingsSync(command, input: input, host: capturedHost),
+                  settingsSyncCurrent(capturedHost, session) else { return }
+            if proceed {
+                guard let value = settingsSyncValue(result) else { return }
+                let succeeded = adoptSettingsSyncToasts(value)
+                archiveRetentionRequested = true
+                await readSettingsSyncModel(resetDraft: succeeded)
+            } else if result.flag("ok") {
+                await readSettingsSyncModel()
+            } else {
+                _ = settingsSyncValue(result)
+            }
+        }
     }
 
     func openGtdSettings() async {

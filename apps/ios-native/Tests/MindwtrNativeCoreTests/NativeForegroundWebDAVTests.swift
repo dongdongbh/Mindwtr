@@ -545,6 +545,61 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertTrue(remote.recorded.contains { $0.status == 412 }, "The real compatibility probe observes conditional conflicts")
     }
 
+    private func seedMissingAttachmentFile() async throws -> (host: CoreHost, manifest: String) {
+        try await seed()
+        let at = ISO8601DateFormatter().string(from: Date())
+        let missing: [String: Any] = ["id": attachmentID, "kind": "file", "title": "Synthetic missing file.txt", "uri": "",
+            "cloudKey": "attachments/" + attachmentID + ".txt", "localStatus": "missing", "createdAt": at, "updatedAt": at]
+        let sql = try SQLiteBridge(url: database)
+        _ = try sql.execute("UPDATE tasks SET attachments=? WHERE id=?", parametersJSON: json([try json([missing]), taskID]))
+        sql.close()
+        let host = core()
+        try await openAndTest(host)
+        let before = try json(manifestObject())
+        try await save(host)
+        XCTAssertEqual(try json(manifestObject()), before, "The question is asked before anything is stored")
+        return (host, before)
+    }
+    private func missingFilesPrompt(_ host: CoreHost) async throws -> [String: Any] {
+        let model = try await command(host, "syncSettings")
+        let prompt = try XCTUnwrap(model["missingFiles"] as? [String: Any])
+        XCTAssertEqual(Set(prompt.keys), Set(["questionId", "title", "message", "continueLabel", "cancelLabel"]))
+        XCTAssertTrue((prompt["message"] as? String)?.contains("Synthetic missing file.txt (Foreground fixture task)") == true)
+        return prompt
+    }
+
+    func testMissingAttachmentFilesAskAfterSaveAndContinueActivatesWithThoseFiles() async throws {
+        let host = try await seedMissingAttachmentFile().host
+        let prompt = try await missingFilesPrompt(host)
+        let question = try XCTUnwrap(prompt["questionId"] as? String)
+        _ = try await command(host, "continueSyncWithoutFiles", ["requestId": UUID().uuidString.lowercased(), "questionId": question])
+        try assertConfiguration()
+        let settled = try await command(host, "syncSettings")
+        XCTAssertTrue(settled["missingFiles"] is NSNull)
+        XCTAssertEqual(try attachment()["localStatus"] as? String, "missing")
+        XCTAssertEqual(try attachment()["id"] as? String, attachmentID)
+        _ = try await command(host, "closeSyncSettings"); await host.close()
+        XCTAssertEqual(try markers("v1.3.9/ios-sync-missing-files-continue").map { $0["context"] as? [String: String] },
+            [["releaseCheck": "v1.3.9/ios-sync-missing-files-continue", "count": "1", "outcome": "activated"]])
+    }
+
+    func testMissingAttachmentFilesCancelKeepsOffAndRefusesALaterContinue() async throws {
+        let (host, before) = try await seedMissingAttachmentFile()
+        let prompt = try await missingFilesPrompt(host)
+        let question = try XCTUnwrap(prompt["questionId"] as? String)
+        _ = try await command(host, "answerSyncMissingFiles", ["questionId": question, "continue": false])
+        let cancelled = try await command(host, "syncSettings")
+        XCTAssertTrue(cancelled["missingFiles"] is NSNull)
+        let reply = try await host.foregroundSync(command: "continueSyncWithoutFiles",
+            requestJSON: json(["requestId": UUID().uuidString.lowercased(), "questionId": question]))
+        let refused = try object(reply)
+        XCTAssertEqual(refused["ok"] as? Bool, false)
+        XCTAssertEqual(try json(manifestObject()), before, "Cancel and the refused Continue leave every stored sync setting as it was")
+        XCTAssertEqual(try manifestObject()["@mindwtr_sync_backend"] as? String, "off")
+        _ = try await command(host, "closeSyncSettings"); await host.close()
+        XCTAssertEqual(try markers("v1.3.9/ios-sync-missing-files-continue").count, 0)
+    }
+
     private func configureStoredCleanupCandidate() async throws -> [String: Any] {
         try await seed()
         let original = try attachment()

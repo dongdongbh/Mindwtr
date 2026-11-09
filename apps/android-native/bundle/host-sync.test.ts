@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createContext, runInContext } from 'node:vm';
+import { transform } from 'esbuild';
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import * as core from '@mindwtr/core';
 import {
@@ -1406,6 +1410,143 @@ it('runs picked activation through two fresh real shared File cycles, then one s
     expect((await contract.selectSyncBackend({ requestId: crypto.randomUUID(), option: 'off' })).ok).toBe(true);
     expect(turn).toBe(4); expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off');
     directory.close(); resetForTests();
+});
+
+const missingFilesFolder = async (stored: Record<string, string>) => {
+    resetForTests(); iosFiles();
+    const at = '2026-11-01T00:00:00.000Z';
+    const task = { id: 't-old-file', title: 'Tax return', status: 'inbox', tags: [], contexts: [], createdAt: at, updatedAt: at,
+        attachments: [{ id: 'att-1', kind: 'file', title: 'scan.pdf', uri: '', cloudKey: 'attachments/att-1.pdf', localStatus: 'missing', createdAt: at, updatedAt: at }] };
+    const data = { tasks: [task], projects: [], sections: [], areas: [], settings: {} } as unknown as AppData;
+    core.setStorageAdapter({ getData: async () => structuredClone(data), saveData: async () => undefined });
+    const fixture = host(stored, false, async () => structuredClone(data), async () => false);
+    const root = 'file:///app/selected/', path = root + 'data.json', bookmark = 'b3JpZ2luYWw=';
+    core.useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {}, error: null, persistenceFailure: null, isLoading: false, editLockCount: 0, lastDataChangeAt: 0 } as never);
+    await core.useTaskStore.getState().fetchData({ throwOnError: true });
+    await core.flushPendingSave();
+    const files = new Map<string, Uint8Array>(), phases: string[] = [];
+    let turn = 0;
+    const state = { active: null as string | null };
+    const control = (text: string) => {
+        const request = JSON.parse(text);
+        if (request.phase === 'begin') {
+            state.active = 'directory-' + (++turn);
+            phases.push('begin:' + turn + ':' + request.picked);
+            return JSON.stringify({ turn: state.active, bookmark, expectedPath: request.picked ? null : fixture.kv.get('@mindwtr_sync_path') });
+        }
+        phases.push('finish:' + turn + ':' + request.admit);
+        state.active = null;
+        return JSON.stringify({ closed: true });
+    };
+    const call: import('./host-file-sync').NativeFileSyncCall = async (request) => {
+        const uri = String(request.uri), bytes = files.get(uri);
+        const reply = (value: unknown) => ({ id: 'reply', value });
+        switch (request.op) {
+        case 'prepare': return reply({ rootURI: root, canonicalPath: path });
+        case 'open': case 'revalidate': case 'close': return reply(null);
+        case 'list': return reply([...files.keys()].map((name) => name.slice(root.length)));
+        case 'info': return reply(uri === root ? { exists: true, size: 0 } : bytes ? { exists: true, size: bytes.length } : { exists: false });
+        case 'read': return bytes ? { id: 'reply', value: 'bytes', body: true, base64: core.bytesToBase64(bytes) } : reply('absent');
+        case 'create': if (files.has(uri)) return reply('exists'); files.set(uri, new Uint8Array()); return reply('created');
+        case 'writeCreated': files.set(uri, core.base64ToBytes(String(request.base64))); return reply(null);
+        case 'renameObserved': {
+            const target = root + encodeURIComponent(String(request.name));
+            files.set(target, bytes!); files.delete(uri); return reply(target);
+        }
+        case 'deleteOwned': files.delete(uri); return reply(null);
+        case 'attachmentDirectory': return reply(null);
+        case 'attachmentInfo': return reply(uri.endsWith('/attachments/') ? { exists: true, isDirectory: true, size: 0, modificationTime: 1 } : { exists: false });
+        case 'attachmentList': return reply([]);
+        case 'attachmentRead': return reply('absent');
+        default: throw new Error('Unexpected native operation');
+        }
+    };
+    const directory = createIosDirectoryFileSync(fixture.bindings, call, control);
+    const sync = createNativeSync({ ...fixture.bindings, ...directory });
+    const contract = core.createNativeHostContract({ syncSettings: sync.settingsHost });
+    expect(await contract.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+    expect((await contract.openSyncSettings({})).ok).toBe(true);
+    const ask = async () => {
+        const read = contract.getSyncSettings(); if (!read.ok) throw new Error('No Settings view');
+        expect(await contract.pickSyncFolder({ requestId: crypto.randomUUID(), revision: read.value.configRevision })).toEqual({ ok: true, value: { toasts: [] } });
+        const asked = contract.getSyncSettings(); if (!asked.ok) throw new Error('No Settings view');
+        expect(asked.value.missingFiles?.message).toContain('• scan.pdf (Tax return)');
+        return asked.value.missingFiles!.questionId;
+    };
+    return { fixture, sync, directory, contract, phases, state, path, ask };
+};
+
+it('returns a picked folder\'s missing attachment files to core, then activates it on Continue with the same pick', async () => {
+    const { fixture, sync, directory, contract, phases, state, path, ask } = await missingFilesFolder({ [SYNC_BACKEND_KEY]: 'off' });
+    expect(sync.settingsHost.defersMissingFilesQuestion).toBe(true);
+    expect(sync.settingsHost.answersMissingFilesQuestion).toBe(false);
+    expect((await contract.selectSyncBackend({ requestId: crypto.randomUUID(), option: 'file' })).ok).toBe(true);
+    const questionId = await ask();
+    expect(phases).toEqual(['begin:1:true', 'finish:1:false']);
+    expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off'); expect(state.active).toBeNull();
+    const storedBefore = new Map(fixture.kv);
+    await directory.pickSyncFolder();
+    const continued = await contract.continueSyncWithoutFiles({ requestId: crypto.randomUUID(), questionId });
+    expect(continued).toMatchObject({ ok: true, value: { toasts: expect.not.arrayContaining([expect.objectContaining({ tone: 'error' })]) } });
+    expect(phases).toEqual(['begin:1:true', 'finish:1:false', 'begin:2:true', 'finish:2:true', 'begin:3:false', 'finish:3:true']);
+    expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('file');
+    expect(fixture.kv.get('@mindwtr_sync_path')).toBe(path);
+    expect(fixture.kv.get('mindwtr-unreachable-attachments')).toContain('att-1');
+    const swiftKV = readFileSync(join(import.meta.dir, '../../ios-native/Sources/MindwtrNativeCore/NativeDeviceKV.swift'), 'utf8');
+    const writableList = /static let writable: Set<Data> = Set\(\[([\s\S]*?)\]\.map/.exec(swiftKV)![1];
+    const writable = new Set([...writableList.matchAll(/"([^"]+)"/g)].map((match) => match[1]));
+    const written = [...fixture.kv].filter(([name, value]) => storedBefore.get(name) !== value).map(([name]) => name);
+    expect(written.filter((name) => !writable.has(name))).toEqual([]);
+    const settled = contract.getSyncSettings(); if (!settled.ok) throw new Error('No Settings view');
+    expect(settled.value.missingFiles).toBeNull();
+    directory.close(); resetForTests();
+});
+
+it('cancels a new folder\'s missing-files question through the foreground entry while a stored folder stays as it was', async () => {
+    const stored = { [SYNC_BACKEND_KEY]: 'file', '@mindwtr_sync_path': 'file:///app/old/data.json', '@mindwtr_sync_path_bookmark': 'b2xkLWZvbGRlcg==' };
+    const { fixture, directory, contract, phases, ask } = await missingFilesFolder(stored);
+    const manifest = () => JSON.stringify([...fixture.kv.entries()].filter(([name]) => name.startsWith('@mindwtr_sync') || name === 'mindwtr-unreachable-attachments').sort());
+    const before = manifest();
+    const questionId = await ask();
+    directory.close();
+    expect(phases).toEqual(['begin:1:true', 'finish:1:false']);
+
+    const source = readFileSync(join(import.meta.dir, 'host-entry.ts'), 'utf8');
+    const capabilityStart = source.indexOf('let iosDropboxControl:');
+    const capabilityEnd = source.indexOf('const ensureIosManualSync', capabilityStart);
+    const methodStart = source.indexOf('    iosForegroundSync(name:');
+    const methodEnd = source.indexOf('    gettingStartedOutcome(json: string): string {', methodStart);
+    expect([capabilityStart, capabilityEnd, methodStart, methodEnd].every((value) => value >= 0)).toBe(true);
+    const sandbox = createContext({ TextEncoder, AbortController, JSON, Error, Object, Array,
+        readNativeIosDropboxConfiguration: () => null, __mindwtrHostPlatform: 'ios', __mindwtrSyncSecrets: {},
+        submit: (work: (signal: AbortSignal) => Promise<unknown>) => work(new AbortController().signal),
+        localAttachments: {}, nativeSync: null, bootAdapter: {}, iosForegroundFailure: null,
+        iosCleanupCallback: null, iosTaskAttachmentPreparation: false, iosProjectFilePreparation: false,
+        isSandboxMode: () => false, isWorkspaceTransitionActive: () => false, native: () => ({ kvMultiGet: () => '' }),
+        iosCloudKitAvailable: () => false, requireSaved: () => undefined, getPersistenceStatus: () => ({}),
+        keyValue: { get: async (name: string) => fixture.kv.get(name) ?? null }, SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY,
+        isNativeIosSelfHostedProvider: () => false, contract,
+        iosManualSync: { settingsHost: { encryption: { mode: 'saved-webdav-or-local' } } },
+        ensureIosManualSync: () => undefined, diagnosticsLog: { append: async () => undefined },
+        NativeAttachmentCleanupUnconfirmedError, MENU_COMMANDS: {
+            answerSyncMissingFiles: (input: { questionId: string; continue: boolean }) => contract.answerSyncMissingFiles(input),
+            saveSyncBackend: () => { throw new Error('A stored folder refuses other foreground commands'); },
+        },
+    });
+    const program = source.slice(capabilityStart, capabilityEnd) + '\n' + 'globalThis.entry = {' + source.slice(methodStart, methodEnd) + '};';
+    runInContext((await transform(program, { loader: 'ts', target: 'es2022' })).code, sandbox);
+
+    const cancelled = await sandbox.entry.iosForegroundSync('answerSyncMissingFiles', JSON.stringify({ questionId, continue: false }), () => '{}');
+    const refused = await sandbox.entry.iosForegroundSync('saveSyncBackend', JSON.stringify({ requestId: crypto.randomUUID(), revision: 'r',
+        webdav: { url: 'https://dav.example.com', username: 'u', password: null, allowInsecureHttp: false } }), () => '{}');
+
+    expect(cancelled).toEqual({ ok: true, value: null });
+    expect(refused).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+    const after = contract.getSyncSettings(); if (!after.ok) throw new Error('No Settings view');
+    expect(after.value.missingFiles).toBeNull();
+    expect(manifest()).toBe(before);
+    expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('file');
+    resetForTests();
 });
 
 it('native directory projection failure closes before core can activate a picked target', async () => {

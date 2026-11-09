@@ -796,6 +796,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
 
 
         answersMissingFilesQuestion: platform === 'android',
+        defersMissingFilesQuestion: platform === 'ios',
 
 
         ...(bindings.pickSyncFolder ? { pickSyncFolder: bindings.pickSyncFolder } : documentCall ? {
@@ -1064,6 +1065,10 @@ export const createIosDirectoryFileSync = (bindings: NativeSyncBindings, call: N
             const result = await fresh.settingsHost.performSync(undefined, { ...options,
                 configOverride: { backend: 'file', syncPath: selected.selection.canonicalPath, syncPathBookmark: null },
             });
+            if (probe && !result.success && result.activationMissingAttachments?.length) {
+                finish(false);
+                return result;
+            }
             if (!result.success || result.skipped || result.fileSyncLockDeferred || result.remoteFenceDeferred) throw new Error('Directory File Sync cycle did not complete');
             finish(true);
             return result;

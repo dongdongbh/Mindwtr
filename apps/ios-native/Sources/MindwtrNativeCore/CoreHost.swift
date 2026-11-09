@@ -29795,9 +29795,11 @@ private final class Engine: @unchecked Sendable {
     func foregroundDirectorySyncSettings(command: String, requestJSON: String, pickedBookmark: Data?, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         try denyCleanupOwner()
-        guard ["openSyncSettings", "syncSettings", "closeSyncSettings", "selectSyncBackend", "pickSyncFolder", "syncNow", "syncPull"].contains(command),
+        guard ["openSyncSettings", "syncSettings", "closeSyncSettings", "selectSyncBackend", "pickSyncFolder", "syncNow", "syncPull",
+               "continueSyncWithoutFiles"].contains(command),
               requestJSON.utf8.count <= 128 * 1024, try NativeJSON.hasUniqueObjectKeys(requestJSON),
               let input = try NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
+              Self.validMissingFilesAnswer(command, input, pickedBookmark: pickedBookmark, directory: true),
               started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
               !fileSyncCloseFailed, fileSyncTurn == nil, foregroundCleanupCancellation == nil, !foregroundCleanupActive,
               pending == nil, projectFileAddTurn == nil, projectDownloadTurn == nil, retainedOrdinaryTurn == nil,
@@ -29834,7 +29836,8 @@ private final class Engine: @unchecked Sendable {
                 guard try NativeJSON.hasUniqueObjectKeys(text), let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw Self.foregroundSyncFailure }
                 if request["phase"] as? String == "begin" {
                     try cancellation.check()
-                    guard command == "pickSyncFolder" || command == "syncNow" || command == "syncPull" || command == "selectSyncBackend" && input["option"] as? String == "file" else { throw Self.foregroundSyncFailure }
+                    guard command == "pickSyncFolder" || command == "syncNow" || command == "syncPull" || command == "continueSyncWithoutFiles"
+                            || command == "selectSyncBackend" && input["option"] as? String == "file" else { throw Self.foregroundSyncFailure }
                     guard Set(request.keys) == Set(["phase", "picked", "probe", "path", "bookmark"]),
                           Self.isBoolean(request["picked"]), let picked = request["picked"] as? Bool,
                           Self.isBoolean(request["probe"]), let probe = request["probe"] as? Bool,
@@ -29842,7 +29845,7 @@ private final class Engine: @unchecked Sendable {
                     let saved = try storage.multiGet(names).map(\.1)
                     let bytes: Data, expected: String?
                     if picked {
-                        guard command == "pickSyncFolder", probe, !pickedConsumed, request["path"] is NSNull,
+                        guard command == "pickSyncFolder" || command == "continueSyncWithoutFiles", probe, !pickedConsumed, request["path"] is NSNull,
                               request["bookmark"] is NSNull, let pickedBookmark else { throw Self.foregroundSyncFailure }
                         bytes = pickedBookmark; expected = nil; pickedConsumed = true
                     } else {
@@ -29921,9 +29924,11 @@ private final class Engine: @unchecked Sendable {
         var cancelSettled = false
         do {
             try denyCleanupOwner()
-            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction"].contains(command),
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction",
+                   "answerSyncMissingFiles", "continueSyncWithoutFiles"].contains(command),
                   requestJSON.utf8.count <= 128 * 1024,
-                  (try? NativeJSON.jsonObject(with: Data(requestJSON.utf8))) is [String: Any],
+                  let requestObject = try? NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
+                  Self.validMissingFilesAnswer(command, requestObject, pickedBookmark: nil, directory: false),
                   started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
                   foregroundCleanupCancellation == nil, !foregroundCleanupActive,
                   pending == nil, projectFileAddTurn == nil, projectDownloadTurn == nil, retainedOrdinaryTurn == nil, providerCopy == nil, ordinaryMutationDepth == 0,
@@ -30086,6 +30091,19 @@ private final class Engine: @unchecked Sendable {
         guard let callback = JSValue(object: control, in: turn.runtime), let undefined = JSValue(undefinedIn: turn.runtime) else { throw Self.foregroundSyncFailure }
         return try invoke("iosForegroundSync", arguments: [command, requestJSON, cleanup, undefined, callback], localCancellation: cancellation,
             cancelledReply: cancelledReply)
+    }
+
+    private static func validMissingFilesAnswer(_ command: String, _ input: [String: Any], pickedBookmark: Data?, directory: Bool) -> Bool {
+        guard command == "answerSyncMissingFiles" || command == "continueSyncWithoutFiles" else { return true }
+        guard let question = input["questionId"] as? String, !question.isEmpty, question.utf16.count <= 100 else { return false }
+        if command == "answerSyncMissingFiles" {
+            return Set(input.keys) == Set(["questionId", "continue"]) && isBoolean(input["continue"]) && pickedBookmark == nil
+        }
+        guard let id = input["requestId"] as? String, id.utf8.count == 36,
+              UUID(uuidString: id)?.uuidString.lowercased() == id.lowercased() else { return false }
+        guard directory else { return Set(input.keys) == Set(["requestId", "questionId"]) }
+        return Set(input.keys) == Set(["requestId", "questionId", "picked"]) && isBoolean(input["picked"])
+            && (input["picked"] as? Bool) == (pickedBookmark != nil)
     }
 
     private static let encryptionUnlockConfigKeys = ["@mindwtr_sync_backend", "@mindwtr_webdav_url",
