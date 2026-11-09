@@ -2123,6 +2123,8 @@ describe('QuickCaptureSheet save handling', () => {
   });
 
   it('previews the picked due date instead of the one the text parsed to', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 4, 12, 0, 0, 0));
 
     let tree!: ReturnType<typeof create>;
     await act(async () => {
