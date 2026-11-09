@@ -383,6 +383,16 @@ export type PreparedProjectSectionOrder = {
     result: { projectId: string; orderedIds: string[] };
 };
 
+export type PreparedProjectOrder = {
+    request: { requestId: string; projectId: string; direction: 'up' | 'down'; tagFilter: string; order: string[] };
+    scope: { neighbourId: string; projects: Project[] };
+    effect: { projects: Array<{ before: Project; after: Project }> };
+    deviceIdBefore: string | null;
+    deviceIdToInitialize: string | null;
+    preparedAt: string;
+    result: { projectId: string; orderedIds: string[] };
+};
+
 export type PreparedProjectTaskOrder = {
     request: { requestId: string; projectId: string; taskId: string; after: ProjectTaskOrderAnchor;
         showCompleted: boolean; filters: Partial<import('./list-filter-state').ListFilterState>; expectedOrder: string };
@@ -874,6 +884,7 @@ export interface TaskStore {
         projectId: string; sectionId: string } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectSectionOrder: (input: PreparedProjectSectionOrder) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectTaskOrder: (input: PreparedProjectTaskOrder) => Promise<PreparedTaskEditResult>;
+    commitPreparedProjectOrder: (input: PreparedProjectOrder) => Promise<PreparedTaskEditResult>;
     commitPreparedAreaCreate: (input: PreparedAreaCreate & { request: { requestId: string; name: string; color: string; expectedAreaId: string } }, authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
     commitPreparedInboxOrganizeDestinationCreate: (input: import('./native-host-contract-inbox-organize-create').NativeInboxOrganizeDestinationCreatePrepared,
         authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;

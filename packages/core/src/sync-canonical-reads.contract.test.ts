@@ -2719,6 +2719,27 @@ describe('canonical local reads contract', () => {
                     expect(useTaskStore.getState()._sectionsById.get(after.id)).toEqual(after);
                 }
             },
+            commitPreparedProjectOrder: async (control) => {
+                const host = await nativeHost(control);
+                const view = nativeValue(host.getFilteredProjects({ tagFilter: '__all__', moves: true }));
+                const group = [...view.active, ...view.deferred, ...view.archived]
+                    .find((entry) => entry.projects.some((row) => view.moves?.[row.id]?.down));
+                const moved = group?.projects.find((row) => view.moves?.[row.id]?.down);
+                if (!group || !moved) throw new Error('fixture needs a Project that can move down');
+                const request = { requestId: '3f1f5f2c-8a7e-4f2b-9d47-6c1e0b2a9d31', projectId: moved.id,
+                    direction: 'down' as const, tagFilter: '__all__', order: group.projects.map((row) => row.id) };
+                const planned = nativeValue(host.prepareProjectMove(request));
+                control.expectPersisted((written) => {
+                    for (const { after } of planned.prepared.effect.projects) {
+                        expect(written.projects.find((entry) => entry.id === after.id)).toEqual(after);
+                    }
+                });
+                expect(nativeValue(await host.commitPreparedProjectMove({ request, prepared: planned.prepared })))
+                    .toEqual(planned.prepared.result);
+                for (const { after } of planned.prepared.effect.projects) {
+                    expect(useTaskStore.getState()._projectsById.get(after.id)).toEqual(after);
+                }
+            },
             commitPreparedProjectTaskOrder: async (control) => {
                 const host = await nativeHost(control);
                 const projectId = settled.projects[1].id;

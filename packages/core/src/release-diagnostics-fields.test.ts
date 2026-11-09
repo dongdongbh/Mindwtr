@@ -216,6 +216,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'mode',
 
+    'direction',
+
     'window',
 
     'legacyWidgetCount',

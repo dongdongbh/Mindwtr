@@ -351,6 +351,7 @@ import { createProjectSectionMethods } from './native-host-contract-project-sect
 import { createProjectSectionRenameMethods } from './native-host-contract-project-section-rename';
 import { createProjectSectionDeleteMethods } from './native-host-contract-project-section-delete';
 import { createProjectSectionOrderMethods } from './native-host-contract-project-section-order';
+import { createProjectMoveMethods } from './native-host-contract-project-move';
 import { createProjectTaskOrderMethods } from './native-host-contract-project-task-order';
 import { createAreaCreateMethods } from './native-host-contract-area-create';
 import { createPersonCreateMethods } from './native-host-contract-person-create';
@@ -607,6 +608,16 @@ export type NativeProjectsView = {
 export type NativeFilteredProjectsView = NativeProjectsView & {
     tagFilter: string;
     tagInventory: { values: string[]; hasUntagged: boolean };
+};
+export type NativeProjectMoves = Record<string, { up: boolean; down: boolean }>;
+const projectMoves = (view: NativeProjectsView): NativeProjectMoves => {
+    const byId = useTaskStore.getState()._projectsById;
+    const moves: NativeProjectMoves = {};
+    for (const group of [...view.active, ...view.deferred, ...view.archived]) {
+        const projects = group.projects.map((row) => byId.get(row.id)).filter((row): row is Project => Boolean(row));
+        getProjectMoveOptions({ areaId: group.areaId ?? undefined, projects }).forEach((options, index) => { moves[projects[index].id] = options; });
+    }
+    return moves;
 };
 
 export type NativeProjectDetailItem =
@@ -2073,6 +2084,7 @@ export function createNativeHostContract(options: {
             revision: projectMutationRevision }),
         ...createProjectSectionOrderMethods({ readiness, save,
             revision: projectMutationRevision }),
+        ...createProjectMoveMethods({ readiness, save, projectsView: readProjectsView }),
         ...createProjectTaskOrderMethods({ readiness, save,
             snapshot: (projectId, showCompleted, filters) => {
                 const resolved = readFilterState(filters);
@@ -2502,29 +2514,24 @@ export function createNativeHostContract(options: {
         },
 
 
-        getProjects(input?: { moves?: true }): NativeHostResult<NativeProjectsView & { moves?: Record<string, { up: boolean; down: boolean }> }> {
+        getProjects(input?: { moves?: true }): NativeHostResult<NativeProjectsView & { moves?: NativeProjectMoves }> {
             const ready = readiness();
             if (!ready.ok) return ready;
             const view = readProjectsView(null);
-            if (input?.moves !== true) return { ok: true, value: view };
-            const byId = useTaskStore.getState()._projectsById;
-            const moves: Record<string, { up: boolean; down: boolean }> = {};
-            for (const group of [...view.active, ...view.deferred, ...view.archived]) {
-                const projects = group.projects.map((row) => byId.get(row.id)).filter((row): row is Project => Boolean(row));
-                getProjectMoveOptions({ areaId: group.areaId ?? undefined, projects }).forEach((options, index) => { moves[projects[index].id] = options; });
-            }
-            return { ok: true, value: { ...view, moves } };
+            return { ok: true, value: input?.moves === true ? { ...view, moves: projectMoves(view) } : view };
         },
 
-        getFilteredProjects(input: { tagFilter: string }): NativeHostResult<NativeFilteredProjectsView> {
+        getFilteredProjects(input: { tagFilter: string; moves?: true }): NativeHostResult<NativeFilteredProjectsView & { moves?: NativeProjectMoves }> {
             const ready = readiness();
             if (!ready.ok) return ready;
-            if (!isObjectRecord(input) || Object.keys(input).length !== 1
+            if (!isObjectRecord(input) || Object.keys(input).length !== (Object.prototype.hasOwnProperty.call(input, 'moves') ? 2 : 1)
                 || !Object.prototype.hasOwnProperty.call(input, 'tagFilter')
+                || (Object.prototype.hasOwnProperty.call(input, 'moves') && input.moves !== true)
                 || typeof input.tagFilter !== 'string' || input.tagFilter.length > 100_000) {
                 return fail('INVALID_INPUT', 'A bounded raw tag filter is required');
             }
-            return { ok: true, value: readProjectsView(input.tagFilter) as NativeFilteredProjectsView };
+            const view = readProjectsView(input.tagFilter) as NativeFilteredProjectsView;
+            return { ok: true, value: input.moves === true ? { ...view, moves: projectMoves(view) } : view };
         },
 
         getProjectDetail(input: { projectId: string; offset: number; limit: number; revision?: string }): NativeHostResult<NativeProjectDetail> {

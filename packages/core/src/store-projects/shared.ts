@@ -37,6 +37,7 @@ export type ProjectActions = Pick<
     | 'commitPreparedProjectSectionDelete'
     | 'commitPreparedProjectSectionOrder'
     | 'commitPreparedProjectTaskOrder'
+    | 'commitPreparedProjectOrder'
     | 'commitPreparedAreaCreate'
     | 'commitPreparedInboxOrganizeDestinationCreate'
     | 'commitPreparedProjectOrganizeDestinationCreate'
@@ -131,7 +132,7 @@ export type ProjectToSectionActions = Pick<ProjectActions, 'convertProjectToSect
 
 export type AreaActions = Pick<ProjectActions, 'addArea' | 'commitPreparedAreaCreate' | 'commitPreparedInboxOrganizeDestinationCreate' | 'commitPreparedProjectOrganizeDestinationCreate' | 'commitPreparedAreaColor' | 'commitPreparedAreaRename' | 'commitPreparedAreaOrder' | 'commitPreparedAreaDelete' | 'updateArea' | 'deleteArea' | 'restoreArea' | 'reorderAreas'>;
 
-export type OrderingActions = Pick<ProjectActions, 'reorderProjects' | 'reorderProjectTasks' | 'reorderBoardTasks' | 'reorderSections' | 'commitPreparedProjectSectionOrder' | 'commitPreparedProjectTaskOrder'>;
+export type OrderingActions = Pick<ProjectActions, 'reorderProjects' | 'reorderProjectTasks' | 'reorderBoardTasks' | 'reorderSections' | 'commitPreparedProjectSectionOrder' | 'commitPreparedProjectTaskOrder' | 'commitPreparedProjectOrder'>;
 
 export type PeopleActions = Pick<ProjectActions, 'addPerson' | 'commitPreparedPersonCreate' | 'commitPreparedPersonDelete' | 'commitPreparedPersonEdit' | 'updatePerson' | 'renamePerson' | 'deletePerson' | 'restorePerson'>;
 

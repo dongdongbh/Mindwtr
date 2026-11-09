@@ -2,7 +2,9 @@ import { getTaskOrder, getNextDataChangeAt, nextRevision, persist } from '../sto
 import { getProjectSectionsForView } from '../project-utils';
 import { sameSectionDeleteJson, sameSectionSqliteRow, sameTaskSqliteRow } from './section-actions';
 import { sameProjectSqliteRow } from './project-actions';
-import type { PreparedProjectSectionOrder, PreparedProjectTaskOrder, PreparedTaskEditResult } from '../store-types';
+import type { PreparedProjectOrder, PreparedProjectSectionOrder, PreparedProjectTaskOrder, PreparedTaskEditResult } from '../store-types';
+import { planProjectMove } from '../project-grouping';
+import { taskEditValuesEqual } from '../json-value-equality';
 import { planProjectTaskOrderMove, projectTaskOrderToken, type ProjectReorderFlatItem } from '../project-task-reorder';
 import { compareProjectsByOrder, compareTasksByProjectOrder, sortTasksByBoardOrder } from '../task-utils';
 import { mutateTasks } from '../store-tasks';
@@ -203,6 +205,43 @@ export const projectSectionOrderEffect = (sections: readonly Section[], orderedI
 };
 
 
+export const projectOrderUpdates = (areaProjects: readonly Project[], orderedIds: string[]): Map<string, number> => {
+    const currentIds = [...areaProjects].sort(compareProjectsByOrder).map((project) => project.id);
+    const validOrderedIds = uniqueValidIds(orderedIds, new Set(currentIds));
+    const updates = new Map<string, number>();
+    if (validOrderedIds.length === 0) return updates;
+    const orderById = new Map(areaProjects.map((project) => [project.id, finiteOrder(project.order)]));
+    const plan = createSparseOrderPlan(currentIds, finalOrderedIds(currentIds, validOrderedIds), orderById);
+    if (plan) for (const project of areaProjects) {
+        const nextOrder = orderFromPlan(plan, project.id);
+        if (Number.isFinite(nextOrder) && project.order !== nextOrder) updates.set(project.id, nextOrder!);
+    }
+    return updates;
+};
+
+export const projectOrderEffect = (areaProjects: readonly Project[], orderedIds: string[],
+    deviceId: string, now: string): PreparedProjectOrder['effect'] => {
+    const updates = projectOrderUpdates(areaProjects, orderedIds);
+    return { projects: areaProjects.filter((row) => updates.has(row.id)).map((before) => ({
+        before, after: { ...before, order: updates.get(before.id)!, updatedAt: now,
+            rev: nextRevision(before.rev), revBy: deviceId },
+    })) };
+};
+
+export const planPreparedProjectOrder = (areaProjects: readonly Project[],
+    request: Pick<PreparedProjectOrder['request'], 'projectId' | 'direction'>, neighbourId: string) => {
+    const project = areaProjects.find((row) => row.id === request.projectId);
+    const neighbour = areaProjects.find((row) => row.id === neighbourId);
+    if (!project || !neighbour || project.id === neighbour.id) return null;
+    const shown = request.direction === 'up' ? [neighbour, project] : [project, neighbour];
+    return planProjectMove({ areaId: project.areaId ?? undefined, projects: shown }, [...areaProjects],
+        request.projectId, request.direction);
+};
+
+export const liveAreaProjects = (projects: readonly Project[], areaId: string | undefined): Project[] =>
+    projects.filter((row) => !row.deletedAt && (row.areaId ?? undefined) === areaId)
+        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 export const projectTaskOrderEffect = (scope: PreparedProjectTaskOrder['scope'],
     request: PreparedProjectTaskOrder['request'], deviceId: string, now: string):
     { effect: PreparedProjectTaskOrder['effect']; result: PreparedProjectTaskOrder['result'] } | null => {
@@ -359,34 +398,61 @@ export const createOrderingActions = ({
     },
     reorderProjects: async (orderedIds: string[], areaId?: string) => {
         if (orderedIds.length === 0) return;
-        const targetAreaId = areaId ?? undefined;
-        let orderPlan: SparseOrderPlan | null = null;
+        let updates = new Map<string, number>();
         await mutateEntities({ set, debouncedSave }, {
             collection: 'projects',
             select: (state) => {
-                const isInArea = (project: Project) => (
-                    (project.areaId ?? undefined) === targetAreaId && !project.deletedAt
-                );
-                const areaProjects = state._allProjects.filter(isInArea);
-                const currentIds = areaProjects
-                    .sort(compareProjectsByOrder)
-                    .map((project) => project.id);
-                const validOrderedIds = uniqueValidIds(orderedIds, new Set(currentIds));
-                if (validOrderedIds.length === 0) return [];
-                const nextIds = finalOrderedIds(currentIds, validOrderedIds);
-                const orderById = new Map(areaProjects.map((project) => [project.id, finiteOrder(project.order)]));
-                orderPlan = createSparseOrderPlan(currentIds, nextIds, orderById);
-                if (!orderPlan) return [];
-                return areaProjects.filter((project) => {
-                    const nextOrder = orderFromPlan(orderPlan!, project.id);
-                    return Number.isFinite(nextOrder) && project.order !== nextOrder;
-                });
+                const areaProjects = state._allProjects.filter((project) =>
+                    (project.areaId ?? undefined) === (areaId ?? undefined) && !project.deletedAt);
+                updates = projectOrderUpdates(areaProjects, orderedIds);
+                return areaProjects.filter((project) => updates.has(project.id));
             },
             buildUpdates: (project) => {
-                const nextOrder = orderFromPlan(orderPlan!, project.id);
-                return Number.isFinite(nextOrder) ? { order: nextOrder as number } : null;
+                const order = updates.get(project.id);
+                return order !== undefined ? { order } : null;
             },
         });
+    },
+
+    commitPreparedProjectOrder: async (input: PreparedProjectOrder): Promise<PreparedTaskEditResult> => {
+        let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
+            error: 'Prepared Project order conflicts with current data' };
+        set((state) => {
+            const pairs = input.effect.projects;
+            if (pairs.length > 0
+                && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
+                && pairs.every(({ after }) => {
+                    const current = state._projectsById.get(after.id);
+                    return current && sameProjectSqliteRow(current, after);
+                })) {
+                result = { success: true, id: input.request.projectId, outcome: 'replayed' };
+                return state;
+            }
+            if ((state.settings.deviceId ?? null) !== input.deviceIdBefore
+                || (input.deviceIdBefore === null ? !input.deviceIdToInitialize : input.deviceIdToInitialize !== null))
+                return state;
+            const moved = input.scope.projects.find((row) => row.id === input.request.projectId);
+            if (!moved) return state;
+            const live = liveAreaProjects(state._allProjects, moved.areaId ?? undefined);
+            if (live.length !== input.scope.projects.length || live.some((row, index) =>
+                !sameSectionDeleteJson(row, input.scope.projects[index])
+                || !sameProjectSqliteRow(row, input.scope.projects[index]))) return state;
+            const planned = planPreparedProjectOrder(live, input.request, input.scope.neighbourId);
+            if (!planned || !taskEditValuesEqual(planned.orderedIds, input.result.orderedIds)) return state;
+            const effect = projectOrderEffect(live, planned.orderedIds,
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.preparedAt);
+            if (effect.projects.length === 0 || !sameSectionDeleteJson(effect, input.effect)) return state;
+            const replacements = new Map(effect.projects.map(({ after }) => [after.id, after]));
+            const projects = state._allProjects.map((row) => replacements.get(row.id) ?? row);
+            const settings = input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            persist(set, debouncedSave, state, { projects,
+                ...(settings !== state.settings ? { settings } : {}) });
+            result = { success: true, id: input.request.projectId, outcome: 'applied' };
+            return { _allProjects: projects, settings,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
+        });
+        return result;
     },
 
     reorderSections: async (projectId: string, orderedIds: string[]) => {

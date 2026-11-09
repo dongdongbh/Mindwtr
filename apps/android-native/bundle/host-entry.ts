@@ -3615,6 +3615,24 @@ globalThis.MindwtrHost = {
     projectSectionOrderCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedProjectSectionOrder(JSON.parse(json))));
     },
+    projectMoveRetryOutcome(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.probeProjectMoveOutcome(JSON.parse(json)));
+        });
+    },
+    projectMovePrepare(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.prepareProjectMove(JSON.parse(json)));
+        });
+    },
+    projectMoveValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedProjectMove(JSON.parse(json))));
+    },
+    projectMoveCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitPreparedProjectMove(JSON.parse(json))));
+    },
     areaCreateOptions(): string {
         return submit(async () => {
             requireSaved();
