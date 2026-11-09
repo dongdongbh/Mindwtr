@@ -3,11 +3,11 @@ package tech.dongdongbh.mindwtr.pilot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import tech.dongdongbh.mindwtr.pilot.core.BackupOperations
 import tech.dongdongbh.mindwtr.pilot.core.WriteJournal
 import java.io.File
 
@@ -21,16 +21,78 @@ class WorkspaceTest {
     }
 
 
+    private fun request(ageMs: Long) = """{"version":1,"requestedAt":${System.currentTimeMillis() - ageMs},"settings":{}}"""
+
+
     @Test fun aBootRequestIsConsumedOnceSoALaterLaunchBootsPersonal() {
-        val store = Store("{\"version\":1}")
-        assertEquals("{\"version\":1}", Workspace.take(store))
+        val raw = request(1_000)
+        val store = Store(raw)
+        assertEquals(raw, Workspace.take(store))
         assertNull(Workspace.take(store))
         assertNull(Workspace.take(Store(null)))
     }
 
 
-    @Test fun aRequestThatCannotBeConsumedNeverOpensTheSandbox() {
-        assertThrows(IllegalStateException::class.java) { Workspace.take(Store("{}", writable = false)) }
+    @Test fun aStaleMalformedOrUnconsumableRequestBootsPersonalWithoutCrashing() {
+        val reasons = mutableListOf<String>()
+        val stale = Store(request(61_000))
+        assertNull(Workspace.take(stale, refused = { reasons += it }))
+        assertNull(stale.value)
+        assertNull(Workspace.take(Store("{"), refused = { reasons += it }))
+        assertNull(Workspace.take(Store(request(1_000), writable = false), refused = { reasons += it }))
+        assertEquals(listOf("stale", "stale", "unconsumed"), reasons)
+    }
+
+
+    @Test fun aRequestFoundAfterAWorkerBootedThePersonalWorkspaceRestartsTheProcessNeverSwitchesIt() {
+        var restarts = 0
+        var entered = false
+        val raw = request(1_000)
+        val fresh = Store(raw)
+        assertNull(Workspace.decide(fresh, booted = true, begin = { true }, restart = { restarts += 1 }, enter = { entered = true }))
+        assertEquals(raw, fresh.value)
+        assertEquals(1, restarts)
+        assertFalse(entered)
+
+        assertNull(Workspace.decide(Store(request(61_000)), booted = true, begin = { true }, restart = { restarts += 1 }, enter = { entered = true }))
+        assertEquals(1, restarts)
+    }
+
+
+    @Test fun theSandboxIsEnteredOnlyWhenItsScratchFolderIsReady() {
+        var entered = false
+        assertNull(Workspace.decide(Store(request(1_000)), booted = false, begin = { false }, restart = {}, enter = { entered = true }))
+        assertFalse(entered)
+        val raw = request(1_000)
+        assertEquals(raw, Workspace.decide(Store(raw), booted = false, begin = { true }, restart = {}, enter = { entered = true }))
+        assertTrue(entered)
+    }
+
+
+    @Test fun theSandboxViewStateLivesInItsOwnPreferencesFile() {
+        assertEquals(DEVICE_PREFS, Workspace.prefsName(sandbox = false))
+        assertEquals(Workspace.SANDBOX_VIEW_PREFS, Workspace.prefsName(sandbox = true))
+        assertTrue(Workspace.prefsName(sandbox = true) != Workspace.prefsName(sandbox = false))
+    }
+
+
+    @Test fun aSandboxBootLeavesARealPendingBackupOperationAlone() {
+        val noBackup = File(folder.root, "no_backup")
+        val realOperation = File(Workspace.dir(noBackup, "backup-operations", sandbox = false), "op-1").apply { mkdirs() }
+        val realPending = File(Workspace.dir(noBackup, "backup-operations", sandbox = false), "op-2.pending").apply { writeText("{}") }
+        BackupOperations(Workspace.dir(noBackup, "backup-operations", sandbox = true).apply { mkdirs() },
+            Workspace.dir(noBackup, "snapshots", sandbox = true).apply { mkdirs() }, syncDirectory = {}).cleanup(emptySet())
+        assertTrue(realOperation.isDirectory)
+        assertTrue(realPending.exists())
+    }
+
+
+    @Test fun aSandboxCaptureDraftNeverReachesTheRealCaptureStore() {
+        val noBackup = File(folder.root, "no_backup")
+        CaptureStore(Workspace.dir(noBackup, "capture", sandbox = true)).write(org.json.JSONObject().put("text", "Sample capture"))
+        assertTrue(File(Workspace.dir(noBackup, "capture", sandbox = true), "capture").exists())
+        assertNull(CaptureStore(Workspace.dir(noBackup, "capture", sandbox = false)).read())
+        assertFalse(File(Workspace.dir(noBackup, "capture", sandbox = false), "capture").exists())
     }
 
 

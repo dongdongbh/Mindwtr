@@ -100,17 +100,26 @@ internal object ProcessCoreHost {
 
     private class SandboxRequestExpired : Exception()
 
+    @Volatile private var sandboxHost: CoreHost? = null
+
+
+    fun isSandbox(host: CoreHost) = host === sandboxHost
+
 
     private fun start(app: Application, language: String?, sandboxRequest: String?): CoreHost =
-        try { open(app, language, sandboxRequest) } catch (_: SandboxRequestExpired) { open(app, language, null) }
+        try { open(app, language, sandboxRequest) } catch (_: SandboxRequestExpired) {
+            Log.w(CoreHost.TAG, "Native Android sandbox request refused by core; restarting into the real workspace releaseCheck=v1.3.9/native-sandbox")
+            Workspace.restart(app)
+            throw IllegalStateException("The process did not restart")
+        }
 
 
     private fun open(app: Application, language: String?, sandboxRequest: String?): CoreHost {
         application = app
         val scratch = Workspace.scratch(app)
         val sandbox = sandboxRequest != null
-        if (!sandbox) check(!scratch.exists() || scratch.deleteRecursively()) { "The last sandbox scratch files were not removed" }
-        else check(Workspace.freshBootFiles(scratch)) { "The sandbox boot files were not reset" }
+        if (!sandbox && scratch.exists() && !scratch.deleteRecursively()) Log.w(CoreHost.TAG, "Native Android sandbox scratch files not removed")
+        if (sandbox) check(Workspace.freshBootFiles(scratch)) { "The sandbox boot files were not reset" }
 
 
         val legacy = if (BuildConfig.RN_STORAGE && !sandbox) {
@@ -134,7 +143,7 @@ internal object ProcessCoreHost {
                 }.commit()
                 setLanguage(runtime, sampleLanguage ?: language)
                 loadTheme(runtime, sampleTheme)
-                Workspace.opened(sandbox = true)
+                sandboxHost = runtime
                 return runtime
             }
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "", legacy?.preflight == true)

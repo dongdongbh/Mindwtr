@@ -114,7 +114,7 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
 
     override fun doWork(): Result {
         val app = applicationContext as Application
-        if (Workspace.sandbox) return Result.success()
+        if (Workspace.sandbox) return Result.retry()
         val input = inputData.keyValueMap.filterKeys { it != JOB }.mapValues { it.value as? String }
         var booted: CoreHost? = null
 
@@ -126,6 +126,7 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
 
                 val language = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE).getString(LANGUAGE_KEY, null)
                 val host = ProcessCoreHost.get(app, language).also { booted = it }
+                check(!ProcessCoreHost.isSandbox(host)) { "A background job never runs in a sandbox process" }
                 object : CoreJob.Calls {
                     override fun recover() = ProcessCoreHost.recover(host)
                     override fun drain() = ProcessCoreHost.recovered(app, host)

@@ -753,10 +753,16 @@ const inboxUi = source('InboxScreen.kt');
 const bulkUi = source('BulkBar.kt');
 
 const processHost = source('ProcessCoreHost.kt');
-assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+val sandbox = sandboxRequest != null\s+if \(!sandbox\) check\(!scratch\.exists\(\) \|\| scratch\.deleteRecursively\(\)\) \{[^}]*\}\s+else check\(Workspace\.freshBootFiles\(scratch\)\)/,
-    'a real start removes every sandbox scratch file (journal, database, key-value store, drafts) before it opens; a sandbox start resets its own boot files');
-assert.match(source('InboxViewModel.kt'), /private val sandboxRequest = Workspace\.take\(Workspace\.store\(app\)\)\?\.also \{ check\(Workspace\.begin\(app\)\)/,
-    'taking a sandbox request empties the scratch folder before any draft store opens in it');
+assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+val sandbox = sandboxRequest != null\s+if \(!sandbox && scratch\.exists\(\) && !scratch\.deleteRecursively\(\)\) Log\.w\([^\n]*\)\s+if \(sandbox\) check\(Workspace\.freshBootFiles\(scratch\)\)/,
+    'a real start removes every sandbox scratch file (journal, database, key-value store, drafts) and only logs if it cannot; a sandbox start must reset its own boot files');
+assert.match(processHost, /catch \(_: SandboxRequestExpired\) \{\s*Log\.w\([^\n]*releaseCheck=v1\.3\.9\/native-sandbox"\)\s*Workspace\.restart\(app\)/,
+    'a request core refuses restarts the process into the real workspace; the process never runs the real workspace on sandbox stores');
+assert.match(source('Workspace.kt'), /fun decide\(store: RequestStore, booted: Boolean, begin: \(\) -> Boolean, restart: \(\) -> Unit, refused: \(String\) -> Unit = \{\},\s+enter: \(\) -> Unit = \{ sandbox = true \}\): String\? \{\s+val raw = take\(store, refused = refused\) \?: return null\s+if \(booted\) \{\s+if \(fresh\(raw\)\) store\.write\(raw\)\s+restart\(\)\s+return null\s+\}/,
+    'a fresh request found after a worker or receiver booted the process personal goes back and the process restarts; a stale one is dropped');
+assert.match(source('Workspace.kt'), /const val REQUEST_MAX_AGE_MS = 60_000L/);
+assert.match(readFileSync(resolve(app, '../../packages/core/src/sandbox.ts'), 'utf8'), /const BOOT_REQUEST_MAX_AGE_MS = 60_000;/, 'Kotlin and core keep the same 60 s request age');
+assert.match(source('InboxViewModel.kt'), /private val sandboxRequest = Workspace\.decide\(Workspace\.store\(app\), ProcessCoreHost\.booted, \{ Workspace\.begin\(app\) \}, \{ Workspace\.restart\(app\) \},\s+refused = \{ reason -> Log\.w\([^\n]*releaseCheck=v1\.3\.9\/native-sandbox"\) \}\)\s+private val sandboxed = Workspace\.sandbox/,
+    'the screen decides the workspace once, before any store opens: an emptied scratch folder and the sandbox mode only for a fresh request in a process not yet booted');
 for (const name of ['editor', 'process-inbox', 'capture', 'menu', 'capture-modal']) {
     assert.match(source('InboxViewModel.kt'), new RegExp(`Workspace\\.dir\\(app, "${name}", sandboxed\\)`), `the ${name} drafts live in the sandbox's scratch folder while it is open, so none reaches the real workspace`);
 }
@@ -769,7 +775,7 @@ assert.match(hostDeps, /HostGmailReceipts\(if \(sandbox\) Workspace\.dir\(app, "
 assert.match(source('Workspace.kt'), /object SandboxReminders : CoreHost\.Reminders \{\s+override fun apply\(plan: String\): Int = 0/);
 assert.match(source('EntryPoints.kt'), /fun pump\(\): Unit = with\(shell\) \{\s+if \(Workspace\.sandbox\) return/, 'shares, shortcuts and notification taps wait in the real queue until the real workspace is back; a tap never opens a sample task');
 assert.match(source('PomodoroAlarms.kt'), /fun plan\(host: CoreHost\): String = synchronized\(LOCK\) \{\s+if \(Workspace\.sandbox\) return "sandbox"/, 'the sandbox plans no Pomodoro alarm');
-assert.match(source('CoreWork.kt'), /override fun doWork\(\): Result \{\s+val app = applicationContext as Application\s+if \(Workspace\.sandbox\) return Result\.success\(\)/, 'a background job in a sandbox process does nothing');
+assert.match(source('CoreWork.kt'), /override fun doWork\(\): Result \{\s+val app = applicationContext as Application\s+if \(Workspace\.sandbox\) return Result\.retry\(\)/, 'a background job in a sandbox process waits for the real workspace');
 for (const receiver of ['Reminders.kt', 'PomodoroAlarms.kt']) {
     const body = source(receiver).slice(source(receiver).search(/class \w*AlarmReceiver : BroadcastReceiver/));
     assert.doesNotMatch(body.slice(0, body.indexOf('\n}\n')), /Workspace\./, `${receiver}'s alarm receiver posts the real notification from its stored payload in either workspace`);
@@ -779,8 +785,7 @@ const sandboxStart = processHost.slice(processHost.indexOf('if (sandboxRequest !
 assert.match(sandboxStart, /if \(opened\.optString\("workspace"\) != "sandbox"\) throw SandboxRequestExpired\(\)[\s\S]*return runtime/, 'an expired request opens the real workspace instead');
 assert.doesNotMatch(sandboxStart, /replay\(|recovered\(|recoverInstalls\(|deferredWidgets/, 'the sandbox replays no journal and recovers nothing into any database');
 assert.match(source('core/CoreHost.kt'), /if \(sandboxRequest != null\) return@onEngine callAsync\("bootSandbox", sandboxRequest/, 'a sandbox start boots the in-memory sample workspace, not the SQLite workspace');
-assert.match(source('InboxViewModel.kt'), /if \(sandboxRequest != null && ProcessCoreHost\.booted\) \{\s+Workspace\.store\(getApplication\(\)\)\.write\(sandboxRequest\)\s+Workspace\.restart\(getApplication\(\)\)/,
-    'a request found after a receiver or worker booted the process personal restarts the process; the workspace never changes mid-process');
+assert.match(source('CoreWork.kt'), /\.also \{ booted = it \}\s+check\(!ProcessCoreHost\.isSandbox\(host\)\)/, 'a background job checks the runtime it got and never runs in a sandbox process');
 assert.doesNotMatch(source('CoreWork.kt'), /Workspace\.take|sandboxRequest/, 'only the app screen consumes a sandbox request, never the background worker');
 const focusControlsUi = source('FocusControls.kt');
 const focusModelKt = source('FocusModel.kt');
@@ -994,7 +999,7 @@ const kotlinFiles = [activity, model, owner, editorUi, focusUi, projectsUi, labe
 assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 
 
-assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE && !sandbox\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = if \(sandbox\) HostInstaller\(File\(scratch, "files"\), File\(scratch, "cache"\)\) else HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val files = Workspace\.files\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), File\(app\.filesDir, "journal"\),\s*app\.getDatabasePath\("RKStorage"\), scratch, sandbox = sandbox\)\s*val runtime = host\(app, files, legacy, installer, sandbox\)\s*try \{[\s\S]{0,1400}?runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
+assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE && !sandbox\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = if \(sandbox\) HostInstaller\(File\(scratch, "files"\), File\(scratch, "cache"\)\) else HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val files = Workspace\.files\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), File\(app\.filesDir, "journal"\),\s*app\.getDatabasePath\("RKStorage"\), scratch, sandbox = sandbox\)\s*val runtime = host\(app, files, legacy, installer, sandbox\)\s*try \{\s*if \(sandboxRequest != null\) \{[\s\S]*?sandboxHost = runtime\s*return runtime\s*\}\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
 assert.match(owner, /val keyValue = RnKeyValue\(files\.keyValue\)\s*return CoreHost\(files\.database, legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*files\.journal, deviceStore\(app, keyValue, sandbox\), File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*if \(sandbox\) SandboxReminders else ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*if \(sandbox\) null else HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = if \(sandbox\) null else \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),[\s\S]{0,400}?calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\([^\n]*\),\s*voice = HostVoice\.forApp\(app\)::call\)/);
 
 
@@ -3034,9 +3039,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
     assert.match(settingsModel, /fun deviceStore\(prefs: SharedPreferences\) = DeviceWrites\(\{ prefs\.all \}, \{ changes ->\s+prefs\.edit\(\)\.apply \{[^\n]*\}\.commit\(\)\s+\}\)/);
     assert.match(settingsModel, /fun deviceStore\(app: Context, keyValue: RnKeyValue, sandbox: Boolean = false\): DeviceWrites \{\s+val prefs = Workspace\.viewPrefs\(app, sandbox\)/);
-    assert.match(source('Workspace.kt'), /fun dir\(context: Context, name: String, sandbox: Boolean = this\.sandbox\) =\s+if \(sandbox\) File\(scratch\(context\), name\) else File\(context\.noBackupFilesDir, name\)/,
+    assert.match(source('Workspace.kt'), /fun dir\(noBackup: File, name: String, sandbox: Boolean\): File = if \(sandbox\) File\(File\(noBackup, "sandbox"\), name\) else File\(noBackup, name\)[\s\S]{0,40}fun dir\(context: Context, name: String, sandbox: Boolean = this\.sandbox\) = dir\(context\.noBackupFilesDir, name, sandbox\)/,
         'a work folder is the real one outside the sandbox and the same name under the sandbox scratch folder inside it');
-    assert.match(source('Workspace.kt'), /fun viewPrefs\(context: Context, sandbox: Boolean = this\.sandbox\) =\s+context\.getSharedPreferences\(if \(sandbox\) SANDBOX_VIEW_PREFS else DEVICE_PREFS, Context\.MODE_PRIVATE\)/,
+    assert.match(source('Workspace.kt'), /fun prefsName\(sandbox: Boolean\) = if \(sandbox\) SANDBOX_VIEW_PREFS else DEVICE_PREFS\s+fun viewPrefs\(context: Context, sandbox: Boolean = this\.sandbox\) = context\.getSharedPreferences\(prefsName\(sandbox\), Context\.MODE_PRIVATE\)/,
         'the device and view-state preferences are the real file outside the sandbox and a separate file inside it');
     assert.match(settingsModel, /private fun store\(writes: JSONArray\) = deviceStore\(prefs\)\.store\(writes, null, replay = false\)/);
     {

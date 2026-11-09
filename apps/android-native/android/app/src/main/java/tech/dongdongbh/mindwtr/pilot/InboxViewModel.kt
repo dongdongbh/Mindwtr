@@ -199,8 +199,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var openProjectId by mutableStateOf(saved.get<String>("project")); private set
     var projectReturn = projectReturnOf(saved.get<String>("projectReturn")); private set
     var project by mutableStateOf<ProjectDetail?>(null); private set
-    private val sandboxRequest = Workspace.take(Workspace.store(app))?.also { check(Workspace.begin(app)) { "The sandbox scratch folder was not prepared" } }
-    private val sandboxed = Workspace.sandbox || sandboxRequest != null
+    private val sandboxRequest = Workspace.decide(Workspace.store(app), ProcessCoreHost.booted, { Workspace.begin(app) }, { Workspace.restart(app) },
+        refused = { reason -> Log.w(CoreHost.TAG, "Native Android sandbox request not used reason=$reason releaseCheck=v1.3.9/native-sandbox") })
+    private val sandboxed = Workspace.sandbox
     private val prefs = Workspace.viewPrefs(app, sandbox = sandboxed)
 
     var focusView by mutableStateOf(FocusViewState.read(prefs)); private set
@@ -463,10 +464,6 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         Thread({
             try {
 
-                if (sandboxRequest != null && ProcessCoreHost.booted) {
-                    Workspace.store(getApplication()).write(sandboxRequest)
-                    Workspace.restart(getApplication())
-                }
                 debugProperty("boot_delay_ms").toLongOrNull()?.let(Thread::sleep)
                 val runtime = ProcessCoreHost.get(getApplication(), prefs.getString(LANGUAGE_KEY, null), sandboxRequest)
 

@@ -3,6 +3,7 @@ package tech.dongdongbh.mindwtr.pilot
 import android.content.Context
 import android.content.Intent
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import org.json.JSONObject
 import java.io.File
 
 
@@ -10,6 +11,7 @@ internal object Workspace {
     const val BOOT_PREFS = "workspace-boot"
     const val REQUEST_KEY = "sandboxBootRequest"
     const val SANDBOX_VIEW_PREFS = "mindwtr-view-state-sandbox"
+    const val REQUEST_MAX_AGE_MS = 60_000L
 
     @Volatile var sandbox = false
         private set
@@ -29,21 +31,46 @@ internal object Workspace {
         else Files(personalDatabase, personalJournal, personalKeyValue)
 
 
-    fun take(store: RequestStore): String? {
+    fun fresh(raw: String, now: Long = System.currentTimeMillis()): Boolean = runCatching {
+        val request = JSONObject(raw)
+        request.optInt("version") == 1 && (now - request.getLong("requestedAt")) in 0..REQUEST_MAX_AGE_MS
+    }.getOrDefault(false)
+
+
+    fun take(store: RequestStore, now: Long = System.currentTimeMillis(), refused: (String) -> Unit = {}): String? {
         val raw = store.read() ?: return null
-        check(store.write(null)) { "The sandbox boot request was not consumed" }
-        return raw
+        if (!store.write(null)) {
+            refused("unconsumed")
+            return null
+        }
+        return raw.takeIf { fresh(it, now) }.also { if (it == null) refused("stale") }
     }
 
 
-    fun opened(sandbox: Boolean) { this.sandbox = sandbox }
+    fun decide(store: RequestStore, booted: Boolean, begin: () -> Boolean, restart: () -> Unit, refused: (String) -> Unit = {},
+               enter: () -> Unit = { sandbox = true }): String? {
+        val raw = take(store, refused = refused) ?: return null
+        if (booted) {
+            if (fresh(raw)) store.write(raw)
+            restart()
+            return null
+        }
+        if (!begin()) {
+            refused("scratch")
+            return null
+        }
+        enter()
+        return raw
+    }
 
 
     fun scratch(context: Context) = File(context.noBackupFilesDir, "sandbox")
 
 
-    fun dir(context: Context, name: String, sandbox: Boolean = this.sandbox) =
-        if (sandbox) File(scratch(context), name) else File(context.noBackupFilesDir, name)
+    fun dir(noBackup: File, name: String, sandbox: Boolean): File = if (sandbox) File(File(noBackup, "sandbox"), name) else File(noBackup, name)
+
+
+    fun dir(context: Context, name: String, sandbox: Boolean = this.sandbox) = dir(context.noBackupFilesDir, name, sandbox)
 
 
     fun begin(context: Context, scratch: File = scratch(context)): Boolean {
@@ -65,8 +92,10 @@ internal object Workspace {
     }
 
 
-    fun viewPrefs(context: Context, sandbox: Boolean = this.sandbox) =
-        context.getSharedPreferences(if (sandbox) SANDBOX_VIEW_PREFS else DEVICE_PREFS, Context.MODE_PRIVATE)
+    fun prefsName(sandbox: Boolean) = if (sandbox) SANDBOX_VIEW_PREFS else DEVICE_PREFS
+
+
+    fun viewPrefs(context: Context, sandbox: Boolean = this.sandbox) = context.getSharedPreferences(prefsName(sandbox), Context.MODE_PRIVATE)
 
 
     fun restart(context: Context) {
