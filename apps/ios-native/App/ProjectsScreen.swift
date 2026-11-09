@@ -14,6 +14,11 @@ struct ProjectsScreen: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
     @FocusState private var titleFocused: Bool
+    @Environment(\.layoutDirection) private var layoutDirection
+    @State private var rowMovePresented = false
+    @State private var rowMoveTarget: CoreObject = [:]
+    @State private var rowDeletePresented = false
+    @State private var rowDeleteTarget: CoreObject = [:]
 
     var body: some View {
         ScrollView {
@@ -50,6 +55,28 @@ struct ProjectsScreen: View {
                 .presentationDetents([.medium, .large])
                 .interactiveDismissDisabled(!model.areaManagerCloseEnabled)
         }
+        .alert(rowMoveTarget.text("title"), isPresented: $rowMovePresented) {
+            ForEach(["up", "down"].filter { model.projectRowCanMove(rowMoveTarget, direction: $0) }, id: \.self) { direction in
+                Button(rowMoveLabel(direction)) {
+                    let row = rowMoveTarget
+                    Task { await model.moveProjectRow(row, direction: direction) }
+                }
+                .accessibilityIdentifier("project-row-long-press-" + direction)
+            }
+            Button(model.label("common.cancel"), role: .cancel) {}
+        }
+        .alert(model.label("projects.title"), isPresented: $rowDeletePresented) {
+            Button(model.label("common.cancel"), role: .cancel) {}
+            Button(model.label("common.delete"), role: .destructive) {
+                let row = rowDeleteTarget
+                Task { await model.deleteProjectRow(row) }
+            }
+            .accessibilityIdentifier("project-row-delete-confirm")
+        } message: { Text(model.label("projects.deleteConfirm")) }
+    }
+
+    private func rowMoveLabel(_ direction: String) -> String {
+        model.label(direction == "up" ? "projects.moveUp" : "projects.moveDown")
     }
 
     private var controls: some View {
@@ -133,8 +160,20 @@ struct ProjectsScreen: View {
                 .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
                     .accessibilityIdentifier("project-focus-read-retry")
             }
+            if let message = model.projectRowError {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8).accessibilityIdentifier("project-row-error")
+                if model.projectRowRetryVisible {
+                    Button { Task { await model.retry() } } label: {
+                        Text(model.label("common.retry")).rnFont(14, .semibold)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("project-row-retry")
+                }
+            }
             if model.error != nil && model.projectCreateError == nil && model.projectCreateReadError == nil
-                && model.projectFocusError == nil && model.projectFocusReadError == nil {
+                && model.projectFocusError == nil && model.projectFocusReadError == nil && model.projectRowError == nil {
                 FailureBanner(model: model, palette: palette)
             }
             HStack(spacing: 12) {
@@ -302,7 +341,12 @@ struct ProjectsScreen: View {
     }
 
     private func projectRow(_ row: CoreObject) -> some View {
-        HStack(spacing: 8) {
+        let id = row.text("id")
+        let archived = row.text("status") == "archived"
+        let moves = ["up", "down"].filter { model.projectRowCanMove(row, direction: $0) }
+        let duplicate: CoreObject = ["id": "duplicate", "label": model.label("projects.duplicate"), "enabled": true]
+        let delete: CoreObject = ["id": "delete", "label": model.label("common.delete"), "enabled": true]
+        return HStack(spacing: 8) {
             Button { Task { await model.openProject(row) } } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(row.text("title")).rnFont(16, .medium).foregroundStyle(palette.text)
@@ -321,7 +365,33 @@ struct ProjectsScreen: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }
             .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
-            .accessibilityIdentifier("project-open-" + row.text("id"))
+            .accessibilityActions {
+                ForEach(moves, id: \.self) { direction in
+                    Button(rowMoveLabel(direction)) { Task { await model.moveProjectRow(row, direction: direction) } }
+                }
+                if !archived {
+                    Button(model.label("projects.areaLabel")) { Task { await model.openProjectRowArea(row) } }
+                }
+            }
+            .accessibilityIdentifier("project-open-" + id)
+            if !archived {
+                Menu {
+                    Section(row.text("title")) {
+                        ForEach(moves, id: \.self) { direction in
+                            Button(rowMoveLabel(direction)) { Task { await model.moveProjectRow(row, direction: direction) } }
+                                .accessibilityIdentifier("project-row-menu-" + direction + "-" + id)
+                        }
+                        Button(model.label("projects.areaLabel")) { Task { await model.openProjectRowArea(row) } }
+                            .accessibilityIdentifier("project-row-menu-area-" + id)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 18)).foregroundStyle(palette.secondary)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .disabled(!model.projectRowActionsEnabled)
+                .accessibilityLabel(model.label("common.more") + ": " + row.text("title"))
+                .accessibilityIdentifier("project-row-menu-" + id)
+            }
             Text(String(row.number("activeTaskCount"))).rnFont(12, .semibold).foregroundStyle(palette.secondary)
                 .frame(minWidth: 20).accessibilityLabel(String(row.number("activeTaskCount")) + " " + model.label("common.tasks"))
             Button { Task { await model.setProjectFocus(row) } } label: {
@@ -332,9 +402,23 @@ struct ProjectsScreen: View {
             .buttonStyle(.plain).disabled(!model.projectFocusInputEnabled || row.flag("focusDisabled"))
             .accessibilityLabel(model.label(row.flag("isFocused") ? "projects.removeFromFocus" : "projects.addToFocus"))
             .accessibilityAddTraits(row.flag("isFocused") ? .isSelected : [])
-            .accessibilityIdentifier("project-focus-" + row.text("id"))
+            .accessibilityIdentifier("project-focus-" + id)
         }
         .padding(.horizontal, 12).padding(.vertical, 8).background(palette.card, in: RoundedRectangle(cornerRadius: 8))
+        .projectRowLongPress(identity: id, enabled: !moves.isEmpty && model.projectRowActionsEnabled) {
+            rowMoveTarget = row
+            rowMovePresented = true
+        }
+        .projectRowSwipeTray(actions: ["swipeRight": [duplicate], "swipeLeft": [delete]],
+                             identity: id + ":" + row.text("projectRevision"), rowID: id, palette: palette,
+                             enabled: model.projectRowActionsEnabled, layoutDirection: layoutDirection) { action, _ in
+            if action.text("id") == "duplicate" {
+                Task { await model.duplicateProjectRow(row) }
+            } else if action.text("id") == "delete" {
+                rowDeleteTarget = row
+                rowDeletePresented = true
+            }
+        }
         .padding(.bottom, 6)
     }
 

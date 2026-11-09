@@ -1049,6 +1049,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var taskFocusDesired: Bool?
     @Published private(set) var projectFocusError: String?
     @Published private(set) var projectFocusReadError: String?
+    @Published private(set) var projectRowError: String?
     @Published private(set) var projectRenameEditing = false
     @Published private(set) var projectRenameTitle = ""
     @Published private(set) var projectRenameError: String?
@@ -1284,6 +1285,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private lazy var settingsPersonCreateWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
     private lazy var areaOrderWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
     private lazy var projectFocusWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    private lazy var projectMoveWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
 
     private func runDurableWrite(_ runner: DurableWriteRunner<CoreHost>, retry: Bool, adoptingBusy: Bool = false,
                                  _ write: DurableWriteRunner<CoreHost>.Write) async {
@@ -1625,6 +1627,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var projectDeleteError: String?
     private var projectDeleteRequest: String?
     private var projectDeleteFromHistory = false
+    private var projectDeleteFromList = false
     private var projectDeleteUndoRequest: String?
     private var projectDeleteNoticeGeneration = 0
     @Published private(set) var projectCurrent = false
@@ -4035,7 +4038,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var projectCreateInputEnabled: Bool { projectCreateInputOpen && textInputAdmitted }
     private var projectCreateInputOpen: Bool {
         ready && selectedSurface == .projects && projectCreateRequest == nil
-            && projectFocusWrite.pending == nil
+            && projectFocusWrite.pending == nil && projectMoveWrite.pending == nil
             && areaCreateRequest == nil && areaColorWrite.pending == nil && areaOrderWrite.pending == nil
             && areaRenameRequest == nil && areaDeleteRequest == nil && !areaManagerPresented
             && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
@@ -4059,6 +4062,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     var projectFocusPending: Bool { projectFocusWrite.pending != nil }
     var projectFocusInputEnabled: Bool {
         projectCreateInputEnabled && projectFocusReadError == nil
+    }
+    var projectRowActionsEnabled: Bool {
+        projectFocusInputEnabled && !busy && !retryNeeded && projectDuplicateRequest == nil
+            && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
+    }
+    var projectRowRetryVisible: Bool {
+        retryNeeded && (projectMoveWrite.pending != nil || projectDeleteFromList && projectDeleteRequest != nil
+            || projectDuplicateRequest != nil && selectedSurface == .projects)
+    }
+    func projectRowCanMove(_ row: CoreObject, direction: String) -> Bool {
+        projects.object("moves").object(row.text("id")).flag(direction)
     }
     var settingsPersonEditInputEnabled: Bool { settingsPersonEditInputOpen && textInputAdmitted }
     private var settingsPersonEditInputOpen: Bool {
@@ -8080,7 +8094,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 calendarComposerRecoveredResult = recovery.object("result")
             } else if recovery.text("method") == "mindSweepCommit" {
                 mindSweepRecoveredResult = recovery.object("result")
-            } else if ["projectToSectionCommit", "projectToSectionUndoCommit", "projectCreateCommit", "projectFocusCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "areaCreateCommit", "areaColorCommit", "areaOrderCommit", "areaRenameCommit",
+            } else if ["projectToSectionCommit", "projectToSectionUndoCommit", "projectCreateCommit", "projectFocusCommit", "projectMoveCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "areaCreateCommit", "areaColorCommit", "areaOrderCommit", "areaRenameCommit",
                        "areaDeleteCommit"].contains(recovery.text("method")) {
 
 
@@ -17808,9 +17822,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         projectCreateOptionsCurrent = false
         do {
             let requested = pendingProjectTagFilter ?? selectedProjectTagFilter
-            let next = try await query("menuRead", ["projects", try json(["tagFilter": requested])])
+            let next = try await query("menuRead", ["projects", try json(["tagFilter": requested, "moves": true])])
             let inventory = next.object("tagInventory")
-            guard let returned = next["tagFilter"] as? String,
+            guard let moves = next["moves"] as? CoreObject, moves.values.allSatisfy({ value in
+                      guard let move = value as? CoreObject, move.count == 2,
+                            let up = move["up"] as? NSNumber, let down = move["down"] as? NSNumber else { return false }
+                      return CFGetTypeID(up) == CFBooleanGetTypeID() && CFGetTypeID(down) == CFBooleanGetTypeID()
+                  }),
+                  let returned = next["tagFilter"] as? String,
                   returned.utf16.count <= 100_000, returned.utf8.elementsEqual(requested.utf8),
                   inventory.count == 2, let values = inventory["values"] as? [String],
                   values.count <= 100_000, values.allSatisfy({ $0.utf16.count <= 100_000 }),
@@ -19847,6 +19866,113 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             projectFocusReadError = nil
             error = nil
         } catch { projectFocusReadError = error.localizedDescription }
+    }
+
+    func moveProjectRow(_ row: CoreObject, direction: String) async {
+        let id = row.text("id")
+        guard projectRowActionsEnabled, projectRowCanMove(row, direction: direction),
+              let group = ["active", "deferred", "archived"].flatMap({ projects.objects($0) })
+                .first(where: { group in group.objects("projects").contains { $0.text("id") == id } }) else { return }
+        do {
+            guard let currentHost = host else { throw CocoaError(.coderInvalidValue) }
+            projectMoveWrite.stage(try json(["requestId": UUID().uuidString.lowercased(), "projectId": id,
+                                             "direction": direction, "tagFilter": projects.text("tagFilter"),
+                                             "order": group.objects("projects").map { $0.text("id") }]), on: currentHost)
+        } catch {
+            projectRowError = error.localizedDescription
+            return
+        }
+        projectRowError = nil
+        await runProjectMoveWrite(retry: false)
+    }
+
+    private func runProjectMoveWrite(retry: Bool) async {
+        await runDurableWrite(projectMoveWrite, retry: retry, .init(
+            admit: { currentHost in self.host === currentHost },
+            dispatch: { _, request, _ in try self.json(await self.query("projectMoveWrite", [request])) },
+            retryOutcome: { _, request in try self.json(await self.query("projectMoveRetryOutcome", [request])) },
+            acknowledge: { reply in try self.acknowledgeProjectMove(reply) },
+            fail: { failure, _ in
+                self.projectRowError = failure.localizedDescription
+                return failure.localizedDescription
+            },
+            refresh: { acknowledged in
+                do { try await self.readSelectedSurface() }
+                catch {
+                    self.projectRowError = error.localizedDescription
+                    if acknowledged { self.error = error.localizedDescription }
+                }
+            },
+            ended: { _ in }))
+    }
+
+    private func acknowledgeProjectMove(_ reply: String) throws {
+        let result = try decode(reply)
+        guard let request = projectMoveWrite.pending?.request,
+              let id = try decode(request)["projectId"] as? String,
+              result.count == 2, result.text("projectId") == id,
+              let ordered = result["orderedIds"] as? [String], ordered.contains(id) else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        projectRowError = nil
+    }
+
+    func duplicateProjectRow(_ row: CoreObject) async {
+        let id = row.text("id")
+        let revision = row.text("projectRevision")
+        guard projectRowActionsEnabled, !id.isEmpty, !revision.isEmpty else { return }
+        busy = true
+        projectRowError = nil
+        defer { finishOperation() }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(),
+                                    "projectId": id, "projectRevision": revision])
+            projectDuplicateRequest = request
+            let result = try await query("projectDuplicateWrite", [request])
+            try await acknowledgeProjectDuplicate(result)
+        } catch {
+            if isDefiniteRejection(error) { projectDuplicateRequest = nil }
+            retryNeeded = projectDuplicateRequest != nil
+            projectRowError = error.localizedDescription
+            if retryNeeded { self.error = error.localizedDescription }
+            else { _ = try? await readSelectedSurface() }
+        }
+    }
+
+    func deleteProjectRow(_ row: CoreObject) async {
+        let id = row.text("id")
+        let revision = row.text("projectRevision")
+        guard projectRowActionsEnabled, !id.isEmpty, !revision.isEmpty else { return }
+        busy = true
+        projectRowError = nil
+        defer { finishOperation() }
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(),
+                                    "projectId": id, "projectRevision": revision])
+            projectDeleteFromHistory = false
+            projectDeleteFromList = true
+            projectDeleteRequest = request
+            let result = try await query("projectDeleteWrite", [request])
+            try acknowledgeProjectDelete(result)
+            do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
+        } catch {
+            if isDefiniteRejection(error) {
+                projectDeleteRequest = nil
+                projectDeleteFromList = false
+            }
+            retryNeeded = projectDeleteRequest != nil
+            projectRowError = error.localizedDescription
+            if retryNeeded { self.error = error.localizedDescription }
+            else { _ = try? await readSelectedSurface() }
+        }
+    }
+
+    func openProjectRowArea(_ row: CoreObject) async {
+        let id = row.text("id")
+        guard projectRowActionsEnabled, !id.isEmpty, row.text("status") != "archived" else { return }
+        await openProject(row)
+        guard selectedSurface == .project, projectHeader.text("id") == id, projectCurrent else { return }
+        await openProjectArea()
     }
 
     func openProjectRename() async {
@@ -35380,8 +35506,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         let requestID = (try decode(request)).text("requestId")
         let fromHistory = projectDeleteFromHistory
+        if projectDeleteFromList { projectRowError = nil }
         projectDeleteRequest = nil
         projectDeleteFromHistory = false
+        projectDeleteFromList = false
         retryNeeded = false
         projectDeleteError = nil
         error = nil
@@ -35700,6 +35828,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         projectDuplicateRequest = nil
         retryNeeded = false
         projectDuplicateError = nil
+        projectRowError = nil
         error = nil
         await presentProject(["id": result.text("id")], caller: .projects)
         showProjectDuplicateNotice(result)
@@ -36568,7 +36697,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !projectFileAddOpening && projectFileImportClaim == nil
             && projectFileImportTask == nil && projectFileImporterID == nil && !projectFileImporterPresented
             && projectAttachmentWriteRequest == nil && projectNotesWriteRequest == nil
-            && projectCreateRequest == nil && projectFocusWrite.pending == nil && projectRenameRequest == nil
+            && projectCreateRequest == nil && projectFocusWrite.pending == nil && projectMoveWrite.pending == nil
+            && projectRenameRequest == nil
             && projectFlowRequest == nil && projectTaskSortRequest == nil && projectTaskOrderRequest == nil
             && projectStatusRequest == nil && projectDateRequest == nil && projectAreaRequest == nil
             && projectTagsRequest == nil && projectSectionRequest == nil && projectSectionRenameRequest == nil
@@ -43656,6 +43786,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             return
         }
         if projectFocusWrite.pending != nil { await runProjectFocusWrite(retry: true); return }
+        if projectMoveWrite.pending != nil { await runProjectMoveWrite(retry: true); return }
         if areaOrderWrite.pending != nil { await runAreaOrderWrite(retry: true); return }
         if areaColorWrite.pending != nil { await runAreaColorWrite(retry: true); return }
         if settingsPersonDeleteWrite.pending != nil { await runSettingsPersonDeleteWrite(retry: true); return }
@@ -43931,12 +44062,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let result: CoreObject
                 if let acknowledgment { result = try decode(acknowledgment) }
                 else { result = try await query("projectDeleteRetryOutcome", [request]) }
+                let fromList = projectDeleteFromList
                 try acknowledgeProjectDelete(result)
-                selectedSurface = projectCaller
-                projectCurrent = false
-                projectFilterSession += 1
-                projectFilterReadTask?.cancel()
-                resetProjectAttachments()
+                if !fromList {
+                    selectedSurface = projectCaller
+                    projectCurrent = false
+                    projectFilterSession += 1
+                    projectFilterReadTask?.cancel()
+                    resetProjectAttachments()
+                }
                 do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
                 return
             }
@@ -45173,6 +45307,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
                 if projectDeleteRequest != nil {
                     projectDeleteRequest = nil
+                    if projectDeleteFromList {
+                        projectDeleteFromList = false
+                        projectRowError = error.localizedDescription
+                    }
                     if projectDeleteFromHistory {
                         projectDeleteFromHistory = false
                         historyError = error.localizedDescription

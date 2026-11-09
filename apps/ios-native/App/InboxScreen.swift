@@ -1744,6 +1744,7 @@ private struct TaskRowSwipeButton: View {
         case "organize": return "folder"
         case "dates": return "calendar"
         case "delete": return "trash"
+        case "duplicate": return "square.on.square"
         case "restore": return "arrow.uturn.backward"
         default: return "arrow.right"
         }
@@ -1789,6 +1790,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     let closeGeneration: Int
     let layoutDirection: LayoutDirection
     let activate: (CoreObject, String) -> Void
+    var cornerRadius: CGFloat = 14
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var offset: CGFloat = 0
@@ -1834,7 +1836,7 @@ private struct TaskRowSwipeTray: ViewModifier {
                     }
                     .offset(x: offset)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             .background(GeometryReader { geometry in
                 Color.clear.onAppear { width = geometry.size.width }
                     .onChange(of: geometry.size.width) { width = $0; close() }
@@ -1887,6 +1889,19 @@ private struct TaskRowSwipeTray: ViewModifier {
         let target: CGFloat = offset > min(72, leftWidth / 2) ? leftWidth
             : offset < -min(72, rightWidth / 2) ? -rightWidth : 0
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { offset = target }
+    }
+}
+
+extension View {
+    func projectRowSwipeTray(actions: CoreObject, identity: String, rowID: String, palette: AppPalette, enabled: Bool,
+                             layoutDirection: LayoutDirection, activate: @escaping (CoreObject, String) -> Void) -> some View {
+        modifier(TaskRowSwipeTray(host: .local, actions: actions, identity: identity, rowID: rowID, palette: palette,
+                                  enabled: enabled, closeGeneration: 0, layoutDirection: layoutDirection,
+                                  activate: activate, cornerRadius: 8))
+    }
+
+    func projectRowLongPress(identity: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        modifier(TaskCardStackLongPress(identity: identity, enabled: enabled, action: action))
     }
 }
 

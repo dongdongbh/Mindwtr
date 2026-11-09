@@ -23612,6 +23612,99 @@ final class CoreHostTests: XCTestCase {
     }
 
 
+    private func seedProjectMoveRows() async throws {
+        let bootstrap = host()
+        _ = try await bootstrap.start()
+        await bootstrap.close()
+        let at = recentAreaTestTime()
+        let sqlite = try SQLiteBridge(url: database)
+        _ = try sqlite.execute("INSERT INTO areas (id, name, color, orderNum, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                               parametersJSON: json(["move-area", "Move Area", "#22c55e", 0, at, at, 1]))
+        for (id, order, focused) in [("move-a", 0, 0), ("move-b", 1, 0), ("move-c", 2, 0), ("move-star", 3, 1)] {
+            _ = try sqlite.execute("INSERT INTO projects (id, title, status, color, areaId, orderNum, tagIds, isSequential, isFocused, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                   parametersJSON: json([id, id, "active", "#94a3b8", "move-area", order, "[]", 0, focused, at, at, 1]))
+        }
+        sqlite.close()
+    }
+
+    private func projectMoveRequest(_ core: CoreHost, projectID: String, direction: String) async throws -> [String: Any] {
+        let view = try object(await core.call("menuRead", argumentsJSON: json(["projects", json(["tagFilter": "__all__", "moves": true])])))
+        let group = try XCTUnwrap((view["active"] as? [[String: Any]])?.first { $0["areaId"] as? String == "move-area" })
+        let order = try XCTUnwrap(group["projects"] as? [[String: Any]]).compactMap { $0["id"] as? String }
+        return ["requestId": UUID().uuidString.lowercased(), "projectId": projectID, "direction": direction,
+                "tagFilter": "__all__", "order": order]
+    }
+
+    private func projectMoveOrder() throws -> [String] {
+        try projectRows().filter { $0["areaId"] as? String == "move-area" }
+            .sorted { (($0["orderNum"] as? NSNumber)?.doubleValue ?? 0) < (($1["orderNum"] as? NSNumber)?.doubleValue ?? 0) }
+            .compactMap { $0["id"] as? String }
+    }
+
+    func testProjectMoveReadsMovesFailedCommitExactRetryAndRefusesPrivateMethods() async throws {
+        try await seedProjectMoveRows()
+        let faults = HostIOFaults()
+        let core = host(faults)
+        _ = try await core.start()
+        let view = try object(await core.call("menuRead", argumentsJSON: json(["projects", json(["tagFilter": "__all__", "moves": true])])))
+        let moves = try XCTUnwrap(view["moves"] as? [String: [String: Bool]])
+        XCTAssertEqual(moves["move-star"], ["up": false, "down": false])
+        XCTAssertEqual(moves["move-a"], ["up": false, "down": true])
+        XCTAssertEqual(moves["move-c"], ["up": true, "down": false])
+        let plain = try object(await core.call("menuRead", argumentsJSON: json(["projects", json(["tagFilter": "__all__"])])))
+        XCTAssertNil(plain["moves"])
+        let request = try await projectMoveRequest(core, projectID: "move-c", direction: "up")
+        XCTAssertEqual(request["order"] as? [String], ["move-star", "move-a", "move-b", "move-c"])
+        var diagnostics: [String] = []
+        faults.commandDiagnostic = { diagnostics.append($0) }
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Project move COMMIT failure") } }
+        await expectFailure("SAVE_FAILED") { _ = try await core.call("projectMoveWrite", argumentsJSON: json([json(request)])) }
+        XCTAssertTrue(diagnostics.isEmpty)
+        XCTAssertEqual(try projectMoveOrder(), ["move-a", "move-b", "move-c", "move-star"])
+        XCTAssertEqual(try object(String(contentsOf: journal))["method"] as? String, "projectMoveCommit")
+        faults.beforeSQL = nil
+        let retry = try await core.retryPending()
+        let result = try object(XCTUnwrap(retry))
+        XCTAssertEqual(diagnostics, ["projectMoveApplied"])
+        XCTAssertEqual(result["projectId"] as? String, "move-c")
+        XCTAssertEqual(result["orderedIds"] as? [String], ["move-a", "move-c", "move-b", "move-star"])
+        XCTAssertEqual(try projectMoveOrder(), ["move-a", "move-c", "move-b", "move-star"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await expectFailure("STALE_REVISION") { _ = try await core.call("projectMoveWrite", argumentsJSON: json([json(request)])) }
+        await expectFailure("STALE_REVISION") { _ = try await core.call("projectMoveRetryOutcome", argumentsJSON: json([json(request)])) }
+        for method in ["projectMovePrepare", "projectMoveValidate", "projectMoveCommit"] {
+            await expectFailure("unavailable") { _ = try await core.call(method, argumentsJSON: json([json(request)])) }
+        }
+        await core.close()
+    }
+
+    func testProjectMoveColdRecoveryAppliesOnceAndRefusesMalformedInput() async throws {
+        try await seedProjectMoveRows()
+        let faults = HostIOFaults()
+        let writer = host(faults)
+        _ = try await writer.start()
+        let request = try await projectMoveRequest(writer, projectID: "move-a", direction: "down")
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected cold Project move failure") } }
+        await expectFailure("SAVE_FAILED") { _ = try await writer.call("projectMoveWrite", argumentsJSON: json([json(request)])) }
+        await writer.close()
+        let reopened = host()
+        let startup = try object(await reopened.start())
+        let recovery = try XCTUnwrap(startup["recovery"] as? [String: Any])
+        XCTAssertEqual(recovery["method"] as? String, "projectMoveCommit")
+        XCTAssertEqual((recovery["result"] as? [String: Any])?["orderedIds"] as? [String], ["move-b", "move-a", "move-c", "move-star"])
+        XCTAssertEqual(try projectMoveOrder(), ["move-b", "move-a", "move-c", "move-star"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await expectFailure { _ = try await reopened.call("menuRead", argumentsJSON: json(["projects", json(["tagFilter": "__all__", "moves": false])])) }
+        var invalid = request
+        invalid["requestId"] = UUID().uuidString.uppercased()
+        await expectFailure("INVALID_INPUT") { _ = try await reopened.call("projectMoveWrite", argumentsJSON: json([json(invalid)])) }
+        var unshown = try await projectMoveRequest(reopened, projectID: "move-a", direction: "down")
+        unshown["order"] = ["move-a"]
+        await expectFailure("INVALID_INPUT") { _ = try await reopened.call("projectMoveWrite", argumentsJSON: json([json(unshown)])) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await reopened.close()
+    }
+
     func testProjectTaskSortTitleDefaultNoopAndArchivedPreserveRows() async throws {
         try await seedProjectRenameRows()
         let faults = HostIOFaults()

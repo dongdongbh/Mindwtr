@@ -17,7 +17,7 @@ final class HostMethodRegistryTests: XCTestCase {
             "managePersonCreate", "managePersonDelete", "managePersonEdit", "manageTaxonomy", "mindSweepAdd", "notificationSetting",
             "pomodoroTransitionWrite", "projectAreaWrite", "projectAttachmentWrite", "projectCreate", "projectDateWrite", "projectDeleteUndo",
             "projectDeleteWrite", "projectDuplicateWrite", "projectFileRemoveWrite", "projectFlowWrite", "projectFocusWrite", "projectLifecycleWrite",
-            "projectNotesWrite", "projectOrganizeDestinationCreateWrite", "projectRenameWrite", "projectSectionCreate", "projectSectionDelete",
+            "projectMoveWrite", "projectNotesWrite", "projectOrganizeDestinationCreateWrite", "projectRenameWrite", "projectSectionCreate", "projectSectionDelete",
             "projectSectionOrder", "projectSectionRename", "projectStatusWrite", "projectTagsWrite", "projectTaskOrderWrite", "projectTaskSortWrite",
             "projectTasksAddTagWrite", "projectTasksDeleteUndoWrite", "projectTasksDeleteWrite", "projectTasksMoveWrite", "projectTasksOrganizeWrite",
             "projectTasksRemoveTagWrite", "projectToSectionUndoWrite", "projectToSectionWrite", "referenceProjectNextAction", "referenceTaskBackdate",

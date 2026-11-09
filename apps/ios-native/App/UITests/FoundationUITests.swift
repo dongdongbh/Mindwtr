@@ -14594,6 +14594,97 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons[title + " changed"].exists)
     }
 
+    private func projectRowsApp(_ name: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        let library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library]
+        print(name + " isolated library: " + library)
+        app.launch()
+        openProjectRows(app)
+        return app
+    }
+
+    private func openProjectRows(_ app: XCUIApplication) {
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        boardTap(app, "tab-menu")
+        boardTap(app, "menu-projects")
+        boardEnabled(app.buttons["projects-manage-areas"])
+    }
+
+    private func createProjectRow(_ app: XCUIApplication, _ title: String) -> String {
+        let input = app.textFields["projects-create-title"]
+        boardEnabled(input)
+        input.tap(); input.typeText(title)
+        boardTap(app, "projects-create-add")
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "project-open-", title)).firstMatch
+        boardEnabled(row, timeout: 20)
+        return String(row.identifier.dropFirst("project-open-".count))
+    }
+
+    private func waitForProjectRow(_ app: XCUIApplication, _ upper: String, above lower: String) {
+        let first = app.buttons["project-open-" + upper]
+        let second = app.buttons["project-open-" + lower]
+        let ordered = NSPredicate { _, _ in first.exists && second.exists && first.frame.minY < second.frame.minY }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ordered, object: nil)], timeout: 20), .completed)
+    }
+
+    func testProjectsListRowMenuMovesLongPressMovesAndAreaOpens() {
+        let app = projectRowsApp("Project row menu")
+        let alpha = createProjectRow(app, "Row Alpha")
+        let beta = createProjectRow(app, "Row Beta")
+        waitForProjectRow(app, alpha, above: beta)
+        boardTap(app, "project-row-menu-" + beta)
+        boardTap(app, "project-row-menu-up-" + beta)
+        waitForProjectRow(app, beta, above: alpha)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Project row moved up"; shot.lifetime = .keepAlways; add(shot)
+        app.terminate(); app.launch(); openProjectRows(app)
+        waitForProjectRow(app, beta, above: alpha)
+        let row = app.buttons["project-open-" + beta]
+        boardEnabled(row)
+        row.press(forDuration: 1.0)
+        let alert = app.alerts["Row Beta"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertFalse(alert.buttons["Move up"].exists, "RN offers no move past the top of the area")
+        alert.buttons["Move down"].tap()
+        waitForProjectRow(app, alpha, above: beta)
+        boardTap(app, "project-row-menu-" + alpha)
+        XCTAssertFalse(app.buttons["project-row-menu-up-" + alpha].exists)
+        boardTap(app, "project-row-menu-area-" + alpha)
+        boardEnabled(app.buttons["project-area-close"], timeout: 20)
+        boardTap(app, "project-area-close")
+        boardEnabled(app.buttons["project-back"])
+        app.terminate()
+    }
+
+    func testProjectsListRowSwipeDuplicateAndDeleteWithUndo() {
+        let app = projectRowsApp("Project row swipe")
+        let gamma = createProjectRow(app, "Row Gamma")
+        let row = app.buttons["project-open-" + gamma]
+        row.swipeRight()
+        boardTap(app, "task-swipe-duplicate-" + gamma)
+        boardEnabled(app.buttons["project-back"], timeout: 20)
+        XCTAssertTrue(app.staticTexts["project-duplicate-notice"].waitForExistence(timeout: 10))
+        boardTap(app, "project-back")
+        boardEnabled(app.buttons["projects-manage-areas"])
+        let copies = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "project-open-", "Row Gamma"))
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 2"), object: copies)], timeout: 20), .completed)
+        boardEnabled(row)
+        row.swipeLeft()
+        boardTap(app, "task-swipe-delete-" + gamma)
+        let alert = app.alerts["Projects"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertTrue(alert.staticTexts["Delete this project? Tasks in this project will be kept and moved to unassigned."].exists)
+        alert.buttons["Delete"].tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 20))
+        boardTap(app, "project-delete-undo")
+        boardEnabled(row, timeout: 20)
+        app.terminate(); app.launch(); openProjectRows(app)
+        boardEnabled(app.buttons["project-open-" + gamma], timeout: 20)
+        app.terminate()
+    }
+
     func testAreaCreateDuplicateCancelColorAndProjectRelaunch() {
         let app = XCUIApplication()
         let library = UUID().uuidString.lowercased()
