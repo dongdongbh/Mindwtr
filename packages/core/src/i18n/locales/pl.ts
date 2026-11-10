@@ -738,6 +738,8 @@ export const plOverrides: Record<string, string> = {
         'review.openTasks': 'Otwarte zadania',
         'review.intro': 'Złap jasność, bądź na bieżąco i odzyskaj kreatywność.',
         'review.openGuide': 'Przegląd tygodniowy',
+        'review.startDailyReview': 'Rozpocznij codzienny przegląd',
+        'review.startWeeklyReview': 'Rozpocznij przegląd tygodniowy',
         'dailyReview.openGuide': 'Codzienny przegląd',
         'dailyReview.title': 'Codzienny przegląd',
         'dailyReview.introTitle': 'Codzienny reset',

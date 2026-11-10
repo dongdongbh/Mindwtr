@@ -737,6 +737,8 @@ export const ruOverrides: Record<string, string> = {
         'review.openTasks': 'Открытые задачи',
         'review.intro': 'Будьте ясны, будьте в курсе событий и проявите творческий подход.',
         'review.openGuide': 'Еженедельный обзор',
+        'review.startDailyReview': 'Начать ежедневный обзор',
+        'review.startWeeklyReview': 'Начать еженедельный обзор',
         'dailyReview.openGuide': 'Ежедневный обзор',
         'dailyReview.title': 'Ежедневный обзор',
         'dailyReview.introTitle': 'Ежедневный сброс',

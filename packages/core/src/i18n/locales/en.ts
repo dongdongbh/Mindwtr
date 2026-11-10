@@ -1145,6 +1145,8 @@ export const en: Record<string, string> = {
         'review.openTasks': 'Open tasks',
         'review.intro': 'Get clear, get current, and get creative.',
         'review.openGuide': 'Weekly Review',
+        'review.startDailyReview': 'Start daily review',
+        'review.startWeeklyReview': 'Start weekly review',
         'dailyReview.openGuide': 'Daily Review',
         'dailyReview.title': 'Daily Review',
         'dailyReview.introTitle': 'Daily reset',

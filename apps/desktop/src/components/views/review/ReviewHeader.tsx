@@ -1,10 +1,13 @@
 import { CheckSquare, List } from 'lucide-react';
 import { tFallback, type TaskSortBy } from '@mindwtr/core';
+import { cn } from '../../../lib/utils';
 import { CONTEXTS_AXES, type ContextsGroupBy } from '../list/next-grouping';
 import { GroupBySelect } from '../list/GroupBySelect';
 import {
     SortBySelect,
     ToolbarButton,
+    TOOLBAR_CONTROL_BASE,
+    TOOLBAR_CONTROL_MUTED,
 } from '../list/list-toolbar';
 
 type ReviewHeaderProps = {
@@ -32,20 +35,22 @@ export function ReviewHeader({
                 <h2 className="text-3xl font-bold tracking-tight">{title}</h2>
                 <p className="text-sm text-muted-foreground">{taskCountLabel}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
                 <button
                     type="button"
                     onClick={onShowDailyGuide}
-                    className="h-10 whitespace-nowrap rounded-lg bg-muted/50 px-4 text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    title={labels.dailyReview}
+                    className={cn(TOOLBAR_CONTROL_BASE, TOOLBAR_CONTROL_MUTED, 'inline-flex min-w-0 max-w-full items-center justify-center rounded-lg px-3 font-medium')}
                 >
-                    {labels.dailyReview}
+                    <span className="truncate">{labels.dailyReview}</span>
                 </button>
                 <button
                     type="button"
                     onClick={onShowGuide}
-                    className="h-10 whitespace-nowrap rounded-lg bg-primary px-4 text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    title={labels.weeklyReview}
+                    className={cn(TOOLBAR_CONTROL_BASE, 'inline-flex min-w-0 max-w-full items-center justify-center rounded-lg border-primary bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90')}
                 >
-                    {labels.weeklyReview}
+                    <span className="truncate">{labels.weeklyReview}</span>
                 </button>
             </div>
         </header>

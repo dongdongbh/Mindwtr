@@ -1107,6 +1107,8 @@ export const ukOverrides: Record<string, string> = {
     "review.openTasks": "Відкриті завдання",
     "review.intro": "Будьте чіткими, будьте актуальними та будьте креативними.",
     "review.openGuide": "Тижневий огляд",
+    "review.startDailyReview": "Почати щоденний огляд",
+    "review.startWeeklyReview": "Почати тижневий огляд",
     "dailyReview.openGuide": "Щоденний огляд",
     "dailyReview.title": "Щоденний огляд",
     "dailyReview.introTitle": "Щоденне скидання",

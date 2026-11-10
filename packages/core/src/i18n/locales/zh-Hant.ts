@@ -1100,6 +1100,8 @@ export const zhHant: Record<string, string> = {
         'review.openTasks': '未完成任務',
         'review.intro': '保持清晰、保持當前、保持創意。',
         'review.openGuide': '每週回顧',
+        'review.startDailyReview': '開始每日回顧',
+        'review.startWeeklyReview': '開始每週回顧',
         'dailyReview.openGuide': '每日回顧',
         'dailyReview.title': '每日回顧',
         'dailyReview.introTitle': '每日整理',

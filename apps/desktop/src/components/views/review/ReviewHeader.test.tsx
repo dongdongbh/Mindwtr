@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ReviewListControls } from './ReviewHeader';
+import { ReviewHeader, ReviewListControls } from './ReviewHeader';
 import { openToolbarSelect } from '../../../test/toolbar-select';
 
 const translations: Record<string, string> = {
@@ -21,6 +21,33 @@ const translations: Record<string, string> = {
     'taskEdit.tab.view': 'View',
     'taskEdit.tagsLabel': 'Tags',
 };
+
+describe('ReviewHeader', () => {
+    it('starts each review from a labelled workflow action without a selected filter state', () => {
+        const onShowDailyGuide = vi.fn();
+        const onShowGuide = vi.fn();
+        render(
+            <ReviewHeader
+                title="Review"
+                taskCountLabel="3 tasks"
+                onShowDailyGuide={onShowDailyGuide}
+                onShowGuide={onShowGuide}
+                labels={{ dailyReview: 'Start daily review', weeklyReview: 'Start weekly review' }}
+            />
+        );
+
+        const daily = screen.getByRole('button', { name: 'Start daily review' });
+        const weekly = screen.getByRole('button', { name: 'Start weekly review' });
+        expect(daily).not.toHaveAttribute('aria-pressed');
+        expect(weekly).not.toHaveAttribute('aria-pressed');
+        fireEvent.click(daily);
+        expect(onShowDailyGuide).toHaveBeenCalledOnce();
+        expect(onShowGuide).not.toHaveBeenCalled();
+        fireEvent.click(weekly);
+        expect(onShowGuide).toHaveBeenCalledOnce();
+        expect(screen.getByRole('heading', { name: 'Review' })).toBeInTheDocument();
+    });
+});
 
 describe('ReviewListControls', () => {
     it('shows direct Sort and Group controls and highlights each non-default value independently', () => {

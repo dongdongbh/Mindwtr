@@ -1,5 +1,7 @@
 
 export const nlOverrides: Record<string, string> = {
+    "review.startDailyReview": "Dagelijkse terugblik starten",
+    "review.startWeeklyReview": "Wekelijkse terugblik starten",
     "review.projectDeferred": "Gepland",
     "taskEdit.startAdvanceReminderLabel": "Voor de start",
     'savedFilters.saveTitle': "Filter opslaan",

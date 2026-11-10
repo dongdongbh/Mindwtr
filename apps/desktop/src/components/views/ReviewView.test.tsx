@@ -374,7 +374,7 @@ describe('ReviewView', () => {
     it('auto-skips an empty weekly review to the all-clear state while showing checked stages', async () => {
         const { getByText } = renderWithProviders(<ReviewView />);
 
-        fireEvent.click(getByText('Weekly Review'));
+        fireEvent.click(getByText('Start weekly review'));
         await waitForExternalCalendarIdle();
 
         await waitFor(() => expect(getByText('Review Complete!')).toBeInTheDocument());
@@ -407,7 +407,7 @@ describe('ReviewView', () => {
         });
         const { getByRole, getByText, queryByRole } = renderWithProviders(<ReviewView />);
 
-        fireEvent.click(getByText('Weekly Review'));
+        fireEvent.click(getByText('Start weekly review'));
         await waitForExternalCalendarIdle();
         expect(getByRole('heading', { level: 1, name: 'Process Inbox' })).toBeInTheDocument();
         expect(getByText('Inbox Zero Goal')).toBeInTheDocument();
@@ -459,7 +459,7 @@ describe('ReviewView', () => {
         });
         const { getByRole, getByText, queryByText } = renderWithProviders(<ReviewView />);
 
-        fireEvent.click(getByText('Weekly Review'));
+        fireEvent.click(getByText('Start weekly review'));
         await waitForExternalCalendarIdle();
         expect(getByRole('heading', { level: 1, name: 'Process Inbox' })).toBeInTheDocument();
 
@@ -516,7 +516,7 @@ describe('ReviewView', () => {
 
         const { getByRole, getByText } = renderWithProviders(<ReviewView />);
 
-        fireEvent.click(getByText('Weekly Review'));
+        fireEvent.click(getByText('Start weekly review'));
         await waitFor(() => expect(getByRole('heading', { level: 1, name: 'Stale items' })).toBeInTheDocument());
 
         fireEvent.click(getByRole('button', { name: 'Run analysis' }));
@@ -555,7 +555,7 @@ describe('ReviewView', () => {
 
         const { getByText, getByRole, getByPlaceholderText } = renderWithProviders(<ReviewView />);
 
-        fireEvent.click(getByText('Weekly Review'));
+        fireEvent.click(getByText('Start weekly review'));
         await waitForExternalCalendarIdle();
 
         expect(getByRole('heading', { level: 1, name: 'Review Projects' })).toBeInTheDocument();

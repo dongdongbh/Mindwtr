@@ -1106,6 +1106,8 @@ export const huOverrides: Record<string, string> = {
     'review.openTasks': 'Nyitott feladatok',
     'review.intro': 'Tisztázzon, legyen naprakész, és gondolkodjon kreatívan.',
     'review.openGuide': 'Heti áttekintés',
+    'review.startDailyReview': 'Napi áttekintés indítása',
+    'review.startWeeklyReview': 'Heti áttekintés indítása',
     'dailyReview.openGuide': 'Napi áttekintés',
     'dailyReview.title': 'Napi áttekintés',
     'dailyReview.introTitle': 'Napi frissítés',
