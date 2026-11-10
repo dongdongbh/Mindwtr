@@ -246,6 +246,8 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Bulk selection
 
+- Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
+
 - Reach: Any task list › Select. The toolbar offers Select All, Add context, Remove context, Add tag, Remove tag, Bulk organize, Export selected tasks as CSV, and Delete. Done leaves the mode.
 - Shortcuts: `Ctrl+Click` (`Cmd+Click`) or `Shift+Click` a row. `x` toggles selection (Standard).
 - Code: `apps/desktop/src/components/views/list/BulkSelectionToolbar.tsx`, `apps/desktop/src/components/views/list/ListBulkActions.tsx`, `apps/desktop/src/components/views/list/TaskBulkOrganizeModal.tsx`, `apps/desktop/src/components/views/review/ReviewBulkActions.tsx`, `apps/desktop/src/components/TokenPickerModal.tsx`

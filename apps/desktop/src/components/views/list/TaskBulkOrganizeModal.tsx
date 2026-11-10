@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ClipboardCheck, X } from 'lucide-react';
 import {
+    BULK_ORGANIZE_STATUS_OPTIONS,
     compareAreasByOrder,
     createBulkOrganizeArea,
     createBulkOrganizeProject,
@@ -55,7 +56,6 @@ const parseTokenInput = (value: string, field: 'contexts' | 'tags'): string[] =>
     ))));
 };
 
-const STATUS_OPTIONS: BulkOrganizeStatus[] = ['next', 'waiting', 'someday', 'reference', 'done'];
 const KEEP_VALUE = '__KEEP__';
 const NONE_VALUE = '__NONE__';
 const bulkDateInputClassName = 'h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring';
@@ -341,7 +341,7 @@ export function TaskBulkOrganizeModal({
                             className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         >
                             <option value={KEEP_VALUE}>{tFallback(t, 'bulk.keepStatus', 'Keep status')}</option>
-                            {STATUS_OPTIONS.map((option) => (
+                            {BULK_ORGANIZE_STATUS_OPTIONS.map((option) => (
                                 <option key={option} value={option}>
                                     {tFallback(t, `status.${option}`, option)}
                                 </option>

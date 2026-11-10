@@ -51,6 +51,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Selection mode and Bulk organize
 
+- Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
+
 - Reach: Long-press a row in Inbox, Waiting For, Someday/Maybe, Reference, or Done. The bulk bar shows the count, statuses, Add tag, Remove tag, Delete, and Bulk organize (Inbox only).
 - Selectors: `organize-create`, `organize-picker-search`, `organize-create-failed`, `destination-search`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/BulkBar.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ListActions.kt`

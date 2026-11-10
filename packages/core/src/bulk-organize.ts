@@ -1,6 +1,6 @@
 import type { Task, TaskStatus } from './types';
 
-export type BulkOrganizeStatus = Exclude<TaskStatus, 'inbox' | 'archived'>;
+export type BulkOrganizeStatus = Exclude<TaskStatus, 'archived'>;
 
 export type BulkOrganizeTaskUpdateInput = {
 

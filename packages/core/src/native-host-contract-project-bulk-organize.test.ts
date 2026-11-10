@@ -74,6 +74,7 @@ describe('Project Organize actual RN/raw SQLite parity', () => {
         ['Done recurrence with mixed previous statuses', { status: 'done', dueDate: '2026-11-10' }],
         ['Reference clears scheduling', { status: 'reference', startDate: '2026-11-01', dueDate: '2026-11-02' }],
         ['Next preserves ordinary status policy', { status: 'next' }],
+        ['Inbox returns selected tasks for reprocessing', { status: 'inbox' }],
     ] satisfies [string, Partial<BulkOrganizeDraft>][])('matches real planBulkOrganize/buildBulkOrganizeInput/batchUpdateTasks across nine SQL domains: %s', async (_label, draft) => {
         clock(); const initial = seed(), rn = await openSqliteHost(initial); let expected, expectedRows, count = 0;
         try {

@@ -131,7 +131,7 @@ export function getTaskListBulkBusyLabels(t: Translate) {
 }
 
 
-export const BULK_ORGANIZE_STATUS_OPTIONS: BulkOrganizeStatus[] = ['next', 'waiting', 'someday', 'done', 'reference'];
+export const BULK_ORGANIZE_STATUS_OPTIONS: BulkOrganizeStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done', 'reference'];
 
 export const BULK_ORGANIZE_KEEP = '__KEEP__';
 

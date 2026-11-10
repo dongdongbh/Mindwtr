@@ -124,6 +124,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Bulk selection
 
+- Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
+
 - Reach: Long press a task row in Inbox, project tasks, Waiting For, Someday, Contexts, or Review. The bar shows Move to, Bulk organize, Range, Add tag, Remove tag, Delete, and Done to exit.
 - Selectors: `task-list-range-select-toggle`, `task-list-reorder-shortcut`, `bulk-organize-project-picker-row`, `bulk-organize-area-picker-row`, `project-task-selection-bulk-bar`
 - Code: `apps/mobile/components/use-task-list-selection.ts`, `apps/mobile/components/task-list/TaskListBulkBar.tsx`, `apps/mobile/components/task-list/TaskListBulkOrganizeModal.tsx`

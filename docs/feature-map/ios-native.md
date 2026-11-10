@@ -51,6 +51,8 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Inbox
 
+- Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
+
 - Reach: Tab bar › Inbox. The toolbar has Sort, Group and Filters icons. The primary button reads Process Inbox (N), or Mind Sweep when Inbox is empty.
 - Selectors: `inbox-scroll`, `inbox-process-primary`, `inbox-mind-sweep-primary`, `inbox-mind-sweep-accessory`, `inbox-chips-clear`, `inbox-sort-close`, `inbox-group-close`, `inbox-more`
 - Code: `apps/ios-native/App/InboxScreen.swift`, `apps/ios-native/App/ListFilterControls.swift`

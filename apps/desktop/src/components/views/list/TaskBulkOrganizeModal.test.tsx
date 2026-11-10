@@ -107,6 +107,14 @@ describe('TaskBulkOrganizeModal', () => {
         ensureDestinationSavedMock.mockResolvedValue(undefined);
     });
 
+    it('can return selected tasks to Inbox for reprocessing', () => {
+        const { getByRole, onApply } = renderModal();
+        const option = getByRole('option', { name: 'inbox' });
+        fireEvent.change(option.parentElement!, { target: { value: 'inbox' } });
+        fireEvent.click(getByRole('button', { name: 'Apply to selected' }));
+        expect(onApply).toHaveBeenCalledWith({ status: 'inbox', contexts: [], tags: [] });
+    });
+
     it('uses the translated bulk organize label for the heading', () => {
         const { getByRole } = renderModal({
             t: (key) => key === 'bulk.organize' ? '批量整理' : key,
