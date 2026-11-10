@@ -33,6 +33,7 @@ export function GroupBySelect<Axis extends TaskGroupAxis>({
     const visibleAxes = prioritiesEnabled ? axes : axes.filter((axis) => axis !== 'priority');
     return (
         <ToolbarSelect
+            compact
             active={defaultValue !== undefined && value !== defaultValue}
             className={cn('w-auto max-w-full min-w-0', className)}
             label={groupLabel}

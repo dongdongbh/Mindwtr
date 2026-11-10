@@ -32,6 +32,54 @@ const openListbox = () => {
 
 const focusedOptionLabel = () => (document.activeElement as HTMLElement | null)?.textContent;
 
+describe('ToolbarSelect presentations', () => {
+    it('keeps the compact label visible and exposes the full selected value on hover', () => {
+        const selectedLabel = 'Voraussichtliches Abschlussdatum des Projekts';
+        render(
+            <ToolbarSelect
+                compact
+                label="Sortieren"
+                value="date"
+                options={[{ value: 'date', label: selectedLabel }]}
+                onChange={vi.fn()}
+            />
+        );
+
+        const trigger = screen.getByRole('combobox', { name: 'Sortieren' });
+        expect(trigger).toHaveTextContent(`Sortieren${selectedLabel}`);
+        expect(trigger).toHaveAttribute('title', `Sortieren: ${selectedLabel}`);
+        fireEvent.click(trigger);
+        expect(screen.getByRole('listbox', { name: 'Sortieren' })).toBeInTheDocument();
+        expect(screen.getByRole('option', { name: selectedLabel })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('preserves the labelled default presentation', () => {
+        renderSelect();
+
+        const trigger = screen.getByRole('combobox', { name: 'Sort' });
+        expect(trigger).toHaveTextContent('SortAlpha');
+        expect(trigger).not.toHaveAttribute('title');
+    });
+
+    it('keeps pills value-only and does not emit an unchanged selection', () => {
+        const onChange = vi.fn();
+        render(<ToolbarSelect pill label="Status" value="a" options={OPTIONS} onChange={onChange} />);
+
+        const trigger = screen.getByRole('combobox', { name: 'Status' });
+        expect(trigger).toHaveTextContent(/^Alpha$/);
+        expect(trigger.querySelector('svg')).toBeNull();
+        expect(trigger).not.toHaveAttribute('title');
+        fireEvent.click(trigger);
+        fireEvent.click(screen.getByRole('option', { name: 'Alpha' }));
+        expect(onChange).not.toHaveBeenCalled();
+        expect(trigger).toHaveFocus();
+        fireEvent.click(trigger);
+        fireEvent.click(screen.getByRole('option', { name: 'Gamma' }));
+        expect(onChange).toHaveBeenCalledOnce();
+        expect(onChange).toHaveBeenCalledWith('c');
+    });
+});
+
 describe('ToolbarSelect keyboard interaction', () => {
     afterEach(() => {
         vi.restoreAllMocks();

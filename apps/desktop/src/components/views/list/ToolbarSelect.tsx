@@ -14,7 +14,8 @@ import { useDropdownPosition } from '../../ui/use-dropdown-position';
 
 const TOOLBAR_SELECT_TRIGGER =
     'relative flex h-9 items-center rounded-lg border pl-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40';
-const TOOLBAR_SELECT_VALUE = 'min-w-0 flex-1 truncate pr-8 text-left';
+const TOOLBAR_SELECT_LABEL = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground';
+const TOOLBAR_SELECT_VALUE = 'min-w-0 flex-1 truncate pl-2 pr-8 text-left';
 
 export type ToolbarSelectOption = {
     value: string;
@@ -30,11 +31,12 @@ type ToolbarSelectProps = {
     options: ToolbarSelectOption[];
     onChange: (value: string) => void;
     className?: string;
+    compact?: boolean;
     pill?: boolean;
     triggerClassName?: string;
 };
 
-export function ToolbarSelect({ active = false, label, icon, value, options, onChange, className, pill = false, triggerClassName }: ToolbarSelectProps) {
+export function ToolbarSelect({ active = false, label, icon, value, options, onChange, className, compact = false, pill = false, triggerClassName }: ToolbarSelectProps) {
     const [open, setOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -131,7 +133,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
     };
 
     return (
-        <div ref={containerRef} className={cn('relative', pill && 'inline-flex shrink-0', className)}>
+        <div ref={containerRef} className={cn('relative', pill && 'inline-flex shrink-0', className, compact && !pill && 'min-w-0 max-w-[min(100%,16rem)]')}>
             <button
                 ref={triggerRef}
                 type="button"
@@ -140,7 +142,7 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
                 aria-expanded={open}
                 aria-controls={open ? listboxId : undefined}
                 aria-label={label}
-                title={label}
+                title={compact && !pill ? `${label}: ${selected?.label ?? ''}` : undefined}
                 onClick={() => setOpen((prev) => !prev)}
                 onKeyDown={(event) => {
                     if (event.key === 'Escape' && open) {
@@ -169,11 +171,20 @@ export function ToolbarSelect({ active = false, label, icon, value, options, onC
                         ? 'border-primary bg-primary/10 text-primary hover:bg-primary/15'
                         : 'border-border bg-card text-foreground hover:bg-muted/70'),
                     triggerClassName ?? className,
+                    compact && !pill && 'w-full min-w-0 max-w-full',
                 )}
             >
                 {pill ? <span className="truncate">{selected?.label ?? ''}</span> : <>
                     {icon}
-                    <span className={TOOLBAR_SELECT_VALUE}>{selected?.label ?? ''}</span>
+                    {compact ? (
+                        <span className="min-w-0 flex-1 truncate pr-8 text-left">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className="pl-2">{selected?.label ?? ''}</span>
+                        </span>
+                    ) : <>
+                        <span className={TOOLBAR_SELECT_LABEL}>{label}</span>
+                        <span className={TOOLBAR_SELECT_VALUE}>{selected?.label ?? ''}</span>
+                    </>}
                     <ChevronDown
                         className={cn(
                             'pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-transform',

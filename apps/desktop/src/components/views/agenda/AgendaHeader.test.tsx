@@ -85,8 +85,8 @@ describe('AgendaHeader', () => {
         );
         expect(sort).toHaveClass('bg-card');
         expect(group).toHaveClass('bg-primary/10');
-        expect(group).toHaveTextContent('Project');
-        expect(group).toHaveAttribute('title', 'Group');
+        expect(group).toHaveTextContent(/Group.*Project/);
+        expect(group).toHaveAttribute('title', 'Group: Project');
 
         view.rerender(
             <AgendaHeader
@@ -188,12 +188,12 @@ describe('AgendaHeader', () => {
 
 
     it('renders its controls in the shared list-toolbar style', () => {
-        const { container, getByRole } = renderHeader();
+        const { container, getByRole, getByText } = renderHeader();
 
         const groupTrigger = getByRole('combobox', { name: 'Group' });
         expect(groupTrigger.className).toContain('h-9');
         expect(groupTrigger.className).toContain('rounded-lg');
-        expect(groupTrigger).toHaveAttribute('title', 'Group');
+        expect(getByText('Group')).toBeInTheDocument();
 
         const buttons = [...container.querySelectorAll('button')];
         expect(buttons.length).toBeGreaterThan(0);

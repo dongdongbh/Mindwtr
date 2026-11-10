@@ -90,6 +90,7 @@ export function SortBySelect<Sort extends SortField = TaskSortBy>({ value, defau
     );
     return (
         <ToolbarSelect
+            compact
             active={defaultValue !== undefined && value !== defaultValue}
             className={cn('w-auto max-w-full min-w-0', className)}
             label={sortLabel}

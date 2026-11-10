@@ -201,7 +201,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Reach: Any task list › Filters (Contexts & tags, Projects, Priority, Time estimate, Task dates). Sort and Group sit beside it. Focus and Contexts offer Save filter.
 - Code: `apps/desktop/src/components/views/list/ListFiltersPanel.tsx`, `apps/desktop/src/components/views/list/FilterDisclosure.tsx`, `apps/desktop/src/components/views/list/active-filter-chips.ts`, `apps/desktop/src/components/views/list/ViewControls.tsx`, `apps/desktop/src/components/views/list/GroupBySelect.tsx`, `apps/desktop/src/components/views/list/list-toolbar.tsx`, `apps/desktop/src/components/views/list/ToolbarSelect.tsx`
 - Checks: `e2e/compact-filters.spec.ts`, `e2e/saved-focus-filter-toggle.spec.ts`, `e2e/ui-simplification.spec.ts`, `e2e/keyboard-ui-compat.spec.ts`, `apps/desktop/src/components/views/list/ListFiltersPanel.test.tsx`, `apps/desktop/src/components/views/list/FilterDisclosure.test.tsx`, `apps/desktop/src/components/views/list/ToolbarSelect.test.tsx`
-- Notes: A chip for a value the view does not apply is muted and does not count as filtering. `Esc` in a view's search input returns focus to the list.
+- Notes: Sort and Group keep visible sentence-case labels and aligned icons in compact controls; long values truncate with the full value on hover. A chip for a value the view does not apply is muted and does not count as filtering. `Esc` in a view's search input returns focus to the list.
 
 ## List presentation
 
