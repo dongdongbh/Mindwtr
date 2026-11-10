@@ -30,6 +30,11 @@ afterEach(() => {
 });
 
 describe('mcp service', () => {
+  test('conditional completion is refused before opening the direct SQLite backend', async () => {
+    const service = createService({ readonly: false, dbPath: join(createTempDir(), 'mindwtr.db') });
+    await expect(service.completeTask('task', { expectedVersion: `sha256-${'a'.repeat(64)}` })).rejects.toThrow('requires the desktop Local API backend');
+  });
+
   test('delegates read operations through query deps', async () => {
     const fakeDb = {} as any;
     const deps = {

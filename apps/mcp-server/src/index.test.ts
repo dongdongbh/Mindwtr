@@ -254,8 +254,9 @@ describe('mcp server index', () => {
     const get = tools.get('mindwtr_get_task')!.handler;
     const add = tools.get('mindwtr_add_task')!.handler;
     const update = tools.get('mindwtr_update_task')!.handler;
+    const complete = tools.get('mindwtr_complete_task')!.handler;
     for (const result of [await get({ id: 't1' }), await add({ title: 'Capture', idempotencyKey: 'capture' }),
-      await update({ id: 't1', title: 'Changed', expectedVersion: version })]) {
+      await update({ id: 't1', title: 'Changed', expectedVersion: version }), await complete({ id: 't1', expectedVersion: version })]) {
       expect(JSON.parse(result.content[0].text)).toEqual({ task: mockTask(), version });
     }
     expect(calls[1].url).toBe('http://127.0.0.1:3456/v1/tasks');
@@ -264,12 +265,28 @@ describe('mcp server index', () => {
     expect(calls[2].url).toBe('http://127.0.0.1:3456/v1/tasks/t1');
     expect(calls[2].headers.get('If-Match')).toBe(`"${version}"`);
     expect(JSON.parse(calls[2].body!)).toEqual({ title: 'Changed' });
+    expect(calls[3].url).toBe('http://127.0.0.1:3456/v2/tasks/t1/complete');
+    expect(calls[3].headers.get('If-Match')).toBe(`"${version}"`);
     conflict = true;
     const result = await update({ id: 't1', title: 'Changed again', expectedVersion: version });
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.content[0].text).code).toBe('task_version_conflict');
     expect(result.content[0].text).not.toContain('private-response');
-    expect(calls).toHaveLength(4);
+    const completeResult = await complete({ id: 't1', expectedVersion: version });
+    expect(completeResult.isError).toBe(true);
+    expect(JSON.parse(completeResult.content[0].text).code).toBe('task_version_conflict');
+    expect(calls).toHaveLength(6);
+  });
+
+  test('Local API task listings expose sibling versions and keep transport metadata out of tasks', async () => {
+    const { server, tools } = createMockServer();
+    const version = `sha256-${'a'.repeat(64)}`;
+    const service = createLocalApiService({ url: 'http://127.0.0.1:3456', token: 'fixture-token',
+      fetcher: async () => new Response(JSON.stringify({ tasks: [mockTask()], versions: { t1: version } })),
+    });
+    registerMindwtrTools(server, service, false, { localApi: true });
+    const response = await tools.get('mindwtr_list_tasks')!.handler({});
+    expect(JSON.parse(response.content[0].text)).toEqual({ tasks: [mockTask()], versions: { t1: version } });
   });
 
   test('reliable write fields validate only in Local API mode and cannot be silently ignored elsewhere', () => {
@@ -278,24 +295,29 @@ describe('mcp server index', () => {
     registerMindwtrTools(localApi.server, createMockService(), false, { localApi: true });
     const add = localApi.tools.get('mindwtr_add_task')!.inputSchema;
     const update = localApi.tools.get('mindwtr_update_task')!.inputSchema;
+    const complete = localApi.tools.get('mindwtr_complete_task')!.inputSchema;
     expect(add.safeParse({ title: 'Capture', idempotencyKey: '!' }).success).toBe(true);
     expect(add.safeParse({ title: 'Capture', idempotencyKey: 'x'.repeat(128) }).success).toBe(true);
     expect(update.safeParse({ id: 't1', expectedVersion: version }).success).toBe(true);
+    expect(complete.safeParse({ id: 't1', expectedVersion: version }).success).toBe(true);
     for (const idempotencyKey of ['', 'x'.repeat(129), 'has space', '\n', 'é']) {
       expect(add.safeParse({ title: 'Capture', idempotencyKey }).success).toBe(false);
     }
     for (const expectedVersion of ['1', `"${version}"`, '*', `W/"${version}"`]) {
       expect(update.safeParse({ id: 't1', expectedVersion }).success).toBe(false);
+      expect(complete.safeParse({ id: 't1', expectedVersion }).success).toBe(false);
     }
     const other = createMockServer();
     registerMindwtrTools(other.server, createMockService(), false);
     const otherAdd = other.tools.get('mindwtr_add_task')!.inputSchema;
     const otherUpdate = other.tools.get('mindwtr_update_task')!.inputSchema;
+    const otherComplete = other.tools.get('mindwtr_complete_task')!.inputSchema;
     if (!(otherAdd instanceof ZodObject) || !(otherUpdate instanceof ZodObject)) throw new Error('Expected task object schemas');
     expect(Object.hasOwn(otherAdd.shape, 'idempotencyKey')).toBe(false);
     expect(Object.hasOwn(otherUpdate.shape, 'expectedVersion')).toBe(false);
     expect(otherAdd.safeParse({ title: 'Capture', idempotencyKey: 'capture' }).success).toBe(false);
     expect(otherUpdate.safeParse({ id: 't1', title: 'Changed', expectedVersion: version }).success).toBe(false);
+    expect(otherComplete.safeParse({ id: 't1', expectedVersion: version }).success).toBe(false);
     expect(otherAdd.safeParse({ title: 'Capture' }).success).toBe(true);
     expect(otherUpdate.safeParse({ id: 't1', title: 'Changed' }).success).toBe(true);
   });

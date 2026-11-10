@@ -465,7 +465,8 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
       logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
       return mapTask(result.task);
     },
-    completeTask: async (id: string) => {
+    completeTask: async (id: string, controls?: { expectedVersion?: string }) => {
+      if (controls?.expectedVersion !== undefined) throw new ValidationError('Conditional completion requires the desktop Local API backend.');
       const result = await request<{ task: AppData['tasks'][number] }>('POST', `/tasks/${encodeURIComponent(id)}/complete`);
       return mapTask(result.task);
     },

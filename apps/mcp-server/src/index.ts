@@ -569,6 +569,11 @@ export const registerMindwtrTools = (
       const tasks = await service.listTasks({
         ...input,
       });
+      if (options.localApi) {
+        const localTasks: LocalApiTask[] = tasks;
+        const versions = Object.fromEntries(localTasks.flatMap((task) => task.version === undefined ? [] : [[task.id, task.version]]));
+        return createMcpTextResponse({ tasks: localTasks.map(({ version: _version, ...task }) => task), ...(Object.keys(versions).length > 0 ? { versions } : {}) });
+      }
       return createMcpTextResponse({ tasks });
     }),
   );
@@ -705,11 +710,12 @@ export const registerMindwtrTools = (
   server.registerTool(
     'mindwtr_complete_task',
     {
-      description: 'Mark a task as done in the configured Mindwtr backend.',
-      inputSchema: completeTaskSchema,
+      description: options.localApi ? 'Mark a task done through the desktop Local API. Set expectedVersion from a task read to reject concurrent edits.' : 'Mark a task as done in the configured Mindwtr backend.',
+      inputSchema: options.localApi ? completeTaskSchema.extend({ expectedVersion: localApiTaskVersionSchema.optional() }).strict() : completeTaskSchema.strict(),
     },
     withReadonlyMcpErrorHandling('mindwtr_complete_task', async (input) => {
-      const task = await service.completeTask(input.id);
+      const expectedVersion = options.localApi && 'expectedVersion' in input ? localApiTaskVersionSchema.optional().parse(input.expectedVersion) : undefined;
+      const task = await service.completeTask(input.id, expectedVersion === undefined ? undefined : { expectedVersion });
       return taskResponse(task);
     }),
   );

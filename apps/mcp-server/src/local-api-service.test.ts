@@ -116,6 +116,21 @@ describe('desktop Local API URL and authentication boundary', () => {
 });
 
 describe('desktop Local API task reads', () => {
+  test('carries list versions through filtering and pagination without changing task fields', async () => {
+    const rows = [task('first', { priority: 'urgent' }), task('second', { priority: 'high' }), task('deleted', { deletedAt: iso })];
+    const versions = Object.fromEntries(rows.map((row, index) => [row.id, `sha256-${String(index).repeat(64)}`]));
+    const { service } = fixture(() => jsonResponse({ tasks: rows, versions }));
+    expect(await service.listTasks({ sortBy: 'priority', offset: 1, limit: 1 })).toEqual([{ ...rows[1], version: versions.second }]);
+    expect((await service.listTasks({ includeDeleted: true })).find((row) => row.id === 'deleted')?.version).toBe(versions.deleted);
+    expect(rows.some((row) => 'version' in row)).toBe(false);
+  });
+
+  test('rejects malformed or incomplete list versions instead of attaching the wrong validator', async () => {
+    for (const versions of [null, [], 'bad', {}, { 'task-1': 'bad' }, { other: version }]) {
+      await expect(fixture(() => jsonResponse({ tasks: [task()], versions })).service.listTasks({})).rejects.toThrow('invalid response');
+    }
+  });
+
   const tasks = [task('next', { projectId: 'project-1', dueDate: '2026-01-02', isFocusedToday: true, priority: 'urgent' }),
     task('done', { status: 'done' }), task('archived', { status: 'archived' }), task('deleted', { deletedAt: iso }),
     task('waiting', { status: 'waiting', contexts: ['@work'], title: 'Ask finance', priority: 'high' }),
@@ -437,6 +452,36 @@ describe('desktop Local API failure safety', () => {
 });
 
 describe('desktop Local API reliable task writes', () => {
+  test('conditional completion requires the new protected route and matching response validator', async () => {
+    const { service, calls } = fixture(() => versionedResponse(task('task-1', { status: 'done' })));
+    expect(await service.completeTask('task-1', { expectedVersion: version })).toEqual({ ...task('task-1', { status: 'done' }), version });
+    expect(calls[0].url).toBe(`${origin}/v2/tasks/task-1/complete`);
+    expect(calls[0].headers.get('If-Match')).toBe(`"${version}"`);
+    expect(calls[0].body).toBeUndefined();
+    await service.completeTask('task-1');
+    expect(calls[1].url).toBe(`${origin}/tasks/task-1/complete`);
+    expect(calls[1].headers.has('If-Match')).toBe(false);
+  });
+
+  test('protected completion never falls back after an old server, malformed reply, conflict, or transport failure', async () => {
+    for (const reply of [
+      () => jsonResponse({}, 404),
+      () => jsonResponse({ task: task() }),
+      () => jsonResponse({ code: 'task_version_conflict' }, 412),
+      () => { throw new Error('transport'); },
+    ]) {
+      const { service, calls } = fixture(reply);
+      await expect(service.completeTask('task-1', { expectedVersion: version })).rejects.toThrow();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(`${origin}/v2/tasks/task-1/complete`);
+    }
+    const { service, calls } = fixture(() => versionedResponse());
+    for (const expectedVersion of ['', '1', '*', `W/"${version}"`]) {
+      await expect(service.completeTask('task-1', { expectedVersion })).rejects.toThrow(ValidationError);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
   test('reads version and sends conditional PATCH headers without persisting transport fields', async () => {
     const { service, calls } = fixture(() => versionedResponse());
     expect(await service.getTask({ id: 'task-1' })).toEqual({ ...task(), version });

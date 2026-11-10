@@ -405,7 +405,7 @@ export type MindwtrService = {
   getPerson: (input: GetPersonInput) => Promise<Person>;
   addTask: (input: AddTaskInput) => Promise<Task>;
   updateTask: (input: UpdateTaskInput) => Promise<Task>;
-  completeTask: (id: string) => Promise<Task>;
+  completeTask: (id: string, controls?: { expectedVersion?: string }) => Promise<Task>;
   deleteTask: (id: string) => Promise<Task>;
   restoreTask: (id: string) => Promise<Task>;
   addProject: (input: AddProjectInput) => Promise<Project>;
@@ -572,7 +572,10 @@ export const createService = (
       logViewSectionWrite(logInfo, 'task', 'update', input.viewSectionIds);
       return updated;
     },
-    completeTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.completeTask(id)),
+    completeTask: async (id, controls) => {
+      if (controls?.expectedVersion !== undefined) throw new ValidationError('Conditional completion requires the desktop Local API backend.');
+      return runCoreWriteWithRetries(options, deps, (core) => core.completeTask(id));
+    },
     deleteTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.deleteTask(id)),
     restoreTask: async (id) => runCoreWriteWithRetries(options, deps, (core) => core.restoreTask(id)),
     addProject: async (input) => {

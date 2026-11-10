@@ -761,6 +761,16 @@ mod tests {
                 json!({"id":"task","expectedVersion":version}),
                 "task_version_conflict",
             ),
+            (
+                "mindwtr_complete_task",
+                json!({"id":"task","expectedVersion":version}),
+                "task_version_conflict",
+            ),
+            (
+                "mindwtr_archive_task",
+                json!({"id":"task","expectedVersion":version}),
+                "task_version_conflict",
+            ),
         ] {
             let response = handle_mcp_request(
                 "fixture-token",
@@ -809,10 +819,25 @@ mod tests {
             json!({"id":"task","expectedVersion":1}),
             json!({"id":"task","expectedVersion":"1"}),
         ] {
-            assert!(
-                crate::mcp_tools::operation("mindwtr_update_task", input.as_object().unwrap())
-                    .is_err()
+            for name in [
+                "mindwtr_update_task",
+                "mindwtr_complete_task",
+                "mindwtr_archive_task",
+            ] {
+                assert!(crate::mcp_tools::operation(name, input.as_object().unwrap()).is_err());
+            }
+        }
+        for name in ["mindwtr_complete_task", "mindwtr_archive_task"] {
+            let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+            assert_eq!(
+                tool["inputSchema"]["properties"]["expectedVersion"]["type"],
+                "string"
             );
+            assert!(crate::mcp_tools::operation(
+                name,
+                json!({"id":"task","unknown":true}).as_object().unwrap()
+            )
+            .is_err());
         }
     }
 

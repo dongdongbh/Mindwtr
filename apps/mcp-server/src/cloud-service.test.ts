@@ -5,6 +5,15 @@ import { createCloudService } from './cloud-service.js';
 
 const iso = '2026-01-01T00:00:00.000Z';
 
+test('conditional completion is refused before contacting the Cloud backend', async () => {
+  let requests = 0;
+  const service = createCloudService({ url: 'https://mindwtr.example.com', token: 'fixture-token',
+    fetcher: async () => { requests++; throw new Error('Unexpected request'); },
+  });
+  await expect(service.completeTask('task', { expectedVersion: `sha256-${'a'.repeat(64)}` })).rejects.toThrow('requires the desktop Local API backend');
+  expect(requests).toBe(0);
+});
+
 const cloudData: AppData = {
   tasks: [
     {

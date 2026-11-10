@@ -920,6 +920,27 @@ pub(crate) fn task_response(task: Value) -> Value {
     json!({"version": task_version(&task), "task": task})
 }
 
+fn task_list_response(tasks: Vec<Value>) -> Value {
+    let versions = tasks
+        .iter()
+        .filter_map(|task| {
+            task.get("id")
+                .and_then(Value::as_str)
+                .map(|id| (id.to_string(), Value::String(task_version(task))))
+        })
+        .collect::<Map<_, _>>();
+    json!({"tasks": tasks, "versions": versions})
+}
+
+fn health_response() -> Value {
+    json!({"ok": true, "apiVersion": 2, "capabilities": {
+        "taskListVersions": true,
+        "conditionalTaskPatch": true,
+        "idempotentTaskCreate": true,
+        "conditionalTaskActions": true
+    }})
+}
+
 pub(crate) fn valid_task_response(response: &Value) -> bool {
     let Some(task) = response.get("task").filter(|task| task.is_object()) else {
         return false;
@@ -1044,6 +1065,7 @@ pub(crate) enum LocalOperation {
     TaskAction {
         id: String,
         action: String,
+        condition: Option<TaskMatchCondition>,
     },
 }
 
@@ -1076,6 +1098,23 @@ impl LocalOperation {
 pub(crate) fn operation_from_api_request(
     request: &ApiRequest,
 ) -> Result<Option<LocalOperation>, String> {
+    let protected_segments = path_segments(&request.path);
+    if request.method == "POST"
+        && protected_segments.len() == 4
+        && protected_segments[0] == "v2"
+        && protected_segments[1] == "tasks"
+        && matches!(protected_segments[3].as_str(), "complete" | "archive")
+    {
+        let header = request
+            .headers
+            .get("if-match")
+            .ok_or("Invalid If-Match header; required for protected task actions")?;
+        return Ok(Some(LocalOperation::TaskAction {
+            id: protected_segments[2].clone(),
+            action: protected_segments[3].clone(),
+            condition: Some(parse_if_match(header)?),
+        }));
+    }
     let path = request
         .path
         .strip_prefix("/v1/tasks")
@@ -1148,6 +1187,15 @@ pub(crate) fn operation_from_api_request(
             LocalOperation::TaskAction {
                 id: id(),
                 action: segments[2].clone(),
+                condition: if segments[2] == "restore" {
+                    None
+                } else {
+                    request
+                        .headers
+                        .get("if-match")
+                        .map(|header| parse_if_match(header))
+                        .transpose()?
+                },
             }
         }
         ("POST", _)
@@ -1199,12 +1247,12 @@ pub(crate) fn execute_operation(
     }
     match operation {
         LocalOperation::Health => {
-            return Ok(json!({ "ok": true }));
+            return Ok(health_response());
         }
         LocalOperation::ListTasks(query) => {
             let data = load_data_snapshot(app)?;
             let tasks = filter_tasks(array_items(&data, "tasks"), &query)?;
-            return Ok(json!({ "tasks": tasks }));
+            return Ok(task_list_response(tasks));
         }
         LocalOperation::ListProjects => {
             let data = load_data_snapshot(app)?;
@@ -1435,7 +1483,11 @@ pub(crate) fn execute_operation(
             })?;
             return Ok(json!({ "task": persisted_task(&persisted, &id)? }));
         }
-        LocalOperation::TaskAction { id, action } => {
+        LocalOperation::TaskAction {
+            id,
+            action,
+            condition,
+        } => {
             let action = action.as_str();
             if !matches!(action, "complete" | "archive" | "restore") {
                 return Err("Unsupported task action".into());
@@ -1445,6 +1497,7 @@ pub(crate) fn execute_operation(
             let operation = LocalOperation::TaskAction {
                 id: id.clone(),
                 action: action.into(),
+                condition: condition.clone(),
             };
             let mutation = mutate_task_rows_with_retries(app, scope, |data| {
                 mutate_task_operation(data, &operation)
@@ -1456,11 +1509,21 @@ pub(crate) fn execute_operation(
                 }
                 Err(error) => return Err(error),
             };
-            return Ok(json!({ "task": persisted_task(&persisted, &id)? }));
+            if condition.is_some() {
+                log::info!("Desktop Local API conditional action persisted extra.releaseCheck=v1.3.9/local-api-conditional-action operation={action} outcome=persisted");
+            }
+            let task = persisted_task(&persisted, &id)?;
+            return Ok(if action == "restore" {
+                json!({"task": task})
+            } else {
+                task_response(task)
+            });
         }
         LocalOperation::QueryTasks(input) => {
             let data = load_data_snapshot(app)?;
-            Ok(json!({ "tasks": crate::local_query::query_tasks(&data, &input)? }))
+            Ok(task_list_response(crate::local_query::query_tasks(
+                &data, &input,
+            )?))
         }
     }
 }
@@ -1512,7 +1575,14 @@ fn mutate_task_operation(
             })?;
             Ok((id.clone(), vec![task]))
         }
-        LocalOperation::TaskAction { id, action } => {
+        LocalOperation::TaskAction {
+            id,
+            action,
+            condition,
+        } => {
+            if let Some(condition) = condition {
+                ensure_task_version(data, id, condition)?;
+            }
             let action = action.as_str();
             let now = now_iso();
             if action == "complete" && recurrence_completion_refusal(data, &id, &now).is_some() {
@@ -5914,6 +5984,308 @@ mod tests {
     }
 
     #[test]
+    fn reliability_lists_expose_snapshot_versions_without_changing_tasks() {
+        let data = json!({"tasks":[
+            {"id":"active","title":"Active","status":"next","rev":2,"updatedAt":"2026-11-08T12:00:00Z"},
+            {"id":"deleted","title":"Deleted","status":"next","rev":3,"updatedAt":"2026-11-08T12:00:00Z","deletedAt":"2026-11-08T12:00:00Z"}
+        ],"projects":[],"settings":{}});
+        let before = data.clone();
+        let response =
+            task_list_response(filter_tasks(array_items(&data, "tasks"), &HashMap::new()).unwrap());
+        assert_eq!(response["tasks"], json!([data["tasks"][0]]));
+        assert_eq!(
+            response["versions"],
+            json!({"active": task_response(data["tasks"][0].clone())["version"]})
+        );
+        let response = task_list_response(
+            filter_tasks(
+                array_items(&data, "tasks"),
+                &HashMap::from([("deleted".into(), "1".into())]),
+            )
+            .unwrap(),
+        );
+        assert_eq!(response["versions"].as_object().unwrap().len(), 2);
+        assert_eq!(
+            response["versions"]["deleted"],
+            task_version(&data["tasks"][1])
+        );
+        let input = json!({"includeDeleted":true,"limit":1,"offset":1});
+        let response = task_list_response(
+            crate::local_query::query_tasks(&data, input.as_object().unwrap()).unwrap(),
+        );
+        assert_eq!(response["tasks"].as_array().unwrap().len(), 1);
+        assert_eq!(response["versions"].as_object().unwrap().len(), 1);
+        let task = &response["tasks"][0];
+        assert_eq!(
+            response["versions"][task["id"].as_str().unwrap()],
+            task_version(task)
+        );
+        assert_eq!(data, before);
+    }
+
+    #[test]
+    fn reliability_conditional_actions_dispatch_atomically_and_survive_reopen() {
+        use crate::storage::{
+            local_operation_test_commit, local_operation_test_seed, read_sqlite_data,
+        };
+        for action in ["complete", "archive"] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = directory.path().join("actions.sqlite");
+            let mut conn = rusqlite::Connection::open(&database).unwrap();
+            let mut data = empty_local_api_data();
+            let task = create_task_from_body(
+                json!({"title":"Recurring action","props":{"status":"next","dueDate":"2099-01-01","recurrence":{"rule":"daily"}}}).as_object().unwrap(),
+                "device", &data,
+            ).unwrap();
+            let id = task["id"].as_str().unwrap().to_string();
+            data["tasks"] = json!([task]);
+            local_operation_test_seed(&mut conn, &data).unwrap();
+            let initial = read_sqlite_data(&conn).unwrap();
+            let stale_version = task_version(&find_task(&initial, &id).unwrap());
+            local_operation_test_commit(
+                &conn,
+                TaskMutationReadScope::existing(&id, false),
+                |data| {
+                    mutate_task_operation(
+                        data,
+                        &LocalOperation::PatchTask {
+                            id: id.clone(),
+                            body: json!({"description":"Concurrent edit"})
+                                .as_object()
+                                .unwrap()
+                                .clone(),
+                        },
+                    )
+                },
+            )
+            .unwrap();
+            let before = read_sqlite_data(&conn).unwrap();
+            let current_version = task_version(&find_task(&before, &id).unwrap());
+            let access = LocalApiAccess {
+                allow_write: true,
+                shutdown: Arc::new(AtomicBool::new(false)),
+            };
+            let dispatch = |path: &str, condition: Option<String>, authorized: bool| {
+                let mut headers = HashMap::new();
+                if authorized {
+                    headers.insert("authorization".into(), "Bearer credential".into());
+                }
+                if let Some(condition) = condition {
+                    headers.insert("if-match".into(), condition);
+                }
+                handle_api_operation(
+                    "credential",
+                    &access,
+                    ApiRequest {
+                        method: "POST".into(),
+                        path: path.into(),
+                        query: HashMap::new(),
+                        headers,
+                        body: vec![],
+                    },
+                    |operation| {
+                        let canonical = local_operation_test_commit(
+                            &conn,
+                            TaskMutationReadScope::existing(&id, false),
+                            |data| mutate_task_operation(data, &operation),
+                        )?;
+                        Ok(task_response(find_task(&canonical, &id).unwrap()))
+                    },
+                )
+            };
+            let protected = format!("/v2/tasks/{id}/{action}");
+            assert_eq!(
+                dispatch(&protected, Some(format!("\"{current_version}\"")), false).status,
+                401
+            );
+            assert_eq!(dispatch(&protected, None, true).status, 400);
+            assert_eq!(dispatch(&protected, Some("bad".into()), true).status, 400);
+            assert_eq!(
+                dispatch(&protected, Some(format!("W/\"{current_version}\"")), true).status,
+                412
+            );
+            for path in [
+                &protected,
+                &format!("/tasks/{id}/{action}"),
+                &format!("/v1/tasks/{id}/{action}"),
+            ] {
+                let response = dispatch(path, Some(format!("\"{stale_version}\"")), true);
+                assert_eq!(response.status, 412);
+                assert_eq!(response.body["code"], "task_version_conflict");
+                assert_eq!(read_sqlite_data(&conn).unwrap(), before);
+            }
+            let request = ApiRequest {
+                method: "POST".into(),
+                path: protected.clone(),
+                query: HashMap::new(),
+                headers: HashMap::from([("if-match".into(), format!("\"{current_version}\""))]),
+                body: vec![],
+            };
+            let mcp = crate::mcp_tools::operation(
+                if action == "complete" {
+                    "mindwtr_complete_task"
+                } else {
+                    "mindwtr_archive_task"
+                },
+                json!({"id":id,"expectedVersion":current_version})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(operation_from_api_request(&request).unwrap().unwrap(), mcp);
+            let response = dispatch(&protected, Some(format!("\"{current_version}\"")), true);
+            assert_eq!(response.status, 200);
+            assert!(http_response(&response).contains("ETag: \"sha256-"));
+            assert_ne!(response.body["version"], current_version);
+            assert_eq!(response.body["task"]["description"], "Concurrent edit");
+            assert_eq!(
+                dispatch(&protected, Some(format!("\"{current_version}\"")), true).status,
+                412
+            );
+            let persisted = read_sqlite_data(&conn).unwrap();
+            assert_eq!(
+                persisted["tasks"].as_array().unwrap().len(),
+                if action == "complete" { 2 } else { 1 }
+            );
+            assert_eq!(
+                find_task(&persisted, &id).unwrap()["status"],
+                if action == "complete" {
+                    "done"
+                } else {
+                    "archived"
+                }
+            );
+            assert_eq!(
+                dispatch(&format!("/tasks/{id}/{action}"), None, true).status,
+                200
+            );
+            assert_eq!(dispatch(&protected, Some("*".into()), true).status, 200);
+            drop(conn);
+            let reopened = rusqlite::Connection::open(&database).unwrap();
+            let mut snapshots = [read_sqlite_data(&reopened).unwrap(), persisted];
+            for snapshot in &mut snapshots {
+                snapshot["tasks"]
+                    .as_array_mut()
+                    .unwrap()
+                    .sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+            }
+            assert_eq!(snapshots[0], snapshots[1]);
+        }
+    }
+
+    #[test]
+    fn reliability_conditional_completion_preserves_refusals_and_rolls_back_successor_failure() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut data = empty_local_api_data();
+        let mut task = create_task_from_body(
+            json!({"title":"Recurring action","props":{"status":"next","dueDate":"2099-01-01","recurrence":{"rule":"daily"}}}).as_object().unwrap(),
+            "device", &data,
+        ).unwrap();
+        let id = task["id"].as_str().unwrap().to_string();
+        task["recurrence"] = json!({"rule":"weekly","byDay":["MO"]});
+        data["tasks"] = json!([task]);
+        crate::storage::local_operation_test_seed(&mut conn, &data).unwrap();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        let operation = LocalOperation::TaskAction {
+            id: id.clone(),
+            action: "complete".into(),
+            condition: Some(TaskMatchCondition::Versions(vec![task_version(
+                &find_task(&before, &id).unwrap(),
+            )])),
+        };
+        assert_eq!(
+            crate::storage::local_operation_test_commit(
+                &conn,
+                TaskMutationReadScope::existing(&id, false),
+                |data| mutate_task_operation(data, &operation)
+            )
+            .unwrap_err(),
+            RECURRENCE_REQUIRES_APP
+        );
+        assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+        let data = crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(&id, false),
+            |data| {
+                mutate_task_operation(
+                    data,
+                    &LocalOperation::PatchTask {
+                        id: id.clone(),
+                        body: json!({"recurrence":{"rule":"daily"}})
+                            .as_object()
+                            .unwrap()
+                            .clone(),
+                    },
+                )
+            },
+        )
+        .unwrap();
+        conn.execute_batch(&format!("CREATE TRIGGER reject_successor BEFORE INSERT ON tasks WHEN NEW.id != '{id}' BEGIN SELECT RAISE(ABORT, 'fixture successor failure'); END;")).unwrap();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        let operation = LocalOperation::TaskAction {
+            id: id.clone(),
+            action: "complete".into(),
+            condition: Some(TaskMatchCondition::Versions(vec![task_version(
+                &find_task(&data, &id).unwrap(),
+            )])),
+        };
+        assert!(crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::existing(&id, false),
+            |data| mutate_task_operation(data, &operation)
+        )
+        .is_err());
+        assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+    }
+
+    #[test]
+    fn reliability_protected_routes_and_health_are_bounded() {
+        let access = LocalApiAccess {
+            allow_write: false,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        for path in ["/v2/tasks", "/v2/tasks/task", "/v2/tasks/task/restore"] {
+            let request = ApiRequest {
+                method: "POST".into(),
+                path: path.into(),
+                query: HashMap::new(),
+                headers: HashMap::new(),
+                body: vec![],
+            };
+            assert!(operation_from_api_request(&request).unwrap().is_none());
+        }
+        for authorized in [false, true] {
+            let response = handle_api_operation(
+                "credential",
+                &access,
+                ApiRequest {
+                    method: "GET".into(),
+                    path: "/health".into(),
+                    query: HashMap::new(),
+                    body: vec![],
+                    headers: if authorized {
+                        HashMap::from([("authorization".into(), "Bearer credential".into())])
+                    } else {
+                        HashMap::new()
+                    },
+                },
+                |operation| {
+                    assert_eq!(operation, LocalOperation::Health);
+                    Ok(health_response())
+                },
+            );
+            assert_eq!(response.status, if authorized { 200 } else { 401 });
+            if authorized {
+                assert_eq!(response.body["apiVersion"], 2);
+                assert_eq!(
+                    response.body["capabilities"],
+                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true})
+                );
+            }
+        }
+    }
+
+    #[test]
     fn reliability_http_dispatch_persists_versions_and_rejects_stale_patch() {
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::storage::local_operation_test_seed(&mut conn, &empty_local_api_data()).unwrap();
@@ -9570,6 +9942,7 @@ mod tests {
             &LocalOperation::TaskAction {
                 id: "late-start".to_string(),
                 action: "complete".to_string(),
+                condition: None,
             },
         );
         assert_eq!(result.unwrap_err(), RECURRENCE_REQUIRES_APP);

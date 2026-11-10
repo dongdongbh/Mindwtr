@@ -33,10 +33,12 @@ export type LocalApiServiceOptions = {
 export const localApiIdempotencyKeySchema = z.string().regex(/^[\x21-\x7e]{1,128}$/);
 export const localApiTaskVersionSchema = z.string().regex(/^sha256-[0-9a-f]{64}$/);
 export type LocalApiTask = Task & { version?: string };
-type LocalApiService = Omit<MindwtrService, 'getTask' | 'addTask' | 'updateTask'> & {
+type LocalApiService = Omit<MindwtrService, 'getTask' | 'addTask' | 'updateTask' | 'listTasks' | 'completeTask'> & {
+  listTasks: (input: ListTasksInput) => Promise<LocalApiTask[]>;
   getTask: (input: GetTaskInput) => Promise<LocalApiTask>;
   addTask: (input: AddTaskInput & { idempotencyKey?: string }) => Promise<LocalApiTask>;
   updateTask: (input: UpdateTaskInput & { expectedVersion?: string }) => Promise<LocalApiTask>;
+  completeTask: (id: string, controls?: { expectedVersion?: string }) => Promise<LocalApiTask>;
 };
 
 export const LOCAL_API_UNSUPPORTED_PROJECT_FIELDS = [
@@ -328,7 +330,15 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
   const entities = async <T extends Task | Project | Area>(path: string, key: 'tasks' | 'projects' | 'areas', kind: 'task' | 'project' | 'area'): Promise<T[]> => {
     const { body: result } = await request('GET', path);
     if (!Array.isArray(result[key])) return malformedResponse();
-    return result[key].map((value) => validateEntity<T>(value, kind));
+    const versions = kind === 'task' && result.versions !== undefined ? asRecord(result.versions) : undefined;
+    if (kind === 'task' && result.versions !== undefined && !versions) return malformedResponse();
+    return result[key].map((value) => {
+      const entity = validateEntity<T>(value, kind);
+      if (!versions) return entity;
+      const version = localApiTaskVersionSchema.safeParse(Object.hasOwn(versions, entity.id) ? versions[entity.id] : undefined);
+      if (!version.success) return malformedResponse();
+      return { ...entity, version: version.data };
+    });
   };
   const entityPath = (kind: 'tasks' | 'projects', id: string): string => {
     parseInput(z.string().min(1), id, 'entity ID');
@@ -408,7 +418,12 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
       logViewSectionWrite(options.logInfo, 'task', 'update', input.viewSectionIds);
       return task;
     },
-    completeTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/complete`, 'task', undefined, id),
+    completeTask: async (id, controls = {}) => {
+      const { expectedVersion } = parseInput(z.object({ expectedVersion: localApiTaskVersionSchema.optional() }).strict(), controls, 'task completion');
+      const path = `${entityPath('tasks', id)}/complete`;
+      return entity<LocalApiTask>('POST', expectedVersion === undefined ? path : `/v2${path}`, 'task', undefined, id,
+        expectedVersion === undefined ? {} : { headers: { 'If-Match': `"${expectedVersion}"` }, requireVersion: true });
+    },
     restoreTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/restore`, 'task', undefined, id),
     deleteTask: async (id) => deleteEntity<Task>('tasks', id),
     addProject: async (input) => {

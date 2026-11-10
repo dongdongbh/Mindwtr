@@ -70,6 +70,7 @@ pub(crate) fn tools() -> Vec<Value> {
             "mindwtr_list_tasks" => crate::local_query::TASK_QUERY_FIELDS.to_vec(),
             "mindwtr_add_task" => TASK_FIELDS.iter().copied().chain(["idempotencyKey"]).collect(),
             "mindwtr_update_task" => ["id", "expectedVersion"].into_iter().chain(TASK_FIELDS.iter().copied().filter(|field| *field != "attachments")).collect(),
+            "mindwtr_complete_task" | "mindwtr_archive_task" => vec!["id", "expectedVersion"],
             "mindwtr_add_project" => PROJECT_FIELDS.to_vec(),
             "mindwtr_update_project" => std::iter::once("id").chain(PROJECT_FIELDS.iter().copied()).collect(),
             "mindwtr_get_task" | "mindwtr_get_project" => vec!["id", "includeDeleted"],
@@ -346,9 +347,26 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
             }
         }
         "mindwtr_complete_task" | "mindwtr_archive_task" | "mindwtr_restore_task" => {
-            only(&["id"])?;
+            only(if name == "mindwtr_restore_task" {
+                &["id"]
+            } else {
+                &["id", "expectedVersion"]
+            })?;
+            let condition = input
+                .get("expectedVersion")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|version| local_api::valid_task_version(version))
+                        .map(|version| {
+                            local_api::TaskMatchCondition::Versions(vec![version.to_string()])
+                        })
+                        .ok_or_else(invalid)
+                })
+                .transpose()?;
             LocalOperation::TaskAction {
                 id: id()?,
+                condition,
                 action: if name == "mindwtr_complete_task" {
                     "complete"
                 } else if name == "mindwtr_archive_task" {
