@@ -3046,7 +3046,7 @@ describe('native host contract', () => {
             const state = useTaskStore.getState();
             const rowTask = state._allTasks.find((candidate) => candidate.id === id)!;
 
-            return { validUntil: getTaskRowMetaValidUntil(rowTask, NOW, resolveTaskRowFeatures(state.settings)), ...buildTaskRowMeta({
+            return { validUntil: getTaskRowMetaValidUntil(rowTask, NOW, resolveTaskRowFeatures(state.settings), options), ...buildTaskRowMeta({
                 ...options,
                 task: rowTask,
                 lookup: resolveTaskRowLookup(rowTask, state.projects, state.areas, state._sectionsById),
@@ -3102,13 +3102,13 @@ describe('native host contract', () => {
             const focusRows = focus.value.sections.flatMap(({ rows }) => rows);
             const deadline = tFallback(getTranslator('de'), 'focus.projectOverdue', 'Project overdue');
             expect(focusRows.find(({ id }) => id === 'boosted')?.meta)
-                .toEqual(mobileMeta('boosted', settings, 'de', 'de-DE', { projectDeadlineLabel: deadline }));
+                .toEqual(mobileMeta('boosted', settings, 'de', 'de-DE', { projectDeadlineLabel: deadline, relativeScheduleDates: true }));
             expect(focusRows.find(({ id }) => id === 'boosted')?.meta.parts).toEqual([
                 { kind: 'project', text: 'Taxes', projectId: 'p-due', dotColor: '#22c55e', detail: false },
                 { kind: 'projectDeadline', text: deadline, detail: false },
             ]);
             expect(focusRows.find(({ id }) => id === 'seq-first')?.meta)
-                .toEqual(mobileMeta('seq-first', settings, 'de', 'de-DE'));
+                .toEqual(mobileMeta('seq-first', settings, 'de', 'de-DE', { relativeScheduleDates: true }));
             expect(focusRows.find(({ id }) => id === 'seq-first')?.meta.parts[0])
                 .toEqual({ kind: 'project', text: 'Launch · Phase 1', projectId: 'p-seq', dotColor: '#22c55e', detail: false });
         });
