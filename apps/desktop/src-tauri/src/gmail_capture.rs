@@ -1324,8 +1324,7 @@ mod tests {
         assert_eq!(
             receipts(&context.receipts)
                 .unwrap()
-                .query_row("SELECT COUNT(*) FROM receipts", [], |r| r
-                    .get::<_, usize>(0))
+                .query_row("SELECT COUNT(*) FROM receipts", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
             2
         );
@@ -1364,8 +1363,7 @@ mod tests {
         assert!(context.lock().unwrap().page.is_none());
         assert_eq!(
             connection
-                .query_row("SELECT COUNT(*) FROM receipts", [], |r| r
-                    .get::<_, usize>(0))
+                .query_row("SELECT COUNT(*) FROM receipts", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
             0
         );

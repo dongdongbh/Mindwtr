@@ -6459,9 +6459,8 @@ mod tests {
             let reader = Connection::open(temp.path().join("snapshot.db")).unwrap();
             assert_eq!(
                 reader
-                    .query_row("SELECT count(*) FROM tasks", [], |row| row
-                        .get::<_, usize>(0))
-                    .unwrap(),
+                    .query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                    .unwrap() as usize,
                 10_001 + run
             );
             println!("snapshot run={run} retained={retained} lock_ms={locked:.2} read_ms={:.2} merge_ms={:.2} replace_ms={:.2} commit_ms={:.2} total_ms={committed:.2}",

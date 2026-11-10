@@ -44,7 +44,7 @@ tauri-plugin-deep-link = "2"
 
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
 dirs = "5"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 keyring = "2"
 
 
