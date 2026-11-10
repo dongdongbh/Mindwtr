@@ -1,5 +1,6 @@
 
 export const nlOverrides: Record<string, string> = {
+    'task.copyDetails': "Taakdetails kopiëren",
     "review.startDailyReview": "Dagelijkse terugblik starten",
     "review.startWeeklyReview": "Wekelijkse terugblik starten",
     "review.projectDeferred": "Gepland",

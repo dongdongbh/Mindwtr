@@ -1,5 +1,6 @@
 
 export const plOverrides: Record<string, string> = {
+    'task.copyDetails': "Kopiuj szczegóły zadania",
     "taskEdit.startAdvanceReminderLabel": "Przed rozpoczęciem",
     "settings.speechUseGemini": "Użyj Gemini",
     "settings.speechNativeUnsupported": "Ten dostawca rozpoznawania mowy nie jest jeszcze tutaj obsługiwany. Wybierz Gemini, OpenAI lub Whisper, aby korzystać z wprowadzania głosowego.",

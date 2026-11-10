@@ -394,6 +394,7 @@ export const svOverrides: Record<string, string> = {
         'list.confirmBatchDelete': 'Ta bort markerade uppgifter?',
         'list.taskDeleted': 'Uppgift borttagen',
         'list.taskCopied': 'Uppgift kopierad till urklipp',
+    'task.copyDetails': "Kopiera uppgiftsdetaljer",
         'task.copyTitle': 'Kopiera titel',
         "task.copyTaskLink": "Kopiera Mindwtr-länk",
         "task.copyTaskId": "Kopiera uppgiftens ID",

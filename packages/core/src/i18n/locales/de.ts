@@ -1,5 +1,6 @@
 
 export const deOverrides: Record<string, string> = {
+    'task.copyDetails': "Aufgabendetails kopieren",
     "taskEdit.startAdvanceReminderLabel": "Vor dem Start",
     "settings.speechUseGemini": "Gemini verwenden",
     "settings.speechNativeUnsupported": "Dieser Sprachanbieter wird hier noch nicht unterstützt. Wähle Gemini, OpenAI oder Whisper für die Sprachaufnahme.",

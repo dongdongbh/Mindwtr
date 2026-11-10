@@ -1,4 +1,5 @@
 export const viOverrides: Record<string, string> = {
+    'task.copyDetails': "Sao chép chi tiết công việc",
     "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
     "settings.speechUseGemini": "Dùng Gemini",
     "settings.speechNativeUnsupported": "Nhà cung cấp giọng nói này chưa được hỗ trợ ở đây. Chọn Gemini, OpenAI hoặc Whisper để dùng tính năng ghi nhận bằng giọng nói.",

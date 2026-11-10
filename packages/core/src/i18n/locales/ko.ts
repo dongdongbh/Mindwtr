@@ -50,6 +50,7 @@ export const koOverrides: Record<string, string> = {
     "task.expandChecklistConflict": "할 일이나 프로젝트가 변경되어 전환을 진행하지 못했습니다. 변경 사항은 유지됩니다.",
     "task.expandChecklistSaveFailed": "전환을 저장하지 못했습니다. 다시 시도하면 중복 없이 같은 전환을 저장합니다.",
 
+    'task.copyDetails': "작업 세부 정보 복사",
     'task.copyTitle': '제목 복사',
     "task.copyTaskLink": "Mindwtr 링크 복사",
     "task.copyTaskId": "작업 ID 복사",

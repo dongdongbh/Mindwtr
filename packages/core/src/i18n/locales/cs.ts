@@ -1,5 +1,6 @@
 
 export const csOverrides: Record<string, string> = {
+    'task.copyDetails': "Kopírovat podrobnosti úkolu",
     "taskEdit.startAdvanceReminderLabel": "Před začátkem",
     "settings.speechUseGemini": "Použít Gemini",
     "settings.speechNativeUnsupported": "Tento poskytovatel řeči zde zatím není podporován. Pro hlasové zadávání vyberte Gemini, OpenAI nebo Whisper.",

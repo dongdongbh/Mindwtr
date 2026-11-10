@@ -1,5 +1,6 @@
 
 export const itOverrides: Record<string, string> = {
+    'task.copyDetails': "Copia dettagli attività",
     "taskEdit.startAdvanceReminderLabel": "Prima dell’inizio",
     "settings.speechUseGemini": "Usa Gemini",
     "settings.speechNativeUnsupported": "Questo fornitore vocale non è ancora supportato qui. Seleziona Gemini, OpenAI o Whisper per usare la cattura vocale.",

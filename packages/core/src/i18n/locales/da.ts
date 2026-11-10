@@ -389,6 +389,7 @@ export const daOverrides: Record<string, string> = {
     'list.confirmBatchDelete': 'Vil du slette valgte opgaver?',
     'list.taskDeleted': 'Opgave slettet',
     'list.taskCopied': 'Opgave kopieret til udklipsholderen',
+    'task.copyDetails': "Kopiér opgavedetaljer",
     'task.copyTitle': 'Kopiér titel',
     "task.copyTaskLink": "Kopiér Mindwtr-link",
     "task.copyTaskId": "Kopiér opgavens ID",

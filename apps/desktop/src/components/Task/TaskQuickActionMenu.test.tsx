@@ -402,6 +402,8 @@ describe('TaskQuickActionMenu', () => {
     });
 
     it.each([
+        ['Copy task details', 1, 'pointer'],
+        ['Copy task details', 0, 'keyboard-or-assistive'],
         ['Copy Title', 1, 'pointer'],
         ['Copy Title', 0, 'keyboard-or-assistive'],
         ['Copy Mindwtr link', 1, 'pointer'],
@@ -559,8 +561,8 @@ describe('TaskQuickActionMenu', () => {
         const props = renderClosableMenu({ task: { ...task, status: 'done' }, readOnly: true });
 
         expect(screen.getAllByRole('menuitem').map((item) => item.textContent))
-            .toEqual(['Copy Title', 'Copy Mindwtr link', 'Copy task ID', 'Duplicate', 'Move to Next', 'Delete']);
-        await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}');
+            .toEqual(['Copy Title', 'Copy task details', 'Copy Mindwtr link', 'Copy task ID', 'Duplicate', 'Move to Next', 'Delete']);
+        await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}');
 
         expect(props.onStatusChange).toHaveBeenCalledExactlyOnceWith('next');
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();

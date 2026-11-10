@@ -31,7 +31,7 @@ import {
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 
 import { reportError } from '../../lib/report-error';
-import { copyTaskReference, copyTaskTitles } from '../../lib/task-clipboard';
+import { copyTaskDetails, copyTaskReference, copyTaskTitles } from '../../lib/task-clipboard';
 import { cn } from '../../lib/utils';
 import { isImeComposing } from '../../lib/ime';
 import { FocusStarIcon } from '../FocusStarIcon';
@@ -934,6 +934,16 @@ export function TaskQuickActionMenu({
                     label: tFallback(t, 'task.copyTitle', 'Copy Title'),
                     onClick: (event) => {
                         void copyTaskTitles([task], t, false, 'menu', {
+                            isTrusted: event.nativeEvent.isTrusted, detail: event.nativeEvent.detail,
+                        });
+                        onClose();
+                    },
+                })}
+                {renderMenuAction({
+                    icon: <Copy className="h-4 w-4" />,
+                    label: tFallback(t, 'task.copyDetails', 'Copy task details'),
+                    onClick: (event) => {
+                        void copyTaskDetails(task, projects.find((project) => project.id === task.projectId)?.title, t, {
                             isTrusted: event.nativeEvent.isTrusted, detail: event.nativeEvent.detail,
                         });
                         onClose();

@@ -1,5 +1,6 @@
 
 export const hiOverrides: Record<string, string> = {
+    'task.copyDetails': "कार्य का विवरण कॉपी करें",
     "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",
     "settings.speechUseGemini": "Gemini का उपयोग करें",
     "settings.speechNativeUnsupported": "यह वाक् प्रदाता अभी यहाँ समर्थित नहीं है। आवाज़ से कैप्चर करने के लिए Gemini, OpenAI या Whisper चुनें।",

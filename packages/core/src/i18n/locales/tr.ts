@@ -1,5 +1,6 @@
 
 export const trOverrides: Record<string, string> = {
+    'task.copyDetails': "Görev ayrıntılarını kopyala",
     "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",
     "settings.speechUseGemini": "Gemini'yi kullan",
     "settings.speechNativeUnsupported": "Bu konuşma sağlayıcısı burada henüz desteklenmiyor. Sesli giriş için Gemini, OpenAI veya Whisper seçin.",

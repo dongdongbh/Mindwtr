@@ -387,6 +387,7 @@ export const huOverrides: Record<string, string> = {
     'list.confirmBatchDelete': 'Törli a kijelölt feladatokat?',
     'list.taskDeleted': 'Feladat törölve',
     'list.taskCopied': 'Feladat a vágólapra másolva',
+    'task.copyDetails': "Feladat részleteinek másolása",
     'task.copyTitle': 'Cím másolása',
     "task.copyTaskLink": "Mindwtr-hivatkozás másolása",
     "task.copyTaskId": "Feladatazonosító másolása",

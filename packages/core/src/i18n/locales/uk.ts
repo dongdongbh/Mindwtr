@@ -1,5 +1,6 @@
 
 export const ukOverrides: Record<string, string> = {
+    'task.copyDetails': "Копіювати деталі завдання",
     "taskEdit.startAdvanceReminderLabel": "До початку",
     "taskEdit.advanceReminderLabel": "Завчасне нагадування",
     "taskEdit.advanceReminderMinutes": "За {count} хв",

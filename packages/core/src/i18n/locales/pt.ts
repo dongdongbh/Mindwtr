@@ -1,5 +1,6 @@
 
 export const ptOverrides: Record<string, string> = {
+    'task.copyDetails': "Copiar detalhes da tarefa",
     "taskEdit.startAdvanceReminderLabel": "Antes do início",
     "settings.speechUseGemini": "Usar Gemini",
     "settings.speechNativeUnsupported": "Este provedor de voz ainda não é compatível aqui. Selecione Gemini, OpenAI ou Whisper para usar a captura de voz.",

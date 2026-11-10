@@ -24,6 +24,21 @@ export async function copyTaskTitles(
     await writeTaskClipboard(text, t, message, source, input);
 }
 
+export async function copyTaskDetails(
+    task: Pick<Task, 'title' | 'description' | 'checklist' | 'startTime' | 'dueDate'>,
+    projectTitle: string | undefined,
+    t: (key: string) => string,
+    input?: TaskClipboardInput,
+): Promise<void> {
+    const fields: string[] = [];
+    if (projectTitle) fields.push(`${translateWithFallback(t, 'taskEdit.projectLabel', 'Project')}: ${projectTitle}`);
+    if (task.startTime) fields.push(`${translateWithFallback(t, 'taskEdit.startDateLabel', 'Start Date')}: ${task.startTime}`);
+    if (task.dueDate) fields.push(`${translateWithFallback(t, 'taskEdit.dueDateLabel', 'Due Date')}: ${task.dueDate}`);
+    const checklist = task.checklist?.map((item) => `[${item.isCompleted ? 'x' : ' '}] ${item.title}`).join('\n');
+    const text = [task.title, fields.join('\n'), task.description?.trim() ? task.description : undefined, checklist].filter(Boolean).join('\n\n');
+    await writeTaskClipboard(text, t, translateWithFallback(t, 'list.taskCopied', 'Task copied to clipboard'), 'menu', input);
+}
+
 export async function copyTaskReference(
     taskId: string,
     kind: 'link' | 'id',

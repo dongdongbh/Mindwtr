@@ -387,6 +387,7 @@ export const esOverrides: Record<string, string> = {
 'list.confirmBatchDelete': "¿Eliminar las tareas seleccionadas?",
 'list.taskDeleted': "Tarea eliminada",
 'list.taskCopied': 'Tarea copiada al portapapeles',
+    'task.copyDetails': "Copiar detalles de la tarea",
 'task.copyTitle': 'Copiar título',
 "task.copyTaskLink": "Copiar enlace de Mindwtr",
 "task.copyTaskId": "Copiar ID de la tarea",

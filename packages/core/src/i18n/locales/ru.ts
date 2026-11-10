@@ -1,5 +1,6 @@
 
 export const ruOverrides: Record<string, string> = {
+    'task.copyDetails': "Копировать сведения о задаче",
     "taskEdit.startAdvanceReminderLabel": "До начала",
     "settings.speechUseGemini": "Использовать Gemini",
     "settings.speechNativeUnsupported": "Этот провайдер распознавания речи здесь пока не поддерживается. Выберите Gemini, OpenAI или Whisper для голосового ввода.",

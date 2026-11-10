@@ -238,10 +238,12 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Task menu
 
-- Reach: Right-click a task row, or its more-options button. Items include Move to…, Dates…, Contexts…, Copy Title, Copy Mindwtr link, Copy task ID, Rename task, Add to checklist…, Create project from task, Convert to Section, Cancel task.
+- Copy task details copies the title, project name, start/due values, description and checklist as plain text. Copy Title and copy shortcuts retain their existing behavior.
+
+- Reach: Right-click a task row, or its more-options button. Items include Move to…, Dates…, Contexts…, Copy Title, Copy task details, Copy Mindwtr link, Copy task ID, Rename task, Add to checklist…, Create project from task, Convert to Section, Cancel task.
 - Shortcuts: `.` (Vim, Standard), `Ctrl+.` (Emacs). `F2` renames (Standard).
-- Code: `apps/desktop/src/components/Task/TaskQuickActionMenu.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.ts`, `apps/desktop/src/components/ui/DestinationSelector.tsx`, `apps/desktop/src/components/TaskProjectConversionDialog.tsx`
-- Checks: `e2e/task-menu-dates.spec.ts`, `e2e/task-menu-contexts.spec.ts`, `e2e/task-menu-project-create.spec.ts`, `e2e/task-copy-title.spec.ts`, `e2e/ui-simplification.spec.ts`, `apps/desktop/src/components/Task/TaskQuickActionMenu.test.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.test.tsx`, `apps/desktop/src/components/ui/DestinationSelector.test.tsx`
+- Code: `apps/desktop/src/components/Task/TaskQuickActionMenu.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.ts`, `apps/desktop/src/lib/task-clipboard.ts`, `apps/desktop/src/components/ui/DestinationSelector.tsx`, `apps/desktop/src/components/TaskProjectConversionDialog.tsx`
+- Checks: `e2e/task-menu-dates.spec.ts`, `e2e/task-menu-contexts.spec.ts`, `e2e/task-menu-project-create.spec.ts`, `e2e/task-copy-title.spec.ts`, `e2e/ui-simplification.spec.ts`, `apps/desktop/src/components/Task/TaskQuickActionMenu.test.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.test.tsx`, `apps/desktop/src/lib/task-clipboard.test.ts`, `apps/desktop/src/components/ui/DestinationSelector.test.tsx`
 - Notes: Move to… changes only the Container, never status or dates. Menu edits wait for Save; a project created there is not assigned until Save.
 
 ## Bulk selection

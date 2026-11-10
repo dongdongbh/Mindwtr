@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { copyTaskReference, copyTaskTitles } from './task-clipboard';
+import { copyTaskDetails, copyTaskReference, copyTaskTitles } from './task-clipboard';
 
 const mocks = vi.hoisted(() => ({
     info: vi.fn(), warn: vi.fn(), toast: vi.fn(), write: vi.fn(),
@@ -20,6 +20,31 @@ describe('task clipboard diagnostics', () => {
         mocks.write.mockResolvedValue(undefined);
         vi.stubGlobal('navigator', { clipboard: { writeText: mocks.write }, userActivation: { isActive: true } });
         vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    });
+
+    it('copies task details with exact date precision and checklist completion', async () => {
+        await copyTaskDetails({
+            title: 'Renew certificate', description: 'Check expiry first.\nKeep the backup.',
+            startTime: '2026-11-16', dueDate: '2026-11-20T15:30:00+01:00',
+            checklist: [{ id: 'a', title: 'Back up', isCompleted: true }, { id: 'b', title: 'Renew', isCompleted: false }],
+        }, 'Homeserver', t, { isTrusted: true, detail: 1 });
+        expect(mocks.write).toHaveBeenCalledExactlyOnceWith('Renew certificate\n\nProject: Homeserver\nStart Date: 2026-11-16\nDue Date: 2026-11-20T15:30:00+01:00\n\nCheck expiry first.\nKeep the backup.\n\n[x] Back up\n[ ] Renew');
+        expect(JSON.stringify(mocks.info.mock.calls)).not.toContain('Homeserver');
+    });
+
+    it('preserves description whitespace when copying task details', async () => {
+        const description = '  Keep the Markdown spacing.\n\n    code block  \n';
+        await copyTaskDetails({ title: 'Formatted note', description }, undefined, t);
+        expect(mocks.write).toHaveBeenCalledExactlyOnceWith(`Formatted note\n\n${description}`);
+    });
+
+    it('omits empty detail fields and reports clipboard rejection', async () => {
+        await copyTaskDetails({ title: 'Only title', description: '  ', checklist: [] }, undefined, t);
+        expect(mocks.write).toHaveBeenLastCalledWith('Only title');
+        mocks.write.mockRejectedValueOnce(new DOMException('Private content', 'NotAllowedError'));
+        await copyTaskDetails({ title: 'Private content' }, undefined, t);
+        expect(mocks.toast).toHaveBeenLastCalledWith('Could not copy task', 'error');
+        expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain('Private content');
     });
 
     it('copies titles and reports the menu outcome without task content', async () => {

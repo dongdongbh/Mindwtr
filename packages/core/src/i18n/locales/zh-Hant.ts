@@ -448,6 +448,7 @@ export const zhHant: Record<string, string> = {
         'list.confirmBatchDelete': '刪除選中的任務？',
         'list.taskDeleted': '任務已刪除',
         'list.taskCopied': '任務已複製到剪貼簿',
+    'task.copyDetails': "複製任務詳細資料",
         'task.copyTitle': '複製標題',
         "task.copyTaskLink": "複製 Mindwtr 連結",
         "task.copyTaskId": "複製任務 ID",
