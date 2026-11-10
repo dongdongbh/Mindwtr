@@ -42,6 +42,10 @@ struct MindwtrWidgetTaskItem: Decodable {
         return labels.isEmpty ? nil : labels.joined(separator: " · ")
     }
 
+    var accessibilityLabel: String {
+        [title, detailLabel, Self.nonEmpty(dueLabel)].compactMap { $0 }.joined(separator: ", ")
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil

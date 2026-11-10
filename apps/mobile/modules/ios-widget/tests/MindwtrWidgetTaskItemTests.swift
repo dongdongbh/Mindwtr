@@ -26,6 +26,17 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         XCTAssertNil(try decode().detailLabel)
     }
 
+    func testSingleLineAccessibilityRetainsStatusContextsProjectAndDateMeaning() throws {
+        XCTAssertEqual(try decode([
+            "statusLabel": "Waiting", "showStatus": true, "contexts": ["@电话"],
+            "contextLabel": "Launch", "dueLabel": "Today",
+        ]).accessibilityLabel, "Task, Waiting · @电话 · Launch, Today")
+        XCTAssertEqual(try decode([
+            "upcomingDate": "2026-11-11", "upcomingLabel": "Returns", "dueLabel": "Returns Tomorrow",
+        ]).accessibilityLabel, "Task, Returns Tomorrow")
+        XCTAssertEqual(try decode(["dueLabel": "  "]).accessibilityLabel, "Task")
+    }
+
     func testContextsRetainTheirTokensAndProjectIdentity() throws {
         let item = try decode([
             "contexts": ["@office", "@电话", "@home"],

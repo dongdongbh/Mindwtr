@@ -405,6 +405,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/widgets-ios/MindwtrWidgetsBundle.swift`, `apps/mobile/widgets-ios/MindwtrTasksWidget.swift`, `apps/mobile/plugins/ios-widgets-and-shortcuts.js`, `apps/mobile/ios-app-intents/MindwtrSiriCaptureIntents.swift`
 - Checks: `apps/mobile/lib/ios-widget-completions.test.ts`
 - Notes: The Control Center control opens `mindwtr://capture-quick?source=control`, which routes to the full-screen capture.
+- Mindwtr widget: Edit Widget → List selects a built-in list or saved search; Focus also offers Include available actions. Normal medium widgets use a single list header and one-line task titles with date labels. Rows adapt to the widget height and Dynamic Type while keeping completion and capture controls; a sole Focus/Schedule heading is omitted, real groups remain, and VoiceOver retains task metadata. Compact and the other widget sizes keep their existing layouts.
 
 ## Apple Watch companion
 

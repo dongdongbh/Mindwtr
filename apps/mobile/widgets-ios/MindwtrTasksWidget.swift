@@ -2,6 +2,10 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
 let mindwtrWidgetKind = "MindwtrTasksWidget"
 private let mindwtrWidgetAppGroup = "group.tech.dongdongbh.mindwtr"
 private let mindwtrWidgetPayloadKey = "mindwtr-ios-widget-payload"
@@ -476,17 +480,27 @@ private struct MindwtrWidgetMetrics {
     let sectionSpacing: CGFloat
     let padding: CGFloat
     let taskRowVPadding: CGFloat
+    var singleLine: Bool = false
 
     var headerHeight: CGFloat {
-        max(actionSize, headerSize + dateSize + 2)
+        if singleLine {
+            return max(actionSize, ceil(UIFont.systemFont(ofSize: headerSize, weight: .semibold).lineHeight))
+        }
+        return max(actionSize, headerSize + dateSize + 2)
     }
 
     var rowHeight: CGFloat {
-        max(actionSize, taskSize + detailSize + 2) + taskRowVPadding * 2 + rowSpacing
+        if singleLine {
+            return max(actionSize, ceil(UIFont.systemFont(ofSize: taskSize, weight: .medium).lineHeight))
+        }
+        return max(actionSize, taskSize + detailSize + 2) + taskRowVPadding * 2 + rowSpacing
     }
 
     var sectionHeaderHeight: CGFloat {
-        sectionSize + sectionSpacing
+        if singleLine {
+            return ceil(UIFont.systemFont(ofSize: sectionSize, weight: .semibold).lineHeight) + rowSpacing
+        }
+        return sectionSize + sectionSpacing
     }
 
     func scaled(by scale: CGFloat) -> MindwtrWidgetMetrics {
@@ -496,11 +510,12 @@ private struct MindwtrWidgetMetrics {
             sectionSize: sectionSize * scale,
             taskSize: taskSize * scale,
             detailSize: detailSize * scale,
-            actionSize: actionSize * min(scale, 1.2),
+            actionSize: actionSize * min(singleLine ? max(1, scale) : scale, 1.2),
             rowSpacing: rowSpacing,
             sectionSpacing: sectionSpacing,
             padding: padding,
-            taskRowVPadding: taskRowVPadding
+            taskRowVPadding: taskRowVPadding,
+            singleLine: singleLine
         )
     }
 
@@ -521,8 +536,9 @@ private struct MindwtrWidgetMetrics {
         case .systemMedium:
             return MindwtrWidgetMetrics(
                 headerSize: 17, dateSize: 11, sectionSize: 11, taskSize: 13,
-                detailSize: 10, actionSize: 34, rowSpacing: 2,
-                sectionSpacing: 6, padding: 12, taskRowVPadding: 1
+                detailSize: 10, actionSize: 34, rowSpacing: 0,
+                sectionSpacing: 4, padding: 8, taskRowVPadding: 0,
+                singleLine: true
             )
         default:
             return MindwtrWidgetMetrics(
@@ -580,6 +596,7 @@ private struct MindwtrTasksWidgetView: View {
                         .accessibilityLabel(Text(payload.captureLabel))
                     }
                 }
+                .frame(minHeight: metrics.singleLine ? metrics.headerHeight : nil)
 
                 if !hasSourceTasks {
                     if widgetFamily == .systemSmall {
@@ -606,7 +623,9 @@ private struct MindwtrTasksWidgetView: View {
                     widgetColumn(columns[0], payload: payload, palette: palette, metrics: metrics)
                 }
 
-                Spacer(minLength: 0)
+                if !metrics.singleLine {
+                    Spacer(minLength: 0)
+                }
             }
             .padding(metrics.padding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -625,10 +644,12 @@ private struct MindwtrTasksWidgetView: View {
                 .font(.system(size: metrics.headerSize, weight: .semibold))
                 .foregroundColor(hexColor(palette.text))
                 .lineLimit(1)
-            Text(nonEmpty(payload.dateLabel) ?? payload.subtitle)
-                .font(.system(size: metrics.dateSize, weight: .medium))
-                .foregroundColor(hexColor(palette.mutedText))
-                .lineLimit(1)
+            if !metrics.singleLine {
+                Text(nonEmpty(payload.dateLabel) ?? payload.subtitle)
+                    .font(.system(size: metrics.dateSize, weight: .medium))
+                    .foregroundColor(hexColor(palette.mutedText))
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -704,9 +725,12 @@ private struct MindwtrTasksWidgetView: View {
         )
         let columnHeight = remainingHeight
 
-        for (sectionIndex, section) in sourceSections(for: payload).enumerated() {
+        let sections = sourceSections(for: payload)
+        for (sectionIndex, section) in sections.enumerated() {
             var itemIndex = 0
-            let sectionTitle = nonEmpty(section.title)
+            let hidesTitle = metrics.singleLine && sections.count == 1
+                && (section.key == "focus" || section.key == "schedule")
+            let sectionTitle = hidesTitle ? nil : nonEmpty(section.title)
             while itemIndex < section.items.count, columnIndex < columns.count {
                 let headerCost = sectionTitle == nil ? 0 : metrics.sectionHeaderHeight
                 let fittingRows = max(0, Int(floor((remainingHeight - headerCost) / metrics.rowHeight)))
@@ -800,16 +824,44 @@ private struct MindwtrWidgetTaskRow: View {
             }
         }
         .padding(.vertical, metrics.taskRowVPadding)
+        .frame(minHeight: metrics.singleLine ? metrics.rowHeight : nil)
     }
 
     private var rowText: some View {
+        Group {
+            if metrics.singleLine {
+                HStack(spacing: 4) {
+                    taskTitle
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let dueLabel = nonEmpty(item.dueLabel) {
+                        Text(dueLabel)
+                            .font(.system(size: metrics.detailSize, weight: .medium))
+                            .foregroundColor(dueColor)
+                            .lineLimit(1)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(item.accessibilityLabel))
+            } else {
+                detailedRowText
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var taskTitle: some View {
+        Text(item.title)
+            .font(.system(size: metrics.taskSize, weight: .medium))
+            .foregroundColor(hexColor(palette.text))
+            .strikethrough(pendingAction != nil)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+
+    private var detailedRowText: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(item.title)
-                .font(.system(size: metrics.taskSize, weight: .medium))
-                .foregroundColor(hexColor(palette.text))
-                .strikethrough(pendingAction != nil)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            taskTitle
 
             HStack(spacing: 4) {
                 if let detailLabel = item.detailLabel {
@@ -836,8 +888,6 @@ private struct MindwtrWidgetTaskRow: View {
             .font(.system(size: metrics.detailSize, weight: .medium))
             .foregroundColor(hexColor(palette.mutedText))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     private var dueColor: Color {
