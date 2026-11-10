@@ -133,6 +133,9 @@ export const koOverrides: Record<string, string> = {
     'viewSections.namePlaceholder': "읽을 책",
     'viewSections.updateFailed': "언젠가/아마도 섹션을 업데이트하지 못했습니다.",
     'viewSections.somedaySection': "언젠가/아마도 섹션",
+    'viewSections.somedaySections': "언젠가/아마도 섹션",
+    'viewSections.rename': "섹션 이름 변경",
+    'viewSections.manageHint': "프로젝트나 프로젝트 섹션은 바꾸지 않고 아이디어를 정리합니다.",
 
     'viewSections.moveToSection': "섹션으로 이동…",
     'viewSections.moved': "이동 완료: {section} ({count})",
@@ -225,6 +228,7 @@ export const koOverrides: Record<string, string> = {
         'projects.createAreaFailed': '영역을 만들지 못했습니다',
         'projects.collapseSidebar': '프로젝트 패널 접기',
         'projects.resizeSidebar': '프로젝트 패널 크기 조절',
+        'people.title': '사람',
         'people.new': '새 사람',
         'people.unassigned': '미지정',
         'filters.title': '필터',
