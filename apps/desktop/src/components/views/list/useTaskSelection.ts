@@ -140,15 +140,16 @@ export function useTaskSelection(
 
     const toggleMultiSelect = useCallback((taskId: string, options: RangeSelectionOptions = {}) => {
         if (!visibleIdSet.has(taskId)) return;
+        const anchorId = anchorIdRef.current;
+        anchorIdRef.current = taskId;
         setMultiSelectedIds((previous) => {
             const result = updateRangeSelection({
-                anchorId: anchorIdRef.current,
+                anchorId,
                 range: options.range,
                 selectedIds: previous,
                 targetId: taskId,
                 visibleIds,
             });
-            anchorIdRef.current = result.anchorId;
             setSelectionMode(result.selectedIds.size > 0);
             return result.selectedIds;
         });

@@ -1,4 +1,4 @@
-import { ChevronsDown, ChevronsUp, Filter, List } from 'lucide-react';
+import { CheckSquare, ChevronsDown, ChevronsUp, Filter, List } from 'lucide-react';
 import { DEFAULT_FOCUS_SORT_BY, FOCUS_SORT_OPTIONS, tFallback, type SortField } from '@mindwtr/core';
 
 import { ToolbarButton } from '../list/list-toolbar';
@@ -6,6 +6,8 @@ import { ViewControls } from '../list/ViewControls';
 import { FOCUS_AXES, type NextGroupBy } from '../list/next-grouping';
 
 type AgendaHeaderProps = {
+    selectionMode: boolean;
+    onToggleSelection: () => void;
     filterCount: number;
     filtersOpen: boolean;
     nextActionsCount: number;
@@ -24,6 +26,8 @@ type AgendaHeaderProps = {
 };
 
 export function AgendaHeader({
+    selectionMode,
+    onToggleSelection,
     filterCount,
     filtersOpen,
     nextActionsCount,
@@ -104,6 +108,15 @@ export function AgendaHeader({
                     icon={<List className="h-3.5 w-3.5" aria-hidden="true" />}
                 >
                     {detailsLabel}
+                </ToolbarButton>
+                <ToolbarButton
+                    active={selectionMode}
+                    data-task-selection-toggle
+                    onClick={onToggleSelection}
+                    aria-pressed={selectionMode}
+                    icon={<CheckSquare className="h-3.5 w-3.5" aria-hidden="true" />}
+                >
+                    {t(selectionMode ? 'bulk.exitSelect' : 'bulk.select')}
                 </ToolbarButton>
             </div>
         </header>

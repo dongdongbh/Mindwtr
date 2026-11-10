@@ -24,12 +24,12 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Focus
 
-- Reach: Sidebar › Focus. This is the default view at launch. Sections: Today's Focus, Due Today, Review Due, Next Actions, Upcoming.
+- Reach: Sidebar › Focus. This is the default view at launch. Sections: Today's Focus, Due Today, Review Due, Next Actions, Upcoming. Select › choose tasks › Bulk organize opens the shared organizer.
 - Shortcuts: `gf` (Vim, Standard), `Alt+A` (Emacs). Standard style: `S` adds the selected task to Today's Focus.
 - Selectors: `todays-focus-section`, `focus-hidden-by-area`
 - Code: `apps/desktop/src/components/views/AgendaView.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.tsx`, `apps/desktop/src/components/views/agenda/AgendaSections.tsx`, `apps/desktop/src/components/views/agenda/AgendaFiltersPanel.tsx`, `apps/desktop/src/components/views/agenda/SortableFocusRow.tsx`, `apps/desktop/src/components/FocusStarIcon.tsx`
-- Checks: `e2e/app.spec.ts`, `e2e/compact-filters.spec.ts`, `e2e/focus-area-selection.spec.ts`, `e2e/saved-focus-filter-toggle.spec.ts`, `e2e/desktop-direct-controls.spec.ts`, `apps/desktop/src/components/views/AgendaView.test.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.test.tsx`, `apps/desktop/src/components/FocusStarIcon.test.tsx`
-- Notes: The star is the Focus star. Starring an Inbox task clarifies it to next; adding a star obeys the focus cap. An area filter hides Focus rows but they still use focus slots.
+- Checks: `e2e/app.spec.ts`, `e2e/compact-filters.spec.ts`, `e2e/focus-area-selection.spec.ts`, `e2e/focus-bulk-selection.spec.ts`, `e2e/saved-focus-filter-toggle.spec.ts`, `e2e/desktop-direct-controls.spec.ts`, `apps/desktop/src/components/views/AgendaView.test.tsx`, `apps/desktop/src/components/views/AgendaView.selection.test.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.test.tsx`, `apps/desktop/src/components/FocusStarIcon.test.tsx`
+- Notes: The star is the Focus star. Starring an Inbox task clarifies it to next; adding a star obeys the focus cap. An area filter hides Focus rows but they still use focus slots. Select All includes actual tasks in expanded filtered sections and groups, including offscreen rows, once per task ID. Folded sections, folded groups and project review cards are excluded. Selection mode disables task dragging and row quick actions; completing a selected sequential action leaves its newly exposed successor unchanged.
 
 ## Pomodoro timer
 
@@ -248,7 +248,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
-- Reach: Any task list › Select. The toolbar offers Select All, Add context, Remove context, Add tag, Remove tag, Bulk organize, Export selected tasks as CSV, and Delete. Done leaves the mode.
+- Reach: Any task list, including Focus, › Select. Available toolbar actions include Select All, Add context, Remove context, Add tag, Remove tag, Bulk organize, Export selected tasks as CSV, and Delete. Focus uses the Review bulk actions; the organizer includes contexts. Done leaves the mode.
 - Shortcuts: `Ctrl+Click` (`Cmd+Click`) or `Shift+Click` a row. `x` toggles selection (Standard).
 - Code: `apps/desktop/src/components/views/list/BulkSelectionToolbar.tsx`, `apps/desktop/src/components/views/list/ListBulkActions.tsx`, `apps/desktop/src/components/views/list/TaskBulkOrganizeModal.tsx`, `apps/desktop/src/components/views/review/ReviewBulkActions.tsx`, `apps/desktop/src/components/TokenPickerModal.tsx`
 - Checks: `e2e/reference.spec.ts`, `apps/desktop/src/components/views/list/ListBulkActions.test.tsx`, `apps/desktop/src/components/views/list/TaskBulkOrganizeModal.test.tsx`, `apps/desktop/src/components/views/list/useTaskSelection.test.tsx`, `apps/desktop/src/components/views/list/useSelectedTasksCsvExport.test.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.selection.test.tsx`, `apps/desktop/src/components/views/review/ReviewBulkActions.test.tsx`

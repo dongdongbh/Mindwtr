@@ -16,9 +16,9 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, TIME_ESTIMATE_OPTIONS, buildFocusPools, compareProjectsByOrder, planFocusFilterCriterionRemoval, formatFocusTaskLimitText,
-    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
+    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, collectBulkTaskTokens, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
 import { DEFAULT_FOCUS_SORT_BY } from '@mindwtr/core';
-import type { MultiValueFilterMatchMode, SavedFilter, SortField, Task, TaskEnergyLevel } from '@mindwtr/core';
+import type { BulkOrganizeTaskUpdateInput, MultiValueFilterMatchMode, RangeSelectionOptions, SavedFilter, SortField, Task, TaskEnergyLevel, TaskStatus } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { buildAdvancedChips, buildSelectionChips, type ActiveFilterChipDeps } from './list/active-filter-chips';
 import { useLanguage } from '../../contexts/language-context';
@@ -37,6 +37,11 @@ import { AgendaHeader } from './agenda/AgendaHeader';
 import { AgendaCollapsibleSection, AgendaProjectSection } from './agenda/AgendaSections';
 import { SortableFocusRow } from './agenda/SortableFocusRow';
 import { StoreTaskItem } from './list/StoreTaskItem';
+import { useTaskSelection } from './list/useTaskSelection';
+import { BulkSelectionToolbar } from './list/BulkSelectionToolbar';
+import { TaskBulkOrganizeModal } from './list/TaskBulkOrganizeModal';
+import { ReviewBulkActions } from './review/ReviewBulkActions';
+import { TokenPickerModal } from '../TokenPickerModal';
 import { GroupedTaskSectionHeader } from './list/GroupedTaskSections';
 import { useTaskGroupCollapse } from './list/useTaskGroupCollapse';
 import { LIST_END_GAP } from './list/list-toolbar';
@@ -262,6 +267,9 @@ function AgendaTaskList({
     getProjectDeadlineLabel,
     showListDetails,
     highlightTaskId,
+    selectionMode,
+    multiSelectedIds,
+    onToggleSelect,
 }: {
     tasks: Task[];
     buildFocusToggle: (task: Task) => {
@@ -276,6 +284,9 @@ function AgendaTaskList({
     getProjectDeadlineLabel?: (taskId: string) => string | undefined;
     showListDetails: boolean;
     highlightTaskId: string | null;
+    selectionMode: boolean;
+    multiSelectedIds: ReadonlySet<string>;
+    onToggleSelect: (id: string, options?: RangeSelectionOptions) => void;
 }) {
     const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
     const [scrollMargin, setScrollMargin] = useState(0);
@@ -322,6 +333,9 @@ function AgendaTaskList({
                     <StoreTaskItem
                         key={task.id}
                         taskId={task.id}
+                        selectionMode={selectionMode}
+                        isMultiSelected={multiSelectedIds.has(task.id)}
+                        onToggleSelectId={onToggleSelect}
                         buildFocusToggle={buildFocusToggle}
                         showProjectBadgeInActions={false}
                         compactMetaEnabled={showListDetails}
@@ -361,6 +375,9 @@ function AgendaTaskList({
                     >
                         <StoreTaskItem
                             taskId={task.id}
+                            selectionMode={selectionMode}
+                            isMultiSelected={multiSelectedIds.has(task.id)}
+                            onToggleSelectId={onToggleSelect}
                             buildFocusToggle={buildFocusToggle}
                             showProjectBadgeInActions={false}
                             compactMetaEnabled={showListDetails}
@@ -377,13 +394,17 @@ function AgendaTaskList({
 
 export function AgendaView() {
     const perf = usePerformanceMonitor('AgendaView');
-    const { projects, sections: projectSections, areas, updateTask, reorderFocusedTasks, settings, error, highlightTaskId, setHighlightTask, taskChangeToken, hasAnyTasks } = useTaskStore(
+    const { projects, sections: projectSections, areas, updateTask, reorderFocusedTasks, batchDeleteTasks, batchMoveTasks, batchUpdateTasks, restoreTask, settings, error, highlightTaskId, setHighlightTask, taskChangeToken, hasAnyTasks } = useTaskStore(
         (state) => ({
             projects: state.projects,
             sections: state.sections,
             areas: state.areas,
             updateTask: state.updateTask,
             reorderFocusedTasks: state.reorderFocusedTasks,
+            batchDeleteTasks: state.batchDeleteTasks,
+            batchMoveTasks: state.batchMoveTasks,
+            batchUpdateTasks: state.batchUpdateTasks,
+            restoreTask: state.restoreTask,
             settings: state.settings,
             error: state.error,
             highlightTaskId: state.highlightTaskId,
@@ -416,6 +437,10 @@ export function AgendaView() {
     const [focusSortBy, setFocusSortBy] = useState<SortField>(DEFAULT_FOCUS_SORT_BY);
     const resetFocusSort = useCallback(() => setFocusSortBy(DEFAULT_FOCUS_SORT_BY), []);
     const [saveFilterPromptOpen, setSaveFilterPromptOpen] = useState(false);
+    const [bulkOrganizeOpen, setBulkOrganizeOpen] = useState(false);
+    const [tagPromptOpen, setTagPromptOpen] = useState(false);
+    const [removeTagPickerOpen, setRemoveTagPickerOpen] = useState(false);
+    const [moveToStatus, setMoveToStatus] = useState<TaskStatus | ''>('');
     const filterInputRef = useRef<HTMLInputElement | null>(null);
     const [persistedViewState, setPersistedViewState] = usePersistedViewState(
         FOCUS_VIEW_STATE_STORAGE_KEY,
@@ -871,17 +896,56 @@ export function AgendaView() {
         if (expandedSections.nextActions) visible.push(...visibleNextActions);
         if (expandedSections.reviewDue) visible.push(...sections.reviewDue);
         if (expandedSections.upcoming) visible.push(...sections.upcoming);
-        return visible;
+        return Array.from(new Map(visible
+            .filter((task) => tasksById.has(task.id))
+            .map((task) => [task.id, task])).values());
     }, [
         expandedSections,
         focusedTasks,
         orderedTodayTasks,
         sections,
         visibleNextActions,
+        tasksById,
     ]);
+    const visibleTaskIds = useMemo(() => visibleTasks.map((task) => task.id), [visibleTasks]);
+    const {
+        activeAction,
+        allVisibleTasksSelected,
+        clearTaskSelection,
+        deleteSelectedTasks,
+        exportSelectedTasks,
+        isExporting,
+        multiSelectedIds,
+        moveSelectedTasks,
+        organizeSelectedTasks,
+        selectedIdsArray,
+        selectionMode,
+        selectAllVisibleTasks,
+        toggleMultiSelect,
+        toggleSelectionMode,
+        updateSelectedTaskTokens,
+    } = useTaskSelection(visibleTaskIds, {
+        batchDeleteTasks,
+        batchMoveTasks,
+        batchUpdateTasks,
+        restoreTask,
+        showToast,
+        t,
+        tasksById,
+        undoNotificationsEnabled: settings?.undoNotificationsEnabled !== false,
+    });
+    const removableTagOptions = useMemo(
+        () => collectBulkTaskTokens(selectedIdsArray, tasksById, 'tags'),
+        [selectedIdsArray, tasksById],
+    );
+    const handleApplyTaskBulkOrganize = useCallback(async (input: BulkOrganizeTaskUpdateInput) => {
+        await organizeSelectedTasks(input, { afterSuccess: () => setBulkOrganizeOpen(false) });
+    }, [organizeSelectedTasks]);
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
     useTaskListScope({
         getTasks: () => visibleTasks,
+        getSelectedIds: () => multiSelectedIds,
+        toggleSelect: (task) => toggleMultiSelect(task.id),
         getSelectedIndex: () => selectedTaskIndex,
         setSelectedIndex: setSelectedTaskIndex,
         t,
@@ -1008,7 +1072,7 @@ export function AgendaView() {
         ? focusedTasks.find((task) => task.id === activeFocusDragId) ?? null
         : null;
 
-    const focusListBody = focusDragEnabled ? (
+    const focusListBody = focusDragEnabled && !selectionMode ? (
         <DndContext
             sensors={focusDndSensors}
             collisionDetection={closestCenter}
@@ -1023,6 +1087,7 @@ export function AgendaView() {
                             key={task.id}
                             taskId={task.id}
                             dragAriaLabel={focusDragAriaLabel}
+                            onToggleSelectId={toggleMultiSelect}
                             buildFocusToggle={buildFocusToggle}
                             showProjectBadgeInActions={false}
                             compactMetaEnabled={showListDetails}
@@ -1045,6 +1110,9 @@ export function AgendaView() {
                 <StoreTaskItem
                     key={task.id}
                     taskId={task.id}
+                    selectionMode={selectionMode}
+                    isMultiSelected={multiSelectedIds.has(task.id)}
+                    onToggleSelectId={toggleMultiSelect}
                     buildFocusToggle={buildFocusToggle}
                     showProjectBadgeInActions={false}
                     compactMetaEnabled={showListDetails}
@@ -1087,6 +1155,8 @@ export function AgendaView() {
         <ErrorBoundary>
             <div className={cn("space-y-6 w-full", LIST_END_GAP)} data-list-end>
             <AgendaHeader
+                selectionMode={selectionMode}
+                onToggleSelection={toggleSelectionMode}
                 filterCount={activeFilterCount}
                 filtersOpen={filtersOpen}
                 nextActionsCount={nextActionsCount}
@@ -1103,6 +1173,40 @@ export function AgendaView() {
                 showListDetails={showListDetails}
                 t={t}
             />
+            {selectionMode && (
+                <div className="space-y-3">
+                    <BulkSelectionToolbar
+                        selectionCount={selectedIdsArray.length}
+                        totalCount={visibleTaskIds.length}
+                        allSelected={allVisibleTasksSelected}
+                        onSelectAll={selectAllVisibleTasks}
+                        onClearSelection={clearTaskSelection}
+                        t={t}
+                    />
+                    <ReviewBulkActions
+                        selectionCount={selectedIdsArray.length}
+                        moveToStatus={moveToStatus}
+                        onMoveToStatus={async (status) => { await moveSelectedTasks(status, { afterSuccess: () => setMoveToStatus('') }); }}
+                        onChangeMoveToStatus={setMoveToStatus}
+                        onBulkOrganize={() => setBulkOrganizeOpen(true)}
+                        onAddTag={() => setTagPromptOpen(true)}
+                        onRemoveTag={() => setRemoveTagPickerOpen(true)}
+                        disableRemoveTag={removableTagOptions.length === 0}
+                        onExportCsv={() => { void exportSelectedTasks(); }}
+                        isExporting={isExporting}
+                        onDelete={() => { void deleteSelectedTasks({
+                            confirm: () => requestConfirmation({
+                                title: tFallback(t, 'common.delete', 'Delete'),
+                                description: tFallback(t, 'list.confirmBatchDelete', 'Delete selected tasks?'),
+                                confirmLabel: tFallback(t, 'common.delete', 'Delete'),
+                                cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
+                            }),
+                        }); }}
+                        statusOptions={['inbox', 'next', 'waiting', 'someday', 'reference', 'done']}
+                        t={t}
+                    />
+                </div>
+            )}
             {savedFocusFilters.length > 0 && (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                     <button
@@ -1229,6 +1333,9 @@ export function AgendaView() {
                                 getAppearsAtLabel={getScheduleAppearsAtLabel}
                                 showListDetails={showListDetails}
                                 highlightTaskId={highlightTaskId}
+                                selectionMode={selectionMode}
+                                multiSelectedIds={multiSelectedIds}
+                                onToggleSelect={toggleMultiSelect}
                             />
                         )}
                         {todayTaskGroups.laterToday.length > 0 && (
@@ -1242,6 +1349,9 @@ export function AgendaView() {
                                     getAppearsAtLabel={getScheduleAppearsAtLabel}
                                     showListDetails={showListDetails}
                                     highlightTaskId={highlightTaskId}
+                                    selectionMode={selectionMode}
+                                    multiSelectedIds={multiSelectedIds}
+                                    onToggleSelect={toggleMultiSelect}
                                 />
                             </div>
                         )}
@@ -1265,6 +1375,9 @@ export function AgendaView() {
                                 getProjectDeadlineLabel={getProjectDeadlineLabel}
                                 showListDetails={showListDetails}
                                 highlightTaskId={highlightTaskId}
+                                selectionMode={selectionMode}
+                                multiSelectedIds={multiSelectedIds}
+                                onToggleSelect={toggleMultiSelect}
                             />
                         </AgendaCollapsibleSection>
                     )
@@ -1299,6 +1412,9 @@ export function AgendaView() {
                                                         getProjectDeadlineLabel={getProjectDeadlineLabel}
                                                         showListDetails={showListDetails}
                                                         highlightTaskId={highlightTaskId}
+                                                        selectionMode={selectionMode}
+                                                        multiSelectedIds={multiSelectedIds}
+                                                        onToggleSelect={toggleMultiSelect}
                                                     />
                                                 </div>
                                             )}
@@ -1325,6 +1441,9 @@ export function AgendaView() {
                             buildFocusToggle={buildFocusToggle}
                             showListDetails={showListDetails}
                             highlightTaskId={highlightTaskId}
+                            selectionMode={selectionMode}
+                            multiSelectedIds={multiSelectedIds}
+                            onToggleSelect={toggleMultiSelect}
                         />
                     </AgendaCollapsibleSection>
                 )}
@@ -1345,6 +1464,9 @@ export function AgendaView() {
                             getAppearsAtLabel={getUpcomingAppearsAtLabel}
                             showListDetails={showListDetails}
                             highlightTaskId={highlightTaskId}
+                            selectionMode={selectionMode}
+                            multiSelectedIds={multiSelectedIds}
+                            onToggleSelect={toggleMultiSelect}
                         />
                     </AgendaCollapsibleSection>
                 )}
@@ -1384,6 +1506,52 @@ export function AgendaView() {
                 cancelLabel={t('common.cancel')}
                 onConfirm={handleSaveFilterConfirm}
                 onCancel={() => setSaveFilterPromptOpen(false)}
+            />
+            <TaskBulkOrganizeModal
+                isOpen={bulkOrganizeOpen}
+                selectedCount={selectedIdsArray.length}
+                projects={projects}
+                areas={areas}
+                isApplying={activeAction === 'organize'}
+                t={t}
+                onCancel={() => setBulkOrganizeOpen(false)}
+                onApply={handleApplyTaskBulkOrganize}
+            />
+            <PromptModal
+                isOpen={tagPromptOpen}
+                title={t('bulk.addTag')}
+                description={t('bulk.addTag')}
+                placeholder={t('bulk.tagPlaceholder')}
+                defaultValue=""
+                confirmLabel={t('common.save')}
+                cancelLabel={t('common.cancel')}
+                onCancel={() => setTagPromptOpen(false)}
+                onConfirm={async (value) => {
+                    const input = value.trim();
+                    if (!input) return;
+                    await updateSelectedTaskTokens('tags', input.startsWith('#') ? input : `#${input}`, 'add', {
+                        afterNoop: () => setTagPromptOpen(false),
+                        afterSuccess: () => setTagPromptOpen(false),
+                    });
+                }}
+            />
+            <TokenPickerModal
+                isOpen={removeTagPickerOpen}
+                title={t('bulk.removeTag')}
+                description={t('bulk.removeTag')}
+                tokens={removableTagOptions}
+                placeholder={t('bulk.tagPlaceholder')}
+                multiSelect
+                confirmLabel={t('common.save')}
+                cancelLabel={t('common.cancel')}
+                onCancel={() => setRemoveTagPickerOpen(false)}
+                onConfirm={async (values) => {
+                    if (values.length === 0) return;
+                    await updateSelectedTaskTokens('tags', values, 'remove', {
+                        afterNoop: () => setRemoveTagPickerOpen(false),
+                        afterSuccess: () => setRemoveTagPickerOpen(false),
+                    });
+                }}
             />
             {confirmModal}
             </div>

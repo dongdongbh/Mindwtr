@@ -13,6 +13,8 @@ const t = (key: string) => resolveText(key, key);
 
 const renderHeader = (overrides: Partial<Parameters<typeof AgendaHeader>[0]> = {}) => render(
     <AgendaHeader
+        selectionMode={false}
+        onToggleSelection={vi.fn()}
         filterCount={0}
         filtersOpen={false}
         nextActionsCount={3}
@@ -44,6 +46,8 @@ describe('AgendaHeader', () => {
 
         view.rerender(
             <AgendaHeader
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
                 filterCount={0}
                 filtersOpen={false}
                 nextActionsCount={3}
@@ -66,6 +70,8 @@ describe('AgendaHeader', () => {
 
         view.rerender(
             <AgendaHeader
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
                 filterCount={0}
                 filtersOpen={false}
                 nextActionsCount={3}
@@ -90,6 +96,8 @@ describe('AgendaHeader', () => {
 
         view.rerender(
             <AgendaHeader
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
                 filterCount={0}
                 filtersOpen={false}
                 nextActionsCount={3}
@@ -127,6 +135,8 @@ describe('AgendaHeader', () => {
 
         rerender(
             <AgendaHeader
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
                 filterCount={0}
                 filtersOpen={false}
                 nextActionsCount={3}
@@ -155,6 +165,8 @@ describe('AgendaHeader', () => {
 
         rerender(
             <AgendaHeader
+                selectionMode={false}
+                onToggleSelection={vi.fn()}
                 filterCount={0}
                 filtersOpen={false}
                 nextActionsCount={3}
