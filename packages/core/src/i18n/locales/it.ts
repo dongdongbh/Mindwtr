@@ -624,8 +624,6 @@ export const itOverrides: Record<string, string> = {
         'next.promoteHint': 'Tocca la freccia per spostarle in Prossime azioni',
         'next.noTasks': 'Nessuna attività in Da fare. Aggiungile all\'Entrata ed elaborale prima.',
         'next.noContext': 'Nessuna Prossima azione con',
-        'next.warningCount': 'elementi in Prossime azioni',
-        'next.warningHint': 'Valuta di concentrarti su meno progetti. GTD consiglia di mantenere le Prossime azioni tra i 10 e i 15 elementi per avere maggiore chiarezza.',
 
 
     'contexts.new': 'Nuovo contesto',

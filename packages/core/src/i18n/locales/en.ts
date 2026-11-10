@@ -802,8 +802,6 @@ export const en: Record<string, string> = {
         'next.promoteHint': 'Tap arrow to move to Next Actions',
         'next.noTasks': 'No tasks in Todo. Add to Inbox and process first.',
         'next.noContext': 'No Next Actions with',
-        'next.warningCount': 'items in Next Actions',
-        'next.warningHint': 'Consider focusing on fewer projects. GTD recommends keeping Next Actions to 10-15 items for clarity.',
 
 
     'contexts.new': 'New context',

@@ -654,8 +654,6 @@ export const deOverrides: Record<string, string> = {
         'next.promoteHint': 'Tippe auf den Pfeil, um in die Nächsten Aktionen zu verschieben',
         'next.noTasks': 'Keine Aufgaben in Zu tun. Füge sie in den Eingang ein und verarbeite diese zuerst.',
         'next.noContext': 'Keine nächsten Aktionen mit',
-        'next.warningCount': 'Elemente in Nächste Aktionen',
-        'next.warningHint': 'Überlege Dir, Dich auf weniger Projekte zu konzentrieren. GTD empfiehlt, höchstens 10-15 Elemente in Nächste Aktionen zu lassen für eine bessere Übersicht.',
 
 
     'contexts.new': 'Neuer Kontext',

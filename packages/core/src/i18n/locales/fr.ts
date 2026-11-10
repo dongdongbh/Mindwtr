@@ -653,8 +653,6 @@ export const frOverrides: Record<string, string> = {
         'next.promoteHint': 'Appuyez sur la flèche pour passer aux prochaines actions.',
         'next.noTasks': 'Aucune tâche à faire. Ajoutez-en à la boîte de réception et traitez-les d’abord.',
         'next.noContext': 'Aucune prochaine action',
-        'next.warningCount': 'éléments dans les prochaines actions',
-        'next.warningHint': 'Pensez à vous concentrer sur moins de projets. GTD recommande de limiter les prochaines actions à 10 à 15 éléments pour plus de clarté.',
 
 
     'contexts.new': 'Nouveau contexte',

@@ -80,6 +80,8 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Next Actions
 
+- Notes: The full Next Actions inventory has no task-count warning. Today’s Focus remains a separate shortlist.
+
 - Reach: No sidebar item. Use `gn` (Vim, Standard), `Alt+N` (Emacs), or `/?view=next`.
 - Code: `apps/desktop/src/components/views/ListView.tsx`, `apps/desktop/src/components/views/list/next-grouping.ts`
 - Checks: `e2e/ui-simplification.spec.ts`, `e2e/task-menu-dates.spec.ts`, `apps/desktop/src/components/views/ListView.test.tsx`

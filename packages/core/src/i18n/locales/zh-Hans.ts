@@ -798,8 +798,6 @@ export const zhHans: Record<string, string> = {
         'next.promoteHint': '点击箭头移动到下一步行动',
         'next.noTasks': '待办中没有任务。请先添加到收集箱并处理。',
         'next.noContext': '没有此情境的下一步行动',
-        'next.warningCount': '个任务在下一步行动中',
-        'next.warningHint': '建议减少同时推进的项目。GTD 推荐保持 10–15 个下一步行动以保持清晰。',
         'contexts.title': '情境',
         "contexts.collapseSidebar": "收起情境面板",
         "contexts.expandSidebar": "展开情境面板",

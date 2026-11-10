@@ -770,8 +770,6 @@ export const koOverrides: Record<string, string> = {
         'next.promoteHint': '다음 행동으로 이동하려면 화살표를 탭하세요.',
         'next.noTasks': '할 일에 할 일이 없습니다. 수집함에 추가하고 먼저 처리하세요.',
         'next.noContext': '다음 행동 없음',
-        'next.warningCount': '다음 행동의 항목',
-        'next.warningHint': '더 적은 수의 프로젝트에 집중하는 것을 고려해보세요. GTD에서는 명확성을 위해 다음 행동을 10~15개 항목으로 유지할 것을 권장합니다.',
 
 
     'contexts.new': '새 상황',

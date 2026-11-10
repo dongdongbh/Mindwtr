@@ -590,8 +590,6 @@ export const ptOverrides: Record<string, string> = {
         'next.promoteHint': 'Toque na seta para ir para as próximas ações',
         'next.noTasks': 'Nenhuma tarefa em Todo. Adicione à caixa de entrada e processe primeiro.',
         'next.noContext': 'Nenhuma próxima ação com',
-        'next.warningCount': 'itens em Próximas Ações',
-        'next.warningHint': 'Considere focar em menos projetos. GTD recomenda manter as Próximas Ações em 10 a 15 itens para maior clareza.',
 
 
         'contexts.title': 'Contextos',

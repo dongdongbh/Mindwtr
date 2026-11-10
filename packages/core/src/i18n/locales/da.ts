@@ -789,9 +789,6 @@ export const daOverrides: Record<string, string> = {
     'next.promoteHint': 'Tryk på pilen for at gå til Næste handlinger',
     'next.noTasks': 'Ingen opgaver på opgavelisten. Føj dem først til Indbakke, og behandl dem der.',
     'next.noContext': 'Ingen næste handlinger med',
-    'next.warningCount': 'elementer i Næste handlinger',
-    'next.warningHint':
-        'Overvej at fokusere på færre projekter. GTD anbefaler 10-15 næste handlinger for at bevare overblikket.',
     'contexts.new': 'Ny kontekst',
     'tags.new': 'Nyt tag',
     'contexts.title': 'Kontekster',

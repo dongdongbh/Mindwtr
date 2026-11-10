@@ -579,8 +579,6 @@ export const plOverrides: Record<string, string> = {
         'next.promoteHint': 'Stuknij strzałkę, aby przenieść do Następnych działań',
         'next.noTasks': 'Brak zadań w „Do zrobienia”. Najpierw dodaj je do skrzynki odbiorczej i przetwórz.',
         'next.noContext': 'Brak Następnych działań dla',
-        'next.warningCount': 'elementów w Następnych działaniach',
-        'next.warningHint': 'Rozważ skupienie się na mniejszej liczbie projektów. GTD zaleca utrzymywać 10–15 pozycji na liście Następne działania dla większej przejrzystości.',
         'contexts.title': 'Konteksty',
         "contexts.collapseSidebar": "Zwiń panel kontekstów",
         "contexts.expandSidebar": "Rozwiń panel kontekstów",

@@ -788,8 +788,6 @@ export const svOverrides: Record<string, string> = {
         'next.promoteHint': 'Tryck på pilen för att flytta till Nästa steg',
         'next.noTasks': 'Inga uppgifter i Att göra. Lägg till i Inkorgen och bearbeta först.',
         'next.noContext': 'Inga nästa steg med',
-        'next.warningCount': 'poster i Nästa steg',
-        'next.warningHint': 'Överväg att fokusera på färre projekt. GTD rekommenderar att hålla Nästa steg till 10–15 poster för tydlighetens skull.',
 
         'contexts.title': 'Kontexter',
         "contexts.collapseSidebar": "Fäll ihop kontextpanelen",

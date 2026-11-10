@@ -589,8 +589,6 @@ export const trOverrides: Record<string, string> = {
         'next.promoteHint': 'Sonraki Eylemler\'e geçmek için oka dokunun',
         'next.noTasks': 'Todo\'da görev yok. Önce Gelen Kutusu\'na ekleyin ve işleyin.',
         'next.noContext': 'Sonraki İşlem Yok',
-        'next.warningCount': 'Sonraki İşlemler\'deki öğeler',
-        'next.warningHint': 'Daha az projeye odaklanmayı düşünün. GTD, netlik sağlamak amacıyla Sonraki Eylemlerin 10-15 öğeyle sınırlı tutulmasını önerir.',
         'contexts.title': 'Bağlamlar',
         'contexts.filter': 'Görevleri bağlama göre filtrele',
         'filters.label': 'Filtreler',

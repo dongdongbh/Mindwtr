@@ -774,8 +774,6 @@ export const huOverrides: Record<string, string> = {
     'next.promoteHint': 'Koppintson a nyílra a Következő teendőkhöz való áthelyezéshez',
     'next.noTasks': 'Nincs feladat a Tennivalók között. Adjon hozzá a Beérkezett elemekhez, és dolgozza fel először.',
     'next.noContext': 'Nincs következő teendő ezzel:',
-    'next.warningCount': 'elem a Következő teendők között',
-    'next.warningHint': 'Fontolja meg, hogy kevesebb projektre fókuszáljon. A GTD azt javasolja, hogy az áttekinthetőség érdekében 10–15 elem között tartsa a Következő teendőket.',
     'contexts.new': 'Új kontextus',
     'tags.new': 'Új címke',
     'contexts.title': 'Kontextusok',

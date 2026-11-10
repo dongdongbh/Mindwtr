@@ -1,6 +1,6 @@
 import React, { memo, useState, useMemo, useDeferredValue, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { AlertTriangle, Check, ChevronDown, ChevronRight, HelpCircle, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, HelpCircle, Sparkles } from 'lucide-react';
 import { buildProjectOrderMap,
     buildProjectViewSectionUpdate,
     buildQuickAddParseOptions,
@@ -127,7 +127,6 @@ interface ListViewProps {
 
 const EMPTY_PRIORITIES: TaskPriority[] = [];
 const EMPTY_ESTIMATES: TimeEstimate[] = [];
-const NEXT_WARNING_THRESHOLD = 15;
 
 const SOMEDAY_NO_SECTION_GROUP_ID = 'view-section:someday:';
 
@@ -1310,20 +1309,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                                     t={t}
                                 />
                             )}
-                        </div>
-                    )}
-
-                    {isNextView && nextCount > NEXT_WARNING_THRESHOLD && (
-                        <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
-                            <AlertTriangle className="mt-0.5 h-5 w-5 text-warning" />
-                            <div>
-                                <p className="font-medium text-warning">
-                                    {nextCount} {t('next.warningCount')}
-                                </p>
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                    {t('next.warningHint')}
-                                </p>
-                            </div>
                         </div>
                     )}
 

@@ -703,8 +703,6 @@ export const viOverrides: Record<string, string> = {
         'next.promoteHint': 'Nhấn mũi tên để chuyển sang Hành động tiếp theo',
         'next.noTasks': 'Không có nhiệm vụ cần làm. Thêm vào Hộp thư đến và xử lý trước.',
         'next.noContext': 'Không có Hành động tiếp theo với',
-        'next.warningCount': 'mục trong Hành động tiếp theo',
-        'next.warningHint': 'Hãy xem xét tập trung vào ít dự án hơn. GTD khuyến nghị giữ Hành động tiếp theo trong khoảng 10-15 mục để rõ ràng hơn.',
 
 
         'contexts.title': 'Ngữ cảnh',

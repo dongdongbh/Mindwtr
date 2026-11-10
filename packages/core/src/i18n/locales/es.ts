@@ -772,8 +772,6 @@ export const esOverrides: Record<string, string> = {
 'next.promoteHint': "Pulsa la flecha para mover a Siguientes acciones",
 'next.noTasks': "No hay tareas pendientes. Primero, añade a la bandeja de entrada y aclara.",
 'next.noContext': "No hay siguientes acciones en el contexto",
-'next.warningCount': "elementos en Siguientes acciones",
-'next.warningHint': "Considera enfocarte en menos proyectos. Por claridad, GTD recomienda que tengas 10-15 elementos en Siguientes acciones.",
     'contexts.new': 'Nuevo contexto',
     'tags.new': 'Nueva etiqueta',
 'contexts.title': "Contextos",

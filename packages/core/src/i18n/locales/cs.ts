@@ -681,8 +681,6 @@ export const csOverrides: Record<string, string> = {
         'next.promoteHint': 'Klepnutím na šipku přesunete do Dalších kroků',
         'next.noTasks': 'Žádné úkoly v K udělání. Nejdřív přidejte do Schránky a zpracujte.',
         'next.noContext': 'Žádné Další kroky s',
-        'next.warningCount': 'položek v Dalších krocích',
-        'next.warningHint': 'Zvažte soustředění na méně projektů. GTD doporučuje držet Další kroky na 10–15 položkách pro přehlednost.',
     'contexts.new': 'Nový kontext',
     'tags.new': 'Nový štítek',
         'contexts.title': 'Kontexty',

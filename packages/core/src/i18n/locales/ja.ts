@@ -804,8 +804,6 @@ export const jaOverrides: Record<string, string> = {
         'next.promoteHint': '矢印をタップすると「次のアクション」に移動します',
         'next.noTasks': '未着手のタスクがありません。まずインボックスに追加して、処理してみましょう。',
         'next.noContext': '該当する次のアクションがありません：',
-        'next.warningCount': '件が「次のアクション」にあります',
-        'next.warningHint': 'プロジェクトを絞ることを検討しましょう。GTD では、見通しを保つために次のアクションを10〜15件ほどに抑えることを勧めています。',
 
 
     'contexts.new': '新しいコンテキスト',
