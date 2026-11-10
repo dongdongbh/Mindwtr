@@ -18,6 +18,18 @@ class ProjectMovesTest {
     }
 
 
+    @Test fun theTagFilterChipsComeFromCoreTagInventory() {
+        val view = ProjectsView.parse(JSONObject("""{"version":1,"active":[],"deferred":[],"archived":[],"tagFilter":"#work",
+            "tagInventory":{"values":["#home","#work",""],"hasUntagged":true}}"""))
+        assertEquals(listOf("#home", "#work", ""), view.tags)
+        assertTrue(view.hasUntagged)
+
+        val bare = ProjectsView.parse(JSONObject("""{"version":1,"active":[],"deferred":[],"archived":[]}"""))
+        assertEquals(emptyList<String>(), bare.tags)
+        assertFalse(bare.hasUntagged)
+    }
+
+
     @Test fun theAreasSheetSaveWaitsForCoreNameCheck() {
         assertFalse(AreaManagerDraft(name = "Home").canSave)
         assertFalse(AreaManagerDraft(name = "Home", check = JSONObject("""{"nameTaken":true,"saveDisabled":true}""")).canSave)

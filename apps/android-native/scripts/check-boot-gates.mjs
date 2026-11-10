@@ -1186,7 +1186,7 @@ assert.match(model, /val blocked = reply\.optString\("blocked"\)\s+if \(blocked\
 assert.match(model, /readOpen\(runtime, at\) else null,\s+AreaFilter\.parse\(runtime\.areaFilter\(\)\),\s+\)/);
 
 
-assert.match(model, /private fun read\(runtime: CoreHost, at: Depth, shown: Screen\? = null\) = Lists\(\s+if \(shown == null \|\| shown == Screen\.Focus\) readFocus\(runtime, null, at\.focus, at\.controls\) else null,\s+if \(shown == null \|\| shown == Screen\.Projects\) ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s+at\.project,\s+if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
+assert.match(model, /private fun read\(runtime: CoreHost, at: Depth, shown: Screen\? = null\) = Lists\(\s+if \(shown == null \|\| shown == Screen\.Focus\) readFocus\(runtime, null, at\.focus, at\.controls\) else null,\s+if \(shown == null \|\| shown == Screen\.Projects\) ProjectsView\.parse\(runtime\.projects\(projectTagFilter\)\) else null,\s+at\.project,\s+if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
 assert.equal(code(model).match(/\bread\(runtime, at\b[^)]*\)/g).join(' | '), 'read(runtime, at, screen) | read(runtime, at) | read(runtime, at) | read(runtime, at, Screen.Focus) | read(runtime, at, Screen.Projects) | read(runtime, at)',
     'the boot reads the tab on screen; a read\'s Try again and a sync\'s refreshAll read all; a command\'s refreshAll reads the tab on screen, then all (AfterCommandReads)');
 assert.match(model, /fun contentShown\(\) \{\s+if \(focus == null\) refreshFocus\(\)\s+if \(projects == null\) refreshProjects\(\)\s+ProcessCoreHost\.contentShown\(\)\s+\}/);
@@ -2253,7 +2253,7 @@ assert.match(iconsKt, /Lucide is ISC licensed/);
 assert.match(iconsKt, /val Target = lucide\("Target", circle\(12, 12, 10\), circle\(12, 12, 6\), circle\(12, 12, 2\)\)/);
 
 
-assert.match(coreHost, /fun projects\(\): JSONObject = callAsync\("projectList"\)/);
+assert.match(coreHost, /fun projects\(tagFilter: String\): JSONObject = callAsync\("projectList", tagFilter\)/);
 assert.match(coreHost, /fun projectDetail\(id: String, offset: Int, limit: Int, revision: String\): JSONObject =\s*callAsync\("projectDetail", id, offset, limit, revision\)/);
 assert.match(coreHost, /fun strings\(keys: List<String>\): JSONObject = callAsync\("strings", JSONArray\(keys\)\.toString\(\)\)/);
 assert.match(hostEntry, /projects\(\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getProjects\(\)\);/);
@@ -2263,7 +2263,7 @@ const labelCalls = hostEntry.slice(hostEntry.indexOf('language(stored: string, s
 assert.match(labelCalls, /contract\.setLanguage\(\{ storedLanguage: stored \|\| null, systemLocale: system \|\| null \}\)/);
 assert.match(labelCalls, /contract\.getStrings\(\{ keys: JSON\.parse\(keysJson\) as string\[\] \}\)/);
 assert.doesNotMatch(labelCalls, /requireSaved/);
-assert.equal(model.match(/runtime\.projects\(\)/g).length, 2, 'read() after boot and commands, and the resume refresh');
+assert.equal(model.match(/runtime\.projects\(projectTagFilter\)/g).length, 2, 'read() after boot and commands, and the resume refresh');
 
 
 assert.equal(model.match(/projectWindow\(runtime, /g).length, 3, 'the first window, the next, and a filter edit\'s first window');
@@ -2299,8 +2299,16 @@ assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) k
 assert.match(model, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) != true\) throw failure\s+null/);
 
 assert.match(projectsUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ model\.refreshProjects\(\) \}/);
-assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 6, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), and a row the clock changes (#1360)');
-assert.match(model, /ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s*at\.project,\s*if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
+assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 7, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), a row the clock changes (#1360), and a Tag filter choice (gap 32)');
+assert.match(hostEntry, /projectList\(tagFilter = '__all__'\): string \{\s+return submit\(async \(\) => \{\s+requireSaved\(\);\s+return unwrap\(contract\.getFilteredProjects\(\{ tagFilter, moves: true \}\)\);/,
+    'the Projects list asks core to match the Tag filter (RN buildProjectGroups), with the moves');
+assert.match(projectsUi, /val heading = if \(active\) "\$\{t\("projects\.tagFilter"\)\}: \$\{projectTagLabel\(projectTagFilter\)\}" else t\("projects\.tagFilter"\)\s+val action = t\(if \(projectTagFilterOpen\) "filters\.hide" else "filters\.show"\)/,
+    'RN\'s Tag filter row: the heading names the chosen tag, and Show or Hide opens the chips');
+assert.match(projectsUi, /contentDescription = "\$heading, \$action"; role = Role\.Button; selected = active; testTag = "projects-tag-filter-toggle"/);
+assert.match(projectsUi, /val options = listOf\(ALL_PROJECT_TAGS to t\("projects\.allTags"\)\) \+ shown\?\.tags\.orEmpty\(\)\.map \{ it to projectTagLabel\(it\) \} \+\s+\(if \(shown\?\.hasUntagged == true\) listOf\(NO_PROJECT_TAGS to t\("projects\.noTags"\)\) else emptyList\(\)\)/,
+    'the chips are RN\'s: All tags, core\'s tag inventory, then No tags when an untagged project exists');
+assert.match(model, /var projectTagFilter by mutableStateOf\(saved\.get<String>\("projectTagFilter"\) \?: ALL_PROJECT_TAGS\); private set/, 'the Tag filter is screen state, as RN\'s useState');
+assert.match(model, /ProjectsView\.parse\(runtime\.projects\(projectTagFilter\)\) else null,\s*at\.project,\s*if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
 
 assert.match(model, /var openProjectId by mutableStateOf\(saved\.get<String>\("project"\)\)/);
 assert.match(model, /openProjectId = id\s+saved\["project"\] = id/);

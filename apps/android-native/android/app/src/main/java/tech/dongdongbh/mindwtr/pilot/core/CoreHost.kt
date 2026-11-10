@@ -936,7 +936,7 @@ class CoreHost(
     }
 
 
-    fun projects(): JSONObject = callAsync("projectList")
+    fun projects(tagFilter: String): JSONObject = callAsync("projectList", tagFilter)
 
 
     fun projectDetail(id: String, offset: Int, limit: Int, revision: String): JSONObject =

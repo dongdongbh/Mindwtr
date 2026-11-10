@@ -216,6 +216,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     var projectsView by mutableStateOf(ProjectsViewState.read(prefs)); private set
 
+    var projectTagFilter by mutableStateOf(saved.get<String>("projectTagFilter") ?: ALL_PROJECT_TAGS); private set
+
+    var projectTagFilterOpen by mutableStateOf(saved.get<Boolean>("projectTagFilterOpen") == true); private set
+
     var projectShowCompleted by mutableStateOf(prefs.getString(PROJECT_SHOW_COMPLETED_KEY, null) == "true"); private set
 
     var projectCompletedCollapsed by mutableStateOf(true); private set
@@ -2304,12 +2308,25 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
 
+    fun toggleProjectTagFilter() {
+        projectTagFilterOpen = !projectTagFilterOpen
+        saved["projectTagFilterOpen"] = projectTagFilterOpen
+    }
+
+
+    fun chooseProjectTag(value: String) {
+        projectTagFilter = value
+        saved["projectTagFilter"] = value
+        refreshProjects()
+    }
+
+
     fun refreshProjects() {
 
 
         if (busy) return menu.whenIdle(::refreshProjects)
         val at = depth()
-        background(listOf(Part.Projects, Part.Project), { runtime -> ProjectsView.parse(runtime.projects()) to readOpen(runtime, at) }) { (list, detail), mine ->
+        background(listOf(Part.Projects, Part.Project), { runtime -> ProjectsView.parse(runtime.projects(projectTagFilter)) to readOpen(runtime, at) }) { (list, detail), mine ->
             if (fresh(mine, Part.Projects)) projects = list
             if (fresh(mine, Part.Project)) showProject(at.project, detail)
         }
@@ -2430,7 +2447,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     private fun read(runtime: CoreHost, at: Depth, shown: Screen? = null) = Lists(
         if (shown == null || shown == Screen.Focus) readFocus(runtime, null, at.focus, at.controls) else null,
-        if (shown == null || shown == Screen.Projects) ProjectsView.parse(runtime.projects()) else null,
+        if (shown == null || shown == Screen.Projects) ProjectsView.parse(runtime.projects(projectTagFilter)) else null,
         at.project,
         if (shown == null || shown == Screen.Projects) readOpen(runtime, at) else null,
         AreaFilter.parse(runtime.areaFilter()),

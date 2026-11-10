@@ -59,7 +59,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -91,7 +93,12 @@ data class ProjectGroup(val areaId: String?, val areaName: String?, val areaColo
 val PROJECT_BUCKETS = listOf("active" to "projects.activeSection", "deferred" to "projects.deferredSection", "archived" to "projects.closed")
 
 
-data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves: Map<String, Pair<Boolean, Boolean>> = emptyMap()) {
+const val ALL_PROJECT_TAGS = "__all__"
+const val NO_PROJECT_TAGS = "__none__"
+
+
+data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves: Map<String, Pair<Boolean, Boolean>> = emptyMap(),
+                        val tags: List<String> = emptyList(), val hasUntagged: Boolean = false) {
     fun title(id: String) = row(id)?.first?.title
 
     fun row(id: String): Pair<ProjectRow, ProjectGroup>? = buckets.values.firstNotNullOfOrNull { groups ->
@@ -119,7 +126,9 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves:
                     }
                 }
             }, json.optJSONObject("moves")?.let { moves -> moves.keys().asSequence().associateWith { id ->
-                moves.getJSONObject(id).let { it.getBoolean("up") to it.getBoolean("down") } } }.orEmpty())
+                moves.getJSONObject(id).let { it.getBoolean("up") to it.getBoolean("down") } } }.orEmpty(),
+                json.optJSONObject("tagInventory")?.optJSONArray("values")?.let { values -> List(values.length()) { values.getString(it) } }.orEmpty(),
+                json.optJSONObject("tagInventory")?.optBoolean("hasUntagged") == true)
         }
     }
 }
@@ -199,6 +208,36 @@ private fun CompletedHeading(entry: DetailSection, enabled: Boolean, toggle: () 
 }
 
 
+private fun projectTagLabel(value: String) = when (value) {
+    NO_PROJECT_TAGS -> t("projects.noTags")
+    "" -> t("projects.emptyTag")
+    else -> value
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProjectTagChips(model: InboxViewModel) {
+    val c = LocalTheme.current.colors
+    val shown = model.projects
+    val options = listOf(ALL_PROJECT_TAGS to t("projects.allTags")) + shown?.tags.orEmpty().map { it to projectTagLabel(it) } +
+        (if (shown?.hasUntagged == true) listOf(NO_PROJECT_TAGS to t("projects.noTags")) else emptyList())
+    FlowRow(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((value, label) in options) {
+            val on = model.projectTagFilter == value
+            Box(Modifier.clip(CircleShape).background(if (on) c.tint else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
+                .clearAndSetSemantics {
+                    contentDescription = label; role = Role.Button; selected = on; testTag = "projects-tag-filter-option"
+                    onClick { model.chooseProjectTag(value); true }
+                }
+                .clickable(role = Role.Button) { model.chooseProjectTag(value) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Text(label, style = rnText(12, 600), color = if (on) c.onTint else c.text)
+            }
+        }
+    }
+}
+
+
 @Composable
 private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model) {
     val c = LocalTheme.current.colors
@@ -208,12 +247,31 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
         item(key = "controls") {
             val manage = t("projects.manageAreas")
             val shape = RoundedCornerShape(8.dp)
-            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.End) {
-                Box(Modifier.heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
-                    .clickable(enabled = writable && !busy, role = Role.Button) { openAreaManager() }
-                    .semantics { contentDescription = manage }.testTag("projects-manage-areas").padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
-                    Text(manage, style = rnText(12, 600), color = c.text)
+            val active = projectTagFilter != ALL_PROJECT_TAGS
+            val heading = if (active) "${t("projects.tagFilter")}: ${projectTagLabel(projectTagFilter)}" else t("projects.tagFilter")
+            val action = t(if (projectTagFilterOpen) "filters.hide" else "filters.show")
+            Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 4.dp).testTag("projects-tag-filter-section"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.weight(1f).heightIn(min = 44.dp)
+                        .clearAndSetSemantics {
+                            contentDescription = "$heading, $action"; role = Role.Button; selected = active; testTag = "projects-tag-filter-toggle"
+                            onClick { toggleProjectTagFilter(); true }
+                        }
+                        .clickable(role = Role.Button, onClick = ::toggleProjectTagFilter),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(heading, style = rnText(12, 600), color = if (active) c.tint else c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f))
+                        Text(action, style = rnText(12, 600), color = c.secondaryText, maxLines = 1, textAlign = TextAlign.End,
+                            modifier = Modifier.widthIn(min = 48.dp))
+                    }
+                    Box(Modifier.heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
+                        .clickable(enabled = writable && !busy, role = Role.Button) { openAreaManager() }
+                        .semantics { contentDescription = manage }.testTag("projects-manage-areas").padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(manage, style = rnText(12, 600), color = c.text)
+                    }
                 }
+                if (projectTagFilterOpen) ProjectTagChips(model)
             }
         }
         if (projects != null && PROJECT_BUCKETS.all { (bucket, _) -> projects?.buckets?.get(bucket).isNullOrEmpty() }) item(key = "empty") {

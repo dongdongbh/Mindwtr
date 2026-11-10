@@ -3487,10 +3487,10 @@ globalThis.MindwtrHost = {
         });
     },
 
-    projectList(): string {
+    projectList(tagFilter = '__all__'): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.getProjects({ moves: true }));
+            return unwrap(contract.getFilteredProjects({ tagFilter, moves: true }));
         });
     },
 

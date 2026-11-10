@@ -22,6 +22,8 @@ val LABEL_KEYS = listOf(
     "projects.cancelConfirmTitle", "projects.cancelConfirmBody", "projects.deleteConfirm", "common.notice",
     "projects.cancelFailed", "projects.duplicateFailed", "projects.deleteFailed", "projects.restoreFailed",
 
+    "projects.tagFilter", "projects.allTags", "projects.noTags", "projects.emptyTag", "filters.show", "filters.hide",
+
     "projects.reorderTasks", "projects.reorderNeedsDefaultSort", "projects.projectOrder", "projects.taskOrder", "board.dragTask", "projects.moveSectionUp", "projects.moveSectionDown",
 
     "task.addFailed",
