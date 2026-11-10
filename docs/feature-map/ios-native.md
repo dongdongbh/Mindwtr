@@ -96,10 +96,12 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 ## Task editor
 
 - Reach: Tap a task title. The sheet opens in Preview or Edit. More holds Duplicate, Share, Cancel, Delete, Skip this occurrence, Create project from task and, for Reference tasks, Convert to action.
-- Selectors: `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
-- Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`
+- Selectors: `task-preview-mark-done`, `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
+- Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`, `apps/ios-native/App/CoreModel.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDuplicate…, testTaskShare…, testTaskCancellation…, testTaskDelete…, testTaskSkip…, testTaskPromotion…, testTaskPreview…, testGtdTaskEditor…)
 - Notes: Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview. Date pickers for due, start, review and recurrence end show a month calendar; time pickers stay wheels, as in RN. Bulk Organize dates use the same month calendar. The Destination picker (`task-destination-choice-project-<id>`) lists Someday and Waiting projects in their own "Someday / Waiting" group after the active projects.
+
+- Preview completion: Mark Done in the visible Status card flushes pending checklist input, changes the same draft to Done, then invokes its normal owned Save. The handler requires the same host/task/session and an accepted draft edit. Repeat taps and competing Save/Close are blocked while it runs. Failed writes keep the draft and existing Retry/Save; uncertain retries replay the retained request and close only after acknowledgement. Reference, terminal, Trash, projected and archived-project/read-only previews have no action. Checks: `apps/ios-native/Tests/MindwtrNativeCoreTests/PreviewCompletionHostTests.swift` and the two `testPreviewMarkDone...` UI cases.
 
 ## Task attachments
 

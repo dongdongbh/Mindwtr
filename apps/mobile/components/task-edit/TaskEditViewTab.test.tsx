@@ -1,6 +1,7 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import { Text } from 'react-native';
+import { FALLBACK_THEME_COLORS } from '../../hooks/use-theme-colors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskEditViewTab } from './TaskEditViewTab';
@@ -32,6 +33,31 @@ const flattenStyle = (value: any): Record<string, unknown> => (
 describe('TaskEditViewTab', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('renders a wrapping labelled completion target with busy and persistence Retry states', () => {
+    const complete = vi.fn();
+    const props: React.ComponentProps<typeof TaskEditViewTab> = {
+      t: (key) => ({ 'review.markDone': 'Mark done', 'common.retry': 'Retry' }[key] ?? key), tc: FALLBACK_THEME_COLORS,
+      styles: taskEditStyles, mergedTask: { id: 'task', status: 'next' }, projects: [], sections: [], areas: [],
+      prioritiesEnabled: false, timeEstimatesEnabled: false, formatTimeEstimateLabel: String, formatDate: String, formatDueDate: String,
+      getRecurrenceRuleValue: () => '', getRecurrenceStrategyValue: () => 'strict', applyChecklistUpdate: vi.fn(),
+      visibleAttachments: [], openAttachment: vi.fn(), isImageAttachment: () => false, textDirectionStyle: {}, resolvedDirection: 'rtl', onComplete: complete,
+    };
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => { tree = renderer.create(<TaskEditViewTab {...props} />); });
+    const button = () => tree.root.findByProps({ testID: 'task-preview-mark-done' });
+    expect(button().props.accessibilityLabel).toBe('Mark done');
+    expect(flattenStyle(button().props.style)).toMatchObject({ minHeight: 44, maxWidth: '100%' });
+    renderer.act(() => { button().props.onPress(); }); expect(complete).toHaveBeenCalledOnce();
+    renderer.act(() => { tree.update(<TaskEditViewTab {...props} completionPending />); });
+    expect(button().props.disabled).toBe(true); expect(button().props.accessibilityState.busy).toBe(true);
+    renderer.act(() => { tree.update(<TaskEditViewTab {...props} mergedTask={{ id: 'task', status: 'done' }} readOnly completionRetryPending completionError="SQLite unavailable" />); });
+    expect(button().props.accessibilityLabel).toBe('Retry'); expect(button().props.disabled).toBe(false);
+    expect(tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toBe('SQLite unavailable');
+    renderer.act(() => { tree.update(<TaskEditViewTab {...props} showStatusField={false} />); });
+    expect(tree.root.findAllByProps({ testID: 'task-preview-mark-done' })).toHaveLength(0);
+    renderer.act(() => tree.unmount());
   });
 
   it('lets preview metadata values wrap across the full row width', () => {

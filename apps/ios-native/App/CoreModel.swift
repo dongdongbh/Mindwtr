@@ -3080,6 +3080,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published var taskStatusMenuPresented = false
     private var viewedTaskID = ""
     private var taskSavePending = false
+    @Published private(set) var taskPreviewCompleting = false
+    private var taskPreviewCompletionOwner: (id: String, session: Int)?
     private var taskChecklistLoaded = false
     private var taskOriginalChecklist: [CoreObject] = []
     private var taskOriginalAttachments: [CoreObject] = []
@@ -5361,6 +5363,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         taskAttachmentCheckpointFailed = nil
         taskAttachmentCheckpointDesired = nil
         guard !appLock.concealed, !Task.isCancelled else { return }
+        recordTaskPreviewCompletionSaved()
         await reconcileTaskAttachmentPresentation()
         try await readSelectedSurface()
         Task { [currentHost] in await currentHost.recordEditorAttachmentAcknowledgment(operation: "save") }
@@ -38507,6 +38510,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func closeTask() {
+        guard !taskPreviewCompleting else { return }
         retireTaskAI()
         guard taskPresented else {
             if taskRecoveryAvailable, let currentHost = host {
@@ -38526,6 +38530,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func discardTask() {
+        guard !taskPreviewCompleting else { return }
         retireTaskAI()
         guard !busy, !retryNeeded, !taskReferenceOpening, !taskAttachmentOpening, !taskPersonCreateOwed, !taskSavePending, taskChecklistWriteKind == nil,
               !taskChecklistReadPending, !taskScheduleUpdating else { return }
@@ -38961,6 +38966,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
         taskRecoveryHydrating = true
         taskPresented = false
+        taskPreviewCompletionOwner = nil
         taskEditor = [:]
         taskEditorSectionHelp = [:]
         taskOpeningIntent = nil
@@ -40007,9 +40013,57 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         showTaskActionNotice(notice)
     }
 
+    var taskPreviewCompletionEnabled: Bool {
+        taskPresented && !taskPreviewCompleting && !taskSavePending && !taskRecoverySaving
+            && taskStatusEditable("done") && !taskAttachmentWorking
+            && !taskLinkSheetActive && taskFileImporterID == nil && !taskPersonCreateNeedsReview
+            && ["inbox", "next", "waiting", "someday"].contains(taskDraft.text("status"))
+            && taskView.text("id") == viewedTaskID
+            && taskView.objects("rows").contains { $0.text("type") == "status" && !$0.text("completeLabel").isEmpty }
+    }
+
+    func completeTaskFromPreview() async {
+        guard taskPreviewCompletionEnabled else { return }
+        let id = viewedTaskID
+        let session = taskScheduleSession
+        let checklistSession = taskChecklistSession
+        let currentHost = host
+        taskPreviewCompleting = true
+        busy = true
+        taskError = nil
+        defer { taskPreviewCompleting = false }
+        do {
+            try await resolveTaskEditorInputs()
+            try await flushTaskChecklistInputs(id: id, session: checklistSession)
+            guard taskPresented, viewedTaskID == id, taskScheduleSession == session,
+                  host === currentHost, !taskEditor.flag("readOnly") else { throw CancellationError() }
+            busy = false
+            guard await editTaskStatus("done", expectedID: id, expectedSession: session, previewCompletion: true) else { return }
+            guard taskPresented, viewedTaskID == id, taskScheduleSession == session, host === currentHost else { return }
+            taskPreviewCompletionOwner = (id, session)
+            await saveTask(previewCompletion: true)
+        } catch {
+            taskError = error.localizedDescription
+            finishOperation()
+        }
+    }
+
+    private func recordTaskPreviewCompletionSaved() {
+        guard let owner = taskPreviewCompletionOwner, owner.id == viewedTaskID,
+              owner.session == taskScheduleSession, taskDraft.text("status") == "done", let currentHost = host else { return }
+        taskPreviewCompletionOwner = nil
+        Task {
+            _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                "Native iOS Preview task completion saved",
+                #"{"releaseCheck":"v1.3.9/preview-mark-done","platform":"ios","outcome":"saved"}"#,
+            ]))
+        }
+    }
+
     enum TaskSaveIntent: String { case cancel, skip }
 
-    func saveTask(intent: TaskSaveIntent? = nil) async {
+    func saveTask(intent: TaskSaveIntent? = nil, previewCompletion: Bool = false) async {
+        guard !taskPreviewCompleting || previewCompletion else { return }
         retireTaskAI()
         let cancel = intent == .cancel
         guard taskPresented, !taskEditor.isEmpty, !taskEditor.flag("readOnly"), !busy, !retryNeeded,
@@ -40030,7 +40084,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let session = taskChecklistSession
         let attachmentSession = taskRecoverySession
         let attachmentHost = host
+        let previewSession = taskScheduleSession
+        func ownsPreviewCompletion() -> Bool {
+            !previewCompletion || (self.host === attachmentHost && taskPresented && viewedTaskID == id
+                && taskScheduleSession == previewSession && !appLock.concealed && !Task.isCancelled)
+        }
         func requireOwnedSaveClaim() throws {
+            guard ownsPreviewCompletion() else { throw CancellationError() }
             guard !ownedSave || (self.host === attachmentHost && taskPresented && viewedTaskID == id
                 && taskRecoverySession == attachmentSession && !appLock.concealed && !Task.isCancelled) else {
                 throw CancellationError()
@@ -40147,6 +40207,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 let result = try decode(try await host.saveAttachmentDraftComplete(saveRequestJSON: payload,
                     expectedSession: snapshot.sessionID, expectedGeneration: snapshot.generation))
                 guard self.host === host, taskRecoverySession == snapshot.sessionID else { throw CancellationError() }
+                try requireOwnedSaveClaim()
                 try await acceptTaskAttachmentSave(result, request: payload, currentHost: host)
                 return
             } else if let snapshot = taskRecoverySnapshot {
@@ -40159,6 +40220,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     checklistSave ? "checklistSave" : "saveDraft",
                     argumentsJSON: try json([payload]), expectedSession: snapshot.sessionID,
                     expectedGeneration: snapshot.generation))
+                try requireOwnedSaveClaim()
                 if checklistSave, result.text("id") != id { throw CocoaError(.coderReadCorrupt) }
                 if cancel { cancellationResult = result }
                 taskRecoverySnapshot = nil
@@ -40170,6 +40232,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 taskChecklistWriteKind = "save"
                 taskChecklistWriteRequest = payload
                 let result = try await query("checklistSave", [payload])
+                try requireOwnedSaveClaim()
                 guard result.text("id") == id else { throw CocoaError(.coderReadCorrupt) }
                 if cancel { cancellationResult = result }
                 taskChecklistWriteKind = nil
@@ -40177,9 +40240,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             } else {
                 taskSavePending = true
                 _ = try await query("saveDraft", [payload])
+                try requireOwnedSaveClaim()
                 taskSavePending = false
             }
         } catch let pending as CoreHostAttachmentCleanupPending {
+            guard ownsPreviewCompletion() else { return }
             guard let payload = taskAttachmentSaveRequest,
                   let result = try? decode(pending.resultJSON),
                   let request = try? decode(payload), result.text("id") == request.text("id") else {
@@ -40195,6 +40260,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             retryNeeded = true
             return
         } catch {
+            guard ownsPreviewCompletion() else { return }
             if isDefiniteRejection(error) {
                 if ownedSave { taskAttachmentSaveRequest = nil }
                 taskRecoverySaving = false
@@ -40211,6 +40277,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
         taskRecoverySaving = false
         if let cancellationResult { showTaskAction(cancellationResult) }
+        recordTaskPreviewCompletionSaved()
         dismissTask()
         do { try await readSelectedSurface() } catch { self.error = error.localizedDescription }
     }
@@ -40261,7 +40328,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
 
     func editTaskStatus(_ status: String, assignedTo: String? = nil,
-                        expectedID: String? = nil, expectedSession: Int? = nil) async -> Bool {
+                        expectedID: String? = nil, expectedSession: Int? = nil, previewCompletion: Bool = false) async -> Bool {
+        guard !taskPreviewCompleting || previewCompletion else { return false }
         guard taskStatusEditable(status), assignedTo == nil || status == "waiting",
               expectedID == nil || expectedID == viewedTaskID,
               expectedSession == nil || expectedSession == taskScheduleSession else { return false }
@@ -44285,6 +44353,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     taskChecklistWriteRequest = nil
                     retryNeeded = false
                     taskError = nil
+                    recordTaskPreviewCompletionSaved()
                     dismissTask()
                     try await readSelectedSurface()
                     return
@@ -44322,6 +44391,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                     try await acceptTaskChecklistReset(result, id: viewedTaskID, session: taskChecklistSession)
                     return
                 }
+                if kind == "save" { recordTaskPreviewCompletionSaved() }
                 dismissTask()
                 try await readSelectedSurface()
                 return

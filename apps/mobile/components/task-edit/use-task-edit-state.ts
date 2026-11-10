@@ -6,6 +6,8 @@ import {
     collectFocusEligibilityTasks,
     getFocusStarBlockedText,
     generateUUID,
+    isProjectedRecurringTask,
+    isProjectedRecurringTaskId,
     saveTaskDraftOntoLatest,
     normalizeFocusTaskLimit,
     resolveTaskEditorFocusStar,
@@ -61,6 +63,7 @@ type TaskEditActivitySession = {
     titleDraft: string;
 
     baseTask?: Task;
+    pendingCompletion?: { taskId: string; attachments?: readonly Attachment[] };
 };
 
 const isTaskEditActivityInputRecovery = (value: unknown): value is TaskEditActivityInputRecovery => {
@@ -94,6 +97,8 @@ const isTaskEditActivitySession = (value: unknown): value is TaskEditActivitySes
         && editDraft.draft !== null
         && (editDraft.checklist === undefined || Array.isArray(editDraft.checklist))
         && (editDraft.attachments === undefined || Array.isArray(editDraft.attachments))
+        && (snapshot.pendingCompletion === undefined || (snapshot.pendingCompletion.taskId === snapshot.taskId
+            && (snapshot.pendingCompletion.attachments === undefined || Array.isArray(snapshot.pendingCompletion.attachments))))
         && (snapshot.baseTask === undefined || (!!snapshot.baseTask && typeof snapshot.baseTask === 'object'
             && snapshot.baseTask.id === snapshot.taskId));
 };
@@ -111,6 +116,7 @@ export type SetTaskEditDraftField = <K extends TaskDraftField>(
 
 export type TaskEditDraftLifecycle = {
     cancel: () => Promise<boolean>;
+    complete: () => Promise<boolean>;
     convertToReference: () => Promise<boolean>;
     discard: () => void;
     hasPendingChanges: () => boolean;
@@ -125,6 +131,7 @@ export function resolveInitialTaskEditTab(target?: TaskEditTab, currentTask?: Ta
 
 type UseTaskEditStateParams = {
     defaultTab?: TaskEditTab;
+    canComplete?: () => boolean;
     onClose: () => void;
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     onSaveError: (message?: string) => void;
@@ -139,6 +146,7 @@ type UseTaskEditStateParams = {
 
 export function useTaskEditState({
     defaultTab,
+    canComplete = () => true,
     onClose,
     onSave,
     onSaveError,
@@ -163,9 +171,16 @@ export function useTaskEditState({
     const attachmentDraftSettledRef = React.useRef(true);
     const saveAwaitingDurabilityRef = React.useRef(false);
     const pendingSavesRef = React.useRef(0);
+    const editorSessionRef = React.useRef(0);
+    const submissionRef = React.useRef(false);
+    const [submissionPending, setSubmissionPending] = React.useState(false);
+    const pendingCompletionRef = React.useRef<{ taskId: string; attachments?: readonly Attachment[] } | null>(null);
+    const [completionRetryPending, setCompletionRetryPending] = React.useState(false);
+    const [completionError, setCompletionError] = React.useState<string | null>(null);
     const pendingCancellationPatchRef = React.useRef<Partial<Task> | null>(null);
     const [cancelRetryPending, setCancelRetryPending] = React.useState(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
+        if (submissionRef.current || pendingCompletionRef.current) return;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -174,6 +189,7 @@ export function useTaskEditState({
         });
     }, []);
     const setChecklist = React.useCallback<SetTaskEditDraftValue<Task['checklist']>>((value, markDirty = true) => {
+        if (submissionRef.current || pendingCompletionRef.current) return;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -182,6 +198,7 @@ export function useTaskEditState({
         });
     }, []);
     const setAttachments = React.useCallback<SetTaskEditDraftValue<Attachment[] | undefined>>((value, markDirty = true) => {
+        if (submissionRef.current || pendingCompletionRef.current) return;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -266,6 +283,7 @@ export function useTaskEditState({
     const taskEditActivitySession = React.useMemo<TaskEditActivitySession | null>(() => {
         if (!recoverableLiveTask || !taskEditDraft) return null;
         return {
+            pendingCompletion: completionRetryPending ? pendingCompletionRef.current ?? undefined : undefined,
             activeInput: activityInputRef.current,
             contextInputDraft,
             descriptionDraft,
@@ -279,6 +297,7 @@ export function useTaskEditState({
             titleDraft,
         };
     }, [
+        completionRetryPending,
         contextInputDraft,
         descriptionDraft,
         editTab,
@@ -313,6 +332,9 @@ export function useTaskEditState({
 
         baseTaskRef.current = snapshot.baseTask?.id === recoverableLiveTask.id ? snapshot.baseTask : recoverableLiveTask;
         attachmentDraftSettledRef.current = false;
+        pendingCompletionRef.current = snapshot.pendingCompletion ?? null;
+        setCompletionRetryPending(Boolean(snapshot.pendingCompletion));
+        saveAwaitingDurabilityRef.current = Boolean(snapshot.pendingCompletion);
         isDirtyRef.current = snapshot.isDirty;
         titleDraftRef.current = snapshot.titleDraft;
         setTitleDraft(snapshot.titleDraft);
@@ -408,7 +430,46 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraftImpl = React.useCallback(async (mode: 'save' | 'cancel' = 'save'): Promise<boolean> => {
+    const saveDraftImpl = React.useCallback(async (mode: 'save' | 'cancel' | 'complete' = 'save'): Promise<boolean> => {
+        const session = editorSessionRef.current;
+        const ownsSession = () => editorSessionRef.current === session;
+        const pendingCompletion = pendingCompletionRef.current;
+        if (pendingCompletion) {
+            if (!canComplete() || mode === 'cancel' || pendingCompletion.taskId !== liveTask?.id) return false;
+            try {
+                await useTaskStore.getState().persistSnapshot();
+                await flushPendingSave();
+            } catch (error) {
+                if (!ownsSession()) return false;
+                const message = getUnknownErrorMessage(error) || translate('task.updateFailed');
+                setCompletionError(message);
+                onSaveError(message);
+                return false;
+            }
+            if (!ownsSession()) return false;
+            saveAwaitingDurabilityRef.current = false;
+            pendingCompletionRef.current = null;
+            setCompletionRetryPending(false);
+            setCompletionError(null);
+            checklistDraftRef.current = '';
+            clearTaskEditActivitySession();
+            settleCurrentAttachmentDraft(pendingCompletion.attachments);
+            void logInfo('Mobile Preview task completion saved', { scope: 'task-edit', extra: { releaseCheck: 'v1.3.9/preview-mark-done', platform: 'rn', outcome: 'saved' } });
+            onClose();
+            return true;
+        }
+        if (mode === 'complete') {
+            const latest = liveTask?.id ? useTaskStore.getState()._tasksById.get(liveTask.id) ?? liveTask : null;
+            const section = sections.find((item) => item.id === (taskEditDraft?.draft.sectionId || latest?.sectionId));
+            const projectId = taskEditDraft?.draft.projectId || latest?.projectId || section?.projectId;
+            const project = useTaskStore.getState().projects.find((item) => item.id === projectId);
+            if (!latest || !canComplete() || pendingCancellationPatchRef.current || latest.deletedAt || latest.purgedAt
+                || isProjectedRecurringTask(latest) || isProjectedRecurringTaskId(latest.id)
+                || project?.status === 'archived' || project?.deletedAt || project?.purgedAt
+                || !['inbox', 'next', 'waiting', 'someday'].includes(latest.status)
+                || !taskEditDraft || !['inbox', 'next', 'waiting', 'someday'].includes(taskEditDraft.draft.status)) return false;
+            isDirtyRef.current = true;
+        }
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return Promise.resolve(false);
         if (mode === 'cancel') isDirtyRef.current = true;
@@ -437,6 +498,10 @@ export function useTaskEditState({
                     draft: setTaskDraftField(saveDraftState.draft, 'status', 'next'),
                 };
             }
+        }
+
+        if (mode === 'complete') {
+            saveDraftState = { ...saveDraftState, draft: setTaskDraftField(saveDraftState.draft, 'status', 'done') };
         }
 
         let updates: Partial<Task> | null = buildTaskEditUpdatePatch(saveDraftState, currentTask, {
@@ -498,6 +563,7 @@ export function useTaskEditState({
                 return false;
             }
         }
+        if (mode === 'complete' && !updates) return false;
         const pendingCancellation = pendingCancellationPatchRef.current;
         if (pendingCancellation) {
             if (mode === 'cancel' && updates) {
@@ -527,11 +593,18 @@ export function useTaskEditState({
             );
             saveAwaitingDurabilityRef.current = wasAwaitingDurability
                 || attachmentSaveRequiresDurability
-                || mode === 'cancel';
+                || mode === 'cancel' || mode === 'complete';
             const saved = await writeMerged(updates);
+            if (!ownsSession()) return false;
             if (!saved) {
                 saveAwaitingDurabilityRef.current = wasAwaitingDurability;
                 return false;
+            }
+            if (mode === 'complete') {
+                taskEditDraftRef.current = saveDraftState;
+                setTaskEditDraftState(saveDraftState);
+                pendingCompletionRef.current = { taskId: currentTask.id, attachments: savedAttachments };
+                setCompletionRetryPending(true);
             }
             if (mode === 'cancel') {
                 pendingCancellationPatchRef.current = updates;
@@ -542,21 +615,29 @@ export function useTaskEditState({
             try {
                 await flushPendingSave();
             } catch (error) {
-                onSaveError(getUnknownErrorMessage(error));
-
-
+                if (!ownsSession()) return false;
+                const message = getUnknownErrorMessage(error) || translate('task.updateFailed');
+                if (mode === 'complete') setCompletionError(message);
+                onSaveError(message);
                 return false;
             }
         }
+        if (!ownsSession()) return false;
         saveAwaitingDurabilityRef.current = false;
         pendingCancellationPatchRef.current = null;
         setCancelRetryPending(false);
+        pendingCompletionRef.current = null;
+        setCompletionRetryPending(false);
+        setCompletionError(null);
         if (mode === 'save' && !currentTask.isFocusedToday
             && useTaskStore.getState()._tasksById.get(currentTask.id)?.isFocusedToday) {
             void logInfo('Editor Focus star saved', {
                 scope: 'task-edit',
                 extra: { releaseCheck: 'v1.3.3/editor-focus-star' },
             });
+        }
+        if (mode === 'complete') {
+            void logInfo('Mobile Preview task completion saved', { scope: 'task-edit', extra: { releaseCheck: 'v1.3.9/preview-mark-done', platform: 'rn', outcome: 'saved' } });
         }
         if (mode === 'cancel') {
             void logInfo('Mobile task cancellation draft saved', {
@@ -573,6 +654,7 @@ export function useTaskEditState({
         onClose();
         return true;
     }, [
+        canComplete,
         clearPendingTextChanges,
         liveTask,
         onClose,
@@ -585,14 +667,27 @@ export function useTaskEditState({
         writePatch,
     ]);
 
-    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' = 'save') => {
+    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' | 'complete' = 'save') => {
+        if (submissionRef.current) return false;
+        const session = editorSessionRef.current;
+        submissionRef.current = true;
         pendingSavesRef.current += 1;
-        try { return await saveDraftImpl(mode); }
-        finally { pendingSavesRef.current -= 1; }
-    }, [saveDraftImpl]);
+        setSubmissionPending(true);
+        try {
+            const result = await saveDraftImpl(mode);
+            if (!result && mode === 'complete' && editorSessionRef.current === session) setCompletionError((current) => current || translate('task.updateFailed'));
+            return result;
+        } finally {
+            pendingSavesRef.current -= 1;
+            submissionRef.current = false;
+            setSubmissionPending(false);
+        }
+    }, [saveDraftImpl, translate]);
     const cancelDraft = React.useCallback(() => saveDraft('cancel'), [saveDraft]);
+    const completeDraft = React.useCallback(() => saveDraft('complete'), [saveDraft]);
 
     const discardDraft = React.useCallback(() => {
+        if (submissionRef.current || pendingCompletionRef.current) return;
         clearPendingTextChanges();
         clearTaskEditActivitySession();
         const currentTask = baseTaskRef.current ?? liveTask;
@@ -680,14 +775,16 @@ export function useTaskEditState({
 
     const draftLifecycle = React.useMemo<TaskEditDraftLifecycle>(() => ({
         cancel: cancelDraft,
+        complete: completeDraft,
         convertToReference,
         discard: discardDraft,
         hasPendingChanges,
         save: saveDraft,
-    }), [cancelDraft, convertToReference, discardDraft, hasPendingChanges, saveDraft]);
+    }), [cancelDraft, completeDraft, convertToReference, discardDraft, hasPendingChanges, saveDraft]);
 
     React.useEffect(() => {
         if (!visible) {
+            editorSessionRef.current += 1;
             activityInputRef.current = null;
             setRecoveredActivityInput(null);
             const currentTask = baseTaskRef.current ?? liveTask;
@@ -696,6 +793,9 @@ export function useTaskEditState({
             baseTaskRef.current = null;
             pendingCancellationPatchRef.current = null;
             setCancelRetryPending(false);
+            pendingCompletionRef.current = null;
+            setCompletionRetryPending(false);
+            setCompletionError(null);
             isDirtyRef.current = false;
             setShowDescriptionPreview(false);
             if (titleDebounceRef.current) {
@@ -722,11 +822,15 @@ export function useTaskEditState({
             const updatedChanged = baseTaskRef.current?.updatedAt !== liveTask.updatedAt;
             if (taskChanged || (!isDirtyRef.current && updatedChanged)) {
                 if (taskChanged) {
+                    editorSessionRef.current += 1;
                     activityInputRef.current = null;
                     setRecoveredActivityInput(null);
                     settleCurrentAttachmentDraft(baseTaskRef.current?.attachments);
                     pendingCancellationPatchRef.current = null;
                     setCancelRetryPending(false);
+                    pendingCompletionRef.current = null;
+                    setCompletionRetryPending(false);
+                    setCompletionError(null);
                 }
                 setCustomWeekdays(byDay);
                 setTaskEditDraftState(createTaskEditDraft(liveTask));
@@ -759,6 +863,9 @@ export function useTaskEditState({
             baseTaskRef.current = null;
             pendingCancellationPatchRef.current = null;
             setCancelRetryPending(false);
+            pendingCompletionRef.current = null;
+            setCompletionRetryPending(false);
+            setCompletionError(null);
             isDirtyRef.current = false;
             setShowDescriptionPreview(false);
             if (titleDebounceRef.current) {
@@ -830,6 +937,9 @@ export function useTaskEditState({
         acknowledgeRecoveredActivityInput,
         checklistDraftRef,
         cancelRetryPending,
+        completionRetryPending,
+        completionError,
+        submissionPending,
         contextInputDraft,
         customWeekdays,
         descriptionDebounceRef,

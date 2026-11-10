@@ -45,6 +45,7 @@ import {
     replaceEntityInArray,
     stampNewRecurringFollowUp,
     type ProjectOrderReserver,
+    type TaskCompletionSource,
 } from './store-helpers';
 import { logInfo, logWarn } from './logger';
 import { safeParseDate } from './date';
@@ -632,6 +633,7 @@ export const planTaskUpdateEffects = ({
     deviceId,
     createId,
     recurrenceProjection,
+    completionSource,
 }: {
     task: Task;
     preparedUpdates: Partial<Task>;
@@ -642,6 +644,7 @@ export const planTaskUpdateEffects = ({
     deviceId: string;
     createId?: () => string;
     recurrenceProjection?: RecurrenceProjection | null;
+    completionSource?: TaskCompletionSource;
 }): {
     updatedTask: Task;
     recurringFollowUpTask: Task | null;
@@ -658,6 +661,7 @@ export const planTaskUpdateEffects = ({
         now,
         createId,
         recurrenceProjection,
+        completionSource,
     );
     const stampedNextRecurringTask = stampNewRecurringFollowUp(
         nextRecurringTask,
@@ -2646,6 +2650,7 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
                 const deviceState = ensureDeviceId(state.settings);
                 const effects = planTaskUpdateEffects({
                     task: oldTask,
+                    completionSource: 'currentDraft',
                     preparedUpdates: preparedUpdates.updates,
                     allTasks: state._allTasks,
                     allProjects: state._allProjects,

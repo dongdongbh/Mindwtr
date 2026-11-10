@@ -4757,6 +4757,7 @@ private final class Engine: @unchecked Sendable {
 
     private static let scheduleFields: Set<String> = ["startTime", "dueDate", "reviewAt", "relativeStartOffset"]
     private static let recurrenceFields: Set<String> = ["recurrence", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence"]
+    private static let recurrenceDraftFields = recurrenceFields.union(["preserveChecklistOnRepeat"])
 
     private static func validTaskAttachmentList(_ value: Any?) -> Bool {
         guard let rows = value as? [[String: Any]], rows.count <= 1_000,
@@ -28722,15 +28723,15 @@ private final class Engine: @unchecked Sendable {
                         throw HostFailure("INVALID_INPUT: Checklist save needs exact baselines and final list")
                     }
                     let allowed = Set(["title", "description", "location", "assignedTo", "priority", "energyLevel", "timeEstimate", "timeSpentMinutes", "projectId", "areaId", "sectionId", "contexts", "tags", "status", "focusedToday", "completedAt"])
-                        .union(Self.scheduleFields).union(Self.recurrenceFields).union(Self.reminderDraftFields)
+                        .union(Self.scheduleFields).union(Self.recurrenceDraftFields).union(Self.reminderDraftFields)
                     guard Set(patch.keys).isSubset(of: allowed), patch.keys.allSatisfy({ field in
                         if field == "relativeStartOffset" { return Self.isOffset(base[field]) && Self.isOffset(patch[field]) }
                         if field == "dueReminderLeadMinutes" || field == "startReminderLeadMinutes" { return Self.isReminderLead(base[field]) && Self.isReminderLead(patch[field]) }
-                        if field == "showFutureRecurrence" || field == "focusedToday" { return Self.isBoolean(base[field]) && Self.isBoolean(patch[field]) }
+                        if field == "showFutureRecurrence" || field == "preserveChecklistOnRepeat" || field == "focusedToday" { return Self.isBoolean(base[field]) && Self.isBoolean(patch[field]) }
                         if field == "timeSpentMinutes" { return Self.isTimeSpent(base[field]) && Self.isTimeSpent(patch[field]) }
                         return base[field] is String && patch[field] is String
                     }) else { throw HostFailure("INVALID_INPUT: Checklist save contains unsupported draft fields") }
-                    let hasRecurrence = !Self.recurrenceFields.isDisjoint(with: patch.keys)
+                    let hasRecurrence = !Self.recurrenceDraftFields.isDisjoint(with: patch.keys)
                     guard (input["recurrenceBase"] != nil) == hasRecurrence else {
                         throw HostFailure("INVALID_INPUT: Checklist recurrence baseline is missing or unrequested")
                     }
@@ -29365,11 +29366,11 @@ private final class Engine: @unchecked Sendable {
                 throw HostFailure("INVALID_INPUT: Native editor requires matching supported draft fields")
             }
             let hasSchedule = !Self.scheduleFields.isDisjoint(with: patch.keys)
-            let hasRecurrence = !Self.recurrenceFields.isDisjoint(with: patch.keys)
+            let hasRecurrence = !Self.recurrenceDraftFields.isDisjoint(with: patch.keys)
             let isPrepared = hasSchedule || hasRecurrence || input["scheduleBase"] != nil
             let allowed = Set(["title", "description", "priority", "energyLevel", "timeEstimate", "projectId", "areaId", "sectionId", "contexts", "tags"])
                 .union(allowPreparedDates && isPrepared ? Set(["location", "assignedTo", "timeSpentMinutes"]).union(Self.reminderDraftFields) : [])
-                .union(allowPreparedDates ? Self.scheduleFields.union(Self.recurrenceFields) : [])
+                .union(allowPreparedDates ? Self.scheduleFields.union(Self.recurrenceDraftFields) : [])
             var inputFields: Set<String> = ["id", "base", "patch"]
             if isPrepared && allowPreparedDates { inputFields.insert("scheduleBase") }
             if hasRecurrence && allowPreparedDates { inputFields.insert("recurrenceBase") }
@@ -29379,7 +29380,7 @@ private final class Engine: @unchecked Sendable {
                   input["attachments"] == nil || (allowPreparedDates && Self.validTaskAttachmentHalf(input["attachments"])),
                   patch.keys.allSatisfy({ field in
                       if field == "relativeStartOffset" { return Self.isOffset(base[field]) && Self.isOffset(patch[field]) }
-                      if field == "showFutureRecurrence" { return Self.isBoolean(base[field]) && Self.isBoolean(patch[field]) }
+                      if field == "showFutureRecurrence" || field == "preserveChecklistOnRepeat" { return Self.isBoolean(base[field]) && Self.isBoolean(patch[field]) }
                       if field == "timeSpentMinutes" { return Self.isTimeSpent(base[field]) && Self.isTimeSpent(patch[field]) }
                       if field == "dueReminderLeadMinutes" || field == "startReminderLeadMinutes" { return Self.isReminderLead(base[field]) && Self.isReminderLead(patch[field]) }
                       return base[field] is String && patch[field] is String

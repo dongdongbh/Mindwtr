@@ -1,7 +1,7 @@
 import { getAttachmentDisplayTitle } from './attachment-link-utils';
 import { isAttachmentKeptWithoutFile } from './unreachable-attachments';
 import { tFallback } from './i18n';
-import { formatRecurrenceLabel, getRecurringTaskPreviewDate } from './recurrence';
+import { formatRecurrenceLabel, getRecurringTaskPreviewDate, isProjectedRecurringTask, isProjectedRecurringTaskId } from './recurrence';
 import { hasTimeComponent } from './date';
 import { isTaskCancelled } from './task-status';
 import { shouldSendTaskReminders } from './task-reminder-policy';
@@ -16,7 +16,7 @@ export type TaskViewField =
 export type TaskViewRow =
     | { type: 'title'; label: string; value: string }
 
-    | { type: 'status'; label: string; value: string; status: TaskStatus | null; editable: boolean }
+    | { type: 'status'; label: string; value: string; status: TaskStatus | null; editable: boolean; completeLabel?: string }
 
     | { type: 'field'; field: TaskViewField; label: string; value: string; project: { id: string; accessibilityLabel: string } | null }
 
@@ -116,7 +116,13 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
 
     if (title) rows.push({ type: 'title', label: t('taskEdit.titleLabel'), value: title });
     if (!isReference && input.showStatusField && statusLabel) {
-        rows.push({ type: 'status', label: t('taskEdit.statusLabel'), value: statusLabel, status: task.status ?? null, editable: !readOnly && Boolean(task.status) });
+        const completionProject = project ?? input.projects.find((item) => item.id === section?.projectId);
+        const canComplete = !readOnly && !task.deletedAt && !task.purgedAt
+            && !isProjectedRecurringTask(task) && !isProjectedRecurringTaskId(task.id)
+            && completionProject?.status !== 'archived' && !completionProject?.deletedAt && !completionProject?.purgedAt
+            && (task.status === 'inbox' || task.status === 'next' || task.status === 'waiting' || task.status === 'someday');
+        rows.push({ type: 'status', label: t('taskEdit.statusLabel'), value: statusLabel, status: task.status ?? null, editable: !readOnly && Boolean(task.status),
+            ...(canComplete ? { completeLabel: tFallback(t, 'review.markDone', 'Mark Done') } : {}) });
     }
     if (!isReference && input.prioritiesEnabled) {
         field('priority', t('taskEdit.priorityLabel'), task.priority ? tFallback(t, `priority.${task.priority}`, task.priority) : undefined);

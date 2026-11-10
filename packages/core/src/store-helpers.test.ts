@@ -912,6 +912,36 @@ describe('derived store state helpers', () => {
 describe('completion timestamp updates', () => {
     const now = '2026-07-08T10:00:00.000Z';
 
+    it('uses the coherent edited schedule, containers and content for an opted-in completion', () => {
+        const task = createTask('current', 'old-project', 0, { status: 'next', title: 'Before',
+            dueDate: '2026-07-08', recurrence: { rule: 'daily', strategy: 'strict' } });
+        const attachment: Attachment = { id: 'link', kind: 'link', title: 'Link', uri: 'https://example.com',
+            createdAt: now, updatedAt: now };
+        const updates: Partial<Task> = { status: 'done', title: 'After', description: 'Edited notes',
+            projectId: 'new-project', sectionId: 'new-section', areaId: 'new-area', tags: ['#edited'], contexts: ['@home'],
+            dueDate: '2026-07-10', relativeStartOffset: { amount: -2, unit: 'day' },
+            recurrence: { rule: 'weekly', strategy: 'strict' }, attachments: [attachment],
+            checklist: [{ id: 'item', title: 'Current checklist', isCompleted: true }] };
+        const { nextRecurringTask: next } = applyTaskUpdates(task, updates, now, undefined, undefined, 'currentDraft');
+        expect(next).toMatchObject({ title: 'After', description: 'Edited notes', projectId: 'new-project',
+            sectionId: 'new-section', areaId: 'new-area', tags: ['#edited'], contexts: ['@home'],
+            dueDate: '2026-07-17', startTime: '2026-07-15', relativeStartOffset: { amount: -2, unit: 'day' },
+            recurrence: { rule: 'weekly' }, attachments: [{ ...attachment, id: expect.any(String) }],
+            checklist: [{ id: expect.any(String), title: 'Current checklist', isCompleted: false }] });
+        const legacy = applyTaskUpdates(task, updates, now).nextRecurringTask;
+        expect(legacy).toMatchObject({ title: 'Before', projectId: 'old-project', dueDate: '2026-07-09', recurrence: { rule: 'daily' } });
+    });
+
+    it('adds or removes recurrence in the same opted-in completion', () => {
+        const plain = createTask('new-repeat', undefined, 0, { status: 'next', dueDate: '2026-07-08' });
+        const added = applyTaskUpdates(plain, { status: 'done', recurrence: { rule: 'weekly', strategy: 'strict' } },
+            now, undefined, undefined, 'currentDraft');
+        expect(added.nextRecurringTask).toMatchObject({ dueDate: '2026-07-15', recurrence: { rule: 'weekly' } });
+        const repeated = { ...plain, recurrence: { rule: 'daily', strategy: 'strict' } } as const;
+        expect(applyTaskUpdates(repeated, { status: 'done', recurrence: undefined }, now,
+            undefined, undefined, 'currentDraft').nextRecurringTask).toBeNull();
+    });
+
     it('uses a caller-supplied completedAt when completing a task', () => {
         const task = createTask('t1', undefined, 0, { status: 'next' });
         const { updatedTask } = applyTaskUpdates(

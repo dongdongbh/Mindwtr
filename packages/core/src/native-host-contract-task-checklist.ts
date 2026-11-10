@@ -22,7 +22,7 @@ import { isNativeJsonWithinBytes, readChecklist, toChecklist } from './native-ho
 import { buildResetTaskChecklistUpdates, planTaskUpdateEffects, prepareTaskUpdatesForStore, planSkippedRecurringOccurrence, planTaskMutations, samePreparedTask, taskFocusWitnessRow } from './store-tasks';
 import { taskEditValuesEqual } from './json-value-equality';
 import { createProjectOrderReserver, ensureDeviceId, getNextProjectOrder, getTaskOrder, selectVisibleProjects, selectVisibleAreas,
-    nextRevision } from './store-helpers';
+    nextRevision, buildTaskCompletionSource } from './store-helpers';
 import { createNativeRequestReceipts, isNativeRequestReceiptDurable, taskRevisionOf, NativeReceiptSqliteAdapter, type NativeRequestReceipts } from './native-request-receipts';
 import { compareAreasByOrder, countFocusedTasksBeforeBoundary, projectFocusDateValues, type FocusDateProjection } from './task-utils';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
@@ -77,6 +77,7 @@ type Witness = {
     deviceIdBefore: string | null;
     deviceIdToInitialize: string | null;
     recurrenceProjection: RecurrenceProjection | null;
+    completionSource?: 'currentDraft';
     calendarTimeZone?: string;
     ids: string[];
 
@@ -999,9 +1000,15 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
         };
         const hasDraftUpdate = selection?.kind === 'rowDestination' ? true : selection && !skip ? Object.keys(direct).some((field) => !same(source[field as keyof Task], direct[field as keyof Task]))
             : !skip || Object.keys(direct).length > 0;
+        if (allowIds && witness.completionSource === 'currentDraft') {
+            witness.recurrenceProjection = projectNextRecurringTask(
+                buildTaskCompletionSource(source, prepared.updates, 'currentDraft'),
+                prepared.updates.completedAt ?? witness.preparedAt);
+        }
         const effects = hasDraftUpdate ? planTaskUpdateEffects({ task: source, preparedUpdates: prepared.updates,
             allTasks: lists.tasks, allProjects: lists.projects, allSections: lists.sections,
             now: witness.preparedAt, deviceId: deviceId(witness), createId,
+            completionSource: witness.completionSource ?? 'saved',
             recurrenceProjection: !skip && prepared.updates.status === 'done' && source.status !== 'done'
                 && source.status !== 'archived' ? witness.recurrenceProjection : undefined }) : null;
         if (effects && selection?.kind === 'rowDates') {
@@ -1136,6 +1143,7 @@ const readChecklistPrepared = (
             'source', 'lists', 'settings', 'preparedAt', 'preparedLocalDay', 'preparedOffsetMinutes',
             'boundaryOffsetMinutes', 'futureBoundary', 'deviceIdBefore', 'deviceIdToInitialize',
             'recurrenceProjection', 'ids', 'directClears', 'direct', 'focusCount', 'focusLimit',
+            ...(own(witness, 'completionSource') ? ['completionSource'] : []),
             ...(frozenRowSelection(selection) ? ['focusDates'] : []),
             ...(isSave(request) && request.intent === 'skip' ? ['calendarTimeZone'] : []),
             ...(isSave(request) && request.intent === 'cancel' ? ['cancelMessage', 'cancelUndoLabel'] : []),
@@ -1146,6 +1154,10 @@ const readChecklistPrepared = (
         || !witness.lists.tasks.every(isRecord) || !witness.lists.projects.every(isRecord)
         || !witness.lists.sections.every(isRecord) || !witness.lists.areas.every(isRecord)
         || !isRecord(witness.direct) || !Array.isArray(witness.directClears)
+        || (own(witness, 'completionSource') && (witness.completionSource !== 'currentDraft'
+            || !isSave(request) || request.patch.status !== 'done'
+            || witness.source.status === 'done' || witness.source.status === 'archived'
+            || request.intent && request.intent !== 'referenceComplete' && request.intent !== 'referenceBackdate'))
         || !validClears(witness.direct, witness.directClears)
         || !Array.isArray(witness.ids) || witness.ids.some((id) => typeof id !== 'string' || !UUID.test(id))
         || new Set(witness.ids).size !== witness.ids.length
@@ -2271,6 +2283,9 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                     && task.status !== 'archived' ? projectNextRecurringTask(task,
                         request.intent === 'referenceBackdate' || selection?.kind === 'rowBackdate' ? request.patch.completedAt!
                             : widgetSource ? widgetCompletionInstant(widgetSource, preparedAt) ?? preparedAt : preparedAt) : null,
+                ...(isSave(request) && (!request.intent || request.intent === 'referenceComplete' || request.intent === 'referenceBackdate')
+                    && request.patch.status === 'done' && task.status !== 'done' && task.status !== 'archived'
+                    ? { completionSource: 'currentDraft' as const } : {}),
                 ...(isSave(request) && request.intent === 'skip'
                     ? { calendarTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } : {}),
                 ids: [], directClears: cleared(direct), direct: JSON.parse(JSON.stringify(direct)),

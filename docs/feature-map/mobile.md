@@ -93,10 +93,12 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 - Reach: Tap any task row. Header: Close, More, Save. More holds Share, Duplicate task, Create project from task, Delete, and more.
 - Shortcuts: Swipe horizontally between the Edit and Preview pages.
-- Selectors: `task-edit-adaptive-surface`, `task-edit-preview-page`, `task-edit-read-only-hint`, `task-edit-focus-star`, `project-create-error`, `area-create-error`, `destination-create-error`
+- Selectors: `task-preview-mark-done`, `task-edit-adaptive-surface`, `task-edit-preview-page`, `task-edit-read-only-hint`, `task-edit-focus-star`, `project-create-error`, `area-create-error`, `destination-create-error`
 - Code: `apps/mobile/components/task-edit-modal.tsx`, `apps/mobile/components/task-edit/TaskEditHeader.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.tsx`
-- Checks: `apps/mobile/components/task-edit-modal.test.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.test.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-actions.save-result.test.tsx`
+- Checks: `apps/mobile/components/task-edit-modal.test.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.test.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-actions.save-result.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-preview-completion.test.tsx`
 - Notes: Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
+
+- Preview completion: Mark Done appears inside the visible Status card for editable active tasks. It saves the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe dismissal is disabled while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
 
 ## Checklist and attachments
 

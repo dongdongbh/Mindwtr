@@ -1,4 +1,5 @@
 import React from 'react';
+import * as core from '@mindwtr/core';
 import { Alert, AppState, Modal, Platform, type AppStateStatus } from 'react-native';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import renderer, { act } from 'react-test-renderer';
@@ -79,6 +80,7 @@ vi.mock('@mindwtr/core', async () => {
     deleteTask: vi.fn(),
     lockEditing: vi.fn(),
     unlockEditing: vi.fn(),
+    persistSnapshot: vi.fn(async () => undefined),
     getDerivedState: () => ({
       allContexts: [],
       allTags: [],
@@ -246,6 +248,34 @@ describe('TaskEditModal', () => {
         sequentialProjectIds: new Set<string>(), sequentialWithinSectionProjectIds: new Set<string>(),
       });
     }
+  });
+
+  it('prevents native sheet swipe dismissal while completion is submitting or awaiting persistence Retry', async () => {
+    const task: Task = { id: 'preview-sheet', title: 'Task', status: 'next', tags: [], contexts: [], createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-10T00:00:00Z' };
+    let release: () => void = () => undefined;
+    let failed: () => void = () => undefined;
+    const failureReached = new Promise<void>((resolve) => { failed = resolve; });
+    const onSave = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    const onClose = vi.fn();
+    vi.spyOn(core, 'flushPendingSave').mockImplementationOnce(async () => { failed(); throw new Error('SQLite unavailable'); }).mockResolvedValue(undefined);
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<TaskEditModal visible task={task} onClose={onClose} onSave={onSave} />); });
+    const modal = () => tree.root.findAllByType(Modal)[0];
+    const preview = () => tree.root.find((node) => typeof node.props.onComplete === 'function');
+    expect(modal().props.allowSwipeDismissal).toBe(true);
+    act(() => { preview().props.onComplete(); });
+    expect(modal().props.allowSwipeDismissal).toBe(false);
+    act(() => { modal().props.onRequestClose(); });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { release(); await failureReached; });
+    expect(preview().props.completionRetryPending).toBe(true);
+    expect(modal().props.allowSwipeDismissal).toBe(false);
+    act(() => { modal().props.onRequestClose(); });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { preview().props.onComplete(); });
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
   });
 
   describe('owner navigation', () => {

@@ -54,7 +54,7 @@ struct TaskViewSheet: View {
     private var busy: Bool { model.busy }
     private var error: String? { model.taskError }
     private var readOnly: Bool { model.taskEditor.flag("readOnly") }
-    private var operationFrozen: Bool { busy || model.retryNeeded || model.taskChecklistReadPending || model.taskPersonCreateOwed || model.taskAttachmentOpening || model.taskReferenceOpening || model.taskSharePayload != nil || model.taskFileOpenPresentation != nil || model.taskAttachmentWorking || model.taskFileImporterPresented }
+    private var operationFrozen: Bool { busy || model.taskPreviewCompleting || model.retryNeeded || model.taskChecklistReadPending || model.taskPersonCreateOwed || model.taskAttachmentOpening || model.taskReferenceOpening || model.taskSharePayload != nil || model.taskFileOpenPresentation != nil || model.taskAttachmentWorking || model.taskFileImporterPresented }
     private var attachmentRecoveryFrozen: Bool {
         model.taskAttachmentState == .interrupted || model.taskAttachmentState == .savedCleanup
             || model.taskAttachmentState == .blocked
@@ -1378,11 +1378,25 @@ struct TaskViewSheet: View {
                     Text(item.text("value")).rnFont(14, .semibold)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
+                if item.text("type") == "status", !item.text("completeLabel").isEmpty {
+                    Button {
+                        endEditingBeforeAction()
+                        Task { await model.completeTaskFromPreview() }
+                    } label: {
+                        Text(item.text("completeLabel")).rnFont(14, .semibold)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minHeight: 44).padding(.horizontal, 14)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tint, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint)
+                    .disabled(frozen || modalPresented || discardConfirm || !model.taskPreviewCompletionEnabled)
+                    .accessibilityIdentifier("task-preview-mark-done")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
             .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: item.text("type") == "status" ? .contain : .combine)
             if item.text("field") == "project" && !item.object("project").text("id").isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     if model.taskReferenceSection == "project" { referenceError }

@@ -1,0 +1,404 @@
+{
+  "request": {
+    "id": "checklist-task",
+    "requestId": "00000000-0000-4000-8000-000000000321",
+    "base": {
+      "recurrence": "daily",
+      "recurrenceRRule": "FREQ=DAILY",
+      "recurrenceStrategy": "strict",
+      "showFutureRecurrence": false,
+      "preserveChecklistOnRepeat": false,
+      "title": "Before",
+      "status": "next"
+    },
+    "patch": {
+      "recurrence": "weekly",
+      "recurrenceRRule": "",
+      "recurrenceStrategy": "strict",
+      "showFutureRecurrence": false,
+      "preserveChecklistOnRepeat": false,
+      "title": "Current draft",
+      "status": "done"
+    },
+    "scheduleBase": {
+      "startTime": null,
+      "dueDate": "2026-09-27",
+      "relativeStartOffset": null,
+      "reviewAt": null
+    },
+    "recurrenceBase": {
+      "recurrence": {
+        "rule": "daily",
+        "strategy": "strict"
+      },
+      "showFutureRecurrence": null
+    },
+    "checklist": {
+      "base": [
+        {
+          "id": "one",
+          "title": "First",
+          "isCompleted": false
+        },
+        {
+          "id": "two",
+          "title": "Second",
+          "isCompleted": false
+        }
+      ],
+      "value": [
+        {
+          "id": "one",
+          "title": "Current checklist",
+          "isCompleted": true
+        }
+      ]
+    }
+  },
+  "prepared": {
+    "version": 1,
+    "kind": "save",
+    "request": {
+      "id": "checklist-task",
+      "base": {
+        "recurrence": "daily",
+        "recurrenceRRule": "FREQ=DAILY",
+        "recurrenceStrategy": "strict",
+        "showFutureRecurrence": false,
+        "preserveChecklistOnRepeat": false,
+        "title": "Before",
+        "status": "next"
+      },
+      "patch": {
+        "recurrence": "weekly",
+        "recurrenceRRule": "",
+        "recurrenceStrategy": "strict",
+        "showFutureRecurrence": false,
+        "preserveChecklistOnRepeat": false,
+        "title": "Current draft",
+        "status": "done"
+      },
+      "scheduleBase": {
+        "startTime": null,
+        "dueDate": "2026-09-27",
+        "relativeStartOffset": null,
+        "reviewAt": null
+      },
+      "recurrenceBase": {
+        "recurrence": {
+          "rule": "daily",
+          "strategy": "strict"
+        },
+        "showFutureRecurrence": null
+      },
+      "requestId": "00000000-0000-4000-8000-000000000321",
+      "checklist": {
+        "base": [
+          {
+            "id": "one",
+            "title": "First",
+            "isCompleted": false
+          },
+          {
+            "id": "two",
+            "title": "Second",
+            "isCompleted": false
+          }
+        ],
+        "value": [
+          {
+            "id": "one",
+            "title": "Current checklist",
+            "isCompleted": true
+          }
+        ]
+      }
+    },
+    "witness": {
+      "source": {
+        "id": "checklist-task",
+        "title": "Before",
+        "status": "next",
+        "taskMode": "list",
+        "createdAt": "2026-09-01T10:00:00.000Z",
+        "updatedAt": "2026-09-01T10:00:00.000Z",
+        "tags": [],
+        "contexts": [],
+        "checklist": [
+          {
+            "id": "one",
+            "title": "First",
+            "isCompleted": false
+          },
+          {
+            "id": "two",
+            "title": "Second",
+            "isCompleted": false
+          }
+        ],
+        "dueDate": "2026-09-27",
+        "recurrence": {
+          "rule": "daily",
+          "strategy": "strict"
+        },
+        "rev": 3,
+        "revBy": "device-a",
+        "pushCount": 0
+      },
+      "lists": {
+        "tasks": [
+          {
+            "id": "checklist-task",
+            "title": "Before",
+            "status": "next",
+            "taskMode": "list",
+            "createdAt": "2026-09-01T10:00:00.000Z",
+            "updatedAt": "2026-09-01T10:00:00.000Z",
+            "tags": [],
+            "contexts": [],
+            "checklist": [
+              {
+                "id": "one",
+                "title": "First",
+                "isCompleted": false
+              },
+              {
+                "id": "two",
+                "title": "Second",
+                "isCompleted": false
+              }
+            ],
+            "dueDate": "2026-09-27",
+            "recurrence": {
+              "rule": "daily",
+              "strategy": "strict"
+            },
+            "rev": 3,
+            "revBy": "device-a",
+            "pushCount": 0
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": []
+      },
+      "settings": {
+        "deviceId": "device-a",
+        "gtd": {}
+      },
+      "preparedAt": "2026-09-27T15:00:00.000Z",
+      "futureBoundary": "2026-09-28T03:59:59.999Z",
+      "preparedOffsetMinutes": 240,
+      "boundaryOffsetMinutes": 240,
+      "preparedLocalDay": "2026-09-27",
+      "deviceIdBefore": "device-a",
+      "deviceIdToInitialize": null,
+      "recurrenceProjection": {
+        "version": 1,
+        "sourceAnchorDays": {
+          "dueDate": 27
+        },
+        "candidate": {
+          "dueDate": "2026-09-28"
+        },
+        "until": null
+      },
+      "ids": [
+        "52231c5e-4c36-4a86-b815-e87d454715ba",
+        "84d23382-026a-4e15-b9e2-f5f69c0f4bf9"
+      ],
+      "directClears": [],
+      "direct": {
+        "title": "Current draft",
+        "status": "done",
+        "recurrence": {
+          "rule": "weekly",
+          "strategy": "strict"
+        },
+        "checklist": [
+          {
+            "id": "one",
+            "title": "Current checklist",
+            "isCompleted": true
+          }
+        ]
+      },
+      "focusCount": 0,
+      "focusLimit": 3
+    },
+    "effect": {
+      "sourceBefore": {
+        "id": "checklist-task",
+        "title": "Before",
+        "status": "next",
+        "taskMode": "list",
+        "createdAt": "2026-09-01T10:00:00.000Z",
+        "updatedAt": "2026-09-01T10:00:00.000Z",
+        "tags": [],
+        "contexts": [],
+        "checklist": [
+          {
+            "id": "one",
+            "title": "First",
+            "isCompleted": false
+          },
+          {
+            "id": "two",
+            "title": "Second",
+            "isCompleted": false
+          }
+        ],
+        "dueDate": "2026-09-27",
+        "recurrence": {
+          "rule": "daily",
+          "strategy": "strict"
+        },
+        "rev": 3,
+        "revBy": "device-a",
+        "pushCount": 0
+      },
+      "tasks": [
+        {
+          "before": {
+            "id": "checklist-task",
+            "title": "Before",
+            "status": "next",
+            "taskMode": "list",
+            "createdAt": "2026-09-01T10:00:00.000Z",
+            "updatedAt": "2026-09-01T10:00:00.000Z",
+            "tags": [],
+            "contexts": [],
+            "checklist": [
+              {
+                "id": "one",
+                "title": "First",
+                "isCompleted": false
+              },
+              {
+                "id": "two",
+                "title": "Second",
+                "isCompleted": false
+              }
+            ],
+            "dueDate": "2026-09-27",
+            "recurrence": {
+              "rule": "daily",
+              "strategy": "strict"
+            },
+            "rev": 3,
+            "revBy": "device-a",
+            "pushCount": 0
+          },
+          "after": {
+            "id": "checklist-task",
+            "title": "Current draft",
+            "status": "done",
+            "taskMode": "list",
+            "createdAt": "2026-09-01T10:00:00.000Z",
+            "updatedAt": "2026-09-27T15:00:00.000Z",
+            "tags": [],
+            "contexts": [],
+            "checklist": [
+              {
+                "id": "one",
+                "title": "Current checklist",
+                "isCompleted": true
+              }
+            ],
+            "dueDate": "2026-09-27",
+            "recurrence": {
+              "rule": "weekly",
+              "seriesId": "checklist-task",
+              "strategy": "strict",
+              "rrule": "FREQ=WEEKLY;X-MINDWTR-SERIES-ID=checklist-task"
+            },
+            "rev": 4,
+            "revBy": "device-a",
+            "pushCount": 0,
+            "isFocusedToday": false,
+            "completedAt": "2026-09-27T15:00:00.000Z"
+          }
+        },
+        {
+          "before": null,
+          "after": {
+            "id": "52231c5e-4c36-4a86-b815-e87d454715ba",
+            "title": "Before",
+            "status": "next",
+            "taskMode": "list",
+            "dueDate": "2026-09-28",
+            "recurrence": {
+              "rule": "daily",
+              "seriesId": "checklist-task",
+              "strategy": "strict",
+              "rrule": "FREQ=DAILY;X-MINDWTR-SERIES-ID=checklist-task"
+            },
+            "suppressMindwtrReminders": false,
+            "tags": [],
+            "contexts": [],
+            "checklist": [
+              {
+                "id": "84d23382-026a-4e15-b9e2-f5f69c0f4bf9",
+                "title": "Current checklist",
+                "isCompleted": false
+              }
+            ],
+            "isFocusedToday": false,
+            "createdAt": "2026-09-27T15:00:00.000Z",
+            "updatedAt": "2026-09-27T15:00:00.000Z",
+            "pushCount": 0,
+            "rev": 1,
+            "revBy": "device-a"
+          }
+        }
+      ],
+      "projects": [],
+      "sections": [],
+      "deviceIdBefore": "device-a",
+      "deviceIdToInitialize": null,
+      "guards": {
+        "selectedProject": null,
+        "selectedArea": null,
+        "taskOrders": [],
+        "reactivation": null,
+        "recurringCandidate": {
+          "id": "52231c5e-4c36-4a86-b815-e87d454715ba",
+          "title": "Before",
+          "status": "next",
+          "taskMode": "list",
+          "dueDate": "2026-09-28",
+          "recurrence": {
+            "rule": "daily",
+            "seriesId": "checklist-task",
+            "strategy": "strict",
+            "rrule": "FREQ=DAILY;X-MINDWTR-SERIES-ID=checklist-task"
+          },
+          "suppressMindwtrReminders": false,
+          "tags": [],
+          "contexts": [],
+          "checklist": [
+            {
+              "id": "84d23382-026a-4e15-b9e2-f5f69c0f4bf9",
+              "title": "Current checklist",
+              "isCompleted": false
+            }
+          ],
+          "isFocusedToday": false,
+          "createdAt": "2026-09-27T15:00:00.000Z",
+          "updatedAt": "2026-09-27T15:00:00.000Z",
+          "pushCount": 0,
+          "rev": 1,
+          "revBy": "device-a"
+        },
+        "recurringDuplicate": null,
+        "focusCount": null,
+        "focusLimit": null,
+        "focusBoundary": null,
+        "autoArchiveDays": null
+      }
+    },
+    "result": {
+      "id": "checklist-task"
+    }
+  }
+}

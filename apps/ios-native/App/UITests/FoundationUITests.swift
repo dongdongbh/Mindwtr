@@ -1,6 +1,40 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    private func previewCompletionFlow(largest: Bool, rtl: Bool) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", rtl ? "(ar)" : "(en-US)"]
+        if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-AppleInterfaceStyle", "Dark"] }
+        print("Preview completion isolated library: " + library)
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        app.textViews["capture-input"].typeText("Preview completion original")
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons["Preview completion original"])
+        app.buttons["Preview completion original"].tap()
+        boardTap(app, "task-mode-edit")
+        let title = app.textFields["task-editor-title"]
+        boardEnabled(title)
+        replaceProjectNotesText(title, with: "Preview completion edited")
+        boardTap(app, "task-mode-view")
+        let complete = app.buttons["task-preview-mark-done"]
+        boardEnabled(complete)
+        XCTAssertGreaterThanOrEqual(complete.frame.height, 44)
+        let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "Preview Mark Done"; picture.lifetime = .keepAlways; add(picture)
+        complete.tap()
+        XCTAssertTrue(complete.waitForNonExistence(timeout: 40))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        XCTAssertFalse(app.buttons["Preview completion original"].exists)
+        XCTAssertFalse(app.buttons["task-preview-mark-done"].exists)
+    }
+    func testPreviewMarkDoneSavesDirtyDraftFromStatusCard() throws { try previewCompletionFlow(largest: false, rtl: false) }
+    func testPreviewMarkDoneLargestTextDarkAndRTL() throws { try previewCompletionFlow(largest: true, rtl: true) }
+
     private func nativeShareApp(_ largest: Bool) throws -> (XCUIApplication, String) {
         let environment = ProcessInfo.processInfo.environment
         guard environment["MINDWTR_SHARE_UI_OWNED_NATIVE_DEV"] == "1",

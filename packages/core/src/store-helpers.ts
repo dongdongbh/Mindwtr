@@ -110,12 +110,29 @@ export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number, sta
     pushCount: 0,
 });
 
+export type TaskCompletionSource = 'saved' | 'currentDraft';
+
+export const buildTaskCompletionSource = (task: Task, updates: Partial<Task>, source: TaskCompletionSource): Task => {
+    if (source === 'currentDraft') {
+        return { ...task, ...resolveRelativeStartUpdates(task, updates), status: task.status };
+    }
+    const saved = { ...task, ...(hasOwnField(updates, 'checklist') ? { checklist: updates.checklist } : {}) };
+    if (saved.recurrence && updates.recurrence && typeof updates.recurrence === 'object') {
+        saved.recurrence = {
+            ...(typeof saved.recurrence === 'string' ? { rule: saved.recurrence } : saved.recurrence),
+            preserveChecklistOnRepeat: updates.recurrence.preserveChecklistOnRepeat,
+        };
+    }
+    return saved;
+};
+
 export function applyTaskUpdates(
     oldTask: Task,
     updates: Partial<Task>,
     now: string,
     createId?: () => string,
     recurrenceProjection?: RecurrenceProjection | null,
+    completionSource: TaskCompletionSource = 'saved',
 ): { updatedTask: Task; nextRecurringTask: Task | null } {
 
     let normalizedUpdates = { ...updates };
@@ -154,13 +171,7 @@ export function applyTaskUpdates(
         };
 
 
-        const recurrenceSource = { ...oldTask, ...(hasOwnField(updates, 'checklist') ? { checklist: updates.checklist } : {}) };
-        if (recurrenceSource.recurrence && updates.recurrence && typeof updates.recurrence === 'object') {
-            recurrenceSource.recurrence = {
-                ...(typeof recurrenceSource.recurrence === 'string' ? { rule: recurrenceSource.recurrence } : recurrenceSource.recurrence),
-                preserveChecklistOnRepeat: updates.recurrence.preserveChecklistOnRepeat,
-            };
-        }
+        const recurrenceSource = buildTaskCompletionSource(oldTask, updatesToApply, completionSource);
         nextRecurringTask = isReturningFromArchive
             ? null
             : recurrenceProjection === undefined

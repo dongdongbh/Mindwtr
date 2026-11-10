@@ -19,7 +19,7 @@ import {
     type TaskChecklistEdit,
 } from './task-checklist-model';
 import { formatTaskEditorDate } from './task-editor-schedule';
-import { buildTaskViewModel, type TaskViewRow } from './task-view-model';
+import { buildTaskViewModel, type TaskViewModelInput, type TaskViewRow } from './task-view-model';
 import type { Area, ChecklistItem, Project, Section, Task } from './types';
 
 
@@ -333,4 +333,35 @@ describe('effective reminders in the task View tab', () => {
             expect(rows.some((row) => row.type === 'field' && row.field === 'reminders')).toBe(skipped);
         },
     );
+});
+
+
+describe('Preview completion presentation', () => {
+    const rows = (task: Partial<Task>, options: Partial<TaskViewModelInput> = {}) => buildTaskViewModel({
+        task, projects: [], sections: [], areas: [], attachments: [], prioritiesEnabled: false,
+        timeEstimatesEnabled: false, showStatusField: true, readOnly: false, t,
+        formatDate: (value) => value, formatDueDate: (value) => value, formatTimeEstimateLabel: String, ...options,
+    });
+    it('uses the translated label only for actionable editable tasks with a visible status', () => {
+        for (const status of ['inbox', 'next', 'waiting', 'someday'] satisfies Task['status'][]) {
+            const statusRow = rows({ id: 'task', status }).find((row) => row.type === 'status');
+            expect(statusRow?.type === 'status' && statusRow.completeLabel).toBe(t('review.markDone'));
+        }
+        for (const status of ['reference', 'done', 'archived'] satisfies Task['status'][]) {
+            expect(rows({ id: 'task', status }).some((row) => row.type === 'status' && row.completeLabel)).toBe(false);
+        }
+        for (const task of [{ id: 'task', status: 'next', deletedAt: 'deleted' }, { id: 'task', status: 'next', purgedAt: 'purged' },
+            { id: 'task', status: 'next', isProjectedRecurringTask: true, sourceTaskId: 'source' }] satisfies Array<Partial<Task> & { isProjectedRecurringTask?: boolean; sourceTaskId?: string }>) {
+            expect(rows(task).some((row) => row.type === 'status' && row.completeLabel)).toBe(false);
+        }
+        expect(rows({ status: 'next' }, { readOnly: true }).some((row) => row.type === 'status' && row.completeLabel)).toBe(false);
+        expect(rows({ status: 'next' }, { showStatusField: false }).some((row) => row.type === 'status')).toBe(false);
+    });
+    it('excludes archived parent projects including section-only ownership', () => {
+        const project: Project = { id: 'parent', title: 'Parent', status: 'archived', color: '#111111', order: 0, tagIds: [], isSequential: false, createdAt: 'now', updatedAt: 'now' };
+        const section: Section = { id: 'section', projectId: 'parent', title: 'Section', order: 0, createdAt: 'now', updatedAt: 'now' };
+        for (const task of [{ status: 'next', projectId: 'parent' }, { status: 'next', sectionId: 'section' }] satisfies Partial<Task>[]) {
+            expect(rows(task, { projects: [project], sections: [section] }).some((row) => row.type === 'status' && row.completeLabel)).toBe(false);
+        }
+    });
 });

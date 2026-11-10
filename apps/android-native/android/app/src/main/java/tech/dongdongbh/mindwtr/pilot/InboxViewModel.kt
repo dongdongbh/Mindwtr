@@ -639,11 +639,14 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     private fun resumeEditor(restored: TaskEditor, pending: JSONObject?) {
         keepEditor(restored)
+        if (restored.previewCompletionSeq != null && pending == null) saveQueued = true
         if (pending == null || failedAction != null) return
         fun map(name: String) = pending.getJSONObject(name).let { m -> m.keys().asSequence().associateWith<String, String?> { m.getString(it) } }
         val action = FailedAction("saveDraft", restored.id, pending.optString("checklist"), base = map("base"), patch = map("patch"),
             requestId = pending.optString("requestId"), attachments = pending.optString("attachments"))
         failedAction = action
+        pendingSave = action
+        keepEditor(restored)
         sendDraft(action)
     }
 
@@ -790,6 +793,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     fun editDraft(edit: JSONObject, field: String? = null) {
         val current = editor ?: return
+        if (current.previewCompletionSeq != null) return
         keepEditor(current.queued(edit.toString(), field))
         pumpEdits()
     }
@@ -808,7 +812,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         val current = editor
         val runtime = host
         if (inFlight != null || current == null || runtime == null || busy || failedAction != null) return
-        val next = current.pending.firstOrNull() ?: return
+        val next = current.pending.firstOrNull() ?: run {
+            if (saveQueued && !current.waiting) { saveQueued = false; saveEditor() }
+            return
+        }
         val ticket = current.session to next.seq
         inFlight = ticket
         val sent = current.fullDraft()
@@ -856,7 +863,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun checklistFocused() { checklistFocus = null }
 
 
-    fun typeChecklistAdd(text: String) { editor?.takeIf { it.checklistAdd != text }?.let { keepEditor(it.copy(checklistAdd = text)) } }
+    fun typeChecklistAdd(text: String) { editor?.takeIf { it.previewCompletionSeq == null && it.checklistAdd != text }?.let { keepEditor(it.copy(checklistAdd = text)) } }
 
 
     fun submitChecklistAdd() {
@@ -933,6 +940,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     internal fun applyAIEdit(edit: JSONObject) {
         val current = editor ?: return
+        if (current.previewCompletionSeq != null) return
         val patch = edit.optJSONObject("patch")
         val typed = buildMap { for (field in TYPED_FIELDS) if (patch?.has(field) == true) put(field, patch.getString(field)) }
         keepEditor(current.copy(inputs = current.inputs + typed, resolved = current.resolved + typed))
@@ -942,6 +950,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     internal fun addAISteps(checklist: String, edit: JSONObject?) {
         val current = editor ?: return
+        if (current.previewCompletionSeq != null) return
         if (editsPending) { main.postDelayed({ addAISteps(checklist, edit) }, 100); return }
         keepEditor(current.withChecklist(checklist).queued(edit?.toString() ?: "", null))
         pumpEdits()
@@ -949,15 +958,16 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
 
     internal fun setDraftAttachments(taskId: String, next: String) {
-        editor?.takeIf { it.id == taskId }?.let { keepEditor(it.withAttachments(next)) }
+        editor?.takeIf { it.id == taskId && it.previewCompletionSeq == null }?.let { keepEditor(it.withAttachments(next)) }
     }
 
 
-    fun editText(field: String, text: String) { editor?.let { keepEditor(it.edit(mapOf(field to text))) } }
+    fun editText(field: String, text: String) { editor?.takeIf { it.previewCompletionSeq == null }?.let { keepEditor(it.edit(mapOf(field to text))) } }
 
 
     fun editInput(field: String, text: String) {
         val current = editor ?: return
+        if (current.previewCompletionSeq != null) return
         keepEditor(current.typed(field, text))
         suggest(field, text)
     }
@@ -979,6 +989,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
 
     fun closeEditor(settle: Boolean = true) {
+        if (settle && editor?.previewCompletionSeq != null) return
         val closed = editor
 
         editor?.takeIf { discardSettles(settle, pendingSave != null, it.attachments != null, it.readOnly) }?.let { closing ->
@@ -1025,6 +1036,19 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             attachments = current.attachmentsSave), failedAction)
 
 
+    fun completeEditor() {
+        val current = editor ?: return
+        if (!writable || busy || failedAction != null || pendingSave != null || current.readOnly || current.previewCompletionSeq != null
+            || current.checklistStructurePending || ai.working == "editor") return
+        val view = taskView?.takeIf { it.optString("id") == current.id } ?: return
+        if (view.menuObjects("rows").none { it.optString("type") == "status" && it.menuText("completeLabel") != null }) return
+        val queued = current.previewCompletionQueued()
+        if (queued === current) return
+        keepEditor(queued)
+        saveQueued = true
+        pumpEdits()
+    }
+
     fun saveEditor() {
 
         if (editor?.checklistAdd?.isNotBlank() == true) submitChecklistAdd()
@@ -1039,19 +1063,29 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
 
-    private fun sendDraft(action: FailedAction) = perform(action) { runtime ->
-        try {
-            runtime.saveTaskDraft(action.id, draftJson(action.base), draftJson(action.patch), action.title, action.attachments, action.requestId)
-        } catch (failure: Exception) {
-
-            if (UPDATE_REFUSALS.any { failure.message?.startsWith(it) == true }) ui { pendingSave = null; failedAction = null; editor?.let(::keepEditor) }
-            throw failure
+    private fun sendDraft(action: FailedAction) {
+        val owner = editor?.takeIf { it.id == action.id }
+        val previewCompletion = owner?.previewCompletionSeq != null
+        perform(action) { runtime ->
+            try {
+                runtime.saveTaskDraft(action.id, draftJson(action.base), draftJson(action.patch), action.title, action.attachments, action.requestId)
+            } catch (failure: Exception) {
+                if (UPDATE_REFUSALS.any { failure.message?.startsWith(it) == true }) ui {
+                    pendingSave = null; failedAction = null
+                    editor?.let { keepEditor(it.copy(previewCompletionSeq = null)) }
+                }
+                throw failure
+            }
+            acknowledged(action)
+            if (action.attachments.isNotEmpty()) attachments.settleSaved(runtime, action.id, JSONObject(action.attachments))
+            if (previewCompletion) Log.i(CoreHost.TAG, "Native Android Preview task completion saved releaseCheck=v1.3.9/preview-mark-done platform=android outcome=saved")
+            ui {
+                if (!previewCompletion || editor?.session == owner?.session) {
+                    editorMenu.saved(action.id)
+                    closeEditor(settle = false)
+                }
+            }
         }
-        acknowledged(action)
-
-        if (action.attachments.isNotEmpty()) attachments.settleSaved(runtime, action.id, JSONObject(action.attachments))
-
-        ui { editorMenu.saved(action.id); closeEditor(settle = false) }
     }
 
     fun reloadEditor() {

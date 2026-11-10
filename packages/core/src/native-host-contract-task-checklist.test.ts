@@ -8,6 +8,8 @@ import { createNextRecurringTask } from './recurrence';
 import { openSqliteHost } from './screen-parity.replay';
 import { samePreparedTask } from './store-tasks';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
+import legacyCompletion from './fixtures/preview-completion-legacy.json';
+import type { NativeChecklistSaveRequest, NativePreparedChecklistWrite } from './native-host-contract-task-checklist';
 
 const clock = '2026-09-27T15:00:00.000Z';
 const item = (id: string, title: string, isCompleted = false) => ({ id, title, isCompleted });
@@ -466,6 +468,64 @@ afterEach(async () => {
 });
 
 describe('prepared native checklist Save and Reset', () => {
+    const legacy = legacyCompletion as unknown as { request: NativeChecklistSaveRequest; prepared: NativePreparedChecklistWrite };
+
+    it('replays a pre-correction frozen completion with its exact saved-template effect', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(clock));
+        const { host, saved } = await open(structuredClone(legacy.prepared.witness.source));
+        expect(legacy.prepared.witness.completionSource).toBeUndefined();
+        expect(unwrap(host.validatePreparedTaskChecklistWrite(legacy))).toEqual(legacy.prepared.result);
+        unwrap(await host.commitPreparedTaskChecklistWrite(legacy));
+        const rows = (tasks: Task[]) => tasks.toSorted((a, b) => a.id.localeCompare(b.id));
+        expect(rows(saved().tasks)).toEqual(rows(legacy.prepared.effect.tasks.map(row => row.after)));
+        const persisted = structuredClone(saved().tasks);
+        const cold = await open(persisted[0], { tasks: persisted.slice(1) });
+        vi.setSystemTime(new Date('2028-04-01T10:00:00.000Z'));
+        unwrap(await cold.host.commitPreparedTaskChecklistWrite(legacy));
+        expect(rows(cold.saved().tasks)).toEqual(rows(persisted));
+    });
+
+    it('builds new combined completion successors from the current recurrence and full draft', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(clock));
+        const { host } = await open(structuredClone(legacy.prepared.witness.source));
+        const request = structuredClone(legacy.request);
+        const planned = unwrap(host.prepareTaskChecklistSave(request));
+        if (planned.kind !== 'prepared') throw new Error('Expected completion');
+        const prepared = planned.prepared;
+        expect(prepared.witness.completionSource).toBe('currentDraft');
+        const child = prepared.effect.tasks.find(row => row.after.id !== request.id)!.after;
+        expect(child).toMatchObject({ title: 'Current draft', dueDate: '2026-10-04',
+            recurrence: { rule: 'weekly' }, checklist: [item(expect.any(String), 'Current checklist', false)] });
+        expect(child.checklist?.[0].id).not.toBe('one');
+        for (const value of [undefined, null, true, 'saved', 'future']) {
+            const forged = structuredClone(prepared);
+            Object.assign(forged.witness, { completionSource: value });
+            if (value === undefined) delete forged.witness.completionSource;
+            expect(host.validatePreparedTaskChecklistWrite({ request, prepared: forged }))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        const forged = structuredClone(prepared);
+        forged.effect.tasks.find(row => row.after.id !== request.id)!.after.title = 'Forged';
+        expect(host.validatePreparedTaskChecklistWrite({ request, prepared: forged }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        unwrap(await host.commitPreparedTaskChecklistWrite({ request, prepared }));
+        expect(useTaskStore.getState()._tasksById.get(child.id)).toEqual(child);
+    });
+
+    it('rejects a completion-source discriminator on a noncompletion witness', async () => {
+        const { host } = await open();
+        const request = { id: 'checklist-task', requestId: id, base: { title: 'Before' },
+            patch: { title: 'After' }, scheduleBase,
+            checklist: { base: source().checklist!, value: source().checklist! } };
+        const planned = unwrap(host.prepareTaskChecklistSave(request));
+        if (planned.kind !== 'prepared') throw new Error('Expected save');
+        const forged = { ...planned.prepared, witness: { ...planned.prepared.witness, completionSource: 'currentDraft' } };
+        expect(host.validatePreparedTaskChecklistWrite({ request, prepared: forged } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('saves Location together with a checklist edit through the existing combined writer', async () => {
         const original = source();
         const { host } = await open(original);

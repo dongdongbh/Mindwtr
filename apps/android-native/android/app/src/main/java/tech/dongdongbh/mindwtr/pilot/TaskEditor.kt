@@ -271,6 +271,7 @@ data class TaskEditor(
     val checklistFrom: String? = null,
 
     val checklistAdd: String = "",
+    val previewCompletionSeq: Long? = null,
 ) {
     val id get() = model.id
     val readOnly get() = model.readOnly
@@ -322,7 +323,14 @@ data class TaskEditor(
     } ?: this
 
 
-    fun refused(edit: PendingEdit): TaskEditor = copy(pending = pending.drop(1)).let { next ->
+    fun previewCompletionQueued(): TaskEditor {
+        if (previewCompletionSeq != null || readOnly || text("status") !in setOf("inbox", "next", "waiting", "someday")) return this
+        val prepared = checklistAddQueued()
+        val done = JSONObject().put("type", "fields").put("patch", JSONObject().put("status", "done"))
+        return prepared.queued(done.toString(), "status").copy(previewCompletionSeq = prepared.nextSeq)
+    }
+
+    fun refused(edit: PendingEdit): TaskEditor = copy(pending = pending.drop(1).filter { it.seq != previewCompletionSeq }, previewCompletionSeq = null).let { next ->
         if (edit.field != CHECKLIST_ADD || next.checklistAdd.isNotBlank()) next
         else next.copy(checklistAdd = JSONObject(edit.edit).getJSONObject("checklist").getString("title"))
     }
@@ -390,6 +398,7 @@ data class TaskEditor(
         .put("attachments", attachments ?: JSONObject.NULL).put("attachmentsFrom", attachmentsFrom ?: JSONObject.NULL)
         .put("checklistFrom", checklistFrom ?: JSONObject.NULL)
         .put("checklistAdd", checklistAdd)
+        .put("previewCompletionSeq", previewCompletionSeq ?: JSONObject.NULL)
 
     companion object {
         fun open(model: EditorModel, tab: String) = TaskEditor(model, emptyMap(), tab = tab)
@@ -409,7 +418,8 @@ data class TaskEditor(
                 attachmentsFrom = saved.optString("attachmentsFrom").takeIf { saved.has("attachmentsFrom") && !saved.isNull("attachmentsFrom") },
 
                 checklistFrom = saved.optString("checklistFrom").takeIf { saved.has("checklistFrom") && !saved.isNull("checklistFrom") },
-                checklistAdd = saved.optString("checklistAdd"))
+                checklistAdd = saved.optString("checklistAdd"),
+                previewCompletionSeq = saved.optLong("previewCompletionSeq").takeIf { saved.has("previewCompletionSeq") && !saved.isNull("previewCompletionSeq") })
         }
     }
 }
@@ -449,7 +459,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
 
 
     val failed = failedAction != null
-    val locked = busy || failed || editor.readOnly
+    val locked = busy || failed || editor.readOnly || editor.previewCompletionSeq != null
     var confirmLeave by rememberSaveable { mutableStateOf(false) }
 
     var linkAfterLeave by rememberSaveable { mutableStateOf<String?>(null) }
@@ -472,7 +482,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     DisposableEffect(pickerOpen) { editorPickerOpen = pickerOpen; onDispose { editorPickerOpen = false } }
 
     val leave = { if (editor.readOnly || (!editor.dirty && !editsPending)) closeEditor() else confirmLeave = true }
-    BackHandler(enabled = !failed) { if (!busy) leave() }
+    BackHandler(enabled = !failed) { if (!busy && editor.previewCompletionSeq == null) leave() }
 
 
     val go = { target: JSONObject ->
@@ -505,7 +515,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
             verticalAlignment = Alignment.CenterVertically) {
             if (!editor.readOnly) {
                 val closeLabel = t("common.close")
-                Box(Modifier.size(44.dp).clickable(enabled = !busy && !failed, role = Role.Button, onClick = leave)
+                Box(Modifier.size(44.dp).clickable(enabled = !busy && !failed && editor.previewCompletionSeq == null, role = Role.Button, onClick = leave)
                     .semantics { contentDescription = closeLabel }, contentAlignment = Alignment.CenterStart) {
                     Icon(Lucide.X, null, tint = c.tint, modifier = Modifier.size(22.dp).fade(if (!busy && !failed) 1f else 0.5f))
                 }
@@ -517,7 +527,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
             Spacer(Modifier.weight(1f))
 
             val saveEnabled = if (editor.readOnly) true else writable && !busy &&
-                (failedAction == null || failedAction == saveDraftAction(editor))
+                (failedAction == null || failedAction == saveDraftAction(editor)) && (editor.previewCompletionSeq == null || failedAction != null)
             Box(Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp)
                 .clickable(enabled = saveEnabled, role = Role.Button) { if (editor.readOnly) closeEditor() else saveEditor() },
                 contentAlignment = Alignment.CenterEnd) {

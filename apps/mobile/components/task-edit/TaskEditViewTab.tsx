@@ -55,6 +55,10 @@ type TaskEditViewTabProps = {
   onTagPress?: (tag: string) => void;
   onBackdatedComplete?: () => void;
   onStatusUpdate?: (status: TaskStatus) => void;
+  onComplete?: () => void;
+  completionPending?: boolean;
+  completionRetryPending?: boolean;
+  completionError?: string | null;
   showStatusField?: boolean;
   readOnly?: boolean;
 };
@@ -85,6 +89,10 @@ function TaskEditViewTabComponent({
   onTagPress,
   onBackdatedComplete,
   onStatusUpdate,
+  onComplete,
+  completionPending = false,
+  completionRetryPending = false,
+  completionError,
   showStatusField = true,
   readOnly = false,
 }: TaskEditViewTabProps) {
@@ -198,6 +206,20 @@ function TaskEditViewTabComponent({
             ) : (
               <Text style={[styles.viewValue, { color: tc.text }]}>{row.value}</Text>
             )}
+            {(row.completeLabel || completionRetryPending) && onComplete ? (
+              <TouchableOpacity
+                testID="task-preview-mark-done"
+                onPress={onComplete}
+                disabled={completionPending}
+                accessibilityRole="button"
+                accessibilityLabel={completionRetryPending ? t('common.retry') : row.completeLabel}
+                accessibilityState={{ disabled: completionPending, busy: completionPending }}
+                style={{ minHeight: Platform.OS === 'android' ? 48 : 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 10, marginTop: 10, borderWidth: 1, borderRadius: 10, borderColor: tc.tint, opacity: completionPending ? 0.5 : 1, maxWidth: '100%' }}
+              >
+                <Text style={{ color: tc.tint, fontWeight: '600', flexShrink: 1 }}>{completionRetryPending ? t('common.retry') : row.completeLabel}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {completionError ? <Text accessibilityRole="alert" style={{ color: tc.danger, marginTop: 8 }}>{completionError}</Text> : null}
           </View>
         );
       case 'field': {

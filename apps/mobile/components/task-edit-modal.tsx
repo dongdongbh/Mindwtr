@@ -298,6 +298,9 @@ function TaskEditModalInner({
         acknowledgeRecoveredActivityInput,
         checklistDraftRef,
         cancelRetryPending,
+        completionRetryPending,
+        completionError,
+        submissionPending,
         contextInputDraft,
         customWeekdays,
         descriptionDebounceRef,
@@ -346,6 +349,7 @@ function TaskEditModalInner({
         titleDraftRef,
     } = useTaskEditState({
         defaultTab,
+        canComplete: canMutate,
         onClose,
         onSave: guardedOnSave,
         onSaveError: showTaskWriteError,
@@ -1178,9 +1182,9 @@ function TaskEditModalInner({
             visible={visible}
             animationType={reducedMotion ? 'none' : (adaptiveWindow.isExpanded ? 'fade' : 'slide')}
             presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
-            allowSwipeDismissal
+            allowSwipeDismissal={!submissionPending && !completionRetryPending}
             onShow={() => setIsModalShown(true)}
-            onRequestClose={readOnly ? onClose : handleAttemptClose}
+            onRequestClose={readOnly ? onClose : () => { if (!submissionPending && !completionRetryPending) handleAttemptClose(); }}
             onDismiss={onDismiss}
         >
             <KeyboardAccessoryHost backgroundColor={tc.bg}>
@@ -1219,6 +1223,8 @@ function TaskEditModalInner({
                         onConvertToSection={handleConvertToSection}
                         showConvertToSection={hasProject}
                         readOnly={readOnly}
+                        submissionPending={submissionPending}
+                        completionRetryPending={completionRetryPending}
                     />
 
                     {readOnly ? (
@@ -1255,9 +1261,9 @@ function TaskEditModalInner({
                                 textDirectionStyle={textDirectionStyle}
                                 resolvedDirection={resolvedDirection}
                                 nestedScrollEnabled
-                                onProjectPress={onProjectNavigate ? handlePreviewProjectPress : undefined}
-                                onContextPress={onContextNavigate ? handlePreviewContextPress : undefined}
-                                onTagPress={onTagNavigate ? handlePreviewTagPress : undefined}
+                                onProjectPress={!submissionPending && !completionRetryPending && onProjectNavigate ? handlePreviewProjectPress : undefined}
+                                onContextPress={!submissionPending && !completionRetryPending && onContextNavigate ? handlePreviewContextPress : undefined}
+                                onTagPress={!submissionPending && !completionRetryPending && onTagNavigate ? handlePreviewTagPress : undefined}
                                 showStatusField={showStatusField}
                                 readOnly
                             />
@@ -1290,6 +1296,9 @@ function TaskEditModalInner({
                             )}
                             onMomentumScrollEnd={handleMomentumScrollEnd}
                         >
+                            <View style={[styles.tabPage, { width: containerWidth || '100%' }]} pointerEvents={submissionPending || completionRetryPending ? 'none' : 'auto'}
+                                accessibilityElementsHidden={editTab !== 'task' || submissionPending || completionRetryPending}
+                                importantForAccessibility={editTab !== 'task' || submissionPending || completionRetryPending ? 'no-hide-descendants' : 'auto'}>
                             <TaskEditFormTab
                                 focusStar={focusStar}
                                 accessibilityHidden={editTab !== 'task'}
@@ -1338,6 +1347,7 @@ function TaskEditModalInner({
                                 formResetKey={`${task.id}:${visible ? 'open' : 'closed'}`}
                                 suspendKeyboardHandling={isMarkdownOverlayOpen}
                             />
+                            </View>
                             <View
                                 accessibilityElementsHidden={editTab !== 'view'}
                                 importantForAccessibility={editTab !== 'view' ? 'no-hide-descendants' : 'auto'}
@@ -1367,12 +1377,17 @@ function TaskEditModalInner({
                                     textDirectionStyle={textDirectionStyle}
                                     resolvedDirection={resolvedDirection}
                                     nestedScrollEnabled
-                                    onProjectPress={onProjectNavigate ? handlePreviewProjectPress : undefined}
-                                    onContextPress={onContextNavigate ? handlePreviewContextPress : undefined}
-                                    onTagPress={onTagNavigate ? handlePreviewTagPress : undefined}
+                                    onProjectPress={!submissionPending && !completionRetryPending && onProjectNavigate ? handlePreviewProjectPress : undefined}
+                                    onContextPress={!submissionPending && !completionRetryPending && onContextNavigate ? handlePreviewContextPress : undefined}
+                                    onTagPress={!submissionPending && !completionRetryPending && onTagNavigate ? handlePreviewTagPress : undefined}
                                     onBackdatedComplete={requestBackdatedCompletion}
                                     onStatusUpdate={handleViewStatusUpdate}
                                     showStatusField={showStatusField}
+                                    readOnly={submissionPending || completionRetryPending}
+                                    onComplete={() => { if (!readOnlyRef.current && pendingAttachmentImportsRef.current === 0 && !isAIWorking && !audioLoading && !audioTranscribing) void draftLifecycle.complete(); }}
+                                    completionPending={submissionPending || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing}
+                                    completionRetryPending={completionRetryPending}
+                                    completionError={completionError}
                                 />
                             </View>
                         </Animated.ScrollView>

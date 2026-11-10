@@ -135,6 +135,15 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
                 if (row.getBoolean("editable") && status != null) StatusPill(status, row.getString("value"), editable, pickStatus,
                     if (status == "done") { { completedAt.openEditor() } } else null)
                 else Text(row.getString("value"), style = rnText(14, 600, 20), color = c.text)
+                row.menuText("completeLabel")?.let { label ->
+                    val enabled = !locked && writable && editor.previewCompletionSeq == null && !editor.checklistStructurePending && ai.working != "editor"
+                    val shape = RoundedCornerShape(10.dp)
+                    Box(Modifier.padding(top = 10.dp).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.tint, shape)
+                        .testTag("task-preview-mark-done").clickable(enabled = enabled, role = Role.Button) { completeEditor() }
+                        .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
+                        Text(label, style = rnText(14, 600), color = c.tint, modifier = Modifier.fade(if (enabled) 1f else 0.5f))
+                    }
+                }
             }
             "field" -> {
                 val project = row.optJSONObject("project")

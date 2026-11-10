@@ -27,6 +27,8 @@ type TaskEditHeaderProps = {
   onConvertToSection?: () => void;
   showConvertToSection?: boolean;
   readOnly?: boolean;
+  submissionPending?: boolean;
+  completionRetryPending?: boolean;
   taskId?: string;
 };
 
@@ -45,6 +47,8 @@ export function TaskEditHeader({
   onConvertToSection,
   showConvertToSection = false,
   readOnly = false,
+  submissionPending = false,
+  completionRetryPending = false,
   taskId,
 }: TaskEditHeaderProps) {
   const { t } = useLanguage();
@@ -58,7 +62,7 @@ export function TaskEditHeader({
   const closeLabel = t('common.close');
 
 
-  const doneLabel = readOnly ? closeLabel : t('common.save');
+  const doneLabel = readOnly ? closeLabel : t(completionRetryPending ? 'common.retry' : 'common.save');
 
   return (
     <>
@@ -69,6 +73,8 @@ export function TaskEditHeader({
               {!readOnly && <TouchableOpacity
                 style={styles.closeAction}
                 onPress={onClose}
+                disabled={submissionPending || completionRetryPending}
+                accessibilityState={{ disabled: submissionPending || completionRetryPending }}
                 accessibilityRole="button"
                 accessibilityLabel={closeLabel}
               >
@@ -77,9 +83,10 @@ export function TaskEditHeader({
               <TouchableOpacity
                 style={styles.headerActionTouchable}
                 onPress={() => setMenuVisible(true)}
+                disabled={submissionPending || completionRetryPending}
                 accessibilityRole="button"
                 accessibilityLabel={moreLabel}
-                accessibilityState={{ expanded: menuVisible }}
+                accessibilityState={{ expanded: menuVisible, disabled: submissionPending || completionRetryPending }}
               >
                 <MoreHorizontal size={24} strokeWidth={2.25} color={tc.tint} accessible={false} />
               </TouchableOpacity>
@@ -90,6 +97,8 @@ export function TaskEditHeader({
           <TouchableOpacity
             style={[styles.headerActionTouchable, styles.headerActionRight]}
             onPress={onDone}
+            disabled={submissionPending}
+            accessibilityState={{ disabled: submissionPending, busy: submissionPending }}
             accessibilityRole="button"
             accessibilityLabel={doneLabel}
           >
