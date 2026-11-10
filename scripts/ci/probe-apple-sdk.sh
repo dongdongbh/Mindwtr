@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-PROBE_DIR="${RUNNER_TEMP:?}/mindwtr-apple-api"
-mkdir -p "$PROBE_DIR"
+PROBE_DIR="${MINDWTR_APPLE_TEMP:-${RUNNER_TEMP:?}}/mindwtr-apple-api"
+MODULE_CACHE="${MINDWTR_NATIVE_CACHE:-$PROBE_DIR}/modules"
+mkdir -p "$PROBE_DIR" "$MODULE_CACHE"
 python3 - "$PROBE_DIR" <<'PYTHON'
 from pathlib import Path
 import sys
@@ -19,12 +20,12 @@ for target in arm64-apple-ios16.4-simulator x86_64-apple-ios16.4-simulator arm64
   sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
   echo "SDK API preflight: $sdk ($target)"
 
-  xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
+  xcrun swiftc -module-cache-path "$MODULE_CACHE" -typecheck -parse-as-library -swift-version 5 \
     -Xfrontend -enable-cross-import-overlays \
     -sdk "$sdk_path" -target "$target" \
     "$PROBE_DIR/SearchEngine.swift" \
     apps/mobile/modules/apple-task-search/ios/MindwtrAppleTaskSearchCollector.swift || status=1
-  xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
+  xcrun swiftc -module-cache-path "$MODULE_CACHE" -typecheck -parse-as-library -swift-version 5 \
     -Xfrontend -enable-cross-import-overlays \
     -sdk "$sdk_path" -target "$target" \
     apps/mobile/modules/apple-image-capture/ios/AppleImageCaptureModule.swift \
@@ -32,7 +33,7 @@ for target in arm64-apple-ios16.4-simulator x86_64-apple-ios16.4-simulator arm64
     apps/mobile/modules/apple-image-capture/ios/AppleImageAnalysisCoordinator.swift || status=1
 
 
-  xcrun swiftc -typecheck -parse-as-library -swift-version 5 \
+  xcrun swiftc -module-cache-path "$MODULE_CACHE" -typecheck -parse-as-library -swift-version 5 \
     -sdk "$sdk_path" -target "$target" \
     apps/mobile/modules/apple-foundation-models/ios/ApplePccEvaluationEngine.swift || status=1
 done

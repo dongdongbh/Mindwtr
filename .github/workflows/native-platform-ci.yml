@@ -55,6 +55,8 @@ on:
       - "scripts/ci/setup-ruby.sh"
       - "scripts/ci/dispatch-macmini.sh"
       - "scripts/ci/prepare-apple-cache.sh"
+      - "scripts/ci/apple_ci_storage.py"
+      - "scripts/ci/cleanup-apple-outputs.py"
       - "scripts/ci/collect-ios27-environment.sh"
       - "scripts/ci/select-ios27-simulator.sh"
       - "scripts/ci/smoke-ios27-simulator.sh"
@@ -108,6 +110,8 @@ on:
       - "scripts/ci/setup-ruby.sh"
       - "scripts/ci/dispatch-macmini.sh"
       - "scripts/ci/prepare-apple-cache.sh"
+      - "scripts/ci/apple_ci_storage.py"
+      - "scripts/ci/cleanup-apple-outputs.py"
       - "scripts/ci/collect-ios27-environment.sh"
       - "scripts/ci/select-ios27-simulator.sh"
       - "scripts/ci/smoke-ios27-simulator.sh"
@@ -276,12 +280,12 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/targets/watch/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/modules/watch-connectivity/Package.swift|apps/mobile/modules/watch-connectivity/tests/*|apps/mobile/modules/ios-widget/Package.swift|apps/mobile/modules/ios-widget/tests/*|apps/mobile/modules/ios-scene-lifecycle/*|apps/mobile/modules/ios-siri-actions/*|apps/mobile/modules/apple-foundation-models/Package.swift|apps/mobile/modules/apple-task-search/Package.swift|apps/mobile/modules/apple-task-search/tests/*|apps/mobile/modules/apple-foundation-models/Tests/*|apps/mobile/modules/apple-image-capture/Package.swift|apps/mobile/modules/apple-image-capture/ios/Tests/*|scripts/ci/select-apple-sdk.sh|scripts/ci/probe-apple-sdk.sh|scripts/ci/select-apple-sdk.test.js|apps/mobile/plugins/*|apps/mobile/hooks/use-ios-scene-diagnostics.ts|apps/mobile/app/_layout.tsx|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/prepare-apple-cache.sh|scripts/ci/dispatch-macmini.sh|scripts/ci/setup-ruby.sh|scripts/ci/collect-ios27-environment.sh|scripts/ci/select-ios27-simulator.sh|scripts/ci/smoke-ios27-simulator.sh|scripts/ci/validate-ios-scene-lifecycle.js|scripts/ci/validate-ios-scene-lifecycle.test.js|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/targets/watch/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/modules/watch-connectivity/Package.swift|apps/mobile/modules/watch-connectivity/tests/*|apps/mobile/modules/ios-widget/Package.swift|apps/mobile/modules/ios-widget/tests/*|apps/mobile/modules/ios-scene-lifecycle/*|apps/mobile/modules/ios-siri-actions/*|apps/mobile/modules/apple-foundation-models/Package.swift|apps/mobile/modules/apple-task-search/Package.swift|apps/mobile/modules/apple-task-search/tests/*|apps/mobile/modules/apple-foundation-models/Tests/*|apps/mobile/modules/apple-image-capture/Package.swift|apps/mobile/modules/apple-image-capture/ios/Tests/*|scripts/ci/select-apple-sdk.sh|scripts/ci/probe-apple-sdk.sh|scripts/ci/select-apple-sdk.test.js|apps/mobile/plugins/*|apps/mobile/hooks/use-ios-scene-diagnostics.ts|apps/mobile/app/_layout.tsx|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/prepare-apple-cache.sh|scripts/ci/apple_ci_storage.py|scripts/ci/cleanup-apple-outputs.py|scripts/ci/dispatch-macmini.sh|scripts/ci/setup-ruby.sh|scripts/ci/collect-ios27-environment.sh|scripts/ci/select-ios27-simulator.sh|scripts/ci/smoke-ios27-simulator.sh|scripts/ci/validate-ios-scene-lifecycle.js|scripts/ci/validate-ios-scene-lifecycle.test.js|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 ios=true
                 ;;
             esac
             case "$path" in
-              apps/ios-native/*|apps/android-native/bundle/*|packages/core/src/*|packages/core/package.json|scripts/ci/select-apple-sdk.sh|scripts/ci/prepare-apple-cache.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/ios-native/*|apps/android-native/bundle/*|packages/core/src/*|packages/core/package.json|scripts/ci/select-apple-sdk.sh|scripts/ci/prepare-apple-cache.sh|scripts/ci/apple_ci_storage.py|scripts/ci/cleanup-apple-outputs.py|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 ios_client=true
                 ;;
             esac
@@ -610,6 +614,9 @@ jobs:
 
 
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: python3 "${{ github.workspace }}/scripts/ci/apple_ci_storage.py" run {0}
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
@@ -639,15 +646,15 @@ jobs:
       - name: Test the embedded core and build the isolated SwiftUI client
         run: |
           set -o pipefail
-          mkdir -p "$RUNNER_TEMP/ios-swiftui-artifacts"
-          bash apps/ios-native/scripts/validate.sh 2>&1 | tee "$RUNNER_TEMP/ios-swiftui-artifacts/validation.log"
+          mkdir -p "$MINDWTR_APPLE_TEMP/ios-swiftui-artifacts"
+          bash apps/ios-native/scripts/validate.sh 2>&1 | tee "$MINDWTR_APPLE_TEMP/ios-swiftui-artifacts/validation.log"
       - name: Upload SwiftUI validation evidence
         id: swiftui_evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios-swiftui-validation-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.lane }}
-          path: ${{ runner.temp }}/ios-swiftui-artifacts
+          path: ${{ env.MINDWTR_APPLE_TEMP }}/ios-swiftui-artifacts
           if-no-files-found: warn
           retention-days: 14
       - name: Retire completed SwiftUI build outputs
@@ -665,6 +672,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     name: iOS Swift compile (${{ matrix.label }})
     timeout-minutes: 75
+    defaults:
+      run:
+        shell: python3 "${{ github.workspace }}/scripts/ci/apple_ci_storage.py" run {0}
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
@@ -711,7 +721,7 @@ jobs:
 
       - name: Capture and validate Xcode 27 environment
         if: matrix.lane == 'xcode27'
-        run: bash scripts/ci/collect-ios27-environment.sh "$RUNNER_TEMP/ios27-artifacts"
+        run: bash scripts/ci/collect-ios27-environment.sh "$MINDWTR_APPLE_TEMP/ios27-artifacts"
 
       - name: Preflight Apple evaluation SDK APIs
         if: matrix.lane == 'xcode27'
@@ -726,6 +736,7 @@ jobs:
       - name: Typecheck iOS widgets at the minimum deployment target
         run: |
           xcrun swiftc \
+            -module-cache-path "$MINDWTR_NATIVE_CACHE/modules" \
             -typecheck \
             -parse-as-library \
             -swift-version 5 \
@@ -739,6 +750,7 @@ jobs:
       - name: Typecheck Watch receiver against the iOS SDK
         run: |
           xcrun swiftc \
+            -module-cache-path "$MINDWTR_NATIVE_CACHE/modules" \
             -typecheck \
             -parse-as-library \
             -swift-version 5 \
@@ -822,12 +834,12 @@ jobs:
 
       - name: Preserve resolved iOS dependencies
         if: matrix.lane == 'xcode27'
-        run: cp apps/mobile/ios/Podfile.lock "$RUNNER_TEMP/ios27-artifacts/Podfile.lock"
+        run: cp apps/mobile/ios/Podfile.lock "$MINDWTR_APPLE_TEMP/ios27-artifacts/Podfile.lock"
 
       - name: Select an available iOS 27 simulator
         if: matrix.lane == 'xcode27'
         id: ios27_simulator
-        run: bash scripts/ci/select-ios27-simulator.sh "$RUNNER_TEMP/ios27-artifacts"
+        run: bash scripts/ci/select-ios27-simulator.sh "$MINDWTR_APPLE_TEMP/ios27-artifacts"
 
       - name: Compile Watch app and complications
         run: |
@@ -856,7 +868,7 @@ jobs:
           ANALYTICS_HEARTBEAT_DISABLED: "1"
         run: |
           set -euo pipefail
-          ARTIFACTS_DIR="$RUNNER_TEMP/ios27-artifacts"
+          ARTIFACTS_DIR="$MINDWTR_APPLE_TEMP/ios27-artifacts"
           DERIVED_DATA="$MINDWTR_NATIVE_CACHE/simulator"
           BUILD_LOG="$ARTIFACTS_DIR/release-simulator-build.log"
           mkdir -p "$ARTIFACTS_DIR"
@@ -896,7 +908,7 @@ jobs:
           bash scripts/ci/smoke-ios27-simulator.sh \
             '${{ steps.ios27_simulator.outputs.simulator_udid }}' \
             '${{ steps.ios27_release_simulator.outputs.app_path }}' \
-            "$RUNNER_TEMP/ios27-artifacts"
+            "$MINDWTR_APPLE_TEMP/ios27-artifacts"
 
       - name: Upload completed simulator validation evidence
         id: ios27_pre_archive_evidence
@@ -904,7 +916,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios27-simulator-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios27-artifacts
+          path: ${{ env.MINDWTR_APPLE_TEMP }}/ios27-artifacts
           if-no-files-found: error
           retention-days: 14
 
@@ -927,7 +939,7 @@ jobs:
           RCT_NO_LAUNCH_PACKAGER: "1"
         run: |
           set -euo pipefail
-          ARTIFACTS_DIR="$RUNNER_TEMP/ios27-artifacts"
+          ARTIFACTS_DIR="$MINDWTR_APPLE_TEMP/ios27-artifacts"
           ARCHIVE_PATH="$ARTIFACTS_DIR/Mindwtr-unsigned.xcarchive"
           ARCHIVE_LOG="$ARTIFACTS_DIR/unsigned-device-archive.log"
           mkdir -p "$ARTIFACTS_DIR"
@@ -970,7 +982,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ios27-native-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios27-artifacts
+          path: ${{ env.MINDWTR_APPLE_TEMP }}/ios27-artifacts
           if-no-files-found: warn
           retention-days: 14
 
