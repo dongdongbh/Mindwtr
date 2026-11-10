@@ -11,7 +11,6 @@ import {
     fromJson,
     fromNullableBool,
     fromPresentBool,
-    fromOptional,
     isRecord,
     sqliteRowFromColumnValues,
     toAttachments,
@@ -188,17 +187,18 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
     const recurrence = fromJson<unknown>(row.recurrence, null) as Task['recurrence'];
     const orderNumRaw = row.orderNum;
     const order = orderNumRaw === null || orderNumRaw === undefined ? undefined : Number(orderNumRaw);
+    const loadedStatus = normalizeTaskStatus(String(row.status ?? ''));
     return {
         id: String(row.id),
         title: String(row.title ?? ''),
         status: row.status as Task['status'],
-        priority: fromOptional(row.priority as Task['priority'] | null),
-        energyLevel: fromOptional(row.energyLevel as Task['energyLevel'] | null),
-        assignedTo: fromOptional(row.assignedTo as string | null),
-        taskMode: fromOptional(row.taskMode as Task['taskMode'] | null),
-        startTime: fromOptional(row.startTime as string | null),
+        priority: (row.priority as Task['priority'] | null) ?? undefined,
+        energyLevel: (row.energyLevel as Task['energyLevel'] | null) ?? undefined,
+        assignedTo: (row.assignedTo as string | null) ?? undefined,
+        taskMode: (row.taskMode as Task['taskMode'] | null) ?? undefined,
+        startTime: (row.startTime as string | null) ?? undefined,
         relativeStartOffset: fromJson<unknown>(row.relativeStartOffset, undefined) as Task['relativeStartOffset'],
-        dueDate: fromOptional(row.dueDate as string | null),
+        dueDate: (row.dueDate as string | null) ?? undefined,
         recurrence,
 
         showFutureRecurrence: recurrence ? fromPresentBool(row.showFutureRecurrence) : undefined,
@@ -211,49 +211,44 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         tags: toStringArray(fromJson<unknown>(row.tags, [])),
         contexts: toStringArray(fromJson<unknown>(row.contexts, [])),
         checklist: toChecklist(fromJson<unknown>(row.checklist, undefined)),
-        description: fromOptional(row.description as string | null),
-        textDirection: fromOptional(row.textDirection as Task['textDirection'] | null),
+        description: (row.description as string | null) ?? undefined,
+        textDirection: (row.textDirection as Task['textDirection'] | null) ?? undefined,
         attachments: toAttachments(fromJson<unknown>(row.attachments, undefined)),
-        location: fromOptional(row.location as string | null),
-        projectId: fromOptional(row.projectId as string | null),
-        sectionId: fromOptional(row.sectionId as string | null),
+        location: (row.location as string | null) ?? undefined,
+        projectId: (row.projectId as string | null) ?? undefined,
+        sectionId: (row.sectionId as string | null) ?? undefined,
         viewSectionIds: fromJson<unknown>(row.viewSectionIds, undefined) as Task['viewSectionIds'],
-        areaId: fromOptional(row.areaId as string | null),
+        areaId: (row.areaId as string | null) ?? undefined,
         order,
         orderNum: order,
         boardOrder: row.boardOrder === null || row.boardOrder === undefined ? undefined : Number(row.boardOrder),
         focusOrder: row.focusOrder === null || row.focusOrder === undefined ? undefined : Number(row.focusOrder),
         isFocusedToday: fromBool(row.isFocusedToday),
-        timeEstimate: fromOptional(row.timeEstimate as Task['timeEstimate'] | null),
+        timeEstimate: (row.timeEstimate as Task['timeEstimate'] | null) ?? undefined,
         timeSpentMinutes: row.timeSpentMinutes === null || row.timeSpentMinutes === undefined
             ? undefined
             : Number(row.timeSpentMinutes),
         suppressMindwtrReminders: fromBool(row.suppressMindwtrReminders),
         reminderPolicy: normalizeTaskReminderPolicy(row.reminderPolicy),
-        reviewAt: fromOptional(row.reviewAt as string | null),
+        reviewAt: (row.reviewAt as string | null) ?? undefined,
 
 
-        completedAt: (() => {
+        completedAt: loadedStatus === 'done' || loadedStatus === 'archived'
+            ? (row.completedAt as string | null) ?? undefined
+            : undefined,
+        cancelledAt: (row.cancelledAt as string | null) ?? undefined,
+        archivedAt: (row.archivedAt as string | null) ?? undefined,
+        statusBeforeProjectArchive: (row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null) ?? undefined,
 
 
-            const status = normalizeTaskStatus(String(row.status ?? ''));
-            return status === 'done' || status === 'archived'
-                ? fromOptional(row.completedAt as string | null)
-                : undefined;
-        })(),
-        cancelledAt: fromOptional(row.cancelledAt as string | null),
-        archivedAt: fromOptional(row.archivedAt as string | null),
-        statusBeforeProjectArchive: fromOptional(row.statusBeforeProjectArchive as Task['statusBeforeProjectArchive'] | null),
-
-
-        completedAtBeforeProjectArchive: fromOptional(row.completedAtBeforeProjectArchive as string | null),
-        isFocusedTodayBeforeProjectArchive: fromOptional(fromNullableBool(row.isFocusedTodayBeforeProjectArchive) ?? null),
-        projectArchivedAt: fromOptional(row.projectArchivedAt as string | null),
+        completedAtBeforeProjectArchive: (row.completedAtBeforeProjectArchive as string | null) ?? undefined,
+        isFocusedTodayBeforeProjectArchive: fromNullableBool(row.isFocusedTodayBeforeProjectArchive) ?? undefined,
+        projectArchivedAt: (row.projectArchivedAt as string | null) ?? undefined,
         rev: row.rev === null || row.rev === undefined ? undefined : Number(row.rev),
-        revBy: fromOptional(row.revBy as string | null),
+        revBy: (row.revBy as string | null) ?? undefined,
         createdAt: String(row.createdAt ?? ''),
         updatedAt: String(row.updatedAt ?? ''),
-        deletedAt: fromOptional(row.deletedAt as string | null),
-        purgedAt: fromOptional(row.purgedAt as string | null),
+        deletedAt: (row.deletedAt as string | null) ?? undefined,
+        purgedAt: (row.purgedAt as string | null) ?? undefined,
     };
 };

@@ -45,7 +45,10 @@ export const fromNullableBool = (value: unknown): boolean | null | undefined => 
 
 export const toStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) return [];
-    return value.filter((item): item is string => typeof item === 'string');
+    for (let index = 0; index < value.length; index += 1) {
+        if (typeof value[index] !== 'string') return value.filter((item): item is string => typeof item === 'string');
+    }
+    return value.slice();
 };
 
 

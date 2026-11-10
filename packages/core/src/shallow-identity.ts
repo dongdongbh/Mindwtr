@@ -11,15 +11,22 @@ const sameShallowValue = (left: unknown, right: unknown): boolean => {
     return true;
 };
 
+const hasOwnProperty = Object.prototype.hasOwnProperty;
+
 export const sameShallowRecord = (input: object, candidate: object): boolean => {
     if (Array.isArray(input) !== Array.isArray(candidate)) return false;
     const inputRecord = input as Record<string, unknown>;
     const candidateRecord = candidate as Record<string, unknown>;
     const candidateKeys = Object.keys(candidateRecord);
-    if (Object.keys(inputRecord).length !== candidateKeys.length) return false;
-    for (const key of candidateKeys) {
-        if (!Object.prototype.hasOwnProperty.call(inputRecord, key)) return false;
-        if (!sameShallowValue(inputRecord[key], candidateRecord[key])) return false;
+    const inputKeys = Object.keys(inputRecord);
+    if (inputKeys.length !== candidateKeys.length) return false;
+    for (let index = 0; index < candidateKeys.length; index += 1) {
+        const key = candidateKeys[index];
+        if (inputKeys[index] !== key && !hasOwnProperty.call(inputRecord, key)) return false;
+        const left = inputRecord[key];
+        const right = candidateRecord[key];
+        if (left === right && (left !== 0 || 1 / left === 1 / (right as number))) continue;
+        if (!sameShallowValue(left, right)) return false;
     }
     return true;
 };

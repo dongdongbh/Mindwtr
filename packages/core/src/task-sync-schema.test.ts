@@ -159,6 +159,22 @@ describe('Task sync schema contract', () => {
         expect(cloudKitProductionSchema.records.MindwtrTask.pendingProduction).not.toContain('cancelledAt');
     });
 
+    it('reads NULL columns as present undefined fields and keeps completedAt only for finished tasks', () => {
+        const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column) => [column, null]));
+        const base = { ...row, id: 't1', title: 'Task', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', completedAt: '2026-01-03T00:00:00.000Z' };
+        const open = mapSqliteTaskRow({ ...base, status: 'next' });
+        expect(Object.keys(open).sort()).toEqual(sorted(fieldNames));
+        expect(open).toStrictEqual({
+            ...Object.fromEntries(fieldNames.map((name) => [name, undefined])),
+            id: 't1', title: 'Task', status: 'next', tags: [], contexts: [], isFocusedToday: false, suppressMindwtrReminders: false,
+            createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
+        });
+        expect(mapSqliteTaskRow({ ...base, status: ' Done ' })).toMatchObject({ status: 'done', completedAt: '2026-01-03T00:00:00.000Z' });
+        expect(mapSqliteTaskRow({ ...base, status: 'archived' }).completedAt).toBe('2026-01-03T00:00:00.000Z');
+        expect(mapSqliteTaskRow({ ...base, status: 'waiting' }).completedAt).toBeUndefined();
+        expect(mapSqliteTaskRow({ ...base, status: 'next', isFocusedTodayBeforeProjectArchive: 0 }).isFocusedTodayBeforeProjectArchive).toBe(false);
+    });
+
     it('reads NULL project-archive columns as absent so a phone-read task matches the merge winner (#1156)', () => {
         const task: Task = { ...TASK_SYNC_SCHEMA_FIXTURE, completedAtBeforeProjectArchive: undefined, isFocusedTodayBeforeProjectArchive: undefined } as Task;
         const row = taskToSqliteRow(task);

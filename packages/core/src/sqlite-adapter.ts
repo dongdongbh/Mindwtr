@@ -339,13 +339,11 @@ const createTempIdTableName = (table: SqliteEntityTable): string => {
 
 
 export function mapSqliteTaskRow(row: Record<string, unknown>): Task {
-    const base = taskFromSqliteRow(row);
-    return {
-        ...base,
-        status: normalizeTaskStatus(row.status),
-        recurrence: normalizeRecurrenceForLoad(base.recurrence),
-        relativeStartOffset: normalizeRelativeStartOffset(base.relativeStartOffset),
-    };
+    const task = taskFromSqliteRow(row);
+    task.status = normalizeTaskStatus(row.status);
+    task.recurrence = normalizeRecurrenceForLoad(task.recurrence);
+    task.relativeStartOffset = normalizeRelativeStartOffset(task.relativeStartOffset);
+    return task;
 }
 
 
