@@ -477,6 +477,11 @@ function TaskEditModalInner({
         try { await pickImageAttachment(); }
         finally { pendingAttachmentImportsRef.current -= 1; }
     }, [pickImageAttachment]);
+    const handleCompletePreview = useCallback(() => {
+        if (!readOnlyRef.current && pendingAttachmentImportsRef.current === 0 && !isAIWorking && !audioLoading && !audioTranscribing) {
+            void draftLifecycle.complete();
+        }
+    }, [audioLoading, audioTranscribing, draftLifecycle, isAIWorking]);
 
     const {
         contextTokenSuggestions,
@@ -1384,7 +1389,7 @@ function TaskEditModalInner({
                                     onStatusUpdate={handleViewStatusUpdate}
                                     showStatusField={showStatusField}
                                     readOnly={submissionPending || completionRetryPending}
-                                    onComplete={() => { if (!readOnlyRef.current && pendingAttachmentImportsRef.current === 0 && !isAIWorking && !audioLoading && !audioTranscribing) void draftLifecycle.complete(); }}
+                                    onComplete={handleCompletePreview}
                                     completionPending={submissionPending || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing}
                                     completionRetryPending={completionRetryPending}
                                     completionError={completionError}

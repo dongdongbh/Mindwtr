@@ -1,7 +1,8 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore, type AppData, type Attachment, type Task } from '@mindwtr/core';
@@ -40,8 +41,7 @@ afterEach(async () => {
 async function open(task: Task = original) {
     await flushPendingSave().catch(() => undefined);
     resetForTests();
-    mkdirSync('/home/dd/scratch', { recursive: true });
-    const directory = mkdtempSync('/home/dd/scratch/mindwtr-preview-completion-');
+    const directory = mkdtempSync(join(tmpdir(), 'mindwtr-preview-completion-'));
     files.push(directory);
     const file = join(directory, 'data.sqlite');
     const db = new DatabaseSync(file); databases.push(db);

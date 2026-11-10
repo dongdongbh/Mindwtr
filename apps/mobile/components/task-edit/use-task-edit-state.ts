@@ -172,7 +172,7 @@ export function useTaskEditState({
     const saveAwaitingDurabilityRef = React.useRef(false);
     const pendingSavesRef = React.useRef(0);
     const editorSessionRef = React.useRef(0);
-    const submissionRef = React.useRef(false);
+    const submissionRef = React.useRef<'save' | 'cancel' | 'complete' | null>(null);
     const [submissionPending, setSubmissionPending] = React.useState(false);
     const pendingCompletionRef = React.useRef<{ taskId: string; attachments?: readonly Attachment[] } | null>(null);
     const [completionRetryPending, setCompletionRetryPending] = React.useState(false);
@@ -180,7 +180,7 @@ export function useTaskEditState({
     const pendingCancellationPatchRef = React.useRef<Partial<Task> | null>(null);
     const [cancelRetryPending, setCancelRetryPending] = React.useState(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
-        if (submissionRef.current || pendingCompletionRef.current) return;
+        if ((submissionRef.current !== null && submissionRef.current !== 'save') || pendingCompletionRef.current) return;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -189,7 +189,7 @@ export function useTaskEditState({
         });
     }, []);
     const setChecklist = React.useCallback<SetTaskEditDraftValue<Task['checklist']>>((value, markDirty = true) => {
-        if (submissionRef.current || pendingCompletionRef.current) return;
+        if ((submissionRef.current !== null && submissionRef.current !== 'save') || pendingCompletionRef.current) return;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -198,7 +198,7 @@ export function useTaskEditState({
         });
     }, []);
     const setAttachments = React.useCallback<SetTaskEditDraftValue<Attachment[] | undefined>>((value, markDirty = true) => {
-        if (submissionRef.current || pendingCompletionRef.current) return;
+        if ((submissionRef.current !== null && submissionRef.current !== 'save') || pendingCompletionRef.current) return;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -670,7 +670,7 @@ export function useTaskEditState({
     const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' | 'complete' = 'save') => {
         if (submissionRef.current) return false;
         const session = editorSessionRef.current;
-        submissionRef.current = true;
+        submissionRef.current = mode;
         pendingSavesRef.current += 1;
         setSubmissionPending(true);
         try {
@@ -679,7 +679,7 @@ export function useTaskEditState({
             return result;
         } finally {
             pendingSavesRef.current -= 1;
-            submissionRef.current = false;
+            submissionRef.current = null;
             setSubmissionPending(false);
         }
     }, [saveDraftImpl, translate]);

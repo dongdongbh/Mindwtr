@@ -1,5 +1,16 @@
 # Performance and stability handoff
 
+## Mobile editor Preview completion, November 10
+
+[Evidence and validation](preview-completion-render-stability-2026-11-10.md): the
+project picker previously added two redundant Preview tab renders because its
+completion callback changed identity. A stable callback restores the unchanged
+render-count gate; all six mobile performance tests pass. The same correction
+preserves ordinary Save draft edits while keeping completion and retry guards,
+and makes the real SQLite completion fixture use a portable temp root. All 102
+focused editor tests, mobile typecheck and lint pass. This is React work-count
+evidence, not native latency evidence. Next: validate the integrated commit in CI.
+
 ## Native iOS (SwiftUI + JavaScriptCore host), November 8
 
 Full evidence: [native iOS cold start, 2026-11-08](native-ios-startup-2026-11-08.md). iPhone 12, optimized marker build of `8d0b42aad`, and the
