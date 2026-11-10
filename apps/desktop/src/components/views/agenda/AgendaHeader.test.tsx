@@ -86,6 +86,7 @@ describe('AgendaHeader', () => {
         expect(sort).toHaveClass('bg-card');
         expect(group).toHaveClass('bg-primary/10');
         expect(group).toHaveTextContent(/Group.*Project/);
+        expect(group).toHaveAttribute('title', 'Group: Project');
 
         view.rerender(
             <AgendaHeader

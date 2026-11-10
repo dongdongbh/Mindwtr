@@ -129,6 +129,7 @@ describe('ListHeader', () => {
         expect(screen.getByText('Group')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'View options' })).not.toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: 'Sort' }).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+        expect(screen.getByRole('combobox', { name: 'Group' }).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
         expect(screen.getByRole('combobox', { name: 'Sort' })).toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: 'Group' })).toBeInTheDocument();
     });
