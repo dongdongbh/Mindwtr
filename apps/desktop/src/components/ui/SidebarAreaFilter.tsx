@@ -46,8 +46,6 @@ export function SidebarAreaFilter({
     ]), [areas, noAreaLabel]);
 
     const isActive = isAreaFilterSelectionActive(selection);
-    const activeCount = selection.included.length + selection.excluded.length;
-
 
     const labelFor = (id: string) => options.find((option) => option.id === id)?.label ?? noAreaLabel;
     const selectedLabel = !isActive
@@ -56,7 +54,12 @@ export function SidebarAreaFilter({
             selection.included.map(labelFor).join(', '),
             selection.excluded.length > 0 ? `${excludedLabel}: ${selection.excluded.map(labelFor).join(', ')}` : '',
         ].filter(Boolean).join(' · ');
-    const triggerLabel = collapsed ? `${ariaLabel}: ${selectedLabel}` : ariaLabel;
+    const summarize = (ids: string[]) => ids.length > 1 ? `${labelFor(ids[0])} + ${ids.length - 1}` : ids.map(labelFor).join('');
+    const compactLabel = !isActive ? allAreasLabel : [
+        summarize(selection.included),
+        selection.excluded.length > 0 ? `${excludedLabel}: ${summarize(selection.excluded)}` : '',
+    ].filter(Boolean).join(' · ');
+    const triggerLabel = `${ariaLabel}: ${selectedLabel}`;
 
     useEffect(() => {
         if (!open) return;
@@ -103,47 +106,55 @@ export function SidebarAreaFilter({
 
     return (
         <div ref={containerRef} className="relative">
-            <button
-                type="button"
-                onClick={() => setOpen((prev) => !prev)}
-                onKeyDown={(event) => {
-                    if (event.key === 'Escape' && open) {
-                        event.preventDefault();
-                        closeDropdown();
-                    }
-                }}
-                className={cn(
-                    'flex items-center text-[13px] bg-muted/40 border-none rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40',
-                    collapsed
-                        ? 'h-10 w-10 justify-center hover:bg-accent hover:text-accent-foreground'
-                        : 'h-9 w-full justify-between px-3',
-                )}
-                aria-haspopup="true"
-                aria-expanded={open}
-                aria-label={triggerLabel}
-                title={triggerLabel}
-            >
-                {collapsed ? (
-                    <span className="relative">
-                        <Layers className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        {isActive && (
-                            <span className="absolute -right-1.5 -top-1.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
-                        )}
-                    </span>
-                ) : (
-                    <>
-                        <span className="truncate">{selectedLabel}</span>
-                        <span className="flex items-center gap-1.5 shrink-0">
-                            {activeCount > 1 && (
-                                <span className="rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground">
-                                    {activeCount}
-                                </span>
+            <div className="flex items-center gap-1">
+                <button
+                    type="button"
+                    onClick={() => setOpen((prev) => !prev)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Escape' && open) {
+                            event.preventDefault();
+                            closeDropdown();
+                        }
+                    }}
+                    className={cn(
+                        'flex items-center text-[13px] bg-muted/40 border-none rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40',
+                        collapsed
+                            ? 'h-10 w-10 justify-center hover:bg-accent hover:text-accent-foreground'
+                            : 'h-9 min-w-0 flex-1 justify-between gap-2 px-3',
+                    )}
+                    aria-haspopup="true"
+                    aria-expanded={open}
+                    aria-label={triggerLabel}
+                    title={triggerLabel}
+                >
+                    {collapsed ? (
+                        <span className="relative">
+                            <Layers className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            {isActive && (
+                                <span className="absolute -right-1.5 -top-1.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
                             )}
-                            <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                         </span>
-                    </>
+                    ) : (
+                        <>
+                            <span className="truncate">{compactLabel}</span>
+                            <span className="flex items-center gap-1.5 shrink-0">
+                                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                            </span>
+                        </>
+                    )}
+                </button>
+                {isActive && !collapsed && (
+                    <button
+                        type="button"
+                        onClick={() => onChange({ included: [], excluded: [] })}
+                        aria-label={allAreasLabel}
+                        title={allAreasLabel}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
                 )}
-            </button>
+            </div>
             {open && (
                 <div
                     ref={dropdownRef}

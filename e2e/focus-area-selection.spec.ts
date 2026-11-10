@@ -18,7 +18,7 @@ test('Area selection hides Focus rows without releasing their global slots', asy
     const section = page.getByTestId('todays-focus-section');
     await expect(section).toContainText('(3/3)');
     await expect(section.locator('[data-task-id]')).toHaveCount(3);
-    const filter = page.getByRole('button', { name: 'Area filter', exact: true });
+    const filter = page.getByRole('button', { name: /^Area filter:/ });
     await filter.click();
     const options = page.getByRole('group', { name: 'Area filter', exact: true });
     await options.getByRole('button', { name: 'Private', exact: true }).click();
@@ -45,4 +45,34 @@ test('Area selection hides Focus rows without releasing their global slots', asy
     await filter.click();
     await expect(section.locator('[data-task-id]')).toHaveCount(3);
     await expect(page.getByTestId('focus-hidden-by-area')).toHaveCount(0);
+});
+
+
+test('Area selection stays open through include, exclude and reset', async ({ page }) => {
+    await dismissOnboarding(page);
+    await seedAppData(page, {
+        areas: [{ id: 'work', name: 'Work' }, { id: 'home', name: 'Home' }, { id: 'hobby', name: 'Hobby' }],
+        settings: { language: 'en' },
+    });
+    await page.goto('/?view=agenda');
+    const filter = page.getByRole('button', { name: /^Area filter:/ });
+    await filter.click();
+    const options = page.getByRole('group', { name: 'Area filter', exact: true });
+    await options.getByRole('button', { name: 'Work', exact: true }).click();
+    await options.getByRole('button', { name: 'Home', exact: true }).click();
+    await expect(filter).toContainText('Work + 1');
+    await expect(filter).toHaveAttribute('title', 'Area filter: Work, Home');
+    await options.getByRole('button', { name: 'Hobby', exact: true }).click();
+    await options.getByRole('button', { name: 'Hobby', exact: true }).click();
+    await expect(options.getByRole('button', { name: 'Hobby (Excluded)', exact: true })).toHaveAttribute('aria-pressed', 'mixed');
+    await expect(filter).toContainText('Work + 1 · Excluded: Hobby');
+    await expect(options).toBeVisible();
+    await filter.press('Escape');
+    await expect(options).toBeHidden();
+    await page.getByRole('button', { name: 'All areas', exact: true }).click();
+    await expect(filter).toContainText('All areas');
+    await filter.click();
+    for (const name of ['Work', 'Home', 'Hobby']) {
+        await expect(options.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'false');
+    }
 });
