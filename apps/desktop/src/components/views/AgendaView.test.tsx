@@ -535,7 +535,7 @@ describe('AgendaView', () => {
         expect(upcomingSection).not.toBeNull();
 
 
-        expect(getAllByText(safeFormatDate(inThreeDays, 'P'))).toHaveLength(1);
+        expect(getAllByText(safeFormatDate(inThreeDays, 'EEEE'))).toHaveLength(1);
     });
 
     it('shows an empty state when active tasks do not produce agenda sections', () => {

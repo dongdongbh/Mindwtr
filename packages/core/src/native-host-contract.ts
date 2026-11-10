@@ -1269,7 +1269,7 @@ export function createNativeHostContract(options: {
                 t: translate,
                 now,
             }),
-            validUntil: getTaskRowMetaValidUntil(task, now, features),
+            validUntil: getTaskRowMetaValidUntil(task, now, features, options),
         };
         if (state.settings.gtd?.taskEditor?.hidden?.includes('status')) base.statusLabel = null;
         if (!base.descriptionPreview) return base;
@@ -1425,6 +1425,7 @@ export function createNativeHostContract(options: {
             const laterToday = section.key === 'schedule' && cachedLaterTodayIds.has(task.id);
             return {
                 ...toNativeTaskRow(task, cachedFocusProjectTitles, rowMeta(task, now, {
+                    relativeScheduleDates: true,
                     projectDeadlineLabel: getProjectDeadlineBoostLabel(
                         cachedDeadlineBoosts.get(task.id),
                         (key, fallback) => tFallback(translate, key, fallback),

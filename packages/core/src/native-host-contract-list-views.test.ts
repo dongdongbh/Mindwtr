@@ -216,6 +216,38 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         expect(host.getHistoryView({ tab: 7 as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
+    it('uses relative schedule presentation only for Focus rows and expires Start-only rows at midnight', async () => {
+        const before = new Date(2026, 10, 10, 23, 59);
+        const midnight = new Date(2026, 10, 11);
+        const stamp = before.toISOString();
+        const tasks: Task[] = [
+            { id: 'dated', title: 'Dated', status: 'next', isFocusedToday: true, startTime: '2026-11-10T09:15', dueDate: '2026-11-12',
+                contexts: [], tags: [], createdAt: stamp, updatedAt: stamp },
+            { id: 'start-only', title: 'Start only', status: 'next', startTime: '2026-11-11',
+                contexts: [], tags: [], createdAt: stamp, updatedAt: stamp },
+        ];
+        const part: ListViewsPart = { ...fixture.contexts, now: stamp, tasks, projects: [], areas: [], sections: [] };
+        const { host, recorder } = await openHost(part, scenario(part, 'chips, counts and chip search'));
+        useTaskStore.setState({ settings: { dateFormat: 'ymd', timeFormat: '24h' } });
+        const original = JSON.stringify(useTaskStore.getState()._allTasks);
+        const writes = recorder.log.length;
+        const focus = value(host.getFocus({ limit: 20 }));
+        const rows = focus.sections.flatMap((section) => section.rows);
+        const dated = rows.find((row) => row.id === 'dated');
+        expect(dated?.meta.relativeScheduleDates).toBe(true);
+        expect(dated?.meta.parts.find((item) => item.kind === 'due')).toMatchObject({ text: 'Thursday', accessibilityLabel: `${t('taskEdit.dueDateLabel')}: 2026-11-12` });
+        expect(dated?.meta.accessibilityLabel).toContain(`${t('taskEdit.startDateLabel')}: 2026-11-10`);
+        expect(rows.find((row) => row.id === 'start-only')?.meta.validUntil).toBe(midnight.getTime());
+        const inventory = value(host.getContextsView({ offset: 0, limit: 20 })).rows.find((row) => row.id === 'dated');
+        expect(inventory?.meta).not.toHaveProperty('relativeScheduleDates');
+        expect(inventory?.meta.parts.find((item) => item.kind === 'due')?.text).toBe('2026-11-12');
+        vi.setSystemTime(midnight);
+        const refreshed = value(host.getFocus({ limit: 20 })).sections.flatMap((section) => section.rows).find((row) => row.id === 'start-only');
+        expect(refreshed?.meta.parts.find((item) => item.kind === 'start')?.text).toBe(`${t('taskEdit.startDateLabel')}: Today`);
+        expect(JSON.stringify(useTaskStore.getState()._allTasks)).toBe(original);
+        expect(recorder.log).toHaveLength(writes);
+    });
+
     it('builds Contexts rows with core\'s list and row functions, paged by the revision', async () => {
         const { host } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
         const first = host.getContextsView({ tokens: ['#work', '@phone'], matchMode: 'any', offset: 0, limit: 2 });

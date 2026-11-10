@@ -217,6 +217,26 @@ describe('buildTaskRowMeta', () => {
         expect(meta(new Date('2026-09-09T10:00')).ageLabel).toBe('1 week old');
     });
 
+    it('shortens Focus dates while preserving exact field labels, default metadata and task data', () => {
+        const row = task({ startTime: '2026-11-10T09:15:00', dueDate: '2026-11-12' });
+        const original = JSON.stringify(row);
+        const input = { ...base, task: row, now: new Date(2026, 10, 10, 12),
+            dateFormatting: { language: 'en', dateFormat: 'ymd', timeFormat: '24h' } };
+        const absolute = buildTaskRowMeta(input);
+        const focus = buildTaskRowMeta({ ...input, relativeScheduleDates: true });
+        expect(focus.relativeScheduleDates).toBe(true);
+        expect(focus.parts.find((part) => part.kind === 'start')).toMatchObject({ text: 'Start: Today · 09:15' });
+        expect(focus.parts.find((part) => part.kind === 'due')).toMatchObject({ text: 'Thursday', accessibilityLabel: 'Due: 2026-11-12' });
+        expect(focus.accessibilityLabel).toContain('Start: 2026-11-10');
+        expect(focus.accessibilityLabel).toContain('09:15');
+        expect(focus.accessibilityLabel).toContain('Due: 2026-11-12');
+        expect(focus.accessibilityLabel).not.toMatch(/Today|Thursday/);
+        expect(absolute).not.toHaveProperty('relativeScheduleDates');
+        expect(absolute.parts.find((part) => part.kind === 'start')?.text).toContain('2026-11-10');
+        expect(absolute.parts.find((part) => part.kind === 'due')).not.toHaveProperty('accessibilityLabel');
+        expect(JSON.stringify(row)).toBe(original);
+    });
+
     it('uses the Project override for its dot while keeping overdue and priority tones', () => {
         const project: Project = { id: 'p', title: 'Project', status: 'active', color: '#3b82f6',
             colorOverride: '#10b981', areaId: 'a', order: 0, tagIds: [], createdAt: '', updatedAt: '' };
@@ -299,5 +319,24 @@ describe('getTaskRowMetaValidUntil', () => {
         expect(getTaskRowMetaValidUntil(done, new Date(now), features)).toBeNull();
         expect(getTaskRowMetaValidUntil(task({ dueDate: new Date(now - hour).toISOString() }), new Date(now), { ...features, taskAge: false })).toBeNull();
         expect(getTaskRowMetaValidUntil(task({ status: 'reference', dueDate: new Date(now + hour).toISOString() }), new Date(now), features)).toBeNull();
+    });
+
+    it('expires Start-only Focus wording at local midnight and leaves ordinary Start-only rows stable', () => {
+        const before = new Date(2026, 10, 10, 23, 59);
+        const midnight = new Date(2026, 10, 11);
+        const row = task({ startTime: '2026-11-11' });
+        const withoutAge = { ...features, taskAge: false };
+        expect(getTaskRowMetaValidUntil(row, before, withoutAge)).toBeNull();
+        expect(getTaskRowMetaValidUntil(row, before, withoutAge, { relativeScheduleDates: true })).toBe(midnight.getTime());
+        const input = { task: row, lookup: {}, features: withoutAge, language: 'en' as const, dateFormatting: {}, t, relativeScheduleDates: true };
+        expect(buildTaskRowMeta({ ...input, now: before }).parts.find((part) => part.kind === 'start')?.text).toBe('Start: Tomorrow');
+        expect(buildTaskRowMeta({ ...input, now: midnight }).parts.find((part) => part.kind === 'start')?.text).toBe('Start: Today');
+    });
+
+    it('keeps an earlier due-tone transition ahead of the wording midnight', () => {
+        const before = new Date(2026, 10, 10, 23, 59);
+        const due = new Date(2026, 10, 10, 23, 59, 20);
+        expect(getTaskRowMetaValidUntil(task({ startTime: '2026-11-11', dueDate: due.toISOString() }), before,
+            { ...features, taskAge: false }, { relativeScheduleDates: true })).toBe(due.getTime() + 1);
     });
 });

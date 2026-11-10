@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import renderer from 'react-test-renderer';
 import { AccessibilityInfo, Alert, AppState, Platform, Text } from 'react-native';
 import type { AppStateStatus } from 'react-native';
+import { ArrowRight, Calendar } from 'lucide-react-native';
 
 import {
   configureDateFormatting,
@@ -212,6 +213,7 @@ vi.mock('../hooks/use-theme-tokens', () => ({
 vi.mock('lucide-react-native', () => ({
   AlignLeft: (props: any) => React.createElement('AlignLeft', props),
   ArrowRight: (props: any) => React.createElement('ArrowRight', props),
+  Calendar: (props: Record<string, unknown>) => React.createElement('Calendar', props),
   CalendarDays: (props: any) => React.createElement('CalendarDays', props),
   Check: (props: any) => React.createElement('Check', props),
   Circle: (props: Record<string, unknown>) => React.createElement('Circle', props),
@@ -295,6 +297,50 @@ describe('SwipeableTaskItem', () => {
       }
     } finally {
       Platform.OS = originalOS;
+    }
+  });
+
+  it('shows Focus dates with exact spoken labels and refreshes Start-only rows at midnight and resume', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 10, 23, 59, 30));
+    const formatting = getDateFormattingConfig();
+    configureDateFormatting({ language: 'en', dateFormat: 'ymd', timeFormat: '24h' });
+    let onState!: (state: AppStateStatus) => void;
+    const stateSpy = vi.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
+      onState = listener;
+      return { remove: vi.fn() };
+    });
+    const colors = { taskItemBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999',
+      tint: '#3b82f6', warning: '#f59e0b', danger: '#b91c1c' } as React.ComponentProps<typeof SwipeableTaskItem>['tc'];
+    const task = { id: 'focus-start', title: 'Start only', status: 'next' as const, startTime: '2026-11-11',
+      tags: [], contexts: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => { tree = renderer.create(<SwipeableTaskItem task={task} isDark={false} tc={colors} relativeScheduleDates />); });
+    try {
+      expect(hasText(tree, 'Start: Tomorrow')).toBe(true);
+      const start = tree.root.findAll((node) => node.props.accessibilityLabel === 'Start: 2026-11-11')[0];
+      expect(start.findAll((node) => node.type === ArrowRight && node.props.accessible === false).length).toBeGreaterThan(0);
+      renderer.act(() => { vi.advanceTimersByTime(30_001); });
+      expect(hasText(tree, 'Start: Today')).toBe(true);
+      renderer.act(() => { onState('background'); });
+      vi.setSystemTime(new Date(2026, 10, 12));
+      expect(hasText(tree, 'Start: Today')).toBe(true);
+      renderer.act(() => { onState('active'); });
+      expect(hasText(tree, 'Start: Today')).toBe(false);
+      expect(hasText(tree, 'Start: 2026-11-11')).toBe(true);
+      renderer.act(() => { tree.update(<SwipeableTaskItem task={{ ...task, dueDate: '2026-11-14T14:30' }}
+        isDark={false} tc={colors} relativeScheduleDates />); });
+      expect(hasText(tree, 'Saturday · 14:30')).toBe(true);
+      const due = tree.root.findAll((node) => node.props.accessibilityLabel === `Due: ${safeFormatDate('2026-11-14T14:30', 'Pp')}`)[0];
+      expect(due.findAll((node) => node.type === Calendar && node.props.accessible === false).length).toBeGreaterThan(0);
+      renderer.act(() => { tree.update(<SwipeableTaskItem task={{ ...task, dueDate: '2026-11-14T14:30' }} isDark={false} tc={colors} />); });
+      expect(hasText(tree, 'Saturday · 14:30')).toBe(false);
+      expect(hasText(tree, safeFormatDate('2026-11-14T14:30', 'Pp'))).toBe(true);
+    } finally {
+      renderer.act(() => { tree.unmount(); });
+      stateSpy.mockRestore();
+      configureDateFormatting(formatting);
+      vi.useRealTimers();
     }
   });
 

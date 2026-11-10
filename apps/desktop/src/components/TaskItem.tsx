@@ -107,6 +107,7 @@ interface TaskItemProps {
     compactMetaEnabled?: boolean;
     enableDoubleClickEdit?: boolean;
     showHoverHint?: boolean;
+    relativeScheduleDates?: boolean;
     editorPresentation?: TaskEditorPresentation;
     appearsAtLabel?: string;
     projectDeadlineLabel?: string;
@@ -142,6 +143,7 @@ export const TaskItem = memo(function TaskItem({
     compactMetaEnabled = true,
     enableDoubleClickEdit = false,
     showHoverHint = true,
+    relativeScheduleDates = false,
     editorPresentation,
     appearsAtLabel,
     projectDeadlineLabel,
@@ -1799,6 +1801,7 @@ export const TaskItem = memo(function TaskItem({
                                 dragHandle={dragHandle}
                                 showTaskAge={showTaskAge}
                                 showHoverHint={showHoverHint}
+                                relativeScheduleDates={relativeScheduleDates}
                                 appearsAtLabel={appearsAtLabel}
                                 projectDeadlineLabel={projectDeadlineLabel}
                                 renameRequestToken={renameRequestToken}

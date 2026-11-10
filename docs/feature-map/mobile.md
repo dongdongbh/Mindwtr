@@ -34,6 +34,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/app/(drawer)/(tabs)/focus.tsx`, `apps/mobile/components/focus/focus-list-layout.ts`
 - Checks: `apps/mobile/lib/focus-screen.test.tsx`, `apps/mobile/lib/focus-controls-parity.test.tsx`, `apps/mobile/tests/focused-count-selector.test.ts`
 - Notes: Long press on Focus rows does not start bulk selection. Starring an inbox task makes it next, and the focus cap can block a new star.
+- Notes: Focus task dates show Today, Tomorrow, or a full localized weekday for the next six days, with explicit times retained. Start uses an arrow and Due a calendar; accessible labels retain the field and exact date. Past dates and dates at least seven days away stay exact. Labels refresh at local midnight and when the app returns to the foreground.
 
 ## Pomodoro
 

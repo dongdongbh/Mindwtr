@@ -9,6 +9,7 @@ import type { ProjectSequenceTaskCue } from './project-utils';
 import { formatRecurrenceLabel } from './recurrence';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getTaskDateCoherenceIssues } from './task-date-coherence';
+import { formatTaskScheduleDisplay } from './task-schedule-display';
 import { isTaskActionable, isTaskCancelled, isTaskCompleted } from './task-status';
 import { getChecklistProgress, getTaskAgeLabel, getTaskUrgency } from './task-utils';
 import { resolveTaskTextDirection } from './text-direction';
@@ -49,8 +50,9 @@ type TaskRowMetaPartBody =
     | { kind: 'context' | 'tag'; overflowCount: number }
     | { kind: 'assignedTo' }
     | { kind: 'completed' | 'cancelled' }
-    | { kind: 'due'; tone: TaskRowDueTone }
-    | { kind: 'start' | 'dateIssue' | 'recurrence' | 'estimate' }
+    | { kind: 'due'; tone: TaskRowDueTone; accessibilityLabel?: string }
+    | { kind: 'start'; accessibilityLabel?: string }
+    | { kind: 'dateIssue' | 'recurrence' | 'estimate' }
     | { kind: 'timeSpent' | 'attachments'; accessibilityLabel: string }
     | { kind: 'checklist'; completed: number; total: number };
 
@@ -60,6 +62,7 @@ export type TaskRowMetaPartKind = TaskRowMetaPart['kind'];
 
 export type TaskRowMeta = {
     parts: TaskRowMetaPart[];
+    relativeScheduleDates?: boolean;
 
     ageLabel: string | null;
 
@@ -118,6 +121,7 @@ export type TaskRowMetaInput = {
     projectDeadlineLabel?: string;
     sequenceCue?: ProjectSequenceTaskCue;
     sequenceLabel?: string;
+    relativeScheduleDates?: boolean;
 };
 
 const DETAIL_PART_KINDS = new Set<TaskRowMetaPartKind>(['assignedTo', 'tag', 'recurrence', 'estimate', 'timeSpent', 'attachments']);
@@ -150,11 +154,16 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
 
-export function getTaskRowMetaValidUntil(task: Task, now: Date, features: Pick<TaskRowFeatures, 'taskAge'>): number | null {
+export function getTaskRowMetaValidUntil(task: Task, now: Date, features: Pick<TaskRowFeatures, 'taskAge'>, options: Pick<TaskRowMetaInput, 'relativeScheduleDates'> = {}): number | null {
     const nowMs = now.getTime();
     if (!Number.isFinite(nowMs) || task.status === 'reference') return null;
     let next = Infinity;
     const consider = (at: number) => { if (at > nowMs && at < next) next = at; };
+    if (options.relativeScheduleDates && (safeParseDate(task.startTime) || safeParseDueDate(task.dueDate))) {
+        const midnight = new Date(now);
+        midnight.setHours(24, 0, 0, 0);
+        consider(midnight.getTime());
+    }
     const due = isTaskActionable(task) ? safeParseDueDate(task.dueDate)?.getTime() : undefined;
 
     if (due !== undefined) for (const before of [72 * HOUR_MS, 0]) consider(due - before + 1);
@@ -178,9 +187,15 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
     const formatDate = createDateFormatter(input.dateFormatting);
     const isReference = task.status === 'reference';
     const area = taskArea ?? projectArea;
-    const startLabel = formatScheduleDate(formatDate, task.startTime, safeParseDate);
-    const dueLabel = formatScheduleDate(formatDate, task.dueDate, safeParseDueDate);
+    const startDisplay = input.relativeScheduleDates ? formatTaskScheduleDisplay({ value: task.startTime, kind: 'start',
+        relative: true, now, dateFormatting: input.dateFormatting, t }) : null;
+    const dueDisplay = input.relativeScheduleDates ? formatTaskScheduleDisplay({ value: task.dueDate, kind: 'due',
+        relative: true, now, dateFormatting: input.dateFormatting, t }) : null;
+    const startLabel = input.relativeScheduleDates ? startDisplay?.label : formatScheduleDate(formatDate, task.startTime, safeParseDate);
+    const dueLabel = input.relativeScheduleDates ? dueDisplay?.label : formatScheduleDate(formatDate, task.dueDate, safeParseDueDate);
     const startText = startLabel ? `${tFallback(t, 'taskEdit.startDateLabel', 'Start')}: ${startLabel}` : null;
+    const exactStartText = startDisplay ? `${tFallback(t, 'taskEdit.startDateLabel', 'Start')}: ${startDisplay.exactLabel}` : null;
+    const exactDueText = dueDisplay ? `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${dueDisplay.exactLabel}` : null;
     const recurrenceLabel = formatRecurrenceLabel({
         recurrence: task.recurrence,
         t,
@@ -235,8 +250,8 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
                 });
             }
         }
-        if (dueLabel) add({ kind: 'due', text: dueLabel, tone: dueToneFor(task, now) });
-        if (startText) add({ kind: 'start', text: startText });
+        if (dueLabel) add({ kind: 'due', text: dueLabel, tone: dueToneFor(task, now), ...(exactDueText ? { accessibilityLabel: exactDueText } : {}) });
+        if (startText) add({ kind: 'start', text: startText, ...(exactStartText ? { accessibilityLabel: exactStartText } : {}) });
         if (getTaskDateCoherenceIssues(task).some((issue) => issue.code === 'start_after_due')) {
             add({ kind: 'dateIssue', text: tFallback(t, 'task.dateIssue.startAfterDue', 'Starts after due date') });
         }
@@ -274,6 +289,7 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
         : null;
 
     return {
+        ...(input.relativeScheduleDates ? { relativeScheduleDates: true } : {}),
         parts,
         ageLabel,
         descriptionPreview: getInlineMarkdownPreview(task.description ?? '') || null,
@@ -288,8 +304,8 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
             : [
                 task.title,
                 `${tFallback(t, 'taskEdit.statusLabel', 'Status')}: ${t(`status.${task.status}`)}`,
-                startText,
-                dueLabel ? `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${dueLabel}` : null,
+                exactStartText ?? startText,
+                exactDueText ?? (dueLabel ? `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${dueLabel}` : null),
 
 
                 features.priorities && task.priority

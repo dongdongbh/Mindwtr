@@ -62,6 +62,60 @@ describe('TaskItem', () => {
         expect(getByText('Test Task')).toBeInTheDocument();
     });
 
+    it('shows Focus-relative schedule dates with exact field labels and decorative icons', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 10, 10, 8));
+        const formatting = core.getDateFormattingConfig();
+        configureDateFormatting({ language: 'en', dateFormat: 'ymd', timeFormat: '24h' });
+        const task: Task = { ...mockTask, status: 'next', startTime: '2026-11-10T09:15', dueDate: '2026-11-12T14:30' };
+        const view = render(<LanguageProvider><TaskItem task={task} relativeScheduleDates /></LanguageProvider>);
+        try {
+            const start = view.getByLabelText(`Start Date: ${safeFormatDate(task.startTime, 'Pp')}`);
+            const due = view.getByLabelText(`Due Date: ${safeFormatDate(task.dueDate, 'Pp')}`);
+            expect(start).toHaveTextContent('Today · 09:15');
+            expect(due).toHaveTextContent('Thursday · 14:30');
+            expect(start).toHaveAttribute('title', start.getAttribute('aria-label'));
+            expect(due).toHaveAttribute('title', due.getAttribute('aria-label'));
+            expect(start.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+            expect(due.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+            view.rerender(<LanguageProvider><TaskItem task={task} relativeScheduleDates compactMetaEnabled={false} /></LanguageProvider>);
+            expect(view.getByText('Today · 09:15')).toBeInTheDocument();
+            expect(view.getByLabelText(`Start Date: ${safeFormatDate(task.startTime, 'Pp')}`)).toHaveAttribute('title', `Start Date: ${safeFormatDate(task.startTime, 'Pp')}`);
+            view.rerender(<LanguageProvider><TaskItem task={task} /></LanguageProvider>);
+            expect(view.queryByText('Today · 09:15')).not.toBeInTheDocument();
+            expect(view.getByText(safeFormatDate(task.dueDate, 'Pp'))).toBeInTheDocument();
+        } finally {
+            view.unmount();
+            configureDateFormatting(formatting);
+            vi.useRealTimers();
+        }
+    });
+
+    it('refreshes a Start-only Focus row at midnight and on foreground resume', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 10, 10, 23, 59, 30));
+        const task: Task = { ...mockTask, status: 'next', startTime: '2026-11-11' };
+        const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+        const view = render(<LanguageProvider><TaskItem task={task} relativeScheduleDates /></LanguageProvider>);
+        try {
+            expect(view.getByText('Tomorrow')).toBeInTheDocument();
+            act(() => { vi.advanceTimersByTime(30_001); });
+            expect(view.getByText('Today')).toBeInTheDocument();
+            hidden.mockReturnValue(true);
+            act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+            vi.setSystemTime(new Date(2026, 10, 12));
+            expect(view.getByText('Today')).toBeInTheDocument();
+            hidden.mockReturnValue(false);
+            act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+            expect(view.queryByText('Today')).not.toBeInTheDocument();
+            expect(view.getByText(safeFormatDate(task.startTime, 'P'))).toBeInTheDocument();
+        } finally {
+            view.unmount();
+            hidden.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
     it('copies a task link by pointer or keyboard without selecting or opening the row', async () => {
         const user = userEvent.setup();
         const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();

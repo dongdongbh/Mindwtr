@@ -43,6 +43,7 @@ data class RowMeta(
     val statusHidden: Boolean = false,
 
     val validUntil: Long? = null,
+    val relativeScheduleDates: Boolean = false,
 ) {
 
     val statusControl: String? get() = statusLabel?.takeUnless { statusHidden }
@@ -116,7 +117,7 @@ fun JSONObject.taskRow() = getJSONObject("meta").let { meta ->
             meta.getJSONObject("swipe").let { RowSwipe(it.getString("target"), it.getString("label"), it.getString("icon")) },
             meta.getString("textDirection") == "rtl", meta.getString("accessibilityLabel"),
             !meta.text("descriptionPreview").isNullOrEmpty(), meta.optJSONObject("description")?.toString(), meta.optBoolean("statusHidden"),
-            meta.takeIf { it.has("validUntil") && !it.isNull("validUntil") }?.getLong("validUntil")),
+            meta.takeIf { it.has("validUntil") && !it.isNull("validUntil") }?.getLong("validUntil"), meta.optBoolean("relativeScheduleDates")),
         text("revealLabel"), getBoolean("laterToday"), optString("taskRevision"), text("focusBlockedLabel"))
 }
 

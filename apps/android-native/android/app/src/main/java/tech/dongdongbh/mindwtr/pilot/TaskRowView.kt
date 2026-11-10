@@ -220,7 +220,7 @@ fun TaskRowItem(
                             verticalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
                             for (part in parts) {
                                 if (part.kind == "checklist") ChecklistBadge(part) { toggleRowChecklist(task.id) }
-                                else Box(Modifier.clearAndSetSemantics { }) { MetaPartView(part, if (part.kind == "completed") editCompleted else null) }
+                                else Box(Modifier.clearAndSetSemantics { }) { MetaPartView(part, if (part.kind == "completed") editCompleted else null, meta.relativeScheduleDates) }
                             }
                         }
                     }
@@ -246,7 +246,7 @@ class RowActions(
 
 
 @Composable
-private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null) {
+private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null, relativeScheduleDates: Boolean = false) {
     val theme = LocalTheme.current
     val c = theme.colors
     when (part.kind) {
@@ -259,7 +259,13 @@ private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null) {
             MetaText(part.text, if (part.kind == "context") theme.context else theme.tag, 500)
             if (part.overflow > 0) MetaText("+${part.overflow}", c.secondaryText, 500, Modifier.padding(start = 4.dp))
         }
-        "due" -> MetaText(part.text, when (part.tone) { "overdue" -> c.danger; "dueSoon" -> c.warning; else -> c.secondaryText }, 600)
+        "due", "start" -> {
+            val color = if (part.kind == "due") when (part.tone) { "overdue" -> c.danger; "dueSoon" -> c.warning; else -> c.secondaryText } else c.secondaryText
+            if (relativeScheduleDates) Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (part.kind == "start") Lucide.ArrowRight else Lucide.Calendar, null, tint = color, modifier = Modifier.size(12.dp))
+                MetaText(part.text, color, if (part.kind == "due") 600 else 500, Modifier.padding(start = 4.dp))
+            } else MetaText(part.text, color, if (part.kind == "due") 600 else 500)
+        }
         "checklist" -> MetaIcon(Lucide.ListChecks, "${part.done}/${part.of}", 13)
 
         "assignedTo" -> Row(verticalAlignment = Alignment.CenterVertically) {

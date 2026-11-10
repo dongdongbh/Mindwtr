@@ -97,6 +97,7 @@ export interface SwipeableTaskItemProps {
     onContextPress?: (context: string) => void;
     onTagPress?: (tag: string) => void;
     projectDeadlineLabel?: string;
+    relativeScheduleDates?: boolean;
 
     footerContent?: React.ReactNode;
     rowContext?: SwipeableTaskItemRowContext;
@@ -246,6 +247,7 @@ function SwipeableTaskItemInner({
     onContextPress,
     onTagPress,
     projectDeadlineLabel,
+    relativeScheduleDates = false,
     footerContent,
     rowContext,
 }: SwipeableTaskItemInnerProps) {
@@ -286,7 +288,7 @@ function SwipeableTaskItemInner({
         areas,
         sectionById,
     ), [areas, projects, sectionById, task.areaId, task.projectId, task.sectionId]);
-    const displayRevision = useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge));
+    const displayRevision = useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge || (relativeScheduleDates && task.startTime)));
 
     const dateFormatting = getDateFormattingConfig();
     const meta = useMemo(() => {
@@ -307,6 +309,7 @@ function SwipeableTaskItemInner({
             hideContexts,
             hideChecklistProgress,
             projectDeadlineLabel,
+            relativeScheduleDates,
             sequenceCue,
             sequenceLabel,
         });
@@ -321,6 +324,7 @@ function SwipeableTaskItemInner({
         displayRevision,
         prioritiesEnabled,
         projectDeadlineLabel,
+        relativeScheduleDates,
         sequenceCue,
         sequenceLabel,
         showTaskAge,

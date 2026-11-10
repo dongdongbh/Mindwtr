@@ -1,6 +1,6 @@
 import { AlertTriangle, AlignLeft, Folder, Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Circle, CheckCircle2, Clock, Timer, Link2, ListChecks, Paperclip, RotateCcw, Copy, MapPin, History, Hourglass, Play, Zap, MoreHorizontal, XCircle } from 'lucide-react';
 import type { Area, Attachment, Project, RangeSelectionOptions, Section, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
-import { einkSafeColor, DEFAULT_AREA_COLOR, getTaskPriorityColors, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskCancelled, isTaskCompleted, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
+import { einkSafeColor, DEFAULT_AREA_COLOR, getTaskPriorityColors, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, formatTaskScheduleDisplay, getDateFormattingConfig, isTaskActionable, isTaskCancelled, isTaskCompleted, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { isImeComposing } from '../../lib/ime';
 import { STATUS_PILL_CLASSES } from '../../lib/status-colors';
@@ -79,6 +79,7 @@ interface TaskItemDisplayProps {
     dragHandle?: ReactNode;
     showTaskAge?: boolean;
     showHoverHint?: boolean;
+    relativeScheduleDates?: boolean;
 
     appearsAtLabel?: string;
     projectDeadlineLabel?: string;
@@ -130,13 +131,22 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     dragHandle,
     showTaskAge = false,
     showHoverHint = true,
+    relativeScheduleDates = false,
     appearsAtLabel,
     projectDeadlineLabel,
     renameRequestToken = 0,
     theme,
     t,
 }: TaskItemDisplayProps) {
-    useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge));
+    useTaskDisplayClock(isTaskActionable(task) && Boolean(task.dueDate || showTaskAge || (relativeScheduleDates && task.startTime)));
+    const scheduleFormatting = getDateFormattingConfig();
+    const now = new Date();
+    const startDisplay = relativeScheduleDates ? formatTaskScheduleDisplay({ value: task.startTime, kind: 'start', relative: true,
+        now, dateFormatting: scheduleFormatting, t }) : null;
+    const dueDisplay = relativeScheduleDates ? formatTaskScheduleDisplay({ value: task.dueDate, kind: 'due', relative: true,
+        now, dateFormatting: scheduleFormatting, t }) : null;
+    const exactStart = startDisplay ? `${tFallback(t, 'taskEdit.startDateLabel', 'Start')}: ${startDisplay.exactLabel}` : undefined;
+    const exactDue = dueDisplay ? `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${dueDisplay.exactLabel}` : undefined;
     const {
         onToggleSelect,
         onToggleView,
@@ -522,19 +532,23 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 />
             )}
             {!isReference && renderCompletionMetadataBadge()}
-            {!isReference && task.startTime && (
+            {!isReference && task.startTime && (!relativeScheduleDates || startDisplay) && (
                 <MetadataBadge
                     variant="info"
                     icon={ArrowRight}
-                    label={safeFormatDate(task.startTime, hasTimeComponent(task.startTime) ? 'Pp' : 'P')}
+                    label={startDisplay?.label ?? safeFormatDate(task.startTime, hasTimeComponent(task.startTime) ? 'Pp' : 'P')}
+                    ariaLabel={exactStart}
+                    title={exactStart}
                 />
             )}
-            {!isReference && task.dueDate && (
+            {!isReference && task.dueDate && (!relativeScheduleDates || dueDisplay) && (
                 <div className="flex items-center gap-2">
                     <MetadataBadge
                         variant="info"
                         icon={CalendarIcon}
-                        label={safeFormatDate(task.dueDate, hasTimeComponent(task.dueDate) ? 'Pp' : 'P')}
+                        label={dueDisplay?.label ?? safeFormatDate(task.dueDate, hasTimeComponent(task.dueDate) ? 'Pp' : 'P')}
+                        ariaLabel={exactDue}
+                        title={exactDue}
                         className={cn(getUrgencyColor(task), isStagnant && "text-muted-foreground/70")}
                     />
                     {isStagnant && (
@@ -887,7 +901,9 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                 <MetadataBadge
                                     variant="info"
                                     icon={ArrowRight}
-                                    label={safeFormatDate(task.startTime, 'Pp')}
+                                    label={startDisplay?.label ?? safeFormatDate(task.startTime, 'Pp')}
+                                    ariaLabel={exactStart}
+                                    title={exactStart}
                                 />
                             )}
                         </div>

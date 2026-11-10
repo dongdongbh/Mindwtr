@@ -338,6 +338,7 @@ function AgendaTaskList({
                         onToggleSelectId={onToggleSelect}
                         buildFocusToggle={buildFocusToggle}
                         showProjectBadgeInActions={false}
+                        relativeScheduleDates
                         compactMetaEnabled={showListDetails}
                         enableDoubleClickEdit
                         appearsAtLabel={getAppearsAtLabel?.(task.id)}
@@ -380,6 +381,7 @@ function AgendaTaskList({
                             onToggleSelectId={onToggleSelect}
                             buildFocusToggle={buildFocusToggle}
                             showProjectBadgeInActions={false}
+                            relativeScheduleDates
                             compactMetaEnabled={showListDetails}
                             enableDoubleClickEdit
                             appearsAtLabel={getAppearsAtLabel?.(task.id)}
@@ -1090,6 +1092,7 @@ export function AgendaView() {
                             onToggleSelectId={toggleMultiSelect}
                             buildFocusToggle={buildFocusToggle}
                             showProjectBadgeInActions={false}
+                            relativeScheduleDates
                             compactMetaEnabled={showListDetails}
                             enableDoubleClickEdit
                         />
@@ -1115,6 +1118,7 @@ export function AgendaView() {
                     onToggleSelectId={toggleMultiSelect}
                     buildFocusToggle={buildFocusToggle}
                     showProjectBadgeInActions={false}
+                    relativeScheduleDates
                     compactMetaEnabled={showListDetails}
                     enableDoubleClickEdit
                 />

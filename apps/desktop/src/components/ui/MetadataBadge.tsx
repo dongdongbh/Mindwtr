@@ -10,13 +10,15 @@ interface MetadataBadgeProps {
     dotColor?: string;
     className?: string;
     ariaLabel?: string;
+    title?: string;
 }
 
-export function MetadataBadge({ label, variant, icon: Icon, dotColor, className, ariaLabel }: MetadataBadgeProps) {
+export function MetadataBadge({ label, variant, icon: Icon, dotColor, className, ariaLabel, title }: MetadataBadgeProps) {
     return (
         <span
             className={cn('metadata-badge', `metadata-badge--${variant}`, className)}
             aria-label={ariaLabel ?? label}
+            title={title}
         >
             {dotColor && (
                 <span

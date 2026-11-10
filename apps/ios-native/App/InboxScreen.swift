@@ -2074,11 +2074,20 @@ struct TaskCard: View {
                 }
                 let parts = meta.objects("parts").filter { showDetails || !$0.flag("detail") }
                 if !parts.isEmpty {
-                    if onProject != nil || onToken != nil || onCompletedAt != nil || hasInlineChecklist {
+                    if onProject != nil || onToken != nil || onCompletedAt != nil || hasInlineChecklist
+                        || (meta.flag("relativeScheduleDates") && parts.contains { ["start", "due"].contains($0.text("kind")) }) {
                         AppChipFlow {
                             ForEach(parts.indices, id: \.self) { index in
                                 let part = parts[index]
-                                if part.text("kind") == "checklist", hasInlineChecklist {
+                                if meta.flag("relativeScheduleDates"), ["start", "due"].contains(part.text("kind")) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: part.text("kind") == "start" ? "arrow.right" : "calendar")
+                                            .font(.system(size: 12)).foregroundStyle(scheduleIconColor(part)).accessibilityHidden(true)
+                                        Text(metadata([part])).rnFont(12, .medium)
+                                    }
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel(part.text("accessibilityLabel"))
+                                } else if part.text("kind") == "checklist", hasInlineChecklist {
                                     Button {
                                         beforeAction?()
                                         checklistInputFocused = false
@@ -2616,6 +2625,12 @@ struct TaskCard: View {
                 .accessibilityIdentifier("task-focus-" + row.text("id"))
             }
         }
+    }
+
+    private func scheduleIconColor(_ part: CoreObject) -> Color {
+        if part.text("kind") == "due" && part.text("tone") == "overdue" { return palette.danger }
+        if part.text("kind") == "due" && part.text("tone") == "dueSoon" { return palette.warning }
+        return palette.secondary
     }
 
     private func metadata(_ parts: [CoreObject]) -> AttributedString {

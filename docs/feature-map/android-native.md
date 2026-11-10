@@ -109,6 +109,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/FocusScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/FocusModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/FocusControls.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/PullSync.kt`
 - Checks: `apps/android-native/scripts/check-focus-device.mjs`, `apps/android-native/scripts/check-focus-small2-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/FocusViewSameShownTest.kt`
 - Notes: Sections, titles, and totals are core's, in core's order. On the reorder screen only the dragged row moves (RN also slides the others); the stored order is the same.
+- Notes: Focus task dates show Today, Tomorrow, or a full localized weekday for the next six days, with explicit times retained. Start uses an arrow and Due a calendar; accessible labels retain the field and exact date. Past dates and dates at least seven days away stay exact. Labels refresh at local midnight and when the app returns to the foreground.
 
 ## Pomodoro
 

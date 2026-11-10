@@ -162,6 +162,7 @@ export * from './project-row-meta';
 export * from './project-task-list-model';
 export * from './project-task-reorder';
 export * from './task-row-meta';
+export * from './task-schedule-display';
 export * from './task-row-swipe-actions';
 export * from './list-filter-state';
 export * from './list-count';

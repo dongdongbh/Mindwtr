@@ -1287,6 +1287,7 @@ export default function FocusScreen() {
         ]}
       >
         <SwipeableTaskItem
+          relativeScheduleDates
           task={item.task}
           isDark={isDark}
           tc={tc}

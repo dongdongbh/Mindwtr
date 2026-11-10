@@ -347,6 +347,7 @@ describe('FocusScreen', () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<FocusScreen />); });
     expect(tree.root.findAllByType(SwipeableTaskItem).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByType(SwipeableTaskItem).every((row) => row.props.relativeScheduleDates === true)).toBe(true);
     expect(tree.root.findAll((node) =>
       typeof node.props.accessibilityLabel === 'string'
       && /^(Help:|onboarding.help:)/.test(node.props.accessibilityLabel)

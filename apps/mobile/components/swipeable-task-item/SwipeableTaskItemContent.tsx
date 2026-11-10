@@ -1,6 +1,6 @@
 import React, { type ReactNode, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { AlignLeft, Check, CircleDot, History, Hourglass, ListChecks, Paperclip, Repeat, UserRound } from 'lucide-react-native';
+import { AlignLeft, ArrowRight, Calendar, Check, CircleDot, History, Hourglass, ListChecks, Paperclip, Repeat, UserRound } from 'lucide-react-native';
 import { useThemeTokens } from '../../hooks/use-theme-tokens';
 import { useStatusColors } from '../../hooks/use-status-colors';
 import { usePriorityColors } from '../../hooks/use-priority-colors';
@@ -261,6 +261,12 @@ export function SwipeableTaskItemContent({
                 const dueColor = part.tone === 'overdue'
                     ? tc.danger
                     : part.tone === 'dueSoon' ? tc.warning : tc.secondaryText;
+                if (meta.relativeScheduleDates) return (
+                    <View key="due" style={styles.inlineMetaItem} accessible accessibilityRole="text" accessibilityLabel={part.accessibilityLabel}>
+                        <Calendar size={12} color={dueColor} strokeWidth={2} accessible={false} />
+                        <CompactText style={[styles.metaText, styles.dueText, { color: dueColor }]}>{part.text}</CompactText>
+                    </View>
+                );
                 return (
                     <CompactText
                         key="due"
@@ -271,6 +277,12 @@ export function SwipeableTaskItemContent({
                 );
             }
             case 'start':
+                if (meta.relativeScheduleDates) return (
+                    <View key="start" style={styles.inlineMetaItem} accessible accessibilityRole="text" accessibilityLabel={part.accessibilityLabel}>
+                        <ArrowRight size={12} color={tc.secondaryText} strokeWidth={2} accessible={false} />
+                        <CompactText style={[styles.metaText, { color: tc.secondaryText }]}>{part.text}</CompactText>
+                    </View>
+                );
                 return (
                     <CompactText
                         key="start"
