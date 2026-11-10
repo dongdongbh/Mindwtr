@@ -59,6 +59,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Global quick add and tray
 
+- Appearance: macOS uses a transparent monochrome template menu bar icon that follows the system menu bar appearance. Other desktop platforms retain the colored tray icon.
 - Reach: Tray icon menu › Quick Add, Show Mindwtr, Lock Mindwtr (only when app lock is on), Quit. Settings › General › Input › Global quick add shortcut. Settings › Advanced › Keyboard and window › Show system tray icon.
 - Shortcuts: Default `Ctrl+Alt+M` (Linux), `Ctrl+Option+M` (macOS). Other choices: `Ctrl+Alt+N`, `Ctrl+Alt+Q`, and legacy `Ctrl+Shift+A` (`Cmd+Shift+A` on macOS).
 - Code: `apps/desktop/src/lib/global-quick-add-shortcut.ts`, `apps/desktop/src/QuickAddWindowApp.tsx`, `apps/desktop/src/lib/quick-add-window.ts`, `apps/desktop/src/lib/desktop-shell-sync.ts`, `apps/desktop/src-tauri/src/ui.rs`

@@ -1024,7 +1024,11 @@ fn should_start_hidden(launched_via_startup: bool, tray_icon_available: bool) ->
 }
 
 fn resolve_tray_icon(handle: &tauri::AppHandle) -> Option<Image<'_>> {
-    Image::from_bytes(include_bytes!("../icons/tray.png"))
+    #[cfg(target_os = "macos")]
+    let bytes = include_bytes!("../icons/tray-template.png").as_slice();
+    #[cfg(not(target_os = "macos"))]
+    let bytes = include_bytes!("../icons/tray.png").as_slice();
+    Image::from_bytes(bytes)
         .ok()
         .or_else(|| handle.default_window_icon().cloned())
 }
@@ -1931,6 +1935,11 @@ pub fn run() {
                         .icon(tray_icon)
                         .menu(&tray_menu)
                         .show_menu_on_left_click(false);
+
+                    #[cfg(target_os = "macos")]
+                    {
+                        tray_builder = tray_builder.icon_as_template(true);
+                    }
 
 
                     #[cfg(target_os = "linux")]
