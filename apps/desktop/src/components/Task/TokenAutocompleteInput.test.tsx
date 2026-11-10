@@ -4,6 +4,27 @@ import { describe, expect, it, vi } from 'vitest';
 import { TokenAutocompleteInput } from './TokenAutocompleteInput';
 
 describe('TokenAutocompleteInput', () => {
+    it('cancels a pending blur close before unmount and environment teardown', () => {
+        vi.useFakeTimers();
+        try {
+            const view = render(
+                <TokenAutocompleteInput value="@home" suggestions={['@home-office']} prefix="@" ariaLabel="Contexts" onChange={vi.fn()} />
+            );
+            const input = view.getByRole('combobox', { name: 'Contexts' });
+            fireEvent.keyUp(input, { key: 'e' });
+            expect(view.getByRole('option', { name: '@home-office' })).toBeInTheDocument();
+            fireEvent.blur(input);
+            fireEvent.blur(input);
+            view.unmount();
+            vi.stubGlobal('window', undefined);
+
+            expect(() => vi.advanceTimersByTime(250)).not.toThrow();
+        } finally {
+            vi.unstubAllGlobals();
+            vi.useRealTimers();
+        }
+    });
+
     it.each([
         { key: 'Enter', isComposing: true },
         { key: 'Enter', keyCode: 229 },

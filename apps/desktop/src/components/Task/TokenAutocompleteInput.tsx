@@ -85,6 +85,7 @@ export function TokenAutocompleteInput({
     const mergedRef = inputRef ?? localRef;
     const listboxId = useId();
     const valueRef = useRef(value);
+    const blurTimeoutRef = useRef<number | null>(null);
     const [segment, setSegment] = useState<TokenSegment | null>(null);
     const [selectedIndex, setSelectedIndex] = useState(NO_ACTIVE_OPTION);
 
@@ -100,6 +101,10 @@ export function TokenAutocompleteInput({
     useEffect(() => {
         valueRef.current = value;
     }, [value]);
+
+    useEffect(() => () => {
+        if (blurTimeoutRef.current !== null) window.clearTimeout(blurTimeoutRef.current);
+    }, []);
 
     useEffect(() => {
         if (selectedIndex >= options.length) {
@@ -206,8 +211,12 @@ export function TokenAutocompleteInput({
                 }}
                 onSelect={(event) => updateSegment(event.currentTarget)}
                 onBlur={(event) => {
+                    if (blurTimeoutRef.current !== null) window.clearTimeout(blurTimeoutRef.current);
+                    blurTimeoutRef.current = window.setTimeout(() => {
+                        blurTimeoutRef.current = null;
+                        closeOptions();
+                    }, 250);
                     onBlur?.(event);
-                    window.setTimeout(() => closeOptions(), 250);
                 }}
                 placeholder={placeholder}
                 role="combobox"
