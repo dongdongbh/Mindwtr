@@ -295,29 +295,53 @@ private fun SettingInput(value: String, label: String, placeholder: String?, mod
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
+private fun PresetChips(presets: JSONObject, enabled: Boolean, modifier: Modifier = Modifier, rowLabel: String? = null, pick: (JSONObject) -> Unit) {
+    val c = LocalTheme.current.colors
+    val shape = if (rowLabel != null) RoundedCornerShape(9.dp) else CircleShape
+    FlowRow(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = if (rowLabel != null) Int.MAX_VALUE else 3) {
+        for (option in presets.menuObjects("options")) {
+            val on = option.getBoolean("selected")
+            val label = option.getString("label")
+            val spoken = rowLabel?.let { "$it: $label" } ?: label
+            val edit = option.getJSONObject("edit")
+            Box(Modifier.then(if (rowLabel != null) Modifier.heightIn(min = 40.dp) else Modifier.weight(1f).heightIn(min = 38.dp)).clip(shape)
+                .background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, shape)
+                .clearAndSetSemantics { contentDescription = spoken; role = Role.RadioButton; selected = on; if (enabled) onClick { pick(edit); true } else disabled() }
+                .clickable(enabled = enabled) { pick(edit) }.padding(horizontal = 12.dp, vertical = if (rowLabel != null) 0.dp else 8.dp), contentAlignment = Alignment.Center) {
+                if (rowLabel != null) Text(label, style = rnText(14, 400), color = if (on) c.tint else c.text, maxLines = 1)
+                else Text(label, style = rnText(13, 700), color = if (on) c.tint else c.secondaryText, maxLines = 1)
+            }
+        }
+    }
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
 private fun SandboxSettings(model: InboxViewModel, view: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
     val sandbox = model.sandbox
     LaunchedEffect(model.busy) { if (!model.busy) settings.readSandboxEditor() }
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(14.dp)
     Column(Modifier.padding(top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp).testTag("sandbox-settings"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(t("sandbox.title"), style = rnText(18, 700, 24), color = c.text, modifier = Modifier.semantics { heading() })
         Text(t("sandbox.description"), style = rnText(14, 400, 20), color = c.secondaryText)
         Text(t("sandbox.notice"), style = rnText(13, 400, 18), color = c.secondaryText,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).padding(10.dp))
-        if (sandbox.failed) Text(t("sandbox.switchFailed"), style = rnText(13, 600, 18), color = c.danger)
-        if (sandbox.switching) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            modifier = Modifier.fillMaxWidth().rnBorderTop(c.border).padding(top = 10.dp))
+        if (sandbox.failed) Text(t("sandbox.switchFailed"), style = rnText(13, 400, 18), color = c.danger)
+        if (sandbox.switching) Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
             CircularProgressIndicator(Modifier.size(18.dp), color = c.tint, strokeWidth = 2.dp)
             Text(t("sandbox.switching"), style = rnText(14, 400, 20), color = c.secondaryText)
-        } else FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        } else FlowRow(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val buttonShape = RoundedCornerShape(10.dp)
             val reset = t("sandbox.reset")
             Row(Modifier.heightIn(min = 44.dp).clip(buttonShape).rnBorder(1.dp, c.border, buttonShape)
                 .clearAndSetSemantics { contentDescription = reset; role = Role.Button; testTag = "sandbox-settings-reset"; onClick { sandbox.reset(); true } }
-                .clickable(onClick = sandbox::reset).padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                .clickable(onClick = sandbox::reset).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Icon(Lucide.RotateCcw, null, tint = c.tint, modifier = Modifier.size(17.dp))
                 Text(reset, style = rnText(14, 700), color = c.tint)
             }
@@ -325,7 +349,7 @@ private fun SandboxSettings(model: InboxViewModel, view: JSONObject) = with(mode
             Row(Modifier.heightIn(min = 44.dp).clip(buttonShape).background(c.tint)
                 .clearAndSetSemantics { contentDescription = exit; role = Role.Button; testTag = "sandbox-settings-exit"; onClick { sandbox.exit(); true } }
                 .clickable(onClick = sandbox::exit).padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Icon(Lucide.X, null, tint = c.onTint, modifier = Modifier.size(18.dp))
                 Text(exit, style = rnText(14, 700), color = c.onTint)
             }
@@ -334,18 +358,10 @@ private fun SandboxSettings(model: InboxViewModel, view: JSONObject) = with(mode
     settings.sandboxEditor?.optJSONObject("taskEditor")?.optJSONObject("presets")?.let { presets ->
         SectionTitle(t("settings.taskEditorLayout"), top = 16)
         Card {
-            Text(presets.getString("label"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
-            FlowRow(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 3) {
-                for (option in presets.menuObjects("options")) {
-                    val on = option.getBoolean("selected")
-                    val label = option.getString("label")
-                    val enabled = idle && !sandbox.switching
-                    Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
-                        .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (enabled) onClick { settings.gtd(option.getJSONObject("edit")); true } else disabled() }
-                        .clickable(enabled = enabled) { settings.gtd(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-                        Text(label, style = rnText(13, 700), color = if (on) c.tint else c.secondaryText, maxLines = 1)
-                    }
-                }
+            val label = presets.getString("label")
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(label, style = rnText(14, 600), color = c.text)
+                PresetChips(presets, idle && !sandbox.switching, rowLabel = label) { settings.gtd(it) }
             }
         }
     }
@@ -1138,19 +1154,7 @@ private fun GtdTaskEditor(model: InboxViewModel, editor: JSONObject) = with(mode
         val presets = editor.getJSONObject("presets")
         Text(presets.getString("label").uppercase(), style = rnText(12, 600, letterSpacing = 0.6f), color = c.secondaryText,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp))
-        FlowRow(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 3) {
-            for (option in presets.menuObjects("options")) {
-                val on = option.getBoolean("selected")
-                val label = option.getString("label")
-                val enabled = model.menu.idle
-                Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
-                    .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (enabled) onClick { gtd(option.getJSONObject("edit")); true } else disabled() }
-                    .clickable(enabled = enabled) { gtd(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-                    Text(label, style = rnText(13, 700), color = if (on) c.tint else c.secondaryText, maxLines = 1)
-                }
-            }
-        }
+        PresetChips(presets, model.menu.idle, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp)) { gtd(it) }
         presets.menuText("custom")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) }
     }
     for (group in editor.menuObjects("groups")) {

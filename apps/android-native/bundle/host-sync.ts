@@ -935,6 +935,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
 
         selectedBackend: () => service.getMobileSelectedSyncBackend(),
 
+        waitForSyncIdle: () => service.waitForMobileSyncIdle(),
+
 
         start(appState: string) {
             if (platform === 'ios') throw new Error('Automatic sync is not available on this iOS build');

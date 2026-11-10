@@ -671,6 +671,7 @@ let iosProjectFilePreparation = false;
 let iosForegroundFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
 
 let networkState: { isConnected: boolean | null; isInternetReachable: boolean | null } = { isConnected: null, isInternetReachable: null };
+const SANDBOX_SYNC_IDLE_MS = 15_000;
 const requireSync = (): NativeSync => {
     if (!nativeSync) throw new Error('Sync is not available on this host');
     return nativeSync;
@@ -3070,6 +3071,10 @@ globalThis.MindwtrHost = {
                 if (!isSandboxMode()) {
                     requireSaved();
                     await flushPendingSave();
+                    let syncWait: ReturnType<typeof setTimeout> | undefined;
+                    await Promise.race([nativeSync?.waitForSyncIdle(), new Promise<never>((_, reject) => {
+                        syncWait = setTimeout(() => reject(new Error('BUSY: Sync is still running')), SANDBOX_SYNC_IDLE_MS);
+                    })]).finally(() => clearTimeout(syncWait));
                     await waitForSyncDocumentOperationsIdle();
                     const status = getPersistenceStatus();
                     if (status.failed || status.queued > 0 || status.inFlight || status.immediate > 0 || status.retrying) {
@@ -7142,7 +7147,7 @@ globalThis.MindwtrHost = {
         return submit(async () => {
             try {
                 logInfo(message, { scope: globalThis.__mindwtrHostPlatform === 'ios' ? 'native-ios' : 'native-android',
-                    ...(['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed'].includes(message) ? { force: true } : {}), context: JSON.parse(contextJson) as Record<string, unknown> });
+                    ...(['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'].includes(message) ? { force: true } : {}), context: JSON.parse(contextJson) as Record<string, unknown> });
             } catch {                                                    }
             return {};
         });

@@ -758,7 +758,7 @@ assert.match(source('ProcessCoreHost.kt'), /fun recovered\(app: Application, run
 assert.match(source('ProcessCoreHost.kt'), /private fun drainAudio\([^\n]*\{\s+if \(isSandbox\(runtime\)\) return/, 'a sandbox process never takes the real widget recordings');
 assert.match(sandboxUi, /val request = runCatching \{ runtime\.sandboxRequest\(display\) \}\.getOrElse \{[\s\S]{0,200}?runtime\.sandboxRelease\(\)[\s\S]{0,120}?if \(!Workspace\.store\(app\)\.write\(request\)\) \{\s+runtime\.sandboxRelease\(\)[\s\S]{0,300}?runtime\.logLine\("Native Android sandbox switch requested"[\s\S]{0,140}?Workspace\.restart\(app\)/,
     'Enter and Reset store core\'s request before the restart and release the switch when they cannot');
-assert.match(sandboxUi, /fun exit\(\) \{[\s\S]{0,200}?if \(!Workspace\.store\(app\)\.write\(null\)\)[\s\S]{0,80}?runtime\.logLine\("Native Android sandbox closed", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.9\/native-sandbox"\)\.put\("outcome", "exited"\)\)\s+Workspace\.restart\(app\)/,
+assert.match(sandboxUi, /fun exit\(\) \{[\s\S]{0,200}?if \(!Workspace\.store\(app\)\.write\(null\)\)[\s\S]{0,80}?val closed = JSONObject\(\)\.put\("releaseCheck", "v1\.3\.9\/native-sandbox"\)\.put\("outcome", "exited"\)\s+if \(runtime != null\) runtime\.logLine\("Native Android sandbox closed", closed\)\s+else Log\.i\(CoreHost\.TAG, "Native Android sandbox closed \$closed"\)\s+Workspace\.restart\(app\)/,
     'Exit clears any request, logs the exit line, then restarts into the real workspace');
 assert.match(source('core/CoreHost.kt'), /fun sandboxRequest\(display: JSONObject\): String \{\s+check\(checkNotNull\(journal\)\.pending\(\)\.isEmpty\(\)\)/, 'no sandbox while a real write still waits in the journal');
 assert.match(source('SettingsScreen.kt'), /if \(Workspace\.sandbox\) SandboxSettings\(model, shown\.view\) else when \(screen\)/, 'Settings in the sandbox is RN\'s Sandbox page');
@@ -770,6 +770,18 @@ assert.match(source('Pomodoro.kt'), /fun refresh\(planAlarms: Boolean = false\) 
 assert.match(source('MainActivity.kt'), /if \(writable\) SandboxEntryConfirmation\(model\)\s+SandboxSwitchingOverlay\(model\)/);
 assert.match(sandboxUi, /\.semantics \{ testTagsAsResourceId = true \}\.testTag\("sandbox-workspace-banner"\)/, 'the banner sits outside every screen\'s resource-id scope, so it exposes its own tags to the device check');
 assert.match(sandboxUi, /\.semantics \{ testTagsAsResourceId = true \}\.testTag\("sandbox-switching"\)/);
+assert.match(sandboxUi, /if \(!shell\.tryPerform \{ runtime ->[\s\S]{0,900}?Workspace\.restart\(app\)\s+\}\) refused\(\)/,
+    'Enter and Reset that the screen refuses (busy, no runtime, an owed journal failure) clear the switching overlay and show switch failed');
+assert.match(sandboxUi, /fun exit\(\) \{[\s\S]{0,120}?val runtime = shell\.host\s+Thread\(\{/, 'Exit needs no runtime, so a failed sandbox boot can still leave');
+assert.doesNotMatch(sandboxUi, /shell\.perform \{/, 'no sandbox switch goes through perform, which drops refused work silently');
+assert.match(sandboxUi, /val blocked get\(\) = switching \|\| !shell\.menu\.idle \|\| shell\.menu\.settings\.transfer\.busy \|\| shell\.menu\.settings\.sync\.running > 0/,
+    'Open sandbox waits, like RN, while a sync, backup or switch runs');
+assert.match(sandboxUi, /val enabled = !sandbox\.blocked/);
+assert.match(source('InboxViewModel.kt'), /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\), sandboxRequest\)\s+if \(!Workspace\.settled\(Workspace\.store\(getApplication\(\)\), sandboxRequest, sandboxed, ProcessCoreHost\.isSandbox\(runtime\)\) \{[\s\S]{0,200}?Workspace\.restart\(getApplication\(\)\)\s+\}\) return@Thread/,
+    'a screen that decided one workspace but got the other runtime (a worker booted first) puts the request back and restarts');
+assert.match(source('InboxViewModel.kt'), /class InboxViewModel\(app: Application, private val saved: SavedStateHandle\) : AndroidViewModel\(app\) \{\s+private val sandboxRequest = Workspace\.decide\([\s\S]{0,300}?private val sandboxed = Workspace\.sandbox\s+init \{\s+if \(!Workspace\.savedStateFits\(saved\.get<String>\(Workspace\.SAVED_WORKSPACE_KEY\), sandboxed\)\) saved\.keys\(\)\.toList\(\)\.forEach \{ saved\.remove<Any\?>\(it\) \}/,
+    'saved screen state from the other workspace is dropped before any screen reads it');
+assert.match(hostEntry, /await flushPendingSave\(\);\s+let syncWait[\s\S]{0,120}?await Promise\.race\(\[nativeSync\?\.waitForSyncIdle\(\)/, 'Enter waits for the running sync like RN\'s waitForMobileSyncIdle');
 
 const processHost = source('ProcessCoreHost.kt');
 assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+val sandbox = sandboxRequest != null\s+if \(!sandbox && scratch\.exists\(\) && !scratch\.deleteRecursively\(\)\) Log\.w\([^\n]*\)\s+if \(sandbox\) check\(Workspace\.freshBootFiles\(scratch\)\)/,
@@ -2069,7 +2081,7 @@ assert.match(owner, /\.put\("error", message\.substringBefore\(':'\)\)\)\s+Start
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "drained"\)\.put\("ingested", ingested\)\)/);
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "failed"\)\.put\("error", message\.substringBefore\(':'\)\)\)/);
 assert.match(coreHost, /fun logLine\(message: String, context: JSONObject\) \{\s+runCatching \{ callAsync\("logLine", message, context\.toString\(\)\) \}\.onFailure \{ Log\.i\(TAG, "\$message \$context"\) \}/);
-assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android',\s+\.\.\.\(\['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed'\]\.includes\(message\) \? \{ force: true \} : \{\}\), context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
+assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android',\s+\.\.\.\(\['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'\]\.includes\(message\) \? \{ force: true \} : \{\}\), context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
 assert.match(coreHost, /fun ingestPendingCaptures\(requestId: String\): JSONObject = callAsync\("ingest", requestId\)/);
 assert.equal(kotlinFiles.join('\n').match(/runtime\.language\(|runtime\.strings\(/g).length, 2);
 
@@ -3107,7 +3119,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
     assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
-    assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\), sandboxRequest\)\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
+    assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\), sandboxRequest\)\s+if \(!Workspace\.settled\([^\n]*\{\s+Log\.w\([^\n]*\)\s+Workspace\.restart\(getApplication\(\)\)\s+\}\) return@Thread\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
     for (const [kotlin, file, core] of [['LANGUAGE_KEY', 'i18n/i18n-constants.ts', 'LANGUAGE_STORAGE_KEY'], ['THEME_KEY', 'general-settings-model.ts', 'MOBILE_THEME_STORAGE_KEY'],
         ['MANAGE_SECTIONS_KEY', 'manage-settings-model.ts', 'MANAGE_OPEN_SECTIONS_STORAGE_KEY'], ['TASK_OPEN_MODE_KEY', 'gtd-settings-model.ts', 'MOBILE_TASK_OPEN_MODE_STORAGE_KEY']]) {
         const value = new RegExp(`export const ${core} = '([^']+)'`).exec(coreFile(file))[1];

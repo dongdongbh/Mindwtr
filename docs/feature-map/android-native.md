@@ -293,7 +293,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `sandbox-open`, `sandbox-workspace-banner`, `sandbox-reset-button`, `sandbox-exit-button`, `sandbox-switching`, `sandbox-settings`, `sandbox-settings-reset`, `sandbox-settings-exit`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Sandbox.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Workspace.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt`
 - Checks: `apps/android-native/scripts/check-sandbox-device.mjs`, `apps/android-native/bundle/host-sandbox.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WorkspaceTest.kt`
-- Notes: The sandbox lives in memory; its scratch files sit under `no_backup/sandbox`, which the next real start removes. A crash or kill inside it comes back to the real workspace. Alarms, widgets, sync, Gmail, backups and shares stay with the real workspace; a real reminder still posts, and its tap waits for Exit.
+- Notes: The sandbox lives in memory; its scratch files sit under `no_backup/sandbox`, which the next real start removes. A crash or kill inside it comes back to the real workspace. Alarms, widgets, sync, Gmail, backups and shares stay with the real workspace; a real reminder still posts, and its tap waits for Exit. Open sandbox is disabled while a sync, backup or switch runs, and Enter waits up to 15 s for a sync that starts meanwhile. A capture made while the sandbox is open stays in the real queue and lands after Exit.
 
 ## Attachments
 

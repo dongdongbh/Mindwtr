@@ -52,6 +52,7 @@ import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 private val SANDBOX_BG = Color(0xFFFEF3C7)
 private val SANDBOX_BORDER = Color(0xFFD97706)
 private val SANDBOX_TEXT = Color(0xFF713F12)
+private val SANDBOX_ERROR = Color(0xFF991B1B)
 
 internal val Beaker = lucide("Beaker", "M4.5 3h15", "M6 3v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V3", "M6 14h12")
 
@@ -64,7 +65,10 @@ class SandboxSwitch(private val shell: InboxViewModel) {
     private val app get() = shell.getApplication<Application>()
 
 
-    fun askEnter() { if (!switching && shell.writable && !shell.busy && shell.failedAction == null) confirming = true }
+    val blocked get() = switching || !shell.menu.idle || shell.menu.settings.transfer.busy || shell.menu.settings.sync.running > 0
+
+
+    fun askEnter() { if (!blocked) confirming = true }
 
 
     fun cancel() { confirming = false }
@@ -88,19 +92,19 @@ class SandboxSwitch(private val shell: InboxViewModel) {
             prefs.getString(LANGUAGE_KEY, null)?.let { put("language", it) }
             prefs.getString(THEME_KEY, null)?.let { put("theme", it) }
         }
-        shell.perform { runtime ->
+        if (!shell.tryPerform { runtime ->
             val request = runCatching { runtime.sandboxRequest(display) }.getOrElse { failure ->
                 Log.w(CoreHost.TAG, "Native Android sandbox switch refused ${failure.message?.substringBefore(':')}")
                 runtime.sandboxRelease()
-                return@perform shell.ui { refused() }
+                return@tryPerform shell.ui { refused() }
             }
             if (!Workspace.store(app).write(request)) {
                 runtime.sandboxRelease()
-                return@perform shell.ui { refused() }
+                return@tryPerform shell.ui { refused() }
             }
             runtime.logLine("Native Android sandbox switch requested", JSONObject().put("releaseCheck", "v1.3.9/native-sandbox").put("outcome", outcome))
             Workspace.restart(app)
-        }
+        }) refused()
     }
 
 
@@ -108,11 +112,14 @@ class SandboxSwitch(private val shell: InboxViewModel) {
         if (switching) return
         switching = true
         failed = false
-        shell.perform { runtime ->
-            if (!Workspace.store(app).write(null)) return@perform shell.ui { refused() }
-            runtime.logLine("Native Android sandbox closed", JSONObject().put("releaseCheck", "v1.3.9/native-sandbox").put("outcome", "exited"))
+        val runtime = shell.host
+        Thread({
+            if (!Workspace.store(app).write(null)) return@Thread shell.ui { refused() }
+            val closed = JSONObject().put("releaseCheck", "v1.3.9/native-sandbox").put("outcome", "exited")
+            if (runtime != null) runtime.logLine("Native Android sandbox closed", closed)
+            else Log.i(CoreHost.TAG, "Native Android sandbox closed $closed")
             Workspace.restart(app)
-        }
+        }, "sandbox-exit").start()
     }
 
 
@@ -132,27 +139,27 @@ fun Modifier.sandboxTop(): Modifier = background(SANDBOX_BG).windowInsetsPadding
 fun SandboxBanner(model: InboxViewModel) {
     if (!Workspace.sandbox) return
     val sandbox = model.sandbox
-    Column(Modifier.fillMaxWidth().background(SANDBOX_BG).rnBorderBottom(SANDBOX_BORDER).padding(horizontal = 8.dp, vertical = 2.dp).semantics { testTagsAsResourceId = true }.testTag("sandbox-workspace-banner")) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(t("sandbox.label"), style = rnText(12, 700, 16), color = SANDBOX_TEXT, maxLines = 2, modifier = Modifier.weight(1f))
-            if (sandbox.switching) {
+    Column(Modifier.fillMaxWidth().background(SANDBOX_BG).rnBorderBottom(SANDBOX_BORDER).padding(start = 8.dp, end = 8.dp, bottom = 2.dp).semantics { testTagsAsResourceId = true }.testTag("sandbox-workspace-banner")) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(t("sandbox.label"), style = rnText(13, 700, 18), color = SANDBOX_TEXT, maxLines = 2, modifier = Modifier.weight(1f))
+            if (sandbox.switching) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CircularProgressIndicator(Modifier.size(16.dp), color = SANDBOX_TEXT, strokeWidth = 2.dp)
                 Text(t("sandbox.switching"), style = rnText(12, 600, 16), color = SANDBOX_TEXT, maxLines = 2)
-            } else {
+            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 BannerButton(t("sandbox.resetShort"), t("sandbox.reset"), "sandbox-reset-button", Lucide.RotateCcw, sandbox::reset)
                 BannerButton(t("sandbox.exitShort"), t("sandbox.exit"), "sandbox-exit-button", null, sandbox::exit)
             }
         }
-        if (sandbox.failed) Text(t("sandbox.switchFailed"), style = rnText(12, 500, 16), color = SANDBOX_TEXT, maxLines = 2, modifier = Modifier.padding(bottom = 4.dp))
+        if (sandbox.failed) Text(t("sandbox.switchFailed"), style = rnText(11, 400, 14), color = SANDBOX_ERROR, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
     }
 }
 
 
 @Composable
 private fun BannerButton(text: String, label: String, tag: String, icon: androidx.compose.ui.graphics.vector.ImageVector?, onClick: () -> Unit) {
-    Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
+    Row(Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = tag; onClick { onClick(); true } }
-        .clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
+        .clickable(onClick = onClick).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         icon?.let { Icon(it, null, tint = SANDBOX_TEXT, modifier = Modifier.size(16.dp)) }
         Text(text, style = rnText(12, 700, 16), color = SANDBOX_TEXT, maxLines = 2)
@@ -169,7 +176,7 @@ fun SandboxSwitchingOverlay(model: InboxViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             CircularProgressIndicator(Modifier.size(20.dp), color = SANDBOX_TEXT, strokeWidth = 2.dp)
             if (Workspace.sandbox) Text(t("sandbox.title"), style = rnText(12, 700, 16), color = SANDBOX_TEXT, textAlign = TextAlign.Center)
-            Text(t("sandbox.switching"), style = rnText(13, 600, 18), color = SANDBOX_TEXT, textAlign = TextAlign.Center)
+            Text(t("sandbox.switching"), style = rnText(12, 600, 16), color = SANDBOX_TEXT, textAlign = TextAlign.Center)
         }
     }
 }
@@ -191,12 +198,12 @@ internal fun SandboxOpenCard(model: InboxViewModel) {
     if (Workspace.sandbox) return
     val c = LocalTheme.current.colors
     val sandbox = model.sandbox
-    val enabled = !sandbox.switching && model.menu.idle
+    val enabled = !sandbox.blocked
     val title = t(if (sandbox.switching) "sandbox.switching" else "sandbox.open")
     val description = t(if (sandbox.failed) "sandbox.switchFailed" else "sandbox.description")
     Card(top = 16) {
         Row(Modifier.fillMaxWidth().heightIn(min = 72.dp)
-            .clearAndSetSemantics { contentDescription = title; role = Role.Button; testTag = "sandbox-open"; if (enabled) onClick { sandbox.askEnter(); true } else disabled() }
+            .clearAndSetSemantics { contentDescription = "$title. $description"; role = Role.Button; testTag = "sandbox-open"; if (enabled) onClick { sandbox.askEnter(); true } else disabled() }
             .clickable(enabled = enabled, onClick = sandbox::askEnter).fade(if (enabled) 1f else 0.5f)
             .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) { Icon(Beaker, null, tint = c.secondaryText, modifier = Modifier.size(20.dp)) }

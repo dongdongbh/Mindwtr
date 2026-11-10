@@ -3,7 +3,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, inEditor, isOn, Stopped, tab, tagged, taskRows, withDescription } from './device.mjs';
+import { box, check, connect, evidenced, fail, inEditor, isOn, Stopped, tab, tagged, taskRows, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -134,8 +134,13 @@ const enterSandbox = async () => {
     return waitFor('the sandbox banner', (next) => banner(next) && settled(next), 90_000);
 };
 
+const LOG = 'files/logs/mindwtr.log';
+const logText = () => { try { return runAs(`cat ${LOG}`); } catch { return ''; } };
+const completeReal = (title) => enqueue({ kind: 'complete', id: randomUUID(), taskId: realRows().tasks.find((task) => task.title === title)?.id ?? '', completedAt: new Date().toISOString(), source: 'android-widget' });
+
 let originalExact = null;
 let realTitle = null;
+let heldTitle = null;
 const restore = async () => {
     try {
         if (front().includes(`${PKG}/`) && banner(await screen())) {
@@ -146,7 +151,7 @@ const restore = async () => {
     try {
         if (realTitle) {
             await device.stopApp();
-            enqueue({ kind: 'complete', id: randomUUID(), taskId: realRows().tasks.find((task) => task.title === realTitle)?.id ?? '', completedAt: new Date().toISOString(), source: 'android-widget' });
+            for (const title of [realTitle, heldTitle].filter(Boolean)) completeReal(title);
             launch();
             await sleep(8000);
         }
@@ -177,6 +182,7 @@ try {
     await waitFor('the real reminder alarm', () => alarms().includes(due), 60_000, 2000);
     const alarmsBefore = alarms();
     const before = realRows();
+    const logStart = logText().length;
     check(before.tasks.some((task) => task.title === realTitle) && !banner(await screen()),
         `the real workspace holds ${realTitle}, due ${local(due)}, with its alarm armed; no sandbox banner`);
 
@@ -193,15 +199,32 @@ try {
     nodes = await openSettings();
     check(Boolean(tagged(nodes, 'sandbox-settings')), 'Settings shows the Sandbox page');
     shot('sandbox-settings');
-    const ageNode = (current) => current.find((node) => /task age/i.test(node['content-desc'] ?? '') && node.clickable === 'true')
-        ?? current.find((node) => /task age/i.test(node['content-desc'] ?? ''));
+    const ageNode = (current) => {
+        const label = current.find((node) => /task age/i.test(node['content-desc'] ?? ''));
+        if (!label) return null;
+        const [x1, y1, x2, y2] = box(label);
+        return current.find((node) => node.checkable === 'true' && (([a, b, c, d]) => a <= x1 && b <= y1 && c >= x2 && d >= y2)(box(node))) ?? null;
+    };
     const toggle = ageNode(nodes) ?? await device.revealNode(ageNode, 'Show task age');
     const wasOn = isOn(toggle);
     await tap(toggle);
     await sleep(1500);
+    const toggled = ageNode(await screen()) ?? await device.revealNode(ageNode, 'Show task age');
+    check(isOn(toggled) !== wasOn, `Show task age in the sandbox reads back ${wasOn ? 'off' : 'on'} after the tap`);
     check(alarms().join(',') === alarmsBefore.join(','), 'inside the sandbox the real alarm list is unchanged');
     const inside = realRows();
     same(before, inside, 'a sample task and a setting changed in the sandbox leave the real tasks and settings rows byte-identical');
+
+    nodes = await toTabs();
+    const resetPid = pid();
+    await tap(tagged(nodes, 'sandbox-reset-button') ?? fail('no Reset in the banner'));
+    await waitFor('a new process after Reset', () => { const now = pid(); return now && now !== resetPid; }, 60_000, 500);
+    nodes = await waitFor('the sandbox after Reset', (next) => banner(next) && settled(next) && taskRows(next).some((row) => row.text === shownSample[0].text), 90_000);
+    check(true, `Reset restarts the sandbox on fresh sample data: ${shownSample[0].text} is back in the Inbox`);
+    nodes = await openSettings();
+    const resetAge = ageNode(nodes) ?? await device.revealNode(ageNode, 'Show task age');
+    check(isOn(resetAge) !== wasOn, 'Reset keeps Show task age as set, like RN: the boot request carries the display settings (core pickSandboxDisplaySettings)');
+    same(before, realRows(), 'after Reset the real rows are still byte-identical');
 
     await device.stopApp();
     launch();
@@ -212,6 +235,17 @@ try {
     check(true, 'the real reminder alarm is armed again in the real workspace');
 
     nodes = await enterSandbox();
+    heldTitle = `SB1196Held${randomInt(100000, 999999)}`;
+    const heldId = randomUUID();
+    enqueue({ id: heldId, title: heldTitle, createdAt: new Date().toISOString(), source: 'android-capture-intent' });
+    sh('input keyevent KEYCODE_HOME');
+    await sleep(1500);
+    launch();
+    nodes = await waitFor('the sandbox back in front', (next) => banner(next) && settled(next), 30_000);
+    await sleep(3000);
+    nodes = await toTabs();
+    check(!nodes.some((node) => node.text === heldTitle) && runAs(`ls ${QUEUE}`).split(/\s+/).includes(`${heldId}.json`),
+        'a real capture made while the sandbox is open stays in the real queue and never shows in the sandbox');
     const firedBy = due + 120_000;
     await waitFor(`the real reminder "${realTitle}" posted`, () => notifications().includes(realTitle), Math.max(0, firedBy - phoneNow()) + 30_000, 3000);
     check(true, `a real reminder firing inside the sandbox still posts its real text "${realTitle}"`);
@@ -232,16 +266,26 @@ try {
     nodes = await waitFor('the real workspace after Exit', (next) => !banner(next) && (settled(next) || inEditor(next)), 90_000);
     nodes = await waitFor('the held reminder tap', (next) => inEditor(next) && next.some((node) => node.text === realTitle), 30_000);
     check(true, `after Exit the held reminder tap opens the real task ${realTitle}`);
-    const after = realRows();
     const realId = before.tasks.find((task) => task.title === realTitle).id;
     const promoted = (id) => {
         const was = before.tasks.find((task) => task.id === id);
         const now = after.tasks.find((task) => task.id === id);
         return id === realId && was?.status === 'inbox' && now?.status === 'next' && Date.parse(now.updatedAt) >= exitedAt - 1000;
     };
-    const diff = changes(before, after).filter((line) => !(line.startsWith(`tasks ${realId}: `) && promoted(realId) && /^tasks [^:]+: (status|rev|updatedAt)(, (status|rev|updatedAt))*$/.test(line)));
+    const heldRows = () => realRows().tasks.filter((task) => task.title === heldTitle && !task.deletedAt);
+    await waitFor(`the held capture ${heldTitle} in the real database`, () => heldRows().length > 0, 60_000);
+    await sleep(3000);
+    const held = heldRows();
+    check(held.length === 1, `after Exit the real capture made during the sandbox lands in the real database exactly once (${held.length})`);
+    const after = realRows();
+    const diff = changes(before, after).filter((line) => !(line.startsWith(`tasks ${realId}: `) && promoted(realId) && /^tasks [^:]+: (status|rev|updatedAt)(, (status|rev|updatedAt))*$/.test(line))
+        && line !== `tasks ${held[0].id} added`);
     if (diff.length) console.log(`info - changed rows: ${diff.join('; ')}`);
-    check(diff.length === 0, `after Exit nothing in the real rows changed except the real workspace itself promoting ${realTitle} from Inbox to Next once its due time passed`);
+    check(diff.length === 0, `after Exit nothing in the real rows changed except the held capture and the real workspace itself promoting ${realTitle} from Inbox to Next once its due time passed`);
+    const lines = logText().slice(logStart);
+    const count = (message) => lines.split(message).length - 1;
+    check(count('Native Android sandbox switch requested') === 3 && count('Native Android sandbox opened') === 3 && count('Native Android sandbox closed') === 1,
+        `the Diagnostics log shows requested 3, opened 3, closed 1 (Enter, Reset, Enter, Exit): ${count('Native Android sandbox switch requested')}, ${count('Native Android sandbox opened')}, ${count('Native Android sandbox closed')}`);
     console.log(`info - Show task age was ${wasOn ? 'on' : 'off'} in the sandbox before the tap`);
     console.log('Sandbox device check passed');
 } catch (error) {

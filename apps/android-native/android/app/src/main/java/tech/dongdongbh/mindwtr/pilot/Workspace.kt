@@ -64,6 +64,23 @@ internal object Workspace {
     }
 
 
+    fun settled(store: RequestStore, request: String?, sandboxed: Boolean, runtimeSandbox: Boolean, restart: () -> Unit): Boolean {
+        if (runtimeSandbox == sandboxed) return true
+        if (request != null && fresh(request)) store.write(request)
+        restart()
+        return false
+    }
+
+
+    const val SAVED_WORKSPACE_KEY = "workspace"
+
+
+    fun marker(sandbox: Boolean) = if (sandbox) "sandbox" else "personal"
+
+
+    fun savedStateFits(stored: String?, sandbox: Boolean) = (stored ?: marker(false)) == marker(sandbox)
+
+
     fun scratch(context: Context) = File(context.noBackupFilesDir, "sandbox")
 
 

@@ -26,6 +26,7 @@ afterEach(() => { for (const database of databases.splice(0)) database.close(); 
 const fixture = () => {
     const database = new Database(':memory:'); databases.push(database);
     const sql = { statements: 0 };
+    const logText = { value: '' };
     const state: Record<string, any> = {
         AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,
         __mindwtrHostPlatform: 'android', console: { info() {}, warn() {}, error() {}, log() {} },
@@ -34,7 +35,13 @@ const fixture = () => {
             sqlRun: (text: string, params: string) => { sql.statements += 1; database.query(text).run(...JSON.parse(params)); return null; },
             sqlAll: (text: string, params: string) => { sql.statements += 1; return JSON.stringify(database.query(text).all(...JSON.parse(params))); },
             nowMs: () => Date.now(), randomBytes: (count: number) => JSON.stringify(Array(count).fill(7)),
-            log: () => null, logFile: (operation: string) => (['path', 'ensure'].includes(operation) ? 'files/logs/mindwtr.log' : ''),
+            log: () => null, logFile: (operation: string, text: string) => {
+                if (operation === 'write') logText.value = text;
+                if (operation === 'append') logText.value += text;
+                if (operation === 'read') return logText.value;
+                if (operation === 'exists') return logText.value ? '1' : '';
+                return ['path', 'ensure'].includes(operation) ? 'files/logs/mindwtr.log' : '';
+            },
             rnStateCommit: () => null, kvGet: () => JSON.stringify([null]), kvSet: () => null, kvRemove: () => null,
             kvMultiGet: (keys: string) => JSON.stringify((JSON.parse(keys) as string[]).map((key) => [key, null])), kvMultiSet: () => null, kvMultiRemove: () => null,
             fileList: () => 'null', fileRead: () => '', fileDelete: () => null, hostEvent: () => null, debugProp: () => '',
@@ -49,7 +56,7 @@ const fixture = () => {
         }
         throw new Error('Host operation did not settle');
     };
-    return { state, poll, sql };
+    return { state, poll, sql, logText };
 };
 
 describe('the Android Sandbox boot (RN #1196, #1273, #1340)', () => {
@@ -93,6 +100,18 @@ describe('the Android Sandbox boot (RN #1196, #1273, #1340)', () => {
             expect(f.state.fixture.sandbox()).toBe(false);
             expect((await f.poll(f.state.MindwtrHost.boot('', '', 'journaled'))).ok).toBe(true);
         }
+    });
+
+    it('writes the switch and exit lines to the diagnostics log even with Debug logging off', async () => {
+        const f = await personal();
+        const context = JSON.stringify({ releaseCheck: 'v1.3.9/native-sandbox', outcome: 'exited' });
+        for (const message of ['Native Android sandbox switch requested', 'Native Android sandbox closed', 'Native Android other line']) {
+            await f.poll(f.state.MindwtrHost.logLine(message, context));
+        }
+        for (let step = 0; step < 50 && !f.logText.value.includes('sandbox closed'); step++) await new Promise((done) => setTimeout(done, 10));
+        expect(f.logText.value).toContain('Native Android sandbox switch requested');
+        expect(f.logText.value).toContain('Native Android sandbox closed');
+        expect(f.logText.value).not.toContain('Native Android other line');
     });
 
     it('refuses a second request while the first switch holds the workspace', async () => {

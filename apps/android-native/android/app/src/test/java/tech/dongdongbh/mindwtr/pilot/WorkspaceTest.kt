@@ -59,6 +59,35 @@ class WorkspaceTest {
     }
 
 
+    @Test fun aScreenThatDecidedTheSandboxButGotTheWorkersPersonalRuntimePutsTheRequestBackAndRestarts() {
+        var restarts = 0
+        val raw = request(1_000)
+        val store = Store(null)
+        assertFalse(Workspace.settled(store, raw, sandboxed = true, runtimeSandbox = false, restart = { restarts += 1 }))
+        assertEquals(raw, store.value)
+        assertEquals(1, restarts)
+
+        val stale = Store(null)
+        assertFalse(Workspace.settled(stale, request(61_000), sandboxed = true, runtimeSandbox = false, restart = { restarts += 1 }))
+        assertNull(stale.value)
+        assertEquals(2, restarts)
+
+        assertTrue(Workspace.settled(Store(null), raw, sandboxed = true, runtimeSandbox = true, restart = { restarts += 1 }))
+        assertTrue(Workspace.settled(Store(null), null, sandboxed = false, runtimeSandbox = false, restart = { restarts += 1 }))
+        assertEquals(2, restarts)
+    }
+
+
+    @Test fun savedScreenStateFromTheOtherWorkspaceIsNotRestored() {
+        assertTrue(Workspace.savedStateFits(null, sandbox = false))
+        assertFalse(Workspace.savedStateFits(null, sandbox = true))
+        assertTrue(Workspace.savedStateFits(Workspace.marker(false), sandbox = false))
+        assertFalse(Workspace.savedStateFits(Workspace.marker(true), sandbox = false))
+        assertTrue(Workspace.savedStateFits(Workspace.marker(true), sandbox = true))
+        assertFalse(Workspace.savedStateFits(Workspace.marker(false), sandbox = true))
+    }
+
+
     @Test fun theSandboxIsEnteredOnlyWhenItsScratchFolderIsReady() {
         var entered = false
         assertNull(Workspace.decide(Store(request(1_000)), booted = false, begin = { false }, restart = {}, enter = { entered = true }))

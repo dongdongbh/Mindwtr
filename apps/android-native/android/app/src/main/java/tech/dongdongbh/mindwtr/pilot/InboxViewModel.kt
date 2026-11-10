@@ -176,6 +176,15 @@ private class Lists(val focus: FocusView?, val projects: ProjectsView?, val proj
 
 
 class InboxViewModel(app: Application, private val saved: SavedStateHandle) : AndroidViewModel(app) {
+    private val sandboxRequest = Workspace.decide(Workspace.store(app), ProcessCoreHost.booted, { Workspace.begin(app) }, { Workspace.restart(app) },
+        refused = { reason -> Log.w(CoreHost.TAG, "Native Android sandbox request not used reason=$reason releaseCheck=v1.3.9/native-sandbox") })
+    private val sandboxed = Workspace.sandbox
+
+    init {
+        if (!Workspace.savedStateFits(saved.get<String>(Workspace.SAVED_WORKSPACE_KEY), sandboxed)) saved.keys().toList().forEach { saved.remove<Any?>(it) }
+        saved[Workspace.SAVED_WORKSPACE_KEY] = Workspace.marker(sandboxed)
+    }
+
     var loading by mutableStateOf(true); private set
 
     var slowStart by mutableStateOf(false); private set
@@ -201,9 +210,6 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var openProjectId by mutableStateOf(saved.get<String>("project")); private set
     var projectReturn = projectReturnOf(saved.get<String>("projectReturn")); private set
     var project by mutableStateOf<ProjectDetail?>(null); private set
-    private val sandboxRequest = Workspace.decide(Workspace.store(app), ProcessCoreHost.booted, { Workspace.begin(app) }, { Workspace.restart(app) },
-        refused = { reason -> Log.w(CoreHost.TAG, "Native Android sandbox request not used reason=$reason releaseCheck=v1.3.9/native-sandbox") })
-    private val sandboxed = Workspace.sandbox
     private val prefs = Workspace.viewPrefs(app, sandbox = sandboxed)
 
     var focusView by mutableStateOf(FocusViewState.read(prefs)); private set
@@ -299,7 +305,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"), SharedFileStager(File(app.cacheDir, "shared-entries"), ContentSharedFileSource(app)))
 
     var leaveApp by mutableStateOf(false); internal set
-    @Volatile private var host: CoreHost? = null
+    @Volatile internal var host: CoreHost? = null
+        private set
     private var attaches = 0
     private val main = Handler(Looper.getMainLooper())
     private val started = SystemClock.uptimeMillis()
@@ -470,6 +477,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
                 debugProperty("boot_delay_ms").toLongOrNull()?.let(Thread::sleep)
                 val runtime = ProcessCoreHost.get(getApplication(), prefs.getString(LANGUAGE_KEY, null), sandboxRequest)
+                if (!Workspace.settled(Workspace.store(getApplication()), sandboxRequest, sandboxed, ProcessCoreHost.isSandbox(runtime)) {
+                    Log.w(CoreHost.TAG, "Native Android sandbox request not used reason=worker-booted releaseCheck=v1.3.9/native-sandbox")
+                    Workspace.restart(getApplication())
+                }) return@Thread
 
                 applyDeviceChoices(runtime, prefs)
                 applySyncedChoices(runtime, prefs)
