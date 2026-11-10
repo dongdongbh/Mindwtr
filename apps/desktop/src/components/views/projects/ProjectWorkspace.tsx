@@ -1436,12 +1436,12 @@ export function ProjectWorkspace({
                 <div className="space-y-3">
                     <SectionDropZone
                         id={NO_SECTION_CONTAINER}
-                        className="min-h-[120px] py-1"
+                        className={cn('py-1', orderedProjectTasks.length > 0 && 'min-h-[120px]')}
                     >
                         {orderedProjectTasks.length > 0 ? (
                             renderTasks(orderedProjectTasks)
                         ) : (
-                            <div className="py-12 text-center text-muted-foreground">
+                            <div className="flex min-h-10 items-center px-1 py-2 text-sm text-muted-foreground">
                                 {t('projects.noActiveTasks')}
                             </div>
                         )}
@@ -1499,7 +1499,7 @@ export function ProjectWorkspace({
                     </SectionDropZone>
                 )}
                 {sectionTaskGroups.sections.length === 0 && sectionTaskGroups.unsectioned.length === 0 && (
-                    <div className="py-12 text-center text-muted-foreground">
+                    <div className="flex min-h-12 items-center px-1 py-2 text-sm text-muted-foreground">
                         {t('projects.noActiveTasks')}
                     </div>
                 )}
