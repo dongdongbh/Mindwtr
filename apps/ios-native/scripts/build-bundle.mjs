@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { runInNewContext } from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { iosBundlePlugins } from './bundle-plugins.mjs';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const android = resolve(app, '../android-native/bundle');
@@ -21,6 +22,7 @@ const options = {
     target: 'es2020',
     minify: true,
     legalComments: 'none',
+    plugins: iosBundlePlugins,
     banner: { js: `globalThis.__mindwtrHostPlatform = 'ios';\n${readFileSync(resolve(app, 'bundle/jsc-preflight.js'), 'utf8')}\n${readFileSync(resolve(android, 'host-polyfills.js'), 'utf8')}` },
 };
 await build({
