@@ -1997,10 +1997,17 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
-    public func backgroundSyncWanted() async throws -> Bool {
+    public func backgroundSyncBackend() async throws -> String? {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
-        return try await perform { try $0.backgroundSyncWanted() }
+        return try await perform { try $0.backgroundSyncBackend() }
+    }
+
+    public func cloudKitAccountStatus() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        let probe = try await perform { try $0.cloudKitAccountProbe() }
+        return try await probe()
     }
 
     public func readTaskAIOptions(requestJSON: String, lease: NativeTaskAIEditorLease) async throws -> String {
@@ -29914,9 +29921,26 @@ private final class Engine: @unchecked Sendable {
         return NativeCloudKitJobs(registry: localRequests, perform: { try await bridge.call($0) }, cancel: { await bridge.cancel() })
     }
 
-    func backgroundSyncWanted() throws -> Bool {
+    func backgroundSyncBackend() throws -> String? {
         let stored = try requireDeviceStorageAdmission().multiGet(["@mindwtr_sync_backend", "@mindwtr_cloud_provider"])
-        return NativeBackgroundSync.wanted(backend: stored[0].1, cloudProvider: stored[1].1)
+        return NativeBackgroundSync.backend(stored: stored[0].1, cloudProvider: stored[1].1, cloudKitAvailable: cloudKitAvailable)
+    }
+
+    func cloudKitAccountProbe() throws -> @Sendable () async throws -> String {
+        guard cloudKitAvailable else { throw Self.foregroundSyncFailure }
+        #if DEBUG
+        if let request = faults?.cloudKitRequest {
+            return {
+                let raw = try await request(#"{"op":"accountStatus"}"#)
+                guard let status = try JSONSerialization.jsonObject(with: Data(raw.utf8), options: .fragmentsAllowed) as? String else {
+                    throw HostFailure("CloudKit account status is invalid")
+                }
+                return status
+            }
+        }
+        #endif
+        guard let container = NativeCloudKitBridge.configuredContainer else { throw Self.foregroundSyncFailure }
+        return { try await NativeCloudKitBridge.accountStatus(containerIdentifier: container) }
     }
 
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {

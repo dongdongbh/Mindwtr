@@ -32,14 +32,24 @@ final class NativeBackgroundSyncTests: XCTestCase {
         XCTAssertEqual(scheduler.cancelled, ["com.expo.modules.backgroundtask.processing"])
     }
 
-    func testWantedMatchesNativeAutomaticSyncBackends() {
-        XCTAssertTrue(NativeBackgroundSync.wanted(backend: " webdav ", cloudProvider: nil))
-        XCTAssertTrue(NativeBackgroundSync.wanted(backend: "cloud", cloudProvider: nil))
-        XCTAssertTrue(NativeBackgroundSync.wanted(backend: "cloud", cloudProvider: "selfhosted"))
-        XCTAssertFalse(NativeBackgroundSync.wanted(backend: "cloud", cloudProvider: "dropbox"))
-        for backend in [nil, "off", "file", "cloudkit"] {
-            XCTAssertFalse(NativeBackgroundSync.wanted(backend: backend, cloudProvider: nil))
+    func testBackendMatchesNativeAutomaticSyncBackends() {
+        XCTAssertEqual(NativeBackgroundSync.backend(stored: " webdav ", cloudProvider: nil, cloudKitAvailable: false), "webdav")
+        XCTAssertEqual(NativeBackgroundSync.backend(stored: "cloud", cloudProvider: nil, cloudKitAvailable: false), "selfhosted")
+        XCTAssertEqual(NativeBackgroundSync.backend(stored: "cloud", cloudProvider: " selfhosted ", cloudKitAvailable: false), "selfhosted")
+        XCTAssertNil(NativeBackgroundSync.backend(stored: "cloud", cloudProvider: "dropbox", cloudKitAvailable: true))
+        XCTAssertEqual(NativeBackgroundSync.backend(stored: " cloudkit ", cloudProvider: nil, cloudKitAvailable: true), "cloudkit")
+        XCTAssertNil(NativeBackgroundSync.backend(stored: "cloudkit", cloudProvider: nil, cloudKitAvailable: false))
+        for stored in [nil, "off", "file", "dropbox"] {
+            XCTAssertNil(NativeBackgroundSync.backend(stored: stored, cloudProvider: nil, cloudKitAvailable: true))
         }
+    }
+
+    func testRunBackendIsUnknownUntilTheRunReadsIt() {
+        let run = makeSync().begin { _ in }
+        XCTAssertEqual(run.backend, "unknown")
+        run.backend = "cloudkit"
+        run.end(.skipped)
+        XCTAssertEqual(run.backend, "cloudkit")
     }
 
     func testRunCompletesExactlyOnceAndReschedules() {

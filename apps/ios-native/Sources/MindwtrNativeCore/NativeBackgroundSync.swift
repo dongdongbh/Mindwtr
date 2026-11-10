@@ -24,13 +24,14 @@ public final class NativeBackgroundSync: @unchecked Sendable {
         self.now = now
     }
 
-    public static func wanted(backend: String?, cloudProvider: String?) -> Bool {
-        switch backend?.trimmingCharacters(in: .whitespacesAndNewlines) {
-        case "webdav": return true
+    public static func backend(stored: String?, cloudProvider: String?, cloudKitAvailable: Bool) -> String? {
+        switch stored?.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "webdav": return "webdav"
         case "cloud":
             let provider = cloudProvider?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return provider.isEmpty || provider == "selfhosted"
-        default: return false
+            return provider.isEmpty || provider == "selfhosted" ? "selfhosted" : nil
+        case "cloudkit": return cloudKitAvailable ? "cloudkit" : nil
+        default: return nil
         }
     }
 
@@ -70,6 +71,7 @@ public final class NativeBackgroundSync: @unchecked Sendable {
         private var cancelWork: (() -> Void)?
         private var ended: Outcome?
         private var wanted = true
+        private var chosenBackend = "unknown"
 
         init(owner: NativeBackgroundSync, complete: @escaping (Bool) -> Void) {
             self.owner = owner
@@ -81,6 +83,10 @@ public final class NativeBackgroundSync: @unchecked Sendable {
         public var durationMs: Int { Int(owner.now().timeIntervalSince(startedAt) * 1_000) }
 
         public func unwanted() { lock.lock(); wanted = false; lock.unlock() }
+        public var backend: String {
+            get { lock.lock(); defer { lock.unlock() }; return chosenBackend }
+            set { lock.lock(); chosenBackend = newValue; lock.unlock() }
+        }
 
         @discardableResult
         public func onCancel(_ work: @escaping () -> Void) -> Bool {

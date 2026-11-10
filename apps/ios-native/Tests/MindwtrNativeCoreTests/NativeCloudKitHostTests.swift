@@ -166,6 +166,21 @@ final class NativeCloudKitHostTests: XCTestCase {
         XCTAssertEqual(afterResume.count, calls.count, "A resume inside the shared cadence calls no CloudKit SDK")
     }
 
+    func testBackgroundBackendAndAccountStatusReadTheStoredCloudKitSelectionWithoutWrites() async throws {
+        for status in ["available", "noAccount", "restricted", "temporarilyUnavailable", "unknown"] {
+            let sdk = CloudKitHostSDK(status: status), (host, database, _) = try makeHost(sdk)
+            _ = try await host.start()
+            let backend = try await host.backgroundSyncBackend()
+            XCTAssertEqual(backend, "cloudkit")
+            let account = try await host.cloudKitAccountStatus()
+            XCTAssertEqual(account, status)
+            let calls = await sdk.calls, writes = await sdk.writes
+            XCTAssertEqual(calls, ["accountStatus"]); XCTAssertTrue(writes.isEmpty)
+            XCTAssertEqual(try taskRows(database).count, 0)
+            await host.close()
+        }
+    }
+
     func testCancelledCloudKitResumeThatSavedIsACleanCancellationAndTheNextSyncRuns() async throws {
         let entered = expectation(description: "SDK read held")
         let sdk = CloudKitHostSDK(fault: .held, entered: entered), (host, _, _) = try makeHost(sdk)

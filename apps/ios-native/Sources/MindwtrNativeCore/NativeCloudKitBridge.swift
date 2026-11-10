@@ -9,6 +9,9 @@ final class NativeCloudKitBridge: @unchecked Sendable {
               identifier == "iCloud.tech.dongdongbh.mindwtr.native.dev" else { return nil }
         return identifier
     }
+    static func accountStatus(containerIdentifier: String) async throws -> String {
+        try await NativeCloudKitTransport(containerIdentifier: containerIdentifier, zoneName: "MindwtrZone").accountStatus()
+    }
     private let transport: NativeCloudKitTransport
     private let files: NativeAttachmentFileJobs
     private let cancellation = NativeAttachmentCancellation()

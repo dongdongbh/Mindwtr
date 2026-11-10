@@ -11011,8 +11011,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard workspaceAdmissionsOpen, settingsSyncAvailable, ready, let currentHost = host,
               currentHost.workspaceMode == .personal else { return }
         Task { [weak self] in
-            guard let wanted = try? await currentHost.backgroundSyncWanted() else { return }
-            self?.backgroundSync.schedule(wanted)
+            let backend: String?
+            do { backend = try await currentHost.backgroundSyncBackend() } catch { return }
+            self?.backgroundSync.schedule(backend != nil)
         }
     }
 
@@ -11084,12 +11085,19 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
             }
         }
-        let wanted: Bool
-        do { wanted = try await owner.host.backgroundSyncWanted() }
+        let stored: String?
+        do { stored = try await owner.host.backgroundSyncBackend() }
         catch { return await skipBackgroundSyncRun(run, "unavailable") }
-        guard wanted else {
+        guard let backend = stored else {
             run.unwanted()
             return await skipBackgroundSyncRun(run, "not-configured")
+        }
+        run.backend = backend
+        if backend == "cloudkit" {
+            let account: String
+            do { account = try await owner.host.cloudKitAccountStatus() }
+            catch { return await skipBackgroundSyncRun(run, "icloud-check-failed") }
+            guard account == "available" else { return await skipBackgroundSyncRun(run, "icloud-" + account) }
         }
         guard backgroundSyncCurrent(owner) else { return await skipBackgroundSyncRun(run, "superseded") }
         let result: CoreObject
@@ -11146,11 +11154,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private func logBackgroundSync(_ run: NativeBackgroundSync.Run, _ outcome: NativeBackgroundSync.Outcome,
                                    _ detail: String, reminders: String = "unchanged") async {
         guard let currentHost = host else {
-            NSLog("Native iOS background sync ended releaseCheck=v1.3.9/ios-background-sync outcome=\(outcome.rawValue) detail=\(detail) reminders=\(reminders) durationMs=\(run.durationMs)")
+            NSLog("Native iOS background sync ended releaseCheck=v1.3.9/ios-background-sync outcome=\(outcome.rawValue) backend=\(run.backend) detail=\(detail) reminders=\(reminders) durationMs=\(run.durationMs)")
             return
         }
         _ = try? await currentHost.call("logLine", argumentsJSON: json(["Native iOS background sync ended", try json([
-            "releaseCheck": "v1.3.9/ios-background-sync", "outcome": outcome.rawValue, "detail": detail,
+            "releaseCheck": "v1.3.9/ios-background-sync", "outcome": outcome.rawValue, "backend": run.backend, "detail": detail,
             "reminders": reminders, "durationMs": String(run.durationMs),
         ])]))
     }
