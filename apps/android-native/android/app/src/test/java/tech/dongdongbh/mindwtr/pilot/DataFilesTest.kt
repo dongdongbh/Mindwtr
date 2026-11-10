@@ -253,11 +253,13 @@ class DataFilesTest {
     @Test fun anEmptyCleanupLeavesAnExportListedMeanwhile() {
         record.writeText("{\"pending\":[]}")
         val writing = java.util.concurrent.CountDownLatch(1)
-        val export = Thread { export("busy.json", create = { "content://doc/busy" }, write = { writing.await(2, java.util.concurrent.TimeUnit.SECONDS) }) }
+        val started = java.util.concurrent.CountDownLatch(1)
+        val export = java.util.concurrent.FutureTask {
+            export("busy.json", create = { "content://doc/busy" }, write = { started.countDown(); writing.await() })
+        }
         exportCleanupPause = {
-            export.start()
-            val deadline = System.currentTimeMillis() + 2_000
-            while (listed() != listOf("content://doc/busy") && System.currentTimeMillis() < deadline) Thread.sleep(10)
+            Thread(export).start()
+            assertTrue(started.await(10, java.util.concurrent.TimeUnit.SECONDS))
         }
         try {
             assertNull(nextStart())
@@ -265,7 +267,7 @@ class DataFilesTest {
         } finally {
             exportCleanupPause = {}
             writing.countDown()
-            export.join(2_000)
+            export.get(10, java.util.concurrent.TimeUnit.SECONDS)
         }
     }
 
@@ -378,14 +380,17 @@ class DataFilesTest {
     @Test fun aCleanupNeverTouchesThisProcesssRunningExport() {
         val writing = java.util.concurrent.CountDownLatch(1)
         val listedNow = java.util.concurrent.CountDownLatch(1)
-        val export = Thread { export("busy.json", create = { "content://doc/busy" }, write = { listedNow.countDown(); writing.await(2, java.util.concurrent.TimeUnit.SECONDS) }) }.apply { start() }
+        val export = java.util.concurrent.FutureTask {
+            export("busy.json", create = { "content://doc/busy" }, write = { listedNow.countDown(); writing.await() })
+        }
+        Thread(export).start()
         try {
-            assertTrue(listedNow.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(listedNow.await(10, java.util.concurrent.TimeUnit.SECONDS))
             assertNull(cleanupExportRecord(record, delete = { error("must not delete") }, exists = { true }))
             assertEquals(listOf("content://doc/busy"), listed())
         } finally {
             writing.countDown()
-            export.join(2_000)
+            export.get(10, java.util.concurrent.TimeUnit.SECONDS)
         }
     }
 }
