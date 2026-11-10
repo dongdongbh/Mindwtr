@@ -633,7 +633,7 @@ export function getWeeklyReviewProjects(
             badge: {
                 label: labels[badge.label],
                 color: einkSafeColor(badge.color, themePreset),
-                background: einkSafeColor(badge.background, themePreset),
+                background: themePreset === 'eink' ? '#EEEEEE' : badge.background,
             },
             countLabel: `${entry.tasks.length} ${entry.tasks.length === 1 ? labels.activeTask : labels.activeTasks}`,
         };

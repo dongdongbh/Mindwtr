@@ -5,7 +5,8 @@ import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
-import { Alert } from 'react-native';
+import { Alert, TouchableOpacity } from 'react-native';
+import { AlertTriangle, Check, RefreshCw } from 'lucide-react-native';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createDateFormatter,
@@ -24,6 +25,7 @@ import {
 import SettingsPage from '../../app/(drawer)/settings';
 import { GeneralSettingsScreen } from './general-settings-screen';
 import { ManageSettingsScreen } from './manage-settings-screen';
+import { MenuItem } from './settings.shell';
 
 const FIXTURE_PATH = new URL('../../../../packages/core/src/settings-screens-parity.fixtures.json', import.meta.url).pathname;
 const CAPTURE = process.env.MINDWTR_CAPTURE_SETTINGS_SCREENS === '1';
@@ -838,6 +840,20 @@ describe('React Native settings screens parity fixture', () => {
     resetForTests();
     if (originalTz === undefined) delete process.env.TZ;
     else process.env.TZ = originalTz;
+  });
+
+  it('renders distinct sync glyphs and keeps the existing status in the accessible button label', async () => {
+    for (const [icon, Component, label] of [
+      ['refresh', RefreshCw, 'Synchronisierung läuft'],
+      ['check', Check, 'Synchronisiert'],
+      ['warning', AlertTriangle, 'Synchronisierung prüfen'],
+    ] as const) {
+      let renderer: ReactTestRenderer;
+      await act(async () => { renderer = create(<MenuItem title="Sync" onPress={() => {}} showIndicator indicatorIcon={icon} indicatorColor="#000000" indicatorAccessibilityLabel={label} />); });
+      expect(renderer!.root.findByType(TouchableOpacity).props.accessibilityLabel).toContain(label);
+      expect(renderer!.root.findByType(Component).props.color).toBe('#000000');
+      await act(async () => { renderer!.unmount(); });
+    }
   });
 
   it('replays every scenario exactly as frozen', async () => {

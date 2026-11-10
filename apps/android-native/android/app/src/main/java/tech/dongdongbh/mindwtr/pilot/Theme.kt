@@ -137,7 +137,7 @@ class RnSwitchProps(val trackOff: Color, val trackOn: Color, val thumbOff: Color
 
 @Immutable
 class MindwtrTheme(val colors: ThemeColors, val isDark: Boolean, val isMaterial: Boolean, private val statuses: Map<String, StatusColors>, private val priorities: Map<String, Color>,
-                   private val isEink: Boolean = false) {
+                   val isEink: Boolean = false) {
 
     fun identityColorOrNull(hex: String?): Color? = coreColorOrNull(hex)?.let(::einkSafe)
 

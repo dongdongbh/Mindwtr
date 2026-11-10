@@ -1,4 +1,3 @@
-import { getProjectAccentColor } from '@mindwtr/core';
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStartupScreenReady } from '@/hooks/use-startup-screen-ready';
 import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
@@ -114,7 +113,7 @@ import { useManualPullSync } from '@/hooks/use-manual-pull-sync';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useCollapsedTaskGroups } from '@/lib/view-state/task-group-collapse-state';
 import { logInfo as logAppInfo } from '@/lib/app-log';
-import { projectMatchesAreaFilterSelection } from '@mindwtr/core';
+import { getProjectAccentColor, projectMatchesAreaFilterSelection } from '@mindwtr/core';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import {
   buildFocusListLayoutFrames,

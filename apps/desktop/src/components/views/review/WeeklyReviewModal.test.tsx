@@ -149,6 +149,16 @@ describe('WeeklyReviewGuideModal', () => {
         window.localStorage.setItem(storageKey, JSON.stringify({ step: 'projects', startedAt: new Date().toISOString() }));
         return updateProject;
     };
+    it('keeps default project review dots monochrome only in E-Ink', () => {
+        seedProjects();
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, theme: 'eink' },
+            _allProjects: state._allProjects.map((project) => ({ ...project, color: '#94a3b8' })) }));
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        const heading = screen.getByRole('heading', { level: 3, name: 'Finish me' });
+        expect(heading.parentElement?.querySelector('.rounded-full')).toHaveStyle({ backgroundColor: '#000000' });
+        expect(useTaskStore.getState()._allProjects[0].color).toBe('#94a3b8');
+    });
+
     it('keeps the full sequential plan behind a collapsed disclosure without writing task data', () => {
         const tasks = [
             makeTask({ id: 'head', title: 'Waiting head', status: 'waiting', projectId: 'project-0', order: 0 }),

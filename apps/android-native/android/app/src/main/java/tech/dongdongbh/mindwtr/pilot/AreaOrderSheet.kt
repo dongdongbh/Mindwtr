@@ -120,7 +120,7 @@ fun AreaOrderSheet(model: InboxViewModel, sheet: JSONObject) = with(model) {
                         Box(Modifier.padding(start = 8.dp).clip(toggleShape).rnBorder(1.dp, c.border, toggleShape)
                             .clickable(enabled = enabled, role = Role.Button) { expandAreaColor(if (draft.expanded == id) null else id) }
                             .semantics { contentDescription = colorLabel }.testTag("project-area-color-$id").padding(6.dp)) {
-                            Box(Modifier.size(32.dp).clip(CircleShape).background(LocalTheme.current.identityColorOrNull(shown) ?: c.tint))
+                            Box(Modifier.size(32.dp).clip(CircleShape).background(coreColorOrNull(shown) ?: c.tint))
                         }
                         val deleteLabel = "${t("common.delete")}: $name"
                         Box(Modifier.padding(start = 8.dp).heightIn(min = 44.dp).fade(if (inUse) 0.6f else 1f)

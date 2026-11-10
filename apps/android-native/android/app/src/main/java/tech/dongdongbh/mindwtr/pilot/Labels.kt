@@ -66,7 +66,8 @@ val LABEL_KEYS = listOf(
 
     "inbox.processButton", "projects.allAreas", "common.loading", "taskEdit.projectLabel", "task.aria.action",
 
-    "tab.menu", "waiting.title", "someday.title", "nav.reference", "nav.history", "taskEdit.moreOptions", "common.search",
+    "tab.menu", "settings.syncBadgeSyncing", "settings.syncBadgeHealthy", "settings.syncBadgeWarning",
+    "waiting.title", "someday.title", "nav.reference", "nav.history", "taskEdit.moreOptions", "common.search",
     "filters.excluded", "filters.remove", "filters.clear", "filters.active", "filters.contexts", "filters.projects", "filters.timeEstimate",
     "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
 

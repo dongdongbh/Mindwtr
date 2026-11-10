@@ -706,7 +706,7 @@ export function createSettingsMethods(deps: SettingsDeps) {
             const menu = buildSettingsMenu({
                 t,
                 query: input.query ?? '',
-                sync: badge ? { color: badge.color, accessibilityLabel: badge.accessibilityLabel } : undefined,
+                sync: badge ?? undefined,
                 updateAvailable: input.updateAvailable === true,
             });
             const advanced = buildSettingsAdvancedMenu(t);

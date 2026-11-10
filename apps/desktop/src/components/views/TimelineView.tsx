@@ -14,6 +14,7 @@ import {
     canEditTimelineProjectDates,
     getCalendarDayOfMonth,
     getCalendarMonthIndex,
+    einkSafeColor,
     getWeekStartsOnIndex,
     hasTimeComponent,
     isTaskVisibleInArea,
@@ -745,7 +746,7 @@ export function TimelineView() {
             const dot = (
                 <span
                     className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: row.color || (project ? DEFAULT_AREA_COLOR : 'hsl(var(--primary))') }}
+                    style={{ backgroundColor: row.color || (project ? einkSafeColor(DEFAULT_AREA_COLOR, settings?.theme) : 'hsl(var(--primary))') }}
                 />
             );
 

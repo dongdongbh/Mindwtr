@@ -5,8 +5,10 @@ import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.PorterDuffColorFilter
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
@@ -73,6 +75,36 @@ class WidgetBackgroundTest {
       val row = TasksWidgetFactory(context, WidgetKind.TASKS, id).apply { onCreate() }.getViewAt(0).apply(context, null)
       assertEquals(palette.text, row.findViewById<TextView>(R.id.mindwtr_widget_item_title).currentTextColor)
       assertEquals(palette.mutedText, row.findViewById<TextView>(R.id.mindwtr_widget_item_due).currentTextColor)
+    }
+  }
+
+  @Test fun einkMarksFollowEachWidgetForegroundAndOrdinaryAccentsStayUnchanged() {
+    for (mode in listOf("eink", "dark", "light")) {
+      WidgetPayloadStore.write(context, JSONObject().put("themeMode", mode).put("palette", JSONObject()
+        .put("text", "#000000").put("mutedText", "#000000").put("background", "#FFFFFF"))
+        .put("lists", JSONObject().put("focus", JSONObject().put("title", "Focus").put("items", org.json.JSONArray()
+          .put(JSONObject().put("id", "marked").put("title", "Row").put("contextLabel", "Project")
+            .put("priorityColor", "#FF0000").put("identityColor", "#00FF00"))
+          .put(JSONObject().put("id", "plain").put("title", "Plain").put("contextLabel", "Project")))))
+        .toString())
+      for ((id, background) in listOf(81 to WidgetBackground.DEFAULT, 82 to WidgetBackground.LIGHT_TEXT, 83 to WidgetBackground.DARK_TEXT)) {
+        bind(id, TasksWidgetProvider::class.java.name)
+        WidgetListStore.writeBackground(context, id, background)
+        val payload = WidgetPayloadStore.read(context)
+        val palette = requireNotNull(WidgetRenderer.palette(context, id, payload))
+        val factory = TasksWidgetFactory(context, WidgetKind.TASKS, id).apply { onCreate() }
+        val row = factory.getViewAt(0).apply(context, null)
+        val priority = row.findViewById<ImageView>(R.id.mindwtr_widget_item_priority)
+        val identity = row.findViewById<ImageView>(R.id.mindwtr_widget_item_identity)
+        assertEquals(if (mode == "eink") palette.text else 0xFFFF0000.toInt(), shadowOf(priority.colorFilter as PorterDuffColorFilter).color)
+        assertEquals(if (mode == "eink") palette.text else 0xFF00FF00.toInt(), shadowOf(identity.colorFilter as PorterDuffColorFilter).color)
+        assertEquals(View.VISIBLE, identity.visibility)
+        assertEquals(palette.text, row.findViewById<TextView>(R.id.mindwtr_widget_item_title).currentTextColor)
+        val plain = factory.getViewAt(1).apply(context, null)
+        assertEquals(View.GONE, plain.findViewById<ImageView>(R.id.mindwtr_widget_item_identity).visibility)
+        WidgetRenderer.render(context, manager, intArrayOf(id), WidgetKind.TASKS)
+        assertEquals(if (background.isTransparent) View.GONE else View.VISIBLE, shadowOf(manager).getViewFor(id).findViewById<View>(R.id.mindwtr_widget_surface).visibility)
+      }
     }
   }
 

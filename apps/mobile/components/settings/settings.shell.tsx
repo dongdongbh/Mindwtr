@@ -1,10 +1,10 @@
 import React from 'react';
 import { Linking, Pressable, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ChevronRight, ExternalLink as ExternalLinkIcon, type LucideIcon } from 'lucide-react-native';
+import { AlertTriangle, Check, RefreshCw, ChevronRight, ExternalLink as ExternalLinkIcon, type LucideIcon } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getSettingsMenuItemAccessibilityLabel } from '@mindwtr/core';
+import { getSettingsMenuItemAccessibilityLabel, type SettingsSyncBadgeIcon } from '@mindwtr/core';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '@/contexts/language-context';
@@ -12,6 +12,7 @@ import { useLanguage } from '@/contexts/language-context';
 import { styles } from './settings.styles';
 
 type MenuItemIcon = LucideIcon;
+const SYNC_INDICATOR_ICONS = { refresh: RefreshCw, check: Check, warning: AlertTriangle };
 
 export function SubHeader({ title }: { title: string }) {
     const tc = useThemeColors();
@@ -31,6 +32,7 @@ export function MenuItem({
     isLast,
     showIndicator,
     indicatorColor,
+    indicatorIcon,
     indicatorAccessibilityLabel,
     disabled = false,
 }: {
@@ -41,11 +43,13 @@ export function MenuItem({
     isLast?: boolean;
     showIndicator?: boolean;
     indicatorColor?: string;
+    indicatorIcon?: SettingsSyncBadgeIcon;
     indicatorAccessibilityLabel?: string;
     disabled?: boolean;
 }) {
     const tc = useThemeColors();
     const accessibilityLabel = getSettingsMenuItemAccessibilityLabel(title, description, indicatorAccessibilityLabel);
+    const IndicatorIcon = indicatorIcon ? SYNC_INDICATOR_ICONS[indicatorIcon] : undefined;
 
     return (
         <TouchableOpacity
@@ -83,13 +87,15 @@ export function MenuItem({
                 </View>
             </View>
             <View style={styles.menuRight}>
-                {showIndicator && (
+                {showIndicator && (IndicatorIcon ? (
+                    <IndicatorIcon color={indicatorColor ?? tc.text} size={16} accessibilityLabel={indicatorAccessibilityLabel} />
+                ) : (
                     <View
                         accessibilityLabel={indicatorAccessibilityLabel}
                         accessibilityRole="text"
                         style={[styles.updateDot, indicatorColor ? { backgroundColor: indicatorColor } : null]}
                     />
-                )}
+                ))}
                 <ChevronRight color={tc.secondaryText} size={20} strokeWidth={2.2} />
             </View>
         </TouchableOpacity>

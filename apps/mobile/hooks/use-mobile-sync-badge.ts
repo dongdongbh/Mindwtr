@@ -1,6 +1,6 @@
 import { usePathname } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useTaskStore } from '@mindwtr/core';
+import { getSettingsSyncBadge, useTaskStore } from '@mindwtr/core';
 
 import { useLanguage } from '../contexts/language-context';
 import { useThemePreset } from './use-eink-safe-color';
@@ -11,7 +11,6 @@ import {
 } from '../lib/sync-service';
 import {
     getMobileLocalChangePending,
-    getMobileSyncBadgeColor,
     resolveMobileSyncBadgeState,
     subscribeMobileLocalChangePending,
 } from '../lib/sync-badge';
@@ -65,23 +64,13 @@ export function useMobileSyncBadge() {
         syncConfigured,
     ]);
 
-    const syncBadgeColor = syncBadgeState === 'hidden' ? undefined : getMobileSyncBadgeColor(syncBadgeState, themePreset);
-
-    const syncBadgeAccessibilityLabel = useMemo(() => {
-        if (syncBadgeState === 'hidden') return undefined;
-        if (syncBadgeState === 'syncing') {
-            return t('settings.syncBadgeSyncing');
-        }
-        if (syncBadgeState === 'healthy') {
-            return t('settings.syncBadgeHealthy');
-        }
-        return t('settings.syncBadgeWarning');
-    }, [syncBadgeState, t]);
+    const syncBadge = useMemo(() => getSettingsSyncBadge(syncBadgeState, t, themePreset), [syncBadgeState, t, themePreset]);
 
     return {
         refreshSyncBadgeConfig,
-        syncBadgeAccessibilityLabel,
-        syncBadgeColor,
+        syncBadgeAccessibilityLabel: syncBadge?.accessibilityLabel,
+        syncBadgeColor: syncBadge?.color,
+        syncBadgeIcon: syncBadge?.icon,
         syncBadgeState,
     };
 }

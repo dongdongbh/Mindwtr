@@ -63,11 +63,20 @@ import kotlin.math.roundToInt
 
 @Composable
 fun RowScope.MenuTab(model: InboxViewModel) {
-    val c = LocalTheme.current.colors
+    val theme = LocalTheme.current
+    val c = theme.colors
     val open = model.menu.sheet
     val color = if (open) c.tabIconSelected else c.tabIconDefault
+    val menuLabel = t("tab.menu")
+    val syncLabel = when (model.syncBadge.state) {
+        "syncing" -> t("settings.syncBadgeSyncing")
+        "healthy" -> t("settings.syncBadgeHealthy")
+        "attention" -> t("settings.syncBadgeWarning")
+        else -> null
+    }
     Column(
-        Modifier.weight(1f).fillMaxHeight().rnTabPress(open) { model.menu.toggleSheet() },
+        Modifier.weight(1f).fillMaxHeight().rnTabPress(open) { model.menu.toggleSheet() }
+            .then(if (theme.isEink && syncLabel != null) Modifier.semantics { contentDescription = "$menuLabel, $syncLabel" } else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Box {
@@ -75,7 +84,15 @@ fun RowScope.MenuTab(model: InboxViewModel) {
 
 
             coreColorOrNull(model.syncBadge.color)?.let { dot ->
-                Box(Modifier.align(Alignment.TopEnd).offset(x = 7.dp, y = (-2).dp).size(7.dp).fade(0.85f).clip(CircleShape).background(dot)
+                val syncIcon = if (theme.isEink) when (model.syncBadge.state) {
+                    "syncing" -> SettingsLucide.RefreshCw
+                    "healthy" -> Lucide.Check
+                    "attention" -> Lucide.TriangleAlert
+                    else -> null
+                } else null
+                if (syncIcon != null) Icon(syncIcon, null, tint = c.text,
+                    modifier = Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-3).dp).size(14.dp).background(c.cardBg, CircleShape).clearAndSetSemantics { }.testTag("menu-sync-${model.syncBadge.state}"))
+                else Box(Modifier.align(Alignment.TopEnd).offset(x = 7.dp, y = (-2).dp).size(7.dp).fade(0.85f).clip(CircleShape).background(dot)
                     .rnBorder(1.5.dp, c.cardBg, CircleShape).clearAndSetSemantics { }.testTag("menu-sync-dot"))
             }
         }

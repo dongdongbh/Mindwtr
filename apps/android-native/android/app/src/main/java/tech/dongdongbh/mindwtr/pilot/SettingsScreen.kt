@@ -153,8 +153,17 @@ private fun MenuCard(model: InboxViewModel, rows: List<JSONObject>) = with(model
                     Text(row.getString("title"), style = rnText(17, 500, 22), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     row.menuText("description")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp)) }
                 }
-                if (row.optBoolean("showIndicator")) Box(Modifier.padding(start = 12.dp).size(8.dp).clip(CircleShape)
-                    .background(coreColorOrNull(row.menuText("indicatorColor")) ?: theme.deleteAction))
+                if (row.optBoolean("showIndicator")) {
+                    val indicatorIcon = when (row.menuText("indicatorIcon")) {
+                        "refresh" -> SettingsLucide.RefreshCw
+                        "check" -> Lucide.Check
+                        "warning" -> Lucide.TriangleAlert
+                        else -> null
+                    }
+                    if (indicatorIcon != null) Icon(indicatorIcon, null, tint = c.text, modifier = Modifier.padding(start = 12.dp).size(16.dp))
+                    else Box(Modifier.padding(start = 12.dp).size(8.dp).clip(CircleShape)
+                        .background(coreColorOrNull(row.menuText("indicatorColor")) ?: theme.deleteAction))
+                }
                 Icon(Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.padding(start = 8.dp).size(20.dp))
             }
         }

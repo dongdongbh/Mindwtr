@@ -23,7 +23,7 @@ import {
 } from './review-views-model';
 import { configureDateFormatting } from './date';
 import { resetForTests } from './store';
-import type { Task } from './types';
+import type { Project, Task } from './types';
 
 const fixture = loadReviewViewsFixture();
 const PARTS: ReviewPart[] = ['review', 'weeklyReview', 'dailyReview'];
@@ -206,13 +206,36 @@ describe('review view models', () => {
 });
 
 describe('eink review colors', () => {
+    it('keeps each review state labelled with a readable opaque fill and preserves ordinary themes and stored colors', () => {
+        const project = { id: 'p', title: 'Project', status: 'active', color: '#123456',
+            colorOverride: '#654321', createdAt: '2026-01-01', updatedAt: '2026-01-01' } satisfies Project;
+        const entries = (['next', 'waiting', 'deferred', 'none'] as const).map((nextActionState) => ({
+            project, tasks: [], currentTasks: [], laterTasks: [], nextActionState,
+        }));
+        const original = JSON.stringify(entries);
+        const labels = getWeeklyReviewLabels((key) => key);
+        const eink = getWeeklyReviewProjects(entries, new Map(), labels, 'eink');
+        expect(new Set(eink.map((entry) => entry.badge.label)).size).toBe(4);
+        expect(eink.map((entry) => [entry.badge.color, entry.badge.background])).toEqual(
+            entries.map(() => ['#000000', '#EEEEEE']),
+        );
+        for (const theme of [undefined, 'light', 'dark']) {
+            const rows = getWeeklyReviewProjects(entries, new Map(), labels, theme);
+            expect(rows.map((entry) => entry.badge.label)).toEqual(eink.map((entry) => entry.badge.label));
+            expect(rows.map((entry) => [entry.badge.color, entry.badge.background])).toEqual([
+                ['#10B981', '#10B98120'], ['#F59E0B', '#F59E0B20'], ['#F59E0B', '#F59E0B20'], ['#EF4444', '#EF444420'],
+            ]);
+        }
+        expect(JSON.stringify(entries)).toBe(original);
+    });
+
     it('draws weekly review badges and area colors black on the eink preset', () => {
         const [entry] = getWeeklyReviewProjects([{ project: { id: 'project', areaId: 'blue',
             color: '#ff0000', colorOverride: '#ff0000' }, tasks: [], nextActionState: 'none' }] as never,
         new Map([['blue', { id: 'blue', color: '#0000ff' } as never]]), getWeeklyReviewLabels((key) => key), 'eink');
         expect(entry.areaColor).toBe('#000000');
         expect(entry.badge.color).toBe('#000000');
-        expect(entry.badge.background).toBe('#00000020');
+        expect(entry.badge.background).toBe('#EEEEEE');
     });
 
     it('draws the review overview area dot black on the eink preset', () => {

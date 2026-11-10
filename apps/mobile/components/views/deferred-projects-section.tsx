@@ -1,10 +1,8 @@
-import { getProjectAccentColor } from '@mindwtr/core';
+import { getProjectAccentColor, tFallback, type Area, type Project } from '@mindwtr/core';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { tFallback } from '@mindwtr/core';
-import type { Area, Project } from '@mindwtr/core';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { useThemePreset } from '@/hooks/use-eink-safe-color';
