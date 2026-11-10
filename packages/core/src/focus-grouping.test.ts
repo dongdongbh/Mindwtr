@@ -201,6 +201,15 @@ describe('buildFocusTaskGroups', () => {
             expect(groups.find((g) => g.key === 'project:p1')?.dotColor).toBe(DEFAULT_AREA_COLOR);
         });
 
+        it('uses a monochrome project fallback only for E-Ink and keeps the no-project bucket bare', () => {
+            for (const theme of [undefined, 'light', 'dark', 'eink']) {
+                const groups = build('project', { tasks: [makeTask({ id: 'a', projectId: 'p1' }), makeTask({ id: 'b' })],
+                    projects: [makeProject({ id: 'p1', color: DEFAULT_AREA_COLOR })], theme });
+                expect(groups.find((group) => group.key === 'project:p1')?.dotColor).toBe(theme === 'eink' ? '#000000' : DEFAULT_AREA_COLOR);
+                expect(groups.find((group) => group.key === 'project:none')?.dotColor).toBeUndefined();
+            }
+        });
+
         it('colors area buckets by area.color (default when unset), none-bucket bare', () => {
             const areas = [
                 makeArea({ id: 'a1', color: '#abcdef' }),
@@ -264,5 +273,23 @@ describe('getProjectDeadlineBoostLabel', () => {
     it('labels overdue and due-today boosts', () => {
         expect(getProjectDeadlineBoostLabel(boost({ isOverdue: true }), resolveText)).toBe('Project overdue');
         expect(getProjectDeadlineBoostLabel(boost({ isOverdue: false }), resolveText)).toBe('Project due today');
+    });
+});
+
+describe('eink focus group dots', () => {
+    it('draws project and area group dots black on the eink theme', () => {
+        const projectGroups = build('project', {
+            tasks: [makeTask({ id: 'a', projectId: 'p1' })],
+            projects: [makeProject({ id: 'p1', color: '#10b981' })],
+            theme: 'eink',
+        });
+        expect(projectGroups.find((group) => group.key === 'project:p1')?.dotColor).toBe('#000000');
+
+        const areaGroups = build('area', {
+            tasks: [makeTask({ id: 'a', areaId: 'a1' })],
+            areas: [makeArea({ id: 'a1', color: '#ef4444' })],
+            theme: 'eink',
+        });
+        expect(areaGroups.find((group) => group.key === 'area:a1')?.dotColor).toBe('#000000');
     });
 });

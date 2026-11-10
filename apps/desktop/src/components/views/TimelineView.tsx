@@ -14,6 +14,7 @@ import {
     canEditTimelineProjectDates,
     getCalendarDayOfMonth,
     getCalendarMonthIndex,
+    einkSafeColor,
     getWeekStartsOnIndex,
     hasTimeComponent,
     isTaskVisibleInArea,
@@ -416,7 +417,7 @@ export function TimelineView() {
                 laterOmitted += 1;
                 continue;
             }
-            const color = getTaskAccentColor(task, projectById, areaById);
+            const color = getTaskAccentColor(task, projectById, areaById, settings?.theme);
             const key = task.projectId && projectById.has(task.projectId) ? task.projectId : '';
             const list = byProject.get(key);
             const row: TimelineRow = { kind: 'task', key: task.id, task, color, lo, hi, single };
@@ -469,7 +470,7 @@ export function TimelineView() {
             }
 
 
-            const groupColor = group.project ? getProjectAccentColor(group.project, areaById) : undefined;
+            const groupColor = group.project ? getProjectAccentColor(group.project, areaById, settings?.theme) : undefined;
 
 
             const projectSpan = group.project ? projectSpans.get(group.project.id) : undefined;
@@ -745,7 +746,7 @@ export function TimelineView() {
             const dot = (
                 <span
                     className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: row.color || (project ? DEFAULT_AREA_COLOR : 'hsl(var(--primary))') }}
+                    style={{ backgroundColor: row.color || (project ? einkSafeColor(DEFAULT_AREA_COLOR, settings?.theme) : 'hsl(var(--primary))') }}
                 />
             );
 

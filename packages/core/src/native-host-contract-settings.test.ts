@@ -527,6 +527,30 @@ describe('native host contract: Settings', () => {
         expect(observed).toEqual(fixture.observations[name]);
     });
 
+    it('publishes distinct E-Ink sync glyphs with translated labels and leaves normal badge shapes unchanged', async () => {
+        freezeClock();
+        await seed({ data: 'manage', settings: 'stored' });
+        const host = await openHost({ language: 'de' });
+        useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, theme: 'eink' } });
+        const t = getTranslator('de');
+        for (const [state, icon, color, label] of [
+            ['syncing', 'refresh', '#F59E0B', 'settings.syncBadgeSyncing'],
+            ['healthy', 'check', '#22C55E', 'settings.syncBadgeHealthy'],
+            ['attention', 'warning', '#EF4444', 'settings.syncBadgeWarning'],
+        ] as const) {
+            const badge = getSettingsSyncBadge(state, t, 'eink');
+            expect(badge).toEqual({ color: '#000000', icon, accessibilityLabel: t(label) });
+            const menu = value(host.getSettingsMenu({ syncBadge: state }));
+            const row = menu.groups.flat().find((item) => item.id === 'sync');
+            expect(row).toMatchObject({ indicatorIcon: icon, indicatorColor: '#000000', showIndicator: true });
+            expect(row?.accessibilityLabel).toContain(t(label));
+            for (const theme of [undefined, 'light', 'dark']) {
+                expect(getSettingsSyncBadge(state, t, theme)).toEqual({ color, accessibilityLabel: t(label) });
+            }
+        }
+        expect(getSettingsSyncBadge('hidden', t, 'eink')).toBeNull();
+    });
+
     it('returns what core\'s settings models return when called directly', async () => {
         freezeClock();
         await seed({ data: 'manage', settings: 'stored' });

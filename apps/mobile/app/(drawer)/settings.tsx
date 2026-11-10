@@ -58,7 +58,7 @@ function PersonalSettingsPage() {
         onboardingHandoff?: string | string[];
         settingsScreen?: string | string[];
     }>();
-    const { syncBadgeAccessibilityLabel, syncBadgeColor } = useMobileSyncBadge();
+    const { syncBadgeAccessibilityLabel, syncBadgeColor, syncBadgeIcon } = useMobileSyncBadge();
     const [hasUpdateBadge, setHasUpdateBadge] = useState(false);
     const [search, setSearch] = useState('');
 
@@ -155,7 +155,7 @@ function PersonalSettingsPage() {
     const menu = buildSettingsMenu({
         t,
         query: search,
-        sync: { color: syncBadgeColor, accessibilityLabel: syncBadgeAccessibilityLabel },
+        sync: { color: syncBadgeColor, accessibilityLabel: syncBadgeAccessibilityLabel, icon: syncBadgeIcon },
         updateAvailable: hasUpdateBadge,
     });
     const filteredGroups = menu.groups;
@@ -192,6 +192,7 @@ function PersonalSettingsPage() {
                                     onPress={() => pushSettingsScreen(row.id)}
                                     showIndicator={row.showIndicator}
                                     indicatorColor={row.indicatorColor}
+                                    indicatorIcon={row.indicatorIcon}
                                     indicatorAccessibilityLabel={row.indicatorAccessibilityLabel}
                                 />
                             ))}

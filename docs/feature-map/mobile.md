@@ -270,6 +270,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Settings › General (appearance, language, app lock)
 
 - Reach: Settings › General. Theme, Language, regional formats, Quick access view, App lock, Expose to system search (Android).
+- Notes: E-Ink renders identity accents in monochrome without changing stored colors or color pickers. Review badges keep distinct state labels with dark text on a light fill. Sync indicators use refresh/check/warning glyphs and translated status labels.
 - Selectors: `regional-formats-toggle`, `app-lock-privacy-cover`
 - Code: `apps/mobile/components/settings/general-settings-screen.tsx`, `packages/core/src/general-settings-model.ts`, `apps/mobile/components/mobile-app-lock-gate.tsx`
 - Checks: `apps/mobile/components/settings/general-settings-screen.test.tsx`, `apps/mobile/components/mobile-app-lock-gate.test.tsx`
@@ -389,6 +390,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/modules/android-widget/README.md`, `apps/mobile/plugins/android-widget.js`, `apps/mobile/lib/widget-service.ts`, `apps/mobile/app/(drawer)/widget-list/[id].tsx`, `apps/mobile/hooks/use-widget-launch.tsx`
 - Checks: `apps/mobile/tests/use-widget-launch.test.tsx`, `apps/mobile/app/(drawer)/widget-list/widget-list-screen.test.tsx`, `apps/mobile/modules/android-widget/android/src/test/java/tech/dongdongbh/mindwtr/androidwidget/WidgetNavigationTest.kt`, `apps/mobile/hooks/root-layout/use-root-layout-pending-captures.test.tsx`
 - Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite.
+- E-Ink: Present priority rings and identity dots use each Android widget's effective text foreground, including transparent light-text and dark-text modes. Missing identity stays hidden; the transparent surface stays clear.
 
 ## Android launcher shortcuts and Quick Settings tile
 

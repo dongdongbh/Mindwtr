@@ -624,7 +624,7 @@ export function BoardView() {
                             projectOptions={sortedProjects.map((project) => ({
                                 id: project.id,
                                 title: project.title,
-                                dotColor: getProjectAccentColor(project, areaById),
+                                dotColor: getProjectAccentColor(project, areaById, settings?.theme),
                             }))}
                             selectedDuePreset={selectedDuePreset}
                             selectedProjectIds={selectedProjectIds}

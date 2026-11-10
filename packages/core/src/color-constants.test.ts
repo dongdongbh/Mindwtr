@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR, getTaskPriorityColors, TASK_PRIORITY_COLORS, TASK_PRIORITY_COLORS_BY_THEME } from './color-constants';
+import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR, einkSafeColor, getTaskPriorityColors, TASK_PRIORITY_COLORS, TASK_PRIORITY_COLORS_BY_THEME } from './color-constants';
 
 describe('AREA_PRESET_COLORS', () => {
     it('keeps the original six swatches first and in order', () => {
@@ -47,5 +47,21 @@ describe('TASK_PRIORITY_COLORS_BY_THEME', () => {
         expect(getTaskPriorityColors('default')).toBe(TASK_PRIORITY_COLORS);
         expect(getTaskPriorityColors(null)).toBe(TASK_PRIORITY_COLORS);
         expect(getTaskPriorityColors('nonsense')).toBe(TASK_PRIORITY_COLORS);
+    });
+});
+
+describe('einkSafeColor', () => {
+    it('draws black on the eink preset and passes every other theme through', () => {
+        expect(einkSafeColor('#3b82f6', 'eink')).toBe('#000000');
+        expect(einkSafeColor('#3b82f6', 'light')).toBe('#3b82f6');
+        expect(einkSafeColor('#3b82f6', 'gruvbox-dark')).toBe('#3b82f6');
+        expect(einkSafeColor('#3b82f6')).toBe('#3b82f6');
+        expect(einkSafeColor('#3b82f6', null)).toBe('#3b82f6');
+    });
+
+    it('keeps an 8-digit hex alpha channel so tinted surfaces stay light', () => {
+
+        expect(einkSafeColor('#10B98120', 'eink')).toBe('#00000020');
+        expect(einkSafeColor('#10B98120', 'light')).toBe('#10B98120');
     });
 });

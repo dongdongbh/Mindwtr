@@ -21,6 +21,9 @@ vi.mock('lucide-react-native', async () => {
     const ReactModule = await vi.importActual<typeof import('react')>('react');
     const Icon = (props: Record<string, unknown>) => ReactModule.createElement('Icon', props);
     return {
+        AlertTriangle: Icon,
+        Check: Icon,
+        RefreshCw: Icon,
         ChevronRight: Icon,
         ExternalLink: Icon,
     };

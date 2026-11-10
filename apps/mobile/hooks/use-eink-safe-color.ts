@@ -14,3 +14,7 @@ export function resolveEinkSafeColor(theme?: ResolvableTheme | null): EinkSafeCo
 export function useEinkSafeColor(): EinkSafeColorFn {
     return resolveEinkSafeColor(useContext(ThemeContext));
 }
+
+export function useThemePreset(): string | undefined {
+    return useContext(ThemeContext)?.themePreset;
+}

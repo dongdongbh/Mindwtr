@@ -352,6 +352,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 ## Settings › General
 
 - Reach: Settings › General. Look & Feel (Appearance, Density, Text size, Font, Show task age, Sidebar views), Localization (Language), Regional formats (Week starts on, Date format, Calendar system, Time format), Input (Global quick add shortcut, Undo notifications).
+- Notes: E-Ink renders project/area accents, Calendar and Timeline indicators, group dots and review badges in monochrome. Review state labels keep a light fill and dark text. Stored colors and color-picker swatches are unchanged.
 - Shortcuts: `Ctrl+=`, `Ctrl+-`, `Ctrl+0` zoom in, out, and reset (`Cmd` on macOS). `Ctrl`+wheel also zooms.
 - Code: `apps/desktop/src/components/views/settings/SettingsMainPage.tsx`, `apps/desktop/src/lib/theme.ts`, `apps/desktop/src/lib/webview-zoom.ts`
 - Checks: `e2e/a11y.spec.ts`, `e2e/ukrainian.spec.ts`, `e2e/time-input-format.spec.ts`, `apps/desktop/src/components/views/settings/SettingsMainPage.test.tsx`, `apps/desktop/src/components/views/settings/useSettingsMainPage.test.tsx`

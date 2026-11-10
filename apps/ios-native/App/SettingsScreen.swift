@@ -3217,9 +3217,14 @@ struct SettingsScreen: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if row.flag("showIndicator") {
-                    Circle().fill(row.text("indicatorColor").isEmpty ? palette.danger : Color(hex: row.text("indicatorColor")))
-                        .frame(width: 8, height: 8).accessibilityHidden(true)
-                        .accessibilityIdentifier("settings-indicator-" + row.text("id"))
+                    if let symbol = ["refresh": "arrow.triangle.2.circlepath", "check": "checkmark", "warning": "exclamationmark.triangle"][row.text("indicatorIcon")] {
+                        Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(palette.text)
+                            .accessibilityHidden(true).accessibilityIdentifier("settings-indicator-" + row.text("id"))
+                    } else {
+                        Circle().fill(row.text("indicatorColor").isEmpty ? palette.danger : Color(hex: row.text("indicatorColor")))
+                            .frame(width: 8, height: 8).accessibilityHidden(true)
+                            .accessibilityIdentifier("settings-indicator-" + row.text("id"))
+                    }
                 }
                 Image(systemName: "chevron.right").font(.system(size: 12))
                     .foregroundStyle(palette.secondary).accessibilityHidden(true)

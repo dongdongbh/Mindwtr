@@ -352,6 +352,17 @@ describe('TimelineView (#1111)', () => {
         expect(dot.style.backgroundColor).toBe('rgb(148, 163, 184)');
     });
 
+    it('draws a default project fallback black in E-Ink without changing its stored color', () => {
+        setStore({
+            tasks: [makeTask({ id: 'plain', title: 'Plain', projectId: 'p1', startTime: iso(0), dueDate: iso(1) })],
+            projects: [{ id: 'p1', title: 'Plain project', status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: iso(-60), updatedAt: iso(-60) }],
+        });
+        useTaskStore.setState({ settings: { theme: 'eink' } });
+        renderTimeline();
+        expect(screen.getByTestId('timeline-group').querySelector('.rounded-full')).toHaveStyle({ backgroundColor: '#000000' });
+        expect(useTaskStore.getState().projects[0].color).toBe('#94a3b8');
+    });
+
     it('groups rows by project with unassigned tasks last', () => {
         setStore({
             tasks: [

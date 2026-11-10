@@ -98,3 +98,20 @@ describe('getAccentTint', () => {
         expect(getAccentTint('#fff')).toBeUndefined();
     });
 });
+
+describe('eink accent colors', () => {
+    it('draws chosen accents black on the eink preset and keeps other themes chromatic', () => {
+        const blue = area({ color: '#0000ff' });
+        const areaById = new Map([[blue.id, blue]]);
+        expect(getProjectAccentColor(project({ colorOverride: '#ff0000' }), areaById, 'eink')).toBe('#000000');
+        expect(getProjectAccentColor(project({ areaId: 'a1' }), areaById, 'eink')).toBe('#000000');
+        expect(getProjectAccentColor(project({ areaId: 'a1' }), areaById)).toBe('#0000ff');
+        expect(getTaskAccentColor(task({ areaId: 'a1' }), new Map(), areaById, 'eink')).toBe('#000000');
+        expect(getTaskAccentColor(task({ areaId: 'a1' }), new Map(), areaById, 'light')).toBe('#0000ff');
+    });
+
+    it('keeps an accent-less task undefined so the themed fallback applies', () => {
+        expect(getTaskAccentColor(task({}), new Map(), new Map(), 'eink')).toBeUndefined();
+        expect(getProjectAccentColor(project({}), new Map(), 'eink')).toBeUndefined();
+    });
+});

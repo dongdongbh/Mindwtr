@@ -49,7 +49,7 @@ vi.mock('expo-router', () => ({
 vi.mock('lucide-react-native', async () => {
   const ReactModule = await vi.importActual<typeof import('react')>('react');
   const Icon = (props: Record<string, unknown>) => ReactModule.createElement('Icon', props);
-  return { ChevronRight: Icon, ExternalLink: Icon };
+  return { AlertTriangle: Icon, Check: Icon, RefreshCw: Icon, ChevronRight: Icon, ExternalLink: Icon };
 });
 vi.mock('@expo/vector-icons', async () => {
   const ReactModule = await vi.importActual<typeof import('react')>('react');

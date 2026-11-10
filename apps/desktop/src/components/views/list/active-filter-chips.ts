@@ -18,6 +18,7 @@ export type ActiveFilterChipDeps = {
     getProject: (projectId: string) => Pick<Project, 'title' | 'color' | 'colorOverride' | 'areaId'> | undefined;
     getAreaColor: (areaId: string) => string | undefined;
     getAreaLabel: (areaId: string) => string | undefined;
+    theme?: string;
 };
 
 export type ActiveFilterChipOptions = {
@@ -72,7 +73,7 @@ export function buildSelectionChips(
                 ? deps.resolveText('taskEdit.noProjectOption', 'No project')
                 : project?.title ?? projectId,
             dotColor: project
-                ? getProjectAccentColor(project, new Map(project.areaId ? [[project.areaId, { color: deps.getAreaColor(project.areaId) }]] : []))
+                ? getProjectAccentColor(project, new Map(project.areaId ? [[project.areaId, { color: deps.getAreaColor(project.areaId) }]] : []), deps.theme)
                 : undefined,
             ...inactiveFlag(applied, 'projects', projectId),
         });

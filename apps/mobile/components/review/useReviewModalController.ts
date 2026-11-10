@@ -95,7 +95,7 @@ export function useReviewModalController({
 }: UseReviewModalControllerParams) {
     const { tasks, projects, sections, people, areas, updateTask, deleteTask, settings, batchUpdateTasks, addTask } = useTaskStore();
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
-    const { isDark } = useTheme();
+    const { isDark, themePreset } = useTheme();
     const { t, language } = useLanguage();
     const { openQuickCapture } = useQuickCapture();
     const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<ReviewStep>>(() => ({
@@ -476,8 +476,8 @@ export function useReviewModalController({
 
 
     const projectReviewEntries = useMemo(
-        () => getWeeklyReviewProjects(weeklyBuckets.projectEntries, areaById, labels),
-        [areaById, labels, weeklyBuckets.projectEntries],
+        () => getWeeklyReviewProjects(weeklyBuckets.projectEntries, areaById, labels, themePreset),
+        [areaById, labels, themePreset, weeklyBuckets.projectEntries],
     );
 
     const stepFlags = useMemo(() => buildReviewSteps(weeklyBuckets, {

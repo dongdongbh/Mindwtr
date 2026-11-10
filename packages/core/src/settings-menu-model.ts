@@ -8,6 +8,7 @@ import {
     SETTINGS_SEARCH_MOBILE_EXCLUSIONS,
     type SettingsSearchPageId,
 } from './settings-search-keys';
+import { einkSafeColor } from './color-constants';
 
 type Translate = (key: string) => string;
 
@@ -200,10 +201,14 @@ export const SETTINGS_SYNC_BADGE_COLORS: Record<Exclude<SettingsSyncBadgeState, 
 };
 
 
-export function getSettingsSyncBadge(state: SettingsSyncBadgeState, t: Translate): { color: string; accessibilityLabel: string } | null {
+export type SettingsSyncBadgeIcon = 'refresh' | 'check' | 'warning';
+
+export function getSettingsSyncBadge(state: SettingsSyncBadgeState, t: Translate, themePreset?: string | null): { color: string; accessibilityLabel: string; icon?: SettingsSyncBadgeIcon } | null {
     if (state === 'hidden') return null;
     const key = state === 'syncing' ? 'settings.syncBadgeSyncing' : state === 'healthy' ? 'settings.syncBadgeHealthy' : 'settings.syncBadgeWarning';
-    return { color: SETTINGS_SYNC_BADGE_COLORS[state], accessibilityLabel: t(key) };
+    const icon: SettingsSyncBadgeIcon = state === 'syncing' ? 'refresh' : state === 'healthy' ? 'check' : 'warning';
+    return { color: einkSafeColor(SETTINGS_SYNC_BADGE_COLORS[state], themePreset), accessibilityLabel: t(key),
+        ...(themePreset === 'eink' ? { icon } : {}) };
 }
 
 
@@ -220,6 +225,7 @@ export type SettingsMenuRow<Id extends string = SettingsMenuRowId> = {
     showIndicator?: boolean;
 
     indicatorColor?: string;
+    indicatorIcon?: SettingsSyncBadgeIcon;
     indicatorAccessibilityLabel?: string;
     accessibilityLabel: string;
 };
@@ -242,12 +248,13 @@ const withLabel = <Id extends string>(row: Omit<SettingsMenuRow<Id>, 'accessibil
 export function buildSettingsMenu(input: {
     t: Translate;
     query: string;
-    sync?: { color?: string; accessibilityLabel?: string };
+    sync?: { color?: string; accessibilityLabel?: string; icon?: SettingsSyncBadgeIcon };
     updateAvailable: boolean;
 }): SettingsMenuModel {
     const { t, query, sync, updateAvailable } = input;
-    const indicators: Partial<Record<SettingsMenuRowId, Pick<SettingsMenuRow, 'showIndicator' | 'indicatorColor' | 'indicatorAccessibilityLabel'>>> = {
-        sync: { showIndicator: Boolean(sync?.color), indicatorColor: sync?.color, indicatorAccessibilityLabel: sync?.accessibilityLabel },
+    const indicators: Partial<Record<SettingsMenuRowId, Pick<SettingsMenuRow, 'showIndicator' | 'indicatorColor' | 'indicatorAccessibilityLabel' | 'indicatorIcon'>>> = {
+        sync: { showIndicator: Boolean(sync?.color), indicatorColor: sync?.color, indicatorAccessibilityLabel: sync?.accessibilityLabel,
+            ...(sync?.icon ? { indicatorIcon: sync.icon } : {}) },
         about: { showIndicator: updateAvailable, indicatorAccessibilityLabel: updateAvailable ? t('settings.updateAvailable') : undefined },
     };
     const groups = SETTINGS_MENU_GROUPS

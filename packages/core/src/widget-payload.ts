@@ -9,7 +9,7 @@ import {
     safeParseDueDate,
 } from './date';
 import { resolveAreaFilterSelection, isTaskVisibleInArea, isTaskVisibleInInbox } from './area-filter';
-import { TASK_PRIORITY_COLORS } from './color-constants';
+import { getTaskPriorityColors } from './color-constants';
 import { buildFocusTaskGroups } from './focus-grouping';
 import { buildFocusPools, buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
 import { NO_FOCUS_WIDGET_FILTER, type FocusWidgetFilter } from './focus-widget-filter';
@@ -405,13 +405,20 @@ export function resolveWidgetLanguage(saved: string | null, setting?: string, sy
     return systemLanguage;
 }
 
+const resolveWidgetStatusPreset = (
+    themeMode: string | undefined,
+    systemColorScheme: WidgetSystemColorScheme,
+) => resolveThemeStatusPreset(
+    (themeMode || '').toLowerCase() as AppTheme,
+    systemColorScheme === 'dark' ? 'dark' : 'light',
+);
+
 const resolveWidgetPalette = (
     themeMode: string | undefined,
     systemColorScheme: WidgetSystemColorScheme,
 ): WidgetPalette => {
-    const normalizedMode = (themeMode || '').toLowerCase();
     const systemScheme = systemColorScheme === 'dark' ? 'dark' : 'light';
-    const presetName = resolveThemeStatusPreset(normalizedMode as AppTheme, systemScheme);
+    const presetName = resolveWidgetStatusPreset(themeMode, systemColorScheme);
     if (presetName) {
         const preset = THEME_PRESETS[presetName];
         const presetIsDark = resolveThemeColorScheme(presetName, systemScheme) === 'dark';
@@ -428,7 +435,7 @@ const resolveWidgetPalette = (
         };
     }
 
-    const isDark = resolveThemeColorScheme(normalizedMode as AppTheme, systemScheme) === 'dark';
+    const isDark = resolveThemeColorScheme((themeMode || '').toLowerCase() as AppTheme, systemScheme) === 'dark';
 
     if (isDark) {
         return {
@@ -499,6 +506,10 @@ export function createWidgetPayloadProjection(
         typeof data.settings?.theme === 'string' ? data.settings.theme : undefined,
         options?.systemColorScheme,
     );
+    const statusPreset = resolveWidgetStatusPreset(
+        typeof data.settings?.theme === 'string' ? data.settings.theme : undefined,
+        options?.systemColorScheme,
+    );
 
 
     const sortedAreas = (data.areas || [])
@@ -558,9 +569,9 @@ export function createWidgetPayloadProjection(
             statusLabel: tr[`status.${task.status}`] || task.status,
             ...computeDueLabel(task.dueDate, tr, language, dayFirst, startOfToday, endOfToday),
             openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
-            priorityColor: prioritiesEnabled && task.priority ? TASK_PRIORITY_COLORS[task.priority] ?? null : null,
+            priorityColor: prioritiesEnabled && task.priority ? getTaskPriorityColors(statusPreset)[task.priority] ?? null : null,
             contextLabel: project?.title ?? area?.name ?? null,
-            identityColor: getTaskAccentColor(task, projectById, areaById) ?? null,
+            identityColor: getTaskAccentColor(task, projectById, areaById, statusPreset) ?? null,
             ...(description ? { description } : {}),
             ...(contexts.length ? { contexts } : {}),
             ...(tags.length ? { tags } : {}),
@@ -752,6 +763,7 @@ export function createWidgetPayloadProjection(
                 const groups = groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
                     groupBy, tasks: list.tasks, projects, areas: data.areas || [],
                     resolveText: (key, fallback) => tr[key] || fallback,
+                    theme: statusPreset ?? undefined,
                 }) : [];
                 let budget = maxItems;
                 const groupedSections: WidgetTaskSection[] = [];

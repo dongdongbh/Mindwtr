@@ -1,7 +1,7 @@
 import { Link, Tabs, useRouter } from 'expo-router';
 import { CommonActions } from '@react-navigation/native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Search, Inbox, Calendar, Circle, ClipboardCheck, Folder, Menu, Mic, Plus, Target } from 'lucide-react-native';
+import { AlertTriangle, Check, RefreshCw, Search, Inbox, Calendar, Circle, ClipboardCheck, Folder, Menu, Mic, Plus, Target } from 'lucide-react-native';
 import { Animated, BackHandler, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +17,7 @@ import { useAndroidActivitySession } from '@/hooks/use-android-activity-session'
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useThemeTokens } from '@/hooks/use-theme-tokens';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { MOBILE_HOME_TAB_ROUTE } from '@/lib/home-route';
 import { useLanguage } from '../../../contexts/language-context';
 import {
@@ -35,6 +36,7 @@ import {
   type MobileQuickAccessView,
   type MoreMenuItem,
   type SavedSearch,
+  type SettingsSyncBadgeIcon,
   type Task,
 } from '@mindwtr/core';
 import { MOBILE_QUICK_ACCESS_TAB_ROUTE } from '@/lib/mobile-quick-access-view';
@@ -119,6 +121,7 @@ function MoreSheetTile({
   onNavigate: (route: string) => void;
   tc: ReturnType<typeof useThemeColors>;
 }) {
+  const einkSafe = useEinkSafeColor();
   return (
     <Pressable
       accessibilityRole="button"
@@ -140,7 +143,7 @@ function MoreSheetTile({
       ]}
     >
       <View style={[styles.moreTileIcon, { backgroundColor: tc.filterBg }]}>
-        <IconSymbol name={item.icon} size={24} color={item.iconColor} />
+        <IconSymbol name={item.icon} size={24} color={einkSafe(item.iconColor)} />
       </View>
       <Text
         style={[styles.moreTileLabel, { color: tc.text }]}
@@ -166,6 +169,7 @@ function MoreSheetCompactItem({
   onNavigate: (route: string) => void;
   tc: ReturnType<typeof useThemeColors>;
 }) {
+  const einkSafe = useEinkSafeColor();
   return (
     <Pressable
       accessibilityRole="button"
@@ -184,7 +188,7 @@ function MoreSheetCompactItem({
       ]}
     >
       <View style={styles.moreCompactIcon}>
-        <IconSymbol name={item.icon} size={18} color={item.iconColor} />
+        <IconSymbol name={item.icon} size={18} color={einkSafe(item.iconColor)} />
       </View>
       <Text
         style={[styles.moreCompactLabel, { color: tc.secondaryText }]}
@@ -435,6 +439,7 @@ function NativeTabBar({
   addTaskAccessibilityLabel,
   audioCaptureAccessibilityLabel,
   menuSyncIndicatorColor,
+  menuSyncIndicatorIcon,
   moreSheetVisible,
   quickAccessTabRoute,
   expanded,
@@ -462,6 +467,7 @@ function NativeTabBar({
   addTaskAccessibilityLabel: string;
   audioCaptureAccessibilityLabel: string;
   menuSyncIndicatorColor?: string;
+  menuSyncIndicatorIcon?: SettingsSyncBadgeIcon;
   moreSheetVisible: boolean;
   quickAccessTabRoute: string;
   expanded: boolean;
@@ -604,8 +610,13 @@ function NativeTabBar({
                       backgroundColor: menuSyncIndicatorColor,
                       borderColor: tc.cardBg,
                     },
+                    menuSyncIndicatorIcon && { width: 16, height: 16, borderRadius: 8, borderWidth: 0, backgroundColor: tc.cardBg, alignItems: 'center', justifyContent: 'center' },
                   ]}
-                />
+                >
+                  {menuSyncIndicatorIcon === 'refresh' ? <RefreshCw color={menuSyncIndicatorColor} size={12} />
+                    : menuSyncIndicatorIcon === 'check' ? <Check color={menuSyncIndicatorColor} size={12} />
+                      : menuSyncIndicatorIcon === 'warning' ? <AlertTriangle color={menuSyncIndicatorColor} size={12} /> : null}
+                </View>
               ) : null}
             </View>
             <Text
@@ -812,7 +823,7 @@ export default function TabLayout() {
   const defaultAutoRecord = defaultCapture === 'audio';
   const quickAccessView = resolveMobileQuickAccessView(settings.appearance?.mobileQuickAccessView);
   const quickAccessTabRoute = MOBILE_QUICK_ACCESS_TAB_ROUTE[quickAccessView];
-  const { syncBadgeAccessibilityLabel, syncBadgeColor } = useMobileSyncBadge();
+  const { syncBadgeAccessibilityLabel, syncBadgeColor, syncBadgeIcon } = useMobileSyncBadge();
 
   return (
     <QuickCaptureProvider value={{ openQuickCapture }}>
@@ -839,6 +850,7 @@ export default function TabLayout() {
             addTaskAccessibilityLabel={t('nav.addTask')}
             audioCaptureAccessibilityLabel={t('quickAdd.audioCaptureLabel')}
             menuSyncIndicatorColor={syncBadgeColor}
+            menuSyncIndicatorIcon={syncBadgeIcon}
             moreSheetVisible={moreSheetVisible}
             quickAccessTabRoute={quickAccessTabRoute}
             expanded={adaptiveWindow.isExpanded}

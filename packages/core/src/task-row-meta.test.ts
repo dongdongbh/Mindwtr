@@ -340,3 +340,29 @@ describe('getTaskRowMetaValidUntil', () => {
             { ...features, taskAge: false }, { relativeScheduleDates: true })).toBe(due.getTime() + 1);
     });
 });
+
+describe('eink row meta dots', () => {
+    const base = {
+        lookup: {},
+        dateFormatting: {},
+        features: { priorities: true, timeEstimates: true, timeSpent: true, taskAge: true },
+        language: 'en' as const,
+        t: (key: string) => key,
+    };
+    const task = (patch: Partial<Task>): Task => ({ id: 't', title: 'Task', status: 'next', tags: [], contexts: [], createdAt: '2026-09-01T10:00:00', updatedAt: '2026-09-01T10:00:00', ...patch });
+    const project: Project = { id: 'p', title: 'Project', status: 'active', color: '#3b82f6', colorOverride: '#10b981', areaId: 'a', order: 0, tagIds: [], createdAt: '', updatedAt: '' };
+    const area = { id: 'a', name: 'Area', color: '#ef4444' as string | undefined, order: 0, createdAt: '', updatedAt: '' } as never;
+
+    it('draws project and area dots black on the eink preset and chromatic without it', () => {
+        const projectMeta = buildTaskRowMeta({ ...base, task: task({ projectId: 'p' }),
+            lookup: { project, projectArea: { id: 'a', name: 'Area', color: '#ef4444', order: 0, createdAt: '', updatedAt: '' } }, themePreset: 'eink' });
+        expect(projectMeta.parts.find((part) => part.kind === 'project')?.dotColor).toBe('#000000');
+
+        const areaMeta = buildTaskRowMeta({ ...base, task: task({ areaId: 'a' }), lookup: { taskArea: area }, themePreset: 'eink' });
+        expect(areaMeta.parts.find((part) => part.kind === 'area')?.dotColor).toBe('#000000');
+
+        const chromatic = buildTaskRowMeta({ ...base, task: task({ projectId: 'p' }),
+            lookup: { project, projectArea: { id: 'a', name: 'Area', color: '#ef4444', order: 0, createdAt: '', updatedAt: '' } }, themePreset: 'light' });
+        expect(chromatic.parts.find((part) => part.kind === 'project')?.dotColor).toBe('#10b981');
+    });
+});

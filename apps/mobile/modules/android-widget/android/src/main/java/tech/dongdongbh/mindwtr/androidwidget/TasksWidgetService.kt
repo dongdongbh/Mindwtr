@@ -121,7 +121,7 @@ class TasksWidgetFactory(
       R.id.mindwtr_widget_item_priority,
       if (struck) R.drawable.mindwtr_widget_circle else R.drawable.mindwtr_widget_ring,
     )
-    item.priorityColor?.let { views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", it) }
+    itemAccentColor(item.priorityColor, palette)?.let { views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", it) }
       ?: views.setThemeColor(R.id.mindwtr_widget_item_priority, "setColorFilter", palette?.mutedText, R.color.mindwtr_widget_muted_text)
 
 
@@ -135,7 +135,7 @@ class TasksWidgetFactory(
     if (contextLabel != null) {
       views.setTextViewText(R.id.mindwtr_widget_item_context, contextLabel)
       views.setViewVisibility(R.id.mindwtr_widget_item_identity, if (item.identityColor == null) View.GONE else View.VISIBLE)
-      item.identityColor?.let { views.setInt(R.id.mindwtr_widget_item_identity, "setColorFilter", it) }
+      itemAccentColor(item.identityColor, palette)?.let { views.setInt(R.id.mindwtr_widget_item_identity, "setColorFilter", it) }
     }
     val dueLabel = item.dueLabel
     views.setViewVisibility(R.id.mindwtr_widget_item_due, if (dueLabel == null) View.GONE else View.VISIBLE)
@@ -159,6 +159,9 @@ class TasksWidgetFactory(
     return views
   }
 
+
+  private fun itemAccentColor(color: Int?, palette: WidgetPayload.Palette?): Int? =
+    color?.let { if (payload.themeMode == "eink") palette?.text ?: it else it }
 
   private fun RemoteViews.setThemeColor(viewId: Int, method: String, color: Int?, colorRes: Int) {
     when {

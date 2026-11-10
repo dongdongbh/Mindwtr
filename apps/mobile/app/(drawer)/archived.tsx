@@ -54,6 +54,7 @@ import {
 import { useCollapsedTaskGroups } from '@/lib/view-state/task-group-collapse-state';
 import { MarkdownInlineText } from '@/components/markdown-text';
 import { useLanguage } from '../../contexts/language-context';
+import { useThemePreset } from '@/hooks/use-eink-safe-color';
 
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -241,7 +242,8 @@ function ArchivedProjectItem({
     deleteLabel: string;
 }) {
     const swipeableRef = useRef<Swipeable>(null);
-    const { cancelled, dateLabel: archivedDateLabel, indicatorColor } = getArchivedProjectRow(project, safeFormatDate, areaById, notSetLabel);
+    const themePreset = useThemePreset();
+    const { cancelled, dateLabel: archivedDateLabel, indicatorColor } = getArchivedProjectRow(project, safeFormatDate, areaById, notSetLabel, themePreset);
 
     const renderLeftActions = () => (
         <Pressable

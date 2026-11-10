@@ -34,6 +34,7 @@ import { useThemeColors, type ThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen, openTaskScreen } from '@/lib/task-meta-navigation';
 
 import { useLanguage } from '../../contexts/language-context';
+import { useThemePreset } from '@/hooks/use-eink-safe-color';
 import { TaskEditModal } from '../task-edit-modal';
 import { FilterChip, TaskFilterSheet, type TaskFilterSheetActiveChip } from '../task-filter-sheet';
 import { useTaskFilterSelections } from '@/hooks/use-task-filter-selections';
@@ -381,7 +382,8 @@ export function BoardView() {
   );
 
   const { areaById, resolvedAreaFilter, visibleTasks } = useVisibleTaskContext();
-  const badges = useMemo(() => getBoardProjectBadges(projects, areaById), [projects, areaById]);
+  const themePreset = useThemePreset();
+  const badges = useMemo(() => getBoardProjectBadges(projects, areaById, themePreset), [areaById, projects, themePreset]);
 
 
   const areaActiveTasks = useMemo(() => selectBoardTasks(visibleTasks), [visibleTasks]);

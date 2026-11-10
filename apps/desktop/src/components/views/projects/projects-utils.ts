@@ -1,4 +1,4 @@
-import { getProjectAccentColor } from '@mindwtr/core';
+import { einkSafeColor, getProjectAccentColor } from '@mindwtr/core';
 import { DEFAULT_AREA_COLOR as CORE_DEFAULT_AREA_COLOR, safeFormatDate, safeParseDate, type Area, type Project } from '@mindwtr/core';
 
 export const DEFAULT_AREA_COLOR = CORE_DEFAULT_AREA_COLOR;
@@ -24,8 +24,8 @@ export function parseTagInput(input: string): string[] {
     return Array.from(new Set(values));
 }
 
-export function getProjectColor(project: Project, areaById: Map<string, Area>, fallback = DEFAULT_AREA_COLOR): string {
-    return getProjectAccentColor(project, areaById) ?? fallback;
+export function getProjectColor(project: Project, areaById: Map<string, Area>, fallback = DEFAULT_AREA_COLOR, themePreset?: string): string {
+    return getProjectAccentColor(project, areaById, themePreset) ?? einkSafeColor(fallback, themePreset);
 }
 
 export function sortAreasByName(areas: Area[]): string[] {
