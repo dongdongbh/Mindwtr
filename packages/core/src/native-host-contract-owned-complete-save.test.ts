@@ -328,14 +328,31 @@ describe('internal complete owned editor Save', () => {
         const envelope = await plan(await request({ edits: { status: 'done' }, checklist: [item('one', 'First', true), item('two', 'Second', true)] }));
         expect(envelope.prepared.decision.kind).toBe('changed'); if (envelope.prepared.decision.kind !== 'changed') throw new Error('Expected completion');
         const proof = envelope.prepared.decision.prepared, child = proof.effect.tasks.find((row) => row.after.id !== 'complete')!.after;
-        expect(child.attachments?.some((attachment) => attachment.uri === file.uri && !attachment.deletedAt)).toBe(true);
+        const sourceAttachments = after(envelope).attachments!, liveAttachments = sourceAttachments.filter((attachment) => !attachment.deletedAt);
+        expect(sourceAttachments.find((attachment) => attachment.id === file.id)).toEqual({ ...file, deletedAt: AT });
+        expect(liveAttachments.filter((attachment) => attachment.kind === 'file')).toEqual([{
+            id: '00000001-1111-4111-8111-111111111111', kind: 'file', title: 'Report.pdf',
+            uri: ROOT + '00000001-1111-4111-8111-111111111111.pdf', size: 3, createdAt: AT, updatedAt: AT, localStatus: 'available',
+        }]);
+        expect(child.attachments).toEqual(liveAttachments.map((attachment) => ({ ...attachment, id: expect.any(String) })));
+        expect(child.attachments?.some((attachment) => attachment.uri === file.uri)).toBe(false);
+        expect(new Set(child.attachments!.map((attachment) => attachment.id)).size).toBe(liveAttachments.length);
+        for (const attachment of child.attachments!) {
+            expect(sourceAttachments.some((source) => source.id === attachment.id)).toBe(false);
+            expect(proof.witness.ids).toContain(attachment.id);
+        }
         expect(proof.rawBefore.tasks.find((row) => row.id === child.id)?.before).toBeNull();
-        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope)); const saved = rows();
-        env = await open(path); const oldZone = process.env.TZ;
+        const frozen = JSON.stringify(envelope);
+        unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(JSON.parse(frozen))); const saved = rows();
+        expect((await rawTask()).attachments).toEqual(sourceAttachments);
+        expect((await env.adapter.getData({ rawTasks: true })).tasks.find((row) => row.id === child.id)?.attachments).toEqual(child.attachments);
+        env = await open(path); env.writes.mockClear(); const oldZone = process.env.TZ;
         try { process.env.TZ = 'Pacific/Auckland'; vi.setSystemTime('2030-04-01T10:00:00.000Z');
-            unwrap(env.host.validatePreparedOwnedEditorCompleteTaskDraftSave(envelope)); unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(envelope));
+            unwrap(env.host.validatePreparedOwnedEditorCompleteTaskDraftSave(JSON.parse(frozen)));
+            unwrap(await env.host.commitPreparedOwnedEditorCompleteTaskDraftSave(JSON.parse(frozen)));
         } finally { process.env.TZ = oldZone; }
         expect(rows()).toEqual(saved); expect((await env.adapter.getData({ rawTasks: true })).tasks.filter((row) => row.id === child.id)).toHaveLength(1);
+        expect(env.writes).not.toHaveBeenCalled(); expect(JSON.stringify(envelope)).toBe(frozen);
     });
     it('saves carry-forward with the latest checklist and reloads its successor from SQLite', async () => {
         env = await open(path, seed({ taskMode: 'task', recurrence: { rule: 'weekly' }, dueDate: '2026-10-05' }));
