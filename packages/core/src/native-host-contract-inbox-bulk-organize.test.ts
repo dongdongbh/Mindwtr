@@ -166,7 +166,7 @@ describe('Inbox Organize strict boundary and authority', () => {
                 { ...input, taskRevisions: { a: input.taskRevisions.a } }, { ...input, requestId: 'wrong' },
                 { ...input, params: { offset: 0 } }, { ...input, params: { includeArchivedProjects: false } },
                 { ...input, params: { filters: { bad: [] } } }, { ...input, draft: {} },
-                { ...input, draft: { ...input.draft, extra: true } }, { ...input, draft: { ...input.draft, status: 'inbox' } },
+                { ...input, draft: { ...input.draft, extra: true } }, { ...input, draft: { ...input.draft, status: 'archived' } },
                 { ...input, draft: { ...input.draft, dueDate: '2026-02-30' } },
                 { ...input, draft: { ...input.draft, tags: 'x'.repeat(2001) } },
                 { ...input, draft: { ...input.draft, status: 'waiting', delegateWho: '   ' } },

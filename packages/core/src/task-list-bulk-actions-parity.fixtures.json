@@ -1,7 +1,7 @@
 {
  "provenance": {
   "command": "cd apps/mobile && MINDWTR_CAPTURE_BULK_ACTIONS=1 MINDWTR_CAPTURE_BULK_ACTIONS_COMMIT=$(git rev-parse HEAD) bunx vitest run components/task-list/bulk-actions-parity.test.tsx",
-  "capturedAt": "fba67ff7bfe800b1cdc6fa3e8a06d84b5717a847",
+  "capturedAt": "ac08bf2be16d2efff95cd4253cbfb22988758fc2",
   "capturedAtNote": "Recorded the React Native picker display order from HEAD; only the test harness and fixture changed during capture."
  },
  "timeZone": "America/New_York",
@@ -4433,6 +4433,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -4696,6 +4702,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -4967,6 +4979,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -5245,6 +5263,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -5511,6 +5535,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -5809,6 +5839,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -6075,6 +6111,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -6346,6 +6388,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -6617,6 +6665,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -6893,6 +6947,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -7159,6 +7219,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -7430,6 +7496,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -8142,6 +8214,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -8405,6 +8483,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -8698,6 +8782,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -8961,6 +9051,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -9254,6 +9350,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -9517,6 +9619,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -9801,6 +9909,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -10064,6 +10178,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -10348,6 +10468,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -10611,6 +10737,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -10904,6 +11036,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -11167,6 +11305,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -11451,6 +11595,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -11713,6 +11863,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -11985,6 +12141,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -12248,6 +12410,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -12515,6 +12683,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -13007,6 +13181,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -13361,6 +13541,12 @@
        null,
        "Keep status",
        true,
+       false
+      ],
+      [
+       null,
+       "Inbox",
+       false,
        false
       ],
       [
@@ -18275,6 +18461,12 @@
       ],
       [
        null,
+       "Inbox",
+       false,
+       false
+      ],
+      [
+       null,
        "Next",
        false,
        false
@@ -18538,6 +18730,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
@@ -18806,6 +19004,12 @@
       [
        null,
        "Keep status",
+       false,
+       false
+      ],
+      [
+       null,
+       "Inbox",
        false,
        false
       ],
