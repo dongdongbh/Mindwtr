@@ -47,11 +47,14 @@ try {
     }));
     await client.ping();
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 14);
+    assert.equal(tools.length, 18);
     assert.ok(tools.some((tool) => tool.name === 'mindwtr_list_tasks'));
     assert.ok(tools.some((tool) => tool.name === 'mindwtr_archive_task'));
+    for (const name of ['mindwtr_list_sections', 'mindwtr_list_people', 'mindwtr_reopen_task', 'mindwtr_add_area']) {
+        assert.ok(tools.some((tool) => tool.name === name), name);
+    }
     for (const tool of tools) assert.equal(tool.inputSchema.type, 'object');
-    for (const name of ['mindwtr_list_tasks', 'mindwtr_list_projects', 'mindwtr_list_areas']) {
+    for (const name of ['mindwtr_list_tasks', 'mindwtr_list_projects', 'mindwtr_list_areas', 'mindwtr_list_sections', 'mindwtr_list_people']) {
         const result = await client.callTool({ name, arguments: {} });
         assert.notEqual(result.isError, true, name);
         assert.ok(Array.isArray(result.content));
@@ -61,6 +64,13 @@ try {
     assert.ok(JSON.stringify(task.content).includes('Native MCP fixture'));
     const denied = await client.callTool({ name: 'mindwtr_add_task', arguments: { title: 'must not write' } });
     assert.equal(denied.isError, true);
+    for (const request of [
+        { name: 'mindwtr_add_area', arguments: { name: 'must not write' } },
+        { name: 'mindwtr_reopen_task', arguments: { id: 'native-fixture-task' } },
+    ]) {
+        const result = await client.callTool(request);
+        assert.equal(result.isError, true, request.name);
+    }
     const rpc = JSON.stringify({ jsonrpc: '2.0', id: 20, method: 'ping' });
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
     assert.equal((await fetch(url, { method: 'POST', headers, body: rpc })).status, 401);

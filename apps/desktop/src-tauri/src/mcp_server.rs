@@ -1419,6 +1419,8 @@ mod tests {
                 LocalOperation::GetTask(id) if id=="native-fixture-task"=>Ok(json!({"task":data["tasks"][0]})),
                 LocalOperation::ListProjects=>Ok(json!({"projects":[]})),
                 LocalOperation::ListAreas=>Ok(json!({"areas":[]})),
+                LocalOperation::ListSections { .. }=>Ok(json!({"sections":[]})),
+                LocalOperation::ListPeople { .. }=>Ok(json!({"people":[]})),
                 _=>Err("Task not found".into()),
             }
         })).unwrap()
