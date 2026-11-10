@@ -969,7 +969,7 @@ assert.match(editorUi, /put\("bases", JSONObject\(edited\.keys\.associateWith \{
 assert.match(model, /val action = saveDraftAction\(current\)\s+pendingSave = action\s+keepEditor\(current\)\s+sendDraft\(action\)/);
 
 assert.match(model, /pendingSave\?\.let \{\s+state\.put\("pending", JSONObject\(\)\.put\("base", JSONObject\(it\.base\)\)\.put\("patch", JSONObject\(it\.patch\)\)\.put\("checklist", it\.title\)\.put\("requestId", it\.requestId\)\s+\.put\("attachments", it\.attachments\)\)\s+\}\s+drafts\.write\(key, state\)/);
-assert.match(model, /val action = FailedAction\("saveDraft", restored\.id, pending\.optString\("checklist"\), base = map\("base"\), patch = map\("patch"\),\s+requestId = pending\.optString\("requestId"\), attachments = pending\.optString\("attachments"\)\)\s+failedAction = action\s+sendDraft\(action\)/);
+assert.match(model, /val action = FailedAction\("saveDraft", restored\.id, pending\.optString\("checklist"\), base = map\("base"\), patch = map\("patch"\),\s+requestId = pending\.optString\("requestId"\), attachments = pending\.optString\("attachments"\)\)\s+failedAction = action\s+pendingSave = action\s+keepEditor\(restored\)\s+sendDraft\(action\)/);
 
 assert.match(editorUi, /val dirty get\(\) = patch\.isNotEmpty\(\) \|\| waiting \|\| checklistChanged \|\| attachmentsChanged/);
 
@@ -1127,7 +1127,8 @@ assert.match(model, /focus = pending\.focus\s+focusRevision = pending\.focus\?\.
 
 assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
-assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+ui \{ editorMenu\.saved\(action\.id\); closeEditor\(settle = false\) \}/);
+const sendDraftFn = model.slice(model.indexOf('private fun sendDraft('), model.indexOf('\n    fun reloadEditor('));
+assert.match(sendDraftFn, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{\s+if \(UPDATE_REFUSALS\.any \{ failure\.message\?\.startsWith\(it\) == true \}\) ui \{\s+pendingSave = null; failedAction = null\s+editor\?\.let \{ keepEditor\(it\.copy\(previewCompletionSeq = null\)\)\s*\}\s+\}\s+throw failure\s+\}\s+acknowledged\(action\)\s+if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+if \(previewCompletion\) Log\.i\(CoreHost\.TAG, "Native Android Preview task completion saved releaseCheck=v1\.3\.9\/preview-mark-done platform=android outcome=saved"\)\s+ui \{\s+if \(!previewCompletion \|\| editor\?\.session == owner\?\.session\) \{\s+editorMenu\.saved\(action\.id\)\s+closeEditor\(settle = false\)\s+\}\s+\}/);
 
 for (const [call, fn] of [
     ['runtime\\.setTaskFocus\\(id, focused, taskRevision\\)', 'fun setTaskFocus('], ['runtime\\.setProjectFocus\\(id, focused, projectRevision\\)', 'fun setProjectFocus('],
@@ -1793,7 +1794,7 @@ assert.match(editorUi, /val attachmentsBase: String = content\.optJSONArray\("at
 
 assert.match(editorUi, /val checklistSave: String get\(\) = if \(!checklistChanged\) "" else\s+JSONObject\(\)\.put\("base", JSONArray\(checklistFrom \?: model\.checklistBase\)\)\.put\("value", JSONArray\(checklistNow\)\)\.toString\(\)/);
 assert.match(editorUi, /val checklistBase: String = content\.getJSONArray\("checklistBase"\)\.toString\(\)/);
-assert.match(model, /private fun sendDraft\(action: FailedAction\) = perform\(action\) \{ runtime ->\s+try \{\s+runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)/);
+assert.match(sendDraftFn, /private fun sendDraft\(action: FailedAction\) \{\s+val owner = editor\?\.takeIf \{ it\.id == action\.id \}\s+val previewCompletion = owner\?\.previewCompletionSeq != null\s+perform\(action\) \{ runtime ->\s+try \{\s+runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)/);
 
 assert.match(editorUi, /fun draftJson\(values: Map<String, String\?>\): String =\s*JSONObject\(\)\.apply \{ values\.forEach \{ \(field, literal\) -> put\(field, draftValue\(literal\)\) \} \}\.toString\(\)/);
 
@@ -1823,7 +1824,7 @@ assert.match(model, /if \(inFlight != null \|\| current == null \|\| runtime == 
 assert.match(model, /val ticket = current\.session to next\.seq/);
 assert.match(model, /val now = editor\?\.takeIf \{ it\.session == ticket\.first && it\.pending\.firstOrNull\(\)\?\.seq == ticket\.second \}/);
 assert.match(editorUi, /val session: String = UUID\.randomUUID\(\)\.toString\(\)/);
-assert.match(model, /fun closeEditor\(settle: Boolean = true\) \{[\s\S]{0,600}?attachments\.closed\(\)\s+editorMenu\.closed\(\)\s+ai\.cancelEditor\(\)\s+inFlight = null/);
+assert.match(model, /fun closeEditor\(settle: Boolean = true\) \{\s+if \(settle && editor\?\.previewCompletionSeq != null\) return\s+val closed = editor[\s\S]{0,600}?attachments\.closed\(\)\s+editorMenu\.closed\(\)\s+ai\.cancelEditor\(\)\s+inFlight = null/);
 
 
 assert.match(model, /attachments\.settle\(closing\.id, closing\.model\.taskRevision, from, closing\.attachmentsNow, from\)/);
@@ -1910,9 +1911,9 @@ assert.equal(editorUi.match(/pickedTime\(/g).length, 2, 'defined once; the share
 assert.doesNotMatch(code(editorUi), /text\("(dueDate|startTime|reviewAt)"\)\.(substring|split|take|drop|contains|startsWith|endsWith|matches|replace)/);
 assert.doesNotMatch(code(editorUi), /\b(due|value)\.(substring|split|take|drop|contains|startsWith|endsWith|matches)\(/);
 
-assert.match(editorUi, /val locked = busy \|\| failed \|\| editor\.readOnly/);
-assert.match(editorUi, /BackHandler\(enabled = !failed\)/);
-assert.match(editorUi, /clickable\(enabled = !busy && !failed, role = Role\.Button, onClick = leave\)/);
+assert.match(editorUi, /val locked = busy \|\| failed \|\| editor\.readOnly \|\| editor\.previewCompletionSeq != null/);
+assert.match(editorUi, /BackHandler\(enabled = !failed\) \{ if \(!busy && editor\.previewCompletionSeq == null\) leave\(\) \}/);
+assert.match(editorUi, /clickable\(enabled = !busy && !failed && editor\.previewCompletionSeq == null, role = Role\.Button, onClick = leave\)/);
 
 
 assert.match(coreHost, /fun focus\(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focus", limit, controls, controlEdit, folds\)/);
@@ -7393,10 +7394,20 @@ export function createNativeSync() {
         const recurring = await fixture({ recurring: true });
         await check(async () => {
             assert.equal((await call(recurring.state, 'attachmentFileEditSaveCommit', recurring.envelope)).ok, true); syncLive(recurring);
+            const source = recurring.state.lastLoaded.tasks.find((row) => row.id === 'task268'); assert(source);
             const child = recurring.state.lastLoaded.tasks.find((row) => row.id !== 'task268'); assert(child);
-            assert(child.attachments.some((row) => row.uri === ROOT + '0.pdf' && !row.deletedAt));
+            assert.equal(recurring.envelope.prepared.decision.prepared.witness.completionSource, 'currentDraft');
+            assert(source.attachments.some((row) => row.id === 'file0' && row.uri === ROOT + '0.pdf' && row.deletedAt));
+            assert.deepEqual(source.attachments.filter((row) => !row.deletedAt).map((row) => row.uri), [ROOT + '1.pdf']);
+            assert.equal(child.attachments.length, 1);
+            assert.equal(child.attachments[0].uri, ROOT + '1.pdf');
+            assert(!child.attachments[0].deletedAt && child.attachments[0].id && child.attachments[0].id !== 'file1');
             const index = recurring.plan.findIndex((row) => row.attachment.uri === ROOT + '0.pdf'); assert(index >= 0);
-            assert.deepEqual(invoke(recurring, index), { result: { outcome: 'referenced' }, seen: ['referenced'] }, 'fresh generated child keeps the source tombstone bytes');
+            assert.deepEqual(invoke(recurring, index), { result: { outcome: 'removed' }, seen: ['removed'] }, 'a generated child does not resurrect the draft removal');
+            recurring.state.ownerProjects = [{ id: 'other-owner', attachments: [{ kind: 'file', uri: ROOT + '0.pdf' }] }];
+            assert.deepEqual(invoke(recurring, index), { result: { outcome: 'referenced' }, seen: ['referenced'] }, 'a fresh live owner retains the removed draft file');
+            recurring.state.ownerProjects = [];
+            assert.deepEqual(invoke(recurring, index), { result: { outcome: 'removed' }, seen: ['removed'] }, 'removing the independent owner permits retirement again');
         });
         const reusable = await fixture(); assert.equal((await call(reusable.state, 'attachmentFileEditSaveCommit', reusable.envelope)).ok, true); syncLive(reusable);
         const validations = () => reusable.state.fileEditSaveInputs.filter(([name]) => name === 'completeValidate').length;
