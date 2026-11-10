@@ -1420,6 +1420,7 @@ struct SettingsScreen: View {
             }
             if let failure = lastSync["error"] as? String {
                 Text(failure).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("sync-cloudkit-last-error")
             }
             if !history.isEmpty {
                 Button { syncCloudKitHistoryExpanded.toggle() } label: {

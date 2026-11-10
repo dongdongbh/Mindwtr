@@ -637,6 +637,41 @@ describe('event-owned iOS stored/resume pacing', () => {
     };
     afterEach(() => resetForTests());
 
+    it('runs iCloud startup and resume through the shared automatic controller like RN', async () => {
+        resetForTests();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        iosFiles();
+        const calls: string[] = [];
+        let account: 'available' | 'noAccount' = 'available';
+        const port = {
+            isAvailable: () => true,
+            getAccountStatus: async () => account,
+            ensureReady: async () => { calls.push('ensureReady'); if (account !== 'available') throw new Error('Native CloudKit account is unavailable'); },
+            read: async () => { calls.push('read'); return null; },
+            write: async () => { calls.push('write'); },
+            assets: { saveAttachmentAsset: async () => {}, fetchAttachmentAsset: async () => { throw new Error('no asset'); },
+                deleteAttachmentAssets: async () => {}, isAttachmentNotFoundError: () => false },
+        };
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'cloudkit' }, false, async () => data(), async () => false);
+        const sync = createNativeSync({ ...fixture.bindings, cloudKit: port });
+
+        expect(await sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        expect(calls).toContain('ensureReady');
+        expect(calls).toContain('read');
+        expect(sync.state().cycles).toBe(1);
+        now += 1_000;
+        expect(await sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(sync.state().cycles).toBe(1);
+        now += 60_000;
+        account = 'noAccount';
+        calls.length = 0;
+        expect(await sync.performStoredAutomaticSync('resume')).toEqual({ success: false, skipped: false });
+        expect(calls).toEqual(['ensureReady']);
+        expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('cloudkit');
+        expect(fixture.schedules).toEqual([]);
+    });
+
     it('runs an explicit stored pull despite automatic resume pacing and preserves configuration', async () => {
         resetForTests(); serve();
         spyOn(Date, 'now').mockReturnValue(100_000);

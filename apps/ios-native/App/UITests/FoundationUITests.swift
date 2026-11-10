@@ -34723,6 +34723,32 @@ extension FoundationUITests {
         screenshot.name = "cloudkit-fixture-no-account-disabled"; screenshot.lifetime = .keepAlways; add(screenshot)
     }
 
+    func testNativeCloudKitColdOpenRunsTheStoredSync() throws {
+        continueAfterFailure = false
+        let library = "82daa6a1-9798-4935-a0de-a41db47f27e1"
+        let app = try cloudKitFixtureApp(library: library, available: true)
+        app.launch(); defer { app.terminate() }
+        task322OpenSync(app)
+        let option = app.buttons["sync-option-cloudkit"]
+        revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-cloudkit")
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: option)
+        waitForExpectations(timeout: 30)
+        cloudKitAssertCard(app, available: true)
+        XCTAssertFalse(app.staticTexts["sync-cloudkit-last-error"].exists)
+        app.terminate()
+        let cold = try cloudKitFixtureApp(library: library, available: false)
+        cold.launch(); defer { cold.terminate() }
+        task371OpenSync(cold, openFlow: false, backend: "cloudkit")
+        cloudKitAssertCard(cold, available: false)
+        let failure = cold.staticTexts["sync-cloudkit-last-error"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 60), "The cold open ran the stored iCloud sync and recorded its result")
+        revealPagedElement(cold, failure, in: cold.scrollViews["sync-screen"])
+        XCTAssertFalse(failure.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        let screenshot = XCTAttachment(screenshot: cold.screenshot())
+        screenshot.name = "cloudkit-cold-open-stored-sync-recorded"; screenshot.lifetime = .keepAlways; add(screenshot)
+    }
+
     func testSandboxRealSampleCaptureEditResetExitAndSharedAppLock() throws {
         continueAfterFailure = false
         let environment = ProcessInfo.processInfo.environment

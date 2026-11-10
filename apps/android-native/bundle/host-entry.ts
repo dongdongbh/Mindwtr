@@ -8942,8 +8942,8 @@ globalThis.MindwtrHost = {
                 const fileMetadata = stored === 'file' && ['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'answerSyncMissingFiles'].includes(name);
                 if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted && !cloudKitSelected && !dropboxSelected && !fileMetadata) return refused;
                 if (cloudKitSyncNow && !cloudKitSelected) return refused;
-                if (['syncStored', 'syncResume', 'syncPull'].includes(name) && stored !== 'webdav' && !selfHosted
-                    && !(name === 'syncPull' && (cloudKitSelected || dropboxSelected))) {
+                if (['syncStored', 'syncResume', 'syncPull'].includes(name) && stored !== 'webdav' && !selfHosted && !cloudKitSelected
+                    && !(name === 'syncPull' && dropboxSelected)) {
                     if (name === 'syncPull') try {
                         await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                             message: 'Native iOS pull Sync command settled',

@@ -150,16 +150,38 @@ final class NativeCloudKitHostTests: XCTestCase {
         try await host.foregroundSync(command: "syncNow", requestJSON: cloudKitHostJSON(["requestId": UUID().uuidString.lowercased()]))
     }
 
-    func testBootAndAutomaticPathsNeverCallCloudKitSDK() async throws {
-        let sdk = CloudKitHostSDK(), (host, database, _) = try makeHost(sdk)
+    func testBootNeverCallsCloudKitAndStartupThenResumeRunOneSharedCycle() async throws {
+        let sdk = CloudKitHostSDK(tasks: try remoteTask()), (host, database, _) = try makeHost(sdk)
         _ = try await host.start()
         let bootCalls = await sdk.calls; XCTAssertTrue(bootCalls.isEmpty)
-        for command in ["syncStored", "syncResume"] {
-            let reply = try value(await host.foregroundSync(command: command, requestJSON: "{}"))
-            XCTAssertEqual(reply["success"] as? Bool, true); XCTAssertEqual(reply["skipped"] as? Bool, true)
+        let started = try value(await host.foregroundSync(command: "syncStored", requestJSON: "{}"))
+        XCTAssertEqual(started["success"] as? Bool, true); XCTAssertEqual(started["skipped"] as? Bool, false)
+        let calls = await sdk.calls
+        XCTAssertTrue(calls.contains("accountStatus")); XCTAssertTrue(calls.contains("ensureZone"))
+        XCTAssertTrue(calls.contains("fetch:MindwtrTask"))
+        XCTAssertEqual(try taskRows(database).map { $0["id"] as? String }, ["cloudkit-remote-inbox"])
+        let resumed = try value(await host.foregroundSync(command: "syncResume", requestJSON: "{}"))
+        XCTAssertEqual(resumed["success"] as? Bool, true); XCTAssertEqual(resumed["skipped"] as? Bool, true)
+        let afterResume = await sdk.calls
+        XCTAssertEqual(afterResume.count, calls.count, "A resume inside the shared cadence calls no CloudKit SDK")
+    }
+
+    func testCancelledCloudKitResumeThatSavedIsACleanCancellationAndTheNextSyncRuns() async throws {
+        let entered = expectation(description: "SDK read held")
+        let sdk = CloudKitHostSDK(fault: .held, entered: entered), (host, _, _) = try makeHost(sdk)
+        _ = try await host.start()
+        let operation = Task { try await host.foregroundSync(command: "syncResume", requestJSON: "{}") }
+        await fulfillment(of: [entered], timeout: 30)
+        operation.cancel()
+        do {
+            _ = try await operation.value
+            XCTFail("A cancelled sync cannot report a result")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "A cancelled CloudKit turn that saved must not need a restart: \(error)")
         }
-        let calls = await sdk.calls, writes = await sdk.writes
-        XCTAssertTrue(calls.isEmpty); XCTAssertTrue(writes.isEmpty); XCTAssertEqual(try taskRows(database).count, 0)
+        let writes = await sdk.writes; XCTAssertTrue(writes.isEmpty)
+        let pulled = try value(await host.foregroundSync(command: "syncPull", requestJSON: "{}"))
+        XCTAssertEqual(pulled["success"] as? Bool, true); XCTAssertEqual(pulled["skipped"] as? Bool, false)
     }
 
     func testStoredFileMetadataUsesForegroundLaneAndOffKeepsDirectoryLane() async throws {

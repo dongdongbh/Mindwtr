@@ -552,7 +552,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     };
 
     let iosAutomaticController: AutoSyncController | null = null;
-    let iosAutomaticBackend: 'webdav' | 'cloud' = 'webdav';
+    let iosAutomaticBackend: 'webdav' | 'cloud' | 'cloudkit' = 'webdav';
     type AutomaticFrame = { result: Awaited<ReturnType<NativeSyncSettingsHost['performSync']>> | null };
     let iosAutomaticFrame: AutomaticFrame | null = null;
 
@@ -705,7 +705,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             if (fatalCleanupError) throw fatalCleanupError;
             if (backend === 'cloud' && (await keyValue.get(CLOUD_PROVIDER_KEY))?.trim() === 'dropbox')
                 throw new Error('Automatic Dropbox sync is unavailable on this iOS build');
-            if (backend !== 'webdav' && backend !== 'cloud') throw new Error('Stored automatic sync requires a remote provider');
+            if (backend !== 'webdav' && backend !== 'cloud' && backend !== 'cloudkit') throw new Error('Stored automatic sync requires a remote provider');
             iosAutomaticBackend = backend;
             const controller = automaticController();
             if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
