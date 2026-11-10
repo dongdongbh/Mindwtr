@@ -12173,6 +12173,12 @@ final class CoreHostTests: XCTestCase {
         return try object(XCTUnwrap(args.first))
     }
 
+    private func waitForMinuteHeadroom(seconds: Int) async throws {
+        while Calendar.current.component(.second, from: Date()) >= 60 - seconds {
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+    }
+
     private func recentAreaTestTime(daysAgo: Int = 1) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -24019,6 +24025,7 @@ final class CoreHostTests: XCTestCase {
         let beforeDB = try SQLiteBridge(url: database)
         let before = try nineTableSnapshot(beforeDB)
         beforeDB.close()
+        try await waitForMinuteHeadroom(seconds: 20)
         let first = try await projectTaskOrderView(core, limit: 25)
         XCTAssertEqual(first["canReorder"] as? Bool, true)
         XCTAssertNotNil(first["orderToken"] as? String)
