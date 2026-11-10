@@ -24,10 +24,23 @@ if [ -z "${JS_BUNDLE:-}" ] || [ ! -s "$JS_BUNDLE" ]; then
   exit 1
 fi
 
+capture_screenshot() {
+  local image
+  local status
+  image="$(mktemp "${RUNNER_TEMP:?}/mindwtr-screen.XXXXXX")"
+  if xcrun simctl io "$SIMULATOR_UDID" screenshot --type=png "$image"; then
+    mv -- "$image" "$1"
+  else
+    status=$?
+    rm -f -- "$image"
+    return "$status"
+  fi
+}
+
 collect_diagnostics() {
   local status=$?
   trap - EXIT
-  xcrun simctl io "$SIMULATOR_UDID" screenshot "$ARTIFACTS_DIR/final-screen.png" >/dev/null 2>&1 || true
+  capture_screenshot "$ARTIFACTS_DIR/final-screen.png" >/dev/null 2>&1 || true
   xcrun simctl spawn "$SIMULATOR_UDID" log show \
     --style compact \
     --last 10m \
@@ -198,7 +211,7 @@ wait_for_marker '[MindwtrScene] stage=sceneConnected deliveryKind=url count='
 wait_for_marker '[MindwtrScene] stage=rootStarted deliveryKind=url count='
 wait_for_marker '[MindwtrScene] stage=coldDelivery deliveryKind=url count='
 wait_for_marker '[MindwtrScene] stage=bridgeReady deliveryKind=none count='
-xcrun simctl io "$SIMULATOR_UDID" screenshot "$ARTIFACTS_DIR/cold-link-screen.png"
+capture_screenshot "$ARTIFACTS_DIR/cold-link-screen.png"
 
 open_url "$WARM_URL"
 sleep 5
@@ -211,5 +224,5 @@ wait_for_marker '[MindwtrScene] stage=warmDelivery deliveryKind=url count='
 wait_for_marker_count '[MindwtrScene] stage=bridgeReady deliveryKind=none count=' 2
 echo "warm_pid=$WARM_PID" | tee -a "$ARTIFACTS_DIR/simulator-smoke.txt"
 
-xcrun simctl io "$SIMULATOR_UDID" screenshot "$ARTIFACTS_DIR/warm-link-screen.png"
+capture_screenshot "$ARTIFACTS_DIR/warm-link-screen.png"
 echo "Release simulator cold/warm deep-link smoke passed without an early process exit."

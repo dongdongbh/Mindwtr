@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -299,6 +299,25 @@ test("iOS 27 smoke accepts only openurl status 60 while requiring delivery proof
   expect(smokeScript).toContain("wait_for_marker '[MindwtrScene] stage=coldDelivery deliveryKind=url count='");
   expect(smokeScript).toContain("wait_for_marker '[MindwtrScene] stage=warmDelivery deliveryKind=url count='");
   expect(smokeScript).toContain("wait_for_marker_count '[MindwtrScene] stage=bridgeReady deliveryKind=none count=' 2");
+});
+
+test("simulator screenshots stage internally before publishing artifacts", () => {
+  const script = readFileSync("scripts/ci/smoke-ios27-simulator.sh", "utf8");
+  const helper = script.match(/^capture_screenshot\(\) \{[\s\S]*?^\}/m)?.[0];
+  expect(helper).toBeDefined();
+  const directory = mkdtempSync(join(tmpdir(), "mindwtr-screenshot-"));
+  try {
+    const output = join(directory, "published.png");
+    const result = spawnSync("bash", ["-euc", `${helper}\nxcrun() { case "$6" in "$RUNNER_TEMP"/mindwtr-screen.*) ;; *) return 91;; esac; printf PNG > "$6"; }\nSIMULATOR_UDID=smoke-sim\ncapture_screenshot "$SCREENSHOT_OUTPUT"\nxcrun() { return 42; }\ncapture_screenshot "$SCREENSHOT_OUTPUT"`], {
+      env: { ...process.env, RUNNER_TEMP: directory, SCREENSHOT_OUTPUT: output },
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(42);
+    expect(readFileSync(output, "utf8")).toBe("PNG");
+    expect(readdirSync(directory)).toEqual(["published.png"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("native CI typechecks all maintained widgets before the expensive host build", () => {
