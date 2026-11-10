@@ -577,6 +577,7 @@ pub(crate) fn handle_mcp_request(
             return ApiResponse {
                 status: 202,
                 body: Value::Null,
+                etag: None,
             };
         }
         return ApiResponse::error(400, "Unsupported notification");
@@ -842,6 +843,36 @@ mod tests {
     }
 
     #[test]
+    fn polling_mcp_reference_lists_need_no_mutation_permissions() {
+        for (name, field) in [
+            ("mindwtr_list_sections", "sections"),
+            ("mindwtr_list_people", "people"),
+        ] {
+            let response = handle_mcp_request(
+                "fixture-token",
+                &access(false),
+                permissions(false),
+                MCP_PORT,
+                request(
+                    json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":{"includeDeleted":true}}}),
+                ),
+                |operation| {
+                    assert!(!operation.writes());
+                    Ok(json!({field: []}))
+                },
+            );
+            assert_ne!(response.body["result"]["isError"], true);
+            let body: Value = serde_json::from_str(
+                response.body["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(body[field], json!([]));
+        }
+    }
+
+    #[test]
     fn mcp_protocol_negotiation_notifications_and_bounded_scope() {
         for proposed in ["2025-03-26", "2025-06-18", "2099-01-01"] {
             let response = call(
@@ -864,7 +895,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            14
+            16
         );
         assert_eq!(
             call("tools/list", json!({"cursor":"bogus"}), false).body["error"]["code"],

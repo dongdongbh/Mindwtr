@@ -168,17 +168,23 @@ pub(crate) struct ApiRequest {
 pub(crate) struct ApiResponse {
     pub(crate) status: u16,
     pub(crate) body: Value,
+    pub(crate) etag: Option<String>,
 }
 
 impl ApiResponse {
     pub(crate) fn ok(body: Value) -> Self {
-        Self { status: 200, body }
+        Self {
+            status: 200,
+            body,
+            etag: None,
+        }
     }
 
     pub(crate) fn error(status: u16, message: impl Into<String>) -> Self {
         Self {
             status,
             body: json!({ "error": message.into() }),
+            etag: None,
         }
     }
 }
@@ -702,6 +708,29 @@ fn write_response(stream: &mut TcpStream, response: ApiResponse) -> Result<(), S
 }
 
 fn http_response(response: &ApiResponse) -> String {
+    let etag = response
+        .etag
+        .clone()
+        .or_else(|| {
+            response
+                .body
+                .get("version")
+                .and_then(Value::as_str)
+                .filter(|version| valid_task_version(version))
+                .map(str::to_string)
+        })
+        .map(|version| format!("ETag: \"{version}\"\r\n"))
+        .unwrap_or_default();
+    let cache_control = if response.etag.is_some() {
+        "Cache-Control: private, no-cache\r\n"
+    } else {
+        ""
+    };
+    if response.status == 304 {
+        return format!(
+            "HTTP/1.1 304 Not Modified\r\n{etag}{cache_control}Connection: close\r\n\r\n"
+        );
+    }
     let status_text = match response.status {
         200 => "OK",
         201 => "Created",
@@ -723,22 +752,19 @@ fn http_response(response: &ApiResponse) -> String {
     let body = if response.status == 202 {
         String::new()
     } else {
-        serde_json::to_string_pretty(&response.body).unwrap_or_else(|_| "{}".to_string())
+        serialized_json_body(&response.body)
     };
-    let etag = response
-        .body
-        .get("version")
-        .and_then(Value::as_str)
-        .filter(|version| valid_task_version(version))
-        .map(|version| format!("ETag: \"{version}\"\r\n"))
-        .unwrap_or_default();
     format!(
-        "HTTP/1.1 {} {}\r\n{etag}Content-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{etag}{cache_control}Content-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         status_text,
         body.len(),
         body,
     )
+}
+
+fn serialized_json_body(body: &Value) -> String {
+    serde_json::to_string_pretty(body).unwrap_or_else(|_| "{}".to_string())
 }
 
 fn handle_api_request(
@@ -838,6 +864,7 @@ pub(crate) fn api_error_response(error: String) -> ApiResponse {
         return ApiResponse {
             status,
             body: json!({"error": message, "code": error}),
+            etag: None,
         };
     }
     if error == RECURRENCE_REQUIRES_APP {
@@ -937,7 +964,9 @@ fn health_response() -> Value {
         "taskListVersions": true,
         "conditionalTaskPatch": true,
         "idempotentTaskCreate": true,
-        "conditionalTaskActions": true
+        "conditionalTaskActions": true,
+        "conditionalTaskListGet": true,
+        "referenceLists": true
     }})
 }
 
@@ -1040,6 +1069,13 @@ pub(crate) enum LocalOperation {
         restore: bool,
     },
     ListAreas,
+    ListSections {
+        project_id: Option<String>,
+        include_deleted: bool,
+    },
+    ListPeople {
+        include_deleted: bool,
+    },
     GetArea(String),
     PatchArea {
         id: String,
@@ -1129,6 +1165,23 @@ pub(crate) fn operation_from_api_request(
         ("GET", "/tasks") => LocalOperation::ListTasks(request.query.clone()),
         ("GET", "/projects") => LocalOperation::ListProjects,
         ("GET", "/areas" | "/v1/areas") => LocalOperation::ListAreas,
+        ("GET", "/sections" | "/v1/sections") => LocalOperation::ListSections {
+            project_id: request
+                .query
+                .get("projectId")
+                .filter(|id| !id.is_empty())
+                .cloned(),
+            include_deleted: request
+                .query
+                .get("deleted")
+                .is_some_and(|value| value == "1"),
+        },
+        ("GET", "/people" | "/v1/people") => LocalOperation::ListPeople {
+            include_deleted: request
+                .query
+                .get("deleted")
+                .is_some_and(|value| value == "1"),
+        },
         ("GET", "/search") => {
             LocalOperation::Search(request.query.get("query").cloned().unwrap_or_default())
         }
@@ -1228,10 +1281,43 @@ fn route_api_operation(
         operation,
         LocalOperation::DeleteTask(_) | LocalOperation::ProjectLifecycle { restore: false, .. }
     );
+    let task_filter = match &operation {
+        LocalOperation::ListTasks(query) => Some(TaskListFilter::from_query(query)?),
+        _ => None,
+    };
+    let condition = if task_filter.is_some() {
+        request
+            .headers
+            .get("if-none-match")
+            .map(|header| parse_if_none_match(header))
+            .transpose()?
+    } else {
+        None
+    };
     let body = execute(operation)?;
+    if let Some(filter) = task_filter {
+        let etag = format!(
+            "task-list-sha256-{}",
+            json_digest(
+                &json!({"namespace":"task-list-v1","query":filter,"body":serialized_json_body(&body)})
+            )
+        );
+        let unchanged = condition.is_some_and(|condition| match condition {
+            ListMatchCondition::Exists => true,
+            ListMatchCondition::Tags(tags) => tags.contains(&etag),
+        });
+        let outcome = if unchanged { "unchanged" } else { "returned" };
+        log::info!("Desktop Local API task list validated extra.releaseCheck=v1.3.9/local-api-reference-polling operation=tasks outcome={outcome}");
+        return Ok(ApiResponse {
+            status: if unchanged { 304 } else { 200 },
+            body: if unchanged { Value::Null } else { body },
+            etag: Some(etag),
+        });
+    }
     Ok(ApiResponse {
         status: if created { 201 } else { 200 },
         body: if deleted { json!({ "ok": true }) } else { body },
+        etag: None,
     })
 }
 
@@ -1347,6 +1433,21 @@ pub(crate) fn execute_operation(
                 .filter(|area| !has_string_field(area, "deletedAt"))
                 .collect::<Vec<_>>();
             return Ok(json!({ "areas": areas }));
+        }
+        LocalOperation::ListSections {
+            project_id,
+            include_deleted,
+        } => {
+            let data = load_data_snapshot(app)?;
+            let sections = reference_sections(&data, project_id.as_deref(), include_deleted);
+            log::info!("Desktop Local API reference list returned extra.releaseCheck=v1.3.9/local-api-reference-polling operation=sections outcome=returned");
+            return Ok(json!({"sections": sections}));
+        }
+        LocalOperation::ListPeople { include_deleted } => {
+            let data = load_data_snapshot(app)?;
+            let people = reference_people(&data, include_deleted);
+            log::info!("Desktop Local API reference list returned extra.releaseCheck=v1.3.9/local-api-reference-polling operation=people outcome=returned");
+            return Ok(json!({"people": people}));
         }
         LocalOperation::GetArea(id) => {
             let data = load_data_snapshot(app)?;
@@ -1689,23 +1790,13 @@ fn task_is_focused_today(task: &Value) -> bool {
 }
 
 fn filter_tasks(tasks: Vec<Value>, query: &HashMap<String, String>) -> Result<Vec<Value>, String> {
-    let include_all = query.get("all").map(|value| value == "1").unwrap_or(false);
-    let include_deleted = query
-        .get("deleted")
-        .map(|value| value == "1")
-        .unwrap_or(false);
-    let status = query
-        .get("status")
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty());
-    if let Some(status) = status {
-        validate_task_status(status)?;
-    }
-    let text_query = query
-        .get("query")
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
-    let is_focused_today = parse_boolean_query_param(query, "isFocusedToday")?;
+    let TaskListFilter {
+        include_all,
+        include_deleted,
+        status,
+        text_query,
+        is_focused_today,
+    } = TaskListFilter::from_query(query)?;
 
     let filtered = tasks
         .into_iter()
@@ -1714,15 +1805,15 @@ fn filter_tasks(tasks: Vec<Value>, query: &HashMap<String, String>) -> Result<Ve
             if include_all {
                 return true;
             }
-            let status = task
-                .get("status")
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            status != "done" && status != "archived"
+            !matches!(
+                task.get("status").and_then(Value::as_str).unwrap_or(""),
+                "done" | "archived"
+            )
         })
         .filter(|task| {
             status
-                .map(|target| task.get("status").and_then(|value| value.as_str()) == Some(target))
+                .as_ref()
+                .map(|target| task.get("status").and_then(Value::as_str) == Some(target.as_str()))
                 .unwrap_or(true)
         })
         .filter(|task| {
@@ -1738,6 +1829,130 @@ fn filter_tasks(tasks: Vec<Value>, query: &HashMap<String, String>) -> Result<Ve
         })
         .collect();
     Ok(filtered)
+}
+
+#[derive(Serialize)]
+struct TaskListFilter {
+    include_all: bool,
+    include_deleted: bool,
+    status: Option<String>,
+    text_query: Option<String>,
+    is_focused_today: Option<bool>,
+}
+
+impl TaskListFilter {
+    fn from_query(query: &HashMap<String, String>) -> Result<Self, String> {
+        let include_all = query.get("all").map(|value| value == "1").unwrap_or(false);
+        let include_deleted = query
+            .get("deleted")
+            .map(|value| value == "1")
+            .unwrap_or(false);
+        let status = query
+            .get("status")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        if let Some(status) = status {
+            validate_task_status(status)?;
+        }
+        let text_query = query
+            .get("query")
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        let is_focused_today = parse_boolean_query_param(query, "isFocusedToday")?;
+
+        Ok(Self {
+            include_all,
+            include_deleted,
+            status: status.map(str::to_string),
+            text_query,
+            is_focused_today,
+        })
+    }
+}
+
+enum ListMatchCondition {
+    Exists,
+    Tags(Vec<String>),
+}
+
+fn parse_if_none_match(header: &str) -> Result<ListMatchCondition, String> {
+    let invalid = || "Invalid If-None-Match header".to_string();
+    let mut remaining = header.trim_matches([' ', '\t']);
+    if remaining == "*" {
+        return Ok(ListMatchCondition::Exists);
+    }
+    let mut tags = Vec::new();
+    loop {
+        while let Some(rest) = remaining.strip_prefix(',') {
+            remaining = rest.trim_matches([' ', '\t']);
+        }
+        if remaining.is_empty() {
+            break;
+        }
+        remaining = remaining.strip_prefix("W/").unwrap_or(remaining);
+        let quoted = remaining.strip_prefix('"').ok_or_else(invalid)?;
+        let end = quoted.find('"').ok_or_else(invalid)?;
+        let tag = &quoted[..end];
+        if !tag
+            .bytes()
+            .all(|byte| byte == 0x21 || (0x23..=0x7e).contains(&byte) || byte >= 0x80)
+        {
+            return Err(invalid());
+        }
+        tags.push(tag.to_string());
+        remaining = quoted[end + 1..].trim_matches([' ', '\t']);
+        if remaining.is_empty() {
+            break;
+        }
+        remaining = remaining
+            .strip_prefix(',')
+            .ok_or_else(invalid)?
+            .trim_matches([' ', '\t']);
+    }
+    Ok(ListMatchCondition::Tags(tags))
+}
+
+fn reference_sections(data: &Value, project_id: Option<&str>, include_deleted: bool) -> Vec<Value> {
+    let mut sections = array_items(data, "sections")
+        .into_iter()
+        .filter(|section| include_deleted || !has_string_field(section, "deletedAt"))
+        .filter(|section| {
+            project_id
+                .filter(|id| !id.is_empty())
+                .is_none_or(|id| section.get("projectId").and_then(Value::as_str) == Some(id))
+        })
+        .collect::<Vec<_>>();
+    sections.sort_by(|left, right| {
+        left["projectId"]
+            .as_str()
+            .cmp(&right["projectId"].as_str())
+            .then_with(|| {
+                left["order"]
+                    .as_f64()
+                    .unwrap_or(0.0)
+                    .total_cmp(&right["order"].as_f64().unwrap_or(0.0))
+            })
+            .then_with(|| left["title"].as_str().cmp(&right["title"].as_str()))
+            .then_with(|| left["id"].as_str().cmp(&right["id"].as_str()))
+    });
+    sections
+}
+
+fn reference_people(data: &Value, include_deleted: bool) -> Vec<Value> {
+    let mut people = array_items(data, "people")
+        .into_iter()
+        .filter(|person| include_deleted || !has_string_field(person, "deletedAt"))
+        .collect::<Vec<_>>();
+    people.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase()
+            .cmp(&right["name"].as_str().unwrap_or("").to_lowercase())
+            .then_with(|| right["updatedAt"].as_str().cmp(&left["updatedAt"].as_str()))
+            .then_with(|| left["id"].as_str().cmp(&right["id"].as_str()))
+    });
+    people
 }
 
 fn search_data(data: &Value, query: &str) -> Value {
@@ -2751,6 +2966,7 @@ fn recurrence_completion_refusal(
 fn recurrence_completion_refusal_response() -> ApiResponse {
     ApiResponse {
         status: 409,
+        etag: None,
         body: json!({
             "error": "This task's recurrence rule requires the app to complete it correctly.",
             "code": RECURRENCE_REQUIRES_APP,
@@ -5984,6 +6200,358 @@ mod tests {
     }
 
     #[test]
+    fn polling_task_list_http_uses_query_scoped_validators_without_writing() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut data = empty_local_api_data();
+        data["tasks"] = json!([
+            {"id":"first","title":"First","status":"next","tags":[],"contexts":[],"rev":1,"createdAt":"2026-11-01T00:00:00Z","updatedAt":"2026-11-01T00:00:00Z"},
+            {"id":"second","title":"Second","status":"waiting","tags":[],"contexts":[],"rev":1,"createdAt":"2026-11-01T00:00:00Z","updatedAt":"2026-11-01T00:00:00Z"},
+            {"id":"deleted","title":"Deleted","status":"done","tags":[],"contexts":[],"rev":1,"createdAt":"2026-11-01T00:00:00Z","updatedAt":"2026-11-01T00:00:00Z","deletedAt":"2026-11-01T00:00:00Z"}
+        ]);
+        crate::storage::local_operation_test_seed(&mut conn, &data).unwrap();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        let access = LocalApiAccess {
+            allow_write: false,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        let calls = std::cell::Cell::new(0);
+        let dispatch = |path: &str,
+                        query: HashMap<String, String>,
+                        condition: Option<String>,
+                        authorized: bool| {
+            let mut headers = HashMap::new();
+            if authorized {
+                headers.insert("authorization".into(), "Bearer credential".into());
+            }
+            if let Some(condition) = condition {
+                headers.insert("if-none-match".into(), condition);
+            }
+            handle_api_operation(
+                "credential",
+                &access,
+                ApiRequest {
+                    method: "GET".into(),
+                    path: path.into(),
+                    query,
+                    headers,
+                    body: vec![],
+                },
+                |operation| {
+                    calls.set(calls.get() + 1);
+                    let LocalOperation::ListTasks(query) = operation else {
+                        panic!()
+                    };
+                    let data = crate::storage::read_sqlite_data(&conn)?;
+                    Ok(task_list_response(filter_tasks(
+                        array_items(&data, "tasks"),
+                        &query,
+                    )?))
+                },
+            )
+        };
+        let first = dispatch("/tasks", HashMap::new(), None, true);
+        let raw = http_response(&first);
+        let tag = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .expect("task list ETag")
+            .to_string();
+        assert!(tag.starts_with("\"task-list-sha256-"));
+        assert!(raw.contains("Cache-Control: private, no-cache\r\n"));
+        assert_eq!(first.body["tasks"].as_array().unwrap().len(), 2);
+        for condition in [
+            tag.clone(),
+            format!("W/{tag}"),
+            format!("\"unrelated,opaque\", W/{tag}"),
+            format!("{tag},"),
+            format!(", , W/{tag}, , \"other\", "),
+            "*".into(),
+        ] {
+            let unchanged = dispatch("/v1/tasks", HashMap::new(), Some(condition), true);
+            assert_eq!(unchanged.status, 304);
+            let raw = http_response(&unchanged);
+            assert!(raw.ends_with("\r\n\r\n"));
+            assert!(!raw.contains("Content-Length:"));
+            assert!(!raw.contains("Content-Type:"));
+            assert!(raw.contains(&format!("ETag: {tag}\r\n")));
+        }
+        let executed = calls.get();
+        assert_eq!(
+            dispatch("/tasks", HashMap::new(), Some(tag.clone()), false).status,
+            401
+        );
+        for condition in ["unquoted", "\"unterminated", "*, \"tag\"", "W/ \"tag\""] {
+            assert_eq!(
+                dispatch("/tasks", HashMap::new(), Some(condition.into()), true).status,
+                400
+            );
+        }
+        assert_eq!(
+            dispatch(
+                "/tasks",
+                HashMap::from([("status".into(), "invalid".into())]),
+                Some(tag.clone()),
+                true
+            )
+            .status,
+            400
+        );
+        assert_eq!(calls.get(), executed);
+        for condition in ["", ", , ", "\"unknown\""] {
+            assert_eq!(
+                dispatch("/tasks", HashMap::new(), Some(condition.into()), true).status,
+                200
+            );
+        }
+        let empty_query = HashMap::from([("query".into(), "absent".into())]);
+        assert_eq!(
+            dispatch("/tasks", empty_query.clone(), Some(tag.clone()), true).status,
+            200
+        );
+        assert_eq!(
+            dispatch("/tasks", empty_query, Some("*".into()), true).status,
+            304
+        );
+        assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+        conn.execute(
+            "UPDATE tasks SET title = 'Backdated edit' WHERE id = 'second'",
+            [],
+        )
+        .unwrap();
+        let changed = dispatch("/tasks", HashMap::new(), Some(tag.clone()), true);
+        assert_eq!(changed.status, 200);
+        assert!(!http_response(&changed).contains(&format!("ETag: {tag}\r\n")));
+        let filtered = HashMap::from([("status".into(), "next".into())]);
+        let response = dispatch("/tasks", filtered.clone(), None, true);
+        let raw = http_response(&response);
+        let filtered_tag = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .unwrap()
+            .to_string();
+        conn.execute(
+            "UPDATE tasks SET title = 'Outside selection' WHERE id = 'second'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            dispatch("/tasks", filtered, Some(filtered_tag), true).status,
+            304
+        );
+        let tombstones =
+            HashMap::from([("all".into(), "1".into()), ("deleted".into(), "1".into())]);
+        let response = dispatch("/tasks", tombstones.clone(), None, true);
+        assert_eq!(response.body["tasks"].as_array().unwrap().len(), 3);
+        let raw = http_response(&response);
+        let tombstone_tag = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .unwrap()
+            .to_string();
+        conn.execute(
+            "UPDATE tasks SET title = 'Changed tombstone' WHERE id = 'deleted'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            dispatch("/tasks", tombstones, Some(tombstone_tag), true).status,
+            200
+        );
+        let response = dispatch("/tasks", HashMap::new(), None, true);
+        let raw = http_response(&response);
+        let before_removal = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .unwrap()
+            .to_string();
+        conn.execute(
+            "UPDATE tasks SET deletedAt = '2026-11-02T00:00:00Z' WHERE id = 'first'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            dispatch("/tasks", HashMap::new(), Some(before_removal), true).status,
+            200
+        );
+        let normalized = HashMap::from([
+            ("query".into(), " OUTSIDE ".into()),
+            ("isFocusedToday".into(), "false".into()),
+        ]);
+        let response = dispatch("/tasks", normalized, None, true);
+        let raw = http_response(&response);
+        let normalized_tag = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            dispatch(
+                "/v1/tasks",
+                HashMap::from([
+                    ("isFocusedToday".into(), "0".into()),
+                    ("query".into(), "outside".into())
+                ]),
+                Some(normalized_tag),
+                true
+            )
+            .status,
+            304
+        );
+        let empty = HashMap::from([("query".into(), "absent".into())]);
+        let response = dispatch("/tasks", empty.clone(), None, true);
+        let raw = http_response(&response);
+        let empty_tag = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .unwrap()
+            .to_string();
+        let mut distinct = empty;
+        distinct.insert("all".into(), "1".into());
+        assert_eq!(
+            dispatch("/tasks", distinct, Some(empty_tag), true).status,
+            200
+        );
+        let response = dispatch("/tasks", HashMap::new(), None, true);
+        let raw = http_response(&response);
+        let before_addition = raw
+            .lines()
+            .find_map(|line| line.strip_prefix("ETag: "))
+            .unwrap()
+            .to_string();
+        crate::storage::local_operation_test_commit(
+            &conn,
+            TaskMutationReadScope::create(None, None, None, false),
+            |data| {
+                mutate_task_operation(
+                    data,
+                    &LocalOperation::CreateTask(
+                        json!({"title":"Newly added"}).as_object().unwrap().clone(),
+                    ),
+                )
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            dispatch(
+                "/tasks",
+                HashMap::new(),
+                Some(before_addition.clone()),
+                true
+            )
+            .status,
+            200
+        );
+        let executed = calls.get();
+        access.shutdown.store(true, Ordering::Relaxed);
+        assert_eq!(
+            dispatch("/tasks", HashMap::new(), Some(before_addition), true).status,
+            403
+        );
+        assert_eq!(calls.get(), executed);
+    }
+
+    #[test]
+    fn polling_reference_routes_are_available_with_read_only_access() {
+        let access = LocalApiAccess {
+            allow_write: false,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        for (path, field) in [
+            ("/sections", "sections"),
+            ("/v1/sections", "sections"),
+            ("/people", "people"),
+            ("/v1/people", "people"),
+        ] {
+            let response = handle_api_operation(
+                "credential",
+                &access,
+                ApiRequest {
+                    method: "GET".into(),
+                    path: path.into(),
+                    query: HashMap::new(),
+                    headers: HashMap::from([("authorization".into(), "Bearer credential".into())]),
+                    body: vec![],
+                },
+                |operation| {
+                    assert!(!operation.writes());
+                    Ok(json!({field: []}))
+                },
+            );
+            assert_eq!(response.status, 200);
+            assert_eq!(response.body[field], json!([]));
+        }
+    }
+
+    #[test]
+    fn polling_reference_selection_preserves_records_and_matches_mcp_inputs() {
+        let data = json!({"projects":[{"id":"archived","status":"archived"}],"sections":[
+            {"id":"later","projectId":"archived","title":"Later","order":2},
+            {"id":"earlier","projectId":"archived","title":"Earlier","order":1,"projectArchivedAt":"marker"},
+            {"id":"deleted","projectId":"other","title":"Deleted","order":0,"deletedAt":"marker"}
+        ],"people":[
+            {"id":"z","name":"Zoe","updatedAt":"2026-11-01"},
+            {"id":"a","name":"alex","updatedAt":"2026-11-02","note":"Reference"},
+            {"id":"deleted","name":"Deleted","updatedAt":"2026-11-01","deletedAt":"marker"}
+        ]});
+        let before = data.clone();
+        assert_eq!(
+            reference_sections(&data, Some("archived"), false),
+            vec![data["sections"][1].clone(), data["sections"][0].clone()]
+        );
+        assert_eq!(reference_sections(&data, None, true).len(), 3);
+        assert!(reference_sections(&data, Some("missing"), true).is_empty());
+        assert_eq!(
+            reference_people(&data, false),
+            vec![data["people"][1].clone(), data["people"][0].clone()]
+        );
+        assert_eq!(reference_people(&data, true).len(), 3);
+        assert!(reference_people(&json!({}), false).is_empty());
+        assert!(reference_sections(&json!({}), None, false).is_empty());
+        for (tool, path, input, query) in [
+            (
+                "mindwtr_list_sections",
+                "/sections",
+                json!({"projectId":"archived","includeDeleted":true}),
+                HashMap::from([
+                    ("projectId".into(), "archived".into()),
+                    ("deleted".into(), "1".into()),
+                ]),
+            ),
+            (
+                "mindwtr_list_people",
+                "/people",
+                json!({"includeDeleted":true}),
+                HashMap::from([("deleted".into(), "1".into())]),
+            ),
+        ] {
+            let request = ApiRequest {
+                method: "GET".into(),
+                path: path.into(),
+                query,
+                headers: HashMap::new(),
+                body: vec![],
+            };
+            let rest = operation_from_api_request(&request).unwrap().unwrap();
+            let mcp = crate::mcp_tools::operation(tool, input.as_object().unwrap()).unwrap();
+            assert_eq!(rest, mcp);
+            assert!(!mcp.writes());
+            for input in [
+                json!({"includeDeleted":"true"}),
+                json!({"unknown":true}),
+                json!({"includeDeleted":null}),
+            ] {
+                assert!(crate::mcp_tools::operation(tool, input.as_object().unwrap()).is_err());
+            }
+        }
+        assert!(crate::mcp_tools::operation(
+            "mindwtr_list_sections",
+            json!({"projectId":1}).as_object().unwrap()
+        )
+        .is_err());
+        assert_eq!(data, before);
+    }
+
+    #[test]
     fn reliability_lists_expose_snapshot_versions_without_changing_tasks() {
         let data = json!({"tasks":[
             {"id":"active","title":"Active","status":"next","rev":2,"updatedAt":"2026-11-08T12:00:00Z"},
@@ -6279,7 +6847,7 @@ mod tests {
                 assert_eq!(response.body["apiVersion"], 2);
                 assert_eq!(
                     response.body["capabilities"],
-                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true})
+                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true,"conditionalTaskListGet":true,"referenceLists":true})
                 );
             }
         }

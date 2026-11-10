@@ -138,8 +138,8 @@ Both arguments are optional. Without them, writes keep their existing behavior. 
 | List/get/create/update/delete projects | Supported for the API's basic project fields: title, color, status, Area and sequential behavior |
 | List areas | Supported |
 | View section catalogue and project assignments | Unavailable; task assignments by known ID are supported |
-| Sections, managed people, Area writes | Unavailable; these tools are hidden in API mode |
-| GTD availability `view` | Unavailable because the API does not expose the required section snapshot |
+| Sections, managed people, Area writes | Section/people lists are supported; single lookups and remaining writes are unavailable |
+| GTD availability `view` | Unavailable because the API does not expose the required view-section and settings snapshot |
 | Replacing attachment links | Unavailable because the API does not provide conditional attachment updates |
 
 Other unsupported fields are rejected before a write. The desktop API's recurrence limitations also apply; some recurring completions must be performed in the app. This backend does not promise full SQLite/Cloud tool parity.

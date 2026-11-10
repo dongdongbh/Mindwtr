@@ -52,6 +52,8 @@ const TOOL_NAMES: &[(&str, &str)] = &[
     ("mindwtr_list_projects", "List live projects."),
     ("mindwtr_get_project", "Get a project by ID."),
     ("mindwtr_list_areas", "List live areas."),
+    ("mindwtr_list_sections", "List project sections, optionally including deleted sections or filtering by project ID."),
+    ("mindwtr_list_people", "List managed people, optionally including deleted people."),
     ("mindwtr_add_task", "Add a task with an explicit title. Quick-add is unavailable."),
     ("mindwtr_update_task", "Update a task. Attachment replacement and done/archived transitions are unavailable; use complete_task for completion."),
     ("mindwtr_complete_task", "Mark a task done."),
@@ -75,6 +77,8 @@ pub(crate) fn tools() -> Vec<Value> {
             "mindwtr_update_project" => std::iter::once("id").chain(PROJECT_FIELDS.iter().copied()).collect(),
             "mindwtr_get_task" | "mindwtr_get_project" => vec!["id", "includeDeleted"],
             "mindwtr_list_projects" | "mindwtr_list_areas" => vec![],
+            "mindwtr_list_sections" => vec!["projectId", "includeDeleted"],
+            "mindwtr_list_people" => vec!["includeDeleted"],
             _ => vec!["id"],
         };
         let mut properties = Map::new();
@@ -192,6 +196,13 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
         }
         id()
     };
+    let include_deleted = || {
+        input
+            .get("includeDeleted")
+            .map(|value| value.as_bool().ok_or_else(invalid))
+            .transpose()
+            .map(|value| value.unwrap_or(false))
+    };
     Ok(match name {
         "mindwtr_list_tasks" => {
             crate::local_query::validate_query(input)?;
@@ -204,6 +215,23 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
         "mindwtr_list_areas" => {
             only(&[])?;
             LocalOperation::ListAreas
+        }
+        "mindwtr_list_sections" => {
+            only(&["projectId", "includeDeleted"])?;
+            LocalOperation::ListSections {
+                project_id: input
+                    .get("projectId")
+                    .map(|value| value.as_str().map(str::to_string).ok_or_else(invalid))
+                    .transpose()?
+                    .filter(|id| !id.is_empty()),
+                include_deleted: include_deleted()?,
+            }
+        }
+        "mindwtr_list_people" => {
+            only(&["includeDeleted"])?;
+            LocalOperation::ListPeople {
+                include_deleted: include_deleted()?,
+            }
         }
         "mindwtr_get_task" => LocalOperation::GetTask(get()?),
         "mindwtr_get_project" => LocalOperation::GetProject(get()?),

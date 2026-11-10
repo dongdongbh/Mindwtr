@@ -116,6 +116,32 @@ describe('desktop Local API URL and authentication boundary', () => {
 });
 
 describe('desktop Local API task reads', () => {
+  test('reads sections and people through authenticated lists with encoded filters', async () => {
+    const section = { id: 'section', title: 'Section', projectId: 'project /+?', order: 1, createdAt: iso, updatedAt: iso, deletedAt: iso };
+    const person = { id: 'person', name: 'Alex', note: 'Reference', createdAt: iso, updatedAt: iso, deletedAt: iso };
+    const { service, calls } = fixture((call) => jsonResponse(call.url.includes('/sections') ? { sections: [section] } : { people: [person] }));
+    expect(await service.listSections({ projectId: section.projectId, includeDeleted: true })).toEqual([section]);
+    expect(new URL(calls[0].url).searchParams.get('projectId')).toBe(section.projectId);
+    expect(new URL(calls[0].url).searchParams.get('deleted')).toBe('1');
+    expect(await service.listPeople({ includeDeleted: true })).toEqual([person]);
+    expect(calls[1].url).toBe(`${origin}/people?deleted=1`);
+    await service.listSections();
+    expect(calls[2].url).toBe(`${origin}/sections`);
+  });
+
+  test('reference lists fail clearly on malformed data and unsupported desktop endpoints', async () => {
+    for (const body of [{}, { sections: [null] }, { sections: [{ id: 's', title: 'S', createdAt: iso, updatedAt: iso }] }]) {
+      await expect(fixture(() => jsonResponse(body)).service.listSections()).rejects.toThrow('invalid response');
+    }
+    for (const body of [{}, { people: [null] }, { people: [{ id: 'p', name: 'P', createdAt: iso, updatedAt: iso, note: 1 }] }]) {
+      await expect(fixture(() => jsonResponse(body)).service.listPeople()).rejects.toThrow('invalid response');
+    }
+    const { service, calls } = fixture(() => jsonResponse({}, 404));
+    await expect(service.listSections()).rejects.toThrow(NotFoundError);
+    await expect(service.listPeople()).rejects.toThrow(NotFoundError);
+    expect(calls).toHaveLength(2);
+  });
+
   test('carries list versions through filtering and pagination without changing task fields', async () => {
     const rows = [task('first', { priority: 'urgent' }), task('second', { priority: 'high' }), task('deleted', { deletedAt: iso })];
     const versions = Object.fromEntries(rows.map((row, index) => [row.id, `sha256-${String(index).repeat(64)}`]));
@@ -365,9 +391,9 @@ describe('desktop Local API capability rejection before requests', () => {
   test('availability, section, people and area write tools fail without any network activity', async () => {
     const { service, calls } = fixture(() => jsonResponse({}));
     for (const view of ['available', 'deferred', 'blocked'] as const) await expect(service.listTasks({ view })).rejects.toThrow('section and settings');
-    for (const operation of [() => service.listSections(), () => service.getSection({ id: 's' }),
+    for (const operation of [() => service.getSection({ id: 's' }),
       () => service.addSection({ title: 'S', projectId: 'p' }), () => service.updateSection({ id: 's', title: 'S' }), () => service.deleteSection('s'),
-      () => service.listPeople(), () => service.getPerson({ id: 'p' }), () => service.addPerson({ name: 'P' }),
+      () => service.getPerson({ id: 'p' }), () => service.addPerson({ name: 'P' }),
       () => service.updatePerson({ id: 'p', name: 'P' }), () => service.renamePerson({ id: 'p', name: 'P' }), () => service.deletePerson('p'),
       () => service.addArea({ name: 'A' }), () => service.updateArea({ id: 'a', name: 'A' }), () => service.deleteArea('a')]) {
       await expect(operation()).rejects.toThrow(ValidationError);

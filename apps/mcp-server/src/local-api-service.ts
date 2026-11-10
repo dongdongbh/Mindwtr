@@ -16,7 +16,7 @@ import {
   taskRecurrenceInputSchema,
 } from './input-validation.js';
 import { buildLinkAttachments, linkAttachmentsCreateSchema, normalizeLinkAttachmentInputs } from './link-attachments.js';
-import type { AddTaskInput, Area, GetTaskInput, ListTasksInput, Project, Task, TaskStatus, UpdateTaskInput } from './queries.js';
+import type { AddTaskInput, Area, GetTaskInput, ListTasksInput, Person, Project, Section, Task, TaskStatus, UpdateTaskInput } from './queries.js';
 import type { MindwtrService } from './service.js';
 import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
 
@@ -192,16 +192,17 @@ const normalizeTaskProps = (input: Record<string, unknown>, creating: boolean): 
 };
 
 const malformedResponse = (): never => { throw new Error('Desktop Local API returned an invalid response.'); };
-const validateEntity = <T extends Task | Project | Area>(value: unknown, kind: 'task' | 'project' | 'area', expectedId?: string): T => {
+const validateEntity = <T extends Task | Project | Area | Section | Person>(value: unknown, kind: 'task' | 'project' | 'area' | 'section' | 'person', expectedId?: string): T => {
   const record = asRecord(value);
   if (!record || typeof record.id !== 'string' || !record.id || (expectedId !== undefined && record.id !== expectedId)
     || typeof record.createdAt !== 'string' || typeof record.updatedAt !== 'string'
-    || typeof record[kind === 'area' ? 'name' : 'title'] !== 'string') return malformedResponse();
+    || typeof record[kind === 'area' || kind === 'person' ? 'name' : 'title'] !== 'string') return malformedResponse();
+  if (kind === 'section' && (typeof record.projectId !== 'string' || !record.projectId || typeof record.order !== 'number' || !Number.isFinite(record.order))) return malformedResponse();
   if (kind === 'task' && (!taskStatusSchema.safeParse(record.status).success
     || !Array.isArray(record.tags) || !record.tags.every((item) => typeof item === 'string')
     || !Array.isArray(record.contexts) || !record.contexts.every((item) => typeof item === 'string'))) return malformedResponse();
   if (kind === 'project' && !z.enum(['active', 'someday', 'waiting', 'archived']).safeParse(record.status).success) return malformedResponse();
-  for (const name of ['deletedAt', 'dueDate', 'startTime', 'reviewAt', 'description', 'projectId', 'sectionId']) {
+  for (const name of ['deletedAt', 'dueDate', 'startTime', 'reviewAt', 'description', 'projectId', 'sectionId', 'note', 'referenceLink']) {
     if (record[name] !== undefined && record[name] !== null && typeof record[name] !== 'string') return malformedResponse();
   }
   return record as T;
@@ -327,7 +328,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
       throw new Error(`Desktop Local API returned an invalid response.${method === 'GET' ? '' : ' The write outcome is unknown; check the desktop app before retrying.'}`);
     }
   };
-  const entities = async <T extends Task | Project | Area>(path: string, key: 'tasks' | 'projects' | 'areas', kind: 'task' | 'project' | 'area'): Promise<T[]> => {
+  const entities = async <T extends Task | Project | Area | Section | Person>(path: string, key: 'tasks' | 'projects' | 'areas' | 'sections' | 'people', kind: 'task' | 'project' | 'area' | 'section' | 'person'): Promise<T[]> => {
     const { body: result } = await request('GET', path);
     if (!Array.isArray(result[key])) return malformedResponse();
     const versions = kind === 'task' && result.versions !== undefined ? asRecord(result.versions) : undefined;
@@ -438,12 +439,21 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
     },
     deleteProject: async (id) => deleteEntity<Project>('projects', id),
     listViewSections: async () => unsupported('view section catalogue'),
-    listSections: async () => unsupported('section tools'),
+    listSections: async (input = {}) => {
+      const parsed = parseInput(z.object({ projectId: z.string().optional(), includeDeleted: z.boolean().optional() }).strict(), input, 'section list');
+      const query = new URLSearchParams();
+      if (parsed.projectId) query.set('projectId', parsed.projectId);
+      if (parsed.includeDeleted) query.set('deleted', '1');
+      return entities<Section>(`/sections${query.size > 0 ? `?${query}` : ''}`, 'sections', 'section');
+    },
     getSection: async () => unsupported('section tools'),
     addSection: async () => unsupported('section tools'),
     updateSection: async () => unsupported('section tools'),
     deleteSection: async () => unsupported('section tools'),
-    listPeople: async () => unsupported('people tools'),
+    listPeople: async (input = {}) => {
+      const parsed = parseInput(z.object({ includeDeleted: z.boolean().optional() }).strict(), input, 'people list');
+      return entities<Person>(`/people${parsed.includeDeleted ? '?deleted=1' : ''}`, 'people', 'person');
+    },
     getPerson: async () => unsupported('people tools'),
     addPerson: async () => unsupported('people tools'),
     updatePerson: async () => unsupported('people tools'),

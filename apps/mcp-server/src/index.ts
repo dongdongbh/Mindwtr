@@ -608,18 +608,18 @@ export const registerMindwtrTools = (
       { description: 'List view section IDs, titles and order for Someday, Waiting or Focus. These are separate from project sections. Read-only; create or rename view sections in the app.', inputSchema: listViewSectionsSchema },
       withMcpErrorHandling('mindwtr_list_view_sections', async (input) => createMcpTextResponse({ viewSections: await service.listViewSections(input) })),
     );
-    server.registerTool(
-      'mindwtr_list_sections',
-      {
-        description: 'List project sections from the configured Mindwtr backend. Optionally filter by projectId.',
-        inputSchema: listSectionsSchema,
-      },
-      withMcpErrorHandling('mindwtr_list_sections', async (input) => {
-        const sections = await service.listSections(input);
-        return createMcpTextResponse({ sections });
-      }),
-    );
   }
+  server.registerTool(
+    'mindwtr_list_sections',
+    {
+      description: 'List project sections from the configured Mindwtr backend. Optionally filter by projectId.',
+      inputSchema: options.localApi ? listSectionsSchema.strict() : listSectionsSchema,
+    },
+    withMcpErrorHandling('mindwtr_list_sections', async (input) => {
+      const sections = await service.listSections(input);
+      return createMcpTextResponse({ sections });
+    }),
+  );
 
   if (!options.localApi) {
     server.registerTool(
@@ -647,19 +647,17 @@ export const registerMindwtrTools = (
     }),
   );
 
-  if (!options.localApi) {
-    server.registerTool(
-      'mindwtr_list_people',
-      {
-        description: 'List managed people from the configured Mindwtr backend.',
-        inputSchema: listPeopleSchema,
-      },
-      withMcpErrorHandling('mindwtr_list_people', async (input) => {
-        const people = await service.listPeople(input);
-        return createMcpTextResponse({ people });
-      }),
-    );
-  }
+  server.registerTool(
+    'mindwtr_list_people',
+    {
+      description: 'List managed people from the configured Mindwtr backend.',
+      inputSchema: options.localApi ? listPeopleSchema.strict() : listPeopleSchema,
+    },
+    withMcpErrorHandling('mindwtr_list_people', async (input) => {
+      const people = await service.listPeople(input);
+      return createMcpTextResponse({ people });
+    }),
+  );
 
   if (!options.localApi) {
     server.registerTool(
