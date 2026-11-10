@@ -143,6 +143,7 @@ test("native CI uses one Xcode 27 lane and retains Apple validation coverage", (
   const workflowText = readFileSync(".github/workflows/native-platform-ci.yml", "utf8");
   const workflow = parse(workflowText);
   const job = workflow.jobs["ios-native"];
+  expect(job.defaults.run.shell).toBe('python3 "${{ github.workspace }}/scripts/ci/apple_ci_storage.py" run {0}');
   const lanes = Object.fromEntries(
     appleRouting(false, false).matrix.include.map((entry) => [entry.lane, entry]),
   );
@@ -221,7 +222,7 @@ test("native CI uses one Xcode 27 lane and retains Apple validation coverage", (
   expect(upload.uses).toBe(
     "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f",
   );
-  expect(upload.with.path).toBe("${{ runner.temp }}/ios27-artifacts");
+  expect(upload.with.path).toBe("${{ env.MINDWTR_APPLE_TEMP }}/ios27-artifacts");
 
   for (const script of [
     "scripts/ci/collect-ios27-environment.sh",
@@ -535,13 +536,16 @@ test("SwiftUI client detection is retained while its CI job is paused for migrat
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
   const job = workflow.jobs["ios-client"];
+  expect(job.defaults.run.shell).toBe('python3 "${{ github.workspace }}/scripts/ci/apple_ci_storage.py" run {0}');
   expect(job.if).toStartWith("false && ");
   expect(job.if).toContain("needs.changes.outputs.ios_client == 'true'");
   expect(job.if).toContain("needs.changes.outputs.macmini != 'true'");
   const validation = job.steps.find((step) => step.run?.includes("bash apps/ios-native/scripts/validate.sh"));
   expect(validation).toBeDefined();
   expect(validation.run).toContain("set -o pipefail");
-  expect(validation.run).toContain('bash apps/ios-native/scripts/validate.sh 2>&1 | tee "$RUNNER_TEMP/ios-swiftui-artifacts/validation.log"');
+  expect(validation.run).toContain('bash apps/ios-native/scripts/validate.sh 2>&1 | tee "$MINDWTR_APPLE_TEMP/ios-swiftui-artifacts/validation.log"');
+  expect(job.steps.find((step) => step.name === "Upload SwiftUI validation evidence").with.path)
+    .toBe("${{ env.MINDWTR_APPLE_TEMP }}/ios-swiftui-artifacts");
   expect(readFileSync("apps/ios-native/scripts/validate.sh", "utf8")).toContain("export TZ=America/New_York");
   expect(workflow.jobs["ios-macmini"].if).toBe("needs.changes.outputs.ios == 'true' && needs.changes.outputs.macmini == 'true'");
   expect(workflow.jobs["ios-native"].if).toBe("needs.changes.outputs.ios == 'true' && needs.changes.outputs.macmini != 'true'");
