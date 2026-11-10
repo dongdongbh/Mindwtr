@@ -862,8 +862,6 @@
   .project-workspace [data-project-task-toolbar] { box-shadow: none; }
   .project-workspace [data-view-filter-input] { min-height: 2.75rem; font-size: 0.875rem; }
   .project-workspace--list .project-section-title { font-size: 1.125rem; }
-  .project-workspace .task-item-display__title { font-weight: 400; }
-  .project-workspace--list .task-item-display__title.text-base { font-size: 1.125rem; }
   .project-workspace--list .task-item-display__description-preview { font-size: 0.875rem; }
   .project-workspace--list [data-task-complete] {
     width: 1.5rem;
