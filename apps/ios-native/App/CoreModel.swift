@@ -2292,11 +2292,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     @Published private(set) var completedStartupToken: UUID?
     private enum ForegroundSyncReason {
-        case startup, resume, pull, retention, background
+        case startup, resume, pull, retention, background, leave
         var command: String {
             switch self {
             case .startup: return "syncStored"
             case .resume, .background: return "syncResume"
+            case .leave: return "syncLeave"
             case .pull: return "syncPull"
             case .retention: return "archiveRetention"
             }
@@ -2330,6 +2331,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var archiveRetentionWake: Task<Void, Never>?
 
     private var foregroundSyncGeneration = 0
+    private var syncLeaveTicket = 0
+    private var syncLeaveArmed = false
     @Published private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
     private struct ReminderLifecycleOwner {
@@ -10898,7 +10901,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
 
         foregroundSyncIntent = nil
-        guard foregroundSyncOwner == nil, let token, token == completedStartupToken,
+        guard foregroundSyncOwner.map({ $0.reason == .leave }) ?? true, let token, token == completedStartupToken,
               let currentHost = host, startupSyncCompletedHost === currentHost,
               ready, !retryNeeded, !settingsSyncRestartRequired,
               !appLockRecoveryPending, foregroundSyncInboxClean else { return }
@@ -10920,6 +10923,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if !nativeDropboxBrowserInactive { cancelForegroundSync() }
             return
         }
+        syncLeaveArmed = true
         if !wasActive && !appLock.concealed, let currentHost = host {
             let generation = foregroundSyncGeneration
             Task { [weak self, weak currentHost] in
@@ -10961,6 +10965,60 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         archiveRetentionWake?.cancel()
         archiveRetentionWake = nil
         archiveRetentionRequested = false
+        if !holdingRunningSync { syncLeaveArmed = false }
+        observeLeaveSync()
+    }
+
+    private var syncTriggerHost: CoreHost? {
+        guard workspaceAdmissionsOpen, settingsSyncAvailable, let currentHost = host, currentHost.workspaceMode == .personal,
+              completedStartupToken != nil, startupSyncCompletedHost === currentHost else { return nil }
+        return currentHost
+    }
+
+    private func observeLeaveSync() {
+        guard syncLeaveArmed, !foregroundSyncSceneActive, let currentHost = syncTriggerHost else { return }
+        syncLeaveTicket += 1
+        let ticket = syncLeaveTicket
+        Task { [weak self] in
+            guard let observation = try? await currentHost.syncChangeObservation(),
+                  let self, self.host === currentHost, self.syncLeaveTicket == ticket else { return }
+            if observation.pending { self.admitLeaveSync() } else { self.syncLeaveArmed = false }
+        }
+    }
+
+    private func admitLeaveSync() {
+        guard syncLeaveArmed, !foregroundSyncSceneActive, backgroundSyncRefusal == nil,
+              let currentHost = syncTriggerHost, let token = completedStartupToken else { return }
+        syncLeaveArmed = false
+        let owner = ForegroundSyncOwner(id: UUID(), host: currentHost, startupToken: token, reason: .leave,
+            generation: foregroundSyncGeneration)
+        foregroundSyncOwner = owner
+        busy = true
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.foregroundSyncOwner?.id == owner.id {
+                    let current = self.backgroundSyncCurrent(owner)
+                    self.foregroundSyncTask = nil
+                    self.foregroundSyncOwner = nil
+                    if self.host === owner.host {
+                        if current { self.finishOperation() }
+                        else { self.busy = false; self.refreshRequested = false; self.admitNotificationResponses() }
+                    }
+                }
+            }
+            guard self.backgroundSyncCurrent(owner) else { return }
+            do {
+                let result: CoreObject = try self.decode(try await owner.host.foregroundSync(command: owner.reason.command, requestJSON: "{}"))
+                try self.validateForegroundSyncReply(result)
+            } catch is CancellationError {
+                await self.logSyncCancelledCleanly(owner.reason.command)
+            } catch {
+                self.requireSettingsSyncRestart(owner.host)
+            }
+        }
+        foregroundSyncTask = task
+        holdForegroundSyncInBackground(task)
     }
 
     private func holdForegroundSyncInBackground(_ running: Task<Void, Never>) {
@@ -47294,6 +47352,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             admitAppleRemindersAutoImport()
             gmailCapture.admit()
             admitBackgroundSync()
+            observeLeaveSync()
             #if DEBUG && targetEnvironment(simulator)
             publishTrashBulkTestState()
             #endif

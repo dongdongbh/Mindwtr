@@ -672,6 +672,26 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.schedules).toEqual([]);
     });
 
+    it('reports an unsynced local edit and syncs it when the app leaves like RN', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const edit = () => core.useTaskStore.setState((state) => ({
+            _allTasks: [...state._allTasks, { id: `local-${now}`, title: 'Synthetic', status: 'inbox', tags: [], contexts: [],
+                createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }],
+            lastDataChangeAt: core.getNextDataChangeAt(state.lastDataChangeAt, now) }) as never);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
+        now += 1_000;
+        edit();
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: true });
+        expect(await fixture.sync.performStoredAutomaticSync('leave')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
+        expect(fixture.schedules).toEqual([]);
+    });
+
     it('runs an explicit stored pull despite automatic resume pacing and preserves configuration', async () => {
         resetForTests(); serve();
         spyOn(Date, 'now').mockReturnValue(100_000);

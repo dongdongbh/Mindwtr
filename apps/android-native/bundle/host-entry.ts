@@ -3760,6 +3760,14 @@ globalThis.MindwtrHost = {
             return result;
         });
     },
+    iosSyncChangeObservation(): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 0) throw new Error('INVALID_INPUT: Sync change observation takes no arguments');
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter) throw new Error('NOT_READY: Sync change observation is unavailable');
+            return iosManualSync?.syncChangeObservation() ?? { pending: false };
+        });
+    },
     iosSearchObservation(): string {
         if (arguments.length !== 0) throw new Error('INVALID_INPUT: Search observation takes no arguments');
         if (globalThis.__mindwtrHostPlatform !== 'ios') throw iosSearchUnavailable();
@@ -8836,11 +8844,12 @@ globalThis.MindwtrHost = {
         return submit(async (signal) => {
             if (iosForegroundFailure) throw iosForegroundFailure;
             const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
+            const IOS_STORED_SYNC_COMMANDS = ['syncStored', 'syncResume', 'syncLeave', 'syncPull'];
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || (name !== 'archiveRetention' && !globalThis.__mindwtrSyncSecrets)) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncLeave', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
                 'answerSyncMissingFiles', 'continueSyncWithoutFiles'];
             if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
                 || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
@@ -8853,7 +8862,7 @@ globalThis.MindwtrHost = {
             try { input = JSON.parse(json) as Record<string, unknown>; }
             catch { throw new Error('INVALID_INPUT: Invalid foreground sync request'); }
             if (!input || typeof input !== 'object' || Array.isArray(input)
-                || ['syncStored', 'syncResume', 'syncPull'].includes(name) && Object.keys(input).length !== 0
+                || IOS_STORED_SYNC_COMMANDS.includes(name) && Object.keys(input).length !== 0
                 || name === 'answerSyncMissingFiles' && (Object.keys(input).length !== 2 || typeof input.questionId !== 'string' || typeof input.continue !== 'boolean')
                 || name === 'continueSyncWithoutFiles' && (Object.keys(input).length !== 2 || typeof input.questionId !== 'string' || typeof input.requestId !== 'string')) {
                 throw new Error('INVALID_INPUT: Invalid foreground sync request');
@@ -8942,7 +8951,7 @@ globalThis.MindwtrHost = {
                 const fileMetadata = stored === 'file' && ['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'answerSyncMissingFiles'].includes(name);
                 if (stored && stored !== 'off' && stored !== 'webdav' && !selfHosted && !cloudKitSelected && !dropboxSelected && !fileMetadata) return refused;
                 if (cloudKitSyncNow && !cloudKitSelected) return refused;
-                if (['syncStored', 'syncResume', 'syncPull'].includes(name) && stored !== 'webdav' && !selfHosted && !cloudKitSelected
+                if (IOS_STORED_SYNC_COMMANDS.includes(name) && stored !== 'webdav' && !selfHosted && !cloudKitSelected
                     && !(name === 'syncPull' && dropboxSelected)) {
                     if (name === 'syncPull') try {
                         await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
@@ -8978,7 +8987,7 @@ globalThis.MindwtrHost = {
                 if (name === 'selectSyncBackend' && input.option === 'selfhosted'
                     || continuing?.ok === true && continuing.value.panel?.kind === 'selfhosted'
                     || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && input.selfHosted !== undefined
-                    || ['syncStored', 'syncResume', 'syncPull', 'projectAttachmentDownload'].includes(name) && selfHosted) {
+                    || [...IOS_STORED_SYNC_COMMANDS, 'projectAttachmentDownload'].includes(name) && selfHosted) {
                     try { await iosManualSync!.assertSelfHostedSyncAdmission(); }
                     catch (error) {
                         if (error instanceof NativeAttachmentCleanupUnconfirmedError) throw error;
@@ -9016,9 +9025,10 @@ globalThis.MindwtrHost = {
                     if (after.failed || after.queued || after.inFlight || after.immediate || after.retrying) throw unavailable();
                 }
                 let storedResult: { success: boolean; skipped: boolean } | null = null;
-                if (name === 'syncStored' || name === 'syncResume' || name === 'syncPull') {
+                if (IOS_STORED_SYNC_COMMANDS.includes(name)) {
                     const answer = name === 'syncPull' ? await iosManualSync!.performStoredManualSync()
-                        : await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup' : 'resume');
+                        : await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup'
+                            : name === 'syncLeave' ? 'leave' : 'resume');
                     await flushPendingSave();
                     requireSaved();
                     const after = getPersistenceStatus();
@@ -9044,10 +9054,12 @@ globalThis.MindwtrHost = {
                         : name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
                         : name === 'syncPull' ? { message: 'Native iOS pull Sync command settled', releaseCheck: 'v1.3.9/ios-pull-sync' }
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
+                        : name === 'syncLeave' ? { message: 'Native iOS automatic Sync trigger settled', releaseCheck: 'v1.3.9/ios-sync-triggers' }
                         : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                         message: diagnostic.message,
-                        context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: name === 'projectAttachmentDownload' ? 'available' : 'settled' },
+                        context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: name === 'projectAttachmentDownload' ? 'available'
+                            : name === 'syncLeave' && storedResult ? (!storedResult.success ? 'failed' : storedResult.skipped ? 'skipped' : 'synced') : 'settled' },
                     }, { force: true });
                 } catch {                                                              }
                 return result;

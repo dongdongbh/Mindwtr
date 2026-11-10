@@ -1959,6 +1959,12 @@ public final class CoreHost: @unchecked Sendable {
         return try NativeSearchSnapshot(json: await perform { try $0.call("iosSearchSnapshot", argumentsJSON: "[]") })
     }
 
+    public func syncChangeObservation() async throws -> NativeSyncChangeObservation {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try NativeSyncChangeObservation(json: await perform { try $0.call("iosSyncChangeObservation", argumentsJSON: "[]") })
+    }
+
     public func searchObservation() async throws -> NativeSearchObservation {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
@@ -29948,7 +29954,7 @@ private final class Engine: @unchecked Sendable {
         var cancelSettled = false
         do {
             try denyCleanupOwner()
-            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction",
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncLeave", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction",
                    "answerSyncMissingFiles", "continueSyncWithoutFiles"].contains(command),
                   requestJSON.utf8.count <= 128 * 1024,
                   let requestObject = try? NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],

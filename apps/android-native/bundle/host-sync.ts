@@ -555,6 +555,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     let iosAutomaticBackend: 'webdav' | 'cloud' | 'cloudkit' = 'webdav';
     type AutomaticFrame = { result: Awaited<ReturnType<NativeSyncSettingsHost['performSync']>> | null };
     let iosAutomaticFrame: AutomaticFrame | null = null;
+    let iosUploadedChangeAt = useTaskStore.getState().lastDataChangeAt;
+    const hasPendingLocalChange = () => useTaskStore.getState().lastDataChangeAt !== iosUploadedChangeAt;
 
     const assertSelfHostedSyncAdmission = async () => {
         if (platform !== 'ios') return;
@@ -627,6 +629,9 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             }
             succeeded = answer.success;
             requeued = answer.skipped === 'requeued';
+            if (platform === 'ios' && answer.success && (!answer.skipped || answer.skipped === 'unchanged') && !options.activationProbe) {
+                iosUploadedChangeAt = useTaskStore.getState().lastDataChangeAt;
+            }
             if (dropbox && iosBackend === 'cloud' && answer.success && !answer.skipped
                 && (options.configOverride?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY)) === 'dropbox') try {
                 await logLine('info', 'Native iOS Dropbox shared cycle completed', { scope: 'native-ios', force: true,
@@ -692,9 +697,9 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         const answer = await performSync(undefined, { manual: true });
         return { success: answer.success === true, skipped: Boolean(answer.skipped) };
     };
-    const performStoredAutomaticSync = async (reason: 'startup' | 'resume') => {
+    const performStoredAutomaticSync = async (reason: 'startup' | 'resume' | 'leave') => {
         if (fatalCleanupError) throw fatalCleanupError;
-        if (platform !== 'ios' || (reason !== 'startup' && reason !== 'resume')) {
+        if (platform !== 'ios' || !['startup', 'resume', 'leave'].includes(reason)) {
             throw new Error('Stored automatic sync is unavailable on this host');
         }
         if (iosAutomaticFrame) throw new Error('An automatic foreground sync is already in progress');
@@ -710,7 +715,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             const controller = automaticController();
             if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
                 <= getMobileAutoSyncCadence(backend).foregroundMinIntervalMs) return { success: true, skipped: true };
-            await controller.requestAutoSync(0, reason);
+            await controller.requestAutoSync(0, reason === 'leave' ? 'app-state-background' : reason);
             if (fatalCleanupError) throw fatalCleanupError;
             return frame.result ? { success: frame.result.success === true, skipped: Boolean(frame.result.skipped) }
                 : { success: true, skipped: true };
@@ -720,6 +725,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         } finally { iosAutomaticFrame = null; }
     };
 
+
+    const syncChangeObservation = () => ({ pending: hasPendingLocalChange() });
 
     const backgroundSyncWanted = async () => {
         const { backend, configured } = await service.getMobileSyncConfigurationStatus();
@@ -918,6 +925,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         assertSelfHostedSyncAdmission,
         performStoredAutomaticSync,
         performStoredManualSync,
+        syncChangeObservation,
         attachmentsHost: attachments?.contractHost ?? null,
         prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,
 

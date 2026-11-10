@@ -3,7 +3,7 @@ import XCTest
 
 final class NativeSyncTurnCancellationTests: XCTestCase {
     func testSettledSyncCancellationWithoutCleanupIsClean() {
-        for command in ["syncStored", "syncResume", "syncPull"] {
+        for command in ["syncStored", "syncResume", "syncLeave", "syncPull"] {
             XCTAssertTrue(NativeSyncTurnCancellation.isClean(CancellationError(), command: command, cleanupOwed: false, settled: true))
         }
     }
