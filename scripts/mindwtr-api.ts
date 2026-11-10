@@ -10,6 +10,7 @@ import {
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 import { asTaskStatus, createMindwtrAutomationService } from './mindwtr-automation-core';
+import { helperTaskListResponse, helperTaskResponse, parseHelperIfMatch, validateHelperIdempotencyKey } from './mindwtr-helper-reliability';
 
 
 setLogger((event: LogPayload) => {
@@ -90,7 +91,8 @@ function applyCorsHeaders(req: Request, response: Response, configuredOrigin: st
     headers.append('Vary', 'Origin');
     if (req.headers.get('origin') === configuredOrigin) {
         headers.set('Access-Control-Allow-Origin', configuredOrigin);
-        headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+        headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, If-Match, Idempotency-Key');
+        headers.set('Access-Control-Expose-Headers', 'ETag');
         headers.set('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
     }
     return new Response(response.body, {
@@ -106,6 +108,9 @@ function baseErrorResponse(message: string, status = 400) {
 
 function baseTaskErrorResponse(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    if (['task_version_conflict', 'idempotency_conflict', 'idempotency_capacity'].includes(message)) {
+        return baseJsonResponse({ error: message, code: message }, { status: message === 'task_version_conflict' ? 412 : 409 });
+    }
     if (message === 'Task not found' || message.startsWith('Task not found:')) {
         return baseErrorResponse('Task not found', 404);
     }
@@ -225,6 +230,10 @@ async function main() {
             const taskErrorResponse = (error: unknown) => {
                 return applyCorsHeaders(req, baseTaskErrorResponse(error), corsOrigin);
             };
+            const taskResponse = (task: Task, status = 200) => {
+                const body = helperTaskResponse(task);
+                return jsonResponse(body, { status, headers: { ETag: `"${body.version}"` } });
+            };
 
             if (req.method === 'OPTIONS') return jsonResponse({ ok: true });
 
@@ -232,10 +241,23 @@ async function main() {
             if (authError) return applyCorsHeaders(req, authError, corsOrigin);
 
             const url = new URL(req.url);
-            const pathname = url.pathname.replace(/\/+$/, '') || '/';
+            const requestedPath = url.pathname.replace(/\/+$/, '') || '/';
+            const protectedAction = /^\/v2\/tasks\/[^/]+\/(complete|archive)$/.test(requestedPath);
+            if (requestedPath.startsWith('/v2/') && (!protectedAction || req.method !== 'POST')) return errorResponse('Not found', 404);
+            const pathname = protectedAction ? requestedPath.slice(3)
+                : requestedPath.replace(/^\/v1\/tasks(?=\/|$)/, '/tasks');
+            const ifMatch = req.headers.get('if-match');
+            const conditionalWrite = (req.method === 'PATCH' && /^\/tasks\/[^/]+$/.test(pathname))
+                || (req.method === 'POST' && /^\/tasks\/[^/]+\/(complete|archive)$/.test(pathname));
+            if (protectedAction && ifMatch === null) return errorResponse('Invalid If-Match');
+            if (conditionalWrite && ifMatch !== null) {
+                try { parseHelperIfMatch(ifMatch); } catch (error) { return taskErrorResponse(error); }
+            }
 
             if (req.method === 'GET' && pathname === '/health') {
-                return jsonResponse({ ok: true });
+                return jsonResponse({ ok: true, implementation: 'bun-helper', apiVersion: 2, capabilities: {
+                    taskListVersions: true, conditionalTaskPatch: true, idempotentTaskCreate: true, conditionalTaskActions: true,
+                } });
             }
 
             if (req.method === 'GET' && pathname === '/tasks') {
@@ -252,8 +274,7 @@ async function main() {
                 if (normalizedFocused !== undefined && !['1', 'true', '0', 'false'].includes(normalizedFocused)) {
                     return errorResponse(`Invalid isFocusedToday: ${rawFocused}`);
                 }
-                return jsonResponse({
-                    tasks: await service.listTasks({
+                return jsonResponse(helperTaskListResponse(await service.listTasks({
                         includeAll,
                         includeDeleted,
                         status,
@@ -261,8 +282,7 @@ async function main() {
                         isFocusedToday: normalizedFocused === undefined
                             ? undefined
                             : normalizedFocused === '1' || normalizedFocused === 'true',
-                    }),
-                });
+                    })));
             }
 
             if (req.method === 'GET' && pathname === '/projects') {
@@ -311,6 +331,10 @@ async function main() {
             }
 
             if (req.method === 'POST' && pathname === '/tasks') {
+                const idempotencyKey = req.headers.get('idempotency-key');
+                if (idempotencyKey !== null) {
+                    try { validateHelperIdempotencyKey(idempotencyKey); } catch (error) { return taskErrorResponse(error); }
+                }
                 const body = await readJsonBody(req);
                 if (body && typeof body === 'object' && '__mindwtrError' in body) {
                     const err = (body as any).__mindwtrError;
@@ -325,8 +349,11 @@ async function main() {
                     const props = typeof payload.props === 'object' && payload.props ? { ...payload.props } : {};
                     if ('sectionId' in payload) props.sectionId = payload.sectionId ?? undefined;
                     try {
-                        const task = await service.createTask({ input, title, props: props as Partial<Task> });
-                        return jsonResponse({ task }, { status: 201 });
+                        const task = await service.createTask({ input, title, props: props as Partial<Task> }, {
+                            idempotencyKey: idempotencyKey ?? undefined,
+                            credential: apiToken ?? undefined,
+                        });
+                        return taskResponse(task, 201);
                     } catch (error) {
                         return taskErrorResponse(error);
                     }
@@ -380,7 +407,7 @@ async function main() {
 
                 if (req.method === 'GET') {
                     try {
-                        return jsonResponse({ task: await service.getTask(taskId) });
+                        return taskResponse(await service.getTask(taskId));
                     } catch (error) {
                         return taskErrorResponse(error);
                     }
@@ -396,8 +423,8 @@ async function main() {
 
                     return withWriteLock(async () => {
                         try {
-                            const task = await service.updateTask(taskId, body as Partial<Task>);
-                            return jsonResponse({ task });
+                            const task = await service.updateTask(taskId, body as Partial<Task>, ifMatch === null ? {} : { ifMatch });
+                            return taskResponse(task);
                         } catch (error) {
                             return taskErrorResponse(error);
                         }
@@ -424,11 +451,11 @@ async function main() {
                 return withWriteLock(async () => {
                     try {
                         const task = action === 'complete'
-                            ? await service.completeTask(taskId)
+                            ? await service.completeTask(taskId, ifMatch === null ? {} : { ifMatch })
                             : action === 'archive'
-                                ? await service.archiveTask(taskId)
+                                ? await service.archiveTask(taskId, ifMatch === null ? {} : { ifMatch })
                                 : await service.restoreTask(taskId);
-                        return jsonResponse({ task });
+                        return taskResponse(task);
                     } catch (error) {
                         return taskErrorResponse(error);
                     }

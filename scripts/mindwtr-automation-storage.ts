@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname } from 'path';
 
 import {
-    SqliteAdapter,
     mergeAppData,
     normalizeAppData,
     type AppData,
@@ -14,6 +13,7 @@ import {
 
 import { withMcpWriteLock } from '../apps/mcp-server/src/db-write-lock';
 import { resolveMindwtrStoragePaths } from './mindwtr-paths';
+import { HelperReceiptSqliteAdapter, type HelperCreateReceipt } from './mindwtr-helper-reliability';
 
 type AutomationStorageOptions = {
     dataPath?: string;
@@ -21,6 +21,9 @@ type AutomationStorageOptions = {
 };
 
 type AutomationStorage = StorageAdapter & {
+    lookupCreateReceipt: (receipt: HelperCreateReceipt) => Promise<Task | null>;
+    armCreateReceipt: (receipt: HelperCreateReceipt, beforeTaskIds: Set<string>) => void;
+    clearCreateReceipt: () => void;
     paths: {
         dataPath: string;
         dbPath: string;
@@ -156,7 +159,7 @@ export function createMindwtrAutomationStorage(options: AutomationStorageOptions
     const paths = resolveMindwtrStoragePaths(options);
     mkdirSync(dirname(paths.dbPath), { recursive: true });
     const { client } = createSqliteClient(paths.dbPath);
-    const sqlite = new SqliteAdapter(client, { rejectConcurrentWrites: true });
+    const sqlite = new HelperReceiptSqliteAdapter(client);
     let initPromise: Promise<void> | null = null;
 
     const saveNormalizedData = async (data: AppData) => {
@@ -171,6 +174,7 @@ export function createMindwtrAutomationStorage(options: AutomationStorageOptions
 
     const ensureReady = async () => {
         initPromise ??= (async () => {
+            await sqlite.initializeReceipts();
             const sqliteData = normalizeAppData(await sqlite.getData());
             const jsonData = loadJsonData(paths.dataPath);
             const merged = jsonData ? normalizeAppData(mergeAppData(sqliteData, jsonData)) : sqliteData;
@@ -204,6 +208,12 @@ export function createMindwtrAutomationStorage(options: AutomationStorageOptions
 
     return {
         paths,
+        lookupCreateReceipt: (receipt) => withStorageLock(async () => {
+            await ensureReady();
+            return sqlite.lookupReceipt(receipt);
+        }),
+        armCreateReceipt: (receipt, beforeTaskIds) => sqlite.armReceipt(receipt, beforeTaskIds),
+        clearCreateReceipt: () => sqlite.clearReceipt(),
         getData: () => withStorageLock(async () => {
             await ensureReady();
             return normalizeAppData(await sqlite.getData());

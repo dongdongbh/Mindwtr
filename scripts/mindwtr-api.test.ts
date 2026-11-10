@@ -97,6 +97,129 @@ afterEach(() => {
 });
 
 describe('mindwtr-api', () => {
+  test('authenticates helper reliability controls and replays keyed responses after process restart', async () => {
+    const dir = makeTempDir();
+    const dataPath = join(dir, 'data.json');
+    const port = await getFreePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const token = 'helper-reliability-token';
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    let server = spawnApi(port, dataPath, { dangerouslyDisableAuth: false, token });
+    const createBody = { title: 'Original', props: {
+      order: 1e-7, description: 'Unicode: 两个 🐢', recurrence: null,
+      checklist: [{ id: '步骤-1', title: 'Nested ✓', isCompleted: false }],
+    } };
+    const create = () => fetch(`${baseUrl}/v1/tasks`, {
+      method: 'POST', headers: { ...headers, 'Idempotency-Key': 'retry-after-lost-response' }, body: JSON.stringify(createBody),
+    });
+    try {
+      await waitForHealth(baseUrl, token);
+      expect((await fetch(`${baseUrl}/v1/tasks`, { method: 'POST', headers: { 'Idempotency-Key': 'retry-after-lost-response' }, body: '{}' })).status).toBe(401);
+      const health = await fetch(`${baseUrl}/health`, { headers }).then((response) => response.json());
+      expect(health).toMatchObject({ implementation: 'bun-helper', apiVersion: 2, capabilities: {
+        taskListVersions: true, conditionalTaskPatch: true, idempotentTaskCreate: true, conditionalTaskActions: true,
+      } });
+      const initial = await create();
+      expect(initial.status).toBe(201);
+      const original = await initial.json();
+      expect(initial.headers.get('etag')).toBe(`"${original.version}"`);
+      const list = await fetch(`${baseUrl}/v1/tasks?all=1&deleted=1`, { headers }).then((response) => response.json());
+      expect(list.tasks).toEqual([original.task]);
+      expect(list.versions).toEqual({ [original.task.id]: original.version });
+      const unchanged = await fetch(`${baseUrl}/v1/tasks/${original.task.id}`, {
+        method: 'PATCH', headers: { ...headers, 'If-Match': `"${original.version}"` }, body: JSON.stringify({ title: 'Original' }),
+      });
+      expect(await unchanged.json()).toEqual(original);
+      const changed = await fetch(`${baseUrl}/tasks/${original.task.id}`, {
+        method: 'PATCH', headers, body: JSON.stringify({ title: 'Edited' }),
+      }).then((response) => response.json());
+      expect(changed.version).not.toBe(original.version);
+      for (const action of ['complete', 'archive']) {
+        const path = `${baseUrl}/v2/tasks/${original.task.id}/${action}`;
+        expect((await fetch(path, { method: 'POST', headers })).status).toBe(400);
+        expect((await fetch(path, { method: 'POST', headers: { ...headers, 'If-Match': `W/"${changed.version}"` } })).status).toBe(412);
+        const refused = await fetch(path, { method: 'POST', headers: { ...headers, 'If-Match': `"${original.version}"` } });
+        expect(refused.status).toBe(412);
+        expect(await refused.json()).toMatchObject({ code: 'task_version_conflict' });
+      }
+      expect((await fetch(`${baseUrl}/v2/tasks/${original.task.id}`, { method: 'PATCH', headers, body: '{}' })).status).toBe(404);
+      const conflict = await fetch(`${baseUrl}/tasks`, {
+        method: 'POST', headers: { ...headers, 'Idempotency-Key': 'retry-after-lost-response' }, body: JSON.stringify({ title: 'Different' }),
+      });
+      expect(conflict.status).toBe(409);
+      expect(await conflict.json()).toMatchObject({ code: 'idempotency_conflict' });
+      expect((await fetch(`${baseUrl}/tasks`, { method: 'POST', headers: { ...headers, 'Idempotency-Key': 'invalid token' }, body: JSON.stringify({ title: 'Invalid' }) })).status).toBe(400);
+      await create();
+      server.kill();
+      await server.exited;
+      server = spawnApi(port, dataPath, { dangerouslyDisableAuth: false, token });
+      await waitForHealth(baseUrl, token);
+      expect(await create().then((response) => response.json())).toEqual(original);
+      const completed = await fetch(`${baseUrl}/v2/tasks/${original.task.id}/complete`, {
+        method: 'POST', headers: { ...headers, 'If-Match': `"${original.version}", "${changed.version}"` },
+      });
+      expect(completed.status).toBe(200);
+      const completedBody = await completed.json();
+      expect(completedBody.task.status).toBe('done');
+      const archived = await fetch(`${baseUrl}/v2/tasks/${original.task.id}/archive`, { method: 'POST', headers: { ...headers, 'If-Match': '*' } });
+      expect(archived.status).toBe(200);
+      expect((await archived.json()).task.status).toBe('archived');
+      expect((await fetch(`${baseUrl}/tasks?all=1`, { headers }).then((response) => response.json())).tasks).toHaveLength(1);
+    } finally {
+      server.kill();
+      await server.exited.catch(() => undefined);
+    }
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  test('uses strong comparison across valid If-Match lists without rejecting weak or opaque members', async () => {
+    const dir = makeTempDir();
+    const dataPath = join(dir, 'data.json');
+    const port = await getFreePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const server = spawnApi(port, dataPath);
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+      await waitForHealth(baseUrl);
+      const original = await fetch(`${baseUrl}/tasks`, {
+        method: 'POST', headers, body: JSON.stringify({ title: 'Conditional original' }),
+      }).then((response) => response.json());
+      const path = `${baseUrl}/tasks/${original.task.id}`;
+      const patch = (condition: string, title = 'Should not change') => fetch(path, {
+        method: 'PATCH', headers: { ...headers, 'If-Match': condition }, body: JSON.stringify({ title }),
+      });
+      for (const condition of [`W/"${original.version}"`, '"unknown"', '"old,opaque"', '""']) {
+        const response = await patch(condition);
+        expect(response.status).toBe(412);
+        expect(await response.json()).toMatchObject({ code: 'task_version_conflict' });
+        expect(await fetch(path).then((result) => result.json())).toEqual(original);
+      }
+      for (const condition of ['"unterminated', 'W/ "old"', '"one" "two"', '*,"other"', ',,']) {
+        expect((await patch(condition)).status).toBe(400);
+        expect(await fetch(path).then((result) => result.json())).toEqual(original);
+      }
+      const mixed = await patch(`W/"${original.version}", "old,opaque", "${original.version}"`, 'Mixed list accepted');
+      expect(mixed.status).toBe(200);
+      const mixedBody = await mixed.json();
+      expect(mixedBody.task.title).toBe('Mixed list accepted');
+      const emptyMembers = await patch(`, , W/"old,opaque", , "${mixedBody.version}", ,`, 'Empty members ignored');
+      expect(emptyMembers.status).toBe(200);
+      const current = await emptyMembers.json();
+      const completed = await fetch(`${baseUrl}/v2/tasks/${original.task.id}/complete`, {
+        method: 'POST', headers: { 'If-Match': `W/"${current.version}", "${current.version}"` },
+      });
+      expect(completed.status).toBe(200);
+      const completedBody = await completed.json();
+      const archived = await fetch(`${baseUrl}/v2/tasks/${original.task.id}/archive`, {
+        method: 'POST', headers: { 'If-Match': `W/"obsolete,opaque", , "${completedBody.version}",` },
+      });
+      expect(archived.status).toBe(200);
+      expect((await archived.json()).task.status).toBe('archived');
+    } finally {
+      server.kill();
+      await server.exited.catch(() => undefined);
+    }
+  }, SPAWN_TEST_TIMEOUT_MS);
+
   test('refuses to start without a bearer token unless auth is dangerously disabled', async () => {
     const dir = makeTempDir();
     const dataPath = join(dir, 'data.json');

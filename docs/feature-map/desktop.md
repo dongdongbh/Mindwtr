@@ -416,6 +416,8 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Local API
 
+- Repository helper: `scripts/mindwtr-api.ts` also supports task-list versions, conditional PATCH/complete/archive, durable create receipts and normalized unchanged PATCH. Versions and receipts stay scoped to the issuing server/workspace. Owning helper files: `scripts/mindwtr-automation-core.ts`, `scripts/mindwtr-automation-storage.ts`, `scripts/mindwtr-helper-reliability.ts`; checks: `scripts/mindwtr-api.test.ts`, `scripts/mindwtr-helper-reliability.test.ts`, `scripts/mindwtr-automation-storage.test.ts`. Diagnostic: `v1.3.9/helper-api-reliability` on stderr.
+
 - Reach: Settings › Advanced › Automation › Enable local API server, Port, Bearer token.
 - Code: `apps/desktop/src/components/views/settings/SettingsAdvancedPage.tsx`, `apps/desktop/src/lib/local-api-server.ts`, `apps/desktop/src-tauri/src/local_api.rs`
 - Checks: `apps/desktop/src/components/views/settings/SettingsAdvancedPage.test.tsx`, `apps/desktop/src/components/views/settings/useSettingsAdvancedPage.test.tsx`

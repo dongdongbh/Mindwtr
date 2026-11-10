@@ -95,6 +95,8 @@ The npm package is read-only by default. Add `--write` only when you explicitly 
 
 ### Desktop Local API mode
 
+The updated Bun API helper also supplies task versions and protected writes. Keep version tokens with the server and workspace that issued them; they are not portable between implementations. Its create receipts are separate local records with the same seven-day retention and 10,000-live-receipt limit. Check the connected server’s health capabilities; the helper does not advertise desktop conditional task-list GET support.
+
 > Requires mindwtr-mcp 1.1.11 or later.
 
 Enable the desktop app's **Local API** in Settings and copy its bearer token. Keep the app and API running. This backend uses the app's REST endpoints and never opens a database or falls back to SQLite.
