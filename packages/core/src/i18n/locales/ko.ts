@@ -1066,6 +1066,8 @@ export const koOverrides: Record<string, string> = {
         'review.openTasks': '미완료 할 일',
         'review.intro': '머릿속을 정리하고, 현재 상태를 파악하고, 새로운 아이디어를 떠올리세요.',
         'review.openGuide': '주간 검토',
+        'review.startDailyReview': '일일 검토 시작',
+        'review.startWeeklyReview': '주간 검토 시작',
         'dailyReview.openGuide': '일일 검토',
         'dailyReview.title': '일일 검토',
         'dailyReview.introTitle': '일일 재설정',

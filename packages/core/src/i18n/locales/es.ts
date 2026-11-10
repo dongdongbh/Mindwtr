@@ -1106,6 +1106,8 @@ export const esOverrides: Record<string, string> = {
 'review.openTasks': "Tareas abiertas",
 'review.intro': "Aclárate, pon tu sistema al día y deja espacio a la creatividad.",
 'review.openGuide': "Revisión semanal",
+'review.startDailyReview': 'Iniciar revisión diaria',
+'review.startWeeklyReview': 'Iniciar revisión semanal',
 'dailyReview.openGuide': "Revisión diaria",
 'dailyReview.title': "Revisión diaria",
 'dailyReview.introTitle': "Puesta a punto diaria",

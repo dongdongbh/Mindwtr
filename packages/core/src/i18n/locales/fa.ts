@@ -1130,6 +1130,8 @@ export const faOverrides: Record<string, string> = {
         'review.openTasks': 'کارهای باز',
         'review.intro': 'شفاف باشید، به‌روز باشید و خلاق باشید.',
         'review.openGuide': 'مرور هفتگی',
+        'review.startDailyReview': 'شروع مرور روزانه',
+        'review.startWeeklyReview': 'شروع مرور هفتگی',
         'dailyReview.openGuide': 'مرور روزانه',
         'dailyReview.title': 'مرور روزانه',
         'dailyReview.introTitle': 'بازنشانی روزانه',

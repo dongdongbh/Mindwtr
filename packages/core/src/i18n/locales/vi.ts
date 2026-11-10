@@ -958,6 +958,8 @@ export const viOverrides: Record<string, string> = {
         'review.openTasks': 'Công việc đang mở',
         'review.intro': 'Làm rõ, cập nhật và sáng tạo.',
         'review.openGuide': 'Xem lại hàng tuần',
+        'review.startDailyReview': 'Bắt đầu xem lại hàng ngày',
+        'review.startWeeklyReview': 'Bắt đầu xem lại hàng tuần',
         'dailyReview.openGuide': 'Xem lại hàng ngày',
         'dailyReview.title': 'Xem lại hàng ngày',
         'dailyReview.introTitle': 'Khởi động hàng ngày',

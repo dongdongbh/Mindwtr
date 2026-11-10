@@ -1125,6 +1125,8 @@ export const svOverrides: Record<string, string> = {
         'review.openTasks': 'Öppna uppgifter',
         'review.intro': 'Bli tydlig, bli à jour och bli kreativ.',
         'review.openGuide': 'Veckogenomgång',
+        'review.startDailyReview': 'Starta daglig genomgång',
+        'review.startWeeklyReview': 'Starta veckogenomgång',
         'dailyReview.openGuide': 'Daglig genomgång',
         'dailyReview.title': 'Daglig genomgång',
         'dailyReview.introTitle': 'Daglig återställning',

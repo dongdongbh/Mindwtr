@@ -833,6 +833,8 @@ export const deOverrides: Record<string, string> = {
         'review.openTasks': 'Offene Aufgaben',
         'review.intro': 'Klarheit bringen, Aktuelles anzeigen und kreativ werden.',
         'review.openGuide': 'Wöchentliche Revision',
+        'review.startDailyReview': 'Tägliche Revision starten',
+        'review.startWeeklyReview': 'Wöchentliche Revision starten',
         'dailyReview.openGuide': 'Tägliche Revision',
         'dailyReview.title': 'Tägliche Revision',
         'dailyReview.introTitle': 'Tägliche Zurücksetzung',

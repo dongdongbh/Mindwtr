@@ -1147,6 +1147,8 @@ export const jaOverrides: Record<string, string> = {
         'review.openTasks': '未完了のタスク',
         'review.intro': '頭をすっきりさせ、リストを最新にして、新しい発想を生むための時間です。',
         'review.openGuide': '週次レビュー',
+        'review.startDailyReview': 'デイリーレビューを開始',
+        'review.startWeeklyReview': '週次レビューを開始',
         'dailyReview.openGuide': 'デイリーレビュー',
         'dailyReview.title': 'デイリーレビュー',
         'dailyReview.introTitle': '1日のリセット',

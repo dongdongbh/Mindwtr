@@ -777,6 +777,8 @@ export const ptOverrides: Record<string, string> = {
         'review.openTasks': 'Tarefas em aberto',
         'review.intro': 'Seja claro, atualize-se e seja criativo.',
         'review.openGuide': 'Revisão Semanal',
+        'review.startDailyReview': 'Iniciar revisão diária',
+        'review.startWeeklyReview': 'Iniciar revisão semanal',
         'dailyReview.openGuide': 'Revisão Diária',
         'dailyReview.title': 'Revisão Diária',
         'dailyReview.introTitle': 'Reinicialização diária',

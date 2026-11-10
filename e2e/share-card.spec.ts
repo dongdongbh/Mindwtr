@@ -8,7 +8,7 @@ test('weekly review exports a private PNG offline and resets the personal note',
         settings: { ai: { enabled: false } },
     });
     await page.goto('/?view=review');
-    await page.getByRole('button', { name: 'Weekly Review', exact: true }).click();
+    await page.getByRole('button', { name: 'Start weekly review', exact: true }).click();
     const shareAction = page.getByRole('button', { name: 'Share my reflection', exact: true });
     for (let step = 0; step < 8 && !(await shareAction.isVisible()); step += 1) {
         await page.getByRole('button', { name: /Next/ }).last().click();

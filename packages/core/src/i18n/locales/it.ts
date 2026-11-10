@@ -815,6 +815,8 @@ export const itOverrides: Record<string, string> = {
         'review.openTasks': 'Attività aperte',
         'review.intro': 'Fai chiarezza, aggiorna, e ritrova la creatività.',
         'review.openGuide': 'Revisione settimanale',
+        'review.startDailyReview': 'Avvia revisione giornaliera',
+        'review.startWeeklyReview': 'Avvia revisione settimanale',
         'dailyReview.openGuide': 'Revisione giornaliera',
         'dailyReview.title': 'Revisione giornaliera',
         'dailyReview.introTitle': 'Reset giornaliero',

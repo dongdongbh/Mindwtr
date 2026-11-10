@@ -820,6 +820,8 @@ export const arOverrides: Record<string, string> = {
         'review.openTasks': 'المهام المفتوحة',
         'review.intro': 'كن واضحًا، وكن محدثًا، وكن مبدعًا.',
         'review.openGuide': 'المراجعة الأسبوعية',
+        'review.startDailyReview': 'بدء المراجعة اليومية',
+        'review.startWeeklyReview': 'بدء المراجعة الأسبوعية',
         'dailyReview.openGuide': 'المراجعة اليومية',
         'dailyReview.title': 'المراجعة اليومية',
         'dailyReview.introTitle': 'إعادة التعيين اليومي',

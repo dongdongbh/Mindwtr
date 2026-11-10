@@ -357,8 +357,8 @@ export function ReviewView() {
                     onShowDailyGuide={() => setShowDailyGuide(true)}
                     onShowGuide={() => setShowGuide(true)}
                     labels={{
-                        dailyReview: t('dailyReview.title'),
-                        weeklyReview: t('review.openGuide'),
+                        dailyReview: t('review.startDailyReview'),
+                        weeklyReview: t('review.startWeeklyReview'),
                     }}
                 />
                 <div className="flex flex-wrap items-center gap-3">

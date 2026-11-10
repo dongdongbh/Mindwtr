@@ -751,6 +751,8 @@ export const trOverrides: Record<string, string> = {
         'review.openTasks': 'Açık görevler',
         'review.intro': 'Açık olun, güncel olun ve yaratıcı olun.',
         'review.openGuide': 'Haftalık İnceleme',
+        'review.startDailyReview': 'Günlük incelemeyi başlat',
+        'review.startWeeklyReview': 'Haftalık incelemeyi başlat',
         'dailyReview.openGuide': 'Günlük İnceleme',
         'dailyReview.title': 'Günlük İnceleme',
         'dailyReview.introTitle': 'Günlük sıfırlama',

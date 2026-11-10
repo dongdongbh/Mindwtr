@@ -1133,6 +1133,8 @@ export const daOverrides: Record<string, string> = {
     'review.openTasks': 'Åbne opgaver',
     'review.intro': 'Bliv klar, bliv aktuel og bliv kreativ.',
     'review.openGuide': 'Ugentlig gennemgang',
+    'review.startDailyReview': 'Start daglig gennemgang',
+    'review.startWeeklyReview': 'Start ugentlig gennemgang',
     'dailyReview.openGuide': 'Daglig gennemgang',
     'dailyReview.title': 'Daglig gennemgang',
     'dailyReview.introTitle': 'Daglig nulstilling',

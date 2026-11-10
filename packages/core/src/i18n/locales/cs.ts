@@ -931,6 +931,8 @@ export const csOverrides: Record<string, string> = {
         'review.openTasks': 'Otevřené úkoly',
         'review.intro': 'Získejte jasno, aktuálnost a kreativitu.',
         'review.openGuide': 'Týdenní revize',
+        'review.startDailyReview': 'Spustit denní revizi',
+        'review.startWeeklyReview': 'Spustit týdenní revizi',
         'dailyReview.openGuide': 'Denní revize',
         'dailyReview.title': 'Denní revize',
         'dailyReview.introTitle': 'Denní reset',

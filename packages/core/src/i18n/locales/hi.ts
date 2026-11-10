@@ -741,6 +741,8 @@ export const hiOverrides: Record<string, string> = {
         'review.openTasks': 'खुले कार्य',
         'review.intro': 'स्पष्ट बनें, वर्तमान बनें और रचनात्मक बनें।',
         'review.openGuide': 'साप्ताहिक समीक्षा',
+        'review.startDailyReview': 'दैनिक समीक्षा शुरू करें',
+        'review.startWeeklyReview': 'साप्ताहिक समीक्षा शुरू करें',
         'dailyReview.openGuide': 'दैनिक समीक्षा',
         'dailyReview.title': 'दैनिक समीक्षा',
         'dailyReview.introTitle': 'दैनिक रीसेट',

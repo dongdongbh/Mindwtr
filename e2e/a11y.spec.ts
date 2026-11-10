@@ -96,7 +96,7 @@ const runAxeContrast = async (page: Page, theme: string, context: string): Promi
 const openDailyReview = async (page: Page) => {
     const reviewNav = page.locator('[data-sidebar-item][data-view="review"]');
     await reviewNav.click();
-    await page.getByRole('button', { name: 'Daily Review', exact: true }).click();
+    await page.getByRole('button', { name: 'Start daily review', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Daily Review' })).toBeVisible();
 };
 
