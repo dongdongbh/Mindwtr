@@ -116,6 +116,8 @@ val LABEL_KEYS = listOf(
 
     "quickAdd.audioRecord", "quickAdd.audioStop", "quickAdd.audioRecording", "quickAdd.audioProcessing", "quickAdd.speechNotConfigured",
     "quickAdd.audioPermissionTitle", "quickAdd.audioPermissionBody", "quickAdd.audioErrorTitle", "sandbox.unavailable",
+    "sandbox.open", "sandbox.description", "sandbox.notice", "sandbox.title", "sandbox.label", "sandbox.reset", "sandbox.resetShort", "sandbox.exit", "sandbox.exitShort",
+    "sandbox.switching", "sandbox.switchFailed", "sandbox.confirmTitle", "sandbox.confirmDescription", "sandbox.enter", "settings.taskEditorLayout", "settings.appearance", "settings.regionalFormats",
     "quickAdd.audioCaptureLabel",
 )
 

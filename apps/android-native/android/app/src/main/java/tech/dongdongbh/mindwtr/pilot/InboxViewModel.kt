@@ -269,6 +269,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     val menu = MenuModel(this, saved, prefs, Workspace.dir(app, "menu", sandboxed))
 
+    val sandbox = SandboxSwitch(this)
+
     val lock = AppLock(this)
 
     val captureModal = CaptureModalModel(this, saved, Workspace.dir(app, "capture-modal", sandboxed))

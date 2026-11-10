@@ -752,6 +752,25 @@ const reviewScreens = { contextsUi, trashUi, reviewUi, weeklyUi, dailyUi, listAc
 const inboxUi = source('InboxScreen.kt');
 const bulkUi = source('BulkBar.kt');
 
+const sandboxUi = source('Sandbox.kt');
+assert.match(source('ProcessCoreHost.kt'), /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = isSandbox\(runtime\) \|\| StartOrder\.afterReplay\(/,
+    'a sandbox process never drains the real capture queue or widget check-offs into the sample data; they wait for the real workspace');
+assert.match(source('ProcessCoreHost.kt'), /private fun drainAudio\([^\n]*\{\s+if \(isSandbox\(runtime\)\) return/, 'a sandbox process never takes the real widget recordings');
+assert.match(sandboxUi, /val request = runCatching \{ runtime\.sandboxRequest\(display\) \}\.getOrElse \{[\s\S]{0,200}?runtime\.sandboxRelease\(\)[\s\S]{0,120}?if \(!Workspace\.store\(app\)\.write\(request\)\) \{\s+runtime\.sandboxRelease\(\)[\s\S]{0,300}?runtime\.logLine\("Native Android sandbox switch requested"[\s\S]{0,140}?Workspace\.restart\(app\)/,
+    'Enter and Reset store core\'s request before the restart and release the switch when they cannot');
+assert.match(sandboxUi, /fun exit\(\) \{[\s\S]{0,200}?if \(!Workspace\.store\(app\)\.write\(null\)\)[\s\S]{0,80}?runtime\.logLine\("Native Android sandbox closed", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.9\/native-sandbox"\)\.put\("outcome", "exited"\)\)\s+Workspace\.restart\(app\)/,
+    'Exit clears any request, logs the exit line, then restarts into the real workspace');
+assert.match(source('core/CoreHost.kt'), /fun sandboxRequest\(display: JSONObject\): String \{\s+check\(checkNotNull\(journal\)\.pending\(\)\.isEmpty\(\)\)/, 'no sandbox while a real write still waits in the journal');
+assert.match(source('SettingsScreen.kt'), /if \(Workspace\.sandbox\) SandboxSettings\(model, shown\.view\) else when \(screen\)/, 'Settings in the sandbox is RN\'s Sandbox page');
+assert.match(source('SettingsModel.kt'), /var stack by mutableStateOf\(if \(Workspace\.sandbox\) listOf\("general"\) else/);
+assert.match(source('SettingsModel.kt'), /private fun keepStack\(value: List<String>\) \{\s+if \(Workspace\.sandbox\) return/, 'Settings in the sandbox stays on the Sandbox page');
+assert.match(source('SyncSettings.kt'), /SnapshotsCard\([^\n]*\)\s+SandboxOpenCard\(model\)/, 'Data & Sync offers Open sandbox, as RN\'s Sync screen does');
+assert.match(source('MainActivity.kt'), /Column\(Modifier\.fillMaxSize\(\)\.then\(if \(Workspace\.sandbox\) Modifier\.sandboxTop\(\) else Modifier\)\) \{\s+SandboxBanner\(model\)\s+Box\(Modifier\.weight\(1f\)\) \{\s+if \(modal != null && writable\) CaptureModalScreen/, 'the Sandbox banner sits above every screen, the menus and editor included');
+assert.match(source('Pomodoro.kt'), /fun refresh\(planAlarms: Boolean = false\) \{\s+if \(Workspace\.sandbox\) return/, 'Pomodoro needs the durable real storage, so the sandbox reads and plans none instead of showing core\'s refusal');
+assert.match(source('MainActivity.kt'), /if \(writable\) SandboxEntryConfirmation\(model\)\s+SandboxSwitchingOverlay\(model\)/);
+assert.match(sandboxUi, /\.semantics \{ testTagsAsResourceId = true \}\.testTag\("sandbox-workspace-banner"\)/, 'the banner sits outside every screen\'s resource-id scope, so it exposes its own tags to the device check');
+assert.match(sandboxUi, /\.semantics \{ testTagsAsResourceId = true \}\.testTag\("sandbox-switching"\)/);
+
 const processHost = source('ProcessCoreHost.kt');
 assert.match(processHost, /val scratch = Workspace\.scratch\(app\)\s+val sandbox = sandboxRequest != null\s+if \(!sandbox && scratch\.exists\(\) && !scratch\.deleteRecursively\(\)\) Log\.w\([^\n]*\)\s+if \(sandbox\) check\(Workspace\.freshBootFiles\(scratch\)\)/,
     'a real start removes every sandbox scratch file (journal, database, key-value store, drafts) and only logs if it cannot; a sandbox start must reset its own boot files');
@@ -1982,7 +2001,7 @@ assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.t
 assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
 
 
-assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
+assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = isSandbox\(runtime\) \|\| StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
 assert.match(source('StartOrder.kt'), /Drain\.Done -> \{\s+startSync\(\)\s+return true\s+\}\s+Drain\.Unswept -> \{\s+startSync\(\)\s+refreshWidgets\(\)\s+retryLater\(\)\s+\}\s+Drain\.Waiting -> retryLater\(\)\s+is Drain\.Failed -> \{\s+owe\(result\.message\)\s+retryLater\(\)\s+\}/);
 assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueue\(context, CoreJob\.INGEST, emptyMap\(\), ExistingWorkPolicy\.KEEP\)/, 'a retry never cancels a running drain');
 
@@ -2707,9 +2726,9 @@ assert.deepEqual(readdirSync(resolve(app, 'android/app/src/main/java/tech/dongdo
 assert.match(searchUi, /\{ complete\(task\.id, task\.taskRevision\) \}/);
 assert.match(source('CalendarModel.kt'), /"done" -> complete\(taskId, revision\)\n/);
 assert.match(source('Pomodoro.kt'), /shell\.complete\(id, taskRevision\)\n/);
-assert.match(source('Pomodoro.kt'), /fun refresh\(planAlarms: Boolean = false\) \{\s+if \(!planAlarms\) return read\(\)\s+planGate\.request\(\)\s+shell\.menu\.whenIdle\(::read\)/,
+assert.match(source('Pomodoro.kt'), /fun refresh\(planAlarms: Boolean = false\) \{\s+if \(Workspace\.sandbox\) return\s+if \(!planAlarms\) return read\(\)\s+planGate\.request\(\)\s+shell\.menu\.whenIdle\(::read\)/,
     'a read that asks for an alarm plan waits for the running command, so a Pomodoro setting change still plans (or cancels) its alerts');
-assert.match(source('Pomodoro.kt'), /fun planInBackground\(\) = shell\.menu\.whenIdle \{ shell\.background\(listOf\(Part\.Pomodoro\), \{ runtime -> plan\(runtime\) \}\) \{ _, _ -> \} \}/,
+assert.match(source('Pomodoro.kt'), /fun planInBackground\(\) = if \(Workspace\.sandbox\) Unit else shell\.menu\.whenIdle \{ shell\.background\(listOf\(Part\.Pomodoro\), \{ runtime -> plan\(runtime\) \}\) \{ _, _ -> \} \}/,
     'the alarm plan itself waits for the running command, since a background read is dropped while one runs');
 assert.match(model, /"complete" -> complete\(action\.id, action\.patch\["taskRevision"\]\.orEmpty\(\)\)\n/);
 assert.match(rowUi, /failedAction == if \(status == "done"\) completeAction\(task\.id, task\.taskRevision\) else statusAction\(task, status\)\)/);
@@ -3806,7 +3825,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(graphic, /offset\(x = if \(on\) 10\.dp else \(-10\)\.dp\)\.size\(20\.dp\)/);
 
     const settingsUiKt = code(source('SettingsScreen.kt'));
-    assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 3);
+    assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 4, 'General\'s three switches and the Sandbox page\'s Show task age, which is General\'s own setting');
     assert.match(settingsUiKt, /props: RnSwitchProps = LocalTheme\.current\.settingsSwitch/);
     assert.match(code(captureUi), /RnSwitch\(on, enabled = !locked, label = label, props = theme\.captureSwitch\)/);
     assert.match(code(menuUi), /RnSwitchGraphic\(on, true, LocalTheme\.current\.referenceSwitch\)/);

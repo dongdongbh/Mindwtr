@@ -396,6 +396,7 @@ internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
     view.optJSONObject("encryption")?.let { EncryptionCard(sync, it) }
     PreferencesCard(model, view.getJSONObject("preferences"), view.getJSONObject("disclosure"))
     SnapshotsCard(model, sync, view.getJSONObject("recoverySnapshots"), view.getJSONObject("disclosure"))
+    SandboxOpenCard(model)
     view.optJSONObject("missingFiles")?.takeIf { it.getString("questionId") != sync.answeredQuestion }?.let { question -> MissingFilesDialog(sync, question) }
 }
 

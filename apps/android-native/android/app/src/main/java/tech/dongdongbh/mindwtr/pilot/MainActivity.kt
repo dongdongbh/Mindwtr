@@ -213,64 +213,69 @@ class MainActivity : FragmentActivity() {
                 val listed = menu.screen
 
 
-                if (modal != null && writable) CaptureModalScreen(model, modal)
-                else if (open != null && writable) Box(Modifier.fillMaxSize()) {
-                    TaskEditorScreen(model, open)
+                Column(Modifier.fillMaxSize().then(if (Workspace.sandbox) Modifier.sandboxTop() else Modifier)) {
+                    SandboxBanner(model)
+                    Box(Modifier.weight(1f)) {
+                        if (modal != null && writable) CaptureModalScreen(model, modal)
+                        else if (open != null && writable) Box(Modifier.fillMaxSize()) {
+                            TaskEditorScreen(model, open)
 
-                    ToastCard(model, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 16.dp))
-                }
-                else if (flow != null && writable) ProcessInboxScreen(model, flow)
-                else if (searching != null && writable) SearchScreen(model, searching)
-                else if (listed != null && writable) MenuScreenHost(model, listed)
-                else Column(
-
-                    Modifier.fillMaxSize().background(c.cardBg).windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                        .semantics { testTagsAsResourceId = true },
-                ) {
-                    if (loading) {
-
-                        if (slowStart) CircularProgressIndicator(Modifier.padding(24.dp))
-                    } else if (!writable) {
-
-                        Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("boot-failure").padding(24.dp))
-                    } else {
-
-
-                        val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-                        val quick = screen == Screen.Projects && menu.quickView != "projects"
-                        if ((screen != Screen.Projects || openProjectId == null || quick) && !landscape) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
-
-                        error?.let { message ->
-                            FailureBanner(message) {
-                                if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
-                                else OwedRetry(model)
-                            }
+                            ToastCard(model, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 16.dp))
                         }
-                        Box(Modifier.weight(1f)) {
-                            Column(Modifier.fillMaxSize()) {
+                        else if (flow != null && writable) ProcessInboxScreen(model, flow)
+                        else if (searching != null && writable) SearchScreen(model, searching)
+                        else if (listed != null && writable) MenuScreenHost(model, listed)
+                        else Column(
 
-                                Box(Modifier.weight(1f).fillMaxWidth().background(c.bg).clipToBounds()) {
-                                    when (screen) {
-                                        Screen.Inbox -> InboxList(model, Modifier.fillMaxSize())
-                                        Screen.Focus -> FocusList(model, Modifier.fillMaxSize())
-                                        Screen.Projects -> if (quick) QuickList(model, Modifier.fillMaxSize()) else ProjectsTab(model, Modifier.fillMaxSize())
+                            Modifier.fillMaxSize().background(c.cardBg).windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                                .semantics { testTagsAsResourceId = true },
+                        ) {
+                            if (loading) {
+
+                                if (slowStart) CircularProgressIndicator(Modifier.padding(24.dp))
+                            } else if (!writable) {
+
+                                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("boot-failure").padding(24.dp))
+                            } else {
+
+
+                                val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+                                val quick = screen == Screen.Projects && menu.quickView != "projects"
+                                if ((screen != Screen.Projects || openProjectId == null || quick) && !landscape) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
+
+                                error?.let { message ->
+                                    FailureBanner(message) {
+                                        if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
+                                        else OwedRetry(model)
+                                    }
+                                }
+                                Box(Modifier.weight(1f)) {
+                                    Column(Modifier.fillMaxSize()) {
+
+                                        Box(Modifier.weight(1f).fillMaxWidth().background(c.bg).clipToBounds()) {
+                                            when (screen) {
+                                                Screen.Inbox -> InboxList(model, Modifier.fillMaxSize())
+                                                Screen.Focus -> FocusList(model, Modifier.fillMaxSize())
+                                                Screen.Projects -> if (quick) QuickList(model, Modifier.fillMaxSize()) else ProjectsTab(model, Modifier.fillMaxSize())
+                                            }
+
+                                            if (menu.sheet) MoreSheet(model)
+                                        }
+                                        TabBar(model)
                                     }
 
-                                    if (menu.sheet) MoreSheet(model)
+                                    Box(Modifier.fillMaxSize().navigationBarsPadding()) {
+
+                                        if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = tabToastBottomAboveNavigationBar()))
+                                        capture?.let { CapturePopup(model, it) }
+                                        if (areaSheet) AreaSheet(model)
+
+                                        if (quick || screen == Screen.Inbox) MenuDialogs(model)
+                                        if (screen == Screen.Focus) FocusDialogs(model)
+                                        StatusMenu(model)
+                                    }
                                 }
-                                TabBar(model)
-                            }
-
-                            Box(Modifier.fillMaxSize().navigationBarsPadding()) {
-
-                                if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = tabToastBottomAboveNavigationBar()))
-                                capture?.let { CapturePopup(model, it) }
-                                if (areaSheet) AreaSheet(model)
-
-                                if (quick || screen == Screen.Inbox) MenuDialogs(model)
-                                if (screen == Screen.Focus) FocusDialogs(model)
-                                StatusMenu(model)
                             }
                         }
                     }
@@ -295,6 +300,10 @@ class MainActivity : FragmentActivity() {
                 if (writable) CompletedAtFlow(model)
 
                 if (writable) StartupPromptOverlays(model)
+
+                if (writable) SandboxEntryConfirmation(model)
+
+                SandboxSwitchingOverlay(model)
             } } } }
         }
     }

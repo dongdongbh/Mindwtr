@@ -321,7 +321,7 @@ internal object ProcessCoreHost {
     }
 
 
-    fun recovered(app: Application, runtime: CoreHost, deferSync: Boolean = false): Boolean = StartOrder.afterReplay(
+    fun recovered(app: Application, runtime: CoreHost, deferSync: Boolean = false): Boolean = isSandbox(runtime) || StartOrder.afterReplay(
         drain = { drain(runtime, queue(app), app) },
         owe = { message -> recordFailure(PendingFailure(FailedAction("journal", ""), message, null)) },
         retryLater = { runCatching { CoreWork.retryDrain(app) }.onFailure { Log.w(CoreHost.TAG, "Native Android drain retry not queued", it) } },
@@ -459,6 +459,7 @@ internal object ProcessCoreHost {
 
 
     private fun drainAudio(app: Application, runtime: CoreHost, askedAt: Long, quietSince: Long = 0, stop: () -> Boolean = { false }) {
+        if (isSandbox(runtime)) return
         if (!audioDrainQueued.compareAndSet(false, true)) return
         audioThread.execute {
             audioDrainQueued.set(false)

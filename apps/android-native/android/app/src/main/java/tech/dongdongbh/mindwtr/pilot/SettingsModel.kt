@@ -111,7 +111,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     val gmail = GmailCaptureModel(menu)
 
 
-    var stack by mutableStateOf(saved.get<String>("settingsStack")?.split(',') ?: listOf("main")); private set
+    var stack by mutableStateOf(if (Workspace.sandbox) listOf("general") else saved.get<String>("settingsStack")?.split(',') ?: listOf("main")); private set
     val screen: String get() = stack.last()
 
     var query by mutableStateOf(saved.get<String>("settingsQuery") ?: ""); private set
@@ -121,12 +121,17 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
 
     var local by mutableStateOf(runCatching { JSONObject(saved.get<String>("settingsLocal") ?: "{}") }.getOrDefault(JSONObject())); private set
 
-    private fun keepStack(value: List<String>) { stack = value; saved["settingsStack"] = value.joinToString(",") }
+    private fun keepStack(value: List<String>) {
+        if (Workspace.sandbox) return
+        stack = value
+        saved["settingsStack"] = value.joinToString(",")
+    }
     private fun keepLocal(value: JSONObject) { local = value; saved["settingsLocal"] = value.toString() }
     internal fun editLocal(edit: JSONObject.() -> Unit) = keepLocal(JSONObject(local.toString()).apply(edit))
 
 
     val title: String get() {
+        if (Workspace.sandbox) return t("sandbox.title")
         val view = page?.takeIf { it.screen == screen || (isGtd(it.screen) && isGtd(screen)) }?.view ?: return t("settings.title")
         return when (screen) {
             "main" -> view.getString("title")
@@ -271,6 +276,12 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         page = next
         next.view.optJSONObject("openSectionsRestore")?.takeIf { prefs.getString(it.getString("key"), null) != it.getString("value") }?.let { store(JSONArray().put(it)) }
     }
+
+
+    var sandboxEditor by mutableStateOf<JSONObject?>(null); private set
+
+
+    fun readSandboxEditor() = shell.background(listOf(Part.Menu), { runtime -> read(runtime, "gtd-task-editor", emptyMap()).view }) { view, _ -> sandboxEditor = view }
 
 
     fun reload(depth: Map<String, Int> = page?.takeIf { it.screen == screen }?.depth.orEmpty()) = menu.whenIdle {

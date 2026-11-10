@@ -37,6 +37,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -90,7 +91,7 @@ fun SettingsList(model: InboxViewModel) = with(model.menu.settings) {
 
     if (shown.screen != screen && !(shown.screen.startsWith("gtd") && screen.startsWith("gtd"))) return
     Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp).testTag("settings-$screen")) {
-        when (screen) {
+        if (Workspace.sandbox) SandboxSettings(model, shown.view) else when (screen) {
             "main" -> SettingsMenu(model, shown.view)
             "advanced" -> MenuCard(model, shown.view.getJSONObject("advanced").menuObjects("rows"))
             "general" -> GeneralSettings(model, shown.view)
@@ -289,6 +290,79 @@ private fun SettingInput(value: String, label: String, placeholder: String?, mod
                 if (value.isEmpty() && placeholder != null) Text(placeholder, style = rnText(14, 400), color = c.secondaryText); inner()
             }
         })
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SandboxSettings(model: InboxViewModel, view: JSONObject) = with(model.menu) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val sandbox = model.sandbox
+    LaunchedEffect(model.busy) { if (!model.busy) settings.readSandboxEditor() }
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.padding(top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp).testTag("sandbox-settings"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(t("sandbox.title"), style = rnText(18, 700, 24), color = c.text, modifier = Modifier.semantics { heading() })
+        Text(t("sandbox.description"), style = rnText(14, 400, 20), color = c.secondaryText)
+        Text(t("sandbox.notice"), style = rnText(13, 400, 18), color = c.secondaryText,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).padding(10.dp))
+        if (sandbox.failed) Text(t("sandbox.switchFailed"), style = rnText(13, 600, 18), color = c.danger)
+        if (sandbox.switching) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CircularProgressIndicator(Modifier.size(18.dp), color = c.tint, strokeWidth = 2.dp)
+            Text(t("sandbox.switching"), style = rnText(14, 400, 20), color = c.secondaryText)
+        } else FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val buttonShape = RoundedCornerShape(10.dp)
+            val reset = t("sandbox.reset")
+            Row(Modifier.heightIn(min = 44.dp).clip(buttonShape).rnBorder(1.dp, c.border, buttonShape)
+                .clearAndSetSemantics { contentDescription = reset; role = Role.Button; testTag = "sandbox-settings-reset"; onClick { sandbox.reset(); true } }
+                .clickable(onClick = sandbox::reset).padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Lucide.RotateCcw, null, tint = c.tint, modifier = Modifier.size(17.dp))
+                Text(reset, style = rnText(14, 700), color = c.tint)
+            }
+            val exit = t("sandbox.exit")
+            Row(Modifier.heightIn(min = 44.dp).clip(buttonShape).background(c.tint)
+                .clearAndSetSemantics { contentDescription = exit; role = Role.Button; testTag = "sandbox-settings-exit"; onClick { sandbox.exit(); true } }
+                .clickable(onClick = sandbox::exit).padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Lucide.X, null, tint = c.onTint, modifier = Modifier.size(18.dp))
+                Text(exit, style = rnText(14, 700), color = c.onTint)
+            }
+        }
+    }
+    settings.sandboxEditor?.optJSONObject("taskEditor")?.optJSONObject("presets")?.let { presets ->
+        SectionTitle(t("settings.taskEditorLayout"), top = 16)
+        Card {
+            Text(presets.getString("label"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp))
+            FlowRow(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 3) {
+                for (option in presets.menuObjects("options")) {
+                    val on = option.getBoolean("selected")
+                    val label = option.getString("label")
+                    val enabled = idle && !sandbox.switching
+                    Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
+                        .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (enabled) onClick { settings.gtd(option.getJSONObject("edit")); true } else disabled() }
+                        .clickable(enabled = enabled) { settings.gtd(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(label, style = rnText(13, 700), color = if (on) c.tint else c.secondaryText, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+    val age = view.optJSONObject("appearance")?.optJSONObject("showTaskAge") ?: return
+    SectionTitle(t("settings.appearance"), top = 16)
+    Card { ToggleRow(model, age, false, enabled = !sandbox.switching, props = theme.generalSwitch) { settings.general(it) } }
+    val regional = view.optJSONObject("regional") ?: return
+    SectionTitle(t("settings.regionalFormats"), top = 16)
+    Card {
+        listOf("weekStart", "dateFormat", "timeFormat").forEachIndexed { index, name ->
+            regional.optJSONObject(name)?.let { picker ->
+                PressRow(picker.getString("label"), picker.getString("value"), index > 0, idle && !sandbox.switching) {
+                    keepDialog(JSONObject().put("kind", "settingsPicker").put("picker", name))
+                }
+            }
+        }
+    }
 }
 
 

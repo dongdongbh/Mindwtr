@@ -775,6 +775,15 @@ class CoreHost(
     fun theme(stored: String): JSONObject = callAsync("theme", stored)
 
 
+    fun sandboxRequest(display: JSONObject): String {
+        check(checkNotNull(journal).pending().isEmpty()) { "SAVE_FAILED: Personal data has unsaved changes" }
+        return callAsync("sandboxRequest", display.toString()).getString("request")
+    }
+
+
+    fun sandboxRelease() { runCatching { callAsync("sandboxRelease") }.onFailure { Log.w(TAG, "Native Android sandbox switch not released ${it.javaClass.simpleName}") } }
+
+
     fun languageSaved(stored: String, system: String): JSONObject = callAsync("languageSaved", stored, system)
 
 
