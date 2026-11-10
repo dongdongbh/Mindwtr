@@ -6,6 +6,7 @@ import {
   isoDateLikeSchema,
   MAX_TASK_LIST_LIMIT,
   MAX_TASK_TITLE_LENGTH,
+  MAX_AREA_NAME_LENGTH,
   MAX_TASK_TOKEN_LENGTH,
   normalizeNullableTaskRecurrence,
   normalizeNullableTaskRelativeStartOffset,
@@ -33,12 +34,13 @@ export type LocalApiServiceOptions = {
 export const localApiIdempotencyKeySchema = z.string().regex(/^[\x21-\x7e]{1,128}$/);
 export const localApiTaskVersionSchema = z.string().regex(/^sha256-[0-9a-f]{64}$/);
 export type LocalApiTask = Task & { version?: string };
-type LocalApiService = Omit<MindwtrService, 'getTask' | 'addTask' | 'updateTask' | 'listTasks' | 'completeTask'> & {
+type LocalApiService = Omit<MindwtrService, 'getTask' | 'addTask' | 'updateTask' | 'listTasks' | 'completeTask' | 'reopenTask'> & {
   listTasks: (input: ListTasksInput) => Promise<LocalApiTask[]>;
   getTask: (input: GetTaskInput) => Promise<LocalApiTask>;
   addTask: (input: AddTaskInput & { idempotencyKey?: string }) => Promise<LocalApiTask>;
   updateTask: (input: UpdateTaskInput & { expectedVersion?: string }) => Promise<LocalApiTask>;
   completeTask: (id: string, controls?: { expectedVersion?: string }) => Promise<LocalApiTask>;
+  reopenTask: (input: Parameters<NonNullable<MindwtrService['reopenTask']>>[0]) => Promise<LocalApiTask>;
 };
 
 export const LOCAL_API_UNSUPPORTED_PROJECT_FIELDS = [
@@ -198,6 +200,7 @@ const validateEntity = <T extends Task | Project | Area | Section | Person>(valu
     || typeof record.createdAt !== 'string' || typeof record.updatedAt !== 'string'
     || typeof record[kind === 'area' || kind === 'person' ? 'name' : 'title'] !== 'string') return malformedResponse();
   if (kind === 'section' && (typeof record.projectId !== 'string' || !record.projectId || typeof record.order !== 'number' || !Number.isFinite(record.order))) return malformedResponse();
+  if (kind === 'area' && record.existing !== undefined && typeof record.existing !== 'boolean') return malformedResponse();
   if (kind === 'task' && (!taskStatusSchema.safeParse(record.status).success
     || !Array.isArray(record.tags) || !record.tags.every((item) => typeof item === 'string')
     || !Array.isArray(record.contexts) || !record.contexts.every((item) => typeof item === 'string'))) return malformedResponse();
@@ -279,7 +282,7 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
           try { code = asRecord(await Promise.race([response.json(), timeout]))?.code; } catch {                              }
           if (code === 'idempotency_conflict') throw new LocalApiRequestError('This idempotency key was already used with different task input. Reuse the original input or start a new operation.', code);
           if (code === 'idempotency_capacity') throw new LocalApiRequestError('Desktop Local API cannot retain another idempotent create receipt yet. Retry later with the same key and input.', code);
-          if (code === 'recurrence_requires_app') throw new LocalApiRequestError('This recurrence requires completion in the desktop app.', 'validation_error');
+          if (code === 'recurrence_requires_app') throw new LocalApiRequestError('This recurring task requires the desktop app for this operation.', 'validation_error');
           throw new LocalApiRequestError('Desktop Local API rejected a lifecycle conflict. Check the task or project in the app.', 'validation_error');
         }
         if (response.status === 400 || response.status === 422) throw new LocalApiRequestError('Desktop Local API rejected invalid or unsupported input.', 'validation_error');
@@ -425,6 +428,11 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
       return entity<LocalApiTask>('POST', expectedVersion === undefined ? path : `/v2${path}`, 'task', undefined, id,
         expectedVersion === undefined ? {} : { headers: { 'If-Match': `"${expectedVersion}"` }, requireVersion: true });
     },
+    reopenTask: async (input) => {
+      const parsed = parseInput(z.object({ id: z.string().min(1), status: z.enum(['inbox', 'next', 'waiting', 'someday']).optional(), expectedVersion: localApiTaskVersionSchema.optional() }).strict(), input, 'task reopen');
+      return entity<LocalApiTask>('POST', `${entityPath('tasks', parsed.id)}/reopen`, 'task', { status: parsed.status ?? 'next' }, parsed.id,
+        { requireVersion: true, ...(parsed.expectedVersion === undefined ? {} : { headers: { 'If-Match': `"${parsed.expectedVersion}"` } }) });
+    },
     restoreTask: async (id) => entity<Task>('POST', `${entityPath('tasks', id)}/restore`, 'task', undefined, id),
     deleteTask: async (id) => deleteEntity<Task>('tasks', id),
     addProject: async (input) => {
@@ -459,7 +467,10 @@ export const createLocalApiService = (options: LocalApiServiceOptions): LocalApi
     updatePerson: async () => unsupported('people tools'),
     renamePerson: async () => unsupported('people tools'),
     deletePerson: async () => unsupported('people tools'),
-    addArea: async () => unsupported('area writes'),
+    addArea: async (input) => {
+      const { name, ...props } = parseInput(z.object({ name: z.string().trim().min(1).max(MAX_AREA_NAME_LENGTH), color: z.string().optional(), icon: z.string().optional() }).strict(), input, 'area creation');
+      return entity<Area>('POST', '/areas', 'area', { name, props });
+    },
     updateArea: async () => unsupported('area writes'),
     deleteArea: async () => unsupported('area writes'),
     close: async () => {},

@@ -138,11 +138,15 @@ Both arguments are optional. Without them, writes keep their existing behavior. 
 | Create tasks | Explicit title and fields; `quickAdd` is unavailable |
 | Update/complete/delete/restore tasks | Supported through the API's corresponding endpoints; terminal status changes cannot be submitted as ordinary edits |
 | List/get/create/update/delete projects | Supported for the API's basic project fields: title, color, status, Area and sequential behavior |
-| List areas | Supported |
+| List/create areas | Supported; creation reuses a live same-name area unchanged or restores a deleted same-name identity |
 | View section catalogue and project assignments | Unavailable; task assignments by known ID are supported |
-| Sections, managed people, Area writes | Section/people lists are supported; single lookups and remaining writes are unavailable |
+| Sections, managed people, remaining Area writes | Section/people lists are supported; single lookups and remaining writes are unavailable |
 | GTD availability `view` | Unavailable because the API does not expose the required view-section and settings snapshot |
 | Replacing attachment links | Unavailable because the API does not provide conditional attachment updates |
+
+`mindwtr_reopen_task` is available in Local API mode for ordinary done/archived tasks. Supply `{id,status?,expectedVersion?}`; status defaults to `next` and accepts `inbox`, `next`, `waiting`, or `someday`. It uses the new `/tasks/:id/reopen` endpoint without fallback, returns the task/version, and checks the optional condition inside the SQLite transaction. A retry already at that target is unchanged. A different active status conflicts. Parent reactivation restores only eligible archive-owned sections and keeps finished siblings finished. Deleted/purged tasks and terminal tasks with any non-null recurrence metadata are refused; the latter return `recurrence_requires_app` and require the app. This operation does not restore Trash.
+
+`mindwtr_add_area` accepts `{name,color?,icon?}`. Names are trimmed, limited to 200 UTF-16 units, and matched without case. A live match wins over a deleted match and returns unchanged with response-only `existing: true`, ignoring supplied props. A deleted match retains its ID and restores only children carrying its exact legacy cascade deletion timestamp. Independently deleted and detached children stay as they are; supplied color respects project color overrides. Fresh creation follows all retained areas in order. These effects commit atomically and require write permission. Area update/delete remain unavailable in Local API mode.
 
 Other unsupported fields are rejected before a write. The desktop API's recurrence limitations also apply; some recurring completions must be performed in the app. This backend does not promise full SQLite/Cloud tool parity.
 

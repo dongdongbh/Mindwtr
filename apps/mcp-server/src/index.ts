@@ -718,6 +718,16 @@ export const registerMindwtrTools = (
     }),
   );
 
+  if (options.localApi) {
+    server.registerTool('mindwtr_reopen_task', {
+      description: 'Reopen an ordinary done or archived task through the desktop Local API. Recurring history requires the app. Set expectedVersion to reject concurrent edits.',
+      inputSchema: z.object({ id: z.string().min(1), status: z.enum(['inbox', 'next', 'waiting', 'someday']).optional(), expectedVersion: localApiTaskVersionSchema.optional() }).strict(),
+    }, withReadonlyMcpErrorHandling('mindwtr_reopen_task', async (input) => {
+      if (!service.reopenTask) throw new ValidationError('This backend does not support reopening tasks.');
+      return taskResponse(await service.reopenTask(input));
+    }));
+  }
+
   server.registerTool(
     'mindwtr_delete_task',
     {
@@ -834,19 +844,17 @@ export const registerMindwtrTools = (
     );
   }
 
-  if (!options.localApi) {
-    server.registerTool(
-      'mindwtr_add_area',
-      {
-        description: 'Add an area to the configured Mindwtr backend. On the local backend, a name a live area already has (any case) creates nothing: the result is that area, unchanged, with existing: true.',
-        inputSchema: addAreaSchema,
-      },
-      withReadonlyMcpErrorHandling('mindwtr_add_area', async (input) => {
-        const area = await service.addArea(input);
-        return createMcpTextResponse({ area });
-      }),
-    );
-  }
+  server.registerTool(
+    'mindwtr_add_area',
+    {
+      description: 'Add an area to the configured Mindwtr backend. On the local backend, a name a live area already has (any case) creates nothing: the result is that area, unchanged, with existing: true.',
+      inputSchema: options.localApi ? addAreaSchema.extend({ name: z.string().trim().min(1).max(MAX_AREA_NAME_LENGTH) }).strict() : addAreaSchema,
+    },
+    withReadonlyMcpErrorHandling('mindwtr_add_area', async (input) => {
+      const area = await service.addArea(input);
+      return createMcpTextResponse({ area });
+    }),
+  );
 
   if (!options.localApi) {
     server.registerTool(

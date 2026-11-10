@@ -36,6 +36,7 @@ const LOCAL_API_TOKEN_BYTES: usize = 32;
 const LOCAL_API_REV_BY: &str = "desktop-local-api";
 const MAX_SYNC_REVISION: i64 = 2_147_483_647;
 const MAX_TASK_TITLE_LENGTH: usize = 500;
+const MAX_AREA_NAME_LENGTH: usize = 200;
 const MAX_TASK_TOKEN_LENGTH: usize = MAX_TASK_TITLE_LENGTH;
 const DEFAULT_PROJECT_COLOR: &str = "#94a3b8";
 const RECURRENCE_REQUIRES_APP: &str = "recurrence_requires_app";
@@ -868,7 +869,7 @@ pub(crate) fn api_error_response(error: String) -> ApiResponse {
         };
     }
     if error == RECURRENCE_REQUIRES_APP {
-        return recurrence_completion_refusal_response();
+        return recurrence_app_refusal_response();
     }
     if matches!(
         error.as_str(),
@@ -966,7 +967,9 @@ fn health_response() -> Value {
         "idempotentTaskCreate": true,
         "conditionalTaskActions": true,
         "conditionalTaskListGet": true,
-        "referenceLists": true
+        "referenceLists": true,
+        "ordinaryTaskReopen": true,
+        "areaCreate": true
     }})
 }
 
@@ -1069,6 +1072,15 @@ pub(crate) enum LocalOperation {
         restore: bool,
     },
     ListAreas,
+    CreateArea {
+        name: String,
+        props: Map<String, Value>,
+    },
+    ReopenTask {
+        id: String,
+        status: String,
+        condition: Option<TaskMatchCondition>,
+    },
     ListSections {
         project_id: Option<String>,
         include_deleted: bool,
@@ -1118,6 +1130,8 @@ impl LocalOperation {
         matches!(
             self,
             Self::CreateProject(_)
+                | Self::CreateArea { .. }
+                | Self::ReopenTask { .. }
                 | Self::PatchProject { .. }
                 | Self::PatchArea { .. }
                 | Self::ProjectLifecycle { .. }
@@ -1196,6 +1210,7 @@ pub(crate) fn operation_from_api_request(
             }
         }
         ("POST", "/projects") => LocalOperation::CreateProject(body()?),
+        ("POST", "/areas") => area_create_operation(&body()?)?,
         (method, _) if segments.len() == 2 && segments[0] == "areas" => match method {
             "GET" => LocalOperation::GetArea(id()),
             "PATCH" => LocalOperation::PatchArea {
@@ -1232,6 +1247,33 @@ pub(crate) fn operation_from_api_request(
             },
             _ => return Ok(None),
         },
+        ("POST", _) if segments.len() == 3 && segments[0] == "tasks" && segments[2] == "reopen" => {
+            let body = if request.body.is_empty() {
+                Map::new()
+            } else {
+                body()?
+            };
+            if body.keys().any(|field| field != "status") {
+                return Err("Unsupported task reopen field".into());
+            }
+            let status = match body.get("status") {
+                None => "next",
+                Some(Value::String(status)) => status.as_str(),
+                _ => return Err("Invalid task reopen status".into()),
+            };
+            if !matches!(status, "inbox" | "next" | "waiting" | "someday") {
+                return Err("Invalid task reopen status".into());
+            }
+            LocalOperation::ReopenTask {
+                id: id(),
+                status: status.into(),
+                condition: request
+                    .headers
+                    .get("if-match")
+                    .map(|header| parse_if_match(header))
+                    .transpose()?,
+            }
+        }
         ("POST", _)
             if segments.len() == 3
                 && segments[0] == "tasks"
@@ -1433,6 +1475,52 @@ pub(crate) fn execute_operation(
                 .filter(|area| !has_string_field(area, "deletedAt"))
                 .collect::<Vec<_>>();
             return Ok(json!({ "areas": areas }));
+        }
+        LocalOperation::CreateArea { name, props } => {
+            let _guard = access.lock_write(write_lock)?;
+            let scope = ProjectMutationReadScope::area_create(&name);
+            let ((id, outcome), persisted) =
+                mutate_project_rows_with_retries(app, scope, |data| {
+                    let (id, outcome, rows) = create_area_in_data_at(
+                        data,
+                        &name,
+                        &props,
+                        &generate_uuid_v4(),
+                        &now_iso(),
+                        &now_iso(),
+                    )?;
+                    Ok(((id, outcome), rows))
+                })?;
+            let mut area = array_items(&persisted, "areas")
+                .into_iter()
+                .find(|area| area["id"].as_str() == Some(&id))
+                .ok_or("Area not found after persistence")?;
+            if outcome == "existing" {
+                area.as_object_mut()
+                    .ok_or("Invalid area result")?
+                    .insert("existing".into(), Value::Bool(true));
+            }
+            log::info!("Desktop Local API area creation completed extra.releaseCheck=v1.3.9/local-api-area-create outcome={outcome}");
+            return Ok(json!({"area":area}));
+        }
+        LocalOperation::ReopenTask {
+            id,
+            status,
+            condition,
+        } => {
+            let _guard = access.lock_write(write_lock)?;
+            let (changed, persisted) = mutate_project_rows_with_retries(
+                app,
+                ProjectMutationReadScope::reopen(&id),
+                |data| {
+                    let rows =
+                        reopen_task_in_data_at(data, &id, &status, condition.as_ref(), &now_iso())?;
+                    Ok((!rows.tasks.is_empty(), rows))
+                },
+            )?;
+            let outcome = if changed { "reopened" } else { "unchanged" };
+            log::info!("Desktop Local API task reopen completed extra.releaseCheck=v1.3.9/local-api-task-reopen outcome={outcome}");
+            return Ok(task_response(persisted_task(&persisted, &id)?));
         }
         LocalOperation::ListSections {
             project_id,
@@ -2029,13 +2117,390 @@ fn live_project_area<'a>(data: &'a Value, area_id: &str) -> Option<&'a Value> {
     })
 }
 
-fn trim_area_name(name: &str) -> &str {
+pub(crate) fn trim_area_name(name: &str) -> &str {
     name.trim_matches(|character| {
         matches!(character,
         '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' |
         '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' |
         '\u{205f}' | '\u{3000}' | '\u{feff}')
     })
+}
+
+pub(crate) fn area_create_operation(body: &Map<String, Value>) -> Result<LocalOperation, String> {
+    if body
+        .keys()
+        .any(|field| !matches!(field.as_str(), "name" | "props"))
+    {
+        return Err("Unsupported area create field".into());
+    }
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .map(trim_area_name)
+        .filter(|name| !name.is_empty())
+        .ok_or("Invalid area name")?;
+    if js_string_length(name) > MAX_AREA_NAME_LENGTH {
+        return Err("Invalid area name: too long".into());
+    }
+    let props = match body.get("props") {
+        None => Map::new(),
+        Some(Value::Object(props)) => props.clone(),
+        _ => return Err("Invalid area props".into()),
+    };
+    for (field, value) in &props {
+        if !matches!(field.as_str(), "color" | "icon") {
+            return Err(format!("Unsupported area field: {field}"));
+        }
+        if !value.is_string() {
+            return Err(format!("Invalid area field: {field}"));
+        }
+    }
+    Ok(LocalOperation::CreateArea {
+        name: name.into(),
+        props,
+    })
+}
+
+fn changed_entity_rows(before: &Value, after: &Value, collection: &str) -> Vec<Value> {
+    let originals = array_items(before, collection)
+        .into_iter()
+        .filter_map(|row| row["id"].as_str().map(str::to_string).map(|id| (id, row)))
+        .collect::<HashMap<_, _>>();
+    array_items(after, collection)
+        .into_iter()
+        .filter(|row| {
+            row["id"]
+                .as_str()
+                .is_some_and(|id| originals.get(id) != Some(row))
+        })
+        .collect()
+}
+
+fn changed_project_rows(before: &Value, after: &Value) -> ProjectMutationRows {
+    ProjectMutationRows {
+        areas: changed_entity_rows(before, after, "areas"),
+        projects: changed_entity_rows(before, after, "projects"),
+        sections: changed_entity_rows(before, after, "sections"),
+        tasks: changed_entity_rows(before, after, "tasks"),
+    }
+}
+
+fn stamp_entity(row: &mut Map<String, Value>, at: &str, device_id: &str) {
+    row.insert("updatedAt".into(), Value::String(at.into()));
+    bump_task_revision(row, device_id);
+}
+
+fn create_area_in_data_at(
+    data: &mut Value,
+    name: &str,
+    props: &Map<String, Value>,
+    new_id: &str,
+    restore_at: &str,
+    update_at: &str,
+) -> Result<(String, String, ProjectMutationRows), String> {
+    let before = data.clone();
+    let mut next = data.clone();
+    let device_id = device_id_from_data(data);
+    let mut areas = array_items(data, "areas");
+    let normalized = trim_area_name(name).to_lowercase();
+    let matches = |area: &&Value| {
+        area["name"]
+            .as_str()
+            .is_some_and(|value| trim_area_name(value).to_lowercase() == normalized)
+    };
+    let deleted = |row: &Value| {
+        row["deletedAt"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    };
+    if let Some(area) = areas.iter().filter(matches).find(|area| !deleted(area)) {
+        return Ok((
+            area["id"].as_str().ok_or("Invalid area id")?.into(),
+            "existing".into(),
+            ProjectMutationRows::default(),
+        ));
+    }
+    let selected = areas
+        .iter()
+        .filter(matches)
+        .find(|area| deleted(area))
+        .cloned();
+    let (id, outcome) = if let Some(mut area) = selected {
+        let id = area["id"].as_str().ok_or("Invalid area id")?.to_string();
+        let cascade_at = area["deletedAt"].clone();
+        let original_name = area["name"].as_str().unwrap_or_default().to_string();
+        let object = area.as_object_mut().ok_or("Invalid area")?;
+        object.remove("deletedAt");
+        stamp_entity(object, restore_at, &device_id);
+        let mut projects = array_items(data, "projects");
+        for project in &mut projects {
+            if project["areaId"].as_str() == Some(&id) && project["deletedAt"] == cascade_at {
+                let object = project.as_object_mut().ok_or("Invalid project")?;
+                object.remove("deletedAt");
+                if !object
+                    .get("areaTitle")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !trim_area_name(value).is_empty())
+                {
+                    object.insert("areaTitle".into(), Value::String(original_name.clone()));
+                }
+                stamp_entity(object, restore_at, &device_id);
+            }
+        }
+        let live_projects = projects
+            .iter()
+            .filter(|project| project["areaId"].as_str() == Some(&id) && !deleted(project))
+            .filter_map(|project| project["id"].as_str().map(str::to_string))
+            .collect::<HashSet<_>>();
+        let mut sections = array_items(data, "sections");
+        for section in &mut sections {
+            if section["projectId"]
+                .as_str()
+                .is_some_and(|id| live_projects.contains(id))
+                && section["deletedAt"] == cascade_at
+            {
+                let object = section.as_object_mut().ok_or("Invalid section")?;
+                object.remove("deletedAt");
+                stamp_entity(object, restore_at, &device_id);
+            }
+        }
+        let live_sections = sections
+            .iter()
+            .filter(|section| {
+                section["projectId"]
+                    .as_str()
+                    .is_some_and(|id| live_projects.contains(id))
+                    && !deleted(section)
+            })
+            .filter_map(|section| section["id"].as_str().map(str::to_string))
+            .collect::<HashSet<_>>();
+        let mut tasks = array_items(data, "tasks");
+        for task in &mut tasks {
+            if (task["areaId"].as_str() == Some(&id)
+                || task["projectId"]
+                    .as_str()
+                    .is_some_and(|id| live_projects.contains(id)))
+                && task["deletedAt"] == cascade_at
+            {
+                let object = task.as_object_mut().ok_or("Invalid task")?;
+                object.remove("deletedAt");
+                object.remove("purgedAt");
+                if object
+                    .get("sectionId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !live_sections.contains(id))
+                {
+                    object.remove("sectionId");
+                }
+                stamp_entity(object, restore_at, &device_id);
+            }
+        }
+        if !props.is_empty() || original_name != name {
+            for project in projects
+                .iter_mut()
+                .filter(|_| props.contains_key("color") || name != trim_area_name(&original_name))
+            {
+                if project["areaId"].as_str() != Some(&id) {
+                    continue;
+                }
+                let repaint = props.get("color").is_some_and(|color| {
+                    project["colorOverride"].is_null() && project["color"] != *color
+                });
+                let rename = project["areaTitle"].as_str() != Some(name);
+                if repaint || rename {
+                    let object = project.as_object_mut().ok_or("Invalid project")?;
+                    if repaint {
+                        object.insert("color".into(), props["color"].clone());
+                    }
+                    if rename {
+                        object.insert("areaTitle".into(), Value::String(name.into()));
+                    }
+                    stamp_entity(object, update_at, &device_id);
+                }
+            }
+            let object = area.as_object_mut().ok_or("Invalid area")?;
+            object.extend(props.clone());
+            object.insert("name".into(), Value::String(name.into()));
+            stamp_entity(object, update_at, &device_id);
+        }
+        for stored in &mut areas {
+            if stored["id"].as_str() == Some(&id) {
+                *stored = area.clone();
+            }
+        }
+        next["projects"] = json!(projects);
+        next["sections"] = json!(sections);
+        next["tasks"] = json!(tasks);
+        (id, "restored")
+    } else {
+        let order = areas
+            .iter()
+            .filter_map(|area| area["order"].as_f64().filter(|order| order.is_finite()))
+            .fold(-1.0, f64::max)
+            + 1.0;
+        let mut area = props.clone();
+        area.extend(json!({"id":new_id,"name":name,"order":finite_order_number(order).ok_or("Invalid area order")?,"rev":1,"revBy":device_id,"createdAt":restore_at,"updatedAt":restore_at}).as_object().ok_or("Invalid area")?.clone());
+        areas.push(Value::Object(area));
+        (new_id.to_string(), "created")
+    };
+    areas.sort_by(|left, right| {
+        left["order"]
+            .as_f64()
+            .unwrap_or(0.0)
+            .total_cmp(&right["order"].as_f64().unwrap_or(0.0))
+    });
+    next["areas"] = json!(areas);
+    let rows = changed_project_rows(&before, &next);
+    *data = next;
+    Ok((id, outcome.into(), rows))
+}
+
+fn reopen_task_in_data_at(
+    data: &mut Value,
+    id: &str,
+    status: &str,
+    condition: Option<&TaskMatchCondition>,
+    at: &str,
+) -> Result<ProjectMutationRows, String> {
+    if !matches!(status, "inbox" | "next" | "waiting" | "someday") {
+        return Err("Invalid task reopen status".into());
+    }
+    if let Some(condition) = condition {
+        ensure_task_version(data, id, condition)?;
+    }
+    let source = find_task(data, id).ok_or("Task not found")?;
+    if has_string_field(&source, "deletedAt") || has_string_field(&source, "purgedAt") {
+        return Err("Task status conflict: deleted or purged task cannot be reopened".into());
+    }
+    let previous = source["status"].as_str().unwrap_or("inbox");
+    if previous == status {
+        return Ok(ProjectMutationRows::default());
+    }
+    if !matches!(previous, "done" | "archived") {
+        return Err("Task status conflict: use PATCH to change an active task".into());
+    }
+    if source
+        .get("recurrence")
+        .is_some_and(|value| !value.is_null())
+    {
+        return Err(RECURRENCE_REQUIRES_APP.into());
+    }
+    let before = data.clone();
+    let mut next = data.clone();
+    let device_id = device_id_from_data(data);
+    let section = array_items(data, "sections")
+        .into_iter()
+        .find(|section| section["id"] == source["sectionId"]);
+    let parent_id = source["projectId"]
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            section
+                .as_ref()
+                .filter(|section| !has_string_field(section, "deletedAt"))
+                .and_then(|section| section["projectId"].as_str().map(str::to_string))
+        });
+    let parent = array_items(data, "projects")
+        .into_iter()
+        .find(|project| project["id"].as_str() == parent_id.as_deref());
+    if let Some(parent) = parent.filter(|parent| {
+        parent["status"] == "archived"
+            && !has_string_field(parent, "deletedAt")
+            && !has_string_field(parent, "purgedAt")
+    }) {
+        let parent_id = parent["id"].as_str().ok_or("Invalid project id")?;
+        for project in ensure_array_mut(&mut next, "projects")? {
+            if project["id"].as_str() == Some(parent_id) {
+                let object = project.as_object_mut().ok_or("Invalid project")?;
+                object.insert("status".into(), Value::String("active".into()));
+                object.remove("cancelledAt");
+                stamp_entity(object, at, &device_id);
+            }
+        }
+        for section in ensure_array_mut(&mut next, "sections")? {
+            if section["projectId"].as_str() == Some(parent_id)
+                && has_string_field(section, "projectArchivedAt")
+                && section["updatedAt"] == section["projectArchivedAt"]
+                && section["deletedAt"] == section["projectArchivedAt"]
+                && section["deletedAtBeforeProjectArchive"].is_null()
+            {
+                let object = section.as_object_mut().ok_or("Invalid section")?;
+                for field in [
+                    "deletedAt",
+                    "deletedAtBeforeProjectArchive",
+                    "projectArchivedAt",
+                ] {
+                    object.remove(field);
+                }
+                stamp_entity(object, at, &device_id);
+            }
+        }
+        for task in ensure_array_mut(&mut next, "tasks")? {
+            if task["id"].as_str() != Some(id) && task["projectId"].as_str() == Some(parent_id) {
+                let object = task.as_object_mut().ok_or("Invalid task")?;
+                if [
+                    "statusBeforeProjectArchive",
+                    "completedAtBeforeProjectArchive",
+                    "isFocusedTodayBeforeProjectArchive",
+                    "projectArchivedAt",
+                ]
+                .iter()
+                .any(|field| object.contains_key(*field))
+                {
+                    for field in [
+                        "statusBeforeProjectArchive",
+                        "completedAtBeforeProjectArchive",
+                        "isFocusedTodayBeforeProjectArchive",
+                        "projectArchivedAt",
+                    ] {
+                        object.remove(field);
+                    }
+                    stamp_entity(object, at, &device_id);
+                }
+            }
+        }
+    }
+    let live = LiveContainers::from_data(&next);
+    let mut patch = json!({"projectId":source["projectId"],"sectionId":source["sectionId"],"areaId":source["areaId"]}).as_object().ok_or("Invalid container patch")?.clone();
+    normalize_task_container_patch(source.as_object().ok_or("Invalid task")?, &mut patch, &live)?;
+    let mut task = source.as_object().ok_or("Invalid task")?.clone();
+    for (field, value) in patch {
+        if value.is_null() {
+            task.remove(&field);
+        } else {
+            task.insert(field, value);
+        }
+    }
+    task.insert("status".into(), Value::String(status.into()));
+    for field in ["completedAt", "cancelledAt", "boardOrder"] {
+        task.remove(field);
+    }
+    if previous == "archived" {
+        task.remove("archivedAt");
+    }
+    if has_string_field(&source, "projectArchivedAt") {
+        for field in [
+            "statusBeforeProjectArchive",
+            "completedAtBeforeProjectArchive",
+            "isFocusedTodayBeforeProjectArchive",
+            "projectArchivedAt",
+        ] {
+            task.remove(field);
+        }
+    }
+    if status == "inbox" && task.get("isFocusedToday").and_then(Value::as_bool) == Some(true) {
+        task.insert("isFocusedToday".into(), Value::Bool(false));
+        task.remove("focusOrder");
+    }
+    stamp_entity(&mut task, at, &device_id);
+    for stored in ensure_array_mut(&mut next, "tasks")? {
+        if stored["id"].as_str() == Some(id) {
+            *stored = Value::Object(task.clone());
+        }
+    }
+    let rows = changed_project_rows(&before, &next);
+    *data = next;
+    Ok(rows)
 }
 
 fn patch_area_in_data(
@@ -2960,15 +3425,15 @@ fn recurrence_completion_refusal(
     {
         return None;
     }
-    Some(recurrence_completion_refusal_response())
+    Some(recurrence_app_refusal_response())
 }
 
-fn recurrence_completion_refusal_response() -> ApiResponse {
+fn recurrence_app_refusal_response() -> ApiResponse {
     ApiResponse {
         status: 409,
         etag: None,
         body: json!({
-            "error": "This task's recurrence rule requires the app to complete it correctly.",
+            "error": "This recurring task requires the desktop app for this operation.",
             "code": RECURRENCE_REQUIRES_APP,
         }),
     }
@@ -6200,6 +6665,35 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_reopen_and_area_create_routes_are_classified_writes() {
+        let access = LocalApiAccess {
+            allow_write: true,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        };
+        for (path, body) in [
+            ("/tasks/task/reopen", json!({})),
+            ("/areas", json!({"name":"Work"})),
+        ] {
+            let response = handle_api_operation(
+                "credential",
+                &access,
+                ApiRequest {
+                    method: "POST".into(),
+                    path: path.into(),
+                    query: HashMap::new(),
+                    headers: HashMap::from([("authorization".into(), "Bearer credential".into())]),
+                    body: serde_json::to_vec(&body).unwrap(),
+                },
+                |operation| {
+                    assert!(operation.writes());
+                    Ok(json!({"ok":true}))
+                },
+            );
+            assert_eq!(response.status, 200);
+        }
+    }
+
+    #[test]
     fn polling_task_list_http_uses_query_scoped_validators_without_writing() {
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         let mut data = empty_local_api_data();
@@ -6847,7 +7341,7 @@ mod tests {
                 assert_eq!(response.body["apiVersion"], 2);
                 assert_eq!(
                     response.body["capabilities"],
-                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true,"conditionalTaskListGet":true,"referenceLists":true})
+                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true,"conditionalTaskListGet":true,"referenceLists":true,"ordinaryTaskReopen":true,"areaCreate":true})
                 );
             }
         }
@@ -8227,7 +8721,6 @@ mod tests {
             );
         }
         for (method, path) in [
-            ("POST", "/areas"),
             ("DELETE", "/areas/area-1"),
             ("PATCH", "/areas"),
             ("PATCH", "/v1/areas/area-1"),
@@ -8236,6 +8729,692 @@ mod tests {
             request.path = path.into();
             assert!(operation_from_api_request(&request).unwrap().is_none());
         }
+    }
+
+    fn reopen_fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../../packages/core/src/__fixtures__/local-api-reopen.json"
+        ))
+        .unwrap()
+    }
+
+    fn area_create_fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../../packages/core/src/__fixtures__/local-api-area-create.json"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn ordinary_reopen_matches_core_full_row_golden_cases() {
+        let fixture = reopen_fixture();
+        for case in fixture["cases"].as_array().unwrap() {
+            let mut data = case["before"].clone();
+            let result = reopen_task_in_data_at(
+                &mut data,
+                "source",
+                case["status"].as_str().unwrap(),
+                None,
+                fixture["at"].as_str().unwrap(),
+            );
+            if case["refused"] == true {
+                assert!(result.is_err(), "{}", case["label"]);
+                assert_eq!(data, case["before"], "{}", case["label"]);
+            } else {
+                result.unwrap_or_else(|error| panic!("{}: {error}", case["label"]));
+                assert_eq!(data, case["after"], "{}", case["label"]);
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_reopen_refuses_invalid_containers_without_partial_reactivation() {
+        let fixture = reopen_fixture();
+        for invalid in [
+            "missing-parent",
+            "purged-parent",
+            "missing-section",
+            "mismatched-section",
+            "predeleted-section",
+            "deleted-area",
+        ] {
+            let mut data = fixture["cases"][5]["before"].clone();
+            match invalid {
+                "missing-parent" => {
+                    data["projects"].as_array_mut().unwrap().remove(0);
+                }
+                "purged-parent" => {
+                    data["projects"][0]["purgedAt"] = fixture["at"].clone();
+                }
+                "missing-section" => {
+                    data["sections"].as_array_mut().unwrap().remove(0);
+                }
+                "mismatched-section" => {
+                    data["sections"][0]["projectId"] = json!("unrelated");
+                }
+                "predeleted-section" => {
+                    data["sections"][0]["deletedAtBeforeProjectArchive"] = fixture["at"].clone();
+                }
+                "deleted-area" => {
+                    data["tasks"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("projectId");
+                    data["tasks"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("sectionId");
+                    data["tasks"][0]["areaId"] = json!("deleted");
+                    data["areas"] =
+                        json!([{"id":"deleted","name":"Deleted","deletedAt":fixture["at"]}]);
+                }
+                _ => unreachable!(),
+            };
+            let before = data.clone();
+            assert!(
+                reopen_task_in_data_at(
+                    &mut data,
+                    "source",
+                    "next",
+                    None,
+                    fixture["at"].as_str().unwrap()
+                )
+                .is_err(),
+                "{invalid}"
+            );
+            assert_eq!(data, before, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn area_creation_matches_core_full_row_golden_cases() {
+        let fixture = area_create_fixture();
+        for case in fixture["cases"].as_array().unwrap() {
+            let mut data = case["before"].clone();
+            let (id, outcome, _) = create_area_in_data_at(
+                &mut data,
+                trim_area_name(case["name"].as_str().unwrap()),
+                case["props"].as_object().unwrap(),
+                fixture["newId"].as_str().unwrap(),
+                fixture["at"].as_str().unwrap(),
+                fixture["updateAt"].as_str().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(id, case["areaId"].as_str().unwrap(), "{}", case["label"]);
+            assert_eq!(
+                outcome,
+                match case["kind"].as_str().unwrap() {
+                    "fresh" => "created",
+                    "restored" => "restored",
+                    "live" => "existing",
+                    kind => panic!("Unknown fixture kind {kind}"),
+                },
+                "{}",
+                case["label"]
+            );
+            assert_eq!(data, case["after"], "{}", case["label"]);
+        }
+    }
+
+    fn sorted_lifecycle_data(mut data: Value) -> Value {
+        for collection in ["tasks", "projects", "sections", "areas", "people"] {
+            if let Some(rows) = data[collection].as_array_mut() {
+                rows.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+            }
+        }
+        data
+    }
+
+    fn lifecycle_http_listener(database: std::path::PathBuf, allow_write: bool) -> LocalApiHandle {
+        let write_lock = Arc::new(Mutex::new(()));
+        start_http_listener(0, allow_write, move |access, _, request| {
+            handle_api_operation("lifecycle-token", access, request, |operation| {
+                let _guard = if operation.writes() {
+                    Some(access.lock_write(&write_lock)?)
+                } else {
+                    None
+                };
+                let conn =
+                    rusqlite::Connection::open(&database).map_err(|error| error.to_string())?;
+                conn.execute_batch("PRAGMA foreign_keys=ON;")
+                    .map_err(|error| error.to_string())?;
+                match operation {
+                    LocalOperation::ReopenTask {
+                        id,
+                        status,
+                        condition,
+                    } => {
+                        let data = crate::storage::local_project_operation_test_commit(
+                            &conn,
+                            ProjectMutationReadScope::reopen(&id),
+                            |data| {
+                                Ok((
+                                    (),
+                                    reopen_task_in_data_at(
+                                        data,
+                                        &id,
+                                        &status,
+                                        condition.as_ref(),
+                                        "2026-11-10T12:00:00.000Z",
+                                    )?,
+                                ))
+                            },
+                        )?;
+                        Ok(task_response(persisted_task(&data, &id)?))
+                    }
+                    LocalOperation::CreateArea { name, props } => {
+                        let mut outcome = String::new();
+                        let mut id = String::new();
+                        let data = crate::storage::local_project_operation_test_commit(
+                            &conn,
+                            ProjectMutationReadScope::area_create(&name),
+                            |data| {
+                                let (selected, result, rows) = create_area_in_data_at(
+                                    data,
+                                    &name,
+                                    &props,
+                                    "new-area",
+                                    "2026-11-10T12:00:00.000Z",
+                                    "2026-11-10T12:00:01.000Z",
+                                )?;
+                                id = selected;
+                                outcome = result;
+                                Ok(((), rows))
+                            },
+                        )?;
+                        let mut area = live_project_area(&data, &id)
+                            .ok_or("Area not found")?
+                            .clone();
+                        if outcome == "existing" {
+                            area["existing"] = Value::Bool(true);
+                        }
+                        Ok(json!({"area":area}))
+                    }
+                    _ => Err("Unsupported lifecycle test operation".into()),
+                }
+            })
+        })
+        .unwrap()
+    }
+
+    fn lifecycle_http_request(
+        port: u16,
+        path: &str,
+        body: Option<Value>,
+        condition: Option<&str>,
+        token: &str,
+    ) -> (u16, Value, Option<String>) {
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .retry(reqwest::retry::never())
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut request = client
+            .post(format!("http://{LOCAL_API_HOST}:{port}{path}"))
+            .bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        if let Some(condition) = condition {
+            request = request.header("If-Match", condition);
+        }
+        let response = request.send().unwrap();
+        let status = response.status().as_u16();
+        let etag = response
+            .headers()
+            .get("etag")
+            .map(|value| value.to_str().unwrap().to_string());
+        (status, response.json().unwrap(), etag)
+    }
+
+    #[test]
+    fn lifecycle_http_sqlite_matches_full_core_plans_after_reopen() {
+        for (area, fixture) in [(false, reopen_fixture()), (true, area_create_fixture())] {
+            for case in fixture["cases"].as_array().unwrap() {
+                let directory = tempfile::tempdir().unwrap();
+                let database = directory.path().join("lifecycle.sqlite");
+                let mut conn = rusqlite::Connection::open(&database).unwrap();
+                crate::storage::local_operation_test_seed(&mut conn, &case["before"]).unwrap();
+                conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+                let before = crate::storage::read_sqlite_data(&conn).unwrap();
+                let mut expected = before.clone();
+                let planned = if area {
+                    create_area_in_data_at(
+                        &mut expected,
+                        trim_area_name(case["name"].as_str().unwrap()),
+                        case["props"].as_object().unwrap(),
+                        "new-area",
+                        fixture["at"].as_str().unwrap(),
+                        fixture["updateAt"].as_str().unwrap(),
+                    )
+                    .map(|_| ())
+                } else {
+                    reopen_task_in_data_at(
+                        &mut expected,
+                        "source",
+                        case["status"].as_str().unwrap(),
+                        None,
+                        fixture["at"].as_str().unwrap(),
+                    )
+                    .map(|_| ())
+                };
+                let listener = lifecycle_http_listener(database.clone(), true);
+                let path = if area {
+                    "/areas"
+                } else {
+                    "/tasks/source/reopen"
+                };
+                let body = if area {
+                    json!({"name":case["name"],"props":case["props"]})
+                } else {
+                    json!({"status":case["status"]})
+                };
+                let (status, response, etag) = lifecycle_http_request(
+                    listener.port,
+                    path,
+                    Some(body.clone()),
+                    None,
+                    "lifecycle-token",
+                );
+                if planned.is_err() {
+                    assert_eq!(status, 400, "{} {response}", case["label"]);
+                    expected = before.clone();
+                } else {
+                    assert_eq!(status, 200, "{} {response}", case["label"]);
+                    if !area {
+                        assert_eq!(
+                            etag,
+                            Some(format!("\"{}\"", response["version"].as_str().unwrap()))
+                        );
+                    }
+                }
+                let after = crate::storage::read_sqlite_data(&conn).unwrap();
+                assert_eq!(
+                    sorted_lifecycle_data(after.clone()),
+                    sorted_lifecycle_data(expected),
+                    "{}",
+                    case["label"]
+                );
+                if status == 200 {
+                    let condition = if area { None } else { etag.as_deref() };
+                    let (retry_status, retry, _) = lifecycle_http_request(
+                        listener.port,
+                        path,
+                        Some(body),
+                        condition,
+                        "lifecycle-token",
+                    );
+                    assert_eq!(retry_status, 200, "{} {retry}", case["label"]);
+                    assert_eq!(
+                        crate::storage::read_sqlite_data(&conn).unwrap(),
+                        after,
+                        "retry must not write rows: {}",
+                        case["label"]
+                    );
+                    if area {
+                        assert_eq!(retry["area"]["existing"], true);
+                        assert!(after["areas"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .all(|row| row.get("existing").is_none()));
+                    }
+                }
+                drop(listener);
+                drop(conn);
+                let reopened = rusqlite::Connection::open(&database).unwrap();
+                assert_eq!(
+                    crate::storage::read_sqlite_data(&reopened).unwrap(),
+                    after,
+                    "durable {}",
+                    case["label"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lifecycle_http_rejects_invalid_stale_and_recurring_requests_without_writes() {
+        let fixture = reopen_fixture();
+        let mut seed = fixture["cases"][5]["before"].clone();
+        let ordinary = seed["tasks"][0].clone();
+        for (id, recurrence) in [
+            ("daily", json!({"rule":"daily"})),
+            ("exhausted", json!({"rule":"daily","count":1})),
+            ("legacy", json!("FREQ=DAILY")),
+            ("advanced", json!({"rrule":"FREQ=DAILY"})),
+            ("empty", json!({})),
+            ("archived-daily", json!({"rule":"daily"})),
+            ("empty-legacy", json!("")),
+        ] {
+            let mut task = ordinary.clone();
+            task["id"] = json!(id);
+            task["recurrence"] = recurrence;
+            if id == "archived-daily" {
+                task["status"] = json!("archived");
+            }
+            seed["tasks"].as_array_mut().unwrap().push(task);
+        }
+        let mut successor = ordinary.clone();
+        successor["id"] = json!("successor");
+        successor["status"] = json!("next");
+        successor["recurrence"] = json!({"rule":"daily"});
+        seed["tasks"].as_array_mut().unwrap().push(successor);
+        for (id, field) in [("deleted", "deletedAt"), ("purged", "purgedAt")] {
+            let mut task = ordinary.clone();
+            task["id"] = json!(id);
+            task[field] = fixture["at"].clone();
+            seed["tasks"].as_array_mut().unwrap().push(task);
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("refusals.sqlite");
+        let mut conn = rusqlite::Connection::open(&database).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &seed).unwrap();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        let listener = lifecycle_http_listener(database.clone(), true);
+        for body in [
+            Value::Null,
+            json!([]),
+            json!({"status":null}),
+            json!({"status":1}),
+            json!({"status":"done"}),
+            json!({"status":"archived"}),
+            json!({"status":"reference"}),
+            json!({"status":"unknown"}),
+            json!({"title":"ignored"}),
+        ] {
+            assert_eq!(
+                lifecycle_http_request(
+                    listener.port,
+                    "/tasks/source/reopen",
+                    Some(body.clone()),
+                    None,
+                    "lifecycle-token"
+                )
+                .0,
+                400,
+                "{body}"
+            );
+        }
+        for body in [
+            json!({}),
+            json!({"name":null}),
+            json!({"name":" \u{feff}"}),
+            json!({"name":"x".repeat(201)}),
+            json!({"name":"A","props":null}),
+            json!({"name":"A","props":{"color":null}}),
+            json!({"name":"A","props":{"icon":1}}),
+            json!({"name":"A","props":{"order":0}}),
+            json!({"name":"A","color":"red"}),
+        ] {
+            assert_eq!(
+                lifecycle_http_request(
+                    listener.port,
+                    "/areas",
+                    Some(body.clone()),
+                    None,
+                    "lifecycle-token"
+                )
+                .0,
+                400,
+                "{body}"
+            );
+        }
+        for (id, status) in [
+            ("missing", 404),
+            ("deleted", 409),
+            ("purged", 409),
+            ("successor", 409),
+        ] {
+            assert_eq!(
+                lifecycle_http_request(
+                    listener.port,
+                    &format!("/tasks/{id}/reopen"),
+                    Some(json!({"status":"waiting"})),
+                    None,
+                    "lifecycle-token"
+                )
+                .0,
+                status,
+                "{id}"
+            );
+        }
+        for id in [
+            "daily",
+            "exhausted",
+            "legacy",
+            "advanced",
+            "empty",
+            "archived-daily",
+            "empty-legacy",
+        ] {
+            let (status, response, _) = lifecycle_http_request(
+                listener.port,
+                &format!("/tasks/{id}/reopen"),
+                None,
+                None,
+                "lifecycle-token",
+            );
+            assert_eq!(status, 409);
+            assert_eq!(response["code"], RECURRENCE_REQUIRES_APP);
+        }
+        let stale = format!("\"sha256-{}\"", "0".repeat(64));
+        let (status, response, _) = lifecycle_http_request(
+            listener.port,
+            "/tasks/source/reopen",
+            None,
+            Some(&stale),
+            "lifecycle-token",
+        );
+        assert_eq!(status, 412);
+        assert_eq!(response["code"], "task_version_conflict");
+        assert_eq!(
+            lifecycle_http_request(
+                listener.port,
+                "/tasks/source/reopen",
+                None,
+                Some("unquoted"),
+                "lifecycle-token"
+            )
+            .0,
+            400
+        );
+        assert_eq!(
+            lifecycle_http_request(
+                listener.port,
+                "/tasks/source/reopen",
+                None,
+                None,
+                "wrong-token"
+            )
+            .0,
+            401
+        );
+        assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+        let read_only = lifecycle_http_listener(database, false);
+        for (path, body) in [
+            ("/tasks/source/reopen", json!({})),
+            ("/areas", json!({"name":"A"})),
+        ] {
+            assert_eq!(
+                lifecycle_http_request(read_only.port, path, Some(body), None, "lifecycle-token").0,
+                403
+            );
+        }
+        assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+        let (status, response, etag) = lifecycle_http_request(
+            listener.port,
+            "/tasks/source/reopen",
+            None,
+            None,
+            "lifecycle-token",
+        );
+        assert_eq!(status, 200, "{response}");
+        assert_eq!(response["task"]["status"], "next");
+        let after = crate::storage::read_sqlite_data(&conn).unwrap();
+        assert_eq!(
+            lifecycle_http_request(
+                listener.port,
+                "/tasks/source/reopen",
+                None,
+                Some(&stale),
+                "lifecycle-token"
+            )
+            .0,
+            412
+        );
+        assert_eq!(
+            lifecycle_http_request(
+                listener.port,
+                "/tasks/source/reopen",
+                None,
+                etag.as_deref(),
+                "lifecycle-token"
+            )
+            .0,
+            200
+        );
+        assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), after);
+    }
+
+    #[test]
+    fn lifecycle_http_child_failures_roll_back_all_rows() {
+        for (area, fixture) in [(false, reopen_fixture()), (true, area_create_fixture())] {
+            let case = &fixture["cases"][if area { 3 } else { 5 }];
+            for (table, event) in [
+                ("projects", "UPDATE"),
+                ("sections", "UPDATE"),
+                ("tasks", "INSERT"),
+            ] {
+                let directory = tempfile::tempdir().unwrap();
+                let database = directory.path().join("rollback.sqlite");
+                let mut conn = rusqlite::Connection::open(&database).unwrap();
+                crate::storage::local_operation_test_seed(&mut conn, &case["before"]).unwrap();
+                conn.execute_batch(&format!("CREATE TRIGGER reject_child BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT, 'injected lifecycle child failure'); END;")).unwrap();
+                let before = crate::storage::read_sqlite_data(&conn).unwrap();
+                let listener = lifecycle_http_listener(database, true);
+                let (path, body) = if area {
+                    ("/areas", json!({"name":case["name"],"props":case["props"]}))
+                } else {
+                    ("/tasks/source/reopen", json!({}))
+                };
+                let (status, response, _) = lifecycle_http_request(
+                    listener.port,
+                    path,
+                    Some(body),
+                    None,
+                    "lifecycle-token",
+                );
+                assert_eq!(status, 500, "area={area} table={table} {response}");
+                assert_eq!(
+                    crate::storage::read_sqlite_data(&conn).unwrap(),
+                    before,
+                    "area={area} table={table}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lifecycle_scopes_read_current_assignment_and_serialize_area_name_races() {
+        let fixture = reopen_fixture();
+        let case = &fixture["cases"][5];
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("fresh.sqlite");
+        let mut conn = rusqlite::Connection::open(&database).unwrap();
+        crate::storage::local_operation_test_seed(&mut conn, &case["before"]).unwrap();
+        let scope = ProjectMutationReadScope::reopen("source");
+        conn.execute("UPDATE tasks SET projectId = NULL, sectionId = NULL, rev = rev + 1 WHERE id = 'source'", []).unwrap();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        let mut expected = before.clone();
+        reopen_task_in_data_at(
+            &mut expected,
+            "source",
+            "next",
+            None,
+            fixture["at"].as_str().unwrap(),
+        )
+        .unwrap();
+        let after = crate::storage::local_project_operation_test_commit(&conn, scope, |data| {
+            Ok((
+                (),
+                reopen_task_in_data_at(
+                    data,
+                    "source",
+                    "next",
+                    None,
+                    fixture["at"].as_str().unwrap(),
+                )?,
+            ))
+        })
+        .unwrap();
+        assert_eq!(
+            sorted_lifecycle_data(after.clone()),
+            sorted_lifecycle_data(expected)
+        );
+        assert_eq!(
+            after["projects"], before["projects"],
+            "old parent is not reactivated after reassignment"
+        );
+        assert_eq!(after["sections"], before["sections"]);
+        let scope = ProjectMutationReadScope::area_create(" Concurrent ");
+        let other = rusqlite::Connection::open(&database).unwrap();
+        other.execute("INSERT INTO areas (id,name,orderNum,rev,createdAt,updatedAt) VALUES ('winner','Concurrent',9,1,?1,?1)", [fixture["at"].as_str().unwrap()]).unwrap();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        let after = crate::storage::local_project_operation_test_commit(&conn, scope, |data| {
+            let (id, outcome, rows) = create_area_in_data_at(
+                data,
+                "Concurrent",
+                &Map::new(),
+                "loser",
+                fixture["at"].as_str().unwrap(),
+                fixture["at"].as_str().unwrap(),
+            )?;
+            assert_eq!(id, "winner");
+            assert_eq!(outcome, "existing");
+            Ok(((), rows))
+        })
+        .unwrap();
+        assert_eq!(after, before);
+        drop(other);
+        let listener = lifecycle_http_listener(database, true);
+        let port = listener.port;
+        let first = thread::spawn(move || {
+            lifecycle_http_request(
+                port,
+                "/areas",
+                Some(json!({"name":"Raced"})),
+                None,
+                "lifecycle-token",
+            )
+        });
+        let second = thread::spawn(move || {
+            lifecycle_http_request(
+                port,
+                "/areas",
+                Some(json!({"name":" raced "})),
+                None,
+                "lifecycle-token",
+            )
+        });
+        let first = first.join().unwrap();
+        let second = second.join().unwrap();
+        assert_eq!(first.0, 200);
+        assert_eq!(second.0, 200);
+        assert_eq!(first.1["area"]["id"], second.1["area"]["id"]);
+        assert_eq!(
+            crate::storage::read_sqlite_data(&conn).unwrap()["areas"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|area| area["name"]
+                    .as_str()
+                    .is_some_and(|name| name.to_lowercase() == "raced"))
+                .count(),
+            1
+        );
     }
 
     fn area_update_fixture() -> Value {
@@ -8386,7 +9565,7 @@ mod tests {
     #[test]
     fn area_http_updates_are_durable_and_fail_atomically() {
         use crate::storage::{
-            local_area_operation_test_commit, local_operation_test_seed, read_sqlite_data,
+            local_operation_test_seed, local_project_operation_test_commit, read_sqlite_data,
         };
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("areas.sqlite");
@@ -8410,12 +9589,21 @@ mod tests {
                     .map_err(|error| error.to_string())?;
                 let (id, data) = match operation {
                     LocalOperation::PatchArea { id, body } => {
-                        let data = local_area_operation_test_commit(&conn, &id, |data| {
-                            Ok((
-                                (),
-                                patch_area_in_data(data, &id, &body, "2026-10-11T12:00:00.000Z")?,
-                            ))
-                        })?;
+                        let data = local_project_operation_test_commit(
+                            &conn,
+                            ProjectMutationReadScope::area_update(&id),
+                            |data| {
+                                Ok((
+                                    (),
+                                    patch_area_in_data(
+                                        data,
+                                        &id,
+                                        &body,
+                                        "2026-10-11T12:00:00.000Z",
+                                    )?,
+                                ))
+                            },
+                        )?;
                         (id, data)
                     }
                     LocalOperation::GetArea(id) => (id, read_sqlite_data(&conn)?),

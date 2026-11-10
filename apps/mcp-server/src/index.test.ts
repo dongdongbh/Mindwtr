@@ -221,9 +221,10 @@ describe('mcp server index', () => {
     const { server, tools } = createMockServer();
     let writes = 0;
     registerMindwtrTools(server, { ...createMockService(), addTask: async () => { writes++; return mockTask(); } }, true, { localApi: true });
-    expect(tools.size).toBe(15);
+    expect(tools.size).toBe(17);
     expect(tools.has('mindwtr_list_areas')).toBe(true);
-    expect(tools.has('mindwtr_add_area')).toBe(false);
+    expect(tools.has('mindwtr_add_area')).toBe(true);
+    expect(tools.has('mindwtr_reopen_task')).toBe(true);
     expect(tools.has('mindwtr_list_sections')).toBe(true);
     expect(tools.has('mindwtr_list_people')).toBe(true);
     expect(tools.has('mindwtr_get_section')).toBe(false);
@@ -240,6 +241,49 @@ describe('mcp server index', () => {
     expect(tools.get('mindwtr_update_project')!.inputSchema.safeParse({ id: 'p1', color: null }).success).toBe(false);
     expect(tools.get('mindwtr_list_tasks')!.inputSchema.safeParse({ view: 'available' }).success).toBe(false);
     expect(tools.get('mindwtr_update_task')!.inputSchema.safeParse({ id: 't1', attachments: null }).success).toBe(false);
+  });
+
+  test('Local API lifecycle tools expose strict supported targets and honor read-only', async () => {
+    const local = createMockServer();
+    let writes = 0;
+    registerMindwtrTools(local.server, { ...createMockService(), reopenTask: async () => { writes++; return mockTask(); }, addArea: async () => { writes++; return { id: 'area', name: 'Work', order: 0, createdAt: 'now', updatedAt: 'now' }; } }, true, { localApi: true });
+    const reopen = local.tools.get('mindwtr_reopen_task')!;
+    for (const status of ['inbox', 'next', 'waiting', 'someday']) expect(reopen.inputSchema.safeParse({ id: 't1', status }).success).toBe(true);
+    for (const status of ['done', 'archived', 'reference', null, 1]) expect(reopen.inputSchema.safeParse({ id: 't1', status }).success).toBe(false);
+    expect(reopen.inputSchema.safeParse({ id: 't1', title: 'Wrong' }).success).toBe(false);
+    const area = local.tools.get('mindwtr_add_area')!;
+    for (const input of [{ name: 'Work', props: {} }, { name: 'Work', color: null }, { name: 'Work', icon: 1 }]) expect(area.inputSchema.safeParse(input).success).toBe(false);
+    for (const result of [await reopen.handler({ id: 't1' }), await area.handler({ name: 'Work' })]) {
+      expect(result.isError).toBe(true); expect(JSON.parse(result.content[0].text).code).toBe('read_only');
+    }
+    expect(writes).toBe(0);
+    const other = createMockServer();
+    registerMindwtrTools(other.server, createMockService(), false);
+    expect(other.tools.has('mindwtr_reopen_task')).toBe(false);
+    const unsupported = createMockServer();
+    registerMindwtrTools(unsupported.server, createMockService(), false, { localApi: true });
+    expect((await unsupported.tools.get('mindwtr_reopen_task')!.handler({ id: 't1' })).isError).toBe(true);
+  });
+
+  test('Local API lifecycle handlers preserve task versions and existing area metadata', async () => {
+    const local = createMockServer();
+    const version = `sha256-${'a'.repeat(64)}`;
+    const calls: Array<{ url: string; headers: Headers; body: Record<string, unknown> | undefined }> = [];
+    const service = createLocalApiService({ url: 'http://127.0.0.1:3456', token: 'fixture-token', fetcher: async (input, init) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers), body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined });
+      return String(input).endsWith('/areas')
+        ? new Response(JSON.stringify({ area: { id: 'area', name: 'Work', order: 0, createdAt: 'now', updatedAt: 'now', existing: true } }))
+        : new Response(JSON.stringify({ task: mockTask(), version }), { headers: { ETag: `"${version}"` } });
+    } });
+    registerMindwtrTools(local.server, service, false, { localApi: true });
+    const reopened = await local.tools.get('mindwtr_reopen_task')!.handler({ id: 't1', status: 'waiting', expectedVersion: version });
+    expect(JSON.parse(reopened.content[0].text)).toEqual({ task: mockTask(), version });
+    expect(calls[0].url).toBe('http://127.0.0.1:3456/tasks/t1/reopen');
+    expect(calls[0].headers.get('If-Match')).toBe(`"${version}"`);
+    expect(calls[0].body).toEqual({ status: 'waiting' });
+    const area = await local.tools.get('mindwtr_add_area')!.handler({ name: 'Work', icon: 'Briefcase' });
+    expect(JSON.parse(area.content[0].text).area.existing).toBe(true);
+    expect(calls[1].body).toEqual({ name: 'Work', props: { icon: 'Briefcase' } });
   });
 
   test('Local API schemas forward reliable writes and expose sibling versions through the adapter', async () => {

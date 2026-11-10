@@ -395,7 +395,7 @@ describe('desktop Local API capability rejection before requests', () => {
       () => service.addSection({ title: 'S', projectId: 'p' }), () => service.updateSection({ id: 's', title: 'S' }), () => service.deleteSection('s'),
       () => service.getPerson({ id: 'p' }), () => service.addPerson({ name: 'P' }),
       () => service.updatePerson({ id: 'p', name: 'P' }), () => service.renamePerson({ id: 'p', name: 'P' }), () => service.deletePerson('p'),
-      () => service.addArea({ name: 'A' }), () => service.updateArea({ id: 'a', name: 'A' }), () => service.deleteArea('a')]) {
+      () => service.updateArea({ id: 'a', name: 'A' }), () => service.deleteArea('a')]) {
       await expect(operation()).rejects.toThrow(ValidationError);
     }
     expect(calls).toHaveLength(0);
@@ -416,7 +416,7 @@ describe('desktop Local API failure safety', () => {
       }
     }
     const { service } = fixture(() => jsonResponse({ error: secret, code: 'recurrence_requires_app' }, 409));
-    await expect(service.completeTask('task-1')).rejects.toThrow('requires completion in the desktop app');
+    await expect(service.completeTask('task-1')).rejects.toThrow('requires the desktop app');
   });
 
   test('fetch failures cannot smuggle URLs/tokens through safe-looking messages and writes are never retried', async () => {
@@ -474,6 +474,48 @@ describe('desktop Local API failure safety', () => {
     const { service, calls } = fixture((_call, index) => index === 0 ? jsonResponse({ ok: true }) : jsonResponse({ error: secret }, 404));
     await expect(service.deleteTask('task-1')).rejects.toThrow('deletion succeeded');
     expect(calls.map((call) => call.method)).toEqual(['DELETE', 'GET']);
+  });
+});
+
+describe('desktop Local API lifecycle operations', () => {
+  test('reopen defaults to next, validates a strong response and forwards optional conditions', async () => {
+    const { service, calls } = fixture(() => versionedResponse());
+    expect(await service.reopenTask({ id: 'task-1' })).toEqual({ ...task(), version });
+    await service.reopenTask({ id: 'task-1', status: 'someday', expectedVersion: version });
+    expect(calls.map((call) => [call.method, call.url, call.body])).toEqual([
+      ['POST', `${origin}/tasks/task-1/reopen`, { status: 'next' }],
+      ['POST', `${origin}/tasks/task-1/reopen`, { status: 'someday' }],
+    ]);
+    expect(calls[0].headers.has('If-Match')).toBe(false);
+    expect(calls[1].headers.get('If-Match')).toBe(`"${version}"`);
+  });
+
+  test('reopen refuses old servers, missing validators, recurrence and stale versions with one request', async () => {
+    for (const reply of [() => jsonResponse({}, 404), () => jsonResponse({ task: task() }),
+      () => jsonResponse({ code: 'task_version_conflict' }, 412), () => jsonResponse({ code: 'recurrence_requires_app' }, 409),
+      () => { throw new Error('transport'); }]) {
+      const { service, calls } = fixture(reply);
+      await expect(service.reopenTask({ id: 'task-1', expectedVersion: version })).rejects.toThrow();
+      expect(calls).toHaveLength(1); expect(calls[0].url).toBe(`${origin}/tasks/task-1/reopen`);
+    }
+    const { service, calls } = fixture(() => versionedResponse());
+    for (const expectedVersion of ['', '*', '1', `W/"${version}"`]) await expect(service.reopenTask({ id: 'task-1', expectedVersion })).rejects.toThrow(ValidationError);
+    for (const id of ['..', 'prefix/task-1', '%2ftask-1']) await expect(service.reopenTask({ id })).rejects.toThrow(ValidationError);
+    expect(calls).toHaveLength(0);
+  });
+
+  test('area creation trims names, preserves identity and existing metadata, and rejects invalid replies', async () => {
+    const area = { id: 'area-1', name: 'Work', order: 0, rev: 4, createdAt: iso, updatedAt: iso, existing: true };
+    const { service, calls } = fixture(() => jsonResponse({ area }));
+    expect(await service.addArea({ name: ' \uFEFFWork ', color: '#123456', icon: 'Briefcase' })).toEqual(area);
+    expect(calls[0].url).toBe(`${origin}/areas`); expect(calls[0].body).toEqual({ name: 'Work', props: { color: '#123456', icon: 'Briefcase' } });
+    for (const name of ['', ' \uFEFF ', 'x'.repeat(201)]) await expect(service.addArea({ name })).rejects.toThrow(ValidationError);
+    expect(calls).toHaveLength(1);
+    for (const invalid of [{}, { area: {} }, { area: { ...area, existing: 'yes' } }]) {
+      const fixtureService = fixture(() => jsonResponse(invalid));
+      await expect(fixtureService.service.addArea({ name: 'Work' })).rejects.toThrow('write outcome is unknown');
+      expect(fixtureService.calls).toHaveLength(1);
+    }
   });
 });
 

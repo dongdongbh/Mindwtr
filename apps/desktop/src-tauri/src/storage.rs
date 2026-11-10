@@ -4184,6 +4184,8 @@ impl TaskMutationReadScope {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectMutationReadScope {
     project_id: Option<String>,
+    reopen_task_id: Option<String>,
+    area_name: Option<String>,
     target_area_id: Option<String>,
     target_area_supplied: bool,
     include_children: bool,
@@ -4192,6 +4194,22 @@ pub(crate) struct ProjectMutationReadScope {
 }
 
 impl ProjectMutationReadScope {
+    pub(crate) fn reopen(task_id: &str) -> Self {
+        Self {
+            reopen_task_id: Some(task_id.to_string()),
+            include_children: true,
+            include_section_tasks: true,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn area_create(name: &str) -> Self {
+        Self {
+            area_name: Some(crate::local_api::trim_area_name(name).to_lowercase()),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn area_update(area_id: &str) -> Self {
         Self {
             target_area_id: Some(area_id.to_string()),
@@ -4721,7 +4739,29 @@ fn read_project_mutation_data(
     let mut sections = Vec::new();
     let mut areas = Vec::new();
 
-    if scope.update_area {
+    let mut project_id = scope.project_id.clone();
+    let mut source_area_id = None;
+    if let Some(task_id) = scope.reopen_task_id.as_deref() {
+        if let Some(task) = read_scoped_task(conn, task_id, &mut stats)? {
+            source_area_id = task
+                .get("areaId")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            project_id = task
+                .get("projectId")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if let Some(section_id) = task.get("sectionId").and_then(Value::as_str) {
+                let owner = load_scoped_section(conn, section_id, &mut sections, &mut stats)?;
+                if project_id.is_none() {
+                    project_id = owner;
+                }
+            }
+            tasks.push(task);
+        }
+    }
+
+    if scope.update_area || scope.area_name.is_some() {
         stats.statements += 1;
         let mut statement = conn
             .prepare("SELECT * FROM areas")
@@ -4733,20 +4773,65 @@ fn read_project_mutation_data(
             areas.push(row.map_err(|e| e.to_string())?);
             stats.rows += 1;
         }
+        let selected_area = scope.area_name.as_ref().and_then(|name| {
+            let matches = |area: &&Value| {
+                area["name"].as_str().is_some_and(|value| {
+                    crate::local_api::trim_area_name(value).to_lowercase() == *name
+                })
+            };
+            areas
+                .iter()
+                .filter(matches)
+                .find(|area| {
+                    !area
+                        .get("deletedAt")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| !value.is_empty())
+                })
+                .or_else(|| {
+                    areas.iter().filter(matches).find(|area| {
+                        area.get("deletedAt")
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| !value.is_empty())
+                    })
+                })
+        });
+        let area_id = selected_area
+            .and_then(|area| area["id"].as_str())
+            .map(str::to_string)
+            .or_else(|| scope.target_area_id.clone());
+        let restoring_area = scope.area_name.is_some()
+            && selected_area.is_some_and(|area| {
+                area.get("deletedAt")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+            });
         stats.statements += 1;
         let mut statement = conn
             .prepare("SELECT * FROM projects WHERE areaId = ?1")
             .map_err(|e| e.to_string())?;
         for row in statement
-            .query_map([scope.target_area_id.as_deref()], row_to_project_value)
+            .query_map([area_id.as_deref()], row_to_project_value)
             .map_err(|e| e.to_string())?
         {
             projects.push(row.map_err(|e| e.to_string())?);
             stats.rows += 1;
         }
+        if restoring_area {
+            let mut statement = conn.prepare("SELECT * FROM sections WHERE projectId IN (SELECT id FROM projects WHERE areaId = ?1)").map_err(|error| error.to_string())?;
+            stats.statements += 1;
+            for row in statement
+                .query_map([area_id.as_deref()], row_to_section_value)
+                .map_err(|error| error.to_string())?
+            {
+                sections.push(row.map_err(|error| error.to_string())?);
+                stats.rows += 1;
+            }
+            append_scoped_task_rows(conn, "SELECT * FROM tasks WHERE areaId = ?1 OR projectId IN (SELECT id FROM projects WHERE areaId = ?1)", [area_id.as_deref()], &mut tasks, &mut stats)?;
+        }
     }
 
-    if let Some(project_id) = scope.project_id.as_deref() {
+    if let Some(project_id) = project_id.as_deref() {
         load_scoped_project(conn, project_id, &mut projects, &mut stats)?;
         if scope.include_children {
             append_scoped_task_rows(
@@ -4769,10 +4854,14 @@ fn read_project_mutation_data(
                 .query_map([project_id], row_to_section_value)
                 .map_err(|e| e.to_string())?;
             for row in rows {
-                sections.push(row.map_err(|e| e.to_string())?);
+                push_unique_entity(&mut sections, row.map_err(|e| e.to_string())?);
                 stats.rows += 1;
             }
         }
+    }
+
+    if let Some(area_id) = source_area_id.as_deref() {
+        load_scoped_area(conn, area_id, &mut areas, &mut stats)?;
     }
 
     let current_area_id = projects
@@ -5019,6 +5108,24 @@ where
     Err("Failed to mutate project rows".to_string())
 }
 
+fn upsert_project_mutation_area_row(conn: &Connection, area: &Value) -> Result<(), String> {
+    let id = area["id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .ok_or("Area id is required")?;
+    let rev_by = normalized_rev_by(area.get("revBy"));
+    conn.execute("INSERT INTO areas (id, name, color, icon, orderNum, deletedAt, deletedAtBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name, color=excluded.color, icon=excluded.icon, orderNum=excluded.orderNum,
+        deletedAt=excluded.deletedAt, deletedAtBeforeProjectArchive=excluded.deletedAtBeforeProjectArchive,
+        projectArchivedAt=excluded.projectArchivedAt, rev=excluded.rev, revBy=excluded.revBy, createdAt=excluded.createdAt, updatedAt=excluded.updatedAt",
+        params![id, area["name"].as_str(), area["color"].as_str(), area["icon"].as_str(), area["order"].as_f64(),
+            area["deletedAt"].as_str(), area["deletedAtBeforeProjectArchive"].as_str(), area["projectArchivedAt"].as_str(),
+            normalized_revision_for_storage(area.get("rev")), rev_by.as_deref(), area["createdAt"].as_str(), area["updatedAt"].as_str()],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn commit_project_row_mutation<T, F>(
     conn: &Connection,
     scope: &ProjectMutationReadScope,
@@ -5033,25 +5140,7 @@ where
         let (mut canonical, read_stats) = read_project_mutation_data(conn, scope)?;
         let (result, changed) = mutate(&mut canonical)?;
         for area in changed.areas {
-            let changed = conn
-                .execute(
-                    "UPDATE areas SET name = ?2, color = ?3, icon = ?4, orderNum = ?5,
-                 rev = ?6, revBy = ?7, updatedAt = ?8 WHERE id = ?1",
-                    params![
-                        area["id"].as_str(),
-                        area["name"].as_str(),
-                        area["color"].as_str(),
-                        area["icon"].as_str(),
-                        area["order"].as_f64(),
-                        area["rev"].as_i64(),
-                        area["revBy"].as_str(),
-                        area["updatedAt"].as_str()
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
-            if changed != 1 {
-                return Err("Area not found".to_string());
-            }
+            upsert_project_mutation_area_row(conn, &area)?;
         }
         let mut written_ids = HashSet::new();
         for project in changed.projects {
@@ -5186,19 +5275,15 @@ pub(crate) fn local_operation_test_seed(conn: &mut Connection, data: &Value) -> 
 }
 
 #[cfg(test)]
-pub(crate) fn local_area_operation_test_commit<F>(
+pub(crate) fn local_project_operation_test_commit<F>(
     conn: &Connection,
-    area_id: &str,
+    scope: ProjectMutationReadScope,
     mut mutate: F,
 ) -> Result<Value, String>
 where
     F: FnMut(&mut Value) -> Result<((), ProjectMutationRows), String>,
 {
-    commit_project_row_mutation(
-        conn,
-        &ProjectMutationReadScope::area_update(area_id),
-        &mut mutate,
-    )?;
+    commit_project_row_mutation(conn, &scope, &mut mutate)?;
     read_sqlite_data(conn)
 }
 

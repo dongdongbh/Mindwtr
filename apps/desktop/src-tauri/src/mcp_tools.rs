@@ -52,6 +52,8 @@ const TOOL_NAMES: &[(&str, &str)] = &[
     ("mindwtr_list_projects", "List live projects."),
     ("mindwtr_get_project", "Get a project by ID."),
     ("mindwtr_list_areas", "List live areas."),
+    ("mindwtr_add_area", "Find, restore or create an area by name. A live same-name area is returned unchanged."),
+    ("mindwtr_reopen_task", "Reopen an ordinary done or archived task. Recurring history requires the app."),
     ("mindwtr_list_sections", "List project sections, optionally including deleted sections or filtering by project ID."),
     ("mindwtr_list_people", "List managed people, optionally including deleted people."),
     ("mindwtr_add_task", "Add a task with an explicit title. Quick-add is unavailable."),
@@ -73,6 +75,8 @@ pub(crate) fn tools() -> Vec<Value> {
             "mindwtr_add_task" => TASK_FIELDS.iter().copied().chain(["idempotencyKey"]).collect(),
             "mindwtr_update_task" => ["id", "expectedVersion"].into_iter().chain(TASK_FIELDS.iter().copied().filter(|field| *field != "attachments")).collect(),
             "mindwtr_complete_task" | "mindwtr_archive_task" => vec!["id", "expectedVersion"],
+            "mindwtr_reopen_task" => vec!["id", "status", "expectedVersion"],
+            "mindwtr_add_area" => vec!["name", "color", "icon"],
             "mindwtr_add_project" => PROJECT_FIELDS.to_vec(),
             "mindwtr_update_project" => std::iter::once("id").chain(PROJECT_FIELDS.iter().copied()).collect(),
             "mindwtr_get_task" | "mindwtr_get_project" => vec!["id", "includeDeleted"],
@@ -85,14 +89,14 @@ pub(crate) fn tools() -> Vec<Value> {
         for field in fields {
             let mut schema = field_schema(field, name.contains("project"));
             if field == "status" && *name != "mindwtr_list_tasks" && !name.contains("project") {
-                schema["enum"].as_array_mut().unwrap().retain(|status| status != "all" && (*name != "mindwtr_update_task" || (status != "done" && status != "archived")));
+                schema["enum"].as_array_mut().unwrap().retain(|status| status != "all" && (*name != "mindwtr_update_task" || (status != "done" && status != "archived")) && (*name != "mindwtr_reopen_task" || matches!(status.as_str(), Some("inbox" | "next" | "waiting" | "someday"))));
             }
             if (name.contains("project") && matches!(field, "areaId" | "colorOverride")) || (name.starts_with("mindwtr_update_") && !matches!(field, "id" | "expectedVersion" | "title" | "status" | "color" | "colorOverride" | "isSequential" | "showFutureRecurrence" | "isFocusedToday" | "suppressMindwtrReminders")) {
                 schema = json!({"anyOf":[schema, {"type":"null"}]});
             }
             properties.insert(field.to_string(), schema);
         }
-        let required = if name.starts_with("mindwtr_add_") { vec!["title"] }
+        let required = if *name == "mindwtr_add_area" { vec!["name"] } else if name.starts_with("mindwtr_add_") { vec!["title"] }
             else if name.starts_with("mindwtr_list_") { vec![] } else { vec!["id"] };
         json!({"name": name, "description": description,
             "inputSchema": {"type":"object", "properties":properties, "required":required, "additionalProperties":false}})
@@ -107,6 +111,7 @@ fn field_schema(field: &str, project: bool) -> Value {
         }
         "id" => json!({"type":"string", "minLength":1}),
         "title" => json!({"type":"string", "minLength":1, "maxLength":500}),
+        "name" => json!({"type":"string", "minLength":1, "maxLength":200}),
         "status" if project => json!({"enum":["active","someday","waiting","archived"]}),
         "status" => {
             json!({"enum":["all","inbox","next","waiting","someday","reference","done","archived"]})
@@ -215,6 +220,44 @@ pub(crate) fn operation(name: &str, input: &Map<String, Value>) -> Result<LocalO
         "mindwtr_list_areas" => {
             only(&[])?;
             LocalOperation::ListAreas
+        }
+        "mindwtr_add_area" => {
+            only(&["name", "color", "icon"])?;
+            let mut props = input.clone();
+            let name = props.remove("name").ok_or_else(invalid)?;
+            local_api::area_create_operation(
+                json!({"name":name,"props":props})
+                    .as_object()
+                    .ok_or_else(invalid)?,
+            )?
+        }
+        "mindwtr_reopen_task" => {
+            only(&["id", "status", "expectedVersion"])?;
+            let status = match input.get("status") {
+                None => "next",
+                Some(Value::String(status)) => status.as_str(),
+                _ => return Err(invalid()),
+            };
+            if !matches!(status, "inbox" | "next" | "waiting" | "someday") {
+                return Err(invalid());
+            }
+            let condition = input
+                .get("expectedVersion")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|version| local_api::valid_task_version(version))
+                        .map(|version| {
+                            local_api::TaskMatchCondition::Versions(vec![version.into()])
+                        })
+                        .ok_or_else(invalid)
+                })
+                .transpose()?;
+            LocalOperation::ReopenTask {
+                id: id()?,
+                status: status.into(),
+                condition,
+            }
         }
         "mindwtr_list_sections" => {
             only(&["projectId", "includeDeleted"])?;

@@ -1,0 +1,901 @@
+{
+  "at": "2026-11-10T12:00:00.000Z",
+  "deviceId": "fixture-device",
+  "cases": [
+    {
+      "label": "ordinary done to inbox",
+      "status": "inbox",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "order": 7,
+            "boardOrder": 2,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "inbox",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "order": 7,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "ordinary done to next",
+      "status": "next",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "order": 7,
+            "boardOrder": 2,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "next",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "order": 7,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "ordinary done to waiting",
+      "status": "waiting",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "order": 7,
+            "boardOrder": 2,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "waiting",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "order": 7,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "ordinary done to someday",
+      "status": "someday",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "order": 7,
+            "boardOrder": 2,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "someday",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "order": 7,
+            "dueDate": "2026-12-01",
+            "startTime": "2026-11-20"
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "cancelled source preserves details",
+      "status": "waiting",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "archived",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "cancelledAt": "2026-11-01T12:00:00.000Z",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "description": "reference",
+            "reviewAt": "2026-12-01",
+            "checklist": [
+              {
+                "id": "check",
+                "title": "Check",
+                "isCompleted": true
+              }
+            ],
+            "attachments": [
+              {
+                "id": "link",
+                "kind": "link",
+                "title": "Reference",
+                "uri": "https://example.com",
+                "createdAt": "2026-10-01T12:00:00.000Z",
+                "updatedAt": "2026-10-01T12:00:00.000Z"
+              }
+            ]
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "waiting",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "description": "reference",
+            "reviewAt": "2026-12-01",
+            "checklist": [
+              {
+                "id": "check",
+                "title": "Check",
+                "isCompleted": true
+              }
+            ],
+            "attachments": [
+              {
+                "id": "link",
+                "kind": "link",
+                "title": "Reference",
+                "uri": "https://example.com",
+                "createdAt": "2026-10-01T12:00:00.000Z",
+                "updatedAt": "2026-10-01T12:00:00.000Z"
+              }
+            ]
+          }
+        ],
+        "projects": [],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "archived parent restores only owned sections and retires sibling markers",
+      "status": "next",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent",
+            "sectionId": "owned",
+            "statusBeforeProjectArchive": "next",
+            "completedAtBeforeProjectArchive": "2026-10-01T12:00:00.000Z",
+            "isFocusedTodayBeforeProjectArchive": true,
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "boardOrder": 4,
+            "order": 8
+          },
+          {
+            "id": "genuine-done",
+            "title": "genuine-done",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent"
+          },
+          {
+            "id": "cancelled-sibling",
+            "title": "cancelled-sibling",
+            "status": "archived",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "projectId": "parent",
+            "cancelledAt": "2026-11-01T12:00:00.000Z",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "statusBeforeProjectArchive": "next",
+            "completedAtBeforeProjectArchive": "2026-10-01T12:00:00.000Z",
+            "isFocusedTodayBeforeProjectArchive": true,
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "reference-sibling",
+            "title": "reference-sibling",
+            "status": "reference",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "projectId": "parent",
+            "statusBeforeProjectArchive": "next",
+            "completedAtBeforeProjectArchive": "2026-10-01T12:00:00.000Z",
+            "isFocusedTodayBeforeProjectArchive": true,
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "deleted-sibling",
+            "title": "deleted-sibling",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent",
+            "deletedAt": "2026-10-01T12:00:00.000Z",
+            "statusBeforeProjectArchive": "next",
+            "completedAtBeforeProjectArchive": "2026-10-01T12:00:00.000Z",
+            "isFocusedTodayBeforeProjectArchive": true,
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "unrelated"
+          }
+        ],
+        "projects": [
+          {
+            "id": "parent",
+            "title": "parent",
+            "status": "archived",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "cancelledAt": "2026-11-01T12:00:00.000Z",
+            "isFocused": false
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "owned",
+            "projectId": "parent",
+            "title": "owned",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "edited",
+            "projectId": "parent",
+            "title": "edited",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "predeleted",
+            "projectId": "parent",
+            "title": "predeleted",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z",
+            "deletedAtBeforeProjectArchive": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "next",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "projectId": "parent",
+            "sectionId": "owned",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "order": 8
+          },
+          {
+            "id": "genuine-done",
+            "title": "genuine-done",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent"
+          },
+          {
+            "id": "cancelled-sibling",
+            "title": "cancelled-sibling",
+            "status": "archived",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "projectId": "parent",
+            "cancelledAt": "2026-11-01T12:00:00.000Z",
+            "archivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "reference-sibling",
+            "title": "reference-sibling",
+            "status": "reference",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "projectId": "parent"
+          },
+          {
+            "id": "deleted-sibling",
+            "title": "deleted-sibling",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "unrelated"
+          }
+        ],
+        "projects": [
+          {
+            "id": "parent",
+            "title": "parent",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "isFocused": false
+          },
+          {
+            "id": "unrelated",
+            "title": "unrelated",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "owned",
+            "projectId": "parent",
+            "title": "owned",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device"
+          },
+          {
+            "id": "edited",
+            "projectId": "parent",
+            "title": "edited",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "predeleted",
+            "projectId": "parent",
+            "title": "predeleted",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z",
+            "deletedAtBeforeProjectArchive": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "section-only live reference derives archived parent",
+      "status": "next",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "sectionId": "live"
+          }
+        ],
+        "projects": [
+          {
+            "id": "parent",
+            "title": "parent",
+            "status": "archived",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "cancelledAt": "2026-11-01T12:00:00.000Z",
+            "isFocused": false
+          }
+        ],
+        "sections": [
+          {
+            "id": "live",
+            "projectId": "parent",
+            "title": "live",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "next",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "sectionId": "live",
+            "projectId": "parent"
+          }
+        ],
+        "projects": [
+          {
+            "id": "parent",
+            "title": "parent",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "isFocused": false
+          }
+        ],
+        "sections": [
+          {
+            "id": "live",
+            "projectId": "parent",
+            "title": "live",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": false
+    },
+    {
+      "label": "independently edited archived section refuses",
+      "status": "next",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent",
+            "sectionId": "edited"
+          }
+        ],
+        "projects": [
+          {
+            "id": "parent",
+            "title": "parent",
+            "status": "archived",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "archivedAt": "2026-11-01T12:00:00.000Z",
+            "cancelledAt": "2026-11-01T12:00:00.000Z",
+            "isFocused": false
+          }
+        ],
+        "sections": [
+          {
+            "id": "edited",
+            "projectId": "parent",
+            "title": "edited",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "projectArchivedAt": "2026-11-01T12:00:00.000Z"
+          }
+        ],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": true
+    },
+    {
+      "label": "deleted parent refuses",
+      "status": "next",
+      "before": {
+        "tasks": [
+          {
+            "id": "source",
+            "title": "source",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "parent"
+          }
+        ],
+        "projects": [
+          {
+            "id": "parent",
+            "title": "parent",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "sections": [],
+        "areas": [],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "refused": true
+    }
+  ]
+}

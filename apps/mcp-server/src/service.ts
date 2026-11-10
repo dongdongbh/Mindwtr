@@ -406,6 +406,7 @@ export type MindwtrService = {
   addTask: (input: AddTaskInput) => Promise<Task>;
   updateTask: (input: UpdateTaskInput) => Promise<Task>;
   completeTask: (id: string, controls?: { expectedVersion?: string }) => Promise<Task>;
+  reopenTask?: (input: { id: string; status?: 'inbox' | 'next' | 'waiting' | 'someday'; expectedVersion?: string }) => Promise<Task>;
   deleteTask: (id: string) => Promise<Task>;
   restoreTask: (id: string) => Promise<Task>;
   addProject: (input: AddProjectInput) => Promise<Project>;

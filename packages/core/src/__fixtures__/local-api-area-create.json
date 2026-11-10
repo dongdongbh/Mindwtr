@@ -1,0 +1,1279 @@
+{
+  "at": "2026-11-10T12:00:00.000Z",
+  "updateAt": "2026-11-10T12:00:01.000Z",
+  "deviceId": "fixture-device",
+  "newId": "new-area",
+  "cases": [
+    {
+      "label": "fresh order includes tombstones",
+      "name": " Personal ",
+      "props": {},
+      "before": {
+        "tasks": [],
+        "projects": [],
+        "sections": [],
+        "areas": [
+          {
+            "id": "old",
+            "name": "Old",
+            "order": 4,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "kind": "fresh",
+      "areaId": "new-area",
+      "after": {
+        "tasks": [],
+        "projects": [],
+        "sections": [],
+        "areas": [
+          {
+            "id": "old",
+            "name": "Old",
+            "order": 4,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "new-area",
+            "name": "Personal",
+            "order": 5,
+            "rev": 1,
+            "revBy": "fixture-device",
+            "createdAt": "2026-11-10T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      }
+    },
+    {
+      "label": "live same name wins and ignores requested props",
+      "name": "﻿ wOrK ﻿",
+      "props": {
+        "color": "#ffffff",
+        "icon": "Briefcase"
+      },
+      "before": {
+        "tasks": [],
+        "projects": [],
+        "sections": [],
+        "areas": [
+          {
+            "id": "deleted",
+            "name": "Work",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "color": "#111111"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "kind": "live",
+      "areaId": "live",
+      "after": {
+        "tasks": [],
+        "projects": [],
+        "sections": [],
+        "areas": [
+          {
+            "id": "deleted",
+            "name": "Work",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "color": "#111111"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      }
+    },
+    {
+      "label": "restore matching cascade without reattaching detached children",
+      "name": "Work",
+      "props": {},
+      "before": {
+        "tasks": [
+          {
+            "id": "restore-task",
+            "title": "restore-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "restore-section",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "purgedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "independent-task",
+            "title": "independent-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "independent-section",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "direct-task",
+            "title": "direct-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "areaId": "restore",
+            "sectionId": "missing",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached-task",
+            "title": "detached-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "projects": [
+          {
+            "id": "restore-project",
+            "title": "restore-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "override-project",
+            "title": "override-project",
+            "status": "active",
+            "color": "#222222",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Stale",
+            "colorOverride": "#222222"
+          },
+          {
+            "id": "independent-project",
+            "title": "independent-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Old",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached",
+            "title": "detached",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "restore-section",
+            "projectId": "restore-project",
+            "title": "restore-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "independent-section",
+            "projectId": "restore-project",
+            "title": "independent-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live-section",
+            "projectId": "override-project",
+            "title": "live-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [
+          {
+            "id": "restore",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "color": "#111111"
+          },
+          {
+            "id": "unrelated",
+            "name": "Other",
+            "order": 9,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "kind": "restored",
+      "areaId": "restore",
+      "after": {
+        "tasks": [
+          {
+            "id": "restore-task",
+            "title": "restore-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "restore-section"
+          },
+          {
+            "id": "independent-task",
+            "title": "independent-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "independent-section",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "direct-task",
+            "title": "direct-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "areaId": "restore"
+          },
+          {
+            "id": "detached-task",
+            "title": "detached-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "projects": [
+          {
+            "id": "restore-project",
+            "title": "restore-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "areaId": "restore",
+            "areaTitle": "Work"
+          },
+          {
+            "id": "override-project",
+            "title": "override-project",
+            "status": "active",
+            "color": "#222222",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Stale",
+            "colorOverride": "#222222"
+          },
+          {
+            "id": "independent-project",
+            "title": "independent-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Old",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached",
+            "title": "detached",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "restore-section",
+            "projectId": "restore-project",
+            "title": "restore-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device"
+          },
+          {
+            "id": "independent-section",
+            "projectId": "restore-project",
+            "title": "independent-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live-section",
+            "projectId": "override-project",
+            "title": "live-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [
+          {
+            "id": "restore",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "color": "#111111"
+          },
+          {
+            "id": "unrelated",
+            "name": "Other",
+            "order": 9,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      }
+    },
+    {
+      "label": "restore props and casing keep overrides and double revisions",
+      "name": "wORK",
+      "props": {
+        "color": "#abcdef",
+        "icon": "Briefcase"
+      },
+      "before": {
+        "tasks": [
+          {
+            "id": "restore-task",
+            "title": "restore-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "restore-section",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "purgedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "independent-task",
+            "title": "independent-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "independent-section",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "direct-task",
+            "title": "direct-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "areaId": "restore",
+            "sectionId": "missing",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached-task",
+            "title": "detached-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "projects": [
+          {
+            "id": "restore-project",
+            "title": "restore-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "override-project",
+            "title": "override-project",
+            "status": "active",
+            "color": "#222222",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Stale",
+            "colorOverride": "#222222"
+          },
+          {
+            "id": "independent-project",
+            "title": "independent-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Old",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached",
+            "title": "detached",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "restore-section",
+            "projectId": "restore-project",
+            "title": "restore-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "independent-section",
+            "projectId": "restore-project",
+            "title": "independent-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live-section",
+            "projectId": "override-project",
+            "title": "live-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [
+          {
+            "id": "restore",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "color": "#111111"
+          },
+          {
+            "id": "unrelated",
+            "name": "Other",
+            "order": 9,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "kind": "restored",
+      "areaId": "restore",
+      "after": {
+        "tasks": [
+          {
+            "id": "restore-task",
+            "title": "restore-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "restore-section"
+          },
+          {
+            "id": "independent-task",
+            "title": "independent-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "independent-section",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "direct-task",
+            "title": "direct-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "areaId": "restore"
+          },
+          {
+            "id": "detached-task",
+            "title": "detached-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "projects": [
+          {
+            "id": "restore-project",
+            "title": "restore-project",
+            "status": "active",
+            "color": "#abcdef",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:01.000Z",
+            "rev": 5,
+            "revBy": "fixture-device",
+            "areaId": "restore",
+            "areaTitle": "wORK"
+          },
+          {
+            "id": "override-project",
+            "title": "override-project",
+            "status": "active",
+            "color": "#222222",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:01.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "areaId": "restore",
+            "areaTitle": "wORK",
+            "colorOverride": "#222222"
+          },
+          {
+            "id": "independent-project",
+            "title": "independent-project",
+            "status": "active",
+            "color": "#abcdef",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:01.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "areaId": "restore",
+            "areaTitle": "wORK",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached",
+            "title": "detached",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "restore-section",
+            "projectId": "restore-project",
+            "title": "restore-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device"
+          },
+          {
+            "id": "independent-section",
+            "projectId": "restore-project",
+            "title": "independent-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live-section",
+            "projectId": "override-project",
+            "title": "live-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [
+          {
+            "id": "restore",
+            "name": "wORK",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:01.000Z",
+            "rev": 5,
+            "revBy": "fixture-device",
+            "color": "#abcdef",
+            "icon": "Briefcase"
+          },
+          {
+            "id": "unrelated",
+            "name": "Other",
+            "order": 9,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      }
+    },
+    {
+      "label": "icon-only restoration does not repair unrelated stale titles",
+      "name": "Work",
+      "props": {
+        "icon": "Briefcase"
+      },
+      "before": {
+        "tasks": [
+          {
+            "id": "restore-task",
+            "title": "restore-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "restore-section",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "purgedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "independent-task",
+            "title": "independent-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "independent-section",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "direct-task",
+            "title": "direct-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "areaId": "restore",
+            "sectionId": "missing",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached-task",
+            "title": "detached-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "projects": [
+          {
+            "id": "restore-project",
+            "title": "restore-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "override-project",
+            "title": "override-project",
+            "status": "active",
+            "color": "#222222",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Stale",
+            "colorOverride": "#222222"
+          },
+          {
+            "id": "independent-project",
+            "title": "independent-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Old",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached",
+            "title": "detached",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "restore-section",
+            "projectId": "restore-project",
+            "title": "restore-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z"
+          },
+          {
+            "id": "independent-section",
+            "projectId": "restore-project",
+            "title": "independent-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live-section",
+            "projectId": "override-project",
+            "title": "live-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [
+          {
+            "id": "restore",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-11-01T12:00:00.000Z",
+            "color": "#111111"
+          },
+          {
+            "id": "unrelated",
+            "name": "Other",
+            "order": 9,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      },
+      "kind": "restored",
+      "areaId": "restore",
+      "after": {
+        "tasks": [
+          {
+            "id": "restore-task",
+            "title": "restore-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "restore-section"
+          },
+          {
+            "id": "independent-task",
+            "title": "independent-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "projectId": "restore-project",
+            "sectionId": "independent-section",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "direct-task",
+            "title": "direct-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "completedAt": "2026-10-01T12:00:00.000Z",
+            "areaId": "restore"
+          },
+          {
+            "id": "detached-task",
+            "title": "detached-task",
+            "status": "done",
+            "tags": [],
+            "contexts": [],
+            "isFocusedToday": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "completedAt": "2026-10-01T12:00:00.000Z"
+          }
+        ],
+        "projects": [
+          {
+            "id": "restore-project",
+            "title": "restore-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device",
+            "areaId": "restore",
+            "areaTitle": "Work"
+          },
+          {
+            "id": "override-project",
+            "title": "override-project",
+            "status": "active",
+            "color": "#222222",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Stale",
+            "colorOverride": "#222222"
+          },
+          {
+            "id": "independent-project",
+            "title": "independent-project",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "areaId": "restore",
+            "areaTitle": "Old",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "detached",
+            "title": "detached",
+            "status": "active",
+            "color": "#94a3b8",
+            "order": 0,
+            "tagIds": [],
+            "isSequential": false,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "sections": [
+          {
+            "id": "restore-section",
+            "projectId": "restore-project",
+            "title": "restore-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:00.000Z",
+            "rev": 4,
+            "revBy": "fixture-device"
+          },
+          {
+            "id": "independent-section",
+            "projectId": "restore-project",
+            "title": "independent-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device",
+            "deletedAt": "2026-10-01T12:00:00.000Z"
+          },
+          {
+            "id": "live-section",
+            "projectId": "override-project",
+            "title": "live-section",
+            "order": 0,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "areas": [
+          {
+            "id": "restore",
+            "name": "Work",
+            "order": 2,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-11-10T12:00:01.000Z",
+            "rev": 5,
+            "revBy": "fixture-device",
+            "color": "#111111",
+            "icon": "Briefcase"
+          },
+          {
+            "id": "unrelated",
+            "name": "Other",
+            "order": 9,
+            "createdAt": "2026-10-01T12:00:00.000Z",
+            "updatedAt": "2026-10-01T12:00:00.000Z",
+            "rev": 3,
+            "revBy": "old-device"
+          }
+        ],
+        "people": [],
+        "settings": {
+          "deviceId": "fixture-device"
+        }
+      }
+    }
+  ]
+}

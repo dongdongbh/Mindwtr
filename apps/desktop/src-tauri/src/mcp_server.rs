@@ -701,6 +701,80 @@ mod tests {
             allow_delete: allowed,
         }
     }
+    #[test]
+    fn lifecycle_tools_have_strict_schemas_and_conditional_operation_mapping() {
+        let map = |name: &str, input: Value| {
+            crate::mcp_tools::operation(name, input.as_object().unwrap())
+        };
+        let version = format!("sha256-{}", "a".repeat(64));
+        for status in ["inbox", "next", "waiting", "someday"] {
+            let operation = map(
+                "mindwtr_reopen_task",
+                json!({"id":"task","status":status,"expectedVersion":version}),
+            )
+            .unwrap();
+            assert!(
+                matches!(operation, LocalOperation::ReopenTask { id, status: target, condition: Some(local_api::TaskMatchCondition::Versions(versions)) } if id == "task" && target == status && versions == vec![version.clone()])
+            );
+        }
+        assert!(
+            matches!(map("mindwtr_reopen_task", json!({"id":"task"})).unwrap(), LocalOperation::ReopenTask { status, condition: None, .. } if status == "next")
+        );
+        assert!(
+            matches!(map("mindwtr_add_area", json!({"name":"  Work  ","color":"#123456","icon":"Briefcase"})).unwrap(), LocalOperation::CreateArea { name, props } if name == "Work" && props == json!({"color":"#123456","icon":"Briefcase"}).as_object().unwrap().clone())
+        );
+        for (name, inputs) in [
+            (
+                "mindwtr_reopen_task",
+                vec![
+                    json!({}),
+                    json!({"id":"t","status":null}),
+                    json!({"id":"t","status":"reference"}),
+                    json!({"id":"t","status":"done"}),
+                    json!({"id":"t","status":"archived"}),
+                    json!({"id":"t","expectedVersion":"bad"}),
+                    json!({"id":"t","title":"wrong"}),
+                ],
+            ),
+            (
+                "mindwtr_add_area",
+                vec![
+                    json!({}),
+                    json!({"name":" \u{feff}"}),
+                    json!({"name":null}),
+                    json!({"name":"x".repeat(201)}),
+                    json!({"name":"A","color":null}),
+                    json!({"name":"A","icon":1}),
+                    json!({"name":"A","props":{}}),
+                ],
+            ),
+        ] {
+            for input in inputs {
+                assert!(map(name, input.clone()).is_err(), "{name} {input}");
+            }
+        }
+        let tools = crate::mcp_tools::tools();
+        let reopen = tools
+            .iter()
+            .find(|tool| tool["name"] == "mindwtr_reopen_task")
+            .unwrap();
+        assert_eq!(reopen["inputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            reopen["inputSchema"]["properties"]["status"]["enum"],
+            json!(["inbox", "next", "waiting", "someday"])
+        );
+        assert_eq!(
+            reopen["inputSchema"]["properties"]["expectedVersion"]["type"],
+            "string"
+        );
+        let area = tools
+            .iter()
+            .find(|tool| tool["name"] == "mindwtr_add_area")
+            .unwrap();
+        assert_eq!(area["inputSchema"]["required"], json!(["name"]));
+        assert_eq!(area["inputSchema"]["properties"]["name"]["maxLength"], 200);
+    }
+
     fn config_request(
         enabled: bool,
         allow_write: bool,
@@ -895,7 +969,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            16
+            18
         );
         assert_eq!(
             call("tools/list", json!({"cursor":"bogus"}), false).body["error"]["code"],
@@ -1085,6 +1159,8 @@ mod tests {
                 ("mindwtr_complete_task", json!({"id":"task"}), 1),
                 ("mindwtr_restore_task", json!({"id":"task"}), 1),
                 ("mindwtr_archive_task", json!({"id":"task"}), 2),
+                ("mindwtr_reopen_task", json!({"id":"task"}), 1),
+                ("mindwtr_add_area", json!({"name":"Work"}), 1),
                 ("mindwtr_delete_task", json!({"id":"task"}), 4),
                 ("mindwtr_delete_project", json!({"id":"project"}), 4),
                 ("mindwtr_add_project", json!({"title":"Project"}), 1),
