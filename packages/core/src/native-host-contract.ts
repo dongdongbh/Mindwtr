@@ -387,8 +387,9 @@ import { createSettingsMethods, type NativePersistentCaptureHost } from './nativ
 import { createSyncSettingsMethods, type NativeSyncSettingsHost, type NativeSyncSettingsSettlement } from './native-host-contract-settings-sync';
 import { createAIMethods, type NativeAIHost } from './native-host-contract-ai';
 import { createAboutMethods, type NativeAboutHost } from './native-host-contract-about';
-import { createStartupPromptMethods } from './native-host-contract-startup-prompts';
+import { createStartupPromptMethods, type NativeStartupPromptHost } from './native-host-contract-startup-prompts';
 export type { NativeAboutHost, NativeAboutNotice, NativeAboutSettings } from './native-host-contract-about';
+export type { NativeStartupPromptHost } from './native-host-contract-startup-prompts';
 export { NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS, type NativeSyncSettingsHost } from './native-host-contract-settings-sync';
 import { createCalendarSettingsMethods, type NativeCalendarHost } from './native-host-contract-settings-calendar';
 export {
@@ -1065,6 +1066,8 @@ export function createNativeHostContract(options: {
     ai?: NativeAIHost;
 
     about?: NativeAboutHost;
+
+    startupPromptHost?: NativeStartupPromptHost;
 
     attachments?: NativeAttachmentsHost;
 
@@ -1933,7 +1936,7 @@ export function createNativeHostContract(options: {
         ...createSavedSearchWriteMethods({ readiness, save, t: (key) => translate(key) }),
         ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
 
-        ...createStartupPromptMethods({ readiness, save, t: () => translate, language: () => language, host: () => options.about ?? null }),
+        ...createStartupPromptMethods({ readiness, save, t: () => translate, language: () => language, host: () => options.about ?? options.startupPromptHost ?? null }),
         ...createSettingsMethods({
             readiness,
             save,

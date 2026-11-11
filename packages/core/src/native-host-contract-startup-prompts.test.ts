@@ -46,7 +46,7 @@ function device(options: { storage?: Record<string, string>; github?: { status: 
     return { host, storage, fetched };
 }
 
-async function openContract(bound: ReturnType<typeof device>) {
+async function openContract(bound: ReturnType<typeof device>, options: { ios?: boolean } = {}) {
     await flushPendingSave();
     resetForTests();
     let data = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
@@ -57,7 +57,7 @@ async function openContract(bound: ReturnType<typeof device>) {
     useTaskStore.setState({ error: null, persistenceFailure: null, isLoading: false, editLockCount: 0 } as never);
     await useTaskStore.getState().fetchData({ throwOnError: true });
     await flushPendingSave();
-    const contract = createNativeHostContract({ about: bound.host });
+    const contract = createNativeHostContract(options.ios ? { startupPromptHost: { ...bound.host, app: { ...bound.host.app, platform: 'ios' } } } : { about: bound.host });
     value(await contract.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' }));
     value(await contract.activate({ writeSafetyReady: true }));
     return contract;
@@ -111,6 +111,43 @@ describe('native host contract: startup prompts', () => {
         expect(value(await contract.startupPromptAction({ id: 'onboarding', action: 'dismiss' }))).toEqual({ shownAt: null });
         expect(bound.storage.get(MOBILE_ONBOARDING_STORAGE_KEY)).toBe('dismissed');
         expect(await begin(contract, {})).toBeNull();
+    });
+
+    it('runs on an iOS prompt host without opening About: the welcome sheet, then the donation ask, and never the update reminder', async () => {
+        const fresh = device();
+        const contract = await openContract(fresh, { ios: true });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        expect((await begin(contract, { donationEnabled: true }))?.id).toBe('onboarding');
+        vi.useRealTimers();
+        const about = await contract.isAboutUpdateCheckDue({ mode: 'manual' });
+        expect(about.ok ? null : about.error.code).toBe('ACTION_FAILED');
+
+        const settled = device({
+            storage: { [MOBILE_ONBOARDING_STORAGE_KEY]: 'dismissed', [LOCAL_USER_PROMPT_STATE_KEY]: longTimeUser() },
+            github: [{ status: 200, body: { tag_name: 'v9.0.0' } }],
+        });
+        const ios = await openContract(settled, { ios: true });
+        const started = Date.now();
+        const deferred = value(await ios.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: true, deferDelay: true }));
+        expect(Date.now() - started).toBeLessThan(1000);
+        expect(deferred).toMatchObject({ prompt: { id: 'donation' }, delayMs: 2000 });
+        expect(Object.keys(deferred).sort()).toEqual(['delayMs', 'prompt']);
+        expect(value(await ios.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: true, deferDelay: true }))).toEqual({ prompt: null, delayMs: 0 });
+        expect(settled.fetched).toEqual([]);
+        expect((await ios.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: true, deferDelay: 'yes' })).ok).toBe(false);
+    });
+
+    it('keeps the default ask waiting out the prompt delay inside core, with no delay in the reply', async () => {
+        const contract = await openContract(device({ storage: { [MOBILE_ONBOARDING_STORAGE_KEY]: 'dismissed', [LOCAL_USER_PROMPT_STATE_KEY]: longTimeUser() } }));
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        let settled = false;
+        const run = contract.beginStartupPrompts({ installerSource: 'play-store', donationEnabled: true }).then((answer) => { settled = true; return answer; });
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        const answer = value(await run);
+        expect(Object.keys(answer)).toEqual(['prompt']);
+        expect(answer.prompt?.id).toBe('donation');
     });
 
     it('never offers the welcome sheet with sync on', async () => {

@@ -26062,7 +26062,7 @@ private final class Engine: @unchecked Sendable {
     private func journalLegacyAndCaptureArguments(_ command: PendingCommand, retainedOrdinary: Bool = false) throws -> [Any] {
 
 
-        if ["complete", "setAreaFilter", "saveDraft", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit"].contains(command.method) {
+        if ["complete", "setAreaFilter", "supportPromptShown", "saveDraft", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit"].contains(command.method) {
 
 
             guard !retainedOrdinary || ["complete", "saveDraft"].contains(command.method) else { throw Self.retainedOrdinaryFailure }
@@ -26451,6 +26451,7 @@ private final class Engine: @unchecked Sendable {
         if method == "logLine" { try validateClientDiagnosticArguments(args) }
         if method == "dataSetting" { try validateDataSettingArguments(args, json) }
         if method == "gettingStarted" { try validateGettingStartedArguments(args, json) }
+        if method == "supportPromptShown" { try validateSupportPromptShownArguments(args) }
         if method == "captureCopilotEdit" || method == "captureCopilotSubmit" {
             guard json.utf8.count <= 12_000_000, let raw = args.first as? String else { throw HostFailure("INVALID_INPUT: Capture copilot transport is malformed") }
             let input = try Self.captureCopilotObject(raw, fields: method == "captureCopilotEdit"
@@ -26502,6 +26503,9 @@ private final class Engine: @unchecked Sendable {
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed"])
         case "Native iOS system search kept on app lock re-read":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-search-lock-reread", "outcome": "kept"])
+        case "Native iOS startup prompts read":
+            valid = Set(context.keys) == ["releaseCheck", "outcome"] && context["releaseCheck"] as? String == "v1.3.9/ios-startup-prompts"
+                && ["onboarding", "donation", "announcement", "none", "held", "failed"].contains(context["outcome"] as? String ?? "")
         case "Native iOS Contexts filter saved":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-context-filter-save", "outcome": "saved"])
         case "Native iOS Weekly Review project completion confirmed":
@@ -26671,6 +26675,16 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private func validateSupportPromptShownArguments(_ args: [Any]) throws {
+        guard let raw = args.first as? String, raw.utf8.count <= 1_024,
+              let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+              Set(request.keys) == Set(["requestId", "shownAt"]), let id = request["requestId"] as? String,
+              UUID(uuidString: id)?.uuidString.lowercased() == id,
+              let shownAt = request["shownAt"] as? String, Self.isCanonicalReviewInstant(shownAt) else {
+            throw HostFailure("INVALID_INPUT: Support prompt showing needs a request UUID and its time")
+        }
+    }
+
     private func validateDataSettingArguments(_ args: [Any], _ transport: String) throws {
         guard transport.utf8.count <= 2_048, let raw = args.first as? String, raw.utf8.count <= 1_024,
               let request = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -26759,6 +26773,9 @@ private final class Engine: @unchecked Sendable {
         }
         if method == "dataSetting", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Data setting request is too large") }
         if method == "gettingStarted", json.utf8.count > 2_048 { throw HostFailure("INVALID_INPUT: Getting Started request is too large") }
+        if ["beginStartupPrompts", "startupPromptAction", "supportPromptShown"].contains(method), json.utf8.count > 2_048 {
+            throw HostFailure("INVALID_INPUT: Startup prompt request is too large")
+        }
         if ["archiveRetentionOptions", "archiveRetentionReview"].contains(method), json.utf8.count > 2_048 {
             throw HostFailure("INVALID_INPUT: Archive retention request is too large")
         }
@@ -32815,7 +32832,7 @@ private final class Engine: @unchecked Sendable {
         }
         context.exception = nil
         let ticket: JSValue?
-        if ["dataSetting", "gettingStarted"].contains(method) {
+        if ["dataSetting", "gettingStarted", "supportPromptShown"].contains(method) {
             guard arguments.count == 1, let originalRequest = arguments.first as? String else {
                 throw HostFailure("INVALID_INPUT: Invalid Data setting request")
             }

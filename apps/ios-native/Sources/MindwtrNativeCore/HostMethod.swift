@@ -23,6 +23,7 @@ struct HostMethod: Equatable {
         "pomodoroPanelReadHost": .readText.owned(by: .pomodoro), "pomodoroAlarmReadHost": .readNone.owned(by: .pomodoro), "pomodoroSessionReadHost": .readNone.owned(by: .pomodoro), "pomodoroTransitionWrite": .writeText.owned(by: .pomodoro), "pomodoroTransitionRetryOutcome": .readText.owned(by: .pomodoro), "pomodoroTasks": .readText,
         "logLine": .readPair,
         "dataSetting": .writeText, "gettingStarted": .writeText,
+        "beginStartupPrompts": .readText, "startupPromptAction": .readText, "supportPromptShown": .writeText,
         "archiveRetentionOptions": .readNone, "archiveRetentionReview": .readText,
         "window": .read(.integer, .integer, .string), "inboxView": .readText, "focus": .read(.integer), "focusWindow": .read(.string, .integer, .integer, .string), "theme": .readText, "areaFilter": .readNone, "setAreaFilter": .writeText,
         "captureOpen": .readNone, "captureView": .readText, "captureEdit": .readText, "captureSubmit": .writeText, "captureCopilotSubmit": .writeText, "captureCopilotEdit": .readText, "captureLinesSubmit": .writeText,

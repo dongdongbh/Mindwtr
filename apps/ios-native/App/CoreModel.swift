@@ -47581,3 +47581,69 @@ private struct TaskScheduleEdit {
     let edit: CoreObject
     let coalesces: Bool
 }
+
+extension CoreModel {
+    var startupPromptsCanShow: Bool {
+        ready && completedStartupToken != nil && !busy && !retryNeeded && error == nil && workspaceAdmissionsOpen
+            && !appLock.concealed && !appLockActive && !appLockRecoveryPending && !settingsSyncRestartRequired
+            && reminderCaptureHandoverOwner == nil && notificationResponseContextClean
+    }
+
+    func startupPromptRead(_ method: String, _ request: CoreObject) async throws -> CoreObject {
+        try await query(method, [json(request)])
+    }
+
+    func recordStartupPromptRead(_ outcome: String) async {
+        guard let currentHost = host else { return }
+        _ = try? await currentHost.call("logLine", argumentsJSON: json([
+            "Native iOS startup prompts read",
+            try json(["releaseCheck": "v1.3.9/ios-startup-prompts", "outcome": outcome]),
+        ]))
+    }
+
+    func recordSupportPromptShown(_ shownAt: String) async {
+        guard let currentHost = host, !retryNeeded else { return }
+        do {
+            _ = try await currentHost.call("supportPromptShown", argumentsJSON: json([
+                json(["requestId": UUID().uuidString.lowercased(), "shownAt": shownAt]),
+            ]))
+        } catch {
+            guard host === currentHost, !isDefiniteRejection(error) else { return }
+            retryNeeded = true
+            self.error = label("persistence.failureMessage")
+        }
+    }
+
+    func seedStartupGettingStarted(language: String) async throws -> String? {
+        guard let currentHost = host, ready, !busy, !retryNeeded else { throw CancellationError() }
+        busy = true
+        defer { if host === currentHost { finishOperation() } }
+        do {
+            let reply = try await currentHost.call("gettingStarted", argumentsJSON: json([
+                json(["requestId": UUID().uuidString.lowercased(), "language": language]),
+            ]))
+            return try validatedGettingStartedProjectID(decode(reply))
+        } catch {
+            if host === currentHost, !isDefiniteRejection(error) {
+                retryNeeded = true
+                self.error = label("persistence.failureMessage")
+            }
+            throw error
+        }
+    }
+
+    func openStartupPromptProject(_ id: String) async {
+        guard ready, workspaceAdmissionsOpen, !appLock.concealed else { return }
+        await presentProject(["id": id], caller: .projects)
+    }
+
+    func openStartupPromptSettings(_ screen: String) async {
+        await openSettings()
+        guard selectedSurface == .settings else { return }
+        switch screen {
+        case "sync": await openSyncSettings()
+        case "data": await openDataSettings()
+        default: openAboutSettings()
+        }
+    }
+}

@@ -6109,7 +6109,7 @@ const poll = async (state, id) => {
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configureHTTP);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups']);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'startupPromptHost']);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost.nativeHTTPDelivered();
     assert.equal(local.logText, null, 'No preboot transport receipt');
@@ -6151,7 +6151,7 @@ for (const [bridge, receipt, operation] of [
         state.__mindwtrNative.ioBody = () => '';
     };
     const local = makeState(0, [], 'ios', configurePort);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups']);
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'startupPromptHost']);
     assert.equal(typeof local.__mindwtrNative.kvMultiGet, 'undefined');
     local.MindwtrHost[receipt]();
     assert.equal(local.logText, null, 'No preboot native primitive receipt');
@@ -6195,7 +6195,7 @@ for (const [bridge, receipt, operation] of [
         };
     };
     const local = makeState(0, [], 'ios', configureKV);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups'], 'KV does not enable iOS Sync or AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'startupPromptHost'], 'KV does not enable iOS Sync or AI');
     for (const name of names) assert.equal(typeof local.__mindwtrNative[name], 'function');
     for (const [method] of receipts) local.MindwtrHost[method]();
     assert.equal(local.logText, null, 'No preboot device storage receipt');
@@ -6641,7 +6641,7 @@ export function createNativeSync() {
     assert.ok(hostEntry.includes("name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }"));
     assert.match(hostEntry, /context: \{ releaseCheck: diagnostic\.releaseCheck, operation: name, outcome:/);
     const local = makeState(0, [], 'ios', configureLocal);
-    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'attachments'], 'local capability enables neither Sync nor AI');
+    assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'attachments', 'startupPromptHost'], 'local capability enables neither Sync nor AI');
     assert.equal(local.localShaInstallCount, 1, 'successful local construction installs native SHA once');
     assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
     const owner = { kind: 'task', taskId: 'task215', attachments: [] };
@@ -6688,7 +6688,7 @@ export function createNativeSync() {
             if (variant === 'refused') state.__mindwtrNative.fileDirectories = () => '!MindwtrNativeError:fixed unavailable';
         });
         assert.deepEqual(Object.keys(unavailable.contractBindings).filter((name) => unavailable.contractBindings[name] !== undefined),
-            variant === 'android' ? ['reminderPlatform', 'projectPickerGroups'] : ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups'], `${variant} capability offers no local fallback`);
+            variant === 'android' ? ['reminderPlatform', 'projectPickerGroups'] : ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'startupPromptHost'], `${variant} capability offers no local fallback`);
         assert.equal(unavailable.localShaInstallCount, 0, 'failed optional discovery leaves SHA binding unchanged');
         assert.equal((await poll(unavailable, unavailable.MindwtrHost.boot())).ok, true, 'optional local failure does not fail boot');
     }
@@ -8060,7 +8060,7 @@ export function createNativeSync() {
                 state.__mindwtrNative[name] = () => { calls++; throw new Error('Unexpected device service activation'); };
             }
         });
-        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'attachments']);
+        assert.deepEqual(Object.keys(local.contractBindings).filter((name) => local.contractBindings[name] !== undefined), ['registerSyncSettingsRetirementStatus', 'reminderPlatform', 'projectPickerGroups', 'attachments', 'startupPromptHost']);
         assert.equal((await poll(local, local.MindwtrHost.boot())).ok, true);
         assert.equal(local.localShaInstallCount, 1);
         assert.equal(call(local), '{"outcome":"removed"}', 'existing synchronous local Discard remains admitted');

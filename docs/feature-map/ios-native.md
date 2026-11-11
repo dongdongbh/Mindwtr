@@ -16,6 +16,7 @@ There is no Mac on the Linux machine. Edit on Linux. Build and test on the Mac m
 - **Generate the core bundle first.** `Resources/core-host.js` and `Resources/label-keys.json` (every English label key, which the app loads at startup and on each language change) are ignored by Git. Run `node apps/ios-native/scripts/build-bundle.mjs` before any Xcode build.
 - **UI tests:** `xcodebuild test -project apps/ios-native/MindwtrNative.xcodeproj -scheme MindwtrNative -destination 'platform=iOS Simulator,name=<simulator>' -only-testing:MindwtrNativeUITests/FoundationUITests/<testName>`. Keep Debug signing and the simulator entitlements on for runtime tests.
 - **Isolated library:** pass `--native-ui-test-library <lowercase-uuid>` to use a separate `NativeUITests/<UUID>` library and preference suite.
+- **Startup prompts:** any `--native-…` launch argument (an isolated library, a fixture, the perf harness) keeps the welcome sheet and the support prompt away. Add `--native-startup-prompts` to show them in an isolated library. A Debug build also takes `--native-startup-prompt-preview onboarding` or `--native-startup-prompt-preview donation` to open one prompt at once.
 - **Physical iPhone:** use a Debug build with the `NATIVE_DEVICE_TEST` condition and the separate `.native.dev` bundle identifier named in `apps/ios-native/README.md`. Startup refuses any other identity on a device. **Never install this app over the RN app.**
 - **Interactive driving:** the skill uses Appium with the XCUITest driver on the physical phone. Find elements by the `accessibilityIdentifier` values listed below.
 
@@ -330,6 +331,14 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Code: `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/App/SettingsScreen.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testAppLock…)
 - Notes: App lock hides the app view; it does not encrypt the database. Turning it on asks for authentication first. Cold start and backgrounding lock the app again.
+
+## Welcome sheet and support prompt
+
+- Reach: First start on an empty library with sync off › welcome sheet with Start using Mindwtr, Sync, Import and Skip for now. Start using Mindwtr adds the Getting Started project and opens it. Sync opens Settings › Sync. Import opens Settings › Data. A Release build later shows the support (donation) prompt, on RN's schedule: after 30 days and 21 active days, then again at most every 183 days.
+- Selectors: `welcome-sheet`, `welcome-start`, `welcome-sync`, `welcome-import`, `welcome-skip`, `welcome-close`, `welcome-error`, `startup-prompt`, `startup-prompt-dismiss`, `startup-prompt-action`, `startup-prompt-close`, `startup-prompt-toast`
+- Code: `apps/ios-native/App/NativeStartupPrompts.swift`, `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/App/CoreModel.swift`, `apps/android-native/bundle/host-about.ts`
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testStartupWelcomeSheet…, testStartupDonationPrompt…), `apps/ios-native/Tests/MindwtrNativeCoreTests/StartupPromptsHostTests.swift`, `packages/core/src/native-host-contract-startup-prompts.test.ts`
+- Notes: Prompts wait for a clean start: no load error, no pending retry or recovery, App lock unlocked, and no sheet or editor open. Skip stores RN's dismissal key on the device, so the sheet does not come back. Sync and Import close the sheet for this run only. The support prompt's showing is a journaled settings write (`settings.supportPrompt`), so other devices see it. The update reminder is Android only. Unlike RN, the Sync and Data pages do not show the "Start using Mindwtr" handoff card; Settings › Data already has Getting Started.
 
 ## System search (Spotlight)
 

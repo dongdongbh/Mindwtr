@@ -883,7 +883,7 @@ final class NativeDeviceKVTests: XCTestCase {
             "@mindwtr_sync_encryption_state_v1", "@mindwtr_fast_sync_state_v1", "@mindwtr_local_sync_status_v1", "@mindwtr_dropbox_last_rev",
             "@mindwtr_webdav_capability_proof_v1", "@mindwtr_webdav_legacy_proof_v1",
             "@mindwtr_attachment_presence_reconcile_v1", "mindwtr-external-calendars", "mindwtr-system-calendar-settings",
-            "mindwtr-unreachable-attachments"]
+            "mindwtr-unreachable-attachments", "mindwtr:mobile:first-run-onboarding:v1", "mindwtr:local-user-prompts:v1"]
         try store.multiSet(allowed.map { ($0, "opaque") })
         XCTAssertEqual(try store.multiGet(allowed).map { $0.1 }, Array(repeating: "opaque", count: allowed.count))
         for key in removeOnly + denied { XCTAssertEqual(try store.get(key), "\u{FEFF}preserve 🧠") }

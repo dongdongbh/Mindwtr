@@ -25,7 +25,7 @@ final class HostMethodRegistryTests: XCTestCase {
             "reminderCompletionCommit", "reminderSnoozeCommit", "reviewAISuggestionsWrite", "reviewTaskWrite", "rowQuickStatusWrite", "rowTaskBackdate",
             "rowTaskDates", "rowTaskDestination", "rowTaskFocus", "saveDraft", "savedSearchWrite", "setAreaFilter", "shareCaptureSubmit",
             "somedaySectionBulkMoveUndo", "somedaySectionBulkMoveWrite", "somedaySectionCreateWrite", "somedaySectionDeleteWrite",
-            "somedaySectionMoveUndo", "somedaySectionMoveWrite", "somedaySectionOrderWrite", "somedaySectionRenameWrite", "somedaySectionTaskCommit",
+            "somedaySectionMoveUndo", "somedaySectionMoveWrite", "somedaySectionOrderWrite", "somedaySectionRenameWrite", "somedaySectionTaskCommit", "supportPromptShown",
             "taskCancellationUndo", "taskChecklistMove", "taskChecklistMoveUndo", "taskCompletion", "taskCompletionUndo", "taskDelete",
             "taskDeleteUndo", "taskFocusWrite", "taskListSortWrite", "taskPromote", "taskPromoteUndoWrite", "trashItemsPurgeWrite",
             "trashItemsRestoreWrite", "trashProjectRestoreWrite", "trashTaskRestoreWrite", "unassignedAreaColorWrite", "watchPomodoroSubmit",

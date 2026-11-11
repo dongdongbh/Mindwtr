@@ -1266,6 +1266,7 @@ private struct AppLockRoot: View {
     @ObservedObject var workspace: NativeSandboxSession
     @State private var confirmingCorruptDraftDiscard = false
     @State private var observedApplicationActive: Bool?
+    @StateObject private var startupPrompts = NativeStartupPrompts()
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
@@ -1275,6 +1276,10 @@ private struct AppLockRoot: View {
     }
 
     private var workspaceReady: Bool { model.ready || workspace.isActive }
+
+    private var startupPromptGate: UUID? {
+        phase == .active && !lock.concealed && !workspace.isActive && model.startupPromptsCanShow ? model.completedStartupToken : nil
+    }
 
     var body: some View {
         let startupToken = model.completedStartupToken
@@ -1386,6 +1391,14 @@ private struct AppLockRoot: View {
                 .buttonStyle(.borderedProminent).controlSize(.large).rnFont(16, .bold)
                 .accessibilityIdentifier("app-lock-gate")
             }
+        }
+        .overlay {
+            if workspaceReady && !lock.concealed && !workspace.isActive {
+                NativeStartupPromptOverlay(model: model, prompts: startupPrompts, palette: palette)
+            }
+        }
+        .task(id: startupPromptGate) {
+            if let token = startupPromptGate { startupPrompts.begin(model, startup: token) }
         }
         .allowsHitTesting(model.workspaceAdmissionsOpen || workspace.isActive)
         .background {

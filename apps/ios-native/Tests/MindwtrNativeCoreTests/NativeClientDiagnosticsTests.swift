@@ -77,6 +77,9 @@ final class NativeClientDiagnosticsTests: XCTestCase {
                 result.append(("Native iOS reminder response", ["releaseCheck": "v1.3.5/ios-reminder-response", "action": action, "outcome": outcome]))
             }
         }
+        for outcome in ["onboarding", "donation", "announcement", "none", "held", "failed"] {
+            result.append(("Native iOS startup prompts read", ["releaseCheck": "v1.3.9/ios-startup-prompts", "outcome": outcome]))
+        }
         for outcome in ["sound", "silent"] {
             result.append(("Native iOS foreground reminder presentation requested", ["releaseCheck": "v1.3.5/ios-reminder-present", "outcome": outcome]))
         }
@@ -168,6 +171,13 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": "restore", "outcome": "confirmed", "taskId": "private"],
         ] {
             refused.append(try json(["Native iOS bulk operation acknowledged", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.9/ios-startup-prompts", "outcome": "update-reminder"],
+            ["releaseCheck": "v1.3.9/ios-startup-prompts", "outcome": "onboarding", "prompt": "private"],
+            ["releaseCheck": "v1.3.8/ios-startup-prompts", "outcome": "onboarding"],
+        ] {
+            refused.append(try json(["Native iOS startup prompts read", json(context)]))
         }
         for context in [
             ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "pending"],

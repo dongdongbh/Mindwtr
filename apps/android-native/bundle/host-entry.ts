@@ -172,7 +172,7 @@ import { createSandboxData } from '../../../packages/core/src/sandbox-data';
 import { waitForSyncDocumentOperationsIdle } from '../../../packages/core/src/data-transfer-transaction';
 import { countTasksForIconBadge } from '../../../packages/core/src/task-icon-badge';
 import { syncPassphraseBytes } from '../../../packages/core/src/sync-crypto';
-import { createNativeAbout } from './host-about';
+import { createIOSStartupPromptHost, createNativeAbout } from './host-about';
 import { createNativeAppSearch, type AppSearchCall } from './host-app-search';
 import { createNativeAI } from './host-ai';
 import { createIOSTaskAI } from './host-ios-task-ai';
@@ -706,6 +706,7 @@ let iosConfigurationAIActive = false;
 let iosCaptureAIQuestion: { revision: string; request: { title: string; contexts: string[]; tags: string[] };
     settings: ReturnType<typeof useTaskStore.getState>['settings']; language: string } | null = null;
 const nativeAbout = nativeSync ? createNativeAbout(globalThis.__mindwtrAppInfo, keyValue, generateUUID, collectFeedbackDiagnostics) : null;
+const iosStartupPromptHost = globalThis.__mindwtrHostPlatform === 'ios' ? createIOSStartupPromptHost(keyValue) : null;
 
 
 const nativeAppSearch = nativeSync && typeof native().appSearchInfo === 'function'
@@ -785,6 +786,7 @@ const contract = createNativeHostContract({
     },
     projectPickerGroups: true,
     ...(nativeAbout ? { about: nativeAbout } : {}),
+    ...(iosStartupPromptHost ? { startupPromptHost: iosStartupPromptHost } : {}),
     ...(persistentCapture ? { persistentCapture } : {}) });
 
 const calendarFeeds = nativeCalendar ? createCalendarFeeds({
@@ -9083,6 +9085,12 @@ globalThis.MindwtrHost = {
                 throw error;
             } finally { iosCleanupCallback = null; iosDropboxControl = null; iosDropboxSignal = undefined; iosDropboxRequestId = null; }
         });
+    },
+    beginStartupPrompts(json: string): string {
+        return submit(async () => unwrap(await contract.beginStartupPrompts(completionJson(json, 2048))));
+    },
+    startupPromptAction(json: string): string {
+        return submit(async () => unwrap(await contract.startupPromptAction(completionJson(json, 2048))));
     },
     gettingStartedOutcome(json: string): string {
         return submit(async () => unwrap(contract.probeGettingStartedOutcome(completionJson(json, 2048) as Parameters<typeof contract.probeGettingStartedOutcome>[0])));

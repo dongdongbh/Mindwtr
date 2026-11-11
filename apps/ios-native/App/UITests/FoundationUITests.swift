@@ -42,7 +42,7 @@ final class FoundationUITests: XCTestCase {
             throw XCTSkip("Root-owned fresh native.dev App/group and synthetic run binding are required")
         }
         let app = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev")
-        app.launchArguments = ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["--native-no-startup-prompts", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
         if largest { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         return (app, run)
     }
@@ -34525,7 +34525,7 @@ extension FoundationUITests {
     func testNativeNextWidgetSeedThroughCapture() throws {
         let run = try nativeNextWidgetRun()
         let app = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev")
-        app.launchArguments = ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["--native-no-startup-prompts", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
         app.launch(); defer { app.terminate() }
         boardEnabled(app.buttons["capture-open"], timeout: 40)
         boardTap(app, "capture-open")
@@ -37655,5 +37655,83 @@ extension FoundationUITests {
         XCTAssertTrue(app.buttons["contexts-chip-@ui10-home"].isSelected)
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
         processEditorObserve(app, "UI10 largest text status, tri-state project picker and save-name cancel remain reachable")
+    }
+}
+
+extension FoundationUITests {
+    private func startupPromptApp(_ library: String, _ extra: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library] + extra + ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        return app
+    }
+
+    func testStartupWelcomeSheetStaysOutOfTestLaunchesAndSkipIsStoredOnTheDevice() throws {
+        continueAfterFailure = false
+        let library = UUID().uuidString.lowercased()
+        var app = startupPromptApp(library)
+        app.launch()
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        XCTAssertFalse(app.otherElements["welcome-sheet"].waitForExistence(timeout: 4))
+        app.terminate()
+        app = startupPromptApp(library, ["--native-startup-prompts"])
+        app.launch(); defer { app.terminate() }
+        let sheet = app.otherElements["welcome-sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["Welcome to Mindwtr"].exists)
+        for id in ["welcome-start", "welcome-sync", "welcome-import", "welcome-skip", "welcome-close"] { XCTAssertTrue(app.buttons[id].exists, id) }
+        let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "Welcome sheet"; picture.lifetime = .keepAlways; add(picture)
+        boardTap(app, "welcome-skip")
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        XCTAssertFalse(sheet.waitForExistence(timeout: 6))
+    }
+
+    func testStartupWelcomeSheetStartFreshSeedsGettingStartedOnce() throws {
+        continueAfterFailure = false
+        let app = startupPromptApp(UUID().uuidString.lowercased(), ["--native-startup-prompts"])
+        app.launch(); defer { app.terminate() }
+        let sheet = app.otherElements["welcome-sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 40))
+        boardTap(app, "welcome-start")
+        let toast = app.staticTexts["startup-prompt-toast"]
+        XCTAssertTrue(toast.waitForExistence(timeout: 40))
+        XCTAssertEqual(toast.label, "Getting Started is ready in Projects.")
+        XCTAssertFalse(sheet.exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        XCTAssertFalse(sheet.waitForExistence(timeout: 6))
+    }
+
+    func testStartupWelcomeSheetSyncAndImportOpenTheirSettingsPages() throws {
+        continueAfterFailure = false
+        let library = UUID().uuidString.lowercased()
+        var app = startupPromptApp(library, ["--native-startup-prompts"])
+        app.launch()
+        XCTAssertTrue(app.otherElements["welcome-sheet"].waitForExistence(timeout: 40))
+        boardTap(app, "welcome-sync")
+        XCTAssertTrue(app.scrollViews["sync-screen"].waitForExistence(timeout: 40))
+        XCTAssertFalse(app.otherElements["welcome-sheet"].exists)
+        app.terminate()
+        app = startupPromptApp(library, ["--native-startup-prompts"])
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.otherElements["welcome-sheet"].waitForExistence(timeout: 40))
+        boardTap(app, "welcome-import")
+        XCTAssertTrue(app.buttons["data-getting-started"].waitForExistence(timeout: 40))
+        XCTAssertFalse(app.otherElements["welcome-sheet"].exists)
+    }
+
+    func testStartupDonationPromptPreviewShowsRNWordsAndCloses() throws {
+        continueAfterFailure = false
+        let app = startupPromptApp(UUID().uuidString.lowercased(), ["--native-startup-prompts", "--native-startup-prompt-preview", "donation"])
+        app.launch(); defer { app.terminate() }
+        let window = app.otherElements["startup-prompt"]
+        XCTAssertTrue(window.waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["Keep Mindwtr free and independent"].exists)
+        XCTAssertTrue(app.buttons["startup-prompt-action"].exists)
+        let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "Donation prompt"; picture.lifetime = .keepAlways; add(picture)
+        boardTap(app, "startup-prompt-dismiss")
+        XCTAssertTrue(window.waitForNonExistence(timeout: 10))
     }
 }

@@ -1,4 +1,4 @@
-import { logInfo, logWarn, type NativeAboutHost } from '@mindwtr/core';
+import { logInfo, logWarn, type NativeAboutHost, type NativeStartupPromptHost } from '@mindwtr/core';
 
 
 type KeyValue = {
@@ -30,6 +30,18 @@ const deviceLocale = (): string => {
 };
 
 
+const aboutLog: Pick<NativeAboutHost, 'logWarn' | 'logInfo'> = {
+    logWarn: (message, error) => {
+        try {
+            logWarn(message, { scope: 'about', context: { error: error instanceof Error ? error.message : String(error) } });
+        } catch {                                                    }
+    },
+    logInfo: (message, context) => {
+        try { logInfo(message, { scope: 'about', context }); } catch {                }
+    },
+};
+
+
 export const createNativeAbout = (appInfo: unknown, keyValue: KeyValue, generateId: () => string,
     feedbackDiagnostics: () => Promise<string | null>): NativeAboutHost | null => {
     const parsed = typeof appInfo === 'string' ? (() => { try { return JSON.parse(appInfo) as unknown; } catch { return null; } })() : null;
@@ -45,13 +57,18 @@ export const createNativeAbout = (appInfo: unknown, keyValue: KeyValue, generate
         locale: deviceLocale,
         generateId,
         feedbackDiagnostics,
-        logWarn: (message, error) => {
-            try {
-                logWarn(message, { scope: 'about', context: { error: error instanceof Error ? error.message : String(error) } });
-            } catch {                                                    }
-        },
-        logInfo: (message, context) => {
-            try { logInfo(message, { scope: 'about', context }); } catch {                }
-        },
+        ...aboutLog,
     };
 };
+
+
+export const createIOSStartupPromptHost = (keyValue: KeyValue): NativeStartupPromptHost => ({
+    app: { platform: 'ios', isFossBuild: false, version: '', packageName: '' },
+    storage: {
+        getItem: (key) => keyValue.get(key),
+        setItem: (key, value) => keyValue.set(key, value),
+        removeItem: (key) => keyValue.remove(key),
+    },
+    fetcher: () => Promise.reject(new Error('Update checks are not available on iOS')),
+    ...aboutLog,
+});

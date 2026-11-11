@@ -43,7 +43,11 @@ type Deps = {
     t: () => (key: string) => string;
 
     language: () => string;
-    host: () => NativeAboutHost | null;
+    host: () => NativeStartupPromptHost | null;
+};
+
+export type NativeStartupPromptHost = Pick<NativeAboutHost, 'storage' | 'fetcher' | 'logInfo' | 'logWarn'> & {
+    app: Pick<NativeAboutHost['app'], 'platform' | 'isFossBuild' | 'version' | 'packageName' | 'githubReleasesApi'>;
 };
 
 export const NATIVE_STARTUP_PROMPT_IDS = ['onboarding', 'announcement', 'update-reminder', 'donation'] as const;
@@ -91,14 +95,14 @@ export function createStartupPromptMethods(deps: Deps) {
         if (id === 'update-reminder') return updateInfo ? { id, announcement: buildUpdateReminderAnnouncement(updateInfo, resolveText), ...labels } : null;
         return { id, announcement: translateDonationPromptAnnouncement(resolveText), ...labels };
     };
-    const warn = (host: NativeAboutHost, message: string, error: unknown) => {
+    const warn = (host: NativeStartupPromptHost, message: string, error: unknown) => {
         try { host.logWarn(message, error); } catch {                   }
     };
 
     return {
 
 
-        async beginStartupPrompts(input: unknown): Promise<NativeHostResult<{ prompt: NativeStartupPrompt | null; notice?: string }>> {
+        async beginStartupPrompts(input: unknown): Promise<NativeHostResult<{ prompt: NativeStartupPrompt | null; notice?: string; delayMs?: number }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const host = deps.host();
@@ -107,7 +111,10 @@ export function createStartupPromptMethods(deps: Deps) {
                 || typeof input.donationEnabled !== 'boolean') {
                 return fail('INVALID_INPUT', 'beginStartupPrompts takes installerSource and donationEnabled');
             }
-            if (isSandboxMode()) return { ok: true, value: { prompt: null } };
+            if (input.deferDelay !== undefined && typeof input.deferDelay !== 'boolean') return fail('INVALID_INPUT', 'deferDelay takes a boolean');
+            const deferDelay = input.deferDelay === true;
+            const noDelay = deferDelay ? { delayMs: 0 } : {};
+            if (isSandboxMode()) return { ok: true, value: { prompt: null, ...noDelay } };
 
 
             if (input.preview !== undefined) {
@@ -120,11 +127,11 @@ export function createStartupPromptMethods(deps: Deps) {
                     : source === 'play-store' ? { label: UPDATE_NOW_ACTION_LABEL, url: `https://play.google.com/store/apps/details?id=${host.app.packageName}` }
                         : { label: source === 'sideload' ? UPDATE_NOW_ACTION_LABEL : VIEW_RELEASE_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
 
-                if (input.preview === 'update-reminder' && !target) return { ok: true, value: { prompt: null, notice: 'Updates are managed by this build channel.' } };
+                if (input.preview === 'update-reminder' && !target) return { ok: true, value: { prompt: null, notice: 'Updates are managed by this build channel.', ...noDelay } };
                 return { ok: true, value: { prompt: view(input.preview as NativeStartupPromptId, target && {
                     currentVersion: host.app.version, latestVersion: '99.99.99', latestReleasedAt: new Date().toISOString(),
                     releaseUrl: target.url, actionLabel: target.label, testOnly: true,
-                }, PROMPT_TEST_ANNOUNCEMENT) } };
+                }, PROMPT_TEST_ANNOUNCEMENT), ...noDelay } };
             }
             const storage = host.storage;
 
@@ -175,15 +182,16 @@ export function createStartupPromptMethods(deps: Deps) {
                 onUpdateReminderInfo: (info) => { updateInfo = info; },
                 getSupportPrompt: () => useTaskStore.getState().settings.supportPrompt,
             });
-            const id = await runStartupPromptsOnce(descriptors, {
+            const id = await runStartupPromptsOnce(deferDelay ? descriptors.map((descriptor) => ({ ...descriptor, delayMs: 0 })) : descriptors, {
                 retired,
                 onLog: (error, context) => warn(host, `Startup prompt failed: ${context.id} ${context.phase}`, error),
             });
-            if (!id) return { ok: true, value: { prompt: null } };
+            if (!id) return { ok: true, value: { prompt: null, ...noDelay } };
 
             const opened = updateInfo as MobileUpdateReminderInfo | null;
             if (id === 'update-reminder' && opened) openedUpdateVersion = opened.latestVersion;
-            return { ok: true, value: { prompt: view(id as NativeStartupPromptId, opened, ACTIVE_APP_ANNOUNCEMENT) } };
+            const delayed = deferDelay ? { delayMs: descriptors.find((descriptor) => descriptor.id === id)?.delayMs ?? 0 } : {};
+            return { ok: true, value: { prompt: view(id as NativeStartupPromptId, opened, ACTIVE_APP_ANNOUNCEMENT), ...delayed } };
         },
 
 
