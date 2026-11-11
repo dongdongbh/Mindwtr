@@ -11,6 +11,18 @@ and makes the real SQLite completion fixture use a portable temp root. All 102
 focused editor tests, mobile typecheck and lint pass. This is React work-count
 evidence, not native latency evidence. Next: validate the integrated commit in CI.
 
+## Native iOS interactions vs RN, November 11
+
+[Evidence](native-ios-interactions-2026-11-11.md): iPhone 12, optimized marker build of `0d26937f6`, 5k library.
+
+- **Cold start:** Inbox content now takes **853 ms**, down from 1141 ms, and RN takes 1300 ms (native/RN = 0.66).
+- **Interactions are still slower than RN:** tab switches take 115 to 232 ms vs RN's 82 to 113 ms. Editor open takes 178 ms vs
+  99 ms, and capture open takes 153 ms vs 82 ms.
+- **Cause found by a device trace:** each tab switch makes SwiftUI rebuild the new tab's list from scratch, using 40 to 56 ms in the
+  first pass plus per-cell sizing. The JavaScriptCore host uses only about 11 ms.
+- **Next:** keep visited bottom tabs mounted, as RN does, then remeasure. Per-property observation needs a minimum of iOS 17,
+  which is dd's decision. The 1k batch is still to run.
+
 ## Native iOS (SwiftUI + JavaScriptCore host), November 8
 
 Full evidence: [native iOS cold start, 2026-11-08](native-ios-startup-2026-11-08.md). iPhone 12, optimized marker build of `8d0b42aad`, and the
