@@ -18,7 +18,7 @@ import { clearIdleSyncCycleSnapshot, normalizeRemoteWriteResult, runSharedSyncCy
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
 import { computeRemoteSyncDocumentFingerprint, parseSyncDocument, toRemoteSyncDocument } from './sync-document';
-import { toStableSyncJson } from './sync-helpers';
+import { areSyncPayloadsEqual, toStableSyncJson } from './sync-helpers';
 import type { FastSyncState } from './sync-fast-sync';
 import {
     SyncFileGenerationCorruptError,
@@ -27,7 +27,7 @@ import {
     type SyncBackend,
 } from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult } from './sync-types';
-import { mergeAppData, performSyncCycle } from './sync';
+import { mergeAppData, mergeAppDataWithStats, performSyncCycle } from './sync';
 import {
     SyncRemoteMutationFenceBusyError,
     SyncRemoteMutationFenceLostError,
@@ -5506,5 +5506,54 @@ describe('activation with attachment files that no device location can serve', (
         const published = second.harness.remote?.tasks[0]?.attachments?.[0];
         expect(published?.deletedAt).toBeUndefined();
         expect(folder.has(published!.cloudKey!)).toBe(true);
+    });
+});
+
+describe('cloud follow-up after a local-only settings change (feedback d4644bd4)', () => {
+    it.each([
+        ['without an appearance stamp', { preferences: STAMP }],
+        ['with an older appearance stamp', { preferences: STAMP, appearance: STAMP }],
+    ])('stops asking for cycles when the remote opted out of appearance %s', async (_label, remoteStamps) => {
+        const changedAt = '2026-07-13T09:59:00.000Z';
+        const local = createData([createTask('t-local', 'Local task')], {
+            theme: 'dark',
+            syncPreferences: { appearance: false },
+            syncPreferencesUpdatedAt: { preferences: STAMP, appearance: changedAt },
+        });
+        const remote = createData([createTask('t-local', 'Local task')], {
+            syncPreferences: { appearance: false },
+            syncPreferencesUpdatedAt: remoteStamps,
+        });
+        const { harness, io, hooks, run } = createHarness({ local, remote });
+        io.writeRemote = vi.fn(async (incoming: AppData) => {
+            const merged = mergeAppDataWithStats(harness.remote ?? createData(), incoming, { nowIso: NOW.toISOString() }).data;
+            const incomingOnly = mergeAppDataWithStats(createData(), incoming, { nowIso: NOW.toISOString() }).data;
+            harness.remote = cloneAppData(merged);
+            return { fingerprint: null, serverMergedRemoteData: !areSyncPayloadsEqual(merged, incomingOnly) };
+        });
+
+        const cyclesUntilQuiet = async () => {
+            let cycles = 0;
+            let followUpsBefore = 0;
+            do {
+                followUpsBefore = vi.mocked(hooks.requestFollowUp).mock.calls.length;
+                expect((await run()).success).toBe(true);
+                harness.inMemory = cloneAppData(harness.persisted);
+                cycles += 1;
+            } while (vi.mocked(hooks.requestFollowUp).mock.calls.length > followUpsBefore && cycles < 5);
+            return cycles;
+        };
+
+        expect(await cyclesUntilQuiet()).toBeLessThanOrEqual(2);
+        harness.persisted.tasks[0] = { ...harness.persisted.tasks[0], title: 'Edited', updatedAt: NOW.toISOString(), rev: 2 };
+        harness.lastDataChangeAt = 2;
+        harness.inMemory = cloneAppData(harness.persisted);
+        expect(await cyclesUntilQuiet()).toBeLessThanOrEqual(2);
+        expect(harness.remote?.tasks[0].title).toBe('Edited');
+        expect(harness.infos).toContainEqual(expect.objectContaining({
+            extra: expect.objectContaining({ releaseCheck: 'v1.3.9/opted-out-settings-stamps', withheldStampCount: '1' }),
+        }));
+        expect(harness.persisted.settings.theme).toBe('dark');
+        expect(harness.persisted.settings.syncPreferencesUpdatedAt?.appearance).toBe(changedAt);
     });
 });

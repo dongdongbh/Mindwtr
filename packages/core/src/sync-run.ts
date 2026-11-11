@@ -43,6 +43,7 @@ import {
     hasPendingSyncSideEffects,
     isLocalPersistEquivalent,
     fingerprintStableSyncJsonPass,
+    sanitizeAppDataForRemote,
     toStableSyncJson,
 } from './sync-helpers';
 import {
@@ -1222,6 +1223,25 @@ class SharedSyncRunMachine {
         throw new Error(message);
     }
 
+    private logWithheldSettingsStamps(
+        settings: AppData['settings'] | undefined,
+        outcome: 'unchanged-fast' | 'unchanged-read' | 'remote-write-skipped' | 'remote-written' | 'remote-written-server-contribution',
+    ): void {
+        if (!settings) return;
+        const uploadedStamps = sanitizeAppDataForRemote({
+            tasks: [], projects: [], sections: [], areas: [], people: [], settings,
+        }).settings.syncPreferencesUpdatedAt ?? {};
+        const withheldStampCount = Object.keys(settings.syncPreferencesUpdatedAt ?? {})
+            .filter((group) => !(group in uploadedStamps)).length;
+        if (withheldStampCount <= 0) return;
+        this.notifier.logInfo('Sync upload withheld opted-out settings stamps', {
+            releaseCheck: 'v1.3.9/opted-out-settings-stamps',
+            backend: this.backend,
+            withheldStampCount: String(withheldStampCount),
+            outcome,
+        });
+    }
+
     private async writeRemoteForCycle(data: AppData): Promise<void> {
         this.assertLocalOnlyUploadIsCanonical(data);
         await this.ensureRemoteMutationFence();
@@ -1255,6 +1275,7 @@ class SharedSyncRunMachine {
             if (this.backend !== 'cloudkit') {
                 this.notifier.tracePayload?.('remote-write-skipped-unchanged', remoteDocument, { backend: this.backend });
             }
+            this.logWithheldSettingsStamps(data.settings, 'remote-write-skipped');
             return;
         }
         if (this.backend === 'webdav' && state.webdavRemoteCorrupted) {
@@ -1282,6 +1303,7 @@ class SharedSyncRunMachine {
         const serverMergedRemoteData = Boolean(outcome && outcome.serverMergedRemoteData === true);
         state.lastRemoteWriteFingerprint = fingerprint;
         state.lastRemoteWriteMergedServerData = serverMergedRemoteData;
+        this.logWithheldSettingsStamps(data.settings, serverMergedRemoteData ? 'remote-written-server-contribution' : 'remote-written');
         if (serverMergedRemoteData) {
             state.remoteDataForCompare = null;
             this.requestFollowUp('server-contribution', data, previousRemoteData);
@@ -1543,6 +1565,7 @@ class SharedSyncRunMachine {
             check,
             skipped: skippedPasses.join(','),
         });
+        this.logWithheldSettingsStamps(this.store.getSettings(), `unchanged-${check}`);
     }
 
 

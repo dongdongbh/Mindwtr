@@ -1,4 +1,4 @@
-import type { AppData, Attachment } from './types';
+import type { AppData, Attachment, SettingsSyncGroup } from './types';
 import { mapPass, runToEnd, SLICE_ITEMS, type CooperativePass } from './cooperative';
 import { keepSavedFilters } from './saved-filters';
 import { getGtdSyncSnapshot, isSettingsSyncGroupEnabled } from './settings-options';
@@ -178,8 +178,10 @@ export const hasPendingSyncSideEffects = (data: AppData): boolean => (
 const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['settings'] => {
     const prefs = settings.syncPreferences ?? {};
     const remotePrefs = { ...prefs };
-    let remotePrefsUpdatedAt = settings.syncPreferencesUpdatedAt
-        ? { ...settings.syncPreferencesUpdatedAt }
+    let remotePrefsUpdatedAt: AppData['settings']['syncPreferencesUpdatedAt'] = settings.syncPreferencesUpdatedAt
+        ? Object.fromEntries(Object.entries(settings.syncPreferencesUpdatedAt).filter(([group]) => (
+            group === 'preferences' || prefs[group as SettingsSyncGroup] !== false
+        )))
         : undefined;
     if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
 

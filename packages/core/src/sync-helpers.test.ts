@@ -396,7 +396,10 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
             gtd: true,
         });
         expect(sanitized.settings.syncPreferencesUpdatedAt).toEqual({
-            ...data.settings.syncPreferencesUpdatedAt,
+            appearance: now,
+            externalCalendars: now,
+            savedFilters: now,
+            ai: now,
             preferences: '2026-02-19T00:00:00.001Z',
         });
         expect(sanitized.settings.theme).toBe('dark');

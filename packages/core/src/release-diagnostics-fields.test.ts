@@ -58,6 +58,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'fields',
 
+    'withheldStampCount',
+
 
     'allowWrite', 'allowArchive', 'allowDelete', 'port', 'category',
 
