@@ -204,7 +204,8 @@ try {
 
     const due = (days) => new Date(Date.now() + days * 86_400_000).toLocaleDateString('en-CA', { timeZone: phoneZone });
     const seeded = { [title(1)]: `${title(1)} /next /due:${due(0)}`, [title(2)]: `${title(2)} /next /due:${due(0)}`,
-        [title(3)]: `${title(3)} /next /due:${due(3)}`, [title(4)]: title(4) };
+        [title(3)]: `${title(3)} /next /due:${due(3)}`, [title(4)]: title(4),
+        [title(6)]: `${title(6)} /next /due:${due(0)}`, [title(7)]: `${title(7)} /next /due:${due(0)}`, [title(8)]: `${title(8)} /next /due:${due(0)}` };
     {
         await killApp();
         for (const text of Object.values(seeded)) enqueue({ id: randomUUID(), title: text, createdAt: new Date().toISOString(), source: 'android-capture-intent' });
@@ -261,6 +262,35 @@ try {
         await sleep(2000);
         nodes = await revealRow(title(1));
         check(nodes === null, '(4) CoreWork\'s refresh redrew the widget without the completed row');
+    }
+
+
+    {
+        const batch = [title(6), title(7), title(8)];
+        const before = batch.map((text) => stored(text)[0]);
+        nodes = (await revealRow(title(8))) ?? fail(`no row ${title(8)}`);
+        const shown = hostedRows(nodes);
+        for (const text of batch) if (!shown.includes(text)) fail(`(4b) ${text} is not on screen with the other two`);
+        const tappedAt = [];
+        for (const [index, text] of batch.entries()) {
+            if (index > 0) await sleep(1600);
+            await tapRing(nodes, text);
+            tappedAt.push(Date.now());
+        }
+        const held = hostedRows(await screen());
+        const heldFor = Date.now() - tappedAt[0];
+        check(heldFor < 3000 + tappedAt[2] - tappedAt[0] && tappedAt[2] - tappedAt[0] >= 3000,
+            `(4b) the rows were read ${heldFor} ms after the first tap, after its own Undo ended and before the last one ended`);
+        check(JSON.stringify(held) === JSON.stringify(shown), `(4b) three rings tapped about 1.6 s apart: no row moved while an Undo was open (${held.join(', ')})`);
+        await waitUntil('the three checked rows to leave together', async () => { const rows = hostedRows(await screen()); return batch.every((text) => !rows.includes(text)); }, 30_000);
+        await waitUntil('CoreWork to store the three check-offs', () => batch.every((text) => stored(text)[0]?.status === 'done'), 60_000, 2000);
+        await sleep(3000);
+        for (const [index, text] of batch.entries()) {
+            const [after] = stored(text);
+            check(after.status === 'done' && after.rev === before[index].rev + 1 && queuedFor(before[index].id).length === 0, `(4b) ${text} was completed once (rev ${before[index].rev} to ${after.rev})`);
+        }
+        await waitUntil('the held count in the log', () => allLogs().includes('releaseCheck=v1.3.9/widget-checkoff-batch'), 30_000);
+        check(true, '(4b) the log shows the check-offs held until the last Undo');
     }
 
 

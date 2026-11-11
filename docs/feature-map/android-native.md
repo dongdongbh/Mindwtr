@@ -333,7 +333,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list.
 - Code: `apps/android-native/android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessService.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt`, `apps/android-native/bundle/host-widgets.ts`, `apps/android-native/scripts/build-widgets.mjs`, `apps/mobile/modules/android-widget`
 - Checks: `apps/android-native/scripts/check-widgets-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetRefreshGateTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetAudioDrainTest.kt`, `apps/android-native/android/widget/src/test/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessServiceTest.kt`
-- Notes: The widget code is RN's module, compiled as is. A ring tap is queued and completed by a background job, even if the app was killed first.
+- Notes: The widget code is RN's module, compiled as is. A ring tap is queued and completed by a background job, even if the app was killed first. Rings tapped in a row keep every row in place until three seconds after the last tap, the same as RN (#1211).
 
 ## Widget list
 

@@ -24,6 +24,7 @@ object CheckoffStore {
     val committed: Map<String, String>,
     val newlyCommitted: Int,
     val failed: Int,
+    val held: Int = 0,
   )
 
   const val PREFS_NAME = "mindwtr_widget_checkoff"
@@ -39,6 +40,7 @@ object CheckoffStore {
   private const val INDEX_RETRY = "indexRetry"
   private const val FAST_RETRY_COUNT = "fastRetryCount"
   private const val SERIALIZED_COUNT = "serializedCount"
+  private const val HELD_COUNT = "heldCount"
   internal const val MAX_FAST_RETRIES = 2
   private const val TAG = "MindwtrWidgetCheckoff"
   private val stateMonitor = Any()
@@ -99,7 +101,7 @@ object CheckoffStore {
     tapAction(
       isCommitted = false,
       hasQueuedCompletion = tappedAt != null && PendingCaptureWriter.hasQueuedCompletion(context.filesDir, taskId, tappedAt),
-      pendingSince = tappedAt,
+      pendingSince = windowOpenedAt(current, taskId),
       now = now,
     )
   }
@@ -112,7 +114,7 @@ object CheckoffStore {
     if (tapAction(
         isCommitted = false,
         hasQueuedCompletion = tappedAt != null && PendingCaptureWriter.hasQueuedCompletion(context.filesDir, taskId, tappedAt),
-        pendingSince = tappedAt,
+        pendingSince = windowOpenedAt(current, taskId),
         now = now,
       ) != TapAction.TOGGLE_PENDING
     ) return@withStateTransaction current.containsKey(taskId)
@@ -153,6 +155,7 @@ object CheckoffStore {
     val pendingWritten = next.pending == current || writePending(context, next.pending)
     val actual = if (pendingWritten) next else next.copy(pending = current, failed = next.failed + 1)
     if (!pendingWritten) Log.w(TAG, "Could not clear queued widget check-offs; retrying")
+    if (pendingWritten && actual.held > 0) recordHeld(context, actual.held)
     if (actual.failed > 0) Log.w(TAG, "Could not queue ${actual.failed} widget completion(s); retrying")
     actual
   }
@@ -171,8 +174,13 @@ object CheckoffStore {
     return ToggleResult(next, persisted = true, isPending = next.containsKey(taskId))
   }
 
-  fun expired(pending: Map<String, Long>, now: Long, windowMs: Long): List<String> =
-    pending.filter { (_, tappedAt) -> now - tappedAt >= windowMs }.keys.sorted()
+  internal fun windowOpenedAt(pending: Map<String, Long>, taskId: String): Long? =
+    if (pending.containsKey(taskId)) pending.values.max() else null
+
+  fun expired(pending: Map<String, Long>, now: Long, windowMs: Long): List<String> {
+    val lastTap = pending.values.maxOrNull() ?: return emptyList()
+    return if (now - lastTap >= windowMs) pending.keys.sorted() else emptyList()
+  }
 
   internal fun swept(
     pending: Map<String, Long>,
@@ -184,6 +192,8 @@ object CheckoffStore {
     val done = committed.toMutableMap()
     var newlyCommitted = 0
     var failed = 0
+    var held = 0
+    val lastTap = pending.values.maxOrNull() ?: 0L
     for (taskId in expired(pending, now, UNDO_WINDOW_MS)) {
       if (done.containsKey(taskId)) {
         remaining.remove(taskId)
@@ -193,11 +203,12 @@ object CheckoffStore {
         done[taskId] = enqueue(taskId, pending.getValue(taskId))
         remaining.remove(taskId)
         newlyCommitted += 1
+        if (pending.getValue(taskId) + UNDO_WINDOW_MS <= lastTap) held += 1
       } catch (_: Exception) {
         failed += 1
       }
     }
-    return SweepState(remaining, done, newlyCommitted, failed)
+    return SweepState(remaining, done, newlyCommitted, failed, held)
   }
 
   private fun writeCommitted(context: Context, committed: Map<String, String>): Boolean {
@@ -315,6 +326,19 @@ object CheckoffStore {
     val count = prefs.getInt(SERIALIZED_COUNT, 0).coerceAtLeast(0)
     if (count <= 0) return@withStateTransaction 0
     if (prefs.edit().remove(SERIALIZED_COUNT).commit()) count else 0
+  }
+
+  private fun recordHeld(context: Context, count: Int) {
+    val prefs = context.getSharedPreferences(DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
+    val total = prefs.getInt(HELD_COUNT, 0).coerceAtLeast(0) + count
+    prefs.edit().putInt(HELD_COUNT, total).commit()
+  }
+
+  fun consumeHeldCount(context: Context): Int = withStateTransaction {
+    val prefs = context.getSharedPreferences(DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
+    val count = prefs.getInt(HELD_COUNT, 0).coerceAtLeast(0)
+    if (count <= 0) return@withStateTransaction 0
+    if (prefs.edit().remove(HELD_COUNT).commit()) count else 0
   }
 
   internal fun nextFastRetry(previous: Int): Int? =

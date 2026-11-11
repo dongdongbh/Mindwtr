@@ -389,7 +389,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Shortcuts: Widget links open `mindwtr:///focus`, `mindwtr:///inbox`, `mindwtr:///waiting`, `mindwtr:///someday`, or `mindwtr:///widget-list/<list-id>`.
 - Code: `apps/mobile/modules/android-widget/README.md`, `apps/mobile/plugins/android-widget.js`, `apps/mobile/lib/widget-service.ts`, `apps/mobile/app/(drawer)/widget-list/[id].tsx`, `apps/mobile/hooks/use-widget-launch.tsx`
 - Checks: `apps/mobile/tests/use-widget-launch.test.tsx`, `apps/mobile/app/(drawer)/widget-list/widget-list-screen.test.tsx`, `apps/mobile/modules/android-widget/android/src/test/java/tech/dongdongbh/mindwtr/androidwidget/WidgetNavigationTest.kt`, `apps/mobile/hooks/root-layout/use-root-layout-pending-captures.test.tsx`
-- Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite.
+- Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite. Rows checked off in a row stay in place, struck through and undoable, until three seconds after the last tap; then they all leave together (`CheckoffStore.kt`, check `CheckoffStoreTest.kt`) (#1211).
 - E-Ink: Present priority rings and identity dots use each Android widget's effective text foreground, including transparent light-text and dark-text modes. Missing identity stays hidden; the transparent surface stays clear.
 
 ## Android launcher shortcuts and Quick Settings tile

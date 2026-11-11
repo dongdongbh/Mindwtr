@@ -174,11 +174,74 @@ class CheckoffStoreTest {
   }
 
   @Test
-  fun onlyEntriesOlderThanTheWindowExpire() {
+  fun pendingCheckoffsExpireTogetherOnlyAfterTheLastTapsWindow() {
     val pending = mapOf("old" to 0L, "fresh" to 2_500L, "edge" to 1_000L)
 
-    assertEquals(listOf("edge", "old"), CheckoffStore.expired(pending, 4_000L, CheckoffStore.UNDO_WINDOW_MS))
     assertEquals(emptyList<String>(), CheckoffStore.expired(pending, 1_500L, CheckoffStore.UNDO_WINDOW_MS))
+    assertEquals(emptyList<String>(), CheckoffStore.expired(pending, 4_000L, CheckoffStore.UNDO_WINDOW_MS))
+    assertEquals(emptyList<String>(), CheckoffStore.expired(pending, 5_499L, CheckoffStore.UNDO_WINDOW_MS))
+    assertEquals(listOf("edge", "fresh", "old"), CheckoffStore.expired(pending, 5_500L, CheckoffStore.UNDO_WINDOW_MS))
+    assertEquals(listOf("solo"), CheckoffStore.expired(mapOf("solo" to 1_000L), 4_000L, CheckoffStore.UNDO_WINDOW_MS))
+  }
+
+  @Test
+  fun twoQuickCheckoffsKeepEveryRowInPlaceUntilTheLastUndoWindowEnds() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val payload = WidgetPayload.parse(
+      org.json.JSONObject()
+        .put("title", "Focus")
+        .put("items", org.json.JSONArray().apply {
+          listOf("first", "second", "third").forEach { put(org.json.JSONObject().put("id", it).put("title", it)) }
+        })
+        .toString(),
+    )!!
+    fun visibleRows() = payload.displaySnapshot(CheckoffStore.committed(context)).payload.items.map { it.id }
+    try {
+      assertTrue(CheckoffStore.toggle(context, "first", now = 0L))
+      assertTrue(CheckoffStore.toggle(context, "second", now = 1_000L))
+
+      CheckoffStore.sweep(context, now = 3_500L)
+      assertEquals(listOf("first", "second", "third"), visibleRows())
+      assertEquals(setOf("first", "second"), CheckoffStore.pending(context).keys)
+
+      CheckoffStore.sweep(context, now = 4_000L)
+      assertEquals(listOf("third"), visibleRows())
+      assertTrue(CheckoffStore.pending(context).isEmpty())
+      assertEquals(setOf("first", "second"), CheckoffStore.committed(context))
+      assertEquals(0, CheckoffStore.consumeHeldCount(context))
+    } finally {
+      PendingCheckoffStore(context).write(emptyMap())
+      context.getSharedPreferences(CheckoffStore.COMMITTED_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit().clear().commit()
+      context.getSharedPreferences(CheckoffStore.DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit().clear().commit()
+    }
+  }
+
+  @Test
+  fun aBatchCountsOnlyRowsWhoseOwnWindowEndedBeforeTheLastTap() {
+    val spread = CheckoffStore.swept(mapOf("first" to 0L, "second" to 3_500L), emptyMap(), 6_500L) { id, _ -> "$id.json" }
+    val quick = CheckoffStore.swept(mapOf("first" to 0L, "second" to 1_000L), emptyMap(), 4_000L) { id, _ -> "$id.json" }
+
+    assertEquals(2, spread.newlyCommitted)
+    assertEquals(1, spread.held)
+    assertEquals(2, quick.newlyCommitted)
+    assertEquals(0, quick.held)
+  }
+
+  @Test
+  fun aHeldRowStaysUndoableUntilTheLastUndoWindowEnds() {
+    val pending = mapOf("first" to 0L, "second" to 1_000L)
+
+    assertEquals(
+      CheckoffStore.TapAction.TOGGLE_PENDING,
+      CheckoffStore.tapAction(isCommitted = false, pendingSince = CheckoffStore.windowOpenedAt(pending, "first"), now = 3_500L),
+    )
+    assertEquals(
+      CheckoffStore.TapAction.RECONCILE,
+      CheckoffStore.tapAction(isCommitted = false, pendingSince = CheckoffStore.windowOpenedAt(pending, "first"), now = 4_000L),
+    )
+    assertEquals(null, CheckoffStore.windowOpenedAt(pending, "unchecked"))
   }
 
   @Test

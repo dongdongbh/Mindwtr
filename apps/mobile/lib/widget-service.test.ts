@@ -408,6 +408,21 @@ describe('widget-service', () => {
         });
     });
 
+    it('logs widget check-offs held until the last Undo window ended (#1211)', async () => {
+        mockAndroidWidgetUpdateWidgets.mockReturnValue({
+            legacyWidgetCount: 0,
+            compactWidgetCount: 0,
+            heldCheckoffCount: 1,
+        });
+
+        expect(await updateMobileWidgetFromData(buildData(3))).toBe(true);
+
+        expect(mockLogInfo).toHaveBeenCalledWith('Android widget check-offs held until the last Undo', {
+            scope: 'widget',
+            extra: { releaseCheck: 'v1.3.9/widget-checkoff-batch', count: '1' },
+        });
+    });
+
     it('carries every GTD list before placement for Compact fallback and offline list switching (#1211)', async () => {
         const data = buildData(2);
         data.tasks.push({ id: 'w1', title: 'Waiting on Sam', status: 'waiting', tags: [], contexts: [], createdAt: data.tasks[0].createdAt, updatedAt: data.tasks[0].updatedAt });

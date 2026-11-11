@@ -131,6 +131,7 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
         const legacyWidgetCount = typeof refreshResult === 'number' ? refreshResult : refreshResult?.legacyWidgetCount;
         const hiddenCheckoffCount = typeof refreshResult === 'object' ? refreshResult.hiddenCheckoffCount : undefined;
         const serializedCheckoffCount = typeof refreshResult === 'object' ? refreshResult.serializedCheckoffCount : undefined;
+        const heldCheckoffCount = typeof refreshResult === 'object' ? refreshResult.heldCheckoffCount : undefined;
         const directCollectionCount = typeof refreshResult === 'object' ? refreshResult.directCollectionCount : undefined;
         const renderedTaskCount = typeof refreshResult === 'object' ? refreshResult.renderedTaskCount : undefined;
         const eligibleTaskCount = typeof refreshResult === 'object' ? refreshResult.eligibleTaskCount : undefined;
@@ -166,6 +167,15 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
                 extra: {
                     releaseCheck: 'v1.3.2/widget-checkoff-serialized',
                     count: String(serializedCheckoffCount),
+                },
+            });
+        }
+        if (typeof heldCheckoffCount === 'number' && heldCheckoffCount > 0) {
+            void logInfo('Android widget check-offs held until the last Undo', {
+                scope: 'widget',
+                extra: {
+                    releaseCheck: 'v1.3.9/widget-checkoff-batch',
+                    count: String(heldCheckoffCount),
                 },
             });
         }

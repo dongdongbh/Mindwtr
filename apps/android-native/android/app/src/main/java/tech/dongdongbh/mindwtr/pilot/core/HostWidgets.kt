@@ -41,6 +41,9 @@ class HostWidgets(private val app: Context, val appState: () -> String) {
                 Log.i(CoreHost.TAG, "Native Android widgets refreshed bytes=${payload.length} legacy=${drawn.legacyWidgetCount} " +
                     "compact=${drawn.compactWidgetCount} rendered=${drawn.renderedTaskCount} hiddenCheckoffs=${CheckoffStore.consumeHiddenCount(app)} " +
                     "serializedCheckoffs=${CheckoffStore.consumeSerializedCount(app)}")
+                CheckoffStore.consumeHeldCount(app).takeIf { it > 0 }?.let {
+                    Log.i(CoreHost.TAG, "Native Android widget check-offs held until the last Undo count=$it releaseCheck=v1.3.9/widget-checkoff-batch")
+                }
             }.onSuccess { stale = false }.onFailure {
                 stale = true
                 Log.w(CoreHost.TAG, "Native Android widget refresh failed", it)
