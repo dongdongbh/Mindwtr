@@ -405,7 +405,7 @@ jobs:
         run: cd apps/mobile && bunx tsc --noEmit
 
       - name: Expo Doctor check
-        run: cd apps/mobile && bunx expo-doctor
+        run: cd apps/mobile && bunx expo-doctor@1.21.6
 
       - name: Mobile tests
         run: bun run --filter mobile test:coverage
