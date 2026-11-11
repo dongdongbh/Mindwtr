@@ -175,14 +175,10 @@ export const hasPendingSyncSideEffects = (data: AppData): boolean => (
     || Boolean(data.settings.attachments?.pendingRemoteDeletes?.length)
 );
 
-const syncsGroup = (prefs: AppData['settings']['syncPreferences'], group: SettingsSyncGroup): boolean => (
-    isSettingsSyncGroupEnabled(prefs, group) === true
-);
-
 export const keepSyncedSettingsStamps = (settings: AppData['settings']): AppData['settings']['syncPreferencesUpdatedAt'] => (
     settings.syncPreferencesUpdatedAt
         ? Object.fromEntries(Object.entries(settings.syncPreferencesUpdatedAt).filter(([group]) => (
-            group === 'preferences' || syncsGroup(settings.syncPreferences, group as SettingsSyncGroup)
+            group === 'preferences' || isSettingsSyncGroupEnabled(settings.syncPreferences, group as SettingsSyncGroup)
         )))
         : undefined
 );
@@ -191,7 +187,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
     const prefs = settings.syncPreferences ?? {};
     const remotePrefs = { ...prefs };
     let remotePrefsUpdatedAt = keepSyncedSettingsStamps(settings);
-    if (syncsGroup(prefs, 'gtd')) {
+    if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
 
 
         remotePrefs.gtd = true;
@@ -221,7 +217,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         next.supportPrompt = { ...settings.supportPrompt };
     }
 
-    if (syncsGroup(prefs, 'appearance')) {
+    if (isSettingsSyncGroupEnabled(prefs, 'appearance')) {
         next.theme = settings.theme;
         next.appearance = settings.appearance ? { ...settings.appearance } : settings.appearance;
         next.keybindingStyle = settings.keybindingStyle;
@@ -229,14 +225,14 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         next.globalQuickAddShortcut = undefined;
     }
 
-    if (syncsGroup(prefs, 'language')) {
+    if (isSettingsSyncGroupEnabled(prefs, 'language')) {
         next.language = settings.language;
         next.weekStart = settings.weekStart;
         next.dateFormat = settings.dateFormat;
         next.timeFormat = settings.timeFormat;
     }
 
-    if (syncsGroup(prefs, 'gtd')) {
+    if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
         const gtdSnapshot = getGtdSyncSnapshot(settings);
         next.gtd = gtdSnapshot.gtd;
         next.taskReminderDefault = gtdSnapshot.taskReminderDefault;
@@ -245,11 +241,11 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         next.features = gtdSnapshot.features;
     }
 
-    if (syncsGroup(prefs, 'savedFilters')) {
+    if (isSettingsSyncGroupEnabled(prefs, 'savedFilters')) {
         next.savedFilters = keepSavedFilters(settings.savedFilters);
     }
 
-    if (syncsGroup(prefs, 'externalCalendars')) {
+    if (isSettingsSyncGroupEnabled(prefs, 'externalCalendars')) {
         next.externalCalendars = settings.externalCalendars
             ? settings.externalCalendars
                 .filter((item) => !isLocalCalendarSourceUrl(item.url))
@@ -257,7 +253,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
             : settings.externalCalendars;
     }
 
-    if (syncsGroup(prefs, 'ai') && settings.ai) {
+    if (isSettingsSyncGroupEnabled(prefs, 'ai') && settings.ai) {
         next.ai = {
             ...settings.ai,
             apiKey: undefined,

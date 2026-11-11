@@ -186,7 +186,10 @@ export const STT_FIELD_STRATEGY_VALUE_SET = new Set<SpeechToTextFieldStrategyVal
 export const isSettingsSyncGroupEnabled = (
     preferences: SettingsSyncPreferences | undefined,
     group: SettingsSyncGroup,
-): boolean => preferences?.[group] ?? (group === 'gtd');
+): boolean => {
+    const value: unknown = preferences?.[group];
+    return typeof value === 'boolean' ? value : group === 'gtd';
+};
 
 
 export const GTD_SYNCED_FIELD_KEYS = [
