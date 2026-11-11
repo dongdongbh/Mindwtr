@@ -5520,7 +5520,7 @@ describe('cloud follow-up after a local-only settings change (feedback d4644bd4)
             syncPreferences: { appearance: false },
             syncPreferencesUpdatedAt: { preferences: STAMP, appearance: changedAt },
         });
-        const remote = createData([createTask('t-local', 'Local task')], {
+        const remote = createData(mergeAppData(local, createData()).tasks, {
             syncPreferences: { appearance: false },
             syncPreferencesUpdatedAt: remoteStamps,
         });
@@ -5544,7 +5544,8 @@ describe('cloud follow-up after a local-only settings change (feedback d4644bd4)
             return cycles;
         };
 
-        expect(await cyclesUntilQuiet()).toBeLessThanOrEqual(2);
+        expect(await cyclesUntilQuiet()).toBe(1);
+        expect(io.writeRemote).not.toHaveBeenCalled();
         harness.persisted.tasks[0] = { ...harness.persisted.tasks[0], title: 'Edited', updatedAt: NOW.toISOString(), rev: 2 };
         harness.lastDataChangeAt = 2;
         harness.inMemory = cloneAppData(harness.persisted);
