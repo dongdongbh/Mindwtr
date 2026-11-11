@@ -934,22 +934,25 @@ test("Windows release keeps SignPath secrets out of the build environment", () =
   }
 });
 
-pwshTest("Windows SignPath gate only emits credential presence", () => {
+pwshTest.each([
+  ["", "", false],
+  ["synthetic-token", "", false],
+  ["", "synthetic-org", false],
+  ["synthetic-token", "synthetic-org", true],
+])("Windows SignPath gate only emits credential presence (%s, %s, %s)", (token, organization, enabled) => {
   const windows = parse(readFileSync(".github/workflows/release-windows.yml", "utf8"));
   const gate = windows.jobs.standalone.steps.find((step) => step.id === "signpath-config");
-  for (const [token, organization, enabled] of [["", "", false], ["synthetic-token", "", false], ["", "synthetic-org", false], ["synthetic-token", "synthetic-org", true]]) {
-    const dir = mkdtempSync(join(tmpdir(), "signpath-gate-"));
-    const outputPath = join(dir, "output");
-    try {
-      const stdout = execFileSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", gate.run], {
-        encoding: "utf8",
-        env: { ...process.env, SIGNPATH_API_TOKEN: token, SIGNPATH_ORGANIZATION_ID: organization, GITHUB_OUTPUT: outputPath },
-      });
-      expect(stdout.trim()).toBe("");
-      expect(readFileSync(outputPath, "utf8").trim()).toBe(`enabled=${enabled}`);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  const dir = mkdtempSync(join(tmpdir(), "signpath-gate-"));
+  const outputPath = join(dir, "output");
+  try {
+    const stdout = execFileSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", gate.run], {
+      encoding: "utf8",
+      env: { ...process.env, SIGNPATH_API_TOKEN: token, SIGNPATH_ORGANIZATION_ID: organization, GITHUB_OUTPUT: outputPath },
+    });
+    expect(stdout.trim()).toBe("");
+    expect(readFileSync(outputPath, "utf8").trim()).toBe(`enabled=${enabled}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
