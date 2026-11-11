@@ -28,6 +28,16 @@ target_compile_definitions(
   IS_ANDROID=TRUE
 )
 
+get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.." REALPATH)
+
+target_compile_options(
+  quickjs-android-wrapper
+  PRIVATE
+  "-ffile-prefix-map=${REPO_ROOT}=."
+  "-ffile-prefix-map=${ANDROID_NDK}=/ndk"
+  "-ffile-prefix-map=${CMAKE_BINARY_DIR}=/build"
+)
+
 target_link_options(
   quickjs-android-wrapper
   PRIVATE
