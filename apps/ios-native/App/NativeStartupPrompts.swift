@@ -8,6 +8,8 @@ final class NativeStartupPrompts: ObservableObject {
     @Published private(set) var seedError: String?
     @Published private(set) var toast: String?
     private var askedStartup: UUID?
+    @Published private var heldPrompt: (startup: UUID?, prompt: CoreObject, preview: Bool)?
+    var holding: Bool { heldPrompt != nil }
     private var previewing = false
     private var opening = UUID()
     private var recordedShowing: UUID?
@@ -38,7 +40,13 @@ final class NativeStartupPrompts: ObservableObject {
     }()
 
     func begin(_ model: CoreModel, startup: UUID) {
-        guard Self.enabled, askedStartup != startup, prompt == nil, model.startupPromptsCanShow else { return }
+        guard Self.enabled, prompt == nil, model.startupPromptsCanShow else { return }
+        if let held = heldPrompt, held.startup == startup {
+            heldPrompt = nil
+            present(held.prompt, preview: held.preview)
+            return
+        }
+        guard askedStartup != startup else { return }
         askedStartup = startup
         Task { await ask(model, preview: Self.preview) }
     }
@@ -61,9 +69,14 @@ final class NativeStartupPrompts: ObservableObject {
         let shown = next.flatMap { ["onboarding", "donation", "announcement"].contains($0.text("id")) ? $0 : nil }
         if shown != nil, delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000) }
         let held = shown != nil && !model.startupPromptsCanShow
+        if let shown, prompt == nil {
+            if held { heldPrompt = (askedStartup, shown, preview != nil) } else { present(shown, preview: preview != nil) }
+        }
         if preview == nil { await model.recordStartupPromptRead(held ? "held" : shown?.text("id") ?? "none") }
-        guard let shown, !held, prompt == nil else { return }
-        previewing = preview != nil
+    }
+
+    private func present(_ shown: CoreObject, preview: Bool) {
+        previewing = preview
         seedError = nil
         opening = UUID()
         prompt = shown

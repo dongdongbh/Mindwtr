@@ -1397,7 +1397,7 @@ private struct AppLockRoot: View {
                 NativeStartupPromptOverlay(model: model, prompts: startupPrompts, palette: palette)
             }
         }
-        .task(id: startupPromptGate) {
+        .task(id: [startupPromptGate?.uuidString ?? "", startupPrompts.holding ? "held" : ""]) {
             if let token = startupPromptGate { startupPrompts.begin(model, startup: token) }
         }
         .allowsHitTesting(model.workspaceAdmissionsOpen || workspace.isActive)
