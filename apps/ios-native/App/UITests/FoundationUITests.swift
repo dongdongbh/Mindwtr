@@ -14675,19 +14675,30 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ordered, object: nil)], timeout: 20), .completed)
     }
 
+    private func projectRowMenuItem(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        app.collectionViews.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    private func projectRowMenuTap(_ app: XCUIApplication, _ label: String) {
+        let item = projectRowMenuItem(app, label)
+        boardEnabled(item)
+        item.tap()
+    }
+
     func testProjectsListRowMenuMovesLongPressMovesAndAreaOpens() {
         let app = projectRowsApp("Project row menu")
         let alpha = createProjectRow(app, "Row Alpha")
         let beta = createProjectRow(app, "Row Beta")
         waitForProjectRow(app, alpha, above: beta)
         boardTap(app, "project-row-menu-" + beta)
-        boardTap(app, "project-row-menu-up-" + beta)
+        projectRowMenuTap(app, "Move up")
         waitForProjectRow(app, beta, above: alpha)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Project row moved up"; shot.lifetime = .keepAlways; add(shot)
         app.terminate(); app.launch(); openProjectRows(app)
         waitForProjectRow(app, beta, above: alpha)
         let row = app.buttons["project-open-" + beta]
         boardEnabled(row)
+        boardEnabled(app.buttons["project-row-menu-" + beta])
         row.press(forDuration: 1.0)
         let alert = app.alerts["Row Beta"]
         XCTAssertTrue(alert.waitForExistence(timeout: 10))
@@ -14695,8 +14706,9 @@ final class FoundationUITests: XCTestCase {
         alert.buttons["Move down"].tap()
         waitForProjectRow(app, alpha, above: beta)
         boardTap(app, "project-row-menu-" + alpha)
-        XCTAssertFalse(app.buttons["project-row-menu-up-" + alpha].exists)
-        boardTap(app, "project-row-menu-area-" + alpha)
+        boardEnabled(projectRowMenuItem(app, "Area"))
+        XCTAssertFalse(projectRowMenuItem(app, "Move up").exists)
+        projectRowMenuTap(app, "Area")
         boardEnabled(app.buttons["project-area-close"], timeout: 20)
         let areaShot = XCTAttachment(screenshot: app.screenshot()); areaShot.name = "Project row Area sheet over the Projects list"
         areaShot.lifetime = .keepAlways; add(areaShot)
@@ -15366,8 +15378,8 @@ final class FoundationUITests: XCTestCase {
     }
 
     private func dismissProjectDateCalendar(_ app: XCUIApplication) {
-        let dismiss = app.otherElements.matching(identifier: "PopoverDismissRegion").firstMatch
-        if dismiss.exists { dismiss.tap() }
+        let dismiss = app.descendants(matching: .any).matching(identifier: "PopoverDismissRegion").firstMatch
+        if dismiss.exists { dismiss.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap() }
         XCTAssertTrue(projectDateCalendarDays(app).firstMatch.waitForNonExistence(timeout: 10))
     }
 
@@ -16733,6 +16745,7 @@ final class FoundationUITests: XCTestCase {
 
         tap("project-start-date-open"); tap("project-date-cancel"); closed()
         tap("project-notes-toggle"); boardEnabled(notes)
+        revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         replaceProjectNotesText(notes, with: "Notes before date opens\n")
         tap("project-start-date-open")
         changeDay(); closed()
@@ -16876,6 +16889,14 @@ final class FoundationUITests: XCTestCase {
         projectNotesAutosave(library: "6e4aebc0-530c-438c-aa5d-b9e137cda191")
     }
 
+    private func deleteTextFromEitherEnd(_ input: XCUIElement) {
+        for edge in [0.97, 0.03, 0.97] {
+            guard let value = input.value as? String, !value.isEmpty, value != input.placeholderValue else { return }
+            input.coordinate(withNormalizedOffset: CGVector(dx: edge, dy: 0.9)).tap()
+            input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+        }
+    }
+
     private func replaceProjectNotesText(_ input: XCUIElement, with text: String) {
         input.tap()
         if let value = input.value as? String, !value.isEmpty, value != input.placeholderValue {
@@ -16885,15 +16906,15 @@ final class FoundationUITests: XCTestCase {
             for _ in 0..<3 {
                 if selectAll.waitForExistence(timeout: 1), selectAll.isHittable { break }
                 let next = app.buttons["Next Page"]
-                guard next.exists else {
-                    print("Text selection menu AX: " + app.debugDescription)
-                    break
-                }
+                guard next.exists else { break }
                 next.tap()
             }
-            XCTAssertTrue(selectAll.exists)
-            selectAll.tap()
-            input.typeText(XCUIKeyboardKey.delete.rawValue)
+            if selectAll.exists {
+                selectAll.tap()
+                input.typeText(XCUIKeyboardKey.delete.rawValue)
+            } else {
+                deleteTextFromEitherEnd(input)
+            }
         }
 
         XCTAssertTrue((input.value as? String ?? "").isEmpty || input.value as? String == input.placeholderValue)
@@ -37671,11 +37692,11 @@ extension FoundationUITests {
         var app = startupPromptApp(library)
         app.launch()
         boardEnabled(app.buttons["capture-open"], timeout: 40)
-        XCTAssertFalse(app.otherElements["welcome-sheet"].waitForExistence(timeout: 4))
+        XCTAssertFalse(app.alerts["welcome-sheet"].waitForExistence(timeout: 4))
         app.terminate()
         app = startupPromptApp(library, ["--native-startup-prompts"])
         app.launch(); defer { app.terminate() }
-        let sheet = app.otherElements["welcome-sheet"]
+        let sheet = app.alerts["welcome-sheet"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 40))
         XCTAssertTrue(app.staticTexts["Welcome to Mindwtr"].exists)
         for id in ["welcome-start", "welcome-sync", "welcome-import", "welcome-skip", "welcome-close"] { XCTAssertTrue(app.buttons[id].exists, id) }
@@ -37691,7 +37712,7 @@ extension FoundationUITests {
         continueAfterFailure = false
         let app = startupPromptApp(UUID().uuidString.lowercased(), ["--native-startup-prompts"])
         app.launch(); defer { app.terminate() }
-        let sheet = app.otherElements["welcome-sheet"]
+        let sheet = app.alerts["welcome-sheet"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 40))
         boardTap(app, "welcome-start")
         let toast = app.staticTexts["startup-prompt-toast"]
@@ -37709,24 +37730,24 @@ extension FoundationUITests {
         let library = UUID().uuidString.lowercased()
         var app = startupPromptApp(library, ["--native-startup-prompts"])
         app.launch()
-        XCTAssertTrue(app.otherElements["welcome-sheet"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.alerts["welcome-sheet"].waitForExistence(timeout: 40))
         boardTap(app, "welcome-sync")
         XCTAssertTrue(app.scrollViews["sync-screen"].waitForExistence(timeout: 40))
-        XCTAssertFalse(app.otherElements["welcome-sheet"].exists)
+        XCTAssertFalse(app.alerts["welcome-sheet"].exists)
         app.terminate()
         app = startupPromptApp(library, ["--native-startup-prompts"])
         app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.otherElements["welcome-sheet"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.alerts["welcome-sheet"].waitForExistence(timeout: 40))
         boardTap(app, "welcome-import")
-        XCTAssertTrue(app.buttons["data-getting-started"].waitForExistence(timeout: 40))
-        XCTAssertFalse(app.otherElements["welcome-sheet"].exists)
+        XCTAssertTrue(app.buttons["backup-disclosure"].waitForExistence(timeout: 40))
+        XCTAssertFalse(app.alerts["welcome-sheet"].exists)
     }
 
     func testStartupDonationPromptPreviewShowsRNWordsAndCloses() throws {
         continueAfterFailure = false
         let app = startupPromptApp(UUID().uuidString.lowercased(), ["--native-startup-prompts", "--native-startup-prompt-preview", "donation"])
         app.launch(); defer { app.terminate() }
-        let window = app.otherElements["startup-prompt"]
+        let window = app.alerts["startup-prompt"]
         XCTAssertTrue(window.waitForExistence(timeout: 40))
         XCTAssertTrue(app.staticTexts["Keep Mindwtr free and independent"].exists)
         XCTAssertTrue(app.buttons["startup-prompt-action"].exists)
