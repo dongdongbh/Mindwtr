@@ -158,7 +158,9 @@ const buildFixture = () => execFileSync('bun', ['-e', `
         await store().updateSettings({ savedSearches: [{ id: 'parity-search', name: 'Kitchen work', query: 'kitchen' }] });
     }
     if (process.env.FIXTURE_EINK === '1') await store().updateSettings({ theme: 'eink' });
-    if (process.env.FIXTURE_DAILY_EMPTY === '1') await store().updateTask(store()._allTasks.find((task) => task.title === T.outline).id, { isFocusedToday: false });
+    if (process.env.FIXTURE_DAILY_EMPTY === '1') {
+        for (const task of store()._allTasks.filter((item) => item.status === 'inbox' && !item.deletedAt)) await store().updateTask(task.id, { status: 'next' });
+    }
     if (process.env.FIXTURE_R2B === '1') await store().updateSettings({ features: { ...(store().settings.features ?? {}), pomodoro: true },
         gtd: { ...(store().settings.gtd ?? {}), pomodoro: { ...(store().settings.gtd?.pomodoro ?? {}), linkTask: true } } });
     await flushPendingSave();
@@ -1124,14 +1126,14 @@ const shootDailyEmpty = async (prefix, suffix, rn, activity) => {
     await tap(button(start, en['review.startReview']));
     const choice = await waitFor('the Daily Review choice', (current) => Boolean(button(current, en['dailyReview.title'])), 15_000);
     await tap(button(choice, en['dailyReview.title']));
-    const onFocusEmpty = (current) => hasText(current, en['dailyReview.focusDesc']);
+    const onInboxEmpty = (current) => hasText(current, en['review.inboxEmpty']);
     for (let step = 0; step < 4; step += 1) {
-        const nodes = await waitFor('a Daily Review step', (current) => onFocusEmpty(current) || Boolean(owedLabeled(current, en['review.nextStepBtn'])), 20_000);
-        if (onFocusEmpty(nodes)) break;
+        const nodes = await waitFor('a Daily Review step', (current) => onInboxEmpty(current) || Boolean(owedLabeled(current, en['review.nextStepBtn'])), 20_000);
+        if (onInboxEmpty(nodes)) break;
         await tap(owedLabeled(nodes, en['review.nextStepBtn']));
         await sleep(1500);
     }
-    await shoot(`${prefix}-daily-focus-empty-${suffix}`, onFocusEmpty);
+    await shoot(`${prefix}-daily-inbox-empty-${suffix}`, onInboxEmpty);
 };
 
 const shootEink = async (prefix, rn, activity) => {
