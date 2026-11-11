@@ -368,7 +368,7 @@ describe('ingestPendingCaptures', () => {
         expect(await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people: [], settings: emptySettings })).toBe(2);
 
         expect(addTask).toHaveBeenNthCalledWith(1, 'From the dialog', { status: 'inbox' });
-        expect(appLogMocks.logInfo).toHaveBeenCalledTimes(2);
+        expect(appLogMocks.logInfo).toHaveBeenCalledTimes(3);
         expect(appLogMocks.logInfo).toHaveBeenCalledWith('Android quick capture destination ingested', {
             scope: 'capture', force: true,
             extra: { releaseCheck: 'v1.3.7/android-widget-capture-status', kind: 'text', destination: 'inbox', selection: 'default', outcome: 'created' },
@@ -1123,11 +1123,11 @@ describe('ingestPendingCaptures', () => {
             scope: 'capture',
             extra: { kind: 'audio', outcome: 'validated' },
         });
-        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(2, 'Android quick capture destination ingested', {
+        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(3, 'Android quick capture destination ingested', {
             scope: 'capture', force: true,
             extra: { releaseCheck: 'v1.3.7/android-widget-capture-status', kind: 'audio', destination: 'inbox', selection: 'default', outcome: 'created' },
         });
-        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(3, 'Android quick capture audio ingested', {
+        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(4, 'Android quick capture audio ingested', {
             scope: 'capture',
             extra: { kind: 'audio', outcome: 'created' },
         });
@@ -1188,7 +1188,7 @@ describe('ingestPendingCaptures', () => {
             scope: 'capture',
             extra: { kind: 'audio', outcome: 'validated' },
         });
-        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(3, 'Android quick capture audio ingested', {
+        expect(appLogMocks.logInfo).toHaveBeenNthCalledWith(4, 'Android quick capture audio ingested', {
             scope: 'capture',
             force: true,
             extra: { kind: 'audio', outcome: 'created', releaseCheck: 'v1.3.7/quick-capture-description' },

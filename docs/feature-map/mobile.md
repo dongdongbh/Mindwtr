@@ -83,6 +83,13 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Checks: `apps/mobile/components/use-quick-capture-audio.test.tsx`, `apps/mobile/lib/speech-to-text.test.ts`
 - Notes: Transcription runs only when Settings › Advanced › AI assistant › Enable speech to text is on. The provider is local Whisper or a cloud provider. The recording can also be kept as an audio attachment.
 
+## Queued Android capture
+
+- Reach: Android Quick capture widget, Quick Settings tile, or capture shortcut.
+- Code: `apps/mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget/QuickCaptureActivity.kt`, `packages/core/src/pending-captures.ts`
+- Checks: `packages/core/src/pending-captures.test.ts`, `apps/mobile/lib/pending-captures.test.ts`
+- Notes: Text and audio queue ingestion uses the configured default area, including active-filter mode. Explicit area/project choices take precedence. Missing or deleted default areas remain unassigned.
+
 ## Full-screen capture (system entry)
 
 - Reach: Opened by the share sheet, Control Center, a capture deep link, and `mindwtr:///capture-quick` without `entry=details`.

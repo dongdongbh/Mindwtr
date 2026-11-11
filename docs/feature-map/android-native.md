@@ -329,6 +329,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Home-screen widgets and Quick Settings tile
 
+- Notes: Queued text/audio captures use the configured default area at ingestion; explicit area/project choices take precedence.
 - Reach: Home screen › Widgets › Mindwtr (Tasks, Compact, Quick capture). Quick Settings › the Mindwtr capture tile (RN's tile class).
 - Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list.
 - Code: `apps/android-native/android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessService.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt`, `apps/android-native/bundle/host-widgets.ts`, `apps/android-native/scripts/build-widgets.mjs`, `apps/mobile/modules/android-widget`
