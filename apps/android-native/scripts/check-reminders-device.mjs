@@ -135,7 +135,7 @@ const coreDetails = (keys, nowMs) => {
 
 
 const editDb = (recurringId, reminders, repeatId) => {
-    if (pid()) fail('the app must be stopped to edit its database');
+    if (pid()) fail(`the app must be stopped to edit its database, but process ${pid()} is alive, started for ${startReason(pid())}`);
     const db = pullDb();
     const before = execFileSync('bun', ['-e', `
         import { Database } from 'bun:sqlite';
@@ -155,7 +155,7 @@ const editDb = (recurringId, reminders, repeatId) => {
     try {
         runAs(`cp ${STAGED} ${next}`);
         if (Number(runAs(`stat -c %s ${next}`)) !== statSync(db).size) fail('the staged database has the wrong size');
-        if (pid()) fail('the app started while its database was being replaced');
+        if (pid()) fail(`the app started while its database was being replaced: process ${pid()}, started for ${startReason(pid())}`);
         runAs(`rm -f files/${DB}-wal files/${DB}-shm && mv -f ${next} files/${DB}`);
     } finally {
         sh(`rm -f ${STAGED}`);
@@ -243,13 +243,25 @@ const closeApp = async () => {
     }
     if (seen && pid() === seen) fail('the app process did not end');
 };
+const startReason = (processId) => {
+    const line = execFileSync(adbBin, ['-s', serial, 'logcat', '-b', 'events', '-d'], { encoding: 'utf8', maxBuffer: 256 << 20 })
+        .split('\n').reverse().find((entry) => entry.includes('am_proc_start') && entry.includes(`[0,${processId},`));
+    return /\[0,\d+,\d+,[^,]+,([^,]+),\{?([^}\]]*)/.exec(line ?? '')?.slice(1).join(' ') ?? 'an unknown reason';
+};
+const requireClosed = async (step) => {
+    const until = Date.now() + 2_000;
+    while (Date.now() < until) {
+        const alive = pid();
+        if (alive) fail(`${step}: the app must be closed, but process ${alive} is alive, started for ${startReason(alive)}`);
+        await sleep(250);
+    }
+};
 const killApp = async () => {
-    for (let round = 0; round < 6; round += 1) {
+    for (let round = 0; round < 6 && pid(); round += 1) {
         await closeApp();
         await sleep(2000);
-        if (!pid()) return;
     }
-    fail('the app kept starting again after it was closed');
+    await requireClosed('closing the app');
 };
 const CYCLE = 'Native Android reminder cycle';
 const cycles = () => count(allLogs(), CYCLE);
@@ -604,9 +616,11 @@ try {
 
     {
         await closeApp();
+        await requireClosed(`(8) before ${names.D}, ${names.G} and ${names.H} fall due`);
         await waitUntil(`the reminders for ${names.D}, ${names.G} and ${names.H}`,
             () => shown(names.D).length > 0 && shown(names.G).length > 0 && shown(names.H).length > 0, 150_000);
         await closeApp();
+        await requireClosed('(8) before reading the alarm map');
         check(alarmMap()[keyOf('D')]?.id === map[keyOf('D')].id, '(8) D fired with the app closed: its alarm is still held');
         checkOff(ids.D);
         const withdrawals = () => allLogs().split('\n').filter((line) => line.includes(CYCLE) && /"withdrawn":[1-9]/.test(line)).length;

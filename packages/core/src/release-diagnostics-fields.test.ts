@@ -6,6 +6,7 @@ import { sanitizeLogContext } from './log-sanitize';
 const RELEASE_CHECK_FIELD_NAMES = [
 
     'staleTaskCount', 'staleProjectCount',
+    'pruned',
     'adopted', 'rowsBefore', 'rowsAfter',
     'section', 'grouping', 'collapsed', 'refresh',
 
