@@ -2750,6 +2750,43 @@ describe('cloud server api', () => {
         expect(stored.tasks.map((task) => task.id)).toEqual(['server-only']);
     });
 
+    test('does not mark PUT /v1/data when the stored copy only differs in a settings group that is not synced', async () => {
+        const put = async (data: AppData) => {
+            const response = await fetch(`${baseUrl}/v1/data`, {
+                method: 'PUT',
+                headers: { ...authHeaders, 'content-type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            expect(response.status).toBe(200);
+            return response.json();
+        };
+        const task = makeTestTask({ id: 'shared', title: 'Shared' });
+        await put({
+            tasks: [task],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {
+                theme: 'dark',
+                syncPreferences: { appearance: false },
+                syncPreferencesUpdatedAt: { preferences: '2026-01-01T00:00:00.000Z', appearance: '2026-01-02T00:00:00.000Z' },
+            },
+        });
+
+        const body = await put({
+            tasks: [task],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {
+                syncPreferences: { appearance: false },
+                syncPreferencesUpdatedAt: { preferences: '2026-01-01T00:00:00.000Z' },
+            },
+        });
+
+        expect(body.serverMergedRemoteData).toBe(false);
+    });
+
     test('PUT /v1/data accepts every core TaskSortBy value and rejects a bogus one', async () => {
         const iso = '2026-01-01T00:00:00.000Z';
         const projects = TASK_SORT_BY_VALUES.map((taskSortBy, index) => ({

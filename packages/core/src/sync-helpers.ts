@@ -180,7 +180,7 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
     const remotePrefs = { ...prefs };
     let remotePrefsUpdatedAt: AppData['settings']['syncPreferencesUpdatedAt'] = settings.syncPreferencesUpdatedAt
         ? Object.fromEntries(Object.entries(settings.syncPreferencesUpdatedAt).filter(([group]) => (
-            group === 'preferences' || prefs[group as SettingsSyncGroup] !== false
+            group === 'preferences' || isSettingsSyncGroupEnabled(prefs, group as SettingsSyncGroup)
         )))
         : undefined;
     if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {

@@ -23,6 +23,7 @@ import {
     isTaskFutureFocusCandidate,
     mergeAppDataWithStats,
     normalizeTaskUpdate,
+    sanitizeAppDataForRemote,
     normalizeTaskLifecycleFields,
     normalizeProjectLifecycleFields,
     normalizeFocusTaskLimit,
@@ -1687,7 +1688,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                     people: [],
                                     settings: {},
                                 }, incomingData, { nowIso: mergeTimestamp });
-                                const serverMergedRemoteData = !areSyncPayloadsEqual(mergeResult.data, incomingOnlyMerge.data);
+                                const serverMergedRemoteData = !areSyncPayloadsEqual(
+                                    sanitizeAppDataForRemote(mergeResult.data),
+                                    sanitizeAppDataForRemote(incomingOnlyMerge.data),
+                                );
                                 return jsonResponse({
                                     ok: true,
                                     stats: mergeResult.stats,

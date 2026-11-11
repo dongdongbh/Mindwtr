@@ -333,11 +333,11 @@ export const collectComparableDiffKeys = (
 };
 
 export const chooseDeterministicWinner = <T>(localItem: T, incomingItem: T): T => {
-    const localSignature = toComparableSignature(localItem);
-    const incomingSignature = toComparableSignature(incomingItem);
+    const localSignature = toComparableSignature(localItem) ?? '';
+    const incomingSignature = toComparableSignature(incomingItem) ?? '';
     if (localSignature === incomingSignature) {
-        const localFullSignature = toDeterministicSignature(localItem);
-        const incomingFullSignature = toDeterministicSignature(incomingItem);
+        const localFullSignature = toDeterministicSignature(localItem) ?? '';
+        const incomingFullSignature = toDeterministicSignature(incomingItem) ?? '';
         if (localFullSignature === incomingFullSignature) return incomingItem;
         return incomingFullSignature > localFullSignature ? incomingItem : localItem;
     }

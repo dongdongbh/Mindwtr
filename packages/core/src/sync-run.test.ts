@@ -5589,7 +5589,7 @@ describe('cloud follow-up after a default-off settings group is switched on with
             cycles += 1;
         } while (vi.mocked(hooks.requestFollowUp).mock.calls.length > followUpsBefore && cycles < 5);
 
-        expect(cycles).toBeLessThanOrEqual(2);
+        expect(cycles).toBe(1);
         const settled = harness.persisted.settings.theme;
         expect(['light', 'dark']).toContain(settled);
         expect(harness.remote?.settings.theme).toBe(settled);

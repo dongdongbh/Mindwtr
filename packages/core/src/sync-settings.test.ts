@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS, mergeAppData } from './sync';
 import { createMockArea, mockAppData } from './sync-test-utils';
 import { AppData } from './types';
+import { areSyncPayloadsEqual, sanitizeAppDataForRemote } from './sync-helpers';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 describe('Sync Logic', () => {
     describe('mergeAppData', () => {
@@ -366,8 +368,9 @@ describe('Sync Logic', () => {
                 expect(onLight.syncPreferencesUpdatedAt?.appearance).toBe(tie);
             });
 
-            it('fills a field the winning side leaves unset from the other side', () => {
+            it('lets the tie decide a field both sides set and fills a field only one side sets', () => {
                 const sparse = side({
+                    theme: 'dark',
                     syncPreferences: { appearance: true },
                     syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', appearance: tie },
                     appearance: { density: 'compact' },
@@ -375,9 +378,64 @@ describe('Sync Logic', () => {
                 const onSparse = mergeAppData(sparse, light).settings;
                 const onLight = mergeAppData(light, sparse).settings;
 
-                expect(onSparse.theme).toBe('light');
-                expect(onLight.theme).toBe('light');
-                expect(onSparse.appearance).toEqual(onLight.appearance);
+                expect(onSparse.theme).toBe(onLight.theme);
+                expect(['light', 'dark']).toContain(onSparse.theme);
+                expect(onSparse.appearance).toEqual({ density: 'compact' });
+                expect(onLight.appearance).toEqual({ density: 'compact' });
+            });
+
+            it('resolves a gtd tie the same way in both orders, including an empty list on one side', () => {
+                const gtdSide = (gtd: AppData['settings']['gtd']) => side({
+                    gtd,
+                    syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', gtd: tie },
+                });
+                const emptyPresets = gtdSide({ timeEstimatePresets: [] });
+                const presets = gtdSide({ timeEstimatePresets: ['5min', '10min'] } as AppData['settings']['gtd']);
+                const layoutA = gtdSide({ focusTaskLimit: 3, taskEditor: { order: ['a', 'b'], hidden: ['b'] } } as AppData['settings']['gtd']);
+                const layoutB = gtdSide({ focusTaskLimit: 5, taskEditor: { order: ['b', 'a'], hidden: [] } } as AppData['settings']['gtd']);
+
+                expect(mergeAppData(emptyPresets, presets).settings.gtd).toEqual(mergeAppData(presets, emptyPresets).settings.gtd);
+                expect(mergeAppData(emptyPresets, presets).settings.gtd?.timeEstimatePresets).toEqual(['5min', '10min']);
+                expect(mergeAppData(layoutA, layoutB).settings.gtd).toEqual(mergeAppData(layoutB, layoutA).settings.gtd);
+
+                const logged: LogPayload[] = [];
+                setLogger((payload) => { logged.push(payload); });
+                try {
+                    mergeAppData(layoutA, layoutB);
+                    mergeAppData(layoutB, layoutA);
+                } finally {
+                    setLogger(consoleLogger);
+                }
+                expect(logged.filter((line) => line.message === 'Task editor layout sync conflict resolved')).toHaveLength(2);
+                expect(logged.filter((line) => line.message === 'Settings group stamp tie resolved')).toHaveLength(2);
+            });
+
+            it('keeps the newest edit on every device when a default-off group is switched on later', () => {
+                const before = '2024-01-01T00:00:00.000Z';
+                const edited = '2024-02-01T00:00:00.000Z';
+                const wire = (data: AppData) => sanitizeAppDataForRemote(data);
+                const empty = side({});
+                let deviceA = side({ theme: 'dark', syncPreferencesUpdatedAt: { preferences: before, appearance: edited } });
+                let deviceB = side({ theme: 'light', syncPreferencesUpdatedAt: { preferences: before, appearance: before } });
+                deviceB = { ...deviceB, settings: mergeAppData(deviceB, wire(deviceA)).settings };
+                expect(deviceB.settings.syncPreferencesUpdatedAt?.appearance).toBe(before);
+
+                deviceA = side({
+                    ...deviceA.settings,
+                    syncPreferences: { appearance: true },
+                    syncPreferencesUpdatedAt: { ...deviceA.settings.syncPreferencesUpdatedAt, preferences: '2024-03-01T00:00:00.000Z' },
+                });
+                let server = mergeAppData(empty, wire(deviceA));
+                deviceB = { ...deviceB, settings: mergeAppData(deviceB, server).settings };
+                const upload = wire(deviceB);
+                const stored = mergeAppData(server, upload);
+                expect(areSyncPayloadsEqual(wire(stored), wire(mergeAppData(empty, upload)))).toBe(true);
+                server = stored;
+                deviceA = { ...deviceA, settings: mergeAppData(deviceA, server).settings };
+
+                expect(deviceB.settings.theme).toBe('dark');
+                expect(server.settings.theme).toBe('dark');
+                expect(deviceA.settings.theme).toBe('dark');
             });
 
             it('still lets a newer stamp win on both sides', () => {

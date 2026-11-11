@@ -63,16 +63,16 @@ describe('signature optimization cross-version parity', () => {
         }
     });
 
-    it('keeps equal-time winner selection identical to the previous implementation', () => {
+    it('keeps equal-time winner selection identical to the previous implementation, with an empty signature ordered as an empty string', () => {
         const values = corpus().filter(value => value && typeof value === 'object');
         for (let i = 0; i < values.length; i++) {
             const left = values[i];
             const right = i % 3 === 0 ? structuredClone(left) : values[(i + 1) % values.length];
-            const a = JSON.stringify(legacy(left));
-            const b = JSON.stringify(legacy(right));
-            const fullA = a === b ? JSON.stringify(legacy(left, true)) : a;
-            const fullB = a === b ? JSON.stringify(legacy(right, true)) : b;
-            const winner = fullA === fullB || fullB! > fullA! ? right : left;
+            const a = JSON.stringify(legacy(left)) ?? '';
+            const b = JSON.stringify(legacy(right)) ?? '';
+            const fullA = a === b ? JSON.stringify(legacy(left, true)) ?? '' : a;
+            const fullB = a === b ? JSON.stringify(legacy(right, true)) ?? '' : b;
+            const winner = fullA === fullB || fullB > fullA ? right : left;
             expect(chooseDeterministicWinner(left, right)).toBe(winner);
         }
     });

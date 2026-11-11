@@ -249,6 +249,14 @@ describe('sync signatures', () => {
         expect(chooseDeterministicWinner(local, incoming)).toBe(incoming);
     });
 
+    it('picks the same winner in both orders when one side has an empty signature', () => {
+        const empty = { timeEstimatePresets: [] as string[] };
+        const filled = { timeEstimatePresets: ['5min', '10min'] };
+
+        expect(chooseDeterministicWinner(empty, filled)).toBe(chooseDeterministicWinner(filled, empty));
+        expect(chooseDeterministicWinner(empty, filled)).toBe(filled);
+    });
+
     it('ignores stale recurrence preview flags on non-recurring tasks', () => {
         const local = normalizeTaskForContentComparison(task({
             showFutureRecurrence: true,

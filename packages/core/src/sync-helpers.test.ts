@@ -402,14 +402,16 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
             ai: now,
             preferences: '2026-02-19T00:00:00.001Z',
         });
-        const defaultOff = sanitizeAppDataForRemote({ ...data, settings: { ...data.settings, syncPreferences: { language: false } } });
+        const defaultOff = sanitizeAppDataForRemote({ ...data, settings: {
+            ...data.settings,
+            syncPreferences: { language: false },
+            syncPreferencesUpdatedAt: { ...data.settings.syncPreferencesUpdatedAt, gtd: now },
+        } });
         expect(defaultOff.settings.syncPreferencesUpdatedAt).toEqual({
-            appearance: now,
-            externalCalendars: now,
-            savedFilters: now,
-            ai: now,
+            gtd: now,
             preferences: '2026-02-19T00:00:00.001Z',
         });
+        expect(defaultOff.settings.theme).toBeUndefined();
         expect(defaultOff.settings.ai).toBeUndefined();
         expect(sanitized.settings.theme).toBe('dark');
         expect(sanitized.settings.appearance).toEqual({ density: 'compact', textSize: 'small', mobileQuickAccessView: 'contexts' });

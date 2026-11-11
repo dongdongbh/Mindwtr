@@ -1057,10 +1057,11 @@ export const mergeSettingsForSync = (
         const resolve = (incomingWins: boolean): T => (mergeValues
             ? mergeValues(localValue, effectiveIncomingValue, incomingWins, isIncomingNewer(incomingAt, localAt))
             : (incomingWins ? effectiveIncomingValue : localValue));
-        const tieDecidesValue = !localOptedOut && TIE_BROKEN_SETTINGS_GROUPS.has(key)
+        const tied = !localOptedOut && TIE_BROKEN_SETTINGS_GROUPS.has(key)
             && isValidTimestamp(localAt) && isValidTimestamp(incomingAt)
-            && parseSyncTimestamp(localAt) === parseSyncTimestamp(incomingAt)
-            && !isSameValue(resolve(true), resolve(false));
+            && parseSyncTimestamp(localAt) === parseSyncTimestamp(incomingAt);
+        const tiedResults = tied ? { incoming: resolve(true), local: resolve(false) } : null;
+        const tieDecidesValue = tiedResults !== null && !isSameValue(tiedResults.incoming, tiedResults.local);
         const tiedIncomingWins = tieDecidesValue && chooseDeterministicWinner(localValue, incomingValue) === incomingValue;
         const incomingWins = localOptedOut ? false : isIncomingNewer(localAt, incomingAt) || tiedIncomingWins;
         if (tieDecidesValue) {
@@ -1069,7 +1070,7 @@ export const mergeSettingsForSync = (
                 context: { releaseCheck: 'v1.3.9/settings-group-tie', group: key, outcome: tiedIncomingWins ? 'incoming' : 'local' },
             });
         }
-        const resolvedValue = resolve(incomingWins);
+        const resolvedValue = tiedResults ? (incomingWins ? tiedResults.incoming : tiedResults.local) : resolve(incomingWins);
         apply(cloneSettingValue(resolvedValue), incomingWins);
         const winnerAt = incomingWins ? incomingAt : localAt;
         if (winnerAt) nextSyncUpdatedAt[key] = winnerAt;
