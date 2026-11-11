@@ -263,8 +263,14 @@ internal object ProcessCoreHost {
 
 
         if (replay.left > 0) return true
+        val pruneStarted = SystemClock.elapsedRealtime()
         runCatching { runtime.pruneReceipts() }
-            .onSuccess { Log.i(CoreHost.TAG, "Native Android receipts pruned=${it.optInt("pruned")}") }
+            .onSuccess {
+                val elapsedMs = SystemClock.elapsedRealtime() - pruneStarted
+                Log.i(CoreHost.TAG, "Native Android receipts pruned=${it.optInt("pruned")} elapsedMs=$elapsedMs releaseCheck=v1.3.9/native-receipt-prune")
+                runtime.logLine("Native Android receipts pruned releaseCheck=v1.3.9/native-receipt-prune",
+                    JSONObject().put("releaseCheck", "v1.3.9/native-receipt-prune").put("pruned", it.optInt("pruned")).put("elapsedMs", elapsedMs))
+            }
             .onFailure { Log.w(CoreHost.TAG, "Native Android receipts prune failed", it) }
         return true
     }

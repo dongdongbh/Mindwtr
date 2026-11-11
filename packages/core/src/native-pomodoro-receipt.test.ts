@@ -174,6 +174,41 @@ describe('Watch Pomodoro source receipt recovery', () => {
     });
 });
 
+describe('Pomodoro receipt prune cost', () => {
+    it('still refuses a saved receipt whose payload is the same plan in a non-canonical key order', async () => {
+        const env = await open(); const plan = watchPlan(env);
+        await env.adapter.savePomodoroTransitionWithReceipt(plan);
+        const [{ method }] = await env.sql.client.all<{ method: string }>('SELECT method FROM native_request_receipts WHERE request_id=?', [NEXT]);
+        const [, stored] = JSON.parse(method) as [string, Record<string, unknown>];
+        const reordered = JSON.stringify(['pomodoroTransition', Object.fromEntries(Object.entries(stored).reverse())]);
+        expect(reordered).not.toBe(method);
+        expect(JSON.parse(reordered)).toEqual(JSON.parse(method));
+        await env.sql.client.run('UPDATE native_request_receipts SET method=? WHERE request_id=?', [reordered, NEXT]);
+        await expect(loadNativeRequestReceipts(env.sql.client, { durableCommands: ['pomodoroTransition'] })).rejects.toThrow('Invalid saved Pomodoro receipt');
+    });
+    it('prunes from the action validated at load or save, without parsing any Pomodoro receipt again', async () => {
+        const env = await open();
+        await env.adapter.savePomodoroTransitionWithReceipt(watchPlan(env));
+        const session = await env.adapter.readPomodoroSession();
+        await env.adapter.savePomodoroTransitionWithReceipt(prepareNativePomodoroTransition({ request: { action: 'reset', requestId: '33333333-3333-4333-8333-333333333333',
+            observedAtMs: now + 20_000, localDayKey: '2026-10-10', autoStart: { autoStartFocus: false, autoStartBreaks: false } },
+            session, target: null, deviceId: null })!);
+        const parsedPomodoro = () => parse.mock.calls.filter(([text]) => typeof text === 'string' && text.startsWith('["pomodoroTransition"')).length;
+        const parse = vi.spyOn(JSON, 'parse');
+        expect(await pruneNativeRequestReceipts(env.sql.client, new Date(AT))).toBe(0);
+        expect(parsedPomodoro()).toBe(0);
+        parse.mockRestore();
+        await env.sql.client.run('UPDATE native_request_receipts SET saved_at=?', ['2026-01-01T00:00:00.000Z']);
+        await loadNativeRequestReceipts(env.sql.client, { durableCommands: ['pomodoroTransition'] });
+        const reload = vi.spyOn(JSON, 'parse');
+        const parsedAfterLoad = () => reload.mock.calls.filter(([text]) => typeof text === 'string' && text.startsWith('["pomodoroTransition"')).length;
+        expect(await pruneNativeRequestReceipts(env.sql.client, new Date(AT))).toBe(0);
+        expect(parsedAfterLoad()).toBe(0);
+        expect(await env.sql.client.all('SELECT request_id FROM native_request_receipts ORDER BY request_id')).toEqual([{ request_id: NEXT }, { request_id: '33333333-3333-4333-8333-333333333333' }]);
+    });
+});
+
+
 describe('native Pomodoro integration with the SQLite and store write gates', () => {
     it('cold-loads and replays a committed schema4 receipt unchanged after policy and advance-reminder edits', async () => {
         const env = await open(); const legacy = structuredClone(env.plan);

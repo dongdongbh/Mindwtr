@@ -288,7 +288,7 @@ const pomodoroReceiptPlan = (row: DocumentReceiptRow): PreparedNativePomodoroTra
         const tuple: unknown = JSON.parse(row.method);
         if (!Array.isArray(tuple) || tuple.length !== 2 || tuple[0] !== 'pomodoroTransition') throw new Error();
         const plan = validatePreparedNativePomodoroTransition(tuple[1]);
-        if (row.request_id !== plan.request.requestId || row.method !== nativePomodoroReceiptPayload(plan)
+        if (row.request_id !== plan.request.requestId || row.method !== JSON.stringify(['pomodoroTransition', plan])
             || row.reply !== JSON.stringify(plan.result) || typeof row.saved_at !== 'string'
             || row.saved_at.length > 40 || !Number.isFinite(Date.parse(row.saved_at))
             || new Date(row.saved_at).toISOString() !== row.saved_at) throw new Error();
@@ -297,7 +297,7 @@ const pomodoroReceiptPlan = (row: DocumentReceiptRow): PreparedNativePomodoroTra
 };
 
 
-type StoredReceipt = { fingerprint: string; reply: unknown; savedAt: string };
+type StoredReceipt = { fingerprint: string; reply: unknown; savedAt: string; pomodoroAction?: string };
 type PendingReceipt = { fingerprint: string; reply: unknown; generation: number };
 let durableReceipts: Map<string, StoredReceipt> | null = null;
 
@@ -341,14 +341,12 @@ export async function loadNativeRequestReceipts(client: SqliteClient,
             throw new Error('Invalid saved widget completion receipt');
         if (fingerprintCommand(row.method) === 'backupDocument' && !validDocumentReceiptRow(row))
             throw new Error('Invalid saved document receipt');
-        if (fingerprintCommand(row.method) === 'pomodoroTransition') {
-            const plan = pomodoroReceiptPlan(row);
-            if (plan.target?.row?.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length) legacyPomodoroReceipts += 1;
-        }
+        const plan = fingerprintCommand(row.method) === 'pomodoroTransition' ? pomodoroReceiptPlan(row) : null;
+        if (plan?.target?.row?.length === NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS.length) legacyPomodoroReceipts += 1;
         const reply: unknown = JSON.parse(row.reply);
         if (options?.durableCommands?.includes('appLock') && fingerprintCommand(row.method) === 'appLock'
             && !validAppLockStoredReceipt(row, reply)) throw new Error('Invalid saved App lock receipt');
-        return [row.request_id, { fingerprint: row.method, reply, savedAt: row.saved_at }];
+        return [row.request_id, { fingerprint: row.method, reply, savedAt: row.saved_at, ...(plan ? { pomodoroAction: plan.request.action } : {}) }];
     }));
     durableCommands = options?.durableCommands ? new Set(options.durableCommands) : null;
     pendingReceipts.clear();
@@ -378,9 +376,9 @@ export async function pruneNativeRequestReceipts(client: SqliteClient, now = new
     const watchPomodoroIds = new Set<string>();
     for (const entry of durableReceipts ?? []) {
         if (fingerprintCommand(entry[1].fingerprint) !== 'pomodoroTransition') continue;
-        const plan = pomodoroReceiptPlan({ request_id: entry[0], method: entry[1].fingerprint,
-            reply: JSON.stringify(entry[1].reply), saved_at: entry[1].savedAt });
-        if (plan.request.action === 'watch') watchPomodoroIds.add(entry[0]);
+        const action = entry[1].pomodoroAction ?? pomodoroReceiptPlan({ request_id: entry[0], method: entry[1].fingerprint,
+            reply: JSON.stringify(entry[1].reply), saved_at: entry[1].savedAt }).request.action;
+        if (action === 'watch') watchPomodoroIds.add(entry[0]);
         if (!latestPomodoro || entry[1].savedAt > latestPomodoro[1].savedAt
             || (entry[1].savedAt === latestPomodoro[1].savedAt && entry[0] > latestPomodoro[0])) latestPomodoro = entry;
     }
@@ -677,7 +675,7 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                         if (patched) {
                             this.pomodoroReloadRequired = true; this.pomodoroReloadRequest = requestId; this.invalidateWriteBaselineAfterDirectSQL();
                         }
-                        durableReceipts?.set(requestId, { fingerprint: payload, reply: result, savedAt: new Date().toISOString() });
+                        durableReceipts?.set(requestId, { fingerprint: payload, reply: result, savedAt: new Date().toISOString(), pomodoroAction: plan.request.action });
                         try { logInfo('Native Pomodoro transition confirmed', { scope: 'storage', force: true,
                             context: { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' } }); } catch {                                              }
                         const owedCredits = replayed ? 0 : nativePomodoroOwedCreditCount(plan.request);
