@@ -199,6 +199,7 @@ internal object ProcessCoreHost {
         val task = synchronized(this) { boot } ?: return
         val runtime = if (task.isDone) runCatching { task.get() }.getOrNull() else null
         runtime?.cacheBytecode()
+        if (runtime != null && engineLogged.compareAndSet(false, true)) Thread(runtime::logEngine, "mindwtr-log").start()
 
         if (runtime != null && saveWarmStarted.compareAndSet(false, true)) Thread({
             runCatching { runtime.warmFirstSave() }.onFailure { Log.w(CoreHost.TAG, "Native Android save warm failed ${failureForLog(it)}") }
@@ -210,6 +211,9 @@ internal object ProcessCoreHost {
 
 
     private val saveWarmStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
+
+    private val engineLogged = java.util.concurrent.atomic.AtomicBoolean(false)
 
 
     private fun resumedRuntime(): CoreHost? = boot?.takeIf { it.isDone }?.let { task -> runCatching { task.get() }.getOrNull() }

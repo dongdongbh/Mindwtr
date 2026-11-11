@@ -22,10 +22,11 @@ class BytecodeCache(
         if (!file.exists()) Read(null, "absent")
         else DataInputStream(file.inputStream().buffered()).use { input ->
             val magic = ByteArray(MAGIC.size).also(input::readFully)
+            val sameBundle = magic.contentEquals(MAGIC) && ByteArray(32).also(input::readFully).contentEquals(hex(bundleHash))
             when {
                 !magic.contentEquals(MAGIC) -> Read(null, "corrupt")
-                !ByteArray(32).also(input::readFully).contentEquals(hex(bundleHash)) -> Read(null, "stale-bundle")
                 input.readUTF() != engineVersion -> Read(null, "other-engine")
+                !sameBundle -> Read(null, "stale-bundle")
                 else -> {
                     val length = input.readInt()
                     val digest = ByteArray(32).also(input::readFully)
