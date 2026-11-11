@@ -227,13 +227,29 @@ const tapInShade = async (text, label) => {
 };
 
 
-const killApp = async () => {
+const JOB_EVENT = new RegExp(`(START|STOP): #(\\S+) ${PKG.replaceAll('.', '\\.')}/androidx\\.work`, 'g');
+const runningJobs = () => {
+    const last = new Map();
+    for (const [, event, job] of sh('dumpsys jobscheduler').matchAll(JOB_EVENT)) last.set(job, event);
+    return [...last.values()].filter((event) => event === 'START').length;
+};
+const closeApp = async () => {
     if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME');
-    for (let attempt = 0; attempt < 20 && pid(); attempt += 1) {
-        try { runAs(`kill -9 ${pid()}`); } catch {                      }
+    await waitUntil('the app\'s running background jobs to finish', () => runningJobs() === 0, 120_000);
+    const seen = pid();
+    for (let attempt = 0; attempt < 20 && seen && pid() === seen; attempt += 1) {
+        try { runAs(`kill -9 ${seen}`); } catch {                      }
         await sleep(500);
     }
-    if (pid()) fail('the app process did not end');
+    if (seen && pid() === seen) fail('the app process did not end');
+};
+const killApp = async () => {
+    for (let round = 0; round < 6; round += 1) {
+        await closeApp();
+        await sleep(2000);
+        if (!pid()) return;
+    }
+    fail('the app kept starting again after it was closed');
 };
 const CYCLE = 'Native Android reminder cycle';
 const cycles = () => count(allLogs(), CYCLE);
@@ -381,7 +397,7 @@ try {
 
 
     const t0 = Math.ceil((phoneNow() + 4 * 60_000) / 60_000) * 60_000;
-    const due = { A: t0, C: t0 + 60_000, D: t0 + 120_000, G: t0 + 120_000 };
+    const due = { A: t0, C: t0 + 60_000, D: t0 + 180_000, G: t0 + 180_000 };
     const names = { A: title(1), B: title(2), C: title(3), D: title(4), G: title(5), E: title(6), F: title(7), H: title(8) };
     due.H = due.D;
     for (const key of ['A', 'C', 'D', 'G', 'H']) capture(`${names[key]} /due:${clock(due[key])}`);
@@ -395,7 +411,7 @@ try {
         ids[key] = rows[0].id;
         openTasks.add(ids[key]);
     }
-    check(['A', 'C', 'D', 'G', 'H'].every((key) => Date.parse(stored(names[key])[0].dueDate) === due[key]), `(1) the timed tasks are due at ${clock(t0)}, +1 and +2 minutes (${zone})`);
+    check(['A', 'C', 'D', 'G', 'H'].every((key) => Date.parse(stored(names[key])[0].dueDate) === due[key]), `(1) the timed tasks are due at ${clock(t0)}, +1 and +3 minutes (${zone})`);
 
 
     {
@@ -415,7 +431,7 @@ try {
         const atC = alarmsAt(due.C);
         const atDG = alarmsAt(due.D);
         check(atT.length === 1 && atC.length === 1 && atDG.length === 3,
-            `${step} dumpsys alarm: one alarm at ${clock(due.A)}, one at +1 and three at +2 minutes (found ${atT.length}, ${atC.length}, ${atDG.length})`);
+            `${step} dumpsys alarm: one alarm at ${clock(due.A)}, one at +1 and three at +3 minutes (found ${atT.length}, ${atC.length}, ${atDG.length})`);
         if (exact !== undefined) check([...atT, ...atC, ...atDG].every((alarm) => alarm.exact === exact), `${step} each is ${exact ? 'exact' : 'inexact (exact alarms not allowed)'}`);
     };
     onePerTask('(1)', false);
@@ -587,10 +603,10 @@ try {
 
 
     {
-        await killApp();
+        await closeApp();
         await waitUntil(`the reminders for ${names.D}, ${names.G} and ${names.H}`,
             () => shown(names.D).length > 0 && shown(names.G).length > 0 && shown(names.H).length > 0, 150_000);
-        await killApp();
+        await closeApp();
         check(alarmMap()[keyOf('D')]?.id === map[keyOf('D')].id, '(8) D fired with the app closed: its alarm is still held');
         checkOff(ids.D);
         const withdrawals = () => allLogs().split('\n').filter((line) => line.includes(CYCLE) && /"withdrawn":[1-9]/.test(line)).length;
@@ -630,8 +646,28 @@ try {
     try {
         console.error(`evidence - the app's reminder lines:\n${allLogs().split('\n').filter((line) => /[Rr]eminder|Local Notifications|core work|journal/.test(line)).slice(-25).join('\n')}`);
     } catch {                   }
+    try {
+        const system = execFileSync(adbBin, ['-s', serial, 'logcat', '-b', 'main,system,events', '-d', '-v', 'time'], { encoding: 'utf8', maxBuffer: 256 << 20 });
+        console.error(`evidence - system process starts and deaths:\n${system.split('\n').filter((line) => line.includes(PKG) && /Start proc|am_proc_start|am_proc_died|am_kill|Killing|has died/.test(line)).slice(-12).join('\n')}`);
+        console.error(`evidence - shade: ${JSON.stringify(notifications().map(({ id, tag, title }) => ({ id, tag, title })))}`);
+        console.error(`evidence - group keys: ${sh('dumpsys notification --noredact').split(/\n(?=\s*NotificationRecord\()/).filter((block) => block.includes(`pkg=${PKG}`))
+            .map((block) => /groupKey=(\S+)/.exec(block)?.[1] ?? '?').join(', ')}`);
+        console.error(`evidence - alarms at ${phoneNow()}: ${JSON.stringify(alarms().map(({ at, exact }) => ({ at, exact })))}`);
+    } catch {}
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {
+    try {
+        const system = execFileSync(adbBin, ['-s', serial, 'logcat', '-b', 'events', '-d', '-v', 'epoch'], { encoding: 'utf8', maxBuffer: 256 << 20 });
+        const app = execFileSync(adbBin, ['-s', serial, 'logcat', '-d', '-v', 'epoch', '-s', `${TAG}:*`], { encoding: 'utf8', maxBuffer: 256 << 20 }).split('\n');
+        for (const line of system.split('\n').filter((entry) => entry.includes('am_proc_start') && entry.includes(`,${PKG},`))) {
+            const at = Number(line.trim().split(/\s+/)[0]);
+            const [, pidText, , , reason] = /\[(?:\d+),(\d+),(\d+),([^,]+),([^,]+),/.exec(line) ?? [];
+            const first = (marker) => app.find((entry) => entry.includes(marker) && entry.trim().split(/\s+/)[1] === pidText);
+            const after = (marker) => { const hit = first(marker); return hit ? `${Math.round((Number(hit.trim().split(/\s+/)[0]) - at) * 1000)} ms` : 'none'; };
+            console.log(`info - process ${pidText} for ${reason}: journal open ${after('Native Android journal open')}, replay ${after('Native Android journal replay')}`);
+        }
+        console.log(`info - jobs at the end: ${sh(`dumpsys jobscheduler ${PKG}`).split('\n').filter((line) => /JOB #|Pending|Running|Ready/.test(line)).slice(0, 12).join(' | ')}`);
+    } catch (error) { console.log(`info - no boot timing (${error.message})`); }
     await restore();
 }
