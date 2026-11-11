@@ -1727,7 +1727,9 @@ const savedSettingsIfSettled = async (settingsReference: unknown): Promise<Recor
 };
 const activateAndVerify = async (adapter: ValidatedSqliteAdapter, recoveryLoad = false) => {
     traceStep('js:activate');
+    const activationStartedAt = Date.now();
     unwrap(await contract.activate(recoveryLoad ? { writeSafetyReady: true, recoveryLoad: true } : { writeSafetyReady: true }));
+    const activateMs = Date.now() - activationStartedAt;
     traceStep('js:flushPendingSave');
     await flushPendingSave();
     traceStep('js:verifyActivation');
@@ -1738,6 +1740,14 @@ const activateAndVerify = async (adapter: ValidatedSqliteAdapter, recoveryLoad =
     traceStep('js:inboxWindow');
     const inbox = unwrap(contract.getInboxWindow({ offset: 0, limit: 50 }));
     traceStep('');
+    if (globalThis.__mindwtrHostPlatform === 'ios') {
+        try {
+            logInfo('Native iOS cold boot activated', {
+                scope: 'native-ios', category: 'storage',
+                context: { releaseCheck: 'v1.3.9/ios-cold-boot', outcome: 'ready', activateMs, taskCount: loaded._allTasks.length },
+            });
+        } catch {}
+    }
     return inbox;
 };
 const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, journaled = false, budgetJSON = ''): string => submit(async () => {

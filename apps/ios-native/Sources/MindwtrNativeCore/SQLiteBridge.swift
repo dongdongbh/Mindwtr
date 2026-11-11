@@ -267,38 +267,110 @@ final class SQLiteBridge {
             } else { throw HostFailure("Unsupported SQLite parameter") }
             guard result == SQLITE_OK else { throw failure("bind") }
         }
-        var rows: [[String: Any]] = []
+        let columns = SQLiteRowJSONColumns(statement)
+        var output: [UInt8] = [0x5b]
+        var firstRow = true
         while true {
             let result = sqlite3_step(statement)
             if result == SQLITE_DONE { break }
             guard result == SQLITE_ROW else { throw failure("step") }
-            var row: [String: Any] = [:]
-            for column in 0..<sqlite3_column_count(statement) {
-                let name = String(cString: sqlite3_column_name(statement, column))
-                switch sqlite3_column_type(statement, column) {
-                case SQLITE_NULL: row[name] = NSNull()
-                case SQLITE_INTEGER: row[name] = sqlite3_column_int64(statement, column)
-                case SQLITE_FLOAT: row[name] = sqlite3_column_double(statement, column)
+            if !firstRow { output.append(0x2c) }
+            firstRow = false
+            output.append(0x7b)
+            for (position, column) in columns.entries.enumerated() {
+                if position > 0 { output.append(0x2c) }
+                output.append(contentsOf: column.key)
+                switch sqlite3_column_type(statement, column.index) {
+                case SQLITE_NULL: output.append(contentsOf: SQLiteRowJSON.null)
+                case SQLITE_INTEGER: SQLiteRowJSON.appendInteger(sqlite3_column_int64(statement, column.index), to: &output)
+                case SQLITE_FLOAT: try SQLiteRowJSON.appendDouble(sqlite3_column_double(statement, column.index), to: &output)
                 case SQLITE_TEXT:
-                    let count = Int(sqlite3_column_bytes(statement, column))
-                    let data = Data(bytes: sqlite3_column_text(statement, column)!, count: count)
-
-
-                    let text = String(decoding: data, as: UTF8.self)
-                    guard text.utf8.elementsEqual(data) else { throw HostFailure("Invalid SQLite text") }
-                    if !loggedLeadingBOM && data.starts(with: [0xEF, 0xBB, 0xBF]) {
+                    let count = Int(sqlite3_column_bytes(statement, column.index))
+                    let bytes = UnsafeBufferPointer(start: sqlite3_column_text(statement, column.index), count: count)
+                    guard SQLiteRowJSON.appendText(bytes, to: &output) else { throw HostFailure("Invalid SQLite text") }
+                    if !loggedLeadingBOM && bytes.starts(with: [0xEF, 0xBB, 0xBF]) {
                         loggedLeadingBOM = true
                         NSLog("Native iOS SQLite text preserved leading BOM releaseCheck=v1.3.3/native-ios-sqlite-leading-bom outcome=preserved")
                     }
-                    row[name] = text
                 default: throw HostFailure("Unsupported SQLite column")
                 }
             }
-            rows.append(row)
+            output.append(0x7d)
         }
+        output.append(0x5d)
         #if DEBUG
         try faults?.afterSQL?(sql)
         #endif
-        return String(decoding: try JSONSerialization.data(withJSONObject: rows), as: UTF8.self)
+        return String(decoding: output, as: UTF8.self)
+    }
+}
+
+struct SQLiteRowJSONColumns {
+    let entries: [(key: [UInt8], index: Int32)]
+
+    init(_ statement: OpaquePointer) {
+        var order: [String] = []
+        var lastIndex: [String: Int32] = [:]
+        for column in 0..<sqlite3_column_count(statement) {
+            let name = String(cString: sqlite3_column_name(statement, column))
+            if lastIndex[name] == nil { order.append(name) }
+            lastIndex[name] = column
+        }
+        entries = order.map { name in
+            var key: [UInt8] = []
+            Array(name.utf8).withUnsafeBufferPointer { _ = SQLiteRowJSON.appendText($0, to: &key) }
+            key.append(0x3a)
+            return (key, lastIndex[name]!)
+        }
+    }
+}
+
+enum SQLiteRowJSON {
+    static let null: [UInt8] = Array("null".utf8)
+    private static let hex: [UInt8] = Array("0123456789abcdef".utf8)
+
+    static func appendInteger(_ value: Int64, to output: inout [UInt8]) {
+        if value == 0 { output.append(0x30); return }
+        if value < 0 { output.append(0x2d) }
+        let first = output.count
+        var magnitude = value.magnitude
+        while magnitude > 0 {
+            output.append(0x30 + UInt8(magnitude % 10))
+            magnitude /= 10
+        }
+        output[first...].reverse()
+    }
+
+    static func appendDouble(_ value: Double, to output: inout [UInt8]) throws {
+        guard value.isFinite else { throw HostFailure("Unsupported SQLite real") }
+        if value == value.rounded(), abs(value) < 9_007_199_254_740_992 {
+            if value == 0 && value.sign == .minus { output.append(0x2d) }
+            appendInteger(Int64(value), to: &output)
+            return
+        }
+        output.append(contentsOf: value.description.utf8)
+    }
+
+    static func appendText(_ bytes: UnsafeBufferPointer<UInt8>, to output: inout [UInt8]) -> Bool {
+        output.append(0x22)
+        var ascii = true
+        for byte in bytes {
+            switch byte {
+            case 0x22: output.append(0x5c); output.append(0x22)
+            case 0x5c: output.append(0x5c); output.append(0x5c)
+            case 0x0a: output.append(0x5c); output.append(0x6e)
+            case 0x0d: output.append(0x5c); output.append(0x72)
+            case 0x09: output.append(0x5c); output.append(0x74)
+            case 0x08: output.append(0x5c); output.append(0x62)
+            case 0x0c: output.append(0x5c); output.append(0x66)
+            case 0x00..<0x20:
+                output.append(contentsOf: [0x5c, 0x75, 0x30, 0x30, hex[Int(byte >> 4)], hex[Int(byte & 0x0f)]])
+            default:
+                if byte >= 0x80 { ascii = false }
+                output.append(byte)
+            }
+        }
+        output.append(0x22)
+        return ascii || String(decoding: bytes, as: UTF8.self).utf8.elementsEqual(bytes)
     }
 }
