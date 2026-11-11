@@ -26500,6 +26500,8 @@ private final class Engine: @unchecked Sendable {
         #endif
         case "Native iOS Process Inbox editor reloaded":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed"])
+        case "Native iOS system search kept on app lock re-read":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-search-lock-reread", "outcome": "kept"])
         case "Native iOS Contexts filter saved":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-context-filter-save", "outcome": "saved"])
         case "Native iOS Weekly Review project completion confirmed":

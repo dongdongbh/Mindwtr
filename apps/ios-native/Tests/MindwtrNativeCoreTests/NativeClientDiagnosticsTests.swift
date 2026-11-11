@@ -49,6 +49,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS retained editor draft protected from late close", ["releaseCheck": "v1.3.5/ios-editor-retained-close", "outcome": "ignored"]),
             ("Native iOS Process Inbox editor reloaded", ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed"]),
             ("Native iOS Weekly Review project completion confirmed", ["releaseCheck": "v1.3.9/ios-weekly-review-complete-project", "outcome": "confirmed"]),
+            ("Native iOS system search kept on app lock re-read", ["releaseCheck": "v1.3.9/ios-search-lock-reread", "outcome": "kept"]),
             ("Native iOS launch selection admitted", ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"]),
             ("Native iOS reminder lifecycle reconciled", ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"]),
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
