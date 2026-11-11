@@ -37,8 +37,9 @@ to apply through the normal store; widget code never writes SQLite.
 A check-off stays visible and struck through during the three-second Undo
 window, whose pending map is persisted with `AtomicFile`. Check-offs tapped
 in a row share one window: each new tap holds every pending row in place,
-and all of them commit together three seconds after the last tap. A held row
-stays tappable to undo until then. After the completion command is durably published, Tasks and Compact
+and all of them commit together three seconds after the last tap. An undo
+also restarts that window while other rows stay pending. A held row stays
+tappable to undo until then; the task peek's Complete never undoes it. After the completion command is durably published, Tasks and Compact
 hide every cached occurrence locally, remove empty section headings, and let
 the remaining rows fill the widget. Compact chooses its Focus/Next Actions
 fallback after this filtering, so its header always matches its rows. The

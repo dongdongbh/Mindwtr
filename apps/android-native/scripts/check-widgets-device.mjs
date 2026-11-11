@@ -277,20 +277,38 @@ try {
             await tapRing(nodes, text);
             tappedAt.push(Date.now());
         }
-        const held = hostedRows(await screen());
-        const heldFor = Date.now() - tappedAt[0];
-        check(heldFor < 3000 + tappedAt[2] - tappedAt[0] && tappedAt[2] - tappedAt[0] >= 3000,
-            `(4b) the rows were read ${heldFor} ms after the first tap, after its own Undo ended and before the last one ended`);
-        check(JSON.stringify(held) === JSON.stringify(shown), `(4b) three rings tapped about 1.6 s apart: no row moved while an Undo was open (${held.join(', ')})`);
-        await waitUntil('the three checked rows to leave together', async () => { const rows = hostedRows(await screen()); return batch.every((text) => !rows.includes(text)); }, 30_000);
+        const lastUndoEnds = tappedAt[2] + 3000;
+        let heldReads = 0;
+        let laterReads = 0;
+        for (const deadline = Date.now() + 30_000; ;) {
+            const readStarted = Date.now();
+            const rows = hostedRows(await screen());
+            const readEnded = Date.now();
+            const present = batch.filter((text) => rows.includes(text));
+            if (present.length === 0) break;
+            if (present.length < batch.length) fail(`(4b) a read showed only part of the batch removed: ${present.join(', ')} still shown`);
+            if (readEnded < lastUndoEnds) {
+                if (JSON.stringify(rows) !== JSON.stringify(shown)) fail(`(4b) a read before the last Undo ended showed different rows: ${rows.join(', ')}`);
+                if (readStarted >= tappedAt[0] + 3000) heldReads += 1;
+            } else {
+                laterReads += 1;
+            }
+            if (Date.now() > deadline) fail('(4b) the three checked rows never left');
+        }
+        check(tappedAt[2] - tappedAt[0] >= 3000, `(4b) the last tap came ${tappedAt[2] - tappedAt[0]} ms after the first, after the first row's own Undo ended`);
+        check(heldReads >= 1, `(4b) ${heldReads} screen read(s) taken after the first row's own Undo ended and finished before the last Undo ended showed exactly the rows from before the taps`);
+        check(true, `(4b) no screen read showed only part of the batch removed (${laterReads} read(s) after the last Undo ended, about one per second)`);
         await waitUntil('CoreWork to store the three check-offs', () => batch.every((text) => stored(text)[0]?.status === 'done'), 60_000, 2000);
         await sleep(3000);
         for (const [index, text] of batch.entries()) {
             const [after] = stored(text);
-            check(after.status === 'done' && after.rev === before[index].rev + 1 && queuedFor(before[index].id).length === 0, `(4b) ${text} was completed once (rev ${before[index].rev} to ${after.rev})`);
+            check(after.status === 'done' && after.rev === before[index].rev + 1 && queuedFor(before[index].id).length === 0, `(4b) ${text} is done after one store write (rev ${before[index].rev} to ${after.rev}) and its queue entry is gone`);
         }
         await waitUntil('the held count in the log', () => allLogs().includes('releaseCheck=v1.3.9/widget-checkoff-batch'), 30_000);
-        check(true, '(4b) the log shows the check-offs held until the last Undo');
+        check(true, '(4b) logcat shows the native widget-checkoff-batch line');
+        const coreLogged = await waitUntil('core\'s logger to receive the held count', () => allLogs().split('\n').find((line) => line.includes('info: Native Android widget check-offs held until the last Undo releaseCheck=v1.3.9/widget-checkoff-batch')
+            && line.includes('"scope":"native-android"') && /"count":[1-9]/.test(line)), 30_000);
+        check(Boolean(coreLogged), '(4b) core\'s logger, which writes Settings › Diagnostics when Debug logging is on, received the line with a positive count');
     }
 
 

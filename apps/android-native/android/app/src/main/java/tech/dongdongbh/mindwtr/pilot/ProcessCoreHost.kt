@@ -487,12 +487,22 @@ internal object ProcessCoreHost {
     }
 
 
+    private fun logHeldCheckoffs(runtime: CoreHost, app: Application) {
+        val held = runCatching { CheckoffStore.consumeHeldCount(app) }.getOrDefault(0)
+        if (held <= 0) return
+        Log.i(CoreHost.TAG, "Native Android widget check-offs held until the last Undo count=$held releaseCheck=v1.3.9/widget-checkoff-batch")
+        runtime.logLine("Native Android widget check-offs held until the last Undo releaseCheck=v1.3.9/widget-checkoff-batch",
+            JSONObject().put("releaseCheck", "v1.3.9/widget-checkoff-batch").put("count", held))
+    }
+
+
     private fun drain(runtime: CoreHost, queue: File, app: Application): StartOrder.Drain {
         if (failure != null) return StartOrder.Drain.Waiting
 
 
         val unswept = runCatching { CheckoffStore.sweep(app).failed > 0 }.onFailure { Log.w(CoreHost.TAG, "Native Android widget check-off sweep failed", it) }.getOrDefault(true)
         if (unswept) runtime.logLine("Native Android queue drain", JSONObject().put("outcome", "unswept"))
+        logHeldCheckoffs(runtime, app)
         val drained = if (unswept) StartOrder.Drain.Unswept else StartOrder.Drain.Done
         when (StartOrder.queueEmpty(queue.list(), queue.exists())) {
             true -> return drained

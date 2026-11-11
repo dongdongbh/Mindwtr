@@ -77,7 +77,7 @@ class TaskPeekActivity : AppCompatActivity() {
 
 
   private fun complete() {
-    when (CheckoffStore.tapAction(this, taskId)) {
+    when (CheckoffStore.completeAction(this, taskId)) {
       CheckoffStore.TapAction.TOGGLE_PENDING -> {
         CheckoffStore.toggle(this, taskId)
         WidgetRenderer.refreshAll(this)
