@@ -121,8 +121,10 @@ describe('selected Task Download private JS producer', () => {
         const state = JSON.stringify({ state: posture, discoveredSalt: '01'.repeat(16), discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
             ...(posture === 'off' ? { partlyEncryptedScope: JSON.stringify(['webdav', 'https://other.invalid', 'synthetic']) } : {}) });
         const captured = cloudConfig({ encryptionStateJSON: state });
-        expect((await f.runConfig(captured)).status).toBe('prepared'); expect(f.bindings.rawConfigJSON).toBe(rawConfig());
-        expect(f.sources[0].base64).toBe(bytesToBase64(BYTES)); expect(f.sources[0].metadata.sha256).toBe(digest(BYTES));
+        const encrypted = posture !== 'off';
+        expect((await f.runConfig(captured)).status).toBe(encrypted ? 'unavailable' : 'prepared'); expect(f.bindings.rawConfigJSON).toBe(rawConfig());
+        if (encrypted) expect(f.sources).toEqual([]);
+        else { expect(f.sources[0].base64).toBe(bytesToBase64(BYTES)); expect(f.sources[0].metadata.sha256).toBe(digest(BYTES)); }
         expect(f.requests).toHaveLength(1); expect(f.legacyCalls).toEqual([]); expect(f.memory.files.size).toBe(0);
     });
 
@@ -220,7 +222,9 @@ describe('selected Task Download private JS producer', () => {
             installer: async () => { throw new Error('No install for a missing response'); },
             deleteNow: () => { throw new Error('No deletion for a missing response'); },
         };
-        const native = createNativeAttachments({ ...createNativeLocalAttachmentConfiguration(), storage, log }, channels);
+        const native = createNativeAttachments({ ...createNativeLocalAttachmentConfiguration(), storage, log,
+            encryption: { getSyncEncryptionMaterial: async () => null, getSyncEncryptionStatus: async () => ({ state: 'off' }), logSyncEncryptionEvent: () => {} },
+        }, channels);
         const selected = attachment({ fileHash: digest(BYTES) });
         const data: AppData = { tasks: [{ id: 'task362', title: 'Fixture', status: 'inbox', tags: [], contexts: [],
             createdAt: AT, updatedAt: AT, attachments: [selected] }], projects: [], sections: [], areas: [], settings: {} };
@@ -284,7 +288,7 @@ describe('selected Task Download private JS producer', () => {
 
     it('opens already-unlocked ciphertext and hands off only its plaintext digest/bytes', async () => {
         const f = fixture(); const material = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
-        f.wire(await encryptSyncArtifact(BYTES, material)); f.key(bytesToBase64(material.key));
+        f.wire(await encryptSyncArtifact(BYTES, material, undefined, { kind: 'attachment', cloudKey: 'attachments/baseline362.txt' })); f.key(bytesToBase64(material.key));
         const state = JSON.stringify({ state: 'enabled', discoveredSalt: Buffer.from(material.salt).toString('hex'), discoveredParams: material.params });
         expect((await f.run(attachment(), { encryptionStateJSON: state })).status).toBe('prepared');
         expect(f.sources[0].base64).toBe(bytesToBase64(BYTES)); expect(f.sources[0].metadata.sha256).toBe(digest(BYTES));
@@ -303,14 +307,14 @@ describe('selected Task Download private JS producer', () => {
 
     it('does not pass ciphertext through when no unlocked material is stored', async () => {
         const f = fixture(); const material = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
-        f.wire(await encryptSyncArtifact(BYTES, material));
+        f.wire(await encryptSyncArtifact(BYTES, material, undefined, { kind: 'attachment', cloudKey: 'attachments/baseline362.txt' }));
         expect((await f.run()).status).toBe('unavailable'); expect(f.sources).toEqual([]);
         expect(f.secretCalls).toEqual(['mindwtr_webdav_password']);
     });
 
     it('refuses AES authentication failure without a source or key/credential mutation', async () => {
         const f = fixture(); const material = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
-        f.wire(await encryptSyncArtifact(BYTES, material)); f.key(bytesToBase64(new Uint8Array(32).fill(9)));
+        f.wire(await encryptSyncArtifact(BYTES, material, undefined, { kind: 'attachment', cloudKey: 'attachments/baseline362.txt' })); f.key(bytesToBase64(new Uint8Array(32).fill(9)));
         const state = JSON.stringify({ state: 'enabled', discoveredSalt: Buffer.from(material.salt).toString('hex'), discoveredParams: material.params });
         expect((await f.run(attachment(), { encryptionStateJSON: state })).status).toBe('unavailable'); expect(f.sources).toEqual([]);
         expect(f.secretCalls).toEqual(['mindwtr_webdav_password', 'mindwtr_sync_encryption_key_v1']);

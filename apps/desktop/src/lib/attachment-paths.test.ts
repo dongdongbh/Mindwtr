@@ -47,6 +47,25 @@ describe('resolveAttachmentReadPath', () => {
         managedDataDirMock.mockResolvedValue('/new-profile');
     });
 
+    it.each([
+        '\\\\host\\share\\report.pdf',
+        '//host/share/report.pdf',
+        '\\\\?\\UNC\\host\\share\\report.pdf',
+        '\\\\.\\C:\\report.pdf',
+        'file://host/share/report.pdf',
+        'file:////host/share/report.pdf',
+        'file:///%2fhost/share/report.pdf',
+        'file:///%5c%5chost/share/report.pdf',
+        'C:\\report.pdf:payload.cmd',
+        'C:\\NUL.pdf',
+        'C:\\CON .txt',
+        'C:\\report.cmd.\\safe.pdf',
+    ])('rejects %s before probing the filesystem', async (uri) => {
+        await expect(resolveAttachmentReadPath(uri, 'remote')).rejects.toThrow('Only local file paths');
+        expect(existsMock).not.toHaveBeenCalled();
+        expect(managedDataDirMock).not.toHaveBeenCalled();
+    });
+
     it('keeps the recorded path whenever it still resolves', async () => {
         existsMock.mockResolvedValue(true);
         expect(await resolveAttachmentReadPath('/old-profile/attachments/a1.pdf', 'a1'))

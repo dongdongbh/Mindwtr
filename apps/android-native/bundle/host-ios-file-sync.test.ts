@@ -281,7 +281,7 @@ describe('File Sync attachments in the selected folder', () => {
         const native = createNativeAttachments({
             storage: storage.storage, getSecureConfigValue: async () => null, log: recorded.log,
             crypto: defaultSyncCryptoPrimitives,
-            encryption: { getSyncEncryptionMaterial: async () => null, logSyncEncryptionEvent: () => {} },
+            encryption: { getSyncEncryptionMaterial: async () => null, getSyncEncryptionStatus: async () => ({ state: 'off' }), logSyncEncryptionEvent: () => {} },
             fileSync: port.attachments,
         }, channels);
         return { memory, folder, ops, port, native, storage, lines: recorded.lines };
@@ -344,7 +344,7 @@ describe('File Sync attachments in the selected folder', () => {
 
     it('a device with encryption off writes nothing beside an attachment an interrupted enable sealed', async () => {
         const material = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
-        const sealed = await encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives);
+        const sealed = await encryptSyncArtifact(new TextEncoder().encode('peer attachment'), material, defaultSyncCryptoPrimitives, { kind: 'document' });
         const context = setup({ folder: new Map([['peer.txt', sealed]]) });
         context.memory.put(LOCAL_URI, LOCAL);
 

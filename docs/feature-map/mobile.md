@@ -274,7 +274,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `regional-formats-toggle`, `app-lock-privacy-cover`
 - Code: `apps/mobile/components/settings/general-settings-screen.tsx`, `packages/core/src/general-settings-model.ts`, `apps/mobile/components/mobile-app-lock-gate.tsx`
 - Checks: `apps/mobile/components/settings/general-settings-screen.test.tsx`, `apps/mobile/components/mobile-app-lock-gate.test.tsx`
-- Notes: App lock uses the device lock and protects the app view, not the database. On Android, a native window keeps the mounted app and its dialogs private while away, showing a blank cover. The unlock panel appears only while active and locked.
+- Notes: App lock uses the device lock and protects the app view, not the database. On Android, a native window keeps the mounted app and its dialogs private while away, showing a blank cover. The unlock panel appears only while active and locked. Private screens wait for the authoritative local database at startup; a backup snapshot cannot decide whether the app is locked. A failed load shows a generic retry screen. Enabling App lock in Settings reuses only that action’s just-completed device authentication; an asynchronously loaded enabled preference requires unlocking.
 
 ## Settings › GTD
 
@@ -311,6 +311,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/settings/sync-settings-screen.tsx`, `apps/mobile/components/settings/sync-settings-webdav-panel.tsx`, `apps/mobile/components/settings/sync-settings-dropbox-panel.tsx`, `apps/mobile/components/settings/sync-settings-file-panel.tsx`, `apps/mobile/components/settings/sync-settings-selfhosted-panel.tsx`, `apps/mobile/components/settings/sync-settings-cloudkit-panel.tsx`, `apps/mobile/components/settings/sync-settings-encryption-card.tsx`
 - Checks: `apps/mobile/components/settings/sync-settings-screen.parity.test.tsx`, `apps/mobile/components/settings/sync-settings-encryption-card.test.tsx`, `apps/mobile/components/settings/use-sync-settings-transport-actions.test.tsx`
 - Notes: A new backend stays inactive until its probe passes; each sync is one Sync run in core. Use the `sync-device-testing` skill for real backends.
+- Upgrade: Settings › Sync › Encryption › Upgrade sync encryption opens an explicit current-passphrase confirmation. Update every device first; older clients cannot read the result. The service uses a verified durable local copy and refuses mismatches or unavailable storage. Keep the upgrade passphrase for retained encrypted recovery archives, even after changing the active passphrase. An interrupted format upgrade can retry; other unfinished encryption transitions do not expose this action. No upgrade runs automatically during unlock.
 
 ## Settings › Data (backup, import, export, diagnostics)
 

@@ -37,6 +37,18 @@
      "webdav: encryption on and a legacy server: only the WebDAV setup compatibility probe log receipts were added; all UI, toasts, probes, activation, storage and other calls matched the frozen run.",
      "webdav: an encrypted remote without the key: only the WebDAV setup compatibility probe log receipts were added; all UI, toasts, probes, activation, storage and other calls matched the frozen run."
     ]
+   },
+   {
+    "base": "64eb64c35abf6b5b20ebe08c6c9eac6c4319e03a",
+    "command": "MINDWTR_DUMP_SYNC_SETTINGS=/home/dd/scratch/mindwtr-security-20261111/encryption-ui-rn-parity.json TZ=UTC bun run --filter mobile test -- components/settings/sync-settings-screen.parity.test.tsx; every changed observation matched its frozen value after removing only the new Upgrade sync encryption label and action",
+    "observations": [
+     "webdav: encryption on and a legacy server: adds the explicit Upgrade sync encryption action while the encrypted card has no open flow; all existing UI, toasts, probes, storage and service calls matched the frozen run.",
+     "webdav: an encrypted remote without the key: adds the explicit Upgrade sync encryption action while the encrypted card has no open flow; all existing UI, toasts, probes, storage and service calls matched the frozen run.",
+     "encryption: enable: adds the explicit Upgrade sync encryption action while the encrypted card has no open flow; all existing UI, toasts, probes, storage and service calls matched the frozen run.",
+     "encryption: change and turn off: adds the explicit Upgrade sync encryption action while the encrypted card has no open flow; all existing UI, toasts, probes, storage and service calls matched the frozen run.",
+     "encryption: unlock: adds the explicit Upgrade sync encryption action while the encrypted card has no open flow; all existing UI, toasts, probes, storage and service calls matched the frozen run.",
+     "encryption: decline and a location left behind: adds the explicit Upgrade sync encryption action while the encrypted card has no open flow; all existing UI, toasts, probes, storage and service calls matched the frozen run."
+    ]
    }
   ]
  },
@@ -8600,6 +8612,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -8676,6 +8689,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -8775,6 +8794,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -8851,6 +8871,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -8975,6 +9001,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -9051,6 +9078,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -9258,6 +9291,7 @@
      "Automatic sync stays paused on this device until you enter the passphrase.",
      "If this sync location no longer holds encrypted files, tap Sync now. This device re-checks the location and carries on.",
      "Enter passphrase",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -9328,6 +9362,12 @@
      ],
      [
       "Enter passphrase",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -9545,6 +9585,7 @@
      "Automatic sync stays paused on this device until you enter the passphrase.",
      "If this sync location no longer holds encrypted files, tap Sync now. This device re-checks the location and carries on.",
      "Enter passphrase",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -9615,6 +9656,12 @@
      ],
      [
       "Enter passphrase",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -18767,6 +18814,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -18843,6 +18891,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -19909,6 +19963,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -19985,6 +20040,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -21124,6 +21185,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      [
       "warning",
       "Encryption was updated. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed."
@@ -21204,6 +21266,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -21833,6 +21901,7 @@
      "Automatic sync stays paused on this device until you enter the passphrase.",
      "If this sync location no longer holds encrypted files, tap Sync now. This device re-checks the location and carries on.",
      "Enter passphrase",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -21903,6 +21972,12 @@
      ],
      [
       "Enter passphrase",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -22955,6 +23030,7 @@
      "Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.",
      "Change passphrase",
      "Turn off encryption",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -23031,6 +23107,12 @@
      ],
      [
       "Turn off encryption",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -23134,6 +23216,7 @@
      "Automatic sync stays paused on this device until you enter the passphrase.",
      "If this sync location no longer holds encrypted files, tap Sync now. This device re-checks the location and carries on.",
      "Enter passphrase",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -23204,6 +23287,12 @@
      ],
      [
       "Enter passphrase",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false
@@ -23491,6 +23580,7 @@
      "Automatic sync stays paused on this device until you enter the passphrase.",
      "If this sync location no longer holds encrypted files, tap Sync now. This device re-checks the location and carries on.",
      "Enter passphrase",
+     "Upgrade sync encryption",
      "Settings sync options",
      "Choose which preferences stay in sync across devices.",
      "▸",
@@ -23561,6 +23651,12 @@
      ],
      [
       "Enter passphrase",
+      true,
+      false,
+      false
+     ],
+     [
+      "Upgrade sync encryption",
       true,
       false,
       false

@@ -29,17 +29,17 @@ describe('sync-crypto MWENC1 format', () => {
         const salt = defaultSyncCryptoPrimitives.randomBytes(16);
         const material = await deriveSyncKeyMaterial('a fresh passphrase', salt, LIGHT);
         const plaintext = new TextEncoder().encode('round trip payload');
-        const encrypted = await encryptSyncArtifact(plaintext, material);
+        const encrypted = await encryptSyncArtifact(plaintext, material, undefined, { kind: 'document' });
         expect(encryptedSyncArtifactByteLength(0)).toBe(70);
         expect(encrypted.byteLength).toBe(encryptedSyncArtifactByteLength(plaintext.byteLength));
-        const decrypted = await decryptSyncArtifact(encrypted, material.key);
+        const decrypted = await decryptSyncArtifact(encrypted, material.key, undefined, { kind: 'document' });
         expect(decrypted).toEqual(plaintext);
 
         const inspected = inspectSyncArtifact(encrypted);
         expect(inspected.kind).toBe('encrypted');
         if (inspected.kind === 'encrypted') {
             expect(inspected.params).toEqual(LIGHT);
-            expect(inspected.formatVersion).toBe(1);
+            expect(inspected.formatVersion).toBe(2);
             expect(inspected.kdfId).toBe(1);
             expect(inspected.cipherId).toBe(1);
         }
@@ -55,7 +55,7 @@ describe('sync-crypto MWENC1 format', () => {
                 const salt = b64ToBytes(vector.saltB64);
                 const material = await deriveSyncKeyMaterial(vector.passphrase, salt, vector.params);
                 const encrypted = b64ToBytes(vector.encryptedB64);
-                const decrypted = await decryptSyncArtifact(encrypted, material.key);
+                const decrypted = await decryptSyncArtifact(encrypted, material.key, undefined, { kind: 'document' });
                 expect(decrypted).toEqual(b64ToBytes(vector.plaintextB64));
             });
         }
@@ -71,7 +71,7 @@ describe('sync-crypto MWENC1 format', () => {
         padded.set(encrypted, 0);
         padded.set([0x20, 0x20, 0x00, 0x00, 0x20], encrypted.length);
 
-        const decrypted = await decryptSyncArtifact(padded, material.key);
+        const decrypted = await decryptSyncArtifact(padded, material.key, undefined, { kind: 'document' });
         expect(decrypted).toEqual(b64ToBytes(vector.plaintextB64));
     });
 
@@ -80,7 +80,7 @@ describe('sync-crypto MWENC1 format', () => {
         const salt = b64ToBytes(vector.saltB64);
         const wrongMaterial = await deriveSyncKeyMaterial('not the right passphrase', salt, vector.params);
         const encrypted = b64ToBytes(vector.encryptedB64);
-        await expect(decryptSyncArtifact(encrypted, wrongMaterial.key)).rejects.toThrow(SyncCryptoAuthError);
+        await expect(decryptSyncArtifact(encrypted, wrongMaterial.key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoAuthError);
     });
 
     it('rejects a tampered header byte via AAD binding, even with the correct key', async () => {
@@ -92,7 +92,7 @@ describe('sync-crypto MWENC1 format', () => {
         const tampered = new Uint8Array(encrypted);
         tampered[20] ^= 0xff;
 
-        await expect(decryptSyncArtifact(tampered, material.key)).rejects.toThrow(SyncCryptoAuthError);
+        await expect(decryptSyncArtifact(tampered, material.key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoAuthError);
     });
 
     it('reports a truncated file as unsupported, not a silent partial decrypt', async () => {
@@ -102,7 +102,7 @@ describe('sync-crypto MWENC1 format', () => {
 
         const salt = b64ToBytes(vector.saltB64);
         const material = await deriveSyncKeyMaterial(vector.passphrase, salt, vector.params);
-        await expect(decryptSyncArtifact(truncated, material.key)).rejects.toThrow(SyncCryptoUnsupportedError);
+        await expect(decryptSyncArtifact(truncated, material.key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoUnsupportedError);
 
         const inspected = inspectSyncArtifact(truncated);
         expect(inspected.kind).toBe('unsupported');
@@ -126,19 +126,19 @@ describe('sync-crypto MWENC1 format', () => {
         const material = await deriveSyncKeyMaterial(vector.passphrase, salt, vector.params);
 
         const badVersion = new Uint8Array(encrypted);
-        badVersion[6] = 0x02;
+        badVersion[6] = 0x03;
         expect(inspectSyncArtifact(badVersion).kind).toBe('unsupported');
-        await expect(decryptSyncArtifact(badVersion, material.key)).rejects.toThrow(SyncCryptoUnsupportedError);
+        await expect(decryptSyncArtifact(badVersion, material.key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoUnsupportedError);
 
         const badKdf = new Uint8Array(encrypted);
         badKdf[7] = 0x02;
         expect(inspectSyncArtifact(badKdf).kind).toBe('unsupported');
-        await expect(decryptSyncArtifact(badKdf, material.key)).rejects.toThrow(SyncCryptoUnsupportedError);
+        await expect(decryptSyncArtifact(badKdf, material.key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoUnsupportedError);
 
         const badCipher = new Uint8Array(encrypted);
         badCipher[17] = 0x02;
         expect(inspectSyncArtifact(badCipher).kind).toBe('unsupported');
-        await expect(decryptSyncArtifact(badCipher, material.key)).rejects.toThrow(SyncCryptoUnsupportedError);
+        await expect(decryptSyncArtifact(badCipher, material.key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoUnsupportedError);
     });
 
     it('derives the same key from NFC-composed and decomposed forms of the same passphrase', async () => {
@@ -161,12 +161,12 @@ describe('sync-crypto MWENC1 format', () => {
         const vector = vectors.find((v) => v.name === 'small-json-default-params')!;
         const encrypted = b64ToBytes(vector.encryptedB64);
         const shortKey = new Uint8Array(20);
-        await expect(decryptSyncArtifact(encrypted, shortKey)).rejects.toThrow(SyncCryptoUnsupportedError);
+        await expect(decryptSyncArtifact(encrypted, shortKey, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoUnsupportedError);
 
         const salt = b64ToBytes(vector.saltB64);
         const material = await deriveSyncKeyMaterial(vector.passphrase, salt, vector.params);
         const shortMaterial = { ...material, key: shortKey };
-        await expect(encryptSyncArtifact(b64ToBytes(vector.plaintextB64), shortMaterial)).rejects.toThrow(
+        await expect(encryptSyncArtifact(b64ToBytes(vector.plaintextB64), shortMaterial, undefined, { kind: 'document' })).rejects.toThrow(
             SyncCryptoUnsupportedError,
         );
     });
@@ -186,11 +186,11 @@ describe('sync-crypto MWENC1 format', () => {
 
 
         await expect(
-            encryptSyncArtifact(plaintext, { ...material, params: { mKib: 64, t: 1, p: 256 } }),
+            encryptSyncArtifact(plaintext, { ...material, params: { mKib: 64, t: 1, p: 256 } }, undefined, { kind: 'document' }),
         ).rejects.toThrow(SyncCryptoUnsupportedError);
 
         await expect(
-            encryptSyncArtifact(plaintext, { ...material, params: { mKib: -1, t: 1, p: 1 } }),
+            encryptSyncArtifact(plaintext, { ...material, params: { mKib: -1, t: 1, p: 1 } }, undefined, { kind: 'document' }),
         ).rejects.toThrow(SyncCryptoUnsupportedError);
     });
 
@@ -208,8 +208,8 @@ describe('sync-crypto MWENC1 format', () => {
             },
         };
 
-        const first = await encryptSyncArtifact(plaintext, material, countingPrims);
-        const second = await encryptSyncArtifact(plaintext, material, countingPrims);
+        const first = await encryptSyncArtifact(plaintext, material, countingPrims, { kind: 'document' });
+        const second = await encryptSyncArtifact(plaintext, material, countingPrims, { kind: 'document' });
 
         expect(randomBytesCalls).toBe(2);
         expect(first.slice(34, 46)).not.toEqual(second.slice(34, 46));
@@ -255,7 +255,7 @@ describe('sync-crypto MWENC1 format', () => {
         it('also rejects an over-ceiling header via decryptSyncArtifact, not just inspect', async () => {
             const hostile = hostileHeader({ mKib: 999_999_999 });
             const key = new Uint8Array(32);
-            await expect(decryptSyncArtifact(hostile, key)).rejects.toThrow(SyncCryptoUnsupportedError);
+            await expect(decryptSyncArtifact(hostile, key, undefined, { kind: 'document' })).rejects.toThrow(SyncCryptoUnsupportedError);
         });
     });
 });

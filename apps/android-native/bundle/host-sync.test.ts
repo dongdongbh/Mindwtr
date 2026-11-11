@@ -172,6 +172,7 @@ it.each(['saved-webdav', 'saved-webdav-or-local'] as const)('records selected iO
     spyOn(core, 'createSyncEncryptionService').mockImplementation((options) => ({
         ...create(options),
         enableSyncEncryption: async () => { await held; },
+        upgradeSyncEncryption: async () => { await held; },
         changeSyncEncryptionPassphrase: async () => { await held; },
         disableSyncEncryption: async () => { await held; },
         abandonSyncEncryptionTransition: async () => 'enable' as const,
@@ -185,20 +186,22 @@ it.each(['saved-webdav', 'saved-webdav-or-local'] as const)('records selected iO
     bindings.appendLog = async (entry) => { entries.push(entry); return null; };
     const transitions = sync.settingsHost.encryption.transitions!;
     const pending = transitions.enable('synthetic secret', {});
+    const upgrading = transitions.upgrade('synthetic secret', {});
     const changing = transitions.change('synthetic current', 'synthetic next', {});
     const disabling = transitions.disable({});
     await Promise.resolve();
     expect(entries).toHaveLength(0);
     release();
-    await Promise.all([pending, changing, disabling]);
+    await Promise.all([pending, upgrading, changing, disabling]);
     expect(await transitions.abandon()).toBe('enable');
     expect(await transitions.recheck()).toBe('mixed');
-    expect(entries.map((entry) => entry.context)).toEqual(['enable', 'change', 'disable', 'abandon', 'recheck'].map((operation) => ({
+    expect(entries.map((entry) => entry.context)).toEqual(['enable', 'upgrade', 'change', 'disable', 'abandon', 'recheck'].map((operation) => ({
         releaseCheck: 'v1.3.5/ios-encryption-selected', operation, outcome: 'confirmed',
     })));
     expect(JSON.stringify(entries)).not.toContain('synthetic secret');
     bindings.appendLog = () => { throw new Error('synthetic diagnostic failure'); };
     await transitions.enable('synthetic secret', {});
+    await transitions.upgrade('synthetic secret', {});
     await transitions.change('synthetic current', 'synthetic next', {});
     await transitions.disable({});
     expect(await transitions.abandon()).toBe('enable');

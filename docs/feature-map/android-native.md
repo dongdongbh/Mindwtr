@@ -400,6 +400,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SyncSettings.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostCrypto.kt`
 - Checks: `apps/android-native/scripts/check-encryption-device.mjs`, `apps/android-native/scripts/check-encryption-dry-run.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/PassphraseFieldsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCryptoTest.kt`
 - Notes: Argon2id key derivation never blocks the engine: a tap during it still answers. After a restart the phone syncs the encrypted folder with no passphrase typed.
+- Upgrade: Settings › Sync › Encryption › Upgrade sync encryption opens an explicit current-passphrase confirmation. Update every device first; older clients cannot read the result. The service uses a verified durable local copy and refuses mismatches or unavailable storage. Keep the upgrade passphrase for retained encrypted recovery archives, even after changing the active passphrase. An interrupted format upgrade can retry; other unfinished encryption transitions do not expose this action. No upgrade runs automatically during unlock.
 
 ## Data: backup, import, and recovery
 

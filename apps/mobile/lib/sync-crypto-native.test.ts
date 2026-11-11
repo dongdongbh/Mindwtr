@@ -75,7 +75,7 @@ describe('mobileSyncCryptoPrimitives', () => {
         fromBase64(vector.encryptedB64),
         material.key,
         mobileSyncCryptoPrimitives,
-      );
+       { kind: 'document' });
       expect(Buffer.from(plaintext).toString('base64'), vector.name).toBe(vector.plaintextB64);
     }
   }, 30_000);
@@ -92,8 +92,8 @@ describe('mobileSyncCryptoPrimitives', () => {
       fromBase64(vector.plaintextB64),
       material,
       mobileSyncCryptoPrimitives,
-    );
-    const opened = await decryptSyncArtifact(sealed, material.key, defaultSyncCryptoPrimitives);
+     { kind: 'document' });
+    const opened = await decryptSyncArtifact(sealed, material.key, defaultSyncCryptoPrimitives, { kind: 'document' });
     expect(Buffer.from(opened).toString('base64')).toBe(vector.plaintextB64);
   }, 30_000);
 
@@ -116,7 +116,7 @@ describe('mobileSyncCryptoPrimitives', () => {
     const tampered = fromBase64(vector.encryptedB64);
     tampered[tampered.length - 1] ^= 0xff;
     await expect(
-      decryptSyncArtifact(tampered, material.key, mobileSyncCryptoPrimitives),
+      decryptSyncArtifact(tampered, material.key, mobileSyncCryptoPrimitives, { kind: 'document' }),
     ).rejects.toBeInstanceOf(SyncCryptoAuthError);
   });
 
@@ -129,7 +129,7 @@ describe('mobileSyncCryptoPrimitives', () => {
       mobileSyncCryptoPrimitives,
     );
     await expect(
-      decryptSyncArtifact(fromBase64(vector.encryptedB64), wrong.key, mobileSyncCryptoPrimitives),
+      decryptSyncArtifact(fromBase64(vector.encryptedB64), wrong.key, mobileSyncCryptoPrimitives, { kind: 'document' }),
     ).rejects.toBeInstanceOf(SyncCryptoAuthError);
   });
 
@@ -144,7 +144,7 @@ describe('mobileSyncCryptoPrimitives', () => {
     const tampered = fromBase64(vector.encryptedB64);
     tampered[34] ^= 0x01;
     await expect(
-      decryptSyncArtifact(tampered, material.key, mobileSyncCryptoPrimitives),
+      decryptSyncArtifact(tampered, material.key, mobileSyncCryptoPrimitives, { kind: 'document' }),
     ).rejects.toBeInstanceOf(SyncCryptoAuthError);
   });
 

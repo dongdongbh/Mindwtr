@@ -290,8 +290,8 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const base = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(1), FAST_KDF);
         const abandoned = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(2), FAST_KDF);
         const remote = Object.assign(createFakeRemote({
-            'data.json.enc': { bytes: await encryptSyncArtifact(utf8('a'), base), kind: 'document' },
-            'attachments/a.png': { bytes: await encryptSyncArtifact(utf8('eleven bytes'), abandoned), kind: 'attachment' },
+            'data.json.enc': { bytes: await encryptSyncArtifact(utf8('a'), base, undefined, { kind: 'document' }), kind: 'document' },
+            'attachments/a.png': { bytes: await encryptSyncArtifact(utf8('eleven bytes'), abandoned, undefined, { kind: 'attachment', cloudKey: 'attachments/a.png' }), kind: 'attachment' },
         }), { maxEncryptedArtifactBytes: 80 });
         const original = new Map(remote.store);
         const write = vi.spyOn(remote, 'write');
@@ -310,7 +310,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
     it('uses canonical encrypted size, ignoring verified provider padding on an unchanged generation', async () => {
         const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(3), FAST_KDF);
-        const sealed = await encryptSyncArtifact(utf8('a'), material);
+        const sealed = await encryptSyncArtifact(utf8('a'), material, undefined, { kind: 'document' });
         const padded = new Uint8Array(sealed.length + 9);
         padded.set(sealed);
         padded.fill(0x20, sealed.length);
@@ -439,9 +439,9 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const key = await keyCache.getKey();
         expect(key).not.toBeNull();
 
-        const decryptedData = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key!);
+        const decryptedData = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key!, undefined, { kind: 'document' });
         expect(text(decryptedData)).toBe('{"tasks":[]}');
-        const decryptedAttachment = await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key!);
+        const decryptedAttachment = await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key!, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' });
         expect(text(decryptedAttachment)).toBe('PNGBYTES');
     });
 
@@ -455,7 +455,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
 
         const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(7), FAST_KDF);
-        const sealedBak = await encryptSyncArtifact(remote.store.get('data.json.bak')!, material);
+        const sealedBak = await encryptSyncArtifact(remote.store.get('data.json.bak')!, material, undefined, { kind: 'document' });
         remote.store.set('data.json.enc.bak', sealedBak);
         remote.kinds.set('data.json.enc.bak', 'document');
 
@@ -469,13 +469,13 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
 
         const key = (await keyCache.getKey())!;
-        const decrypted = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key);
+        const decrypted = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key, undefined, { kind: 'document' });
         expect(text(decrypted)).toBe('{"tasks":[]}');
     });
 
     it('authenticates an interrupted encrypted generation before a wrong passphrase can mutate attachments', async () => {
         const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(7), FAST_KDF);
-        const encryptedDocument = await encryptSyncArtifact(utf8('{"tasks":[]}'), material);
+        const encryptedDocument = await encryptSyncArtifact(utf8('{"tasks":[]}'), material, undefined, { kind: 'document' });
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
             'data.json.enc': { bytes: encryptedDocument, kind: 'document' },
@@ -509,7 +509,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
     it('authenticates attachment-only interrupted generations before mutating earlier plaintext attachments', async () => {
         const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(11), FAST_KDF);
-        const encryptedAttachment = await encryptSyncArtifact(utf8('SEALED'), material);
+        const encryptedAttachment = await encryptSyncArtifact(utf8('SEALED'), material, undefined, { kind: 'attachment', cloudKey: 'attachments/z-sealed.bin' });
         const remote = createFakeRemote({
             'attachments/a-plain.bin': { bytes: utf8('PLAIN'), kind: 'attachment' },
             'attachments/z-sealed.bin': { bytes: encryptedAttachment, kind: 'attachment' },
@@ -542,7 +542,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const peerMaterial = await deriveSyncKeyMaterial('peer passphrase', new Uint8Array(16).fill(17), FAST_KDF);
         const remote = createFakeRemote({
             'data.json.enc': {
-                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), originalMaterial),
+                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), originalMaterial, undefined, { kind: 'document' }),
                 kind: 'document',
             },
         });
@@ -552,7 +552,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
             if (name === 'data.json.enc') {
                 encryptedDocumentReads += 1;
                 if (encryptedDocumentReads === 2) {
-                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial));
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial, undefined, { kind: 'document' }));
                 }
             }
             return originalRead(name);
@@ -579,7 +579,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         await expect(decryptRemoteArtifactOrThrow(
             remote.store.get('data.json.enc')!,
             originalMaterial.key,
-        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+         undefined, { kind: 'document' })).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
     });
 
     it('converges mixed-salt encrypted documents to the authoritative base generation', async () => {
@@ -587,11 +587,11 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const backupMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(23), FAST_KDF);
         const remote = createFakeRemote({
             'data.json.enc': {
-                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), baseMaterial),
+                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), baseMaterial, undefined, { kind: 'document' }),
                 kind: 'document',
             },
             'data.json.enc.bak': {
-                bytes: await encryptSyncArtifact(utf8('{"tasks":["old"]}'), backupMaterial),
+                bytes: await encryptSyncArtifact(utf8('{"tasks":["old"]}'), backupMaterial, undefined, { kind: 'document' }),
                 kind: 'document',
             },
         });
@@ -609,8 +609,8 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         );
 
         const key = (await keyCache.getKey())!;
-        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key)).toEqual(utf8('{"tasks":[]}'));
-        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc.bak')!, key)).toEqual(utf8('{"tasks":["old"]}'));
+        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key, undefined, { kind: 'document' })).toEqual(utf8('{"tasks":[]}'));
+        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc.bak')!, key, undefined, { kind: 'document' })).toEqual(utf8('{"tasks":["old"]}'));
 
         await runDisableSyncEncryptionOverRemote(remote, keyCache, localState);
         expect(text(remote.store.get('data.json')!)).toBe('{"tasks":[]}');
@@ -627,16 +627,16 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
 
         const abandonedMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(42), FAST_KDF);
-        remote.store.set('attachments/a1.png', await encryptSyncArtifact(utf8('PNGBYTES'), abandonedMaterial));
+        remote.store.set('attachments/a1.png', await encryptSyncArtifact(utf8('PNGBYTES'), abandonedMaterial, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' }));
 
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF);
 
         const key = (await keyCache.getKey())!;
 
 
-        const decryptedAttachment = await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key);
+        const decryptedAttachment = await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' });
         expect(text(decryptedAttachment)).toBe('PNGBYTES');
-        const decryptedData = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key);
+        const decryptedData = await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key, undefined, { kind: 'document' });
         expect(text(decryptedData)).toBe('{"tasks":[]}');
     });
 
@@ -706,7 +706,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
         expect(text(await decryptRemoteArtifactOrThrow(
             remote.store.get('attachments/a1.png')!, (await keyCache.getKey())!,
-        ))).toBe('PEER');
+            undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' }))).toBe('PEER');
     });
 
     it('does not commit enable when a new attachment appears after inventory', async () => {
@@ -790,7 +790,7 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         const foreignMaterial = await deriveSyncKeyMaterial('foreign-pw', new Uint8Array(16).fill(29), FAST_KDF);
         remote.peerWrite(
             'attachments/z-foreign.bin',
-            await encryptSyncArtifact(utf8('FOREIGN'), foreignMaterial),
+            await encryptSyncArtifact(utf8('FOREIGN'), foreignMaterial, undefined, { kind: 'attachment', cloudKey: 'attachments/z-foreign.bin' }),
         );
         const write = vi.spyOn(remote, 'write');
 
@@ -871,7 +871,7 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
         const originalWrite = remote.write.bind(remote);
         const peerMaterial = await deriveSyncKeyMaterial('pw', hexToBytesForTest(localState.value!.discoveredSalt!), FAST_KDF);
-        const peerBytes = await encryptSyncArtifact(utf8('PEER'), peerMaterial);
+        const peerBytes = await encryptSyncArtifact(utf8('PEER'), peerMaterial, undefined, { kind: 'document' });
         let injected = false;
         remote.write = async (name, bytes, expectedVersion) => {
             if (!injected && name === 'attachments/a1.png') {
@@ -902,7 +902,7 @@ describe('runDisableSyncEncryptionOverRemote', () => {
             salt: hexToBytesForTest(localState.value!.discoveredSalt!),
             params: FAST_KDF,
         };
-        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), material);
+        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), material, undefined, { kind: 'document' });
         const originalWrite = remote.write.bind(remote);
         let injected = false;
         remote.write = async (name, bytes, expectedVersion) => {
@@ -959,7 +959,7 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         const abandonedMaterial = await deriveSyncKeyMaterial('intended-next', new Uint8Array(16).fill(31), FAST_KDF);
         remote.peerWrite(
             'attachments/z-abandoned.bin',
-            await encryptSyncArtifact(utf8('ABANDONED'), abandonedMaterial),
+            await encryptSyncArtifact(utf8('ABANDONED'), abandonedMaterial, undefined, { kind: 'attachment', cloudKey: 'attachments/z-abandoned.bin' }),
         );
         const write = vi.spyOn(remote, 'write');
 
@@ -975,8 +975,8 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
             'old-pw', 'intended-next', remote, keyCache, localState, undefined, undefined, FAST_KDF,
         );
         const finalKey = (await keyCache.getKey())!;
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a-old.bin')!, finalKey))).toBe('OLD');
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/z-abandoned.bin')!, finalKey))).toBe('ABANDONED');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a-old.bin')!, finalKey, undefined, { kind: 'attachment', cloudKey: 'attachments/a-old.bin' }))).toBe('OLD');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/z-abandoned.bin')!, finalKey, undefined, { kind: 'attachment', cloudKey: 'attachments/z-abandoned.bin' }))).toBe('ABANDONED');
     });
 
     it('refuses rotation while an interrupted disable left a plaintext document generation', async () => {
@@ -1018,8 +1018,8 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
 
         expect(localState.value!.discoveredSalt).not.toBe(oldSalt);
         const key = (await keyCache.getKey())!;
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":[]}');
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key))).toBe('PNGBYTES');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key, undefined, { kind: 'document' }))).toBe('{"tasks":[]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' }))).toBe('PNGBYTES');
     });
 
     it('is resumable when an earlier attempt with the same passphrases left an artifact under an abandoned intermediate salt', async () => {
@@ -1033,13 +1033,13 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
 
 
         const abandonedMaterial = await deriveSyncKeyMaterial('new-pw', new Uint8Array(16).fill(99), FAST_KDF);
-        remote.store.set('attachments/a1.png', await encryptSyncArtifact(utf8('PNGBYTES'), abandonedMaterial));
+        remote.store.set('attachments/a1.png', await encryptSyncArtifact(utf8('PNGBYTES'), abandonedMaterial, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' }));
 
         await runChangeSyncEncryptionPassphraseOverRemote('old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
 
         const key = (await keyCache.getKey())!;
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key))).toBe('PNGBYTES');
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":[]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' }))).toBe('PNGBYTES');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key, undefined, { kind: 'document' }))).toBe('{"tasks":[]}');
     });
 
     it('keeps the old local key/state and peer bytes when rotation loses its generation', async () => {
@@ -1056,7 +1056,7 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
             key: oldKey,
             salt: hexToBytesForTest(localState.value!.discoveredSalt!),
             params: FAST_KDF,
-        });
+        }, undefined, { kind: 'attachment', cloudKey: 'attachments/a1.png' });
         const originalWrite = remote.write.bind(remote);
         let injected = false;
         remote.write = async (name, bytes, expectedVersion) => {
@@ -1115,9 +1115,9 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         expect(finalKey).not.toEqual(oldKey);
         expect(localState.value?.state).toBe('enabled');
         expect(localState.value?.incompleteTransition).toBeUndefined();
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey)))
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey, undefined, { kind: 'document' })))
             .toBe('{"tasks":[]}');
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey, undefined, { kind: 'attachment', cloudKey: 'attachments/a.bin' })))
             .toBe('ATTACHMENT');
     });
 
@@ -1160,7 +1160,7 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         const persistedCandidateKey = new Uint8Array((await keyCache.getKey())!);
         expect(persistedCandidateKey).not.toEqual(oldKey);
         expect(localState.value).toEqual({ ...oldState, incompleteTransition: 'change-passphrase' });
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, persistedCandidateKey)))
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, persistedCandidateKey, undefined, { kind: 'document' })))
             .toBe('{"tasks":[]}');
 
         keyCache.setKey = setKey;
@@ -1171,9 +1171,9 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         const finalKey = (await keyCache.getKey())!;
         expect(localState.value?.state).toBe('enabled');
         expect(localState.value?.incompleteTransition).toBeUndefined();
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey)))
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey, undefined, { kind: 'document' })))
             .toBe('{"tasks":[]}');
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey, undefined, { kind: 'attachment', cloudKey: 'attachments/a.bin' })))
             .toBe('ATTACHMENT');
     });
 
@@ -1191,7 +1191,7 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
             salt: hexToBytesForTest(localState.value!.discoveredSalt!),
             params: FAST_KDF,
         };
-        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), oldMaterial);
+        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), oldMaterial, undefined, { kind: 'document' });
         const originalWrite = remote.write.bind(remote);
         let injected = false;
         remote.write = async (name, bytes, expectedVersion) => {
@@ -1240,12 +1240,12 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
 
     it('detectForeignSaltArtifact flags only a valid container under another salt', async () => {
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(1), FAST_KDF);
-        const sealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), material);
+        const sealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), material, undefined, { kind: 'document' });
         expect(detectForeignSaltArtifact(sealed, material)).toBeNull();
         expect(detectForeignSaltArtifact(utf8('{"tasks":[]}'), material)).toBeNull();
 
         const foreignMaterial = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(9), FAST_KDF);
-        const foreignSealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), foreignMaterial);
+        const foreignSealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), foreignMaterial, undefined, { kind: 'document' });
         const detected = detectForeignSaltArtifact(foreignSealed, material);
         expect(detected).not.toBeNull();
         expect(Array.from(detected!.salt)).toEqual(Array.from(foreignMaterial.salt));
@@ -1287,7 +1287,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
             if (name === 'data.json.enc') {
                 reads += 1;
                 if (reads === 2) {
-                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial));
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial, undefined, { kind: 'document' }));
                 }
             }
             return originalRead(name);
@@ -1298,7 +1298,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         )).resolves.toBe('ok');
 
         const key = (await keyCache.getKey())!;
-        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":["peer"]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key, undefined, { kind: 'document' }))).toBe('{"tasks":["peer"]}');
         expect(localState.value?.discoveredSalt).toBe(bytesToHexForTest(peerMaterial.salt));
     });
 
@@ -1318,7 +1318,7 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
                     const material = await deriveSyncKeyMaterial(
                         'right-pw', new Uint8Array(16).fill(40 + reads), FAST_KDF,
                     );
-                    remote.peerWrite(name, await encryptSyncArtifact(utf8(`{"tasks":[${reads}]}`), material));
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8(`{"tasks":[${reads}]}`), material, undefined, { kind: 'document' }));
                 }
             }
             return originalRead(name);
@@ -1463,22 +1463,22 @@ describe('discovery scope (#1138)', () => {
 describe('fail-closed decrypt', () => {
     it('wraps auth failure (wrong key / tampered ciphertext) as SyncEncryptionTerminalError', async () => {
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16), FAST_KDF);
-        const sealed = await encryptSyncArtifact(utf8('secret'), material);
+        const sealed = await encryptSyncArtifact(utf8('secret'), material, undefined, { kind: 'document' });
         const tampered = new Uint8Array(sealed);
         tampered[tampered.length - 1] ^= 0xff;
-        await expect(decryptRemoteArtifactOrThrow(tampered, material.key)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+        await expect(decryptRemoteArtifactOrThrow(tampered, material.key, undefined, { kind: 'document' })).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
 
         const wrongKey = new Uint8Array(32).fill(9);
-        await expect(decryptRemoteArtifactOrThrow(sealed, wrongKey)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+        await expect(decryptRemoteArtifactOrThrow(sealed, wrongKey, undefined, { kind: 'document' })).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
     });
 
 
     it('raw decryptSyncArtifact (no wrapper) throws a different class than the terminal wrapper', async () => {
         const { decryptSyncArtifact, SyncCryptoAuthError } = await import('./sync-crypto');
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16), FAST_KDF);
-        const sealed = await encryptSyncArtifact(utf8('secret'), material);
+        const sealed = await encryptSyncArtifact(utf8('secret'), material, undefined, { kind: 'document' });
         const wrongKey = new Uint8Array(32).fill(9);
-        await expect(decryptSyncArtifact(sealed, wrongKey)).rejects.toBeInstanceOf(SyncCryptoAuthError);
+        await expect(decryptSyncArtifact(sealed, wrongKey, undefined, { kind: 'document' })).rejects.toBeInstanceOf(SyncCryptoAuthError);
     });
 });
 
@@ -1541,7 +1541,7 @@ describe('unsupported containers in transitions', () => {
 
     const unknownVersionContainer = async (): Promise<Uint8Array> => {
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(7), FAST_KDF);
-        const sealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), material);
+        const sealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), material, undefined, { kind: 'document' });
         sealed[6] = 9;
         return sealed;
     };

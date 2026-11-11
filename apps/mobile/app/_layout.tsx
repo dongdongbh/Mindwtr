@@ -346,7 +346,7 @@ function RootLayoutContentInner() {
     openSyncSettings,
     showToast,
   });
-  const { dataReady, canonicalDataReady } = useRootLayoutStartup({
+  const { dataReady, canonicalDataReady, startupLoadFailed, retryDataLoad } = useRootLayoutStartup({
     analyticsHeartbeatUrl,
     analyticsHeartbeatChannel,
     appVersion: analyticsAppVersion,
@@ -1035,7 +1035,13 @@ function RootLayoutContentInner() {
       }}
     >
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-          <MobileAppLockGate enabled={mobileAppLockEnabled} onLockedChange={setAppLocked}>
+          <MobileAppLockGate
+            enabled={mobileAppLockEnabled}
+            securityReady={canonicalDataReady}
+            startupLoadFailed={startupLoadFailed}
+            onRetryStartup={retryDataLoad}
+            onLockedChange={setAppLocked}
+          >
           <ProjectNextActionPromptProvider>
           <StartupReadinessContext.Provider value={startupReadiness}>
             <PersistenceFailureBanner />

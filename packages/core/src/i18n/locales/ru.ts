@@ -972,6 +972,7 @@ export const ruOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Через 5 минут',
         'settings.mobile.appLockRelockAfter15': 'Через 15 минут',
         'appLock.title': 'Mindwtr заблокирован',
+        "appLock.loadFailed": "Mindwtr не удалось загрузить ваши данные. Попробуйте ещё раз.",
         'appLock.description': 'Используйте блокировку устройства, чтобы открыть Mindwtr. Это защищает экран приложения, а не базу данных на устройстве.',
         'appLock.prompt': 'Разблокировать Mindwtr',
         'appLock.enablePrompt': 'Включить блокировку Mindwtr',

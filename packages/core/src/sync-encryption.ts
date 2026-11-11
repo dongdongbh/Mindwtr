@@ -6,6 +6,7 @@ import {
     SyncCryptoAuthError,
     SyncCryptoUnsupportedError,
     decryptSyncArtifact,
+    decryptLegacySyncArtifactForUpgrade,
     defaultSyncCryptoPrimitives,
     deriveSyncKeyMaterial,
     encryptedSyncArtifactByteLength,
@@ -14,12 +15,18 @@ import {
     type SyncCryptoKdfParams,
     type SyncCryptoPrimitives,
     type SyncKeyMaterial,
+    type SyncArtifactContext,
 } from './sync-crypto';
 import { normalizeCloudUrl, normalizeWebdavUrl } from './sync-helpers';
+import { computeSha256Hex, isSha256Hex } from './attachment-hash';
+import { areRemoteSyncDocumentsEqual, parseSyncDocument, toRemoteSyncDocument } from './sync-document';
+import type { AppData } from './types';
+import { hmac } from '@noble/hashes/hmac.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 
 export type SyncEncryptionState = 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
-export type SyncEncryptionTransitionKind = 'enable' | 'disable' | 'change-passphrase';
+export type SyncEncryptionTransitionKind = 'enable' | 'disable' | 'change-passphrase' | 'upgrade';
 
 
 export const SYNC_ENCRYPTION_KEYED_STATES: readonly SyncEncryptionState[] = ['enabled', 'remote-plaintext'];
@@ -170,7 +177,12 @@ export type SyncEncryptionKeyCachePort = {
 export type SyncEncryptionRemoteEntryKind = 'document' | 'attachment';
 
 
-export type SyncEncryptionRemoteEntry = { name: string; kind: SyncEncryptionRemoteEntryKind };
+export type SyncEncryptionRemoteEntry = { name: string; kind: SyncEncryptionRemoteEntryKind; originalName?: string };
+
+const entryContext = (entry: SyncEncryptionRemoteEntry): SyncArtifactContext => entry.kind === 'document'
+    ? { kind: 'document' } : entry.name.startsWith('attachments/') && !entry.originalName
+        ? { kind: 'attachment', cloudKey: entry.name }
+        : { kind: 'recovery', artifactName: entry.originalName ?? entry.name };
 
 
 export type SyncEncryptionRemoteRead = {
@@ -265,6 +277,14 @@ export class SyncEncryptionRemotePlaintextError extends Error {
     }
 }
 
+export const assertSyncAttachmentEncryptionPosture = (status: SyncEncryptionStatus, material: SyncKeyMaterial | null | undefined): void => {
+    if (status.incompleteTransition) throw new SyncEncryptionTransitionIncompleteError(status.incompleteTransition);
+    if (status.partlyEncrypted) throw new SyncEncryptionPartlyEncryptedError();
+    if (status.state === 'off' && !status.partlyEncrypted && !material) return;
+    if (SYNC_ENCRYPTION_KEYED_STATES.includes(status.state) && material) return;
+    throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError('SYNC_ENCRYPTION_ATTACHMENT_POSTURE: attachment encryption is locked, unavailable or changed'));
+};
+
 
 export function isPlaintextSyncArtifact(bytes: Uint8Array | null | undefined): boolean {
     if (!bytes || bytes.length === 0) return false;
@@ -277,9 +297,10 @@ export async function decryptRemoteArtifactOrThrow(
     bytes: Uint8Array,
     key: Uint8Array,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
+    context: SyncArtifactContext,
 ): Promise<Uint8Array> {
     try {
-        return await decryptSyncArtifact(bytes, key, prims);
+        return await decryptSyncArtifact(bytes, key, prims, context);
     } catch (err) {
         if (err instanceof SyncCryptoAuthError || err instanceof SyncCryptoUnsupportedError) {
             throw new SyncEncryptionTerminalError(err);
@@ -307,9 +328,9 @@ const unsupportedArtifact = (name: string, reason: string): SyncEncryptionTermin
     new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(`${name}: ${reason}`));
 
 
-async function triesDecrypt(bytes: Uint8Array, key: Uint8Array, prims: SyncCryptoPrimitives): Promise<boolean> {
+async function triesDecrypt(bytes: Uint8Array, key: Uint8Array, prims: SyncCryptoPrimitives, context: SyncArtifactContext): Promise<boolean> {
     try {
-        await decryptSyncArtifact(bytes, key, prims);
+        await decryptSyncArtifact(bytes, key, prims, context);
         return true;
     } catch (err) {
         if (err instanceof SyncCryptoAuthError) return false;
@@ -656,7 +677,7 @@ export async function runEnableSyncEncryptionOverRemote(
             continue;
         }
         const candidate = await recoverMaterialForSalt(inspected.salt, inspected.params);
-        const plaintext = await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
+        const plaintext = await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims, entryContext(entry));
         plaintextLengths.set(entry.name, plaintext.length);
         if (!attachmentMaterial && entry.kind === 'attachment') attachmentMaterial = candidate;
         if (entry.kind === 'document' && entry.name.includes('.enc')) {
@@ -681,7 +702,7 @@ export async function runEnableSyncEncryptionOverRemote(
 
             if (inspected.kind === 'encrypted'
                 && (entry.kind === 'document' && !entry.name.includes('.enc')
-                    || await triesDecrypt(bytes, material.key, prims))) continue;
+                    || await triesDecrypt(bytes, material.key, prims, entryContext(entry)))) continue;
             if (encryptedSyncArtifactByteLength(plaintextLength) > maxEncryptedArtifactBytes) {
                 throw new SyncEncryptionArtifactCapacityError();
             }
@@ -718,22 +739,22 @@ export async function runEnableSyncEncryptionOverRemote(
             const inspected = inspectSyncArtifact(bytes);
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             if (inspected.kind === 'plaintext') {
-                const sealed = await encryptSyncArtifact(bytes, material, prims);
+                const sealed = await encryptSyncArtifact(bytes, material, prims, entryContext(entry));
                 await ensureTransitionJournal();
                 const verified = await writeVerifiedRemoteBytes(remote, entry.name, sealed, version, async (verify) => {
-                    const plain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                    const plain = await decryptRemoteArtifactOrThrow(verify, material.key, prims, entryContext(entry));
                     if (!bytesEqual(plain, bytes)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
                     }
                 });
                 snapshot.set(entry.name, verified);
-            } else if (!(await triesDecrypt(bytes, material.key, prims))) {
+            } else if (!(await triesDecrypt(bytes, material.key, prims, entryContext(entry)))) {
                 const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
-                const plain = await decryptRemoteArtifactOrThrow(bytes, oldMaterial.key, prims);
-                const sealed = await encryptSyncArtifact(plain, material, prims);
+                const plain = await decryptRemoteArtifactOrThrow(bytes, oldMaterial.key, prims, entryContext(entry));
+                const sealed = await encryptSyncArtifact(plain, material, prims, entryContext(entry));
                 await ensureTransitionJournal();
                 const verified = await writeVerifiedRemoteBytes(remote, entry.name, sealed, version, async (verify) => {
-                    const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                    const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims, entryContext(entry));
                     if (!bytesEqual(verifiedPlain, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
                     }
@@ -748,7 +769,7 @@ export async function runEnableSyncEncryptionOverRemote(
     for (const entry of encryptedDocuments) {
         report('documents');
         const current = snapshotRemoteRead(snapshot, entry.name);
-        if (current.bytes && !(await triesDecrypt(current.bytes, material.key, prims))) {
+        if (current.bytes && !(await triesDecrypt(current.bytes, material.key, prims, entryContext(entry)))) {
             const version = requireExistingRemoteVersion(entry.name, current);
             const inspected = inspectSyncArtifact(current.bytes);
             if (inspected.kind !== 'encrypted') {
@@ -757,11 +778,11 @@ export async function runEnableSyncEncryptionOverRemote(
                 );
             }
             const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
-            const plain = await decryptRemoteArtifactOrThrow(current.bytes, oldMaterial.key, prims);
-            const sealed = await encryptSyncArtifact(plain, material, prims);
+            const plain = await decryptRemoteArtifactOrThrow(current.bytes, oldMaterial.key, prims, entryContext(entry));
+            const sealed = await encryptSyncArtifact(plain, material, prims, entryContext(entry));
             await ensureTransitionJournal();
             const verified = await writeVerifiedRemoteBytes(remote, entry.name, sealed, version, async (verify) => {
-                const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims, entryContext(entry));
                 if (!bytesEqual(verifiedPlain, plain)) {
                     throw new SyncEncryptionRemoteConflictError(
                         `${entry.name} changed during sync encryption enable convergence`,
@@ -785,18 +806,18 @@ export async function runEnableSyncEncryptionOverRemote(
 
             if (inspected.kind === 'plaintext') {
                 const encName = syncEncryptedArtifactName(entry.name);
-                const sealed = await encryptSyncArtifact(bytes, material, prims);
+                const sealed = await encryptSyncArtifact(bytes, material, prims, entryContext(entry));
                 const target = snapshotRemoteRead(snapshot, encName);
                 if (target.bytes) {
                     requireExistingRemoteVersion(encName, target);
-                    const targetPlain = await decryptRemoteArtifactOrThrow(target.bytes, material.key, prims);
+                    const targetPlain = await decryptRemoteArtifactOrThrow(target.bytes, material.key, prims, entryContext(entry));
                     if (!bytesEqual(targetPlain, bytes)) {
                         throw new SyncEncryptionRemoteConflictError(`${encName} conflicts with the plaintext generation`);
                     }
                 } else {
                     await ensureTransitionJournal();
                     const verified = await writeVerifiedRemoteBytes(remote, encName, sealed, null, async (verify) => {
-                        const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                        const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims, entryContext(entry));
                         if (!bytesEqual(verifiedPlain, bytes)) {
                             throw new SyncEncryptionRemoteConflictError(`${encName} changed during sync encryption enable verification`);
                         }
@@ -856,7 +877,7 @@ export async function runDisableSyncEncryptionOverRemote(
         if (inspected.kind === 'encrypted') {
             plaintextByName.set(
                 entry.name,
-                await decryptRemoteArtifactOrThrow(current.bytes, key, prims),
+                await decryptRemoteArtifactOrThrow(current.bytes, key, prims, entryContext(entry)),
             );
         }
     }
@@ -1012,12 +1033,12 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         const current = snapshotRemoteRead(snapshot, entry.name);
         if (!current.bytes) continue;
         const bytes = current.bytes;
-        if (await triesDecrypt(bytes, newMaterial.key, prims)) {
+        if (await triesDecrypt(bytes, newMaterial.key, prims, entryContext(entry))) {
             rewrapPlan.set(entry.name, null);
             continue;
         }
-        if (await triesDecrypt(bytes, oldKey, prims)) {
-            rewrapPlan.set(entry.name, await decryptRemoteArtifactOrThrow(bytes, oldKey, prims));
+        if (await triesDecrypt(bytes, oldKey, prims, entryContext(entry))) {
+            rewrapPlan.set(entry.name, await decryptRemoteArtifactOrThrow(bytes, oldKey, prims, entryContext(entry)));
             continue;
         }
         const inspected = inspectSyncArtifact(bytes);
@@ -1029,7 +1050,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         const recoveredMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
         rewrapPlan.set(
             entry.name,
-            await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims),
+            await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims, entryContext(entry)),
         );
     }
 
@@ -1039,10 +1060,10 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         const version = requireExistingRemoteVersion(name, current);
         const plain = rewrapPlan.get(name);
         if (!plain) return;
-        const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
+        const sealed = await encryptSyncArtifact(plain, newMaterial, prims, entryContext({ name, kind: expectedKinds.get(name) ?? 'document' }));
         await ensureTransitionJournal();
         const verified = await writeVerifiedRemoteBytes(remote, name, sealed, version, async (verify) => {
-            const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims);
+            const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims, entryContext({ name, kind: expectedKinds.get(name) ?? 'document' }));
             if (!bytesEqual(verifiedPlain, plain)) {
                 throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption passphrase verification`);
             }
@@ -1088,6 +1109,172 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
 }
 
 
+export const isLegacySyncPreservationName = (name: string): boolean => /^\.mindwtr-legacy-(?:[a-f0-9]{64}\.bin|inventory-[a-f0-9]{64}\.json\.enc)$/.test(name);
+
+export async function runUpgradeSyncEncryptionOverRemote(
+    passphrase: string,
+    readTrustedLocalData: () => Promise<AppData>,
+    remote: SyncEncryptionRemotePort,
+    keyCache: SyncEncryptionKeyCachePort,
+    localState: SyncEncryptionLocalStatePort,
+    onProgress?: (progress: SyncEncryptionTransitionProgress) => void,
+    prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
+): Promise<void> {
+    requireMatchingIncompleteTransition(localState, 'upgrade');
+    const local = await readTrustedLocalData();
+    const parsedLocal = parseSyncDocument(local, 'local');
+    if (!parsedLocal.ok) {
+        throw new Error('SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: open a complete local library before upgrading');
+    }
+    const trusted = toRemoteSyncDocument(parsedLocal.data);
+    const entries = await remote.list();
+    const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+    for (const entry of entries) {
+        const read = await remote.read(entry.name);
+        if (read.bytes) requireExistingRemoteVersion(entry.name, read);
+        snapshot.set(entry.name, read);
+    }
+    const canonical = snapshot.get('data.json.enc');
+    if (!canonical?.bytes) throw new Error('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED: the encrypted remote library is missing');
+    const inspected = inspectSyncArtifact(canonical.bytes);
+    if (inspected.kind !== 'encrypted') throw new SyncCryptoUnsupportedError('Expected an encrypted remote library');
+    const material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
+    const openForUpgrade = (bytes: Uint8Array, context: SyncArtifactContext) => {
+        const header = inspectSyncArtifact(bytes);
+        if (header.kind === 'plaintext' && context.kind === 'attachment') return Promise.resolve(bytes);
+        return header.kind === 'encrypted' && header.formatVersion === 1
+            ? decryptLegacySyncArtifactForUpgrade(bytes, material.key, prims)
+            : decryptSyncArtifact(bytes, material.key, prims, context);
+    };
+    const remotePlain = await openForUpgrade(canonical.bytes, { kind: 'document' });
+    const parsedRemote = parseSyncDocument(JSON.parse(new TextDecoder().decode(remotePlain)), 'remote');
+    if (!parsedRemote.ok || !areRemoteSyncDocumentsEqual(trusted, toRemoteSyncDocument(parsedRemote.data))) {
+        throw new Error('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED: reconcile all devices with this trusted local library before upgrading');
+    }
+    const planned = new Map<string, Uint8Array>();
+    for (const entity of [...parsedLocal.data.tasks, ...parsedLocal.data.projects]) {
+        for (const attachment of entity.attachments ?? []) {
+            if (attachment.kind === 'link' || attachment.deletedAt || !attachment.cloudKey) continue;
+            const name = attachment.cloudKey;
+            const current = snapshot.get(name);
+            if (!current?.bytes || !isSha256Hex(attachment.fileHash)) {
+                throw new Error('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED: every remote attachment needs a trusted content hash');
+            }
+            const context: SyncArtifactContext = { kind: 'attachment', cloudKey: name };
+            const plain = await openForUpgrade(current.bytes, context);
+            const digest = await computeSha256Hex(plain);
+            if (!digest || digest.toLowerCase() !== attachment.fileHash.toLowerCase()) {
+                throw new Error('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED: an attachment differs from the trusted local library');
+            }
+            planned.set(name, await encryptSyncArtifact(plain, material, prims, context));
+        }
+    }
+    const alreadyUpgraded = localState.read()?.incompleteTransition !== 'upgrade' && entries.every((entry) => {
+        const bytes = snapshot.get(entry.name)?.bytes;
+        if (!bytes) return true;
+        const header = inspectSyncArtifact(bytes);
+        return header.kind === 'encrypted' && header.formatVersion === 2;
+    });
+    if (alreadyUpgraded) {
+        await keyCache.setKey(material.key);
+        await localState.write({ state: 'enabled', discoveredSalt: bytesToHex(material.salt), discoveredParams: material.params });
+        return;
+    }
+    const document = await encryptSyncArtifact(new TextEncoder().encode(JSON.stringify(trusted)), material, prims, { kind: 'document' });
+    const preservedInventory: { name: string; preservedName: string; sourceSha256: string; encoding: 'recovery-v2' }[] = [];
+    const archiveIdentifiers = new Map<string, string>();
+    const recoveryIdentifier = (domain: string, bytes: Uint8Array) => bytesToHex(hmac.create(sha256, material.key)
+        .update(new TextEncoder().encode(`mindwtr-legacy-${domain}:2\u0000`)).update(bytes).digest());
+    for (const entry of entries) {
+        const current = snapshot.get(entry.name)!;
+        if (!current.bytes) continue;
+        const digest = await computeSha256Hex(current.bytes);
+        if (!digest) throw new Error('Legacy preservation hash is unavailable');
+        const identifier = recoveryIdentifier('archive', current.bytes);
+        archiveIdentifiers.set(entry.name, identifier);
+        preservedInventory.push({ name: entry.originalName ?? entry.name, preservedName: `.mindwtr-legacy-${identifier}.bin`, sourceSha256: digest, encoding: 'recovery-v2' });
+    }
+    const inventoryBytes = new TextEncoder().encode(JSON.stringify(preservedInventory.sort((a, b) => compareSyncTransitionEntryNames(a.name, b.name))));
+    const inventoryDigest = recoveryIdentifier('inventory', inventoryBytes);
+    const inventoryName = `.mindwtr-legacy-inventory-${inventoryDigest}.json.enc`;
+    const capacity = remote.maxEncryptedArtifactBytes;
+    if (capacity !== undefined && [document.length, ...Array.from(planned.values(), (bytes) => bytes.length),
+        encryptedSyncArtifactByteLength(inventoryBytes.length),
+        ...Array.from(snapshot.values()).flatMap((entry) => entry.bytes ? [encryptedSyncArtifactByteLength(entry.bytes.length)] : []),
+    ].some((length) => length > capacity)) {
+        throw new SyncEncryptionArtifactCapacityError();
+    }
+    const assertLocalUnchanged = async () => {
+        const current = parseSyncDocument(await readTrustedLocalData(), 'local');
+        if (!current.ok || !areRemoteSyncDocumentsEqual(trusted, toRemoteSyncDocument(current.data))) {
+            throw new Error('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED: the local library changed during upgrade');
+        }
+    };
+    await assertLocalUnchanged();
+    await beginSyncEncryptionTransition(localState, 'upgrade');
+    let completed = 0;
+    for (const entry of entries) {
+        const current = snapshot.get(entry.name)!;
+        if (!current.bytes) continue;
+        const digest = archiveIdentifiers.get(entry.name)!;
+        const preservedName = `.mindwtr-legacy-${digest}.bin`;
+        const preserved = await remote.read(preservedName);
+        if (preserved.bytes) {
+            requireExistingRemoteVersion(preservedName, preserved);
+            const opened = await decryptSyncArtifact(preserved.bytes, material.key, prims, { kind: 'recovery', artifactName: digest });
+            if (!bytesEqual(opened, current.bytes)) throw new SyncEncryptionRemoteConflictError();
+        } else {
+            const sealed = await encryptSyncArtifact(current.bytes, material, prims, { kind: 'recovery', artifactName: digest });
+            await writeVerifiedRemoteBytes(remote, preservedName, sealed, null, (bytes) => {
+                if (!bytesEqual(bytes, sealed)) throw new SyncEncryptionRemoteConflictError();
+            });
+        }
+        completed += 1;
+        onProgress?.({ phase: 'attachments', completed, total: entries.length });
+    }
+    const existingInventory = await remote.read(inventoryName);
+    if (existingInventory.bytes) {
+        requireExistingRemoteVersion(inventoryName, existingInventory);
+        const opened = await decryptSyncArtifact(existingInventory.bytes, material.key, prims, { kind: 'recovery', artifactName: 'legacy-inventory' });
+        if (!bytesEqual(opened, inventoryBytes)) throw new SyncEncryptionRemoteConflictError();
+    } else {
+        const sealed = await encryptSyncArtifact(inventoryBytes, material, prims, { kind: 'recovery', artifactName: 'legacy-inventory' });
+        await writeVerifiedRemoteBytes(remote, inventoryName, sealed, null, (bytes) => {
+            if (!bytesEqual(bytes, sealed)) throw new SyncEncryptionRemoteConflictError();
+        });
+    }
+    for (const [name, bytes] of planned) {
+        const current = snapshot.get(name)!;
+        const verified = await writeVerifiedRemoteBytes(remote, name, bytes,
+            requireExistingRemoteVersion(name, current), async (written) => {
+                const opened = await decryptSyncArtifact(written, material.key, prims, { kind: 'attachment', cloudKey: name });
+                if (!bytesEqual(opened, await decryptSyncArtifact(bytes, material.key, prims, { kind: 'attachment', cloudKey: name }))) {
+                    throw new SyncEncryptionRemoteConflictError();
+                }
+            });
+        snapshot.set(name, verified);
+    }
+    await assertLocalUnchanged();
+    for (const entry of entries) {
+        const current = snapshot.get(entry.name)!;
+        if (current.bytes && !remoteReadsEqual(current, await remote.read(entry.name))) throw new SyncEncryptionRemoteConflictError();
+    }
+    const written = await writeVerifiedRemoteBytes(remote, 'data.json.enc', document,
+        requireExistingRemoteVersion('data.json.enc', canonical), async (bytes) => {
+            const plain = await decryptSyncArtifact(bytes, material.key, prims, { kind: 'document' });
+            if (!bytesEqual(plain, new TextEncoder().encode(JSON.stringify(trusted)))) throw new SyncEncryptionRemoteConflictError();
+        });
+    snapshot.set('data.json.enc', written);
+    for (const entry of entries) {
+        if (entry.name === 'data.json.enc' || planned.has(entry.name)) continue;
+        const current = snapshot.get(entry.name)!;
+        if (current.bytes) await remote.remove(entry.name, requireExistingRemoteVersion(entry.name, current));
+    }
+    await assertLocalUnchanged();
+    await keyCache.setKey(material.key);
+    await localState.write({ state: 'enabled', discoveredSalt: bytesToHex(material.salt), discoveredParams: material.params });
+}
+
 export async function runProvideSyncEncryptionPassphraseOverRemote(
     passphrase: string,
     baseDocumentPlainName: string,
@@ -1120,7 +1307,7 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
         const material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
         let wrongPassphrase = false;
         try {
-            await decryptSyncArtifact(bytes, material.key, prims);
+            await decryptSyncArtifact(bytes, material.key, prims, { kind: 'document' });
         } catch (err) {
             if (err instanceof SyncCryptoAuthError) wrongPassphrase = true;
             else throw err;

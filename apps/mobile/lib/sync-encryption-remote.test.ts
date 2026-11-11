@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as nodeCrypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
-import type { AppData } from '@mindwtr/core';
+import type { AppData, SyncKeyMaterial } from '@mindwtr/core';
 
 const asyncStorage = vi.hoisted(() => new Map<string, string>());
 vi.mock('@react-native-async-storage/async-storage', () => ({
@@ -111,17 +111,46 @@ beforeEach(() => {
   setSyncCryptoNativeModuleForTests(nodeQuickCrypto);
 });
 
+const storeAttachmentMaterial = async (material: SyncKeyMaterial): Promise<void> => {
+  await syncEncryptionKeyCache.setKey(material.key);
+  await syncEncryptionLocalState.write({
+    state: 'enabled',
+    discoveredSalt: Buffer.from(material.salt).toString('hex'),
+    discoveredParams: material.params,
+  });
+};
+
 describe('attachment byte seam', () => {
+  it.each([
+    { state: { state: 'off' }, failure: 'SYNC_ENCRYPTION_ATTACHMENT_POSTURE' },
+    { state: { state: 'remote-encrypted-no-key' }, failure: 'SYNC_ENCRYPTION_ATTACHMENT_POSTURE' },
+    { state: { state: 'enabled', incompleteTransition: 'enable' }, failure: 'SYNC_ENCRYPTION_TRANSITION_INCOMPLETE' },
+  ] as const)('refuses supplied material when the actual stored posture is $state', async ({ state, failure }) => {
+    const material = await deriveSyncKeyMaterial(
+      PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
+    );
+    await storeAttachmentMaterial(material);
+    await syncEncryptionLocalState.write(state);
+    const bytes = new Uint8Array([1, 2, 3]);
+    await expect(sealAttachmentBytesForUpload(bytes, material, 'attachments/held.bin'))
+      .rejects.toThrow(failure);
+    await expect(openAttachmentBytesFromDownload(bytes, material, 'attachments/held.bin'))
+      .rejects.toThrow(failure);
+  });
+
   it('round-trips attachment bytes through seal/open', async () => {
     const material = await deriveSyncKeyMaterial(
       PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
+    await storeAttachmentMaterial(material);
     const plaintext = new Uint8Array([0, 1, 2, 250, 251, 255]);
-    const sealed = await sealAttachmentBytesForUpload(plaintext, material);
+    const sealed = await sealAttachmentBytesForUpload(plaintext, material, 'attachments/roundtrip.bin');
     expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
     expect(sealed.length).toBe(plaintext.length + 70);
-    expect(Array.from(await openAttachmentBytesFromDownload(sealed, material)))
+    expect(Array.from(await openAttachmentBytesFromDownload(sealed, material, 'attachments/roundtrip.bin')))
       .toEqual(Array.from(plaintext));
+    await expect(openAttachmentBytesFromDownload(sealed, material, 'attachments/substituted.bin'))
+      .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
   });
 
   it('is a byte-for-byte no-op when encryption is off', async () => {
@@ -134,28 +163,33 @@ describe('attachment byte seam', () => {
     const material = await deriveSyncKeyMaterial(
       PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
-    const sealed = await sealAttachmentBytesForUpload(new Uint8Array([4, 5, 6]), material);
-    const refused = await openAttachmentBytesFromDownload(sealed, null).then(() => null, (error: unknown) => error);
+    await storeAttachmentMaterial(material);
+    const sealed = await sealAttachmentBytesForUpload(new Uint8Array([4, 5, 6]), material, 'attachments/off.bin');
+    await syncEncryptionLocalState.write({ state: 'off' });
+    await syncEncryptionKeyCache.clearKey();
+    const refused = await openAttachmentBytesFromDownload(sealed, null, 'attachments/off.bin').then(() => null, (error: unknown) => error);
     expect(refused).toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
     expect(classifySyncFailure(refused)).toBe('encryption');
   });
 
-  it('passes an unmigrated plaintext attachment through (interrupted enable)', async () => {
+  it('refuses unmigrated plaintext while encryption is enabled', async () => {
     const material = await deriveSyncKeyMaterial(
       PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
+    await storeAttachmentMaterial(material);
     const plaintext = new Uint8Array([7, 7, 7]);
-    expect(Array.from(await openAttachmentBytesFromDownload(plaintext, material)))
-      .toEqual([7, 7, 7]);
+    await expect(openAttachmentBytesFromDownload(plaintext, material, 'attachments/legacy.bin'))
+      .rejects.toThrow('SYNC_ENCRYPTION_PLAINTEXT_ATTACHMENT');
   });
 
   it('fails closed on a corrupt MWENC1 container rather than returning the raw bytes', async () => {
     const material = await deriveSyncKeyMaterial(
       PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
-    const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material);
+    await storeAttachmentMaterial(material);
+    const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material, 'attachments/roundtrip.bin');
     sealed[6] = 0x09;
-    await expect(openAttachmentBytesFromDownload(sealed, material))
+    await expect(openAttachmentBytesFromDownload(sealed, material, 'attachments/roundtrip.bin'))
       .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
   });
 
@@ -165,6 +199,7 @@ describe('attachment byte seam', () => {
       const material = await deriveSyncKeyMaterial(
         PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
       );
+      await storeAttachmentMaterial(material);
       const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material, 'attachments/corrupt.bin');
       sealed[6] = 0x09;
       vi.mocked(logInfo).mockClear();
@@ -192,6 +227,7 @@ describe('attachment byte seam', () => {
       const material = await deriveSyncKeyMaterial(
         PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
       );
+      await storeAttachmentMaterial(material);
       const sealedEncrypted = await sealAttachmentBytesForUpload(new Uint8Array([9, 9]), material, 'attachments/secret.bin');
       await openAttachmentBytesFromDownload(sealedEncrypted, material, 'attachments/secret.bin');
 
@@ -212,11 +248,12 @@ describe('attachment byte seam', () => {
     const material = await deriveSyncKeyMaterial(
       PASSPHRASE, new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
+    await storeAttachmentMaterial(material);
     const other = await deriveSyncKeyMaterial(
       'other', new Uint8Array(16).fill(3), FAST_PARAMS, mobileSyncCryptoPrimitives,
     );
-    const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material);
-    await expect(openAttachmentBytesFromDownload(sealed, other))
+    const sealed = await sealAttachmentBytesForUpload(new Uint8Array([1, 2, 3]), material, 'attachments/roundtrip.bin');
+    await expect(openAttachmentBytesFromDownload(sealed, other, 'attachments/roundtrip.bin'))
       .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
   });
 });
@@ -675,7 +712,7 @@ describe('Dropbox remote port + core transition round trip', () => {
 
     const key = await syncEncryptionKeyCache.getKey();
     expect(key).not.toBeNull();
-    const opened = await decryptSyncArtifact(remote.get('/data.json.enc')!, key!, mobileSyncCryptoPrimitives);
+    const opened = await decryptSyncArtifact(remote.get('/data.json.enc')!, key!, mobileSyncCryptoPrimitives, { kind: 'document' });
     expect(JSON.parse(new TextDecoder().decode(opened))).toEqual(data);
 
     await runDisableSyncEncryptionOverRemote(
@@ -710,7 +747,7 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(rotatedKey).not.toBeNull();
     await expect(decryptSyncArtifact(
       remote.get(`/${peerAttachmentName}`)!, rotatedKey!, mobileSyncCryptoPrimitives,
-    )).resolves.toEqual(peerAttachmentBytes);
+      { kind: 'attachment', cloudKey: peerAttachmentName })).resolves.toEqual(peerAttachmentBytes);
 
     await runDisableSyncEncryptionOverRemote(
       port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
@@ -741,7 +778,7 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(changedKey).not.toBeNull();
     await expect(decryptSyncArtifact(
       remote.get(`/${attachmentName}`)!, changedKey!, mobileSyncCryptoPrimitives,
-    )).resolves.toEqual(attachmentBytes);
+      { kind: 'attachment', cloudKey: attachmentName })).resolves.toEqual(attachmentBytes);
 
     await runDisableSyncEncryptionOverRemote(
       port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,

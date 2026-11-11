@@ -105,7 +105,7 @@ describe('selected metadata-only Task availability proof', () => {
             await memory.fs.move(staged, target); return { status: 'installed' as const };
         });
         const common = createMobileAttachmentCommon({ fs: memory.fs, files, crypto: defaultSyncCryptoPrimitives,
-            encryption: { logSyncEncryptionEvent: async () => undefined },
+            encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: 'off' }) },
             installer: { installAttachmentFileGeneration: install }, installerMayBeMissing: () => false,
             timersPaused: () => false, uploads: { createUploadTask: () => null } });
         const target = MANAGED + 'synced-file.pdf', downloaded = copy(selected);

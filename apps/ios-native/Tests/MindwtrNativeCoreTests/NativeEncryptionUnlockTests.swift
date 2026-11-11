@@ -81,7 +81,7 @@ private final class EncryptionDAVStore: @unchecked Sendable {
         let match = request.value(forHTTPHeaderField: "If-Match")
         let none = request.value(forHTTPHeaderField: "If-None-Match")
         let condition = match.map { "match:" + $0 } ?? none.map { "none:" + $0 }
-        let encryptedBody = method == "PUT" && body.prefix(8) == (Data("MWENC1".utf8) + Data([1, 1]))
+        let encryptedBody = method == "PUT" && body.prefix(8) == (Data("MWENC1".utf8) + Data([2, 1]))
         let date = DateFormatter(); date.locale = Locale(identifier: "en_US_POSIX"); date.timeZone = TimeZone(secondsFromGMT: 0)
         date.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
         func reply(_ status: Int, _ bytes: Data = Data(), etag: String? = nil, type: String = "application/octet-stream") -> Reply {
@@ -246,7 +246,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     }) }
     private func independentlyEncrypted(_ plaintext: Data) throws -> Data {
         var header = Data(repeating: 0, count: 54)
-        header.replaceSubrange(0..<8, with: Data("MWENC1".utf8) + Data([1, 1]))
+        header.replaceSubrange(0..<8, with: Data("MWENC1".utf8) + Data([2, 1]))
         func write(_ value: UInt64, _ offset: Int, _ count: Int) {
             for index in 0..<count { header[offset + index] = UInt8(truncatingIfNeeded: value >> (8 * index)) }
         }
@@ -570,7 +570,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         return (requestID, enabled.original, oldKey)
     }
     private func independentlyDecrypted(_ bytes: Data, key: Data) throws -> Data {
-        XCTAssertGreaterThanOrEqual(bytes.count, 70); XCTAssertEqual(bytes.prefix(8), Data("MWENC1".utf8) + Data([1, 1]))
+        XCTAssertGreaterThanOrEqual(bytes.count, 70); XCTAssertEqual(bytes.prefix(8), Data("MWENC1".utf8) + Data([2, 1]))
         let sealed = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: bytes.subdata(in: 34..<46)),
             ciphertext: bytes.subdata(in: 54..<(bytes.count - 16)), tag: bytes.suffix(16))
         return try AES.GCM.open(sealed, using: SymmetricKey(data: key), authenticating: bytes.prefix(54))

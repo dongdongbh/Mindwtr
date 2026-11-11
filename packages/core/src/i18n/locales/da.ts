@@ -1429,6 +1429,7 @@ export const daOverrides: Record<string, string> = {
     'settings.mobile.appLockRelockAfter5': 'Efter 5 minutter',
     'settings.mobile.appLockRelockAfter15': 'Efter 15 minutter',
     'appLock.title': 'Mindwtr er låst',
+    "appLock.loadFailed": "Mindwtr kunne ikke indlæse dine data. Prøv igen.",
     'appLock.description':
         'Brug din enhedslås til at åbne Mindwtr. Dette beskytter appvisningen, ikke databasen på enheden.',
     'appLock.prompt': 'Lås Mindwtr op',
@@ -1497,6 +1498,11 @@ export const daOverrides: Record<string, string> = {
     'settings.syncEncryptionDesc':
         'Krypter de synkroniserede filer med en adgangssætning. Enheder uden adgangssætningen kan ikke læse dem.',
     'settings.syncEncryptionEnable': 'Aktiver kryptering',
+    "settings.syncEncryptionUpgrade": "Opgrader synkroniseringskryptering",
+    "settings.syncEncryptionUpgradeWarning": "Opdater først Mindwtr på alle enheder. Ældre versioner kan ikke læse opgraderede synkroniseringsfiler. Opgraderingen bruger en verificeret lokal kopi og stopper, hvis den synkroniserede kopi afviger. Eksisterende krypterede kopier bevares. Gem denne adgangssætning for at gendanne de bevarede kopier, selv hvis du ændrer den senere.",
+    "settings.syncEncryptionErrorLegacy": "Denne synkroniseringsplacering bruger ældre kryptering. Opdater alle enheder, og vælg derefter Opgrader synkroniseringskryptering.",
+    "settings.syncEncryptionErrorReconciliation": "Det kunne ikke bekræftes, at den lokale og synkroniserede kopi stemmer overens. Sammenlign dine betroede kopier, og løs forskellene, før du prøver igen. Synkronisering forbliver sat på pause.",
+    "settings.syncEncryptionErrorTrustedLocal": "Åbn et komplet, gemt lokalt bibliotek på denne enhed før opgraderingen. Synkronisering forbliver sat på pause.",
     'settings.syncEncryptionPassphrase': 'Adgangssætning',
     'settings.syncEncryptionPassphraseConfirm': 'Bekræft adgangssætning',
     'settings.syncEncryptionCurrentPassphrase': 'Aktuel adgangssætning',

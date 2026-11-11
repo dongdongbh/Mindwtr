@@ -17,6 +17,7 @@ import type { SyncEncryptionStatus, SyncEncryptionTransitionKind } from './sync-
 import {
     createSyncEncryptionCard,
     getSyncEncryptionCardMessages,
+    isSyncEncryptionUpgradeAvailable,
     type SyncEncryptionCard,
     type SyncEncryptionCardFlow,
     type SyncEncryptionCardHost,
@@ -119,7 +120,7 @@ export type NativeSyncSettingsHost = {
 
         isBackendPending(): Promise<boolean>;
 
-        transitions?: Pick<SyncEncryptionCardHost, 'enable' | 'change' | 'disable' | 'provide' | 'decline' | 'abandon' | 'recheck' | 'randomBytes'>;
+        transitions?: Pick<SyncEncryptionCardHost, 'enable' | 'upgrade' | 'change' | 'disable' | 'provide' | 'decline' | 'abandon' | 'recheck' | 'randomBytes'>;
     };
 
     log: { info(message: string, context: { scope: string; extra: Record<string, string>; force?: boolean }): unknown; error(error: unknown): void };
@@ -339,7 +340,7 @@ const TO_LOCALE_STRING_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 const PASSWORD_DOTS = '••••••••';
 const PASSPHRASE_FIELDS = new Set<string>(['current', 'next', 'confirm']);
-const FLOWS = new Set<string>(['enable', 'change', 'disable', 'unlock', 'abandon']);
+const FLOWS = new Set<string>(['enable', 'change', 'disable', 'unlock', 'abandon', 'upgrade']);
 
 export const SYNC_ENCRYPTION_PASSPHRASE_MAX_LENGTH = 1000;
 
@@ -562,6 +563,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             getStatus: () => host.encryption.getStatus(),
             isBackendPending: () => host.encryption.isBackendPending(),
             enable: transitions ? (passphrase, options) => transitions.enable(passphrase, options) : missing,
+            upgrade: transitions ? (passphrase, options) => transitions.upgrade(passphrase, options) : missing,
             change: transitions ? (current, next, options) => transitions.change(current, next, options) : missing,
             disable: transitions ? (options) => transitions.disable(options) : missing,
             provide: transitions ? (passphrase) => transitions.provide(passphrase) : missing,
@@ -935,6 +937,10 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         return card?.state === 'enabled' && !card.partlyEncrypted
             && (card.incompleteTransitionKind === null || card.incompleteTransitionKind === 'change-passphrase');
     };
+    const canUpgrade = (current: Screen) => {
+        const card = current.card?.getState();
+        return card !== undefined && isSyncEncryptionUpgradeAvailable(card);
+    };
     const canDisable = (current: Screen) => {
         const card = current.card?.getState();
         return (card?.state === 'enabled' || card?.state === 'remote-plaintext') && !card.partlyEncrypted
@@ -971,13 +977,15 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         if (target.type === 'open' || target.type === 'submit') {
             return target.flow === 'unlock' ? canUnlock(current)
                 : target.flow === 'enable' ? canEnable(current)
+                    : target.flow === 'upgrade' ? hasAllWebDavTransitions(current) && canUpgrade(current)
                     : target.flow === 'change' ? hasAllWebDavTransitions(current) && canChange(current)
                         : target.flow === 'disable' ? hasAllWebDavTransitions(current) && canDisable(current)
                             : target.flow === 'abandon' && canAbandon(current);
         }
         if (target.type === 'typed') {
             const flow = current.card?.getState().flow;
-            return flow === 'unlock' ? target.field === 'current' && canUnlock(current)
+            return flow === 'upgrade' ? target.field === 'current' && hasAllWebDavTransitions(current) && canUpgrade(current)
+                : flow === 'unlock' ? target.field === 'current' && canUnlock(current)
                 : flow === 'enable' ? (target.field === 'next' || target.field === 'confirm') && canEnable(current)
                     : flow === 'change' && hasAllWebDavTransitions(current) && canChange(current)
                         && (target.field === 'current' || target.field === 'next' || target.field === 'confirm');
@@ -1089,6 +1097,17 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 act(t('settings.syncEncryptionDecline'), { type: 'decline' });
                 if (mode !== 'full') act(t('common.cancel'), { type: 'cancel' });
             }
+        }
+        if (card.flow === 'none' && canUpgrade(current)) {
+            act(t('settings.syncEncryptionUpgrade'), { type: 'open', flow: 'upgrade' });
+        }
+        if (card.flow === 'upgrade') {
+            text(t('settings.syncEncryptionUpgradeWarning'), 'warning');
+            field(t('settings.syncEncryptionCurrentPassphrase'), 'current');
+            error();
+            reveal();
+            act(t('settings.syncEncryptionUpgrade'), { type: 'submit', flow: 'upgrade' }, !card.currentPassphrase);
+            act(t('common.cancel'), { type: 'cancel' });
         }
         if (card.flow === 'abandon') {
             text(t('settings.syncEncryptionAbandonWarning'), 'warning');
@@ -1719,7 +1738,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                     const run = type === 'decline'
                         ? () => card.decline()
                         : type === 'recheck' ? () => card.recheckLocation()
-                        : target!.flow === 'enable' ? () => card.submitEnable()
+                        : target!.flow === 'upgrade' ? () => card.submitUpgrade()
+                            : target!.flow === 'enable' ? () => card.submitEnable()
                             : target!.flow === 'change' ? () => card.submitChange()
                                 : target!.flow === 'disable' ? () => card.submitDisable()
                                     : target!.flow === 'abandon' ? () => card.submitAbandon()

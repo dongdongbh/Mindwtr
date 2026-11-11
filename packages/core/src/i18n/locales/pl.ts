@@ -968,6 +968,7 @@ export const plOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Po 5 minutach',
         'settings.mobile.appLockRelockAfter15': 'Po 15 minutach',
         'appLock.title': 'Mindwtr jest zablokowany',
+        "appLock.loadFailed": "Mindwtr nie mógł wczytać Twoich danych. Spróbuj ponownie.",
         'appLock.description': 'Użyj blokady urządzenia, aby otworzyć Mindwtr. Chroni to widok aplikacji, a nie bazę danych na urządzeniu.',
         'appLock.prompt': 'Odblokuj Mindwtr',
         'appLock.enablePrompt': 'Włącz blokadę aplikacji Mindwtr',

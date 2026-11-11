@@ -350,7 +350,7 @@ afterEach(() => {
 const seedEncrypted = async (data: AppData, key: SyncKeyMaterial = material, uri = ENC_URI) => {
   const sealed = await encryptSyncArtifact(
     new TextEncoder().encode(JSON.stringify(data, null, 2)), key, mobileSyncCryptoPrimitives,
-  );
+   { kind: 'document' });
   fs.files.set(uri, sealed);
   return sealed;
 };
@@ -926,7 +926,7 @@ describe('backup rotation never writes into an existing file (B8)', () => {
       expect(written().filter((uri) => existing.has(uri) && !created.has(uri))).toEqual([]);
     }
     const { decryptSyncArtifact } = await import('@mindwtr/core');
-    const backup = await decryptSyncArtifact(fs.files.get(`${SAF_DIR}/data.json.enc.bak`)!, material.key, mobileSyncCryptoPrimitives);
+    const backup = await decryptSyncArtifact(fs.files.get(`${SAF_DIR}/data.json.enc.bak`)!, material.key, mobileSyncCryptoPrimitives, { kind: 'document' });
     expect(JSON.parse(new TextDecoder().decode(backup))).toMatchObject({ tasks: [{ title: 'second' }] });
     expect([...fs.files.keys()].filter((uri) => uri.includes('.mindwtr-et-'))).toEqual([]);
   });
@@ -937,7 +937,7 @@ describe('backup rotation never writes into an existing file (B8)', () => {
     await seedEncrypted(appData('older'), material, BACKUP);
     const peerBackup = await encryptSyncArtifact(
       new TextEncoder().encode(JSON.stringify(appData('peer-backup'))), material, mobileSyncCryptoPrimitives,
-    );
+     { kind: 'document' });
     const cas = await import('./sync-file-transition-cas');
     const previous = vi.mocked(cas.renameSafTransitionDocument).getMockImplementation()!;
 
@@ -965,7 +965,7 @@ describe('backup rotation never writes into an existing file (B8)', () => {
     const older = await seedEncrypted(appData('older'), material, BACKUP);
     const peerBackup = await encryptSyncArtifact(
       new TextEncoder().encode(JSON.stringify(appData('peer-backup'))), material, mobileSyncCryptoPrimitives,
-    );
+     { kind: 'document' });
     const fileSystem = await import('./file-system');
     const create = vi.mocked(fileSystem.StorageAccessFramework!.createFileAsync!);
     const previousCreate = create.getMockImplementation()!;
@@ -1129,13 +1129,13 @@ describe('non-truncating provider padding (decision #8)', () => {
     const safUri = 'content://provider/tree/sync/document/sync%2Fdata.json.enc';
     const big = await encryptSyncArtifact(
       new TextEncoder().encode(JSON.stringify(appData('x'.repeat(2000)))), material, mobileSyncCryptoPrimitives,
-    );
+     { kind: 'document' });
     await writeSyncArtifactBytes(safUri, big);
     fs.nonTruncating.enabled = true;
 
     const small = await encryptSyncArtifact(
       new TextEncoder().encode(JSON.stringify(appData('tiny'))), material, mobileSyncCryptoPrimitives,
-    );
+     { kind: 'document' });
     await writeSyncArtifactBytes(safUri, small);
 
     const readBack = await readSyncArtifactBytes(safUri);
@@ -1144,7 +1144,7 @@ describe('non-truncating provider padding (decision #8)', () => {
     expect(inspected.kind).toBe('encrypted');
 
     const { decryptSyncArtifact } = await import('@mindwtr/core');
-    const plaintext = await decryptSyncArtifact(readBack!, material.key, mobileSyncCryptoPrimitives);
+    const plaintext = await decryptSyncArtifact(readBack!, material.key, mobileSyncCryptoPrimitives, { kind: 'document' });
     expect(JSON.parse(new TextDecoder().decode(plaintext))).toMatchObject({
       tasks: [{ title: 'tiny' }],
     });
@@ -1227,7 +1227,7 @@ describe('remote mutation fence lifecycle', () => {
       new TextEncoder().encode(JSON.stringify(appData('remote'))),
       material,
       mobileSyncCryptoPrimitives,
-    );
+     { kind: 'document' });
     await syncEncryptionLocalState.write({ state: 'remote-encrypted-no-key' });
     await flushSyncEncryptionLocalState();
     const remote: SyncEncryptionRemotePort & {
@@ -1251,7 +1251,7 @@ describe('remote mutation fence lifecycle', () => {
       new TextEncoder().encode(JSON.stringify(appData('remote'))),
       material,
       mobileSyncCryptoPrimitives,
-    );
+     { kind: 'document' });
     await syncEncryptionLocalState.write({ state: 'remote-encrypted-no-key' });
     await flushSyncEncryptionLocalState();
     let assertions = 0;
@@ -1810,7 +1810,7 @@ describe('File Sync transitions through core orchestration', () => {
     const resolved = await getSyncEncryptionMaterial();
     const { decryptSyncArtifact } = await import('@mindwtr/core');
     const migrated = fs.files.get(`${SYNC_DIR}/attachments/a2.png`)!;
-    await expect(decryptSyncArtifact(migrated, resolved!.key, mobileSyncCryptoPrimitives))
+    await expect(decryptSyncArtifact(migrated, resolved!.key, mobileSyncCryptoPrimitives, { kind: 'attachment', cloudKey: 'attachments/a2.png' }))
       .resolves.toEqual(peerAttachment);
     expect(fs.files.has(SYNC_URI)).toBe(false);
     expect(inspectSyncArtifact(fs.files.get(ENC_URI)!).kind).toBe('encrypted');
@@ -1866,7 +1866,7 @@ describe('File Sync transitions through core orchestration', () => {
         fs.files.get(`${SYNC_DIR}/${name}.enc`)!,
         rotated!.key,
         mobileSyncCryptoPrimitives,
-      )).resolves.toEqual(seedBytes.get(name));
+       { kind: 'document' })).resolves.toEqual(seedBytes.get(name));
     }
 
     await disableSyncEncryption();
@@ -2067,6 +2067,7 @@ describe('File Sync transitions through core orchestration', () => {
     expect(retained).toHaveLength(2);
     expect(retained.every((uri) => inspectSyncArtifact(fs.files.get(uri)!).kind === 'plaintext')).toBe(true);
 
+    const originalRetained = new Map(retained.map((uri) => [uri, fs.files.get(uri)!.slice()]));
     await enableSyncEncryption(PASSPHRASE);
 
     const material = await getSyncEncryptionMaterial();
@@ -2076,7 +2077,12 @@ describe('File Sync transitions through core orchestration', () => {
     for (const uri of retained) {
       const sealed = fs.files.get(uri)!;
       expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
-      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives)).resolves.toBeDefined();
+      const relative = uri.slice(SYNC_DIR.length + 1);
+      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives, relative.startsWith('attachments/')
+        ? { kind: 'attachment', cloudKey: relative } : { kind: 'recovery', artifactName: relative }))
+        .resolves.toEqual(originalRetained.get(uri));
+      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives, { kind: 'document' }))
+        .rejects.toMatchObject({ name: 'SyncCryptoAuthError' });
     }
     await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
   }, 30_000);
@@ -2090,6 +2096,7 @@ describe('File Sync transitions through core orchestration', () => {
     fs.files.set(retained[0], new TextEncoder().encode('desktop retained document generation'));
     fs.files.set(retained[1], new TextEncoder().encode('desktop retained attachment generation'));
 
+    const originalRetained = new Map(retained.map((uri) => [uri, fs.files.get(uri)!.slice()]));
     await enableSyncEncryption(PASSPHRASE);
 
     const material = await getSyncEncryptionMaterial();
@@ -2098,8 +2105,11 @@ describe('File Sync transitions through core orchestration', () => {
     for (const uri of retained) {
       const sealed = fs.files.get(uri)!;
       expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
-      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives))
-        .resolves.toBeDefined();
+      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives,
+        { kind: 'recovery', artifactName: uri.slice(SYNC_DIR.length + 1) }))
+        .resolves.toEqual(originalRetained.get(uri));
+      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives, { kind: 'document' }))
+        .rejects.toMatchObject({ name: 'SyncCryptoAuthError' });
     }
     expect(fs.files.has(retained[0])).toBe(true);
     expect(fs.files.has(retained[1])).toBe(true);
@@ -2124,7 +2134,7 @@ describe('File Sync transitions through core orchestration', () => {
     expect(fs.files.has(SYNC_URI)).toBe(false);
     const resumed = await getSyncEncryptionMaterial();
     const { decryptSyncArtifact } = await import('@mindwtr/core');
-    await expect(decryptSyncArtifact(encBefore, resumed!.key, mobileSyncCryptoPrimitives)).resolves.toBeDefined();
+    await expect(decryptSyncArtifact(encBefore, resumed!.key, mobileSyncCryptoPrimitives, { kind: 'document' })).resolves.toBeDefined();
   }, 30_000);
 
   it('disable restores plaintext artifacts and clears the cached key', async () => {

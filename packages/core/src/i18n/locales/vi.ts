@@ -1219,6 +1219,7 @@ export const viOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Sau 5 phút',
         'settings.mobile.appLockRelockAfter15': 'Sau 15 phút',
         'appLock.title': 'Mindwtr đã bị khóa',
+        "appLock.loadFailed": "Mindwtr không thể tải dữ liệu của bạn. Hãy thử lại.",
         'appLock.description': 'Dùng khóa thiết bị để mở Mindwtr. Điều này bảo vệ chế độ xem ứng dụng, không phải cơ sở dữ liệu trên thiết bị.',
         'appLock.prompt': 'Mở khóa Mindwtr',
         'appLock.enablePrompt': 'Bật khóa ứng dụng Mindwtr',

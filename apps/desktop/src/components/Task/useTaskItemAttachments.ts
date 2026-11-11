@@ -11,7 +11,7 @@ import { isTauriRuntime } from '../../lib/runtime';
 import {
     fetchWebCloudAttachmentBlob,
     fetchWebCloudAttachmentText,
-    retainOpenedWebAttachmentUrl,
+    openWebCloudAttachment,
 } from '../../lib/web-attachment-source';
 import { logInfo, logWarn } from '../../lib/app-log';
 import { createWebAttachmentDraft, getWebAttachmentUploadTarget, pickBrowserAttachmentFiles, webAttachmentUploadMessage } from '../../lib/web-attachment-upload';
@@ -111,8 +111,8 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
 
         if (!isTauriRuntime()) return fetchWebCloudAttachmentBlob(attachment);
-        const uri = await resolveAttachmentReadPath(attachment.uri, attachment.id);
         try {
+            const uri = await resolveAttachmentReadPath(attachment.uri, attachment.id);
 
 
             const managedDir = await getManagedDataDir();
@@ -183,12 +183,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         setAttachmentError(null);
         try {
             if (!isTauriRuntime() && !(attachment.uri || '').trim()) {
-                const blobUrl = await fetchWebCloudAttachmentBlob(attachment);
-                if (!blobUrl) throw new Error(t('attachments.fileNotSupported'));
-
-
-                retainOpenedWebAttachmentUrl(blobUrl);
-                window.open(blobUrl, '_blank');
+                if (!await openWebCloudAttachment(attachment)) throw new Error(t('attachments.fileNotSupported'));
                 return;
             }
 

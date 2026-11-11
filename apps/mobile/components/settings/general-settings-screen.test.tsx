@@ -1,9 +1,15 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
-import { Modal, ScrollView, Text, TouchableOpacity } from 'react-native';
-import { describe, expect, it, vi } from 'vitest';
+import { Modal, ScrollView, Switch, Text, TouchableOpacity } from 'react-native';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GeneralSettingsScreen } from './general-settings-screen';
+import { MobileAppLockEnableContext } from '@/lib/mobile-app-lock';
+
+const { authenticateMock, updateSettingsMock } = vi.hoisted(() => ({
+  authenticateMock: vi.fn(),
+  updateSettingsMock: vi.fn(),
+}));
 
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
@@ -11,7 +17,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
   shallow: Object.is,
   useTaskStore: (selector: (state: unknown) => unknown) => selector({
     settings: { weekStart: 'monday', dateFormat: 'ymd', timeFormat: '24h' },
-    updateSettings: vi.fn().mockResolvedValue(undefined),
+    updateSettings: updateSettingsMock,
   }),
 }));
 
@@ -35,10 +41,14 @@ vi.mock('@/lib/app-search-service', () => ({
   enableAppSearchIndexing: async () => undefined,
   wipeAppSearchIndex: async () => undefined,
 }));
-vi.mock('@/lib/mobile-app-lock', () => ({
-  authenticateWithDeviceLock: async () => ({ success: false }),
-  getMobileAppLockErrorKey: () => 'appLock.failed',
-}));
+vi.mock('@/lib/mobile-app-lock', async () => {
+  const { createContext } = await import('react');
+  return {
+    MobileAppLockEnableContext: createContext<() => void>(() => undefined),
+    authenticateWithDeviceLock: authenticateMock,
+    getMobileAppLockErrorKey: () => 'appLock.failed',
+  };
+});
 vi.mock('@/modules/system-date-format', () => ({ getSystemDateFormat: () => 'dd.MM.yyyy' }));
 
 vi.mock('react-native-safe-area-context', () => ({
@@ -56,6 +66,33 @@ vi.mock('./settings.shell', () => ({
 }));
 
 describe('GeneralSettingsScreen pickers', () => {
+  beforeEach(() => {
+    authenticateMock.mockReset();
+    authenticateMock.mockResolvedValue({ success: false, reason: 'cancelled' });
+    updateSettingsMock.mockReset();
+    updateSettingsMock.mockResolvedValue(undefined);
+  });
+
+  it.each([false, true])('notifies its mounted gate only after successful enable authentication: %s', async (success) => {
+    const confirm = vi.fn();
+    authenticateMock.mockResolvedValue({ success, reason: 'cancelled' });
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => {
+      tree = renderer.create(<MobileAppLockEnableContext.Provider value={confirm}><GeneralSettingsScreen /></MobileAppLockEnableContext.Provider>);
+    });
+    await renderer.act(async () => {
+      tree.root.findAllByType(Switch).find((node) => node.props.disabled === false)!.props.onValueChange(true);
+    });
+    expect(authenticateMock).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledTimes(success ? 1 : 0);
+    expect(updateSettingsMock).toHaveBeenCalledTimes(success ? 1 : 0);
+    if (success) {
+      expect(updateSettingsMock).toHaveBeenCalledWith(expect.objectContaining({ security: expect.objectContaining({ mobileAppLockEnabled: true }) }));
+      expect(updateSettingsMock.mock.invocationCallOrder[0]).toBeLessThan(confirm.mock.invocationCallOrder[0]);
+    }
+    await renderer.act(async () => tree.unmount());
+  });
+
   it('previews the actual native System date pattern even with an explicit format selected', () => {
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => { tree = renderer.create(<GeneralSettingsScreen />); });

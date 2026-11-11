@@ -13680,7 +13680,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private func settingsSyncEncryptionActionAllowed(_ action: CoreObject) -> Bool {
         switch action.text("type") {
-        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && ["unlock", "enable", "change", "disable", "abandon"].contains(action.text("flow"))
+        case "open", "submit": return Set(action.keys) == Set(["type", "flow"]) && ["unlock", "enable", "change", "disable", "abandon", "upgrade"].contains(action.text("flow"))
         case "cancel", "decline", "retry", "recheck": return Set(action.keys) == Set(["type"])
         default: return false
         }
@@ -13715,9 +13715,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard fields.isEmpty || fields == Set(["current"]) || fields == Set(["next", "confirm"])
             || fields == Set(["current", "next", "confirm"]) else { return false }
         if !fields.isEmpty {
-            let flow = fields.count == 3 ? "change" : fields.contains("current") ? "unlock" : "enable"
+            let flows = fields.count == 3 ? ["change"] : fields.contains("current") ? ["unlock", "upgrade"] : ["enable"]
             guard rows.contains(where: { $0.text("kind") == "action" && $0.object("action").text("type") == "submit"
-                && $0.object("action").text("flow") == flow }) else { return false }
+                && flows.contains($0.object("action").text("flow")) }) else { return false }
         }
         return true
     }
@@ -13727,7 +13727,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private func settingsSyncEncryptionFields(_ flow: String) -> [String] {
         switch flow {
-        case "unlock": return ["current"]
+        case "unlock", "upgrade": return ["current"]
         case "enable": return ["next", "confirm"]
         case "change": return ["current", "next", "confirm"]
         default: return []

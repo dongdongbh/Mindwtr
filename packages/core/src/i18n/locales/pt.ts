@@ -1020,6 +1020,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Após 5 minutos',
         'settings.mobile.appLockRelockAfter15': 'Após 15 minutos',
         'appLock.title': 'Mindwtr está bloqueado',
+        "appLock.loadFailed": "O Mindwtr não conseguiu carregar os seus dados. Tente novamente.",
         'appLock.description': 'Use o bloqueio do dispositivo para abrir o Mindwtr. Isso protege a visualização do app, não o banco de dados no dispositivo.',
         'appLock.prompt': 'Desbloquear Mindwtr',
         'appLock.enablePrompt': 'Ativar bloqueio do Mindwtr',

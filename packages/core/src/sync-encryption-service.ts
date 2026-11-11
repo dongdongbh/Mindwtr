@@ -30,6 +30,8 @@ import {
     runAbandonSyncEncryptionTransition,
     runEnableSyncEncryptionLocalOnly,
     runEnableSyncEncryptionOverRemote,
+    runUpgradeSyncEncryptionOverRemote,
+    isLegacySyncPreservationName,
     runProvideSyncEncryptionPassphraseOverRemote,
     type SyncEncryptionKeyCachePort,
     type SyncEncryptionLocalState,
@@ -125,6 +127,7 @@ const sanitizeBlobAttachmentKey = (value: unknown): string | undefined => {
 
 const assertManagedRemoteArtifactName = (name: string): string => {
     if (REMOTE_DOCUMENT_NAMES.has(name)) return name;
+    if (isLegacySyncPreservationName(name)) return name;
     if (sanitizeBlobAttachmentKey(name) === name) return name;
     throw new Error('Invalid sync encryption remote artifact name');
 };
@@ -331,6 +334,7 @@ const backendLabel = (target: SyncEncryptionLocationTarget | null): string =>
     !target ? 'off' : target.backend === 'dropbox' ? 'cloud' : target.backend;
 
 export type SyncEncryptionServiceDeps<Lease> = {
+    readTrustedLocalData?(): Promise<AppData>;
 
     maxEncryptedArtifactBytes?: number;
 
@@ -476,7 +480,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         }
         for (const candidate of candidates) {
             try {
-                const plain = await decryptRemoteArtifactOrThrow(bytes, candidate, crypto);
+                const plain = await decryptRemoteArtifactOrThrow(bytes, candidate, crypto, { kind: 'document' });
                 return JSON.parse(new TextDecoder().decode(plain)) as AppData;
             } catch (error) {
                 if (!(error instanceof SyncEncryptionTerminalError)) throw error;
@@ -1121,6 +1125,21 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         isSyncEncryptionBackendPending: async (): Promise<boolean> =>
             (await location.readTarget()).backend === 'off',
         enableSyncEncryption,
+        upgradeSyncEncryption: (passphrase: string, options: SyncEncryptionTransitionOptions = {}): Promise<void> =>
+            runSerializedSyncDocumentOperation(async () => {
+                await state.loadSyncEncryptionLocalState();
+                const readTrusted = deps.readTrustedLocalData;
+                if (!readTrusted) throw new Error('SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED');
+                const target = await requireTransitionTarget(null);
+                await withTransitionDiagnostics('upgrade', options, (onProgress) =>
+                    runWithFileTransitionLease(target, (port, releaseFence) =>
+                        runWithRemoteMutationFence(port, (remote, keyCache, localState) =>
+                            runUpgradeSyncEncryptionOverRemote(passphrase, readTrusted, remote, keyCache,
+                                localState, onProgress, crypto), revalidateFenceFor(target), releaseFence)));
+                await location.invalidateCycleProofs();
+                await state.logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.transition,
+                    { releaseCheck: 'v1.3.9/sync-artifact-context', format: '2', artifactKind: 'document', outcome: 'upgraded' });
+            }),
         disableSyncEncryption,
         changeSyncEncryptionPassphrase,
         provideSyncEncryptionPassphrase,

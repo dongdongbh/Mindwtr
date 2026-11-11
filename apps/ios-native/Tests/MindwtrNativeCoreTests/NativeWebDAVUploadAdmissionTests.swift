@@ -303,7 +303,7 @@ final class NativeWebDAVUploadAdmissionTests: XCTestCase {
         XCTAssertEqual(network.conditions, ["*"])
         let wire = try XCTUnwrap(network.uploads.first); XCTAssertEqual(wire.count, wireCap)
         guard wire.count >= 70 else { throw HostFailure("Synthetic encrypted upload container is incomplete") }
-        XCTAssertEqual(wire.prefix(8), Data("MWENC1".utf8) + Data([1, 1])); XCTAssertNotEqual(wire, bytes)
+        XCTAssertEqual(wire.prefix(8), Data("MWENC1".utf8) + Data([2, 1])); XCTAssertNotEqual(wire, bytes)
         let header = wire.prefix(54), nonce = try AES.GCM.Nonce(data: wire.subdata(in: 34..<46))
         let sealed = try AES.GCM.SealedBox(nonce: nonce, ciphertext: wire.subdata(in: 54..<(wire.count - 16)), tag: wire.suffix(16))
         XCTAssertEqual(try AES.GCM.open(sealed, using: SymmetricKey(data: Data(count: 32)), authenticating: header), bytes)

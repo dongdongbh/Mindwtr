@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Attachment } from '@mindwtr/core';
+import { logInfo } from './app-log';
 import {
     clearWebAttachmentMemoryCaches,
     fetchWebCloudAttachmentBlob,
     fetchWebCloudAttachmentText,
+    openWebCloudAttachment,
     retainOpenedWebAttachmentUrl,
     WEB_ATTACHMENT_BYTE_CACHE_MAX_BYTES,
     WEB_ATTACHMENT_BYTE_CACHE_MAX_ENTRIES,
@@ -16,6 +18,8 @@ const syncState = {
     encryption: { state: 'off' as string },
     config: { url: 'https://cloud.example.com/v1/data', token: 'token-123', allowInsecureHttp: false },
 };
+
+vi.mock('./app-log', () => ({ logInfo: vi.fn() }));
 
 vi.mock('./runtime', () => ({
     isTauriRuntime: () => false,
@@ -52,6 +56,7 @@ const okFetcher = (body: Uint8Array) => vi.fn(async () => new Response(body.buff
 
 describe('fetchWebCloudAttachmentBlob', () => {
     beforeEach(() => {
+        vi.mocked(logInfo).mockClear();
         clearWebAttachmentMemoryCaches();
         syncState.backend = 'cloud';
         syncState.provider = 'selfhosted';
@@ -84,6 +89,55 @@ describe('fetchWebCloudAttachmentBlob', () => {
 
         expect(fetcher).toHaveBeenCalledTimes(1);
         expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['image/svg+xml', 'text/html', 'application/xhtml+xml', 'application/xml', 'audio/html'])('uses an opaque preview URL for %s instead of an active app-origin blob', async (mimeType) => {
+        const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+        const url = await fetchWebCloudAttachmentBlob(makeAttachment({ mimeType }), { fetcher: okFetcher(bytes) });
+
+        expect(url).toBe(`data:${mimeType === 'image/svg+xml' ? mimeType : 'application/octet-stream'};base64,${btoa(new TextDecoder().decode(bytes))}`);
+        expect(URL.createObjectURL).not.toHaveBeenCalled();
+        expect(logInfo).toHaveBeenCalledExactlyOnceWith('Web attachment preview isolated', {
+            scope: 'attachment', force: true,
+            extra: { releaseCheck: 'v1.3.9/web-attachment-open-policy', outcome: 'isolated-preview' },
+        });
+    });
+
+    it.each(['text/html', 'image/svg+xml', 'application/xhtml+xml', 'application/xml', 'text/xml', 'application/octet-stream', 'unknown/type', 'audio/html', 'video/xml'])('downloads %s without opening app-origin active content', async (mimeType) => {
+        const attachment = makeAttachment({ mimeType, title: 'report.pdf' });
+        const fetcher = okFetcher(new TextEncoder().encode('<script>document.body.dataset.proof = "ran"</script>'));
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        const downloads: Array<{ name: string; href: string; connected: boolean }> = [];
+        const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+            downloads.push({ name: this.download, href: this.href, connected: this.isConnected });
+        });
+
+        expect(await openWebCloudAttachment(attachment, { fetcher })).toBe(true);
+
+        expect(open).not.toHaveBeenCalled();
+        expect(downloads).toEqual([{ name: 'report.pdf', href: 'blob:mock-url', connected: true }]);
+        expect(document.querySelector('a[download]')).toBeNull();
+        const blob = vi.mocked(URL.createObjectURL).mock.calls[0][0];
+        if (!(blob instanceof Blob)) throw new Error('Expected attachment bytes');
+        expect(blob.type).toBe('application/octet-stream');
+        open.mockRestore();
+        click.mockRestore();
+    });
+
+    it.each([' Application/PDF ; charset=utf-8', 'IMAGE/PNG', 'audio/mp4; codecs="mp4a.40.2"', 'video/webm', 'text/plain'])('preserves an inert %s preview with a normalized MIME', async (mimeType) => {
+        const fetcher = okFetcher(new Uint8Array([1]));
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+        expect(await openWebCloudAttachment(makeAttachment({ mimeType }), { fetcher })).toBe(true);
+
+        expect(open).toHaveBeenCalledWith('blob:mock-url', '_blank', 'noopener,noreferrer');
+        expect(click).not.toHaveBeenCalled();
+        const blob = vi.mocked(URL.createObjectURL).mock.calls[0][0];
+        if (!(blob instanceof Blob)) throw new Error('Expected attachment bytes');
+        expect(blob.type).toBe(mimeType.split(';', 1)[0].trim().toLowerCase());
+        open.mockRestore();
+        click.mockRestore();
     });
 
     it('evicts least-recently-used byte entries after the entry budget', async () => {

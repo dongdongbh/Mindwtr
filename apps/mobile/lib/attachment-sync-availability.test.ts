@@ -89,6 +89,7 @@ vi.mock('./secure-config', () => ({
 vi.mock('./sync-encryption-state', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./sync-encryption-state')>()),
   getSyncEncryptionMaterial: vi.fn().mockResolvedValue(null),
+  getMobileSyncEncryptionStatus: vi.fn().mockResolvedValue({ state: 'off' }),
 
 
   logSyncEncryptionEvent: vi.fn(),
@@ -289,13 +290,14 @@ describe('ensureAttachmentAvailable', () => {
       salt: new Uint8Array(16).fill(3),
       params: core.SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
     };
-    const { getSyncEncryptionMaterial } = await import('./sync-encryption-state');
+    const { getSyncEncryptionMaterial, getMobileSyncEncryptionStatus } = await import('./sync-encryption-state');
     vi.mocked(getSyncEncryptionMaterial).mockResolvedValue(material as never);
+    vi.mocked(getMobileSyncEncryptionStatus).mockResolvedValue({ state: 'enabled' });
     const sealed = await core.encryptSyncArtifact(
       REMOTE_BYTES,
       material,
       (await import('./sync-crypto-native')).mobileSyncCryptoPrimitives,
-    );
+     { kind: 'attachment', cloudKey: 'attachments/a-file-sealed.txt' });
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'file');
     asyncStorageMock.store.set('@mindwtr_sync_path', 'file://sync/data.json');
     let stagedPath = '';
@@ -337,6 +339,7 @@ describe('ensureAttachmentAvailable', () => {
     expect(result).toMatchObject({ localStatus: 'available', fileHash: sha256Hex(REMOTE_BYTES) });
     setSyncCryptoNativeModuleForTests(null);
     vi.mocked(getSyncEncryptionMaterial).mockResolvedValue(null);
+    vi.mocked(getMobileSyncEncryptionStatus).mockResolvedValue({ state: 'off' });
   });
 
   it('natively stages plaintext from SAF without a base64 read', async () => {
@@ -772,13 +775,14 @@ describe('ensureAttachmentAvailable', () => {
       salt: new Uint8Array(16).fill(3),
       params: core.SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
     };
-    const { getSyncEncryptionMaterial } = await import('./sync-encryption-state');
+    const { getSyncEncryptionMaterial, getMobileSyncEncryptionStatus } = await import('./sync-encryption-state');
     vi.mocked(getSyncEncryptionMaterial).mockResolvedValue(material as never);
+    vi.mocked(getMobileSyncEncryptionStatus).mockResolvedValue({ state: 'enabled' });
     const sealed = await core.encryptSyncArtifact(
       REMOTE_BYTES,
       material,
       (await import('./sync-crypto-native')).mobileSyncCryptoPrimitives,
-    );
+     { kind: 'attachment', cloudKey: 'attachments/a-sealed.txt' });
     expect(core.inspectSyncArtifact(sealed).kind).toBe('encrypted');
 
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
@@ -809,6 +813,7 @@ describe('ensureAttachmentAvailable', () => {
     );
     setSyncCryptoNativeModuleForTests(null);
     vi.mocked(getSyncEncryptionMaterial).mockResolvedValue(null);
+    vi.mocked(getMobileSyncEncryptionStatus).mockResolvedValue({ state: 'off' });
   });
 
   it('keeps a self-hosted cloud 404 unavailable and retries the same live row', async () => {

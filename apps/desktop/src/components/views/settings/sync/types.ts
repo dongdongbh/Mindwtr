@@ -4,6 +4,7 @@ import type {
     SyncBackend,
     SyncEncryptionState,
     SyncEncryptionTransitionProgress,
+    SyncEncryptionTransitionKind,
 } from '@mindwtr/core';
 
 export type SettingsSyncLabels = {
@@ -207,6 +208,11 @@ export type SettingsSyncLabels = {
     syncEncryption: string;
     syncEncryptionDesc: string;
     syncEncryptionEnable: string;
+    syncEncryptionUpgrade: string;
+    syncEncryptionUpgradeWarning: string;
+    syncEncryptionErrorLegacy: string;
+    syncEncryptionErrorReconciliation: string;
+    syncEncryptionErrorTrustedLocal: string;
     syncEncryptionPassphrase: string;
     syncEncryptionPassphraseConfirm: string;
     syncEncryptionCurrentPassphrase: string;
@@ -254,6 +260,9 @@ export type SyncEncryptionErrorKind =
     | 'backend-required'
     | 'backend-incompatible'
     | 'transition-incomplete'
+    | 'legacy-upgrade-required'
+    | 'reconciliation-required'
+    | 'trusted-local-required'
     | 'generic';
 
 export type SyncEncryptionWarningKind = 'cleanup-deferred' | 'no-encrypted-remote';
@@ -263,6 +272,8 @@ export type SyncEncryptionController = {
 
     state: SyncEncryptionState | null;
     stateUnavailable: boolean;
+    incompleteTransitionKind: SyncEncryptionTransitionKind | null;
+    partlyEncrypted: boolean;
 
     supported: boolean;
 
@@ -277,6 +288,7 @@ export type SyncEncryptionController = {
     retryState: () => Promise<void>;
     generatePassphrase: () => string;
     enable: (passphrase: string) => Promise<boolean>;
+    upgrade: (passphrase: string) => Promise<boolean>;
     disable: () => Promise<boolean>;
     changePassphrase: (current: string, next: string) => Promise<boolean>;
     unlock: (passphrase: string) => Promise<boolean>;

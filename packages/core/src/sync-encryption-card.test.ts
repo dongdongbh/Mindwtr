@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createSyncEncryptionCard, getSyncEncryptionCardMessages, type SyncEncryptionCardHost } from './sync-encryption-card';
-import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, type SyncEncryptionTransitionKind } from './sync-encryption';
-import { SyncCryptoUnsupportedError } from './sync-crypto';
+import { createSyncEncryptionCard, getSyncEncryptionCardMessages, isSyncEncryptionUpgradeAvailable, type SyncEncryptionCardHost } from './sync-encryption-card';
+import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteConflictError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, type SyncEncryptionTransitionKind } from './sync-encryption';
+import { SyncCryptoAuthError, SyncCryptoUnsupportedError } from './sync-crypto';
 import { SyncEncryptionCleanupDeferredError, isSyncEncryptionCleanupDeferredError } from './sync-encryption-service';
 
 function setup(overrides: Partial<SyncEncryptionCardHost> = {}) {
@@ -15,6 +15,7 @@ function setup(overrides: Partial<SyncEncryptionCardHost> = {}) {
         recheck: async () => { calls.push(['recheck']); if (found !== 'mixed') partly = false; return found; },
         isBackendPending: async () => false,
         enable: async (passphrase) => { calls.push(['enable', passphrase]); state = 'enabled'; },
+        upgrade: async () => undefined,
         change: async () => undefined,
         disable: async () => { state = 'off'; },
         provide: async (passphrase) => (passphrase === 'right' ? 'ok' : 'wrong-passphrase'),
@@ -35,6 +36,65 @@ function setup(overrides: Partial<SyncEncryptionCardHost> = {}) {
 }
 
 describe('sync encryption card', () => {
+    it.each([
+        [null, true], ['upgrade', true], ['enable', false], ['disable', false], ['change-passphrase', false],
+    ] as const)('offers only a new or interrupted upgrade when transition is %s', (incompleteTransitionKind, expected) => {
+        expect(isSyncEncryptionUpgradeAvailable({ state: 'enabled', partlyEncrypted: false, incompleteTransitionKind })).toBe(expected);
+        expect(isSyncEncryptionUpgradeAvailable({ state: 'remote-encrypted-no-key', partlyEncrypted: false, incompleteTransitionKind })).toBe(expected);
+    });
+
+
+    it('upgrades only after an explicit flow and passes no UI snapshot as trusted data', async () => {
+        const requests: unknown[][] = [];
+        const { card, setState } = setup({
+            upgrade: async (...args) => { requests.push(args); },
+            appData: () => { throw new Error('An upgrade must read the durable local copy in its service'); },
+        });
+        setState('enabled');
+        await card.refresh().done;
+        card.setField('current', 'synthetic phrase');
+        await card.submitUpgrade();
+        expect(requests).toEqual([]);
+        card.openFlow('upgrade');
+        card.setField('current', 'synthetic phrase');
+        await card.submitUpgrade();
+        expect(requests).toEqual([['synthetic phrase', { onProgress: expect.any(Function) }]]);
+        expect(card.getState()).toMatchObject({ flow: 'none', currentPassphrase: '', busy: false });
+    });
+
+    it.each([
+        ['SYNC_ENCRYPTION_LEGACY', 'legacy-upgrade-required', 'settings.syncEncryptionErrorLegacy'],
+        ['SYNC_ENCRYPTION_RECONCILIATION_REQUIRED', 'reconciliation-required', 'settings.syncEncryptionErrorReconciliation'],
+        ['SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED', 'trusted-local-required', 'settings.syncEncryptionErrorTrustedLocal'],
+    ] as const)('keeps %s actionable without calling it a wrong passphrase', async (code, error, label) => {
+        const { card, setState } = setup({ provide: async () => { throw new Error(code); } });
+        setState('remote-encrypted-no-key');
+        await card.refresh().done;
+        card.openFlow('unlock');
+        card.setField('current', 'synthetic phrase');
+        await card.submitUnlock();
+        expect(card.getState().error).toBe(error);
+        expect(getSyncEncryptionCardMessages(card.getState(), (key) => key).errorMessage).toBe(label);
+    });
+
+    it.each([
+        [new SyncCryptoAuthError(), 'wrong-passphrase'],
+        [new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'wrong-passphrase'],
+        [new SyncCryptoUnsupportedError('unsupported format'), 'generic'],
+        [new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError('corrupt header')), 'generic'],
+        [new SyncEncryptionRemoteConflictError(), 'transition-incomplete'],
+        [new Error('network unavailable'), 'generic'],
+        [new Error('MWENC1 corrupt header'), 'generic'],
+    ] as const)('classifies an upgrade failure %s without blaming unrelated failures on the passphrase', async (failure, error) => {
+        const { card, setState } = setup({ upgrade: async () => { throw failure; } });
+        setState('enabled');
+        await card.refresh().done;
+        card.openFlow('upgrade');
+        card.setField('current', 'synthetic phrase');
+        await card.submitUpgrade();
+        expect(card.getState()).toMatchObject({ error, flow: 'upgrade', busy: false });
+    });
+
     it('refuses two different passphrases before anything runs, and enables with the typed one', async () => {
         const { card, calls } = setup();
         await card.refresh().done;

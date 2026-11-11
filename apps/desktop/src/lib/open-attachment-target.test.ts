@@ -96,6 +96,17 @@ describe('openAttachmentTarget', () => {
         expect(openShellMock).not.toHaveBeenCalled();
     });
 
+    it.each(['\\\\host\\share\\report.pdf', 'file://host/share/report.pdf', 'file:////host/share/report.pdf'])('does not hand %s to a native or browser opener', async (uri) => {
+        Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+        const openSpy = vi.spyOn(window, 'open');
+
+        await expect(openAttachmentTarget(uri, 'remote')).rejects.toThrow('Only local file paths');
+
+        expect(invokeMock).not.toHaveBeenCalled();
+        expect(openShellMock).not.toHaveBeenCalled();
+        expect(openSpy).not.toHaveBeenCalled();
+    });
+
     it('passes a folder link and its id to open_path unchanged', async () => {
         (window as any).__TAURI_INTERNALS__ = {};
 
@@ -113,8 +124,26 @@ describe('openAttachmentTarget', () => {
 
         await openAttachmentTarget('/tmp/My Doc.pdf');
 
-        expect(openSpy).toHaveBeenCalledWith('file:///tmp/My Doc.pdf', '_blank');
+        expect(openSpy).toHaveBeenCalledWith('file:///tmp/My Doc.pdf', '_blank', 'noopener,noreferrer');
         expect(invokeMock).not.toHaveBeenCalled();
         expect(openShellMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['javascript:document.body.dataset.proof="ran"', 'data:text/html,<p>active</p>', 'blob:https://example.com/active', 'vbscript:active', 'about:blank'])('rejects active or unsupported attachment scheme %s before any opener', async (uri) => {
+        const openSpy = vi.spyOn(window, 'open');
+
+        await expect(openAttachmentTarget(uri, 'unsafe-link')).rejects.toThrow('Attachment link protocol is not supported.');
+
+        expect(openSpy).not.toHaveBeenCalled();
+        expect(invokeMock).not.toHaveBeenCalled();
+        expect(openShellMock).not.toHaveBeenCalled();
+    });
+
+    it.each(['https://example.com/report.pdf', 'mailto:someone@example.com', 'tel:+15550000', 'mid:message-id', 'obsidian://open?vault=sample', 'joplin://x-callback-url/openNote?id=a', 'ms-windows-store://pdp/?productid=sample'])('preserves browser handoff for supported link %s', async (uri) => {
+        const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+
+        await openAttachmentTarget(uri);
+
+        expect(openSpy).toHaveBeenCalledWith(uri, '_blank', 'noopener,noreferrer');
     });
 });

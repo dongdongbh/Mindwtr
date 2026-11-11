@@ -1333,6 +1333,7 @@ export const koOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5분 후',
         'settings.mobile.appLockRelockAfter15': '15분 후',
         'appLock.title': 'Mindwtr가 잠겨 있습니다',
+        "appLock.loadFailed": "Mindwtr가 데이터를 불러오지 못했습니다. 다시 시도하세요.",
         'appLock.description': '기기 잠금으로 Mindwtr를 엽니다. 앱 화면만 보호하며 기기 안의 데이터베이스는 보호하지 않습니다.',
         'appLock.prompt': 'Mindwtr 잠금 해제',
         'appLock.enablePrompt': 'Mindwtr 앱 잠금 켜기',

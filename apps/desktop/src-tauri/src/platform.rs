@@ -1,82 +1,73 @@
 use crate::*;
 use std::path::Component;
 
-fn strip_file_scheme(raw: &str) -> Result<String, String> {
-    if !raw.to_ascii_lowercase().starts_with("file://") {
-        return Ok(raw.to_string());
-    }
-
-    let without_scheme = &raw[7..];
-    if without_scheme.starts_with('/') {
-        #[cfg(target_os = "windows")]
-        {
-            let without_leading_slash = without_scheme.trim_start_matches('/');
-            if without_leading_slash.as_bytes().get(1) == Some(&b':') {
-                return Ok(without_leading_slash.to_string());
-            }
-        }
-        return Ok(without_scheme.to_string());
-    }
-
-    Err("Only local file paths can be opened.".to_string())
-}
-
-fn canonical_existing_dir(path: PathBuf) -> Option<PathBuf> {
-    path.canonicalize()
-        .ok()
-        .filter(|candidate| candidate.is_dir())
-}
-
-fn configured_obsidian_vault_path(config: &AppConfigToml) -> Option<PathBuf> {
-    #[derive(Deserialize, Default)]
-    struct VaultPathOnly {
-        vault_path: Option<String>,
-    }
-
-    let raw = config.obsidian_config.as_ref()?;
-    let parsed = serde_json::from_str::<VaultPathOnly>(raw).ok()?;
-    let vault_path = parsed.vault_path?.trim().to_string();
-    if vault_path.is_empty() {
-        return None;
-    }
-    canonical_existing_dir(PathBuf::from(vault_path))
-}
-
-fn allowed_open_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
-    let config = read_config(app);
-    let mut roots = vec![
-        get_data_dir(app),
-        get_data_dir(app).join("attachments"),
-        get_data_dir(app).join("audio-captures"),
-    ];
-
-    if let Some(sync_path) = config
-        .sync_path
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
+fn ensure_local_attachment_path(path: &str) -> Result<(), String> {
+    let normalized = path.replace('\\', "/");
+    let windows_path = normalized
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphabetic)
+        && normalized.as_bytes().get(1) == Some(&b':')
+        && normalized.as_bytes().get(2) == Some(&b'/');
+    let invalid_windows_component = windows_path
+        && normalized[3..].split('/').any(|part| {
+            let base = part
+                .split('.')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches(' ')
+                .to_ascii_lowercase();
+            let reserved = matches!(
+                base.as_str(),
+                "con" | "prn" | "aux" | "nul" | "clock$" | "conin$" | "conout$"
+            ) || ["com", "lpt"].iter().any(|prefix| {
+                base.strip_prefix(prefix).is_some_and(|suffix| {
+                    matches!(
+                        suffix,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
+                })
+            });
+            part.contains(':')
+                || (!matches!(part, "." | "..") && (part.ends_with('.') || part.ends_with(' ')))
+                || reserved
+        });
+    if normalized.starts_with("//")
+        || path.starts_with('\\')
+        || path.chars().any(|character| character.is_ascii_control())
+        || invalid_windows_component
     {
-        roots.push(PathBuf::from(sync_path).join("attachments"));
+        return Err("Only local file paths can be opened.".to_string());
     }
+    Ok(())
+}
 
-    if let Some(vault_path) = configured_obsidian_vault_path(&config) {
-        roots.push(vault_path);
-    }
-
-    #[cfg(target_os = "linux")]
-    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        roots.push(PathBuf::from(runtime_dir).join("doc"));
-    }
-
-    roots.into_iter().filter_map(canonical_existing_dir).fold(
-        Vec::<PathBuf>::new(),
-        |mut unique_roots, root| {
-            if !unique_roots.iter().any(|existing| existing == &root) {
-                unique_roots.push(root);
-            }
-            unique_roots
-        },
-    )
+fn strip_file_scheme(raw: &str) -> Result<String, String> {
+    let path = if raw.to_ascii_lowercase().starts_with("file:") {
+        if !raw.to_ascii_lowercase().starts_with("file://") {
+            return Err("Only local file paths can be opened.".to_string());
+        }
+        ensure_local_attachment_path(
+            &raw[7..]
+                .to_ascii_lowercase()
+                .replace("%2f", "/")
+                .replace("%5c", "\\"),
+        )?;
+        let url = reqwest::Url::parse(raw)
+            .map_err(|_| "Only local file paths can be opened.".to_string())?;
+        if url.host_str().is_some() {
+            return Err("Only local file paths can be opened.".to_string());
+        }
+        url.to_file_path()
+            .map_err(|_| "Only local file paths can be opened.".to_string())?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| "Only local file paths can be opened.".to_string())?
+    } else {
+        raw.to_string()
+    };
+    ensure_local_attachment_path(&path)?;
+    Ok(path)
 }
 
 const RELOCATED_MANAGED_DIR_NAMES: &[&str] = &["attachments", "audio-captures"];
@@ -109,6 +100,17 @@ fn normalize_open_path(
     managed_attachments_dir: Option<&Path>,
     attachment_id: Option<&str>,
 ) -> Result<PathBuf, String> {
+    normalize_open_path_with(raw, managed_attachments_dir, attachment_id, |path| {
+        path.canonicalize()
+    })
+}
+
+fn normalize_open_path_with(
+    raw: &str,
+    managed_attachments_dir: Option<&Path>,
+    attachment_id: Option<&str>,
+    canonicalize: impl Fn(&Path) -> std::io::Result<PathBuf>,
+) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("Path is empty".to_string());
@@ -118,15 +120,15 @@ fn normalize_open_path(
     if !candidate.is_absolute() {
         return Err("Only absolute local file paths can be opened.".to_string());
     }
-    if let Ok(resolved) = candidate.canonicalize() {
-        return Ok(resolved);
+    if let Ok(resolved) = canonicalize(&candidate) {
+        return require_local_resolved_path(resolved);
     }
 
     if let Some(resolved) = managed_attachments_dir
         .and_then(|dir| rehomed_managed_path(&candidate, dir))
-        .and_then(|rehomed| rehomed.canonicalize().ok())
+        .and_then(|rehomed| canonicalize(&rehomed).ok())
     {
-        return Ok(resolved);
+        return require_local_resolved_path(resolved);
     }
     let file_name_matches_attachment = candidate.file_name().is_some_and(|name| {
         attachment_id.is_some_and(|attachment_id| {
@@ -142,23 +144,141 @@ fn normalize_open_path(
         .and(managed_attachments_dir)
         .zip(candidate.file_name())
         .map(|(dir, name)| dir.join(name))
-        .and_then(|fallback| fallback.canonicalize().ok())
+        .and_then(|fallback| canonicalize(&fallback).ok())
         .ok_or_else(|| {
             format!(
                 "File does not exist or cannot be accessed: {}",
                 candidate.display()
             )
         })
+        .and_then(require_local_resolved_path)
 }
 
-fn path_is_under_allowed_root(path: &Path, allowed_roots: &[PathBuf]) -> bool {
-    allowed_roots
+fn require_local_resolved_path(path: PathBuf) -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    if !matches!(path.components().next(), Some(Component::Prefix(prefix))
+        if matches!(prefix.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_)))
+    {
+        return Err("Only local file paths can be opened.".to_string());
+    }
+    Ok(path)
+}
+
+const ATTACHMENT_DOCUMENT_EXTENSIONS: &[&str] = &[
+    "pdf", "txt", "md", "markdown", "rst", "csv", "tsv", "log", "json", "yaml", "yml", "toml",
+    "ini", "cfg", "conf", "xml", "rtf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods",
+    "odp", "odg", "pages", "numbers", "key", "epub", "mobi", "png", "jpg", "jpeg", "gif", "webp",
+    "bmp", "ico", "tif", "tiff", "heic", "heif", "avif", "m4a", "aac", "mp3", "wav", "caf", "ogg",
+    "oga", "flac", "webm", "mp4", "m4v", "mov", "avi", "mkv", "mpg", "mpeg", "3gp", "3gpp", "zip",
+    "gz", "bz2", "xz", "7z", "rar", "tar", "ics", "vcf",
+];
+const ATTACHMENT_BUNDLE_EXTENSIONS: &[&str] = &[
+    "app",
+    "bundle",
+    "workflow",
+    "scptd",
+    "kext",
+    "plugin",
+    "prefpane",
+    "framework",
+    "component",
+    "service",
+    "action",
+    "qlgenerator",
+    "mdimporter",
+    "saver",
+    "appex",
+    "xpc",
+];
+
+fn attachment_bundle_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            ATTACHMENT_BUNDLE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
+        || path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains(".{"))
+}
+
+fn path_is_openable(path: &Path) -> Result<bool, String> {
+    let metadata =
+        fs::metadata(path).map_err(|_| "Path does not exist or cannot be opened.".to_string())?;
+    if metadata.is_dir() {
+        return Ok(!attachment_bundle_path(path));
+    }
+    if !metadata.is_file() {
+        return Err("Only local files and folders can be opened.".to_string());
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !ATTACHMENT_DOCUMENT_EXTENSIONS.contains(&extension.as_str()) {
+        return Ok(false);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 != 0 {
+            return Ok(false);
+        }
+    }
+    let mut file = fs::File::open(path).map_err(|_| "File cannot be read safely.".to_string())?;
+    let mut header = [0u8; 512];
+    let length = file
+        .read(&mut header)
+        .map_err(|_| "File cannot be read safely.".to_string())?;
+    let header = &header[..length];
+    let blocked = header.starts_with(b"MZ")
+        || header.starts_with(b"\x7fELF")
+        || header.starts_with(b"#!")
+        || header.starts_with(b"\xef\xbb\xbf#!")
+        || header
+            .windows(b"[Desktop Entry]".len())
+            .any(|part| part == b"[Desktop Entry]")
+        || [
+            [0xfe, 0xed, 0xfa, 0xce],
+            [0xfe, 0xed, 0xfa, 0xcf],
+            [0xce, 0xfa, 0xed, 0xfe],
+            [0xcf, 0xfa, 0xed, 0xfe],
+            [0xca, 0xfe, 0xba, 0xbe],
+            [0xbe, 0xba, 0xfe, 0xca],
+            [0xca, 0xfe, 0xba, 0xbf],
+            [0xbf, 0xba, 0xfe, 0xca],
+            [0x4c, 0x00, 0x00, 0x00],
+        ]
         .iter()
-        .any(|root| path == root || path.starts_with(root))
+        .any(|signature| header.starts_with(signature));
+    Ok(!blocked)
 }
 
-fn path_is_openable(path: &Path, allowed_roots: &[PathBuf]) -> bool {
-    path_is_under_allowed_root(path, allowed_roots) || path.is_file() || path.is_dir()
+fn open_local_attachment(
+    path: &Path,
+    opener: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<bool, String> {
+    let openable = path_is_openable(path)?;
+    let mut target = path;
+    if !openable {
+        loop {
+            target = target
+                .parent()
+                .ok_or_else(|| "The attachment folder cannot be opened.".to_string())?;
+            if !attachment_bundle_path(target) {
+                break;
+            }
+        }
+    }
+    opener(target).map_err(|_| "Path does not exist or cannot be opened.".to_string())?;
+    let outcome = if openable {
+        "opened-local"
+    } else {
+        "revealed-folder"
+    };
+    log::info!("Attachment launch policy applied extra.releaseCheck=v1.3.9/attachment-open-policy outcome={outcome}");
+    Ok(true)
 }
 
 #[cfg(target_os = "macos")]
@@ -1007,12 +1127,16 @@ fn open_through_link_folder_bookmark(
         unsafe { mindwtr_macos_open_security_bookmark(c_bookmark.as_ptr(), c_expected.as_ptr()) };
     let label = match outcome {
         1 => "opened",
+        2 => "revealed",
         0 => "fallback",
         _ => "open-failed",
     };
     log::info!("Linked folder opened through its bookmark extra.releaseCheck=v1.3.4/link-folder-bookmark outcome={label}");
+    if matches!(outcome, 1 | 2) {
+        log::info!("Attachment launch policy applied extra.releaseCheck=v1.3.9/attachment-open-policy outcome=bookmarked-folder-{label}");
+    }
     match outcome {
-        1 => Ok(true),
+        1 | 2 => Ok(true),
         0 => Ok(false),
         _ => Err("Path does not exist or cannot be opened.".to_string()),
     }
@@ -1024,6 +1148,10 @@ pub(crate) fn open_path(
     path: String,
     attachment_id: Option<String>,
 ) -> Result<bool, String> {
+    if let Err(error) = strip_file_scheme(path.trim()) {
+        log::warn!("Attachment path refused extra.releaseCheck=v1.3.9/attachment-open-policy outcome=refused-path");
+        return Err(error);
+    }
     #[cfg(target_os = "macos")]
     if open_through_link_folder_bookmark(&app, &path, attachment_id.as_deref())? {
         return Ok(true);
@@ -1034,13 +1162,7 @@ pub(crate) fn open_path(
         Some(&managed_attachments_dir),
         attachment_id.as_deref(),
     )?;
-    let allowed_roots = allowed_open_roots(&app);
-    if !path_is_openable(&normalized, &allowed_roots) {
-        return Err("Path does not exist or cannot be opened.".to_string());
-    }
-
-    open::that_detached(normalized).map_err(|e| e.to_string())?;
-    Ok(true)
+    open_local_attachment(&normalized, |target| open::that_detached(target))
 }
 
 #[cfg(test)]
@@ -1344,34 +1466,174 @@ mod tests {
     }
 
     #[test]
-    fn path_is_under_allowed_root_respects_boundaries() {
-        let root = PathBuf::from("/tmp/mindwtr");
-        assert!(path_is_under_allowed_root(
-            Path::new("/tmp/mindwtr/attachments/a.pdf"),
-            &[root.clone()]
-        ));
-        assert!(!path_is_under_allowed_root(
-            Path::new("/tmp/mindwtr-other/a.pdf"),
-            &[root]
-        ));
-    }
-
-    #[test]
-    fn path_is_under_allowed_root_allows_flatpak_document_portal_paths() {
-        let portal_root = PathBuf::from("/run/user/1000/doc");
-        assert!(path_is_under_allowed_root(
-            Path::new("/run/user/1000/doc/abc123/notes.pdf"),
-            &[portal_root]
-        ));
-    }
-
-    #[test]
     fn path_is_openable_allows_existing_user_selected_files() {
         let temp = tempfile::tempdir().expect("should create temp dir");
         let attachment_path = temp.path().join("notes.md");
         fs::write(&attachment_path, "notes").expect("should write attachment");
 
-        assert!(path_is_openable(&attachment_path, &[]));
+        assert!(path_is_openable(&attachment_path).expect("policy"));
+    }
+
+    #[test]
+    fn path_is_openable_refuses_to_launch_script_and_shortcut_attachments() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        for name in [
+            "report.cmd",
+            "report.exe",
+            "report.bat",
+            "report.ps1",
+            "report.sh",
+            "report.lnk",
+            "report.url",
+            "report.hta",
+            "report.msi",
+            "report.msc",
+            "report.jar",
+            "report.desktop",
+            "report.search-ms",
+            "report.library-ms",
+            "report",
+            "report.custom",
+        ] {
+            let path = temp.path().join(name);
+            fs::write(&path, b"attachment").expect("attachment");
+            assert!(!path_is_openable(&path).expect("policy"), "{name}");
+            open_local_attachment(&path, |target| {
+                assert_eq!(target, temp.path(), "{name}");
+                Ok(())
+            })
+            .expect("reveal folder");
+        }
+    }
+
+    #[test]
+    fn attachment_open_policy_inspects_bytes_instead_of_document_extensions() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("report.pdf");
+        for bytes in [
+            b"MZpayload".as_slice(),
+            b"\x7fELFpayload",
+            b"#!/bin/sh",
+            b"\xef\xbb\xbf#!/bin/sh",
+            b"\xfe\xed\xfa\xce",
+            b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe",
+            b"\xca\xfe\xba\xbf",
+            b"\x4c\x00\x00\x00",
+            b"[Desktop Entry]\nType=Application",
+        ] {
+            fs::write(&path, bytes).expect("file");
+            open_local_attachment(&path, |target| {
+                assert_eq!(target, temp.path());
+                Ok(())
+            })
+            .expect("reveal");
+        }
+        for name in [
+            "report.pdf",
+            "notes.md",
+            "photo.png",
+            "recording.wav",
+            "archive.zip",
+        ] {
+            let path = temp.path().join(name);
+            fs::write(&path, b"document").expect("file");
+            open_local_attachment(&path, |target| {
+                assert_eq!(target, path);
+                Ok(())
+            })
+            .expect("document open");
+        }
+    }
+
+    #[test]
+    fn attachment_open_policy_reveals_app_bundles_without_launching_their_parent_bundle() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let bundle = temp.path().join("Example.app");
+        fs::create_dir(&bundle).expect("bundle");
+        let nested = bundle.join("Nested.app");
+        fs::create_dir(&nested).expect("nested bundle");
+        for path in [&bundle, &nested] {
+            open_local_attachment(path, |target| {
+                assert_eq!(target, temp.path());
+                Ok(())
+            })
+            .expect("reveal");
+        }
+    }
+
+    #[test]
+    fn attachment_open_policy_rejects_remote_and_device_paths_before_filesystem_access() {
+        for raw in [
+            r"\\host\share\report.pdf",
+            "//host/share/report.pdf",
+            r"\\?\UNC\host\share\report.pdf",
+            r"\\?\C:\report.pdf",
+            r"\\.\C:\report.pdf",
+            r"\??\C:\report.pdf",
+            "file://host/share/report.pdf",
+            "file:////host/share/report.pdf",
+            "file:///%5c%5chost/share/report.pdf",
+            "file:///%2fhost/share/report.pdf",
+            r"C:\report.pdf:payload.cmd",
+            r"C:\NUL.pdf",
+            r"C:\CON .txt",
+            r"C:\COM1.txt",
+            r"C:\report.cmd.\safe.pdf",
+        ] {
+            let result =
+                normalize_open_path_with(raw, None, None, |_| panic!("filesystem probe: {raw}"));
+            assert_eq!(
+                result.unwrap_err(),
+                "Only local file paths can be opened.",
+                "{raw}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attachment_open_policy_reveals_executable_documents_and_resolved_script_symlinks() {
+        use std::os::unix::{fs::symlink, fs::PermissionsExt};
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("report.pdf");
+        fs::write(&path, b"document").expect("file");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("permissions");
+        open_local_attachment(&path, |target| {
+            assert_eq!(target, temp.path());
+            Ok(())
+        })
+        .expect("reveal");
+        let script = temp.path().join("payload.sh");
+        fs::write(&script, b"payload").expect("script");
+        let link = temp.path().join("linked.pdf");
+        symlink(&script, &link).expect("symlink");
+        let resolved =
+            normalize_open_path(link.to_str().expect("path"), None, None).expect("resolve");
+        open_local_attachment(&resolved, |target| {
+            assert_eq!(target, temp.path());
+            Ok(())
+        })
+        .expect("reveal");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn attachment_open_policy_accepts_canonical_drive_prefixes_and_refuses_resolved_unc_paths() {
+        let canonical = PathBuf::from(r"\\?\C:\Documents\report.pdf");
+        assert_eq!(
+            normalize_open_path_with(r"C:\Documents\report.pdf", None, None, |_| Ok(
+                canonical.clone()
+            ))
+            .expect("local"),
+            canonical
+        );
+        assert!(
+            normalize_open_path_with(r"C:\Documents\report.pdf", None, None, |_| Ok(
+                PathBuf::from(r"\\?\UNC\host\share\report.pdf")
+            ))
+            .is_err()
+        );
     }
 
     #[test]
@@ -1393,14 +1655,14 @@ mod tests {
     fn path_is_openable_allows_existing_user_linked_directories() {
         let temp = tempfile::tempdir().expect("should create temp dir");
 
-        assert!(path_is_openable(temp.path(), &[]));
+        assert!(path_is_openable(temp.path()).expect("policy"));
     }
 
     #[test]
     fn path_is_openable_rejects_missing_paths() {
         let temp = tempfile::tempdir().expect("should create temp dir");
 
-        assert!(!path_is_openable(&temp.path().join("does-not-exist"), &[]));
+        assert!(path_is_openable(&temp.path().join("does-not-exist")).is_err());
     }
 }
 

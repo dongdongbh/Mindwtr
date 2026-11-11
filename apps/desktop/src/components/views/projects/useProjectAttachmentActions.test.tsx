@@ -109,7 +109,7 @@ describe('useProjectAttachmentActions', () => {
             await hook.result.current.openAttachment(attachment);
         });
 
-        expect(openSpy).toHaveBeenCalledWith('file:///tmp/notes.txt', '_blank');
+        expect(openSpy).toHaveBeenCalledWith('file:///tmp/notes.txt', '_blank', 'noopener,noreferrer');
     });
 
     it('links a picked folder to the project as a plain link', async () => {

@@ -295,6 +295,10 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
 
 
     const transitions = createSyncEncryptionService<MobileFileSyncLease>({
+        readTrustedLocalData: async () => {
+            await flushPendingSave();
+            return bindings.localData().getData({ rawTasks: true });
+        },
         maxEncryptedArtifactBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         storage,
         state: encryptionState,
@@ -371,6 +375,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         maxCloudBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined,
         encryption: {
             logSyncEncryptionEvent: (event, extra, options) => encryptionState.logSyncEncryptionEvent(event, extra, options),
+            getSyncEncryptionStatus: () => encryptionState.getSyncEncryptionStatus(),
             getSyncEncryptionMaterial: () => encryptionState.getSyncEncryptionMaterial(),
         },
     }, channels) : null;
@@ -777,7 +782,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     });
 
 
-    const logSelectedEncryptionCompleted = async (operation: 'enable' | 'change' | 'disable' | 'abandon' | 'recheck'): Promise<void> => {
+    const logSelectedEncryptionCompleted = async (operation: 'enable' | 'upgrade' | 'change' | 'disable' | 'abandon' | 'recheck'): Promise<void> => {
         if (platform !== 'ios' || (settingsHost.encryption.mode !== 'saved-webdav-enable-unlock'
             && settingsHost.encryption.mode !== 'saved-webdav' && settingsHost.encryption.mode !== 'saved-webdav-or-local')) return;
         try {
@@ -843,6 +848,10 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
                         }
                         throw error;
                     }
+                },
+                upgrade: async (passphrase, options) => {
+                    await transitions.upgradeSyncEncryption(passphrase, options);
+                    await logSelectedEncryptionCompleted('upgrade');
                 },
                 change: async (current, next, options) => {
                     await transitions.changeSyncEncryptionPassphrase(current, next, options);

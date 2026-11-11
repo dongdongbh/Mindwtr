@@ -137,7 +137,8 @@ use storage::{
     create_data_snapshot, delete_calendar_sync_entry, get_all_calendar_sync_entries,
     get_calendar_sync_entry, get_data, get_data_path_cmd, get_db_path_cmd,
     get_device_config_path_for_startup, list_data_snapshots, query_tasks, read_data_json,
-    read_data_snapshot, save_data, save_task, search_fts, upsert_calendar_sync_entry,
+    read_data_snapshot, read_sync_encryption_trusted_local, save_data, save_task, search_fts,
+    upsert_calendar_sync_entry,
 };
 use sync::{
     acquire_file_sync_lease, clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
@@ -154,7 +155,7 @@ use sync::{
 };
 use sync::{
     change_sync_encryption_passphrase, disable_sync_encryption, enable_sync_encryption,
-    provide_sync_encryption_passphrase,
+    file_sync_encryption_artifact, provide_sync_encryption_passphrase,
 };
 use sync_encryption::{
     clear_sync_encryption_key_material, derive_sync_encryption_key,
@@ -2061,6 +2062,7 @@ pub fn run() {
             list_system_fonts,
             check_microsoft_store_update,
             get_data,
+            read_sync_encryption_trusted_local,
             read_data_json,
             save_data,
             save_task,
@@ -2125,6 +2127,7 @@ pub fn run() {
             restore_sync_encryption_verified_remote,
             mark_sync_encryption_transition_incomplete,
             enable_sync_encryption,
+            file_sync_encryption_artifact,
             disable_sync_encryption,
             change_sync_encryption_passphrase,
             provide_sync_encryption_passphrase,

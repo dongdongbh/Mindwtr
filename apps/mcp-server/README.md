@@ -157,12 +157,12 @@ Other unsupported fields are rejected before a write. The desktop API's recurren
 Use Cloud mode when you run your own Mindwtr Cloud server and want MCP tools without pointing the helper at a local SQLite database:
 
 ```bash
+MINDWTR_MCP_CLOUD_TOKEN="$MINDWTR_TOKEN" \
 npx -y mindwtr-mcp \
-  --cloud-url "https://mindwtr.example.com" \
-  --cloud-token "$MINDWTR_TOKEN"
+  --cloud-url "https://mindwtr.example.com"
 ```
 
-Or pass the same values through environment variables:
+Pass bearer tokens through the environment to keep them out of process arguments. The `--cloud-token` flag remains supported. You can also pass the URL through the environment:
 
 ```bash
 MINDWTR_MCP_CLOUD_URL="https://mindwtr.example.com" \
@@ -181,8 +181,11 @@ For private HTTP test deployments, local/private HTTP URLs are allowed by the sh
 By default `mindwtr-mcp` only speaks stdio. Pass `--http` to also (instead of stdio) serve a stateless streamable-HTTP MCP endpoint, so you can point a remote MCP client at a URL — the motivating case is [Gemini Spark](https://gemini.google.com) "custom apps", which take an MCP server URL. HTTP mode works with all three backends.
 
 ```bash
-mindwtr-mcp --http --http-token "$(openssl rand -hex 32)" --db "/path/to/mindwtr.db"
+export MINDWTR_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
+mindwtr-mcp --http --db "/path/to/mindwtr.db"
 ```
+
+Configure the remote MCP client with the same token from `MINDWTR_MCP_HTTP_TOKEN`. Use a randomly generated token; the minimum length does not guarantee a strong secret. Passing it through the environment keeps it out of process arguments; `--http-token` remains supported.
 
 Flags (all have `MINDWTR_MCP_HTTP*` env var equivalents):
 
@@ -193,7 +196,7 @@ Flags (all have `MINDWTR_MCP_HTTP*` env var equivalents):
 
 The desktop app's built-in MCP server also uses port `8722`. If it is on, pass another port with `--http-port`, for example `--http-port 8723`.
 
-The MCP endpoint is `POST /mcp` and requires `Authorization: Bearer <token>` on every request; `GET /healthz` returns `200 ok` without auth for reverse-proxy health checks. Requests without a valid token get `401`; repeated authentication failures get `429` with a `Retry-After` header. Bodies over 1 MiB get `413`. When HTTP mode is on, the server does not also connect a stdio transport — it stays alive as long as the HTTP server is listening, not stdin.
+The MCP endpoint is `POST /mcp` and requires `Authorization: Bearer <token>` on every request; `GET /healthz` returns `200 ok` without auth for reverse-proxy health checks. Requests without a valid token get `401`; repeated authentication failures get `429` with a `Retry-After` header. This response does not block further token checks: a valid token still succeeds, so it is not a brute-force lockout. Bodies over 1 MiB get `413`. When HTTP mode is on, the server does not also connect a stdio transport — it stays alive as long as the HTTP server is listening, not stdin.
 
 There is no built-in TLS termination or rate limiting for authenticated requests. If you're exposing this beyond localhost, put a reverse proxy (e.g. Caddy, nginx) in front for TLS and put the resulting `https://` URL (plus your token) into the remote MCP client.
 

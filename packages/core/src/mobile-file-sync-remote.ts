@@ -639,7 +639,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         name.startsWith(DESKTOP_TRANSITION_STAGE_DIR_PREFIX)
         || name.startsWith(DESKTOP_TRANSITION_QUARANTINE_DIR_PREFIX);
 
-    type ArtifactLocation = { directory: DirectoryHandle; leaf: string; mimeType: string };
+    type ArtifactLocation = { directory: DirectoryHandle; leaf: string; mimeType: string; originalName?: string };
 
 
     const createFileSyncEncryptionRemotePort = async (
@@ -706,17 +706,18 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             return unique;
         };
 
-        const collectDesktopRecoveryDirectory = async (dirUri: string): Promise<void> => {
+        const collectDesktopRecoveryDirectory = async (dirUri: string, originalDirectory: string): Promise<void> => {
             const directory = await openDirectory(dirUri);
             for (const [leaf, uri] of directory.entries) {
                 if (isDesktopTransitionRecoveryDir(leaf)) {
-                    await collectDesktopRecoveryDirectory(uri);
+                    await collectDesktopRecoveryDirectory(uri, `${originalDirectory}/${leaf}`);
                     continue;
                 }
                 const name = `${DESKTOP_RECOVERY_ENTRY_PREFIX}${desktopRecoveryLocations.size}`;
                 desktopRecoveryLocations.set(name, {
                     directory,
                     leaf,
+                    originalName: `${originalDirectory}/${leaf}`,
                     mimeType: leaf.endsWith('.json') ? 'application/json' : DEFAULT_ARTIFACT_MIME,
                 });
             }
@@ -788,7 +789,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                     );
                 }
                 if (isDesktopTransitionRecoveryDir(name)) {
-                    await collectDesktopRecoveryDirectory(uri);
+                    await collectDesktopRecoveryDirectory(uri, name);
                 } else if (isTransitionScratchName(name)) {
                     entries.push({ name, kind: 'attachment' });
                 }
@@ -803,7 +804,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                         );
                     }
                     if (isDesktopTransitionRecoveryDir(name)) {
-                        await collectDesktopRecoveryDirectory(uri);
+                        await collectDesktopRecoveryDirectory(uri, `${ATTACHMENT_PREFIX}${name}`);
                         continue;
                     }
 
@@ -816,7 +817,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 }
             }
             for (const name of desktopRecoveryLocations.keys()) {
-                entries.push({ name, kind: 'attachment' });
+                entries.push({ name, kind: 'attachment', originalName: desktopRecoveryLocations.get(name)?.originalName });
             }
 
             return entries.sort((left, right) => compareSyncTransitionEntryNames(left.name, right.name));

@@ -9,6 +9,8 @@ import { defaultSyncCryptoPrimitives, SYNC_CRYPTO_DEFAULT_KDF_PARAMS, type SyncK
 import { WebDavRemoteWriteConflictError } from './webdav';
 import { AttachmentUploadTooLargeError } from './attachment-transfer';
 import { CACHE, createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
+import { createSyncEncryptionStateStore } from './sync-encryption-local-state';
+import { SYNC_ENCRYPTION_STATE_KEY } from './sync-storage-keys';
 
 const now = '2026-09-28T00:00:00.000Z';
 const bytes = (...values: number[]) => new Uint8Array(values);
@@ -32,6 +34,7 @@ const setup = (options: {
   timersPaused?: boolean;
   createUploadTask?: () => MobileAttachmentUploadTask | null;
   preparePlaintextDownload?: MobileAttachmentCommonHost['preparePlaintextDownload'];
+  encryption?: Partial<MobileAttachmentCommonHost['encryption']>;
 } = {}) => {
   const memory = createMemoryFileSystem({ sha256: options.sha256 });
   const { log, lines } = createRecordingLog();
@@ -60,7 +63,7 @@ const setup = (options: {
     fs: memory.fs,
     files,
     crypto: defaultSyncCryptoPrimitives,
-    encryption: { logSyncEncryptionEvent },
+    encryption: { logSyncEncryptionEvent, getSyncEncryptionStatus: async () => ({ state: 'off' }), ...options.encryption },
     installer: { installAttachmentFileGeneration },
     installerMayBeMissing: () => options.installerMayBeMissing === true,
     timersPaused: () => options.timersPaused === true,
@@ -236,25 +239,47 @@ describe('mobile attachment common: download installation', () => {
 });
 
 describe('mobile attachment common: encryption seam (#1056)', () => {
-  it('seals on upload and opens on download; plaintext passes through', async () => {
-    const { common, logSyncEncryptionEvent } = setup();
+  it('refuses plaintext upload and download with the real locked state store, while proven off remains supported', async () => {
+    const values = new Map([[SYNC_ENCRYPTION_STATE_KEY, JSON.stringify({ state: 'remote-encrypted-no-key' })]]);
+    const store = createSyncEncryptionStateStore({
+      storage: {
+        getItem: async (name) => values.get(name) ?? null,
+        setItem: async (name, value) => { values.set(name, value); },
+        removeItem: async (name) => { values.delete(name); },
+      },
+      secureConfig: { getSecureConfigValue: async () => null, setSecureConfigValue: async () => {}, deleteSecureConfigValue: async () => {} },
+      readActiveScope: async () => null,
+      log: { info: () => {}, warn: () => {} },
+    });
+    const { common } = setup({ encryption: { getSyncEncryptionStatus: store.getSyncEncryptionStatus } });
+    const material = await store.getSyncEncryptionMaterial();
+    expect(material).toBeNull();
+    const plaintext = bytes(1, 2, 3);
+    await expect(common.openAttachmentBytesFromDownload(plaintext, material, 'attachments/a.txt')).rejects.toThrow('ATTACHMENT_POSTURE');
+    await expect(common.sealAttachmentBytesForUpload(plaintext, material, 'attachments/a.txt')).rejects.toThrow('ATTACHMENT_POSTURE');
+    await store.syncEncryptionLocalState.write(null);
+    expect(await common.openAttachmentBytesFromDownload(plaintext, null, 'attachments/a.txt')).toBe(plaintext);
+    expect(await common.sealAttachmentBytesForUpload(plaintext, null, 'attachments/a.txt')).toBe(plaintext);
+  });
+  it('seals on upload, authenticates identity on download and refuses plaintext while enabled', async () => {
+    const { common, logSyncEncryptionEvent } = setup({ encryption: { getSyncEncryptionStatus: async () => ({ state: 'enabled' }) } });
     const plaintext = bytes(1, 2, 3, 4);
 
     const sealed = await common.sealAttachmentBytesForUpload(plaintext, material, 'attachments/att-1.txt');
     expect(sealed).not.toEqual(plaintext);
     await expect(common.openAttachmentBytesFromDownload(sealed, material, 'attachments/att-1.txt')).resolves.toEqual(plaintext);
-    await expect(common.openAttachmentBytesFromDownload(plaintext, material)).resolves.toBe(plaintext);
-    await expect(common.sealAttachmentBytesForUpload(plaintext, null)).resolves.toBe(plaintext);
+    await expect(common.openAttachmentBytesFromDownload(plaintext, material, 'attachments/att-1.txt')).rejects.toThrow('PLAINTEXT_ATTACHMENT');
+    await expect(setup().common.sealAttachmentBytesForUpload(plaintext, null, 'attachments/att-1.txt')).resolves.toBe(plaintext);
     expect(logSyncEncryptionEvent).toHaveBeenCalledWith('remote-read', expect.objectContaining({ decision: 'seal' }));
   });
 });
 
 describe('mobile attachment common: a partly encrypted location', () => {
   it('never takes ciphertext as an attachment\'s bytes when this device has no key', async () => {
-    const { common } = setup();
+    const { common } = setup({ encryption: { getSyncEncryptionStatus: async () => ({ state: 'enabled' }) } });
     const sealed = await common.sealAttachmentBytesForUpload(bytes(1, 2, 3, 4), material, 'attachments/att-1.txt');
     await expect(common.openAttachmentBytesFromDownload(sealed, null, 'attachments/att-1.txt'))
-      .rejects.toBeInstanceOf(SyncEncryptionPartlyEncryptedError);
+      .rejects.toThrow('ATTACHMENT_POSTURE');
   });
 });
 
@@ -306,6 +331,17 @@ describe('mobile attachment common: a host that hashes files itself', () => {
 });
 
 describe('mobile attachment common: streamed uploads', () => {
+  it('rechecks current posture before the native task publishes any plaintext', async () => {
+    const task = { uploadAsync: vi.fn().mockResolvedValue({ status: 201 }) };
+    let observations = 0;
+    const { common } = setup({
+      createUploadTask: () => task,
+      encryption: { getSyncEncryptionStatus: async () => ({ state: ++observations === 1 ? 'off' : 'remote-encrypted-no-key' }) },
+    });
+    await expect(common.uploadWebdavFileWithFileSystem('https://dav.example.com/a.txt', `${MANAGED}a.txt`,
+      'text/plain', 'fixture', 'synthetic', false, undefined, undefined, undefined, null)).rejects.toThrow('ATTACHMENT_POSTURE');
+    expect(task.uploadAsync).not.toHaveBeenCalled();
+  });
   const upload = (common: ReturnType<typeof setup>['common'], url: string, fileUri: string, {
     expectedEtag = null,
     signal,
@@ -377,7 +413,7 @@ describe('mobile attachment common: streamed uploads', () => {
 
     const pending = upload(common, 'https://dav.example.com/a.txt', `${MANAGED}att-1.txt`, { signal: controller.signal })
       .finally(() => { settled = true; });
-    await Promise.resolve();
+    await vi.waitFor(() => expect(task.uploadAsync).toHaveBeenCalledOnce());
     controller.abort(new Error('cycle aborted'));
     await new Promise((resolve) => setTimeout(resolve, 0));
 

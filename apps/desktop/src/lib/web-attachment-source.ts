@@ -1,9 +1,12 @@
-import { cloudGetFile, getCloudBaseUrl, type Attachment } from '@mindwtr/core';
+import { bytesToBase64, cloudGetFile, getCloudBaseUrl, type Attachment } from '@mindwtr/core';
 import { inferAttachmentMimeTypeFromUri } from './attachment-mime';
 import { isTauriRuntime } from './runtime';
+import { logInfo } from './app-log';
 
 
 type WebAttachmentBytes = { bytes: ArrayBuffer; mimeType: string };
+
+const INERT_WEB_ATTACHMENT_MIME = /^(application\/pdf|text\/plain|image\/(png|jpeg|gif|webp|bmp|avif|heic|heif|tiff|x-icon|vnd\.microsoft\.icon)|audio\/(aac|mpeg|mp4|wav|x-wav|ogg|flac|webm|x-caf|x-m4a|3gpp|3gpp2)|video\/(mp4|webm|quicktime|x-msvideo|x-matroska|mpeg|ogg|3gpp|3gpp2))$/;
 
 export const WEB_ATTACHMENT_BYTE_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 export const WEB_ATTACHMENT_BYTE_CACHE_MAX_ENTRIES = 8;
@@ -138,7 +141,45 @@ export async function fetchWebCloudAttachmentBlob(
 ): Promise<string | null> {
     const result = await readCachedBytes(attachment, options);
     if (!result) return null;
-    return URL.createObjectURL(new Blob([result.bytes], { type: result.mimeType }));
+    const mimeType = result.mimeType.split(';', 1)[0].trim().toLowerCase();
+    if (!INERT_WEB_ATTACHMENT_MIME.test(mimeType)) {
+        const opaqueMime = mimeType === 'image/svg+xml' ? mimeType : 'application/octet-stream';
+        void logInfo('Web attachment preview isolated', {
+            scope: 'attachment', force: true,
+            extra: { releaseCheck: 'v1.3.9/web-attachment-open-policy', outcome: 'isolated-preview' },
+        });
+        return `data:${opaqueMime};base64,${bytesToBase64(new Uint8Array(result.bytes))}`;
+    }
+    return URL.createObjectURL(new Blob([result.bytes], { type: mimeType }));
+}
+
+export async function openWebCloudAttachment(
+    attachment: Attachment,
+    options: WebAttachmentFetchOptions = {},
+): Promise<boolean> {
+    const result = await readCachedBytes(attachment, options);
+    if (!result) return false;
+    const mimeType = result.mimeType.split(';', 1)[0].trim().toLowerCase();
+    const preview = INERT_WEB_ATTACHMENT_MIME.test(mimeType);
+    const url = URL.createObjectURL(new Blob([result.bytes], {
+        type: preview ? mimeType : 'application/octet-stream',
+    }));
+    retainOpenedWebAttachmentUrl(url);
+    if (preview) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = attachment.title || 'attachment';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    }
+    void logInfo('Web attachment open policy applied', {
+        scope: 'attachment', force: true,
+        extra: { releaseCheck: 'v1.3.9/web-attachment-open-policy', outcome: preview ? 'preview' : 'download' },
+    });
+    return true;
 }
 
 

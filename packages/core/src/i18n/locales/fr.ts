@@ -1,5 +1,11 @@
 
 export const frOverrides: Record<string, string> = {
+    "settings.syncEncryptionUpgrade": "Mettre à niveau le chiffrement de synchronisation",
+    "settings.syncEncryptionUpgradeWarning": "Mettez d’abord Mindwtr à jour sur tous les appareils. Les anciennes versions ne peuvent pas lire les fichiers mis à niveau. La mise à niveau utilise une copie locale vérifiée et s’arrête si la copie synchronisée diffère. Les copies chiffrées existantes sont conservées. Conservez cette phrase secrète pour restaurer les copies conservées, même si vous la modifiez ensuite.",
+    "settings.syncEncryptionErrorLegacy": "Cet emplacement utilise un ancien chiffrement. Mettez tous les appareils à jour, puis choisissez Mettre à niveau le chiffrement de synchronisation.",
+    "settings.syncEncryptionErrorReconciliation": "La correspondance des copies locale et synchronisée n’a pas pu être vérifiée. Comparez vos copies fiables et résolvez les différences avant de réessayer. La synchronisation reste suspendue.",
+    "settings.syncEncryptionErrorTrustedLocal": "Ouvrez une bibliothèque locale complète et enregistrée sur cet appareil avant la mise à niveau. La synchronisation reste suspendue.",
+
     "quickAdd.invalidReminderCommand": "Rappel invalide : indiquez une durée prise en charge et une date et heure explicites",
     'task.copyDetails': "Copier les détails de la tâche",
     "taskEdit.startAdvanceReminderLabel": "Avant le début",
@@ -1172,6 +1178,7 @@ export const frOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Après 5 minutes',
         'settings.mobile.appLockRelockAfter15': 'Après 15 minutes',
         'appLock.title': 'Mindwtr est verrouillé',
+        "appLock.loadFailed": "Mindwtr n’a pas pu charger vos données. Réessayez.",
         'appLock.description': 'Utilisez le verrouillage de l’appareil pour ouvrir Mindwtr. Cela protège la vue de l’app, pas la base de données sur l’appareil.',
         'appLock.prompt': 'Déverrouiller Mindwtr',
         'appLock.enablePrompt': 'Activer le verrouillage de Mindwtr',

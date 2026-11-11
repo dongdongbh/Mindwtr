@@ -434,7 +434,7 @@ describe('mobile sync service behind fake ports', () => {
         createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' }] }] } as AppData;
     const encryptedBlob = await encryptSyncArtifact(new TextEncoder().encode('remote blob'), {
       key: new Uint8Array(32).fill(1), salt: new Uint8Array(16).fill(2), params: { mKib: 65536, t: 3, p: 1 },
-    });
+    }, undefined, { kind: 'document' });
     const attachmentUploads = vi.fn(async () => false as const);
     const blobReads: string[] = [];
     fake.host.localData.getData = async () => data;

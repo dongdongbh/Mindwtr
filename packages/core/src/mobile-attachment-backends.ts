@@ -279,6 +279,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
   ): Promise<AppData | false> => {
     assertAttachmentSyncNotAborted(signal);
     const material = options.material ?? null;
+    await common.assertEncryptionPosture(material);
     const maxBufferedPlaintextBytes = maxWebdavBufferedUploadBytes === undefined
       ? undefined
       : Math.max(0, maxWebdavBufferedUploadBytes - (material ? encryptedSyncArtifactByteLength(0) : 0));
@@ -878,6 +879,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     baseSyncUrl: string,
     options: CloudAttachmentSyncOptions = {}
   ): Promise<AppData | false> => {
+    await common.assertEncryptionPosture(null);
     const attachmentsDir = await files.getAttachmentsDir();
 
     const attachmentsById = collectAttachmentsById(appData);
@@ -1145,6 +1147,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
             shouldPropagateError = true;
             throw error;
           }
+          await common.assertEncryptionPosture(null);
           await core.cloudPutFile(
             uploadUrl,
             buffer,
@@ -1279,6 +1282,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     fetcher: typeof fetch,
     options: DropboxAttachmentSyncOptions = {}
   ): Promise<AppData | false> => {
+    await common.assertEncryptionPosture(options.material);
     if (!dropboxClientId) return false;
     const plaintextLimit = maxDropboxBufferedUploadBytes === undefined ? undefined
       : Math.max(0, maxDropboxBufferedUploadBytes - (options.material ? encryptedSyncArtifactByteLength(0) : 0));
@@ -1681,6 +1685,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
     }
 
     assertAttachmentSyncNotAborted(signal);
+    await common.assertEncryptionPosture(options.material);
     const syncDir = await files.resolveFileSyncDir(syncPath);
     if (!syncDir) return false;
 

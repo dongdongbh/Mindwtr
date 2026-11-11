@@ -101,7 +101,8 @@ const parseLocalState = (raw: string | null): SyncEncryptionLocalState | null =>
         if (incompleteTransition !== undefined
             && incompleteTransition !== 'enable'
             && incompleteTransition !== 'disable'
-            && incompleteTransition !== 'change-passphrase') {
+            && incompleteTransition !== 'change-passphrase'
+            && incompleteTransition !== 'upgrade') {
             throw new SyncEncryptionStateUnavailableError();
         }
         if (parsed?.state !== 'enabled'

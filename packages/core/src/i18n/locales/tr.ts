@@ -986,6 +986,7 @@ export const trOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5 dakika sonra',
         'settings.mobile.appLockRelockAfter15': '15 dakika sonra',
         'appLock.title': 'Mindwtr kilitli',
+        "appLock.loadFailed": "Mindwtr verilerinizi yükleyemedi. Tekrar deneyin.",
         'appLock.description': 'Mindwtr’ı açmak için cihaz kilidini kullanın. Bu, cihazdaki veritabanını değil uygulama görünümünü korur.',
         'appLock.prompt': 'Mindwtr kilidini aç',
         'appLock.enablePrompt': 'Mindwtr uygulama kilidini aç',

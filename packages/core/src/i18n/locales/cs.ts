@@ -1182,6 +1182,7 @@ export const csOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Po 5 minutách',
         'settings.mobile.appLockRelockAfter15': 'Po 15 minutách',
         'appLock.title': 'Mindwtr je zamčený',
+        "appLock.loadFailed": "Mindwtr nemohl načíst vaše data. Zkuste to znovu.",
         'appLock.description': 'K otevření Mindwtr použijte zámek zařízení. Chrání zobrazení aplikace, ne databázi v zařízení.',
         'appLock.prompt': 'Odemknout Mindwtr',
         'appLock.enablePrompt': 'Zapnout zámek aplikace Mindwtr',

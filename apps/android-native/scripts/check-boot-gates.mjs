@@ -573,11 +573,11 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     for (const vector of vectors) {
         const material = await pumped(gate.deriveSyncKeyMaterial(vector.passphrase, u8(b(vector.saltB64)), vector.params, gate.prims));
         const encrypted = u8(b(vector.encryptedB64));
-        const opened = await pumped(gate.decryptSyncArtifact(encrypted, material.key, gate.prims));
+        const opened = await pumped(gate.decryptSyncArtifact(encrypted, material.key, gate.prims, { kind: 'document' }));
         assert(Buffer.from(opened).equals(b(vector.plaintextB64)), `${vector.name} opens through the host's calls`);
 
         const nonce = encrypted.slice(34, 46);
-        const sealed = await pumped(gate.encryptSyncArtifact(u8(b(vector.plaintextB64)), material, { ...gate.prims, randomBytes: () => nonce }));
+        const sealed = await pumped(gate.encryptSyncArtifact(u8(b(vector.plaintextB64)), material, { ...gate.prims, randomBytes: () => nonce }, { kind: 'document' }));
         assert(Buffer.from(sealed).equals(b(vector.encryptedB64)), `${vector.name} seals byte for byte`);
     }
     const argonRequest = requests.find((request) => request.op === 'argon2id' && request.m === 19456);
@@ -587,7 +587,7 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     const material = await pumped(gate.deriveSyncKeyMaterial(first.passphrase, u8(b(first.saltB64)), first.params, gate.prims));
     const tampered = u8(b(first.encryptedB64));
     tampered[tampered.length - 1] ^= 1;
-    const authError = await pumped(gate.decryptSyncArtifact(tampered, material.key, gate.prims)).then(() => null, (error) => error);
+    const authError = await pumped(gate.decryptSyncArtifact(tampered, material.key, gate.prims, { kind: 'document' })).then(() => null, (error) => error);
     assert(authError instanceof gate.SyncCryptoAuthError, 'a tag mismatch is core\'s SyncCryptoAuthError');
     const short = await pumped(gate.prims.aesGcmOpen(material.key, u8(new Uint8Array(12)), u8(new Uint8Array(15)), u8(new Uint8Array(0)))).then(() => null, (error) => error);
     assert(short instanceof gate.SyncCryptoAuthError, 'a body too short for a tag is an auth failure too');

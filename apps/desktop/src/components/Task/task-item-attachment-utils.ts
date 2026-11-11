@@ -1,6 +1,6 @@
 import { Attachment } from '@mindwtr/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { normalizeAttachmentPathForUrl, isLocalAttachmentPath, resolveAttachmentOpenTarget } from '../../lib/attachment-paths';
+import { normalizeAttachmentPathForUrl, isLocalAttachmentPath, isUnsafeLocalAttachmentPath, resolveAttachmentOpenTarget } from '../../lib/attachment-paths';
 import { isTauriRuntime } from '../../lib/runtime';
 
 export function isAudioAttachment(attachment: Attachment): boolean {
@@ -26,6 +26,7 @@ export function isTextAttachment(attachment: Attachment): boolean {
 }
 
 export function resolveAttachmentSource(uri: string): string {
+    if (isUnsafeLocalAttachmentPath(uri)) return '';
     if (!isTauriRuntime()) return uri;
     if (/^https?:\/\//i.test(uri)) return uri;
     if (!isLocalAttachmentPath(uri)) return uri;

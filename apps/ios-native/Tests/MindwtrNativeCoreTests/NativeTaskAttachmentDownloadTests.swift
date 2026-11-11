@@ -219,7 +219,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         before = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(), taskID: taskID, generation: 1, payloadJSON: payload)
         try editor.checkpoint(before)
         if encrypted {
-            var header = Data("MWENC1".utf8); header.append(contentsOf: [1,1,64,0,0,0,1,0,0,0,1,1])
+            var header = Data("MWENC1".utf8); header.append(contentsOf: [2,1,64,0,0,0,1,0,0,0,1,1])
             header.append(Data(count: 16)); header.append(Data(count: 12))
             var length = UInt64(bytes.count + 16).littleEndian
             withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }
@@ -1704,7 +1704,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
     func testAESRequestWithDifferentValidKeyRefusesBeforeNativeCryptoOrSource() async throws {
         try await seed(encrypted: true)
         let other = Data(repeating: 1, count: 32)
-        var header = Data("MWENC1".utf8); header.append(contentsOf: [1,1,64,0,0,0,1,0,0,0,1,1])
+        var header = Data("MWENC1".utf8); header.append(contentsOf: [2,1,64,0,0,0,1,0,0,0,1,1])
         header.append(Data(count: 16)); header.append(Data(count: 12))
         var length = UInt64(bytes.count + 16).littleEndian
         withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }

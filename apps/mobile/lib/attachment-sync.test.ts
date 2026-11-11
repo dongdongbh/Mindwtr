@@ -242,6 +242,7 @@ beforeAll(async () => {
 
 describe('attachment sync', () => {
   beforeEach(async () => {
+    (await import('./sync-encryption-state')).__resetSyncEncryptionStateForTests();
     vi.clearAllMocks();
     fileSystemMock.uploadAsync.mockReset();
     fileSystemMock.createUploadTask.mockReset();
@@ -3494,12 +3495,19 @@ describe('attachment sync', () => {
       salt: new Uint8Array(16).fill(3),
       params: core.SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
     };
+    const encryption = await import('./sync-encryption-state');
+    await encryption.syncEncryptionKeyCache.setKey(material.key);
+    await encryption.syncEncryptionLocalState.write({
+      state: 'enabled',
+      discoveredSalt: Buffer.from(material.salt).toString('hex'),
+      discoveredParams: material.params,
+    });
     const bytes = new Uint8Array([22, 23, 24]);
     const sealed = await core.encryptSyncArtifact(
       bytes,
       material,
       (await import('./sync-crypto-native')).mobileSyncCryptoPrimitives,
-    );
+     { kind: 'attachment', cloudKey: 'attachments/recover-file-encrypted.txt' });
     const remoteUri = 'file://sync/attachments/recover-file-encrypted.txt';
     const targetUri = 'file://document/attachments/recover-file-encrypted.txt';
     const appData = singleAttachmentData({
@@ -5417,11 +5425,13 @@ describe('attachment sync', () => {
         null,
         30_000,
       );
+      const rejected = expect(pending).rejects.toThrow('upload aborted for test');
+      await vi.waitFor(() => expect(fileSystemMock.createUploadTask).toHaveBeenCalledOnce());
 
       controller.abort('upload aborted for test');
       await vi.waitFor(() => expect(cancelAsync).toHaveBeenCalledOnce());
       upload.reject(new Error('native upload cancelled'));
-      await expect(pending).rejects.toThrow('upload aborted for test');
+      await rejected;
     });
 
     it('defers a WebDAV edit during prepare and downloads when newer remote content wins', async () => {

@@ -103,8 +103,18 @@ int mindwtr_macos_open_security_bookmark(const char *base64_cstr,
 
     BOOL started = [resolvedURL startAccessingSecurityScopedResource];
     __block BOOL opened = NO;
+    __block BOOL revealed = NO;
     void (^openBlock)(void) = ^{
-        opened = [[NSWorkspace sharedWorkspace] openURL:resolvedURL];
+        NSNumber *isDirectory = nil;
+        if (![resolvedURL getResourceValue:&isDirectory forKey:NSURLIsDirectoryKey error:nil]
+            || ![isDirectory boolValue]) return;
+        if ([[NSWorkspace sharedWorkspace] isFilePackageAtPath:resolved]) {
+            [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[resolvedURL]];
+            revealed = YES;
+            opened = YES;
+        } else {
+            opened = [[NSWorkspace sharedWorkspace] openURL:resolvedURL];
+        }
     };
     if ([NSThread isMainThread]) {
         openBlock();
@@ -112,7 +122,7 @@ int mindwtr_macos_open_security_bookmark(const char *base64_cstr,
         dispatch_sync(dispatch_get_main_queue(), openBlock);
     }
     if (started) [resolvedURL stopAccessingSecurityScopedResource];
-    return opened ? 1 : -1;
+    return opened ? (revealed ? 2 : 1) : -1;
 }
 
 

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { pwshTest } from "./pwsh-test.mjs";
 
 const readIosRelease = () => parse(readFileSync('.github/workflows/release-ios-appstore.yml', 'utf8'));
 const readMacosRelease = () => parse(readFileSync('.github/workflows/release-macos-appstore.yml', 'utf8'));
@@ -807,9 +808,7 @@ test("Windows release signs and publishes exactly the current NSIS installer", (
   expect(bundleStep.run.indexOf("Remove-Item")).toBeLessThan(
     bundleStep.run.indexOf("bunx tauri bundle"),
   );
-  expect(stageExeStep.if).toContain(
-    "vars.SIGNPATH_SIGNING_ENABLED == 'true'",
-  );
+  expect(stageExeStep.if).toContain("steps.signpath-config.outputs.enabled == 'true'");
   expect(resolveStep).toBeDefined();
   expect(resolveStep.run).toContain("tauri.conf.json");
   expect(resolveStep.run).toContain("$tauriConfig.productName");
@@ -909,6 +908,49 @@ test("Windows release SignPath submissions are gated end to end and target the p
   expect(submitInstallerStep.with["artifact-configuration-slug"]).toBe(
     "windows-installer",
   );
+});
+
+test("Windows release keeps SignPath secrets out of the build environment", () => {
+  const windows = parse(readFileSync(".github/workflows/release-windows.yml", "utf8"));
+  const job = windows.jobs.standalone;
+  const gate = job.steps.find((step) => step.id === "signpath-config");
+  expect(gate).toBeDefined();
+  expect(gate.if).toContain("vars.SIGNPATH_SIGNING_ENABLED == 'true'");
+  expect(gate.if).toContain("github.repository == 'dongdongbh/Mindwtr'");
+  expect(gate.if).toContain("startsWith(github.ref, 'refs/tags/') || inputs.tag != '' || github.event.inputs.tag != ''");
+  for (const name of ["SIGNPATH_API_TOKEN", "SIGNPATH_ORGANIZATION_ID"]) {
+    expect(windows.env?.[name]).toBeUndefined();
+    expect(job.env[name]).toBeUndefined();
+    expect(gate.env[name]).toBe(`\${{ secrets.${name} }}`);
+    for (const step of job.steps.filter((step) => step !== gate)) {
+      expect(step.env?.[name]).toBeUndefined();
+    }
+  }
+  const submissions = job.steps.filter((step) => step.uses?.startsWith("SignPath/"));
+  expect(submissions).toHaveLength(2);
+  for (const step of submissions) {
+    expect(step.with["api-token"]).toBe("${{ secrets.SIGNPATH_API_TOKEN }}");
+    expect(step.with["organization-id"]).toBe("${{ secrets.SIGNPATH_ORGANIZATION_ID }}");
+  }
+});
+
+pwshTest("Windows SignPath gate only emits credential presence", () => {
+  const windows = parse(readFileSync(".github/workflows/release-windows.yml", "utf8"));
+  const gate = windows.jobs.standalone.steps.find((step) => step.id === "signpath-config");
+  for (const [token, organization, enabled] of [["", "", false], ["synthetic-token", "", false], ["", "synthetic-org", false], ["synthetic-token", "synthetic-org", true]]) {
+    const dir = mkdtempSync(join(tmpdir(), "signpath-gate-"));
+    const outputPath = join(dir, "output");
+    try {
+      const stdout = execFileSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", gate.run], {
+        encoding: "utf8",
+        env: { ...process.env, SIGNPATH_API_TOKEN: token, SIGNPATH_ORGANIZATION_ID: organization, GITHUB_OUTPUT: outputPath },
+      });
+      expect(stdout.trim()).toBe("");
+      expect(readFileSync(outputPath, "utf8").trim()).toBe(`enabled=${enabled}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 test("stable and RC releases sign and verify the checksum manifest", () => {

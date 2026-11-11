@@ -514,7 +514,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             foreignSalt: false,
             decision: 'decrypt',
         });
-        const plaintext = await decryptRemoteArtifactOrThrow(bytes, material.key, host.crypto);
+        const plaintext = await decryptRemoteArtifactOrThrow(bytes, material.key, host.crypto, { kind: 'document' });
         return parseAppData(new TextDecoder().decode(plaintext));
     };
 
@@ -713,7 +713,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                     snapshot.bytes,
                     material.key,
                     host.crypto,
-                );
+                 { kind: 'document' });
                 let decrypted: AppData;
                 try {
                     decrypted = parseAppData(new TextDecoder().decode(plaintext));
@@ -805,7 +805,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             try {
                 const readable = material
                     ? parseAppData(new TextDecoder().decode(
-                        await decryptRemoteArtifactOrThrow(current.bytes, material.key, host.crypto),
+                        await decryptRemoteArtifactOrThrow(current.bytes, material.key, host.crypto, { kind: 'document' }),
                     ))
                     : parseAppData(new TextDecoder().decode(current.bytes));
                 void readable;
@@ -828,7 +828,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 new TextEncoder().encode(content),
                 material,
                 host.crypto,
-            )
+             { kind: 'document' })
             : new TextEncoder().encode(content);
 
         const written = (await remote.write(name, payload, expectedVersion)) ?? await remote.read(name);
@@ -838,7 +838,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 written.bytes,
                 material.key,
                 host.crypto,
-            );
+             { kind: 'document' });
             parseAppData(new TextDecoder().decode(plaintext));
         } else {
             parseAppData(new TextDecoder().decode(written.bytes));

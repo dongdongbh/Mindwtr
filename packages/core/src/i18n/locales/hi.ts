@@ -976,6 +976,7 @@ export const hiOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5 मिनट बाद',
         'settings.mobile.appLockRelockAfter15': '15 मिनट बाद',
         'appLock.title': 'Mindwtr लॉक है',
+        "appLock.loadFailed": "Mindwtr आपका डेटा लोड नहीं कर सका। फिर से कोशिश करें।",
         'appLock.description': 'Mindwtr खोलने के लिए डिवाइस लॉक का उपयोग करें। यह ऐप दृश्य की सुरक्षा करता है, डिवाइस पर मौजूद डेटाबेस की नहीं।',
         'appLock.prompt': 'Mindwtr अनलॉक करें',
         'appLock.enablePrompt': 'Mindwtr ऐप लॉक सक्षम करें',

@@ -2,11 +2,12 @@
 
 
 import { generateDicewarePassphrase } from './diceware';
-import { SyncCryptoUnsupportedError } from './sync-crypto';
+import { SyncCryptoAuthError, SyncCryptoUnsupportedError } from './sync-crypto';
 import type { AppData } from './types';
 import {
     SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE,
     SyncEncryptionTerminalError,
+    SyncEncryptionRemoteConflictError,
     isSyncEncryptionRemoteVersionUnavailableError,
     type SyncEncryptionState,
     type SyncEncryptionStatus,
@@ -24,9 +25,12 @@ export type SyncEncryptionCardError =
     | 'backend-required'
     | 'backend-incompatible'
     | 'transition-incomplete'
+    | 'legacy-upgrade-required'
+    | 'reconciliation-required'
+    | 'trusted-local-required'
     | 'generic';
 
-export type SyncEncryptionCardFlow = 'none' | 'enable' | 'change' | 'disable' | 'unlock' | 'abandon';
+export type SyncEncryptionCardFlow = 'none' | 'enable' | 'change' | 'disable' | 'unlock' | 'abandon' | 'upgrade';
 export type SyncEncryptionCardWarning = 'cleanup-deferred' | 'file-cleanup-deferred' | 'no-encrypted-remote';
 export type SyncEncryptionPassphraseField = 'current' | 'next' | 'confirm';
 
@@ -37,6 +41,7 @@ export type SyncEncryptionCardHost = {
     getStatus(): Promise<SyncEncryptionStatus>;
     isBackendPending(): Promise<boolean>;
     enable(passphrase: string, options: TransitionOptions): Promise<void>;
+    upgrade(passphrase: string, options: TransitionOptions): Promise<void>;
     change(current: string, next: string, options: TransitionOptions): Promise<void>;
     disable(options: TransitionOptions): Promise<void>;
     provide(passphrase: string): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'>;
@@ -96,8 +101,18 @@ const INITIAL_STATE: SyncEncryptionCardState = {
     pendingFirstSync: false,
 };
 
+export const isSyncEncryptionUpgradeAvailable = ({ state, partlyEncrypted, incompleteTransitionKind }: Pick<SyncEncryptionCardState,
+    'state' | 'partlyEncrypted' | 'incompleteTransitionKind'>): boolean => (
+    (incompleteTransitionKind === null || incompleteTransitionKind === 'upgrade')
+    && (incompleteTransitionKind === 'upgrade'
+        || !partlyEncrypted && (state === 'enabled' || state === 'remote-encrypted-no-key'))
+);
+
 export const classifySyncEncryptionCardFailure = (error: unknown, terminal: SyncEncryptionCardError): SyncEncryptionCardError => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    if (message.includes('SYNC_ENCRYPTION_LEGACY')) return 'legacy-upgrade-required';
+    if (message.includes('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED')) return 'reconciliation-required';
+    if (message.includes('SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED')) return 'trusted-local-required';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
     if (message.includes('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE')) return 'transition-incomplete';
     if (message.includes(SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE)) return 'backend-incompatible';
@@ -115,7 +130,18 @@ const SYNC_ENCRYPTION_CARD_ERROR_KEYS: Record<SyncEncryptionCardError, string> =
     'backend-required': 'settings.syncEncryptionErrorBackendRequired',
     'backend-incompatible': 'settings.syncEncryptionErrorBackendIncompatible',
     'transition-incomplete': 'settings.syncEncryptionErrorTransitionIncomplete',
+    'legacy-upgrade-required': 'settings.syncEncryptionErrorLegacy',
+    'reconciliation-required': 'settings.syncEncryptionErrorReconciliation',
+    'trusted-local-required': 'settings.syncEncryptionErrorTrustedLocal',
     generic: 'settings.syncEncryptionErrorGeneric',
+};
+
+export const classifySyncEncryptionUpgradeFailure = (error: unknown): 'wrong-passphrase' | 'generic' | 'transition-incomplete' | null => {
+    const cause = error instanceof SyncEncryptionTerminalError ? error.cause : error;
+    if (cause instanceof SyncCryptoAuthError) return 'wrong-passphrase';
+    if (cause instanceof SyncCryptoUnsupportedError) return 'generic';
+    if (error instanceof SyncEncryptionRemoteConflictError) return 'transition-incomplete';
+    return null;
 };
 
 
@@ -233,7 +259,11 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
 
     const toggleRevealed = () => set({ revealed: !card.revealed });
 
-    const run = async (operation: () => Promise<void>, terminal: SyncEncryptionCardError) => {
+    const run = async (
+        operation: () => Promise<void>,
+        terminal: SyncEncryptionCardError,
+        classify?: (error: unknown) => SyncEncryptionCardError | null,
+    ) => {
         set({ busy: true, error: null, progress: null });
         let succeeded = false;
         let cleanupDeferred: SyncEncryptionCardWarning | null = null;
@@ -249,13 +279,13 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
                     : 'cleanup-deferred';
                 set({ warning: cleanupDeferred });
             } else {
-                set({ error: classifySyncEncryptionCardFailure(failure, terminal) });
+                set({ error: classify?.(failure) ?? classifySyncEncryptionCardFailure(failure, terminal) });
             }
         }
 
         const nextState = await readState();
         set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly });
-        if (nextState.incomplete) set({ error: 'transition-incomplete' });
+        if (nextState.incomplete && !card.error) set({ error: 'transition-incomplete' });
         set({ pendingFirstSync: await host.isBackendPending().catch(() => false) });
         set({ progress: null, busy: false });
         if (succeeded) {
@@ -288,6 +318,12 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
             () => host.change(currentPassphrase, nextPassphrase, { appData: host.appData(), onProgress }),
             'wrong-passphrase',
         );
+    };
+
+    const submitUpgrade = () => {
+        if (card.flow !== 'upgrade' || card.busy || !card.currentPassphrase) return Promise.resolve();
+        const passphrase = card.currentPassphrase;
+        return run(() => host.upgrade(passphrase, { onProgress }), 'generic', classifySyncEncryptionUpgradeFailure);
     };
 
     const submitDisable = () => run(() => host.disable({ appData: host.appData(), onProgress }), 'rotation-first');
@@ -371,6 +407,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         setField,
         toggleRevealed,
         submitEnable,
+        submitUpgrade,
         submitChange,
         submitDisable,
         submitUnlock,

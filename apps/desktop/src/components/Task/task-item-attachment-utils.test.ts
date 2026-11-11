@@ -47,4 +47,9 @@ describe('task-item attachment utils', () => {
         );
         expect(convertFileSrcMock).toHaveBeenCalledWith('C:/Users/demo/Pictures/My Receipt.png');
     });
+
+    it.each(['\\\\host\\share\\image.png', 'file://host/share/image.png', 'file:///%5c%5chost/share/image.png'])('does not create an asset source for %s', (uri) => {
+        expect(resolveAttachmentSource(uri)).toBe('');
+        expect(convertFileSrcMock).not.toHaveBeenCalled();
+    });
 });

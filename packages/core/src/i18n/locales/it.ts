@@ -1057,6 +1057,7 @@ export const itOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Dopo 5 minuti',
         'settings.mobile.appLockRelockAfter15': 'Dopo 15 minuti',
         'appLock.title': 'Mindwtr è bloccata',
+        "appLock.loadFailed": "Mindwtr non ha potuto caricare i tuoi dati. Riprova.",
         'appLock.description': 'Usa il blocco del dispositivo per aprire Mindwtr. Protegge la vista dell’app, non il database sul dispositivo.',
         'appLock.prompt': 'Sblocca Mindwtr',
         'appLock.enablePrompt': 'Attiva il blocco di Mindwtr',

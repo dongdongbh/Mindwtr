@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { FILE_SYNC_ABSENT_FINGERPRINT, createMobileFileSync, type MobileFileSyncFullHost } from './mobile-file-sync';
 import { FileSyncPathOwnerTerminatedError, fileSyncErrorCode, type MobileFileSyncObservedPublication } from './mobile-file-sync-remote';
-import { defaultSyncCryptoPrimitives } from './sync-crypto';
+import { defaultSyncCryptoPrimitives, decryptSyncArtifact, deriveSyncKeyMaterial, encryptSyncArtifact } from './sync-crypto';
+import { runUpgradeSyncEncryptionOverRemote } from './sync-encryption';
+import { toRemoteSyncDocument } from './sync-document';
 import { compareSyncTransitionEntryNames, runChangeSyncEncryptionPassphraseOverRemote, runDisableSyncEncryptionOverRemote, runEnableSyncEncryptionOverRemote, SyncEncryptionRemoteConflictError, type SyncEncryptionLocalState } from './sync-encryption';
 import type { AppData } from './types';
 
@@ -90,6 +92,41 @@ const observe = <T>(promise: Promise<T>) => {
 };
 
 const nextTurn = () => new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+
+describe('encryption upgrade retained-generation identities', () => {
+    it('records original nested display-name paths through the actual mobile remote port', async () => {
+        const folder = pathFolder();
+        const originalName = '.mindwtr-encryption-quarantine-fixture/.mindwtr-encryption-stage-inner/data.json.enc';
+        const original = new TextEncoder().encode('historical bytes to preserve');
+        const material = await deriveSyncKeyMaterial('phrase', new Uint8Array(16).fill(4), { mKib: 64, t: 1, p: 1 });
+        folder.files.set(`${PATH_DIR}/data.json.enc`, await encryptSyncArtifact(
+            new TextEncoder().encode(JSON.stringify(toRemoteSyncDocument(data))), material, defaultSyncCryptoPrimitives, { kind: 'document' }));
+        folder.files.set(`${PATH_DIR}/${originalName}`, original);
+        const { host } = fakeHost({ os: () => 'ios', crypto: defaultSyncCryptoPrimitives, path: {
+            ...folder.port,
+            exists: (uri) => folder.files.has(uri) || [...folder.files.keys()].some((path) => path.startsWith(`${uri}/`)),
+            list: async (directory) => [...new Set([...folder.files.keys()]
+                .filter((path) => path.startsWith(directory.endsWith('/') ? directory : `${directory}/`))
+                .map((path) => path.slice(directory.endsWith('/') ? directory.length : directory.length + 1).split('/')[0]))],
+        } });
+        const remote = await createMobileFileSync(host).createFileSyncEncryptionRemotePort(`${PATH_DIR}/data.json`);
+        if (!remote) throw new Error('Expected a File Sync remote port');
+        expect((await remote.list()).find((entry) => entry.originalName === originalName)?.name)
+            .toMatch(/^\.mindwtr-desktop-recovery-entry-/);
+        let state: SyncEncryptionLocalState | null = { state: 'enabled' };
+        await runUpgradeSyncEncryptionOverRemote('phrase', async () => data, remote,
+            { getKey: async () => material.key, setKey: async () => {}, clearKey: async () => {} },
+            { read: () => state, write: async (next) => { state = next; } });
+        const inventory = [...folder.files].find(([path]) => path.includes('.mindwtr-legacy-inventory-'));
+        if (!inventory) throw new Error('Expected an encrypted recovery inventory');
+        const mapping = JSON.parse(new TextDecoder().decode(await decryptSyncArtifact(inventory[1], material.key,
+            defaultSyncCryptoPrimitives, { kind: 'recovery', artifactName: 'legacy-inventory' })));
+        expect(mapping).toContainEqual(expect.objectContaining({ name: originalName, encoding: 'recovery-v2' }));
+        expect(JSON.stringify(mapping)).not.toContain('.mindwtr-desktop-recovery-entry-');
+        expect(JSON.stringify(mapping)).not.toContain('file://');
+        expect(folder.files.has(`${PATH_DIR}/${originalName}`)).toBe(false);
+    });
+});
 
 describe('promise-capable File Sync path ports', () => {
     const fileUri = `${PATH_DIR}/data.json`;

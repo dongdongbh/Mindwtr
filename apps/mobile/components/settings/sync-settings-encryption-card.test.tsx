@@ -19,6 +19,7 @@ const encryptionMocks = vi.hoisted(() => ({
   abandonSyncEncryptionTransition: vi.fn(async (): Promise<string | null> => 'enable'),
   recheckPartlyEncryptedLocation: vi.fn(async (): Promise<string> => 'mixed'),
   disableSyncEncryption: vi.fn(async (_options?: TransitionOptions): Promise<void> => undefined),
+  upgradeSyncEncryption: vi.fn(async (_passphrase: string, _options?: TransitionOptions): Promise<void> => undefined),
   enableSyncEncryption: vi.fn(
     async (_passphrase: string, _options?: TransitionOptions): Promise<void> => undefined,
   ),
@@ -186,6 +187,28 @@ describe('SyncEncryptionCard', () => {
     encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'off' });
     encryptionMocks.provideSyncEncryptionPassphrase.mockResolvedValue('ok');
     encryptionMocks.isSyncEncryptionBackendPending.mockResolvedValue(false);
+  });
+
+  it.each([
+    ['upgrade', true], ['enable', false], ['disable', false], ['change-passphrase', false],
+  ] as const)('offers upgrade only for a matching interrupted transition: %s', async (incompleteTransition, available) => {
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'enabled', incompleteTransition });
+    const tree = await renderCard();
+    expect(texts(tree).includes('settings.syncEncryptionUpgrade')).toBe(available);
+  });
+
+  it.each(['enabled', 'remote-encrypted-no-key'] as const)('confirms upgrade with a current passphrase and no UI snapshot for %s', async (state) => {
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state });
+    const tree = await renderCard();
+    expect(encryptionMocks.upgradeSyncEncryption).not.toHaveBeenCalled();
+    await press(tree, 'settings.syncEncryptionUpgrade');
+    expect(texts(tree)).toContain('settings.syncEncryptionUpgradeWarning');
+    const submit = tree.root.findAllByType(TouchableOpacity).find((node) => node.findAllByType(Text).some((child) => child.props.children === 'settings.syncEncryptionUpgrade'));
+    expect(submit?.props.disabled).toBe(true);
+    await typeInto(tree, 'settings.syncEncryptionCurrentPassphrase', 'synthetic phrase');
+    await press(tree, 'settings.syncEncryptionUpgrade');
+    expect(encryptionMocks.upgradeSyncEncryption).toHaveBeenCalledWith('synthetic phrase', { onProgress: expect.any(Function) });
+    expect(texts(tree)).not.toContain('settings.syncEncryptionUpgradeWarning');
   });
 
   it('shows both warnings before anything can be enabled', async () => {

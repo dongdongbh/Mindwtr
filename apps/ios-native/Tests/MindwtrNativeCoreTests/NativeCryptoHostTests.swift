@@ -175,8 +175,8 @@ final class NativeCryptoHostTests: XCTestCase {
         const plain=bytes(10),capacity=g.encryptedSyncArtifactByteLength(plain.length);
         const f=fixture({'attachments/file.bin':{bytes:plain,kind:'attachment'},'data.json':{bytes:plain,kind:'document'}},capacity);
         await enable(f);const attachment=f.store.get('attachments/file.bin'),document=f.store.get('data.json.enc');
-        const opened=await Promise.all([g.decryptSyncArtifact(attachment.bytes,f.keys.current,g.prims),
-          g.decryptSyncArtifact(document.bytes,f.keys.current,g.prims)]);
+        const opened=await Promise.all([g.decryptSyncArtifact(attachment.bytes,f.keys.current,g.prims,{kind:'attachment',cloudKey:'attachments/file.bin'}),
+          g.decryptSyncArtifact(document.bytes,f.keys.current,g.prims,{kind:'document'})]);
         return {capacity,lengths:[attachment.bytes.length,document.bytes.length],opened:opened.map(value=>hex(value)===hex(plain)),
           names:[...f.store.keys()].sort(),state:f.localState.read().state,complete:!f.localState.read().incompleteTransition,
           stateWrites:f.stateWrites.map(value=>value.incompleteTransition||value.state),keyWrites:f.keys.writes,keyClears:f.keys.clears,
@@ -204,7 +204,7 @@ final class NativeCryptoHostTests: XCTestCase {
         let host=try host(capacityHelpers+"""
         const base=await g.deriveSyncKeyMaterial(passphrase,new Uint8Array(16).fill(1),kdf,g.prims),
           abandoned=await g.deriveSyncKeyMaterial(passphrase,new Uint8Array(16).fill(2),kdf,g.prims),plain=bytes(10),documentPlain=bytes(1);
-        const baseDocument=await g.encryptSyncArtifact(documentPlain,base,g.prims),foreign=await g.encryptSyncArtifact(plain,abandoned,g.prims),
+        const baseDocument=await g.encryptSyncArtifact(documentPlain,base,g.prims,{kind:'document'}),foreign=await g.encryptSyncArtifact(plain,abandoned,g.prims,{kind:'attachment',cloudKey:'attachments/file.bin'}),
           padded=new Uint8Array(foreign.length+9);padded.set(foreign);padded.fill(0x20,foreign.length);
         const capacity=g.encryptedSyncArtifactByteLength(plain.length),f=fixture({
           'attachments/file.bin':{bytes:padded,kind:'attachment'},'data.json.enc':{bytes:baseDocument,kind:'document'},
@@ -215,7 +215,7 @@ final class NativeCryptoHostTests: XCTestCase {
         const interruptedChecks={interrupted,inputPadded:padded.length>capacity,journal:journal&&journal.incompleteTransition==='enable',
           stateOff:journal&&journal.state==='off',keyMissing:f.keys.current===null,keyWrites:f.keys.writes,mutations:f.mutations.length,
           canonical:afterInterrupted.bytes.length===capacity,version:afterInterrupted.version,
-          attachment:hex(await g.decryptSyncArtifact(afterInterrupted.bytes,base.key,g.prims))===hex(plain),
+          attachment:hex(await g.decryptSyncArtifact(afterInterrupted.bytes,base.key,g.prims,{kind:'attachment',cloudKey:'attachments/file.bin'}))===hex(plain),
           document:hex(f.store.get('data.json.enc').bytes)===hex(baseDocument),
           original:hex(f.store.get('data.json').bytes)===hex(documentPlain)};
         await enable(f);const finalState=f.localState.read(),attachment=f.store.get('attachments/file.bin');
@@ -224,8 +224,8 @@ final class NativeCryptoHostTests: XCTestCase {
           stateWrites:f.stateWrites.map(value=>value.incompleteTransition||value.state),
           mutations:f.mutations.map(value=>({operation:value.operation,name:value.name,expected:value.expected})),
           canonical:attachment.bytes.length===capacity,version:attachment.version,
-          attachment:hex(await g.decryptSyncArtifact(attachment.bytes,f.keys.current,g.prims))===hex(plain),
-          document:hex(await g.decryptSyncArtifact(f.store.get('data.json.enc').bytes,f.keys.current,g.prims))===hex(documentPlain),
+          attachment:hex(await g.decryptSyncArtifact(attachment.bytes,f.keys.current,g.prims,{kind:'attachment',cloudKey:'attachments/file.bin'}))===hex(plain),
+          document:hex(await g.decryptSyncArtifact(f.store.get('data.json.enc').bytes,f.keys.current,g.prims,{kind:'document'}))===hex(documentPlain),
           baseUnchanged:hex(f.store.get('data.json.enc').bytes)===hex(baseDocument),originalRemoved:!f.store.has('data.json'),
           allWritesAdmitted:f.mutations.filter(value=>value.operation==='write').every(value=>value.length<=capacity)};
         """,faults:faults())
@@ -265,10 +265,10 @@ final class NativeCryptoHostTests: XCTestCase {
     func testFiveMWENC1FixturesUseSharedCoreIncludingNFCAndTrailingPadding() async throws {
         let host=try host("""
         const results=[];for(const v of g.vectors){const material=await g.deriveSyncKeyMaterial(v.passphrase,un64(v.saltB64),v.params,g.prims);
-          const encrypted=un64(v.encryptedB64),plain=un64(v.plaintextB64),opened=await g.decryptSyncArtifact(encrypted,material.key,g.prims);
-          const sealed=await g.encryptSyncArtifact(plain,material,{...g.prims,randomBytes:()=>un64(v.nonceB64)});
+          const encrypted=un64(v.encryptedB64),plain=un64(v.plaintextB64),opened=await g.decryptSyncArtifact(encrypted,material.key,g.prims,{kind:'document'});
+          const sealed=await g.encryptSyncArtifact(plain,material,{...g.prims,randomBytes:()=>un64(v.nonceB64)},{kind:'document'});
           const padded=new Uint8Array(encrypted.length+3);padded.set(encrypted);padded.set([1,2,3],encrypted.length);
-          const padding=await g.decryptSyncArtifact(padded,material.key,g.prims);
+          const padding=await g.decryptSyncArtifact(padded,material.key,g.prims,{kind:'document'});
           results.push(hex(opened)===hex(plain)&&hex(sealed)===hex(encrypted)&&hex(padding)===hex(plain))}
         const v=g.vectors[3],a=await g.deriveSyncKeyMaterial(v.passphrase.normalize('NFC'),un64(v.saltB64),v.params,g.prims),
           b=await g.deriveSyncKeyMaterial(v.passphrase.normalize('NFD'),un64(v.saltB64),v.params,g.prims);
@@ -396,13 +396,13 @@ final class NativeCryptoHostTests: XCTestCase {
     func testMWENC1InvalidHeadersRefuseBeforeNativeAndFullHeaderIsAuthenticated() async throws {
         let host=try host("""
         const bytes=un64(g.vectors[0].encryptedB64),invalid=[];
-        for(const [offset,value] of [[6,2],[7,2],[17,2],[16,9],[8,255]]){const bad=bytes.slice();bad[offset]=value;if(offset===8){bad[9]=255;bad[10]=255;bad[11]=255}invalid.push(bad)}
+        for(const [offset,value] of [[6,3],[7,2],[17,2],[16,9],[8,255]]){const bad=bytes.slice();bad[offset]=value;if(offset===8){bad[9]=255;bad[10]=255;bad[11]=255}invalid.push(bad)}
         invalid.push(bytes.slice(0,53),bytes.slice(0,bytes.length-1));
         const unsupported=[];for(const bad of invalid){const inspection=g.inspectSyncArtifact(bad);let error=false;
-          try{await g.decryptSyncArtifact(bad,new Uint8Array(32),g.prims)}catch(e){error=e instanceof g.SyncCryptoUnsupportedError}
+          try{await g.decryptSyncArtifact(bad,new Uint8Array(32),g.prims,{kind:'document'})}catch(e){error=e instanceof g.SyncCryptoUnsupportedError}
           unsupported.push(inspection.kind==='unsupported'&&error)}
         const v=g.vectors[0],material=await g.deriveSyncKeyMaterial(v.passphrase,un64(v.saltB64),v.params,g.prims),bad=bytes.slice();bad[18]^=1;
-        let auth=false;try{await g.decryptSyncArtifact(bad,material.key,g.prims)}catch(e){auth=e instanceof g.SyncCryptoAuthError}
+        let auth=false;try{await g.decryptSyncArtifact(bad,material.key,g.prims,{kind:'document'})}catch(e){auth=e instanceof g.SyncCryptoAuthError}
         return {unsupported,auth};
         """,faults:faults())
         try await start(host);let result=try await probe(host)

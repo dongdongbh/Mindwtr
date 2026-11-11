@@ -238,7 +238,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'operation',
 
 
-    'format',
+    'format', 'artifactKind',
 
     'retryAfterMs',
 
