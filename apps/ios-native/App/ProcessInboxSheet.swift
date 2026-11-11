@@ -311,9 +311,9 @@ struct ProcessInboxSheet: View {
         case "project": return "folder"
         case "later": return "clock"
         case "delegate": return "person"
-        case "someday": return "cloud"
+        case "someday": return "arrow.up.circle"
         case "incubate": return "calendar.badge.clock"
-        case "reference": return "bookmark"
+        case "reference": return "book"
         case "trash": return "trash"
         default: return "chevron.right"
         }
