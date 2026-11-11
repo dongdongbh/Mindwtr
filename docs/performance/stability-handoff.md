@@ -70,17 +70,15 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   undated tasks (T2a) cut `core:remindersCycle` on a hot return from 34.3 to 5.2 ms with no dated task and from 67.1 to 43.2 ms with 20%
   dated (S23, n = 6 per cell). Shared core, so RN and iOS plan faster too; a frozen corpus proves byte-identical output. First frame and
   settled do not move: the cycle runs 365–447 ms after the return, after the screen settles. A plan cache stays closed.
-- **Empty cold start, rejected (11-11):** the empty cold first-content median sits at 363–370 ms against the 360 ms budget. The baseline
-  drifts between 363 and 370 ms across sessions, so compare only interleaved A/B runs. `core:evaluate` takes about 197 ms of that,
-  and `js:bundleInit` 138–148 ms. Root cause: the app's QuickJS (wrapper 3.2.0, VERSION 2024-02-14) finds each captured variable by
-  walking the frame's open captures (`get_var_ref`). esbuild puts the whole 10.5 MB bundle in one IIFE frame, so every top-level closure
-  pays for every capture before it, and init grows faster than the bundle. Upstream QuickJS (2026-06-04) looks the variable up by index.
-  An engine upgrade is options (a) (a local build of upstream qjs to time the real bundle) and (b) (a newer wrapper, or a wrapper built
-  from source). Both wait on dd. Rejected: (1) building the host table, `MENU_READS` and `MENU_COMMANDS` inside a function called once.
-  On a desktop qjs microbenchmark this cut a 110-method literal from 97 to 6.6 ms, but on the 110-method production build the median
-  stayed at 363 ms (p90 374). `--trace-modules` builds keep all 916 host methods and so overstate the host table. (2) Lazy-requiring the
-  OmniFocus, CSV, TickTick, Todoist and DGT parsers: 370 → 406 ms median, p90 399 → 435 (n = 15 each, interleaved, archived APKs). esbuild
-  then wraps 838 modules in `__esm` with 2,225 init calls (22 wrappers before), which adds captures instead of removing them.
+- **Empty cold start, fixed by the QuickJS upgrade (11-11):** [evidence](native-android-quickjs-2026-11-11.md). The app now builds
+  upstream QuickJS 2026-06-04 from source (`android/third_party/quickjs-wrapper`, wrapper 3.2.0 JNI, patches in its `PATCHES.md`).
+  Interleaved A/B of archived Benchmark APKs, n = 20 each: empty cold first content 360 → **221 ms** (p90 379 → 233), under the
+  360 ms budget; large-5000 796 → 578 ms (p90 812 → 605). `js:bundleInit` 138 → 15 ms and `core:evaluate` 203 → 70 ms: the old
+  engine searched the IIFE frame's captured variables in a list (`get_var_ref`); upstream reads them by index. PSS costs 3–5 MiB.
+  The bytecode cache is keyed on the engine `VERSION`; Android also deletes `code_cache` on every APK install. Function source is
+  stripped (`JS_STRIP_SOURCE`); without it the cache is 32 MB. A rope-string tag the wrapper did not know sent large replies to
+  Kotlin as `null` (5k boot failed with `NOT_READY`); fixed and pinned by a boot gate. Still rejected from the earlier attempts:
+  building the host table inside a function (no gain at 110 methods), and lazy-requiring the importer parsers (370 → 406 ms).
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 
