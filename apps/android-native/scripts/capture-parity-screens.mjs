@@ -1124,8 +1124,7 @@ const shootDailyEmpty = async (prefix, suffix, rn, activity) => {
     await tap(button(start, en['review.startReview']));
     const choice = await waitFor('the Daily Review choice', (current) => Boolean(button(current, en['dailyReview.title'])), 15_000);
     await tap(button(choice, en['dailyReview.title']));
-    const hint = en['agenda.focusHint'].split('{{')[0];
-    const onFocusEmpty = (current) => current.some((node) => (node.text ?? '').startsWith(hint));
+    const onFocusEmpty = (current) => hasText(current, en['dailyReview.focusDesc']);
     for (let step = 0; step < 4; step += 1) {
         const nodes = await waitFor('a Daily Review step', (current) => onFocusEmpty(current) || Boolean(owedLabeled(current, en['review.nextStepBtn'])), 20_000);
         if (onFocusEmpty(nodes)) break;
