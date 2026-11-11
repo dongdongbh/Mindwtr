@@ -3,6 +3,7 @@
 Changes collected since the latest stable release.
 
 - Sync: changing an Appearance, Language or other settings group whose sync is switched off no longer makes Self-hosted sync run over and over. (feedback d4644bd4)
+- Sync: switching on Appearance, Language or GTD settings sync no longer makes Self-hosted sync run over and over when two devices held different values from the same moment; all devices settle on one value.
 - Mobile task Preview: Mark Done saves the current draft and completes the task directly, retaining Retry if saving fails. (#1514)
 - Desktop: project task titles use the shared task-row typography. The Area selector summarizes the active scope and provides a direct reset to all areas. (#1532, #1525)
 

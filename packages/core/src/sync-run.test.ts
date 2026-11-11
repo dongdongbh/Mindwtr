@@ -5558,3 +5558,42 @@ describe('cloud follow-up after a local-only settings change (feedback d4644bd4)
         expect(harness.persisted.settings.syncPreferencesUpdatedAt?.appearance).toBe(changedAt);
     });
 });
+
+describe('cloud follow-up after a default-off settings group is switched on with a tied stamp', () => {
+    it('converges this device, the server and the other device on one value', async () => {
+        const tie = '2026-07-10T00:00:00.000Z';
+        const local = createData([createTask('t-local', 'Local task')], {
+            theme: 'light',
+            syncPreferencesUpdatedAt: { preferences: STAMP, appearance: tie },
+        });
+        const remote = createData(mergeAppData(local, createData()).tasks, {
+            theme: 'dark',
+            syncPreferences: { appearance: true },
+            syncPreferencesUpdatedAt: { preferences: '2026-07-12T00:00:00.000Z', appearance: tie },
+        });
+        const otherDevice = cloneAppData(remote);
+        const { harness, io, hooks, run } = createHarness({ local, remote });
+        io.writeRemote = vi.fn(async (incoming: AppData) => {
+            const merged = mergeAppDataWithStats(harness.remote ?? createData(), incoming, { nowIso: NOW.toISOString() }).data;
+            const incomingOnly = mergeAppDataWithStats(createData(), incoming, { nowIso: NOW.toISOString() }).data;
+            harness.remote = cloneAppData(merged);
+            return { fingerprint: null, serverMergedRemoteData: !areSyncPayloadsEqual(merged, incomingOnly) };
+        });
+
+        let cycles = 0;
+        let followUpsBefore = 0;
+        do {
+            followUpsBefore = vi.mocked(hooks.requestFollowUp).mock.calls.length;
+            expect((await run()).success).toBe(true);
+            harness.inMemory = cloneAppData(harness.persisted);
+            cycles += 1;
+        } while (vi.mocked(hooks.requestFollowUp).mock.calls.length > followUpsBefore && cycles < 5);
+
+        expect(cycles).toBeLessThanOrEqual(2);
+        const settled = harness.persisted.settings.theme;
+        expect(['light', 'dark']).toContain(settled);
+        expect(harness.remote?.settings.theme).toBe(settled);
+        expect(mergeAppData(otherDevice, harness.remote!).settings.theme).toBe(settled);
+        expect(harness.persisted.settings.syncPreferencesUpdatedAt?.appearance).toBe(tie);
+    });
+});

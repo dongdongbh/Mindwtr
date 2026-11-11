@@ -41,6 +41,8 @@ const parseSyncTimestamp = (value?: string): number => {
     return Number.isFinite(parsed) ? parsed : NaN;
 };
 
+const TIE_BROKEN_SETTINGS_GROUPS: ReadonlySet<SettingsSyncGroup> = new Set(['appearance', 'language', 'gtd']);
+
 const isIncomingNewer = (localAt?: string, incomingAt?: string): boolean => {
     const localTime = parseSyncTimestamp(localAt);
     const incomingTime = parseSyncTimestamp(incomingAt);
@@ -1051,11 +1053,23 @@ export const mergeSettingsForSync = (
         const localAt = localSettings.syncPreferencesUpdatedAt?.[key];
         const incomingAt = incomingSettings.syncPreferencesUpdatedAt?.[key];
         const localOptedOut = localSettings.syncPreferences?.[key] === false;
-        const incomingWins = localOptedOut ? false : isIncomingNewer(localAt, incomingAt);
         const effectiveIncomingValue = localOptedOut ? localValue : incomingValue;
-        const resolvedValue = mergeValues
+        const resolve = (incomingWins: boolean): T => (mergeValues
             ? mergeValues(localValue, effectiveIncomingValue, incomingWins, isIncomingNewer(incomingAt, localAt))
-            : (incomingWins ? effectiveIncomingValue : localValue);
+            : (incomingWins ? effectiveIncomingValue : localValue));
+        const tieDecidesValue = !localOptedOut && TIE_BROKEN_SETTINGS_GROUPS.has(key)
+            && isValidTimestamp(localAt) && isValidTimestamp(incomingAt)
+            && parseSyncTimestamp(localAt) === parseSyncTimestamp(incomingAt)
+            && !isSameValue(resolve(true), resolve(false));
+        const tiedIncomingWins = tieDecidesValue && chooseDeterministicWinner(localValue, incomingValue) === incomingValue;
+        const incomingWins = localOptedOut ? false : isIncomingNewer(localAt, incomingAt) || tiedIncomingWins;
+        if (tieDecidesValue) {
+            logInfo('Settings group stamp tie resolved', {
+                scope: 'sync',
+                context: { releaseCheck: 'v1.3.9/settings-group-tie', group: key, outcome: tiedIncomingWins ? 'incoming' : 'local' },
+            });
+        }
+        const resolvedValue = resolve(incomingWins);
         apply(cloneSettingValue(resolvedValue), incomingWins);
         const winnerAt = incomingWins ? incomingAt : localAt;
         if (winnerAt) nextSyncUpdatedAt[key] = winnerAt;

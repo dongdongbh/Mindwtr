@@ -341,6 +341,68 @@ describe('Sync Logic', () => {
             expect(merged.settings.appearance).toEqual({ density: 'compact', textSize: 'small', mobileQuickAccessView: 'calendar' });
         });
 
+        describe('a settings group whose stamps tie', () => {
+            const tie = '2024-01-05T00:00:00.000Z';
+            const side = (settings: AppData['settings']): AppData => ({ ...mockAppData(), settings });
+            const light = side({
+                theme: 'light',
+                language: 'de',
+                syncPreferences: { appearance: true, language: true },
+                syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', appearance: tie, language: tie },
+            });
+            const dark = side({
+                theme: 'dark',
+                language: 'fr',
+                syncPreferences: { appearance: true, language: true },
+                syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', appearance: tie, language: tie },
+            });
+
+            it('resolves to the same value whichever side merges', () => {
+                const onLight = mergeAppData(light, dark).settings;
+                const onDark = mergeAppData(dark, light).settings;
+
+                expect(onLight.theme).toBe(onDark.theme);
+                expect(onLight.language).toBe(onDark.language);
+                expect(onLight.syncPreferencesUpdatedAt?.appearance).toBe(tie);
+            });
+
+            it('fills a field the winning side leaves unset from the other side', () => {
+                const sparse = side({
+                    syncPreferences: { appearance: true },
+                    syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', appearance: tie },
+                    appearance: { density: 'compact' },
+                });
+                const onSparse = mergeAppData(sparse, light).settings;
+                const onLight = mergeAppData(light, sparse).settings;
+
+                expect(onSparse.theme).toBe('light');
+                expect(onLight.theme).toBe('light');
+                expect(onSparse.appearance).toEqual(onLight.appearance);
+            });
+
+            it('still lets a newer stamp win on both sides', () => {
+                const newerLight = side({
+                    ...light.settings,
+                    syncPreferencesUpdatedAt: { ...light.settings.syncPreferencesUpdatedAt, appearance: '2024-01-05T00:00:00.001Z' },
+                });
+                const newerDark = side({
+                    ...dark.settings,
+                    syncPreferencesUpdatedAt: { ...dark.settings.syncPreferencesUpdatedAt, appearance: '2024-01-05T00:00:00.001Z' },
+                });
+
+                expect(mergeAppData(newerLight, dark).settings.theme).toBe('light');
+                expect(mergeAppData(dark, newerLight).settings.theme).toBe('light');
+                expect(mergeAppData(newerDark, light).settings.theme).toBe('dark');
+                expect(mergeAppData(light, newerDark).settings.theme).toBe('dark');
+            });
+
+            it('keeps the local value when this device opted out of the group', () => {
+                const optedOut = side({ ...light.settings, syncPreferences: { appearance: false, language: true } });
+
+                expect(mergeAppData(optedOut, dark).settings.theme).toBe('light');
+            });
+        });
+
         it('keeps an incoming condensed density value through the merge sanitizer', () => {
             const local: AppData = {
                 ...mockAppData(),
