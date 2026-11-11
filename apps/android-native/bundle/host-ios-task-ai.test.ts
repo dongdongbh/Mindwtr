@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, setSystemTime } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createTaskDraft } from '../../../packages/core/src/task-draft';
 import { getPersistenceStatus, getStorageAdapter, flushPendingSave, resetForTests, useTaskStore } from '../../../packages/core/src/store';
@@ -12,6 +12,7 @@ const databases = new Set<Database>(), globals = new Map<string, PropertyDescrip
 const names = ['MindwtrHost', '__mindwtrHostPlatform', '__mindwtrNative', '__mindwtrSecrets', '__mindwtrSyncSecrets',
     '__cancelHostCalls', '__resumeHostCalls', 'fetch'];
 afterEach(async () => {
+    setSystemTime();
     await flushPendingSave().catch(() => undefined); resetForTests(); resetNativeRequestReceipts();
     for (const db of databases) db.close(); databases.clear();
     for (const [name, descriptor] of globals) {
@@ -119,6 +120,7 @@ async function fixture(provider: 'openai' | 'gemini' | 'anthropic' = 'openai', p
 
 describe('private iOS manual task AI bridge', () => {
     it('projects only canonical manual-action labels for a legacy task ID, without writes or changing old editor shapes', async () => {
+        setSystemTime(new Date(AT));
         const f = await fixture(); await f.boot();
         const { operation: _, ...input } = f.question();
         const before = await f.call('editDraft', input), saved = f.saved();
