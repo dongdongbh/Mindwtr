@@ -19,6 +19,7 @@ This folder builds the app's JavaScript engine from source. It replaces the Mave
 2. `wrapper-java/.../QuickJSContext.java`: removed the matching `dumpObjects` methods and native declaration.
 3. `native/cpp/quickjs_context_jni.cpp` (`createRuntime`): added `JS_SetStripInfo(rt, JS_STRIP_SOURCE)`. Bytecode then keeps no function source text, as the old engine's bytecode did. Without it, the bytecode cache grows from 8 MB to 32 MB. Line numbers stay in error stacks.
 4. `native/cpp/quickjs_wrapper.cpp` (`toJavaObject`): `JS_TAG_SHORT_BIG_INT` takes the `JS_TAG_BIG_INT` branch. The new engine stores small BigInts under the new tag. Without the patch, they reach Java as `null`.
+5. `native/cpp/quickjs_wrapper.cpp` (`toJavaObject`): `JS_TAG_STRING_ROPE` takes the `JS_TAG_STRING` branch (`JS_ToCString` reads both). The new engine keeps long joined strings as ropes. Without the patch, a large reply (a 5,000-task boot) reaches Kotlin as `null` and the app stops at `NOT_READY`.
 
 ## Build settings (in `CMakeLists.txt` and `build.gradle.kts`)
 

@@ -3659,6 +3659,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(readFileSync(resolve(wrapper, 'quickjs/VERSION'), 'utf8'), /^\d{4}-\d{2}-\d{2}\n$/);
         assert.match(source('ProcessCoreHost.kt'), /BytecodeCache\(File\(app\.codeCacheDir, "core-host\.qjsc"\), BuildConfig\.QUICKJS_ENGINE\)/);
         assert.match(readFileSync(resolve(wrapper, 'native/cpp/quickjs_context_jni.cpp'), 'utf8'), /auto \*rt = JS_NewRuntime\(\);\s+JS_SetStripInfo\(rt, JS_STRIP_SOURCE\);/, 'cached bytecode carries no function source');
+        const toJava = /QuickJSWrapper::toJavaObject[\s\S]*?default:/.exec(readFileSync(resolve(wrapper, 'native/cpp/quickjs_wrapper.cpp'), 'utf8'))?.[0] ?? assert.fail('toJavaObject has no tag switch');
+        assert.match(toJava, /case JS_TAG_STRING_ROPE:\s+case JS_TAG_STRING: \{\s+result = toJavaString\(env, value\);/, 'a rope string reaches Kotlin as a string, not null');
+        assert.match(toJava, /case JS_TAG_SHORT_BIG_INT:\s+case JS_TAG_BIG_INT: \{/, 'a small BigInt reaches Kotlin as a Long, not null');
         assert.match(readFileSync(resolve(wrapper, 'build.gradle.kts'), 'utf8'), /ndkVersion = "27\.1\.12297006"[\s\S]*arguments \+= "-DCMAKE_BUILD_TYPE=Release"/, 'every app variant runs the optimized engine');
     }
     {

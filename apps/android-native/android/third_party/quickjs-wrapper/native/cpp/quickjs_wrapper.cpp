@@ -402,6 +402,7 @@ jobject QuickJSWrapper::toJavaObject(JNIEnv *env, jobject thiz, JSValueConst thi
             break;
         }
 
+        case JS_TAG_STRING_ROPE:
         case JS_TAG_STRING: {
             result = toJavaString(env, value);
             break;
