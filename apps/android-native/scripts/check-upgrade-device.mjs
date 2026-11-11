@@ -1151,9 +1151,10 @@ const scenarioFileSync = async () => {
             row = nodes.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.sync']}. `));
         }
         await tap(row ?? fail('no Sync row in native Settings'));
-        nodes = await waitFor('native Settings > Sync with RN\'s folder', (current) => Boolean(tagged(current, 'sync-select-folder')), 30_000);
-
+        nodes = await waitFor('native Settings > Sync', (current) => Boolean(tagged(current, 'sync-backend-file')), 30_000);
         check(tagged(nodes, 'sync-backend-file')?.checked === 'true', '(11) the native Sync screen shows RN\'s backend (File chosen)');
+        for (let step = 0; step < 6 && !tagged(nodes, 'sync-select-folder'); step += 1) nodes = await device.swipe(nodes, 'down');
+        if (!tagged(nodes, 'sync-select-folder')) fail('timed out waiting for native Settings > Sync with RN\'s folder');
 
         const label = decodeURIComponent(path).split('/').pop();
         let now = nodes;
