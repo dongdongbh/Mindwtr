@@ -29,7 +29,11 @@ import {
     cloudPutJson,
     parseQuickAdd,
     flushPendingSave,
+    mergeAppData,
+    normalizeAppData,
+    parseSyncDocument,
     resetForTests,
+    sanitizeAppDataForRemote,
     setStorageAdapter,
     TASK_SORT_BY_VALUES,
     useTaskStore,
@@ -2786,6 +2790,86 @@ describe('cloud server api', () => {
 
         expect(body.serverMergedRemoteData).toBe(false);
     });
+
+    test('does not mark PUT /v1/data when the stored copy holds a stamp for a group that was never switched on', async () => {
+        const put = async (data: AppData) => {
+            const response = await fetch(`${baseUrl}/v1/data`, {
+                method: 'PUT',
+                headers: { ...authHeaders, 'content-type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            expect(response.status).toBe(200);
+            return response.json();
+        };
+        const task = makeTestTask({ id: 'shared', title: 'Shared' });
+        const settings = { syncPreferencesUpdatedAt: { preferences: '2026-01-01T00:00:00.000Z' } };
+        await put({ tasks: [task], projects: [], sections: [], areas: [], settings });
+        const [stored] = readdirSync(dataDir).filter((name) => name.endsWith('.json'));
+        const storedPath = join(dataDir, stored);
+        const legacy = JSON.parse(readFileSync(storedPath, 'utf8')) as AppData;
+        legacy.settings.syncPreferencesUpdatedAt = { ...legacy.settings.syncPreferencesUpdatedAt, appearance: '2026-01-02T00:00:00.000Z' };
+        writeFileSync(storedPath, JSON.stringify(legacy));
+        __serverDataCacheTestUtils.clearDataCaches();
+
+        const body = await put({ tasks: [task], projects: [], sections: [], areas: [], settings });
+
+        expect(body.serverMergedRemoteData).toBe(false);
+    });
+
+    for (const switcher of ['older device', 'newest device'] as const) {
+        test(`keeps the newest pre-update theme on every device when the ${switcher} switches Appearance sync on over a stamp an old build uploaded`, async () => {
+            const before = '2026-07-01T00:00:00.000Z';
+            const olderEdit = '2026-07-05T00:00:00.000Z';
+            const newestEdit = '2026-07-08T00:00:00.000Z';
+            const doc = (settings: AppData['settings']): AppData => normalizeAppData({
+                tasks: [], projects: [], sections: [], areas: [], people: [], settings,
+            });
+            const seed = await fetch(`${baseUrl}/v1/data`, {
+                method: 'PUT',
+                headers: { ...authHeaders, 'content-type': 'application/json' },
+                body: JSON.stringify(doc({ syncPreferencesUpdatedAt: { preferences: before } })),
+            });
+            expect(seed.status).toBe(200);
+            const [stored] = readdirSync(dataDir).filter((name) => name.endsWith('.json'));
+            const storedPath = join(dataDir, stored);
+            const legacy = JSON.parse(readFileSync(storedPath, 'utf8')) as AppData;
+            legacy.settings.syncPreferencesUpdatedAt = { ...legacy.settings.syncPreferencesUpdatedAt, appearance: newestEdit };
+            writeFileSync(storedPath, JSON.stringify(legacy));
+            __serverDataCacheTestUtils.clearDataCaches();
+
+            const sync = async (device: AppData): Promise<AppData> => {
+                const parsed = parseSyncDocument(await (await fetch(`${baseUrl}/v1/data`, { headers: authHeaders })).json(), 'remote');
+                if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+                const merged = mergeAppData(device, parsed.data);
+                const response = await fetch(`${baseUrl}/v1/data`, {
+                    method: 'PUT',
+                    headers: { ...authHeaders, 'content-type': 'application/json' },
+                    body: JSON.stringify(sanitizeAppDataForRemote(merged)),
+                });
+                expect(response.status).toBe(200);
+                return merged;
+            };
+            const switchOn = (device: AppData): AppData => ({ ...device, settings: {
+                ...device.settings,
+                syncPreferences: { ...device.settings.syncPreferences, appearance: true },
+                syncPreferencesUpdatedAt: { ...device.settings.syncPreferencesUpdatedAt, preferences: '2026-07-10T00:00:00.000Z' },
+            } });
+            let older = doc({ theme: 'light', syncPreferencesUpdatedAt: { preferences: before, appearance: olderEdit } });
+            let newest = doc({ theme: 'dark', syncPreferencesUpdatedAt: { preferences: before, appearance: newestEdit } });
+
+            older = await sync(older);
+            if (switcher === 'older device') older = await sync(switchOn(older));
+            else newest = await sync(switchOn(newest));
+            newest = await sync(newest);
+            older = await sync(older);
+            newest = await sync(newest);
+            const server = await (await fetch(`${baseUrl}/v1/data`, { headers: authHeaders })).json() as AppData;
+
+            expect(newest.settings.theme).toBe('dark');
+            expect(server.settings.theme).toBe('dark');
+            expect(older.settings.theme).toBe('dark');
+        });
+    }
 
     test('PUT /v1/data accepts every core TaskSortBy value and rejects a bogus one', async () => {
         const iso = '2026-01-01T00:00:00.000Z';

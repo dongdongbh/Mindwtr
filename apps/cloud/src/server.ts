@@ -21,6 +21,7 @@ import {
     getNextProjectOrder,
     getTaskOrder,
     isTaskFutureFocusCandidate,
+    keepSyncedSettingsStamps,
     mergeAppDataWithStats,
     normalizeTaskUpdate,
     sanitizeAppDataForRemote,
@@ -1658,7 +1659,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
 
                                 const existingDataResult = loadExistingDataForMerge(filePath);
                                 if ('error' in existingDataResult) return existingDataResult.error;
-                                const existingData = existingDataResult;
+                                const existingData: AppData = {
+                                    ...existingDataResult,
+                                    settings: { ...existingDataResult.settings, syncPreferencesUpdatedAt: keepSyncedSettingsStamps(existingDataResult.settings) },
+                                };
                                 const incomingData = validated.data;
                                 const mergeTimestamp = resolveServerMergeTimestamp(existingData, incomingData);
                                 const mergeResult = mergeAppDataWithStats(existingData, incomingData, {

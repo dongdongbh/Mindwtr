@@ -3,6 +3,7 @@ import { DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS, mergeAppData } from './sync';
 import { createMockArea, mockAppData } from './sync-test-utils';
 import { AppData } from './types';
 import { areSyncPayloadsEqual, sanitizeAppDataForRemote } from './sync-helpers';
+import { parseSyncDocument } from './sync-document';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 
 describe('Sync Logic', () => {
@@ -408,6 +409,32 @@ describe('Sync Logic', () => {
                 }
                 expect(logged.filter((line) => line.message === 'Task editor layout sync conflict resolved')).toHaveLength(2);
                 expect(logged.filter((line) => line.message === 'Settings group stamp tie resolved')).toHaveLength(2);
+            });
+
+            it('drops a remote stamp for a group the remote copy does not sync before merging it', () => {
+                const logged: LogPayload[] = [];
+                setLogger((payload) => { logged.push(payload); });
+                let legacyServer: ReturnType<typeof parseSyncDocument>;
+                try {
+                    legacyServer = parseSyncDocument(side({
+                        syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', appearance: '2024-03-01T00:00:00.000Z', gtd: '2024-03-01T00:00:00.000Z' },
+                    }), 'remote');
+                } finally {
+                    setLogger(consoleLogger);
+                }
+                if (!legacyServer.ok) throw new Error(legacyServer.errors.join('; '));
+                expect(logged.filter((line) => line.message === 'Remote settings stamps without values ignored')
+                    .map((line) => line.context)).toEqual([{ releaseCheck: 'v1.3.9/remote-unsynced-stamps', count: 1 }]);
+                const device = side({ theme: 'light', syncPreferencesUpdatedAt: { preferences: '2024-01-01T00:00:00.000Z', appearance: '2024-02-01T00:00:00.000Z' } });
+
+                expect(legacyServer.data.settings.syncPreferencesUpdatedAt).toEqual({
+                    preferences: '2024-01-01T00:00:00.000Z',
+                    gtd: '2024-03-01T00:00:00.000Z',
+                });
+                const merged = mergeAppData(device, legacyServer.data).settings;
+
+                expect(merged.syncPreferencesUpdatedAt?.appearance).toBe('2024-02-01T00:00:00.000Z');
+                expect(merged.theme).toBe('light');
             });
 
             it('keeps the newest edit on every device when a default-off group is switched on later', () => {

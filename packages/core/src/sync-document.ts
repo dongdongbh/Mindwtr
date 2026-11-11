@@ -10,6 +10,7 @@ import {
 import {
     areSyncPayloadsEqual,
     computeStableValueFingerprint,
+    keepSyncedSettingsStamps,
     sanitizeAppDataForRemote,
     sanitizeAppDataForRemotePass,
     toStableSyncJsonPass,
@@ -213,6 +214,17 @@ const recoverLegacyAttachmentUrls = (
 };
 
 
+const withoutUnsyncedSettingsStamps = (data: AppData): AppData => {
+    const stamps = data.settings.syncPreferencesUpdatedAt;
+    const synced = keepSyncedSettingsStamps(data.settings);
+    if (!stamps || Object.keys(synced ?? {}).length === Object.keys(stamps).length) return data;
+    logInfo('Remote settings stamps without values ignored', {
+        scope: 'sync',
+        context: { releaseCheck: 'v1.3.9/remote-unsynced-stamps', count: Object.keys(stamps).length - Object.keys(synced ?? {}).length },
+    });
+    return { ...data, settings: { ...data.settings, syncPreferencesUpdatedAt: synced } };
+};
+
 const stripRemoteAttachmentDeviceState = (data: AppData): AppData => {
     const stripAttachments = <T extends { attachments?: AppData['tasks'][number]['attachments'] }>(
         owners: T[],
@@ -264,7 +276,7 @@ export const parseSyncDocument = (
     const recovery = recoverLegacyAttachmentUrls(input, source);
     if (recovery.errors.length > 0) return { ok: false, errors: recovery.errors };
     const normalized = normalizeAppData(recovery.data as AppData);
-    const data = source === 'remote' ? stripRemoteAttachmentDeviceState(normalized) : normalized;
+    const data = source === 'remote' ? withoutUnsyncedSettingsStamps(stripRemoteAttachmentDeviceState(normalized)) : normalized;
     if (recovery.repairedOwners > 0) {
         logInfo('Legacy attachment URL normalized for sync', {
             scope: 'sync',

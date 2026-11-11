@@ -412,6 +412,12 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
             preferences: '2026-02-19T00:00:00.001Z',
         });
         expect(defaultOff.settings.theme).toBeUndefined();
+        const corrupt = sanitizeAppDataForRemote({ ...data, settings: {
+            ...data.settings,
+            syncPreferences: { appearance: 'true' as unknown as boolean },
+        } });
+        expect(corrupt.settings.syncPreferencesUpdatedAt?.appearance).toBeUndefined();
+        expect(corrupt.settings.theme).toBeUndefined();
         expect(defaultOff.settings.ai).toBeUndefined();
         expect(sanitized.settings.theme).toBe('dark');
         expect(sanitized.settings.appearance).toEqual({ density: 'compact', textSize: 'small', mobileQuickAccessView: 'contexts' });
