@@ -241,16 +241,15 @@ private fun ProjectTagChips(model: InboxViewModel) {
 @Composable
 private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model) {
     val c = LocalTheme.current.colors
-    LazyColumn(modifier, contentPadding = PaddingValues(12.dp)) {
-        item(key = "add") { AddProjectField(model) }
-
-        item(key = "controls") {
+    Column(modifier) {
+        Column(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(start = 16.dp, end = 16.dp, top = 16.dp).testTag("projects-list-controls")) {
+            AddProjectField(model)
             val manage = t("projects.manageAreas")
             val shape = RoundedCornerShape(8.dp)
             val active = projectTagFilter != ALL_PROJECT_TAGS
             val heading = if (active) "${t("projects.tagFilter")}: ${projectTagLabel(projectTagFilter)}" else t("projects.tagFilter")
             val action = t(if (projectTagFilterOpen) "filters.hide" else "filters.show")
-            Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 4.dp).testTag("projects-tag-filter-section"),
+            Column(Modifier.fillMaxWidth().testTag("projects-tag-filter-section"),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.weight(1f).heightIn(min = 44.dp)
@@ -274,46 +273,48 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
                 if (projectTagFilterOpen) ProjectTagChips(model)
             }
         }
-        if (projects != null && PROJECT_BUCKETS.all { (bucket, _) -> projects?.buckets?.get(bucket).isNullOrEmpty() }) item(key = "empty") {
-            Text(t("projects.empty"), style = rnText(16, 400), color = c.secondaryText, textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(48.dp))
-        }
-        var first = true
-        for ((bucket, heading) in PROJECT_BUCKETS) {
-            val groups = projects?.buckets?.get(bucket).orEmpty()
-            if (groups.isEmpty()) continue
-            val collapsible = bucket != "active"
-            val open = !collapsible || (if (bucket == "deferred") projectsView.showDeferred else projectsView.showArchived)
-            val ruled = !first
-            first = false
-            item(key = "bucket:$bucket") {
-                val toggleLabel = t(if (open) "markdown.collapse" else "markdown.expand")
-                val title = t(heading)
-
-                Row(
-                    Modifier.fillMaxWidth().then(if (ruled) Modifier.rnBorderTop(c.border) else Modifier)
-                        .clearAndSetSemantics {
-                            text = AnnotatedString(title)
-                            heading()
-                            if (collapsible) onClick(label = toggleLabel) { toggle(bucket); true }
-                        }
-                        .then(if (collapsible) Modifier.clickable(onClickLabel = toggleLabel) { toggle(bucket) } else Modifier)
-                        .padding(top = 14.dp, bottom = 10.dp, start = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText, modifier = Modifier.weight(1f))
-                    if (collapsible) Icon(if (open) Lucide.ChevronDown else Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
-                }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+            if (projects != null && PROJECT_BUCKETS.all { (bucket, _) -> projects?.buckets?.get(bucket).isNullOrEmpty() }) item(key = "empty") {
+                Text(t("projects.empty"), style = rnText(16, 400), color = c.secondaryText, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(48.dp))
             }
-            if (!open) continue
-            for (group in groups) {
+            var first = true
+            for ((bucket, heading) in PROJECT_BUCKETS) {
+                val groups = projects?.buckets?.get(bucket).orEmpty()
+                if (groups.isEmpty()) continue
+                val collapsible = bucket != "active"
+                val open = !collapsible || (if (bucket == "deferred") projectsView.showDeferred else projectsView.showArchived)
+                val ruled = !first
+                first = false
+                item(key = "bucket:$bucket") {
+                    val toggleLabel = t(if (open) "markdown.collapse" else "markdown.expand")
+                    val title = t(heading)
 
-                val areaKey = group.areaId ?: "no-area"
-                val folded = areaKey in projectsView.collapsedAreas
-                item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, bucket, group, areaKey, folded) }
-                if (!folded) for (row in group.projects) item(key = "project:${row.id}") {
-                    val (up, down) = projects?.moves?.get(row.id) ?: (false to false)
-                    ProjectRowItem(model, row, group.projects.map { it.id }, up, down)
+                    Row(
+                        Modifier.fillMaxWidth().then(if (collapsible) Modifier.padding(top = 6.dp) else Modifier).then(if (ruled) Modifier.rnBorderTop(c.border) else Modifier)
+                            .clearAndSetSemantics {
+                                text = AnnotatedString(title)
+                                heading()
+                                if (collapsible) onClick(label = toggleLabel) { toggle(bucket); true }
+                            }
+                            .then(if (collapsible) Modifier.clickable(onClickLabel = toggleLabel) { toggle(bucket) } else Modifier)
+                            .padding(top = if (collapsible) 14.dp else 8.dp, bottom = if (collapsible) 10.dp else 8.dp, start = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText, modifier = Modifier.weight(1f))
+                        if (collapsible) Icon(if (open) Lucide.ChevronDown else Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                    }
+                }
+                if (!open) continue
+                for (group in groups) {
+
+                    val areaKey = group.areaId ?: "no-area"
+                    val folded = areaKey in projectsView.collapsedAreas
+                    item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, bucket, group, areaKey, folded) }
+                    if (!folded) for (row in group.projects) item(key = "project:${row.id}") {
+                        val (up, down) = projects?.moves?.get(row.id) ?: (false to false)
+                        ProjectRowItem(model, row, group.projects.map { it.id }, up, down)
+                    }
                 }
             }
         }
@@ -367,7 +368,7 @@ private fun AddProjectField(model: InboxViewModel) = with(model) {
     val canAdd = writable && !busy && projectDraft.isNotBlank() &&
         (failedAction == null || failedAction == createProjectAction(chosen))
     val placeholder = t("projects.addPlaceholder")
-    Column(Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) {
+    Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val shape = RoundedCornerShape(8.dp)
             BasicTextField(

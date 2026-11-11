@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { box, check, connect, evidenced, fail, mainList, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -150,10 +150,11 @@ const restore = async () => {
 const toggle = (nodes) => tagged(nodes, 'projects-tag-filter-toggle');
 const chip = (nodes, label) => nodes.find((node) => node['resource-id']?.endsWith('projects-tag-filter-option') && node['content-desc'] === label);
 const visibleProjects = (nodes, seen) => seen.projects.map((entry) => entry.title).filter((title) => Boolean(textNode(nodes, title)));
+const middle = (node) => (box(node)[1] + box(node)[3]) / 2;
 const toTop = async () => {
     for (let step = 0; step < 6; step += 1) {
         const nodes = await screen();
-        if (toggle(nodes) && nodes.some((node) => node.class === 'android.widget.EditText' && box(node)[3] <= box(toggle(nodes))[1])) return nodes;
+        if (toggle(nodes) && nodes.some((node) => node.class === 'android.widget.EditText' && box(node)[3] <= middle(toggle(nodes)))) return nodes;
         sh('input swipe 540 700 540 1900 250');
         await sleep(600);
     }
@@ -191,6 +192,30 @@ try {
         `RN's row: "${closedLabel}" on the same line as ${en['projects.manageAreas']}`);
     check(!nodes.some((node) => node['resource-id']?.endsWith('projects-tag-filter-option')), 'the chips stay hidden until Show');
     shot('closed-light');
+
+    const header = tagged(nodes, 'projects-list-controls') ?? fail('no fixed Projects header');
+    const addField = nodes.find((node) => node.class === 'android.widget.EditText' && box(node)[1] >= box(header)[1] && box(node)[3] <= box(header)[3]) ?? fail('no Add project field in the header');
+    const list = mainList(nodes) ?? fail('no Projects list');
+    check(box(addField)[1] >= box(header)[1] && middle(toggle(nodes)) < box(header)[3] && box(list)[1] >= box(header)[3] - 1,
+        `RN's header: the Add field and the Tag filter row sit above the list (header ${header.bounds}, list ${list.bounds})`);
+    const [hl, , hr, hb] = box(header);
+    const pixel = (file, y) => execFileSync('magick', [file, '-format', `%[hex:p{${hl + 24},${y}}]`, 'info:'], { encoding: 'utf8' }).trim().slice(0, 6).toUpperCase();
+    const headerShot = resolve(shots, 'closed-light.png');
+    const [rule, above] = [pixel(headerShot, box(list)[1] - 1), pixel(headerShot, hb - 12)];
+    check(rule !== above, `RN's bottom border under the header: #${rule} on the ${hr - hl}px-wide edge over #${above}`);
+    const projectsAt = (current) => current.filter((node) => node.text && box(node)[1] >= box(list)[1] && box(node)[3] <= box(list)[3])
+        .map((node) => `${node.text}@${box(node)[1]}`).join(',');
+    const before = projectsAt(nodes);
+    let scrolled = nodes;
+    for (let step = 0; step < 3 && projectsAt(scrolled) === before; step += 1) scrolled = await device.swipe(scrolled, 'down');
+    scrolled = await device.settle(scrolled);
+    check(projectsAt(scrolled) !== before, 'the project list scrolls');
+    check(tagged(scrolled, 'projects-list-controls')?.bounds === header.bounds && toggle(scrolled)?.bounds === toggle(nodes).bounds
+        && scrolled.find((node) => node.class === 'android.widget.EditText')?.bounds === addField.bounds,
+        'the header stays put while the list scrolls, as RN keeps it above its FlatList');
+    shot('scrolled-light');
+    for (let step = 0; step < 6; step += 1) scrolled = await device.swipe(scrolled, 'up');
+    nodes = await toTop();
 
     nodes = await tapExpecting(toggle(nodes), (current) => Boolean(chip(current, en['projects.allTags'])), 'the tag chips');
     const chips = nodes.filter((node) => node['resource-id']?.endsWith('projects-tag-filter-option')).map((node) => node['content-desc']);
