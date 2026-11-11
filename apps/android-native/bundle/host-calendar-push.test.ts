@@ -123,6 +123,20 @@ async function upgrade(options: { tasks: Task[]; kv: Record<string, string>; dev
 
 const started = () => lines.find((line) => line.message === 'Native Android calendar push started')?.context;
 
+describe('a background job asks for the calendar push (C4d)', () => {
+    it('answers pushed when push is on and off when it is off, so the job logs only a push that ran', async () => {
+        const on = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}`, color: '#3B82F6' })]);
+        const pushed = await upgrade({ tasks: [task('t1')], kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7' }, device: on });
+        expect(await pushed.host.startPush()).toBe('pushed');
+        expect(await pushed.rows()).toEqual([['t1', '500', '7']]);
+        const off = phone([calendar('1')]);
+        const stopped = await upgrade({ tasks: [task('t1')], kv: { [KEY.enabled]: '0' }, device: off });
+        expect(await stopped.host.startPush()).toBe('off');
+        expect(off.writes()).toEqual([]);
+    });
+});
+
+
 describe('an upgrade from RN keeps RN\'s Mindwtr calendar and its events', () => {
     it('reuses the saved calendar: done tasks lose their event, the rest update in place, and none is made (e98b4e796)', async () => {
         const device = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}`, color: '#3B82F6' })],

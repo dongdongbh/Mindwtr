@@ -21,6 +21,8 @@ internal object CoreJob {
     const val WIDGET_REFRESH = "widgetRefresh"
     private val JOBS = setOf(INGEST, CONTEXT, REMINDERS, REMINDER_DONE, REMINDER_SNOOZE, SYNC, WIDGET_REFRESH)
 
+    private val TASK_CHANGING_JOBS = setOf(INGEST, REMINDER_DONE, SYNC)
+
     enum class Outcome { Success, Retry, Failure }
 
     const val LINE = "Native Android core work"
@@ -44,6 +46,8 @@ internal object CoreJob {
         fun backgroundSync(trigger: String): JSONObject = throw UnsupportedOperationException("backgroundSync")
 
         fun appActive(): Boolean = false
+
+        fun calendarPush(job: String): String = "unavailable"
     }
 
 
@@ -57,7 +61,7 @@ internal object CoreJob {
         var recovered = false
         val outcome = try {
             val host = boot()
-            if (!host.recover() || !host.drain()) Outcome.Retry
+            val result = if (!host.recover() || !host.drain()) Outcome.Retry
             else when (name) {
                 WIDGET_REFRESH -> {
                     refreshWidgets()
@@ -102,6 +106,8 @@ internal object CoreJob {
                     Outcome.Success
                 }
             }
+            if (result == Outcome.Success && name in TASK_CHANGING_JOBS && !host.appActive()) runCatching { host.calendarPush(name.orEmpty()) }
+            result
         } catch (failure: Throwable) {
             line.put("error", (failure.message ?: failure.javaClass.simpleName).substringBefore(':'))
             val refused = failure.message?.startsWith("INVALID_INPUT") == true

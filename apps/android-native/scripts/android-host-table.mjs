@@ -109,6 +109,7 @@ export const ANDROID_HOST_METHODS = [
     'syncAppState',
     'syncNetwork',
     'syncStart',
+    'calendarPushBackground',
     'syncState',
     'taskFocus',
     'taskView',

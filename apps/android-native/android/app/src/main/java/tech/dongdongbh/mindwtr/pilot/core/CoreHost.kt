@@ -896,6 +896,9 @@ class CoreHost(
     fun syncState(): JSONObject = callAsync("syncState")
 
 
+    fun calendarPushBackground(): String = callAsync("calendarPushBackground").optString("outcome", "unavailable")
+
+
     fun backgroundSync(trigger: String, stored: Int): JSONObject =
         callLong("backgroundSync", trigger, stored, debugFault("bgsync_deadline_ms").toIntOrNull() ?: 0)
 

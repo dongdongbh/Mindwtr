@@ -627,6 +627,14 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
 const coreHost = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
 const sqliteBridge = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/SqliteBridge.kt'), 'utf8');
 const hostEntry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
+assert.match(hostEntry, /calendarPushBackground\(\): string \{\s+return submit\(async \(\) => \(\{ outcome: !nativeCalendar \|\| isSandboxMode\(\) \? 'unavailable' : await nativeCalendar\.startPush\(\) \}\)\);/,
+    'a background job pushes the calendar through the same push as the app, and never in a sandbox (C4d)');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreJob.kt'), 'utf8'),
+    /private val TASK_CHANGING_JOBS = setOf\(INGEST, REMINDER_DONE, SYNC\)[\s\S]*?if \(result == Outcome\.Success && name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) runCatching \{ host\.calendarPush\(name\.orEmpty\(\)\) \}/,
+    'after a capture or check-off ingest, a notification Done or a background sync, a closed app pushes the calendar; an open app pushes through its own subscription');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreWork.kt'), 'utf8'),
+    /override fun calendarPush\(job: String\): String \{\s+val outcome = runCatching \{ host\.calendarPushBackground\(\) \}\.getOrDefault\("failed"\)\s+if \(outcome == "pushed" \|\| outcome == "failed"\) host\.logLine\("Native Android calendar push after background work releaseCheck=v1\.3\.9\/native-calendar-push-background"/,
+    'the background push logs only a push that ran, never while push is off');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
 
 assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
@@ -4064,7 +4072,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(nativeContext, /if \(context\.length > MAX_TRIGGER_TEXT\) return "too-long"\s+return if \(runCatching \{ enqueue\(mapOf\("action" to action, "context" to context\)\) \}\.isSuccess\) "queued" else "failed"/);
 
     const coreJob = source('CoreJob.kt');
-    assert.match(coreJob, /val host = boot\(\)\s+if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
+    assert.match(coreJob, /val host = boot\(\)\s+val result = if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
     assert.match(owner, /fun recover\(runtime: CoreHost\): Boolean \{\s+val owed = failure \?: return true\s+if \(owed\.action\.kind != "journal"\) return false\s+runtime\.replayJournal\(\)\.owed\?\.let \{ return false \}\s+clearFailure\(owed\.action\)\s+return true\s+\}/);
     assert.match(source('CoreWork.kt'), /override fun recover\(\) = ProcessCoreHost\.recover\(host\)\s+override fun drain\(\) = ProcessCoreHost\.recovered\(app, host\)/, 'CoreWork drains through the start order');
 

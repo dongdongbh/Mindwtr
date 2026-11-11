@@ -7005,6 +7005,10 @@ globalThis.MindwtrHost = {
         });
     },
 
+    calendarPushBackground(): string {
+        return submit(async () => ({ outcome: !nativeCalendar || isSandboxMode() ? 'unavailable' : await nativeCalendar.startPush() }));
+    },
+
     syncAppState(appState: string): string {
         return submit(async () => {
             gmailLifecycle(() => nativeGmail?.appState(appState));

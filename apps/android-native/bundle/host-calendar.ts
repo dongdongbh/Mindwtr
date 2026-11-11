@@ -65,7 +65,7 @@ const reportRefusal = (write: Promise<unknown>, outcome: 'recreated' | 'cleared'
 });
 
 export type NativeAndroidCalendar = NativeCalendarHost & {
-    startPush(): Promise<void>;
+    startPush(): Promise<'unavailable' | 'off' | 'pushed' | 'failed'>;
 };
 
 export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCall, fileCall: () => FileCall,
@@ -117,11 +117,11 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
         },
         startPush: async () => {
             const bound = lifecycle;
-            if (!bound) return;
+            if (!bound) return 'unavailable';
             try {
                 const before = await pushState();
-                if (!await bound.start()) return;
-                const outcome = await bound.run().then(() => 'pushed', () => 'failed');
+                if (!await bound.start()) return 'off';
+                const outcome = await bound.run().then(() => 'pushed' as const, () => 'failed' as const);
                 const after = await pushState();
                 const adopted = after.target ? 'target'
                     : !after.saved ? 'none'
@@ -131,8 +131,10 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
                 logInfo('Native Android calendar push started', { scope: 'calendar-push', force: true, context: {
                     releaseCheck: 'v1.3.8/native-calendar-push', outcome, adopted, rowsBefore: String(before.rows), rowsAfter: String(after.rows),
                 } });
+                return outcome;
             } catch (error) {
                 try { logWarn('Native Android calendar push did not start', { scope: 'calendar-push', context: { error: error instanceof Error ? error.name : typeof error } }); } catch {  }
+                return 'failed';
             }
         },
     };

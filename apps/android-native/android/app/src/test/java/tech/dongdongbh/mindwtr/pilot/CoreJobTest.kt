@@ -19,6 +19,9 @@ class CoreJobTest {
     private var nextStored = true
     private var ensured = true
     private var remindersFailure: Throwable? = null
+    private var calendarOutcome = "unavailable"
+    private var calendarFailure: Throwable? = null
+    private val calendarPushes = mutableListOf<String>()
 
     private val calls = object : CoreJob.Calls {
         override fun recover(): Boolean {
@@ -41,6 +44,15 @@ class CoreJobTest {
             return JSONObject().put("schedule", syncWanted)
         }
         override fun appActive() = appActive
+        override fun calendarPush(job: String): String {
+            calendarPushes += job
+            calendarFailure?.let { throw it }
+            return calendarOutcome
+        }
+        override fun reminderDone(requestId: String, taskId: String): JSONObject {
+            events += "done $taskId"
+            return JSONObject()
+        }
         override fun reminders(mode: String, key: String): JSONObject {
             events += "reminders $mode $key"
             remindersFailure?.let { throw it }
@@ -261,5 +273,36 @@ class CoreJobTest {
         assertEquals(CoreJob.Outcome.Failure, run("sync"))
         assertEquals(CoreJob.Outcome.Failure, run(null))
         assertEquals(emptyList<String>(), events)
+    }
+
+
+    @Test fun aBackgroundJobThatChangesTasksPushesTheCalendarAfterItsWork() {
+        calendarOutcome = "pushed"
+        assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
+        assertEquals(CoreJob.Outcome.Success, run(CoreJob.REMINDER_DONE, mapOf("requestId" to "r", "taskId" to "t")))
+        assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
+        assertEquals(listOf(CoreJob.INGEST, CoreJob.REMINDER_DONE, CoreJob.SYNC), calendarPushes)
+        assertEquals("done t", events.first { it.startsWith("done") })
+    }
+
+
+    @Test fun theCalendarWaitsForTheAppWhenItIsOpenAndNeverRunsAfterOtherJobsOrAFailure() {
+        calendarOutcome = "pushed"
+        appActive = true
+        run(CoreJob.INGEST)
+        appActive = false
+        run(CoreJob.REMINDER_SNOOZE, mapOf("requestId" to "r"))
+        run(CoreJob.REMINDERS, mapOf("mode" to "cycle"))
+        drained = false
+        assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
+        assertEquals(emptyList<String>(), calendarPushes)
+    }
+
+
+    @Test fun aFailedCalendarPushNeverFailsTheJob() {
+        calendarFailure = IllegalStateException("boom")
+        assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
+        assertEquals(listOf(CoreJob.INGEST), calendarPushes)
+        assertEquals("Native Android core work ingest success", lines.last())
     }
 }

@@ -34,7 +34,9 @@ const work = resolve(app, 'android/build/calendar-push-check');
 const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'));
 
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
-const TITLES = { timed: `CP${run} timed`, allDay: `CP${run} allday`, done: `CP${run} done`, gone: `CP${run} gone`, off: `CP${run} afteroff`, mine: `CP${run} mine` };
+const TITLES = { timed: `CP${run} timed`, allDay: `CP${run} allday`, done: `CP${run} done`, gone: `CP${run} gone`, off: `CP${run} afteroff`, mine: `CP${run} mine`,
+    shade: `CP${run} shade` };
+const BACKGROUND_LINE = 'Native Android calendar push after background work releaseCheck=v1.3.9/native-calendar-push-background';
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
@@ -180,6 +182,28 @@ const deleteThroughApp = async () => {
     await waitUntil('Mindwtr\'s calendar gone', () => !mindwtrCalendar(), 30_000);
 };
 
+const notificationsSetting = () => sqlite(pullFile(`files/${DB}`, 'db'), "SELECT json_extract(data, '$.notificationsEnabled') AS value FROM settings WHERE id = 1")[0]?.value ?? null;
+const shown = (title) => sh('dumpsys notification --noredact').split(/\n(?=\s*NotificationRecord\()/)
+    .some((block) => block.includes(`pkg=${PKG}`) && new RegExp(`android\\.title=\\w+ \\(${title}\\)`).test(block));
+const tapComplete = async (title) => {
+    sh('cmd statusbar expand-notifications');
+    await sleep(1500);
+    const center = (node) => { const [l, t, r, b] = box(node); return [Math.round((l + r) / 2), Math.round((t + b) / 2)]; };
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        const nodes = await screen();
+        const titleNode = nodes.find((node) => node.text === title) ?? fail(`the reminder "${title}" is not in the shade`);
+        const [, y] = center(titleNode);
+        const button = nodes.find((node) => (node.text ?? '').toUpperCase() === 'COMPLETE' && center(node)[1] > y && center(node)[1] < y + 500);
+        if (button) { const [x, by] = center(button); sh(`input tap ${x} ${by}`); return; }
+        const expand = nodes.filter((node) => /\/expand_button$/.test(node['resource-id'] ?? '') && Math.abs(center(node)[1] - y) < 140)[0];
+        if (expand) { const [x, ey] = center(expand); sh(`input tap ${x} ${ey}`); } else sh(`input swipe ${center(titleNode)[0]} ${y} ${center(titleNode)[0]} ${y + 400} 300`);
+        await sleep(1200);
+    }
+    fail(`no COMPLETE on "${title}" in the shade`);
+};
+const exactMode = /SCHEDULE_EXACT_ALARM: (\w+)/.exec(sh(`appops get ${PKG} SCHEDULE_EXACT_ALARM`))?.[1] ?? 'default';
+let keptNotifications;
+
 let calendarId = null;
 let unmarkedId = null;
 let created = false;
@@ -208,6 +232,16 @@ const restore = async () => {
             await sleep(8000);
         }
     } catch (error) { console.error(`RESTORE: this run's tasks were not checked off (${error.message})`); }
+    try {
+        if (keptNotifications !== undefined && keptNotifications !== 1 && keptNotifications !== true) {
+            await editDb(keptNotifications === null ? "UPDATE settings SET data = json_remove(data, '$.notificationsEnabled') WHERE id = 1"
+                : `UPDATE settings SET data = json_set(data, '$.notificationsEnabled', json('${keptNotifications ? 'true' : 'false'}')) WHERE id = 1`);
+            device.launch(ACTIVITY);
+            await sleep(6000);
+        }
+    } catch (error) { console.error(`RESTORE: the reminder setting was not put back (${error.message})`); }
+    try { sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${exactMode}`); } catch {}
+    try { sh('cmd statusbar collapse'); } catch {}
     try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch {}
     try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {}
 };
@@ -281,6 +315,33 @@ try {
     check(kept && kept.title === TITLES.mine && Number(kept.dtstart) === start && kept.description === 'made by hand',
         '(6) an event in Mindwtr\'s calendar without a Mindwtr line is never changed or removed');
     check(otherEvents(calendarId) === otherBefore, '(6) no event in any other calendar changed');
+
+    sh(`pm grant ${PKG} android.permission.POST_NOTIFICATIONS`);
+    sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM allow`);
+    keptNotifications = notificationsSetting();
+    const fireAt = Math.ceil((Date.now() + 150_000) / 60_000) * 60_000;
+    const pad = (value) => String(value).padStart(2, '0');
+    const at = new Date(fireAt);
+    await editDb("UPDATE settings SET data = json_set(data, '$.notificationsEnabled', json('true')) WHERE id = 1");
+    capture(`${TITLES.shade} /due:${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`);
+    device.launch(ACTIVITY);
+    const shadeId = (await waitUntil('the reminder task', () => task(TITLES.shade), 60_000)).id;
+    await waitUntil('the reminder task\'s event', () => eventFor(calendarId, shadeId), 60_000);
+    sh('input keyevent KEYCODE_HOME');
+    await sleep(1500);
+    for (let attempt = 0; attempt < 10 && pid(); attempt += 1) { try { runAs(`kill -9 ${pid()}`); } catch {} await sleep(500); }
+    if (pid()) fail('the app did not close');
+    sh('logcat -c');
+    await waitUntil(`the reminder for ${TITLES.shade}`, () => shown(TITLES.shade), fireAt - Date.now() + 90_000, 3000);
+    await tapComplete(TITLES.shade);
+    sh('cmd statusbar collapse');
+    await waitUntil('the event removed by the background Done', () => !eventFor(calendarId, shadeId), 150_000, 2000);
+    const line = adbRaw('logcat', '-d', '-s', `${TAG}:*`).toString('utf8').split('\n').find((entry) => entry.includes(BACKGROUND_LINE)) ?? '';
+    check(!front().includes(`${PKG}/`) && /"job":"reminderDone"/.test(line.replace(/\\/g, '')) && /"outcome":"pushed"/.test(line.replace(/\\/g, '')),
+        '(6b) with the app closed, Done on the reminder pushes the calendar in the background: the event is gone and the log shows the push (C4d)');
+    check(otherEvents(calendarId) === otherBefore, '(6b) no event in any other calendar changed');
+    device.launch(ACTIVITY);
+    await waitFor('the app', (current) => Boolean(tab(current, en['tab.menu'])), 60_000);
 
     nodes = await openCalendarSettings();
     await tap(await pushSwitch());
