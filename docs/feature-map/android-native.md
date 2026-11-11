@@ -167,8 +167,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Shortcuts: Link `mindwtr-native-dev:///global-search?q=…`.
 - Selectors: `global-search`, `search-result`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SearchScreen.kt`
-- Checks: `apps/android-native/scripts/check-search-device.mjs`
-- Notes: A task result opens the editor over the search. Its row on the list beneath is outlined for 3.5 seconds.
+- Checks: `apps/android-native/scripts/check-search-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProjectReturnTest.kt`
+- Notes: A task result opens the editor over the search. Its row on the list beneath is outlined for 3.5 seconds. A project result opens the project; Back returns to the search with its query, results and scroll position, as in RN. Closing a task result's editor keeps the scroll position too. This return survives rotation and process restore.
 
 ## Saved searches
 

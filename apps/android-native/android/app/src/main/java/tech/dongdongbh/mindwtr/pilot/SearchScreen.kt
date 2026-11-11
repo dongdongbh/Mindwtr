@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -75,18 +76,21 @@ data class SearchState(
     val saveRequestId: String = UUID.randomUUID().toString(),
 
     val submitted: String? = null,
+    val scrollIndex: Int = 0,
+    val scrollOffset: Int = 0,
 ) {
     fun request(): String = JSONObject().put("query", query).put("filters", filters ?: JSONObject.NULL).put("limit", SEARCH_LIMIT).toString()
 
     fun state(): JSONObject = JSONObject().put("query", query).put("filters", filters ?: JSONObject.NULL).put("filtersOpen", filtersOpen)
         .put("saveName", saveName ?: JSONObject.NULL).put("saveRequestId", saveRequestId).put("submitted", submitted ?: JSONObject.NULL)
+        .put("scrollIndex", scrollIndex).put("scrollOffset", scrollOffset)
 
     companion object {
         fun restore(text: String): SearchState? = runCatching {
             val saved = JSONObject(text)
             SearchState(saved.getString("query"), saved.optJSONObject("filters"), saved.getBoolean("filtersOpen"),
                 if (saved.isNull("saveName")) null else saved.getString("saveName"), saved.getString("saveRequestId"),
-                if (saved.isNull("submitted")) null else saved.getString("submitted"))
+                if (saved.isNull("submitted")) null else saved.getString("submitted"), saved.optInt("scrollIndex"), saved.optInt("scrollOffset"))
         }.getOrNull()
     }
 }
@@ -207,43 +211,48 @@ fun SearchScreen(model: InboxViewModel, state: SearchState) = with(model) {
                     .clickable(role = Role.Button) { setSearchFilters((state.filters ?: view.defaultFilters).withValue("includeCompleted", true)) }
                     .padding(horizontal = 12.dp, vertical = 8.dp))
         }
-        LazyColumn(Modifier.weight(1f).imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (view != null && searching && shown == 0) item(key = "empty") {
-                Text(if (trimmed.isEmpty()) t("search.noResults") else "${t("search.noResults")} \"$trimmed\"", style = rnText(16, 400),
-                    color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(32.dp))
-            }
-            items(view?.projects.orEmpty(), key = { "project-${it.id}" }) { project ->
-                ResultRow(project.segments, project.title, t("search.resultProject"), null, null, idle, true, {
-                    Icon(Lucide.Folder, null, tint = c.tint, modifier = Modifier.size(24.dp))
-                }) { openFromSearch(Screen.Projects, project.id) }
-            }
-            items(view?.tasks.orEmpty(), key = { "task-${it.id}" }) { task ->
-                val route = task.route?.let(SEARCH_ROUTES::get)
+        if (view == null) Box(Modifier.weight(1f)) else {
+            val list = rememberLazyListState(state.scrollIndex, state.scrollOffset)
+            val leave = { keepSearchScroll(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) }
+            LazyColumn(Modifier.weight(1f).imePadding(), state = list, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (searching && shown == 0) item(key = "empty") {
+                    Text(if (trimmed.isEmpty()) t("search.noResults") else "${t("search.noResults")} \"$trimmed\"", style = rnText(16, 400),
+                        color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(32.dp))
+                }
+                items(view.projects, key = { "project-${it.id}" }) { project ->
+                    ResultRow(project.segments, project.title, t("search.resultProject"), null, null, idle, true, {
+                        Icon(Lucide.Folder, null, tint = c.tint, modifier = Modifier.size(24.dp))
+                    }) { leave(); openFromSearch(Screen.Projects, project.id) }
+                }
+                items(view.tasks, key = { "task-${it.id}" }) { task ->
+                    val route = task.route?.let(SEARCH_ROUTES::get)
 
-                val listed = task.route?.takeIf(::isMenuRoute)
-                val subtitle = if (task.inProject) "${t("search.resultTask")} • ${t("search.inProjectSuffix")}" else t("search.resultTask")
-                val dateColor = when (task.dateTone) { "danger" -> c.danger; "warning" -> c.warning; else -> c.secondaryText }
+                    val listed = task.route?.takeIf(::isMenuRoute)
+                    val subtitle = if (task.inProject) "${t("search.resultTask")} • ${t("search.inProjectSuffix")}" else t("search.resultTask")
+                    val dateColor = when (task.dateTone) { "danger" -> c.danger; "warning" -> c.warning; else -> c.secondaryText }
 
-                val opens = task.editor || route != null || listed != null
-                ResultRow(task.segments, task.title, subtitle, task.dateLabel, dateColor, idle && opens, opens, {
-                    when {
-                        task.canComplete -> {
-                            val markDone = t("review.markDone")
-                            val canDone = writable && !busy && (failedAction == null || failedAction == completeAction(task.id, task.taskRevision))
-                            Box(Modifier.size(32.dp).clickable(enabled = canDone, role = Role.Button) { complete(task.id, task.taskRevision) }
-                                .semantics { contentDescription = markDone }, contentAlignment = Alignment.Center) {
-                                Icon(Lucide.CheckCircle, null, tint = c.secondaryText, modifier = Modifier.size(24.dp))
+                    val opens = task.editor || route != null || listed != null
+                    ResultRow(task.segments, task.title, subtitle, task.dateLabel, dateColor, idle && opens, opens, {
+                        when {
+                            task.canComplete -> {
+                                val markDone = t("review.markDone")
+                                val canDone = writable && !busy && (failedAction == null || failedAction == completeAction(task.id, task.taskRevision))
+                                Box(Modifier.size(32.dp).clickable(enabled = canDone, role = Role.Button) { complete(task.id, task.taskRevision) }
+                                    .semantics { contentDescription = markDone }, contentAlignment = Alignment.Center) {
+                                    Icon(Lucide.CheckCircle, null, tint = c.secondaryText, modifier = Modifier.size(24.dp))
+                                }
                             }
+                            task.cancelled -> Icon(Lucide.XCircle, null, tint = c.secondaryText, modifier = Modifier.size(24.dp))
+                            else -> Icon(Lucide.CheckCircle, null, tint = c.tint, modifier = Modifier.size(24.dp))
                         }
-                        task.cancelled -> Icon(Lucide.XCircle, null, tint = c.secondaryText, modifier = Modifier.size(24.dp))
-                        else -> Icon(Lucide.CheckCircle, null, tint = c.tint, modifier = Modifier.size(24.dp))
-                    }
-                }) {
+                    }) {
 
-                    when {
-                        task.editor -> { highlight(task.id); openEditor(task.id) }
-                        route != null -> { openFromSearch(route, task.projectId); highlight(task.id, task.projectId) }
-                        listed != null -> { closeSearch(); menu.openRoute(listed); highlight(task.id) }
+                        leave()
+                        when {
+                            task.editor -> { highlight(task.id); openEditor(task.id) }
+                            route != null -> { openFromSearch(route, task.projectId); highlight(task.id, task.projectId) }
+                            listed != null -> { closeSearch(); menu.openRoute(listed); highlight(task.id) }
+                        }
                     }
                 }
             }

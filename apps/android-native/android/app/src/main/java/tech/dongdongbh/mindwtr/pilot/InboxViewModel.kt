@@ -2018,6 +2018,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         readSearch()
     }
 
+    fun keepSearchScroll(index: Int, offset: Int) { search?.let { keepSearch(it.copy(scrollIndex = index, scrollOffset = offset)) } }
+
     fun showSearchFilters(open: Boolean) { search?.let { keepSearch(it.copy(filtersOpen = open)) } }
 
 
@@ -2076,9 +2078,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
 
     fun openFromSearch(target: Screen, projectId: String?) {
+        val below = search
         closeSearch()
 
-        if (target == Screen.Projects) return menu.openProjects(projectId)
+        if (target == Screen.Projects) return menu.openProjects(projectId, below)
         show(target)
         if (projectId != null) openProject(projectId)
     }
@@ -2286,6 +2289,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         val back = projectReturn
         closeProject()
         back?.let(menu::returnTo)
+        back?.search?.let(::openSearch)
     }
 
     fun closeProject() {

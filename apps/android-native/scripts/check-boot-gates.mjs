@@ -2314,12 +2314,21 @@ assert.match(model, /var openProjectId by mutableStateOf\(saved\.get<String>\("p
 assert.match(model, /openProjectId = id\s+saved\["project"\] = id/);
 assert.match(projectsUi, /BackHandler\(enabled = failedAction == null\) \{ backFromProject\(\) \}/);
 assert.match(projectsUi, /IconButton\(onClick = model::backFromProject, enabled = failedAction == null,/, 'the header Back returns where the project was opened from');
-assert.match(menuModel, /fun openProjects\(projectId: String\?\) \{\s+val back = projectId\?\.let \{ projectReturnFrom\(shell\.screen, screen, quickView == "projects", shell\.openProjectId, shell\.projectReturn\) \}[\s\S]{0,300}?shell\.keepProjectReturn\(back\)/, 'a project opened from Someday or any other screen remembers that screen');
-assert.match(source('InboxViewModel.kt'), /fun backFromProject\(\) \{\s+val back = projectReturn\s+closeProject\(\)\s+back\?\.let\(menu::returnTo\)/);
+assert.match(menuModel, /fun openProjects\(projectId: String\?, search: SearchState\? = null\) \{\s+val back = projectId\?\.let \{ projectReturnFrom\(shell\.screen, screen, quickView == "projects", shell\.openProjectId, shell\.projectReturn, search\) \}[\s\S]{0,300}?shell\.keepProjectReturn\(back\)/, 'a project opened from Someday, Search or any other screen remembers that screen');
+assert.match(source('InboxViewModel.kt'), /fun backFromProject\(\) \{\s+val back = projectReturn\s+closeProject\(\)\s+back\?\.let\(menu::returnTo\)\s+back\?\.search\?\.let\(::openSearch\)\s+\}/, 'Back from a project opened from Search reopens the search with its query, as RN pops back to it');
+assert.match(source('InboxViewModel.kt'), /fun openFromSearch\(target: Screen, projectId: String\?\) \{\s+val below = search\s+closeSearch\(\)\s+if \(target == Screen\.Projects\) return menu\.openProjects\(projectId, below\)/, 'a project opened from the search results keeps the search beneath it');
+assert.match(menuModel, /search != null -> ProjectReturn\(tab, menu, search\)/, 'a project opened from Search returns to Search even over the Projects list');
+assert.match(menuModel, /listOfNotNull\(it\.tab\.name, it\.menu\?\.name\.orEmpty\(\), it\.search\?\.state\(\)\?\.toString\(\)\)\.joinToString\("\|"\)/, 'the search beneath a project survives process restore');
 assert.doesNotMatch(source('FocusScreen.kt'), /show\(Screen\.Projects\); openProject\(/, 'Focus opens a project through openProjects, so Back returns to Focus');
 assert.match(source('InboxViewModel.kt'), /fun show\(target: Screen\) \{\s+val switched = target != screen\s+if \(switched\) \{ keepProjectReturn\(null\);/, 'a real tab switch forgets where the project came from');
 assert.match(source('InboxViewModel.kt'), /fun closeProject\(\) \{\s+keepProject\(null\)\s+keepProjectReturn\(null\)/, 'a closed project forgets where it came from');
 assert.match(projectsUi, /\)\) \{ keepProjectReturn\(null\); openProject\(row\.id\) \}/, 'a Projects list row opens its project with Back to the list');
+assert.match(searchUi, /\.put\("scrollIndex", scrollIndex\)\.put\("scrollOffset", scrollOffset\)/, 'the search record keeps its scroll position through process restore');
+assert.match(searchUi, /saved\.optInt\("scrollIndex"\), saved\.optInt\("scrollOffset"\)\)/, 'a search saved before the scroll fields restores at the top');
+assert.match(searchUi, /if \(view == null\) Box\(Modifier\.weight\(1f\)\) else \{\s+val list = rememberLazyListState\(state\.scrollIndex, state\.scrollOffset\)\s+val leave = \{ keepSearchScroll\(list\.firstVisibleItemIndex, list\.firstVisibleItemScrollOffset\) \}/, 'the results list starts at the kept scroll position once results are read, so an empty first frame cannot reset it');
+assert.match(searchUi, /\}\) \{ leave\(\); openFromSearch\(Screen\.Projects, project\.id\) \}/, 'a project result keeps the scroll position before it opens');
+assert.match(searchUi, /\}\) \{\s+leave\(\)\s+when \{\s+task\.editor ->/, 'a task result keeps the scroll position before it opens');
+assert.match(source('InboxViewModel.kt'), /fun keepSearchScroll\(index: Int, offset: Int\) \{ search\?\.let \{ keepSearch\(it\.copy\(scrollIndex = index, scrollOffset = offset\)\) \} \}/);
 assert.match(source('CaptureModalModel.kt'), /"openInProject" -> \{\s+keep\(null\)\s+reopenProjectWithTask\(reply\.getString\("projectId"\), reply\.getString\("taskId"\)\)/, 'Save and edit from a project reopens it in place, keeping its Back');
 assert.match(source('CaptureModalModel.kt'), /private fun reopenProjectWithTask\(projectId: String, taskId: String\) \{\s+shell\.menu\.whenIdle \{\s+shell\.openProject\(projectId\)\s+shell\.menu\.whenIdle \{ shell\.openEditor\(taskId, "task"\) \}/);
 

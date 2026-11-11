@@ -20,8 +20,18 @@ class ProjectReturnTest {
         assertEquals(someday, projectReturnFrom(Screen.Inbox, MenuScreen.Projects, false, "p1", someday))
     }
 
+    @Test fun aProjectOpenedFromSearchReturnsToTheSearch() {
+        val search = SearchState("5600 | x", saveRequestId = "r1")
+        val someday = ProjectReturn(Screen.Inbox, MenuScreen.Someday)
+        assertEquals(ProjectReturn(Screen.Inbox, MenuScreen.Someday, search), projectReturnFrom(Screen.Inbox, MenuScreen.Someday, false, null, null, search))
+        assertEquals(ProjectReturn(Screen.Projects, null, search), projectReturnFrom(Screen.Projects, null, true, null, someday, search))
+        assertEquals(ProjectReturn(Screen.Inbox, MenuScreen.Projects, search), projectReturnFrom(Screen.Inbox, MenuScreen.Projects, false, "p1", someday, search))
+    }
+
     @Test fun theReturnSurvivesSavedState() {
-        for (back in listOf(ProjectReturn(Screen.Inbox, MenuScreen.Someday), ProjectReturn(Screen.Focus, null), null)) {
+        val search = SearchState("5600 | x", saveRequestId = "r1")
+        for (back in listOf(ProjectReturn(Screen.Inbox, MenuScreen.Someday), ProjectReturn(Screen.Focus, null), ProjectReturn(Screen.Focus, null, search),
+            ProjectReturn(Screen.Projects, MenuScreen.Projects, search), ProjectReturn(Screen.Inbox, null, search.copy(scrollIndex = 7, scrollOffset = 40)), null)) {
             assertEquals(back, projectReturnOf(projectReturnText(back)))
         }
         assertNull(projectReturnOf("Nowhere|Someday"))

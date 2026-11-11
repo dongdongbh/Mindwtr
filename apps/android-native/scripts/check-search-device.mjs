@@ -3,9 +3,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { box, button, chipOn, check, connect, draftText, evidenced, fail, field, inEditor, inboxCount, isOn, Stopped, tab, tagged, withDescription } from './device.mjs';
+import { box, button, chipOn, check, connect, draftText, evidenced, fail, field, inEditor, inboxCount, isOn, mainList, Stopped, tab, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -86,6 +86,18 @@ const digitProject = () => JSON.parse(execFileSync('bun', ['-e', `
     const rows = db.query("SELECT title FROM projects WHERE deletedAt IS NULL AND status != 'archived'").all().map((row) => row.title)
         .filter((title) => /^[0-9]{3,12}$/.test(title));
     console.log(JSON.stringify(rows.includes('5600') ? '5600' : rows.sort()[0] ?? null));
+`], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase() } }).trim().split('\n').pop());
+
+
+const busyQuery = () => JSON.parse(execFileSync('bun', ['-e', `
+    import { Database } from 'bun:sqlite';
+    const db = new Database(process.env.CHECK_DB);
+    const projects = db.query("SELECT title FROM projects WHERE deletedAt IS NULL AND status != 'archived'").all().map((row) => row.title.toLowerCase());
+    const tasks = db.query("SELECT title FROM tasks WHERE deletedAt IS NULL").all().map((row) => row.title.toLowerCase());
+    const pieces = new Set(projects.flatMap((title) => Array.from({ length: Math.max(0, title.length - 5) }, (_, at) => title.slice(at, at + 6))).filter((piece) => /^[a-z0-9]{6}$/.test(piece)));
+    const scored = [...pieces].map((piece) => [piece, projects.filter((title) => title.includes(piece)).length, tasks.filter((title) => title.includes(piece)).length])
+        .filter(([, inProjects, inTasks]) => inProjects >= 2 && inTasks >= 15).sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0]));
+    console.log(JSON.stringify(scored[0] ?? null));
 `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase() } }).trim().split('\n').pop());
 
 
@@ -227,9 +239,42 @@ try {
     const opened = (current) => tagged(current, 'project-title-input')?.text === projectTitle && !tagged(current, 'global-search');
     nodes = await tapExpecting(projectHit(nodes), opened, `the project ${projectTitle}`);
     check(true, `(g) the project hit ${projectTitle} opened that project's screen`);
+    sh('settings put system user_rotation 1');
+    const wide = (current) => { const [l, t, r, b] = box(current[0]); return r - l > b - t; };
+    await waitFor('the project after rotating', (current) => opened(current) && wide(current), 15_000);
+    sh('settings put system user_rotation 0');
+    await waitFor('the project after rotating back', (current) => opened(current) && !wide(current), 15_000);
     requireAppFront();
     sh('input keyevent KEYCODE_BACK');
-    await waitFor('the project screen to close', (current) => !tagged(current, 'project-title-input'), 15_000);
+    nodes = await waitFor('the search results again', (current) => inSearch(current) && field(current)?.text === projectTitle && Boolean(projectHit(current)), 15_000);
+    check(!tagged(nodes, 'project-title-input'), `(h) Back from the project returns to the search with "${projectTitle}" and its results, as RN pops back to it`);
+    writeFileSync(resolve(work, 'search-after-project-back.png'), execFileSync(adbBin, ['-s', serial, 'exec-out', 'screencap', '-p'], { maxBuffer: 64 << 20 }));
+    const [busyToken, projectCount] = busyQuery() ?? fail('no 6-character piece of a project title matches 2 projects and 15 tasks: run check-projects-device first');
+    await tapExpecting(withDescription(nodes, en['common.clear']) ?? fail('no Clear in the search field'), (current) => field(current)?.text === '', 'the empty query');
+    await typeQuery(busyToken);
+    const projectHits = (current) => current.filter((node, index) => (node['resource-id'] ?? '').endsWith('search-result') && current[index + 1]?.text === en['search.resultProject']);
+    nodes = await waitFor(`the ${projectCount} project hits for ${busyToken}`, (current) => field(current)?.text === busyToken && projectHits(current).length >= 2, 20_000);
+    const resultList = mainList(nodes) ?? fail('no search result list');
+    const [rl, rt, rr, rb] = box(resultList);
+    const shown = (current) => current.filter((node) => (node['resource-id'] ?? '').endsWith('search-result') && box(node)[1] >= rt && box(node)[3] <= rb)
+        .map((node) => `${node['content-desc'] || node.text}@${box(node)[1]}`).join(',');
+    const atTop = shown(nodes);
+    sh(`input swipe ${Math.round((rl + rr) / 2)} ${rb - 200} ${Math.round((rl + rr) / 2)} ${rb - 420} 900`);
+    nodes = await device.settle(await screen());
+    const scrolledTo = shown(nodes);
+    check(scrolledTo !== atTop && projectHits(nodes).some((node) => box(node)[1] >= rt), `the ${busyToken} results scroll and still show a project hit (${scrolledTo})`);
+    const target = projectHits(nodes).find((node) => box(node)[1] >= rt);
+    const targetTitle = target['content-desc'] || target.text;
+    await tapExpecting(target, (current) => tagged(current, 'project-title-input')?.text === targetTitle && !tagged(current, 'global-search'), `the project ${targetTitle}`);
+    requireAppFront();
+    sh('input keyevent KEYCODE_BACK');
+    nodes = await waitFor('the search at its scroll position', (current) => inSearch(current) && shown(current) === scrolledTo, 15_000);
+    check(field(nodes)?.text === busyToken, `(i) Back from ${targetTitle} returns to the ${busyToken} results at the same scroll position, as in RN`);
+    writeFileSync(resolve(work, 'search-scroll-after-project-back.png'), execFileSync(adbBin, ['-s', serial, 'exec-out', 'screencap', '-p'], { maxBuffer: 64 << 20 }));
+
+    requireAppFront();
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the search to close', (current) => !tagged(current, 'global-search'), 15_000);
 
     nodes = await waitFor('the tabs', (current) => Boolean(tab(current, en['tab.inbox'])), 15_000);
     await tapExpecting(tab(nodes, en['tab.inbox']), (current) => Number.isFinite(inboxCount(current)), 'the Inbox again');
