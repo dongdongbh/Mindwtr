@@ -896,7 +896,10 @@ class CoreHost(
     fun syncState(): JSONObject = callAsync("syncState")
 
 
-    fun calendarPushBackground(): String = callAsync("calendarPushBackground").optString("outcome", "unavailable")
+    fun calendarPushSnapshot(): String? = callAsync("calendarPushSnapshot").let { reply -> if (reply.isNull("token")) null else reply.getString("token") }
+
+
+    fun calendarPushBackground(token: String): String = callAsync("calendarPushBackground", token).optString("outcome", "unavailable")
 
 
     fun backgroundSync(trigger: String, stored: Int): JSONObject =

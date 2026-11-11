@@ -149,9 +149,10 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
                         return host.backgroundSync(trigger, if (ProcessCoreHost.appActive) 0 else stored).also { owed.settle(stored) }
                     }
                     override fun appActive() = ProcessCoreHost.appActive
-                    override fun calendarPush(job: String): String {
-                        val outcome = runCatching { host.calendarPushBackground() }.getOrDefault("failed")
-                        if (outcome == "pushed" || outcome == "failed") host.logLine("Native Android calendar push after background work releaseCheck=v1.3.9/native-calendar-push-background",
+                    override fun calendarSnapshot() = host.calendarPushSnapshot()
+                    override fun calendarPush(job: String, snapshot: String): String {
+                        val outcome = runCatching { host.calendarPushBackground(snapshot) }.getOrDefault("failed")
+                        if (outcome == "pushed" || outcome == "failed" || outcome == "timeout") host.logLine("Native Android calendar push after background work releaseCheck=v1.3.9/native-calendar-push-background",
                             JSONObject().put("releaseCheck", "v1.3.9/native-calendar-push-background").put("job", job).put("outcome", outcome))
                         return outcome
                     }

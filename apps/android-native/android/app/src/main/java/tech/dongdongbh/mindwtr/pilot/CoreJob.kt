@@ -47,7 +47,9 @@ internal object CoreJob {
 
         fun appActive(): Boolean = false
 
-        fun calendarPush(job: String): String = "unavailable"
+        fun calendarSnapshot(): String? = null
+
+        fun calendarPush(job: String, snapshot: String): String = "unavailable"
     }
 
 
@@ -59,9 +61,12 @@ internal object CoreJob {
             return Outcome.Failure
         }
         var recovered = false
+        var calls: Calls? = null
+        var snapshot: String? = null
         val outcome = try {
-            val host = boot()
-            val result = if (!host.recover() || !host.drain()) Outcome.Retry
+            val host = boot().also { calls = it }
+            if (name in TASK_CHANGING_JOBS && !host.appActive()) snapshot = runCatching { host.calendarSnapshot() }.getOrNull()
+            if (!host.recover() || !host.drain()) Outcome.Retry
             else when (name) {
                 WIDGET_REFRESH -> {
                     refreshWidgets()
@@ -106,8 +111,6 @@ internal object CoreJob {
                     Outcome.Success
                 }
             }
-            if (result == Outcome.Success && name in TASK_CHANGING_JOBS && !host.appActive()) runCatching { host.calendarPush(name.orEmpty()) }
-            result
         } catch (failure: Throwable) {
             line.put("error", (failure.message ?: failure.javaClass.simpleName).substringBefore(':'))
             val refused = failure.message?.startsWith("INVALID_INPUT") == true
@@ -115,6 +118,9 @@ internal object CoreJob {
         }
         log(LINE, line.put("outcome", outcome.name.lowercase()))
         if (outcome == Outcome.Success && name != WIDGET_REFRESH) refreshWidgets()
+        val taken = snapshot
+        val host = calls
+        if (outcome == Outcome.Success && taken != null && host != null && !host.appActive()) runCatching { host.calendarPush(name.orEmpty(), taken) }
         return outcome
     }
 

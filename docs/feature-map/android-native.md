@@ -256,10 +256,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## External calendars
 
-- Reach: Settings › Advanced › External Calendar. It has calendar URL subscriptions (Add, Test), Device calendar, and the push to a Mindwtr calendar (Delete Mindwtr calendar). Push also runs after background work with the app closed: a capture or widget check-off, a reminder's Done, a background sync.
+- Reach: Settings › Advanced › External Calendar. It has calendar URL subscriptions (Add, Test), Device calendar, and the push to a Mindwtr calendar (Delete Mindwtr calendar). Push also runs after background work with the app closed: a capture or widget check-off, a reminder's Done, a background sync. It pushes only the tasks that work changed.
 - Selectors: `calendar-url`, `calendar-device`, `calendar-device-body`, `calendar-grant`, `calendar-push`, `calendar-delete-confirm`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CalendarSettings.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendars.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWrites.kt`, `apps/android-native/bundle/host-calendar.ts`
-- Checks: `apps/android-native/scripts/check-calendar-feeds-device.mjs`, `apps/android-native/scripts/check-calendar-push-device.mjs`, `apps/android-native/scripts/check-upgrade-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendarsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWritesTest.kt`
+- Checks: `apps/android-native/scripts/check-calendar-feeds-device.mjs`, `apps/android-native/scripts/check-calendar-push-device.mjs`, `apps/android-native/scripts/check-upgrade-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendarsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWritesTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/CoreJobTest.kt`, `apps/android-native/bundle/host-calendar-push.test.ts`
 - Notes: A subscription URL is never written to the journal, the log files, or logcat. Feed requests carry no Origin header.
 
 ## Board

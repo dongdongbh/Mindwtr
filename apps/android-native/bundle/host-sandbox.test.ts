@@ -27,9 +27,11 @@ const fixture = () => {
     const database = new Database(':memory:'); databases.push(database);
     const sql = { statements: 0 };
     const logText = { value: '' };
+    const calendarCalls: string[] = [];
     const state: Record<string, any> = {
         AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,
         __mindwtrHostPlatform: 'android', console: { info() {}, warn() {}, error() {}, log() {} },
+        __mindwtrCalendarCall: (op: string) => { calendarCalls.push(op); return JSON.stringify({ ok: true, value: null }); },
         __mindwtrNative: {
             sqlExec: (text: string) => { sql.statements += 1; database.exec(text); return null; },
             sqlRun: (text: string, params: string) => { sql.statements += 1; database.query(text).run(...JSON.parse(params)); return null; },
@@ -56,7 +58,7 @@ const fixture = () => {
         }
         throw new Error('Host operation did not settle');
     };
-    return { state, poll, sql, logText };
+    return { state, poll, sql, logText, calendarCalls };
 };
 
 describe('the Android Sandbox boot (RN #1196, #1273, #1340)', () => {
@@ -91,6 +93,18 @@ describe('the Android Sandbox boot (RN #1196, #1273, #1340)', () => {
         expect(f.state.fixture.titles()).toContain('Sample edit');
         expect(f.sql.statements).toBe(0);
         expect((await f.poll(f.state.MindwtrHost.backupLibraryBytes())).ok).toBe(false);
+    });
+
+    it('a background calendar push is unavailable in the sandbox and makes no calendar call (C4d)', async () => {
+        const source = await personal();
+        const request = JSON.parse((await source.poll(source.state.MindwtrHost.sandboxRequest('{}'))).value.request as string);
+        const f = fixture();
+        await f.poll(f.state.MindwtrHost.bootSandbox(JSON.stringify(request)));
+        expect(await f.poll(f.state.MindwtrHost.calendarPushSnapshot())).toEqual({ ok: true, value: { token: null } });
+        expect(await f.poll(f.state.MindwtrHost.calendarPushBackground('calendar-1'))).toEqual({ ok: true, value: { outcome: 'unavailable' } });
+        const personalSnapshot = await source.poll(source.state.MindwtrHost.calendarPushSnapshot());
+        expect(await source.poll(source.state.MindwtrHost.calendarPushBackground(personalSnapshot.value.token))).toEqual({ ok: true, value: { outcome: 'off' } });
+        expect([...f.calendarCalls, ...source.calendarCalls]).toEqual([]);
     });
 
     it('boots personal from an expired, malformed or missing request', async () => {

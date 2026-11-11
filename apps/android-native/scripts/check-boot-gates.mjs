@@ -627,14 +627,16 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
 const coreHost = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
 const sqliteBridge = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/SqliteBridge.kt'), 'utf8');
 const hostEntry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
-assert.match(hostEntry, /calendarPushBackground\(\): string \{\s+return submit\(async \(\) => \(\{ outcome: !nativeCalendar \|\| isSandboxMode\(\) \? 'unavailable' : await nativeCalendar\.startPush\(\) \}\)\);/,
-    'a background job pushes the calendar through the same push as the app, and never in a sandbox (C4d)');
+assert.match(hostEntry, /calendarPushSnapshot\(\): string \{\s+return submit\(async \(\) => \(\{ token: !nativeCalendar \|\| isSandboxMode\(\) \? null : nativeCalendar\.snapshot\(\) \}\)\);\s+\},\s+calendarPushBackground\(token: string\): string \{\s+return submit\(async \(\) => \{\s+if \(!nativeCalendar \|\| isSandboxMode\(\) \|\| typeof token !== 'string'\) return \{ outcome: 'unavailable' \};[\s\S]*?Promise\.race\(\[nativeCalendar\.pushChanged\(token\),[\s\S]*?setTimeout\(\(\) => done\('timeout'\), CALENDAR_BACKGROUND_PUSH_MS\)/,
+    'a background job pushes only the tasks it changed, never in a sandbox, under its own limit that stays below the host call deadline (C4d)');
+assert.ok(Number(/const CALENDAR_BACKGROUND_PUSH_MS = ([\d_]+);/.exec(hostEntry)[1].replace(/_/g, '')) < Number(/OPERATION_DEADLINE_MS = ([\d_]+)L?/.exec(coreHost)[1].replace(/_/g, '')),
+    'a slow background calendar push answers timeout before the host call deadline cancels other host calls');
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreJob.kt'), 'utf8'),
-    /private val TASK_CHANGING_JOBS = setOf\(INGEST, REMINDER_DONE, SYNC\)[\s\S]*?if \(result == Outcome\.Success && name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) runCatching \{ host\.calendarPush\(name\.orEmpty\(\)\) \}/,
+    /private val TASK_CHANGING_JOBS = setOf\(INGEST, REMINDER_DONE, SYNC\)[\s\S]*?val host = boot\(\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+if \(!host\.recover\(\)[\s\S]*?if \(outcome == Outcome\.Success && name != WIDGET_REFRESH\) refreshWidgets\(\)\s+val taken = snapshot\s+val host = calls\s+if \(outcome == Outcome\.Success && taken != null && host != null && !host\.appActive\(\)\) runCatching \{ host\.calendarPush\(name\.orEmpty\(\), taken\) \}\s+return outcome/,
     'after a capture or check-off ingest, a notification Done or a background sync, a closed app pushes the calendar; an open app pushes through its own subscription');
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreWork.kt'), 'utf8'),
-    /override fun calendarPush\(job: String\): String \{\s+val outcome = runCatching \{ host\.calendarPushBackground\(\) \}\.getOrDefault\("failed"\)\s+if \(outcome == "pushed" \|\| outcome == "failed"\) host\.logLine\("Native Android calendar push after background work releaseCheck=v1\.3\.9\/native-calendar-push-background"/,
-    'the background push logs only a push that ran, never while push is off');
+    /override fun calendarPush\(job: String, snapshot: String\): String \{\s+val outcome = runCatching \{ host\.calendarPushBackground\(snapshot\) \}\.getOrDefault\("failed"\)\s+if \(outcome == "pushed" \|\| outcome == "failed" \|\| outcome == "timeout"\) host\.logLine\("Native Android calendar push after background work releaseCheck=v1\.3\.9\/native-calendar-push-background"/,
+    'the background push logs only a push that ran, never while push is off, when nothing changed or when a newer push replaced it');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
 
 assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
@@ -4072,7 +4074,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(nativeContext, /if \(context\.length > MAX_TRIGGER_TEXT\) return "too-long"\s+return if \(runCatching \{ enqueue\(mapOf\("action" to action, "context" to context\)\) \}\.isSuccess\) "queued" else "failed"/);
 
     const coreJob = source('CoreJob.kt');
-    assert.match(coreJob, /val host = boot\(\)\s+val result = if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
+    assert.match(coreJob, /val host = boot\(\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
     assert.match(owner, /fun recover\(runtime: CoreHost\): Boolean \{\s+val owed = failure \?: return true\s+if \(owed\.action\.kind != "journal"\) return false\s+runtime\.replayJournal\(\)\.owed\?\.let \{ return false \}\s+clearFailure\(owed\.action\)\s+return true\s+\}/);
     assert.match(source('CoreWork.kt'), /override fun recover\(\) = ProcessCoreHost\.recover\(host\)\s+override fun drain\(\) = ProcessCoreHost\.recovered\(app, host\)/, 'CoreWork drains through the start order');
 

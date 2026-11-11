@@ -22,6 +22,7 @@ class CoreJobTest {
     private var calendarOutcome = "unavailable"
     private var calendarFailure: Throwable? = null
     private val calendarPushes = mutableListOf<String>()
+    private val calendarSnapshots = mutableListOf<String>()
 
     private val calls = object : CoreJob.Calls {
         override fun recover(): Boolean {
@@ -44,8 +45,12 @@ class CoreJobTest {
             return JSONObject().put("schedule", syncWanted)
         }
         override fun appActive() = appActive
-        override fun calendarPush(job: String): String {
-            calendarPushes += job
+        override fun calendarSnapshot(): String {
+            calendarSnapshots += "after ${events.last()}"
+            return "snap${calendarSnapshots.size}"
+        }
+        override fun calendarPush(job: String, snapshot: String): String {
+            calendarPushes += "$job $snapshot after ${events.last()}"
             calendarFailure?.let { throw it }
             return calendarOutcome
         }
@@ -276,13 +281,13 @@ class CoreJobTest {
     }
 
 
-    @Test fun aBackgroundJobThatChangesTasksPushesTheCalendarAfterItsWork() {
+    @Test fun aBackgroundJobThatChangesTasksSnapshotsBeforeItsWorkAndPushesAfterTheWidgets() {
         calendarOutcome = "pushed"
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.REMINDER_DONE, mapOf("requestId" to "r", "taskId" to "t")))
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
-        assertEquals(listOf(CoreJob.INGEST, CoreJob.REMINDER_DONE, CoreJob.SYNC), calendarPushes)
-        assertEquals("done t", events.first { it.startsWith("done") })
+        assertEquals(listOf("after boot", "after boot", "after boot"), calendarSnapshots)
+        assertEquals(listOf("ingest snap1 after widgets", "reminderDone snap2 after widgets", "backgroundSync snap3 after widgets"), calendarPushes)
     }
 
 
@@ -296,13 +301,14 @@ class CoreJobTest {
         drained = false
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
         assertEquals(emptyList<String>(), calendarPushes)
+        assertEquals(listOf("after boot"), calendarSnapshots)
     }
 
 
     @Test fun aFailedCalendarPushNeverFailsTheJob() {
         calendarFailure = IllegalStateException("boom")
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf(CoreJob.INGEST), calendarPushes)
+        assertEquals(listOf("ingest snap1 after widgets"), calendarPushes)
         assertEquals("Native Android core work ingest success", lines.last())
     }
 }

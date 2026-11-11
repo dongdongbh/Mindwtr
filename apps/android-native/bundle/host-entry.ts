@@ -769,6 +769,7 @@ const nativeCalendar = nativeSync && typeof globalThis.__mindwtrCalendarCall ===
         return bootAdapter;
     })
     : null;
+const CALENDAR_BACKGROUND_PUSH_MS = 20_000;
 let readSyncSettingsRetirementStatus: (() => { pending: boolean; uncertain: boolean }) | null = null;
 const contract = createNativeHostContract({
     ...(globalThis.__mindwtrHostPlatform === 'ios' ? {
@@ -7005,8 +7006,18 @@ globalThis.MindwtrHost = {
         });
     },
 
-    calendarPushBackground(): string {
-        return submit(async () => ({ outcome: !nativeCalendar || isSandboxMode() ? 'unavailable' : await nativeCalendar.startPush() }));
+    calendarPushSnapshot(): string {
+        return submit(async () => ({ token: !nativeCalendar || isSandboxMode() ? null : nativeCalendar.snapshot() }));
+    },
+
+    calendarPushBackground(token: string): string {
+        return submit(async () => {
+            if (!nativeCalendar || isSandboxMode() || typeof token !== 'string') return { outcome: 'unavailable' };
+            let limit: ReturnType<typeof setTimeout> | undefined;
+            const outcome = await Promise.race([nativeCalendar.pushChanged(token),
+                new Promise<'timeout'>((done) => { limit = setTimeout(() => done('timeout'), CALENDAR_BACKGROUND_PUSH_MS); })]).finally(() => clearTimeout(limit));
+            return { outcome };
+        });
     },
 
     syncAppState(appState: string): string {

@@ -8,9 +8,13 @@ import {
     type ExternalCalendarEvent,
     type NativeCalendarFeedSlot,
     type NativeCalendarHost,
+    type Task,
 } from '@mindwtr/core';
 import {
+    buildCalendarSyncTaskMap,
+    calendarPushChangedTaskIds,
     CALENDAR_PUSH_CALENDAR_ID_KEY,
+    CALENDAR_PUSH_ENABLED_KEY,
     CALENDAR_PUSH_TARGET_ID_KEY,
     type CalendarPushEventDetails,
 } from '../../../packages/core/src/calendar-push-service';
@@ -66,11 +70,15 @@ const reportRefusal = (write: Promise<unknown>, outcome: 'recreated' | 'cleared'
 
 export type NativeAndroidCalendar = NativeCalendarHost & {
     startPush(): Promise<'unavailable' | 'off' | 'pushed' | 'failed'>;
+    snapshot(): string;
+    pushChanged(token: string): Promise<'unavailable' | 'off' | 'unchanged' | 'replaced' | 'pushed' | 'failed'>;
 };
 
 export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCall, fileCall: () => FileCall,
     sync?: () => CalendarSyncStore): NativeAndroidCalendar => {
     let lifecycle: NativeCalendarPushLifecycle | null = null;
+    const snapshots = new Map<string, Map<string, Task>>();
+    let snapshotCount = 0;
     const pushState = async () => ({
         saved: await keyValue.get(CALENDAR_PUSH_CALENDAR_ID_KEY),
         target: await keyValue.get(CALENDAR_PUSH_TARGET_ID_KEY),
@@ -114,6 +122,23 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
             error: (error, context) => {
                 try { logWarn('Calendar settings failed', { scope: context.scope, context: { error: error instanceof Error ? error.name : typeof error } }); } catch {  }
             },
+        },
+        snapshot: () => {
+            const token = `calendar-${++snapshotCount}`;
+            snapshots.set(token, buildCalendarSyncTaskMap(useTaskStore.getState()._allTasks));
+            for (const stale of snapshots.keys()) if (snapshots.size > 8) snapshots.delete(stale);
+            return token;
+        },
+        pushChanged: async (token) => {
+            const before = snapshots.get(token);
+            snapshots.delete(token);
+            const bound = lifecycle;
+            if (!before || !bound) return 'unavailable';
+            if (await keyValue.get(CALENDAR_PUSH_ENABLED_KEY) !== '1') return 'off';
+            const changed = calendarPushChangedTaskIds(before, useTaskStore.getState()._allTasks);
+            if (changed.length === 0) return 'unchanged';
+            return bound.run(changed).then(() => 'pushed' as const,
+                (error: unknown) => (error instanceof Error && error.message.startsWith('NOT_READY') ? 'replaced' as const : 'failed' as const));
         },
         startPush: async () => {
             const bound = lifecycle;

@@ -123,6 +123,52 @@ async function upgrade(options: { tasks: Task[]; kv: Record<string, string>; dev
 
 const started = () => lines.find((line) => line.message === 'Native Android calendar push started')?.context;
 
+describe('a background job pushes only the tasks it changed (C4d, RN subscription parity)', () => {
+    const seeded = async (enabled: string) => {
+        const device = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}`, color: '#3B82F6' })],
+            { 70: { calendarId: '7', title: 'PRIVATE t1' }, 71: { calendarId: '7', title: 'PRIVATE t2' } }, { 70: 't1', 71: 't2' });
+        const app = await upgrade({ tasks: [task('t1'), task('t2')], kv: { [KEY.enabled]: enabled, [KEY.calendarId]: '7' }, device,
+            rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }, { taskId: 't2', eventId: '71', calendarId: '7' }] });
+        return { device, app };
+    };
+
+    it('a job that changes nothing makes no calendar call at all', async () => {
+        const { device, app } = await seeded('1');
+        const token = app.host.snapshot();
+        expect(await app.host.pushChanged(token)).toBe('unchanged');
+        expect(device.state.calls).toEqual([]);
+    });
+
+    it('a changed task updates only its own event', async () => {
+        const { device, app } = await seeded('1');
+        const token = app.host.snapshot();
+        await useTaskStore.getState().updateTask('t1', { title: 'PRIVATE renamed' });
+        expect(await app.host.pushChanged(token)).toBe('pushed');
+        expect(device.writes()).toEqual(['updateEvent']);
+        expect(device.state.calls.find((entry) => entry.op === 'updateEvent')?.eventId).toBe('70');
+    });
+
+    it('with push off it answers off before any calendar call', async () => {
+        const { device, app } = await seeded('0');
+        const token = app.host.snapshot();
+        await useTaskStore.getState().updateTask('t1', { title: 'PRIVATE renamed' });
+        expect(await app.host.pushChanged(token)).toBe('off');
+        expect(device.state.calls).toEqual([]);
+    });
+
+    it('a rejected push answers failed, and a push a newer one replaced answers replaced', async () => {
+        const { app } = await seeded('1');
+        for (const [error, expected] of [[new Error('boom'), 'failed'], [new Error('NOT_READY: Calendar push lifecycle changed'), 'replaced']] as const) {
+            app.host.bindPushLifecycle!({ start: async () => true, stop: () => {}, run: async () => { throw error; } });
+            const token = app.host.snapshot();
+            await useTaskStore.getState().updateTask('t2', { title: `PRIVATE ${expected}` });
+            expect(await app.host.pushChanged(token)).toBe(expected);
+        }
+        expect(await app.host.pushChanged('calendar-unknown')).toBe('unavailable');
+    });
+});
+
+
 describe('a background job asks for the calendar push (C4d)', () => {
     it('answers pushed when push is on and off when it is off, so the job logs only a push that ran', async () => {
         const on = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}`, color: '#3B82F6' })]);
