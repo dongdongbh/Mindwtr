@@ -258,7 +258,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Reach: Settings › Advanced › External Calendar. It has calendar URL subscriptions (Add, Test), Device calendar, and the push to a Mindwtr calendar (Delete Mindwtr calendar).
 - Selectors: `calendar-url`, `calendar-device`, `calendar-device-body`, `calendar-grant`, `calendar-push`, `calendar-delete-confirm`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CalendarSettings.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendars.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWrites.kt`, `apps/android-native/bundle/host-calendar.ts`
-- Checks: `apps/android-native/scripts/check-calendar-feeds-device.mjs`, `apps/android-native/scripts/check-upgrade-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendarsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWritesTest.kt`
+- Checks: `apps/android-native/scripts/check-calendar-feeds-device.mjs`, `apps/android-native/scripts/check-calendar-push-device.mjs`, `apps/android-native/scripts/check-upgrade-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendarsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWritesTest.kt`
 - Notes: A subscription URL is never written to the journal, the log files, or logcat. Feed requests carry no Origin header.
 
 ## Board
