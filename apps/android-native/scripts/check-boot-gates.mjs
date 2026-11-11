@@ -3663,6 +3663,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(toJava, /case JS_TAG_STRING_ROPE:\s+case JS_TAG_STRING: \{\s+result = toJavaString\(env, value\);/, 'a rope string reaches Kotlin as a string, not null');
         assert.match(toJava, /case JS_TAG_SHORT_BIG_INT:\s+case JS_TAG_BIG_INT: \{/, 'a small BigInt reaches Kotlin as a Long, not null');
         assert.match(readFileSync(resolve(wrapper, 'build.gradle.kts'), 'utf8'), /ndkVersion = "27\.1\.12297006"[\s\S]*arguments \+= "-DCMAKE_BUILD_TYPE=Release"/, 'every app variant runs the optimized engine');
+        assert.match(readFileSync(resolve(wrapper, 'CMakeLists.txt'), 'utf8'), /^\s+JS_DEFAULT_STACK_SIZE=262144$/m, 'deep recursion throws a RangeError inside a 256 KB limit instead of overflowing the thread stack');
     }
     {
         const verifier = resolve(app, 'scripts/verify-bundle.mjs');

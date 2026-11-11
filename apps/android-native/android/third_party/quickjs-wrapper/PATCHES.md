@@ -29,4 +29,4 @@ This folder builds the app's JavaScript engine from source. It replaces the Mave
 - `CONFIG_VERSION` comes from `quickjs/VERSION`. `CONFIG_BIGNUM` is gone, because upstream removed the bignum extensions.
 - 16 KB page alignment (`-z max-page-size=16384`), as in wrapper 3.2.0.
 
-The app keys its bytecode cache on `quickjs/VERSION` (`BuildConfig.QUICKJS_ENGINE`). Updating `quickjs` to a release with a new `VERSION` makes every phone rebuild its cache once.
+Two guards keep an old bytecode cache from running on a new engine. First, Android deletes the app's `code_cache` folder on every install or update. Second, the app keys the cache on `quickjs/VERSION` (`BuildConfig.QUICKJS_ENGINE`), so a cache from another release is skipped. Bellard's master branch does not bump `VERSION` between releases, so vendor a tagged release, or the second guard does not apply.
