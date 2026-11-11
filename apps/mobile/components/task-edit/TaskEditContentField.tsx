@@ -402,14 +402,14 @@ export function TaskEditContentField({
         onMove: (from, to) => {
             handleChecklistMove(from, to);
             void logInfo('Checklist handle drag applied to draft', {
-                scope: 'task-edit', extra: { releaseCheck: 'v1.3.8/checklist-handle-drag', stage: 'draft-moved' },
+                scope: 'task-edit', extra: { releaseCheck: 'v1.3.9/checklist-handle-drag', stage: 'draft-moved' },
             });
         },
         onStart: () => {
             cancelPendingChecklistFocus();
-            setChecklistMenuRow(null);
             for (const input of Object.values(checklistInputRefs.current)) input?.blur?.();
         },
+        onDragStart: () => setChecklistMenuRow(null),
         onMenu: (row) => setChecklistMenuRow((previous) => previous === row ? null : row),
     });
     const renderChecklistHandle = (identity: string) => (
@@ -793,13 +793,11 @@ export function TaskEditContentField({
                                     const { index } = item;
                                     const checklistItemKey = checklistRows[index].identity;
                                     return (
-                                        <View key={checklistItemKey} testID={`mobile-checklist-row-${checklistItemKey}`} onLayout={(event) => checklistDrag.rowLayout(checklistItemKey, event)}>
+                                        <View key={checklistItemKey} testID={`mobile-checklist-row-${checklistItemKey}`} style={checklistDrag.rowStyle(checklistItemKey, index)} onLayout={(event) => checklistDrag.rowLayout(checklistItemKey, event)}>
                                         <View
                                             style={[
                                                 styles.checklistItem,
-                                                { borderBottomColor: checklistDrag.indicator?.target === checklistItemKey ? tc.tint : tc.border,
-                                                    ...(checklistDrag.indicator?.target === checklistItemKey ? { borderTopWidth: 2 } : {}),
-                                                    ...(checklistDrag.indicator?.row === checklistItemKey ? { opacity: 0.6 } : {}) },
+                                                { borderBottomColor: tc.border, backgroundColor: tc.cardBg },
                                             ]}
                                         >
                                             {renderChecklistHandle(checklistItemKey)}

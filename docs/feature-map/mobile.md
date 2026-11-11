@@ -111,9 +111,9 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Checklist and attachments
 
 - Reach: Task editor › checklist field and attachments field. Task rows also show checklist progress.
-- Shortcuts: In the checklist order panel, long press and drag a row.
+- Shortcuts: Drag a checklist row by its handle; the row follows the finger and neighboring rows preview its slot. Sideways movement keeps the drag active. Release commits the draft move; cancellation restores the original positions. Tap a handle for row actions; tapping another handle switches the menu on release. Both editor scroll views stay locked during handle contact; edge scrolling remains available. The order panel also provides up/down buttons.
 - Selectors: `mobile-checklist-add-item`, `mobile-checklist-order-toggle`, `mobile-checklist-order-panel`, `mobile-checklist-row-` (+ item key), `mobile-checklist-drag-` (+ item key), `mobile-checklist-move-up-` (+ item id), `mobile-checklist-move-down-` (+ item id)
-- Code: `apps/mobile/components/task-edit/TaskEditContentField.tsx`, `apps/mobile/components/task-edit/use-task-edit-attachments.ts`, `apps/mobile/components/swipeable-task-item/useSwipeableChecklist.ts`
+- Code: `apps/mobile/components/task-edit/TaskEditContentField.tsx`, `apps/mobile/components/task-edit/use-checklist-handle-drag.tsx`, `apps/mobile/components/task-edit/use-task-edit-attachments.ts`, `apps/mobile/components/swipeable-task-item/useSwipeableChecklist.ts`
 - Checks: `apps/mobile/components/task-edit/TaskEditContentField.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-attachments.test.tsx`, `apps/mobile/tests/attachments.parity.test.tsx`
 - Notes: Attachments are buffered with the Task draft and count as pending edits.
 

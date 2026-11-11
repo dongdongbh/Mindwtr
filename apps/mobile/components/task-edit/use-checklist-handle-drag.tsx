@@ -11,13 +11,14 @@ export type ChecklistDragScroll = {
 };
 export const ChecklistDragScrollContext = React.createContext<ChecklistDragScroll | null>(null);
 
-type Drag = { row: string; startY: number; pointer: number; originTop: number; originOffset: number; moved: boolean; measured: boolean };
+type Drag = { row: string; startY: number; pointer: number; originTop: number; originRowY: number; originOffset: number; moved: boolean; measured: boolean };
 
-export function useChecklistHandleDrag({ sessionId, rows, onMove, onStart, onMenu }: {
+export function useChecklistHandleDrag({ sessionId, rows, onMove, onStart, onDragStart, onMenu }: {
     sessionId?: string;
     rows: readonly string[];
     onMove: (from: number, to: number) => void;
     onStart: () => void;
+    onDragStart: () => void;
     onMenu: (row: string) => void;
 }) {
     const scroll = React.useContext(ChecklistDragScrollContext);
@@ -25,9 +26,9 @@ export function useChecklistHandleDrag({ sessionId, rows, onMove, onStart, onMen
     const layouts = React.useRef(new Map<string, { y: number; height: number }>());
     const active = React.useRef<Drag | null>(null);
     const frame = React.useRef<number | null>(null);
-    const latest = React.useRef({ rows, onMove, onStart, onMenu, scroll });
-    latest.current = { rows, onMove, onStart, onMenu, scroll };
-    const [indicator, setIndicator] = React.useState<{ row: string; target: string } | null>(null);
+    const latest = React.useRef({ rows, onMove, onStart, onDragStart, onMenu, scroll });
+    latest.current = { rows, onMove, onStart, onDragStart, onMenu, scroll };
+    const [indicator, setIndicator] = React.useState<{ row: string; target: string; translation: number } | null>(null);
 
     const targetIndex = React.useCallback((drag: Drag) => {
         const current = latest.current;
@@ -65,8 +66,10 @@ export function useChecklistHandleDrag({ sessionId, rows, onMove, onStart, onMen
             const viewport = current.scroll?.viewport();
             if (viewport && viewport.bottom > viewport.top) current.scroll?.scrollBy(checklistEdgeScroll(drag.pointer, viewport.top, viewport.bottom));
             const target = current.rows[targetIndex(drag)];
-            if (target) setIndicator((previous) => previous?.row === drag.row && previous.target === target
-                ? previous : { row: drag.row, target });
+            const translation = drag.pointer - drag.startY + (current.scroll?.offset() ?? 0) - drag.originOffset
+                + drag.originRowY - (layouts.current.get(drag.row)?.y ?? drag.originRowY);
+            if (target) setIndicator((previous) => previous?.row === drag.row && previous.target === target && previous.translation === translation
+                ? previous : { row: drag.row, target, translation });
         }
         frame.current = requestAnimationFrame(tick);
     }, [finish, targetIndex]);
@@ -80,32 +83,46 @@ export function useChecklistHandleDrag({ sessionId, rows, onMove, onStart, onMen
         };
     }, [sessionId]);
 
+    const previewFrom = indicator ? rows.indexOf(indicator.row) : -1;
+    const previewTo = indicator ? rows.indexOf(indicator.target) : -1;
+
     return {
         listRef,
         indicator,
         rowLayout: (row: string, event: LayoutChangeEvent) => layouts.current.set(row, event.nativeEvent.layout),
+        rowStyle: (row: string, index: number) => {
+            if (!indicator) return undefined;
+            if (row === indicator.row) return { transform: [{ translateY: indicator.translation }], zIndex: 1, elevation: 4 };
+            const height = layouts.current.get(indicator.row)?.height ?? 0;
+            const translation = previewFrom < index && index <= previewTo ? -height : previewTo <= index && index < previewFrom ? height : 0;
+            return { transform: [{ translateY: translation }] };
+        },
         handleProps: (row: string) => ({
             onStartShouldSetResponder: () => rows.length > 0,
             onResponderTerminationRequest: () => false,
             onResponderGrant: (event: GestureResponderEvent) => {
                 finish(false);
                 const pointer = event.nativeEvent.pageY;
+                latest.current.scroll?.begin();
                 latest.current.onStart();
                 Keyboard.dismiss();
-                latest.current.scroll?.begin();
-                const drag: Drag = { row, startY: pointer, pointer, originTop: 0,
+                const drag: Drag = { row, startY: pointer, pointer, originTop: 0, originRowY: layouts.current.get(row)?.y ?? 0,
                     originOffset: latest.current.scroll?.offset() ?? 0, moved: false, measured: false };
                 active.current = drag;
                 listRef.current?.measureInWindow((_x, y) => {
                     if (active.current === drag) { drag.originTop = y; drag.measured = true; }
                 });
                 frame.current = requestAnimationFrame(tick);
+                return true;
             },
             onResponderMove: (event: GestureResponderEvent) => {
                 const drag = active.current;
                 if (!drag) return;
                 drag.pointer = event.nativeEvent.pageY;
-                drag.moved ||= latest.current.rows.length > 1 && Math.abs(drag.pointer - drag.startY) > 6;
+                if (!drag.moved && latest.current.rows.length > 1 && Math.abs(drag.pointer - drag.startY) > 6) {
+                    drag.moved = true;
+                    latest.current.onDragStart();
+                }
             },
             onResponderRelease: () => finish(true),
             onResponderTerminate: () => finish(false),

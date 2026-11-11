@@ -1428,6 +1428,48 @@ describe('checklist handle reordering', () => {
     act(() => { for (const tree of renderedTrees.splice(0)) tree.unmount(); });
     vi.unstubAllGlobals();
   });
+  it('switches action menus on release without collapsing the old menu on touch down', () => {
+    installAnimationFrameHarness();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TaskEditContentField {...baseProps} fieldId="checklist"
+      checklist={[{ id: 'a', title: 'A', isCompleted: false }, { id: 'b', title: 'B', isCompleted: true }]} />); });
+    const first = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-1' });
+    const second = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-2' });
+    act(() => first.props.onAccessibilityTap());
+    const action = () => tree.root.findAll((node) => node.props.onPress && node.findAllByType(Text).some((text) => text.props.children === 'taskEdit.moveChecklistTop'))[0];
+    expect(action().props.disabled).toBe(true);
+    act(() => second.props.onResponderGrant({ nativeEvent: { pageY: 75 } }));
+    expect(action().props.disabled).toBe(true);
+    act(() => second.props.onResponderRelease());
+    expect(action().props.disabled).toBe(false);
+    act(() => second.props.onResponderGrant({ nativeEvent: { pageY: 75 } }));
+    act(() => second.props.onResponderRelease());
+    expect(action()).toBeUndefined();
+  });
+
+  it('keeps the dragged row under the finger when a menu above it collapses', () => {
+    const frames = installAnimationFrameHarness();
+    const changed = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TaskEditContentField {...baseProps} fieldId="checklist" applyChecklistUpdate={changed}
+      checklist={['A', 'B', 'C'].map((title) => ({ id: title, title, isCompleted: false }))} />,
+      { createNodeMock: () => ({ measureInWindow: (callback: (x: number, y: number) => void) => callback(0, 100), blur: vi.fn() }) }); });
+    const rows = tree.root.findAll((node) => node.type === View && String(node.props.testID ?? '').startsWith('mobile-checklist-row-'));
+    const first = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-1' });
+    const second = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-2' });
+    act(() => first.props.onAccessibilityTap());
+    act(() => rows.forEach((row, index) => row.props.onLayout({ nativeEvent: { layout: { y: index === 0 ? 0 : 100 + (index - 1) * 70, height: index === 0 ? 100 : 70 } } })));
+    act(() => second.props.onResponderGrant({ nativeEvent: { pageX: 20, pageY: 225 } }));
+    act(() => second.props.onResponderMove({ nativeEvent: { pageX: 350, pageY: 240 } }));
+    act(() => rows.forEach((row, index) => row.props.onLayout({ nativeEvent: { layout: { y: index === 0 ? 0 : 50 + (index - 1) * 70, height: index === 0 ? 50 : 70 } } })));
+    act(() => frames.runNext());
+    expect(rows[1].props.style.transform).toEqual([{ translateY: 65 }]);
+    expect(tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-2' })).toBe(second);
+    act(() => second.props.onTouchCancel());
+    expect(rows[1].props.style).toBeUndefined();
+    expect(changed).not.toHaveBeenCalled();
+  });
+
   it('moves the selected duplicate row and preserves the mounted input and unsaved text', () => {
     let saved: { id: string; title: string; isCompleted: boolean }[] = [];
     function Harness() {
@@ -1477,9 +1519,13 @@ describe('checklist handle reordering', () => {
       .forEach((row, index) => row.props.onLayout({ nativeEvent: { layout: { y: index * 50, height: 50 } } }));
     act(layoutRows);
     const handle = tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-1' });
-    act(() => handle.props.onResponderGrant({ nativeEvent: { pageY: 125 } }));
-    act(() => { handle.props.onResponderMove({ nativeEvent: { pageY: 1525 } }); frames.runNext(); });
+    act(() => expect(handle.props.onResponderGrant({ nativeEvent: { pageX: 20, pageY: 125 } })).toBe(true));
+    act(() => { handle.props.onResponderMove({ nativeEvent: { pageX: 320, pageY: 1525 } }); frames.runNext(); });
     expect(changed).not.toHaveBeenCalled();
+    const draggedRow = tree.root.findByProps({ testID: 'mobile-checklist-row-checklist-row-1' });
+    expect(draggedRow.props.style.transform[0].translateY).toBe(1400 + scrollOffset);
+    expect(tree.root.findByProps({ testID: 'mobile-checklist-row-checklist-row-2' }).props.style.transform).toEqual([{ translateY: -50 }]);
+    expect(tree.root.findByProps({ testID: 'mobile-checklist-drag-checklist-row-1' })).toBe(handle);
     expect(scroll.begin).toHaveBeenCalled();
     expect(scroll.scrollBy).toHaveBeenCalledWith(expect.any(Number));
     expect(scrollOffset).toBeGreaterThan(0);
@@ -1489,6 +1535,7 @@ describe('checklist handle reordering', () => {
     act(() => frames.runAll());
     expect(scroll.scrollBy).toHaveBeenCalledTimes(scrollCalls);
     expect(saved[0].title).toBe('Row 0');
+    expect(draggedRow.props.style).toBeUndefined();
     act(() => handle.props.onResponderGrant({ nativeEvent: { pageY: 125 } }));
     act(() => { handle.props.onResponderMove({ nativeEvent: { pageY: 1525 } }); frames.runNext(); });
     act(() => handle.props.onResponderRelease());
