@@ -189,7 +189,7 @@ internal object ProcessCoreHost {
 
     private fun coreBundle(app: Application): CoreBundle {
         val hash = runCatching { app.assets.open("core-host.js").use(BytecodeCache::bundleKey) }.getOrDefault("")
-        val cache = BytecodeCache(File(app.codeCacheDir, "core-host.qjsc"), BuildConfig.QUICKJS_WRAPPER)
+        val cache = BytecodeCache(File(app.codeCacheDir, "core-host.qjsc"), BuildConfig.QUICKJS_ENGINE)
         return CoreBundle(hash, cache) { traced("boot:bundleRead") { app.assets.open("core-host.js").use { it.readBytes() } } }
     }
 
