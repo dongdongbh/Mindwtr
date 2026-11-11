@@ -175,6 +175,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/views/contexts-view.tsx`, `apps/mobile/app/(drawer)/contexts.tsx`, `apps/mobile/app/(drawer)/(tabs)/contexts-tab.tsx`
 - Checks: `apps/mobile/components/views/contexts-view.test.tsx`, `apps/mobile/components/views/contexts-view.parity.test.tsx`
 - Notes: Several selected tokens match in "all" mode by default; the view can switch to "any".
+- Notes: A saved Contexts filter opened from a widget uses this full view with the saved filter selected, including its saved criteria and sort. Filter controls and chips remain editable. Clearing the selection does not reapply the widget filter. Other saved-filter views keep their existing destinations.
 
 ## Waiting For
 
@@ -398,6 +399,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/modules/android-widget/README.md`, `apps/mobile/plugins/android-widget.js`, `apps/mobile/lib/widget-service.ts`, `apps/mobile/app/(drawer)/widget-list/[id].tsx`, `apps/mobile/hooks/use-widget-launch.tsx`
 - Checks: `apps/mobile/tests/use-widget-launch.test.tsx`, `apps/mobile/app/(drawer)/widget-list/widget-list-screen.test.tsx`, `apps/mobile/modules/android-widget/android/src/test/java/tech/dongdongbh/mindwtr/androidwidget/WidgetNavigationTest.kt`, `apps/mobile/hooks/root-layout/use-root-layout-pending-captures.test.tsx`
 - Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite. Rows checked off in a row stay in place, struck through and undoable, until three seconds after the last tap; then they all leave together (`CheckoffStore.kt`, check `CheckoffStoreTest.kt`) (#1211).
+- Notes: Existing `/widget-list/filter:<id>` links for saved Contexts filters open the full Contexts controls with that filter selected after local settings load. Deleted or unknown filters show an empty result. The original widget path remains mounted for launch acknowledgment after App lock unlocks.
 - E-Ink: Present priority rings and identity dots use each Android widget's effective text foreground, including transparent light-text and dark-text modes. Missing identity stays hidden; the transparent surface stays clear.
 
 ## Android launcher shortcuts and Quick Settings tile

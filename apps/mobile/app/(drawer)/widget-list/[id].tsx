@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, RefreshControl, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { shallow, useTaskStore, type Task, type TaskStatus } from '@mindwtr/core';
+import { normalizeSavedFilters, shallow, useTaskStore, type Task, type TaskStatus } from '@mindwtr/core';
 import { SwipeableTaskItem, type TaskRowActions } from '@/components/swipeable-task-item';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { TASK_LIST_WINDOWING_PROPS } from '@/components/task-list-windowing';
@@ -9,7 +9,8 @@ import { useLanguage } from '@/contexts/language-context';
 import { useTheme } from '@/contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
-import { resolveWidgetListDestination } from '@/lib/widget-list-destination';
+import { normalizeWidgetListDestinationId, resolveWidgetListDestination } from '@/lib/widget-list-destination';
+import { ContextsView } from '@/components/views/contexts-view';
 import { logInfo } from '@/lib/app-log';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
@@ -35,6 +36,11 @@ export default function WidgetListScreen() {
   const list = useMemo(() => resolveWidgetListDestination(data, language, id), [data, id, language, dayKey]);
   const title = list?.title ?? t('search.noResults');
   const available = Boolean(list);
+  const destinationId = normalizeWidgetListDestinationId(id);
+  const contextFilter = useMemo(() => destinationId?.startsWith('filter:')
+    ? normalizeSavedFilters(data.settings.savedFilters).find((filter) =>
+      filter.id === destinationId.slice('filter:'.length) && filter.view === 'contexts' && !filter.deletedAt)
+    : undefined, [data.settings.savedFilters, destinationId]);
   useEffect(() => {
     if (source !== 'shortcut') return;
     void logInfo('Saved list shortcut destination resolved', {
@@ -75,6 +81,7 @@ export default function WidgetListScreen() {
     <View style={{ flex: 1, backgroundColor: tc.bg }}>
       <WidgetLaunchDestination path={`/widget-list/${typeof id === 'string' ? id : ''}`} />
       <Stack.Screen options={{ title }} />
+      {contextFilter ? <ContextsView key={contextFilter.id} initialSavedFilterId={contextFilter.id} /> : <>
       {
                                                                                     }
       <FlatList
@@ -100,6 +107,7 @@ export default function WidgetListScreen() {
         onContextNavigate={openContextsScreen}
         onTagNavigate={openContextsScreen}
       />
+      </>}
     </View>
   );
 }

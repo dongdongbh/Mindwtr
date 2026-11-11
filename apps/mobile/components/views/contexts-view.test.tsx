@@ -5,6 +5,7 @@ import { runStoreCommand, runSyncStoreSave, type Task } from '@mindwtr/core';
 import { Pressable, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { ContextsView } from './contexts-view';
 import { TaskListSortModal } from '../task-list/TaskListSortModal';
+import { FilterChip, TaskFilterSheet } from '../task-filter-sheet';
 
 const now = '2026-06-11T00:00:00.000Z';
 
@@ -142,6 +143,47 @@ vi.mock('react-native', async (importOriginal) => {
 });
 
 describe('ContextsView', () => {
+  it('selects the widget saved filter with its criteria and sort while keeping controls editable', async () => {
+    const previous = storeState.settings;
+    storeState.tasks = [
+      { ...makeTask('a', 'Alpha'), status: 'someday' },
+      { ...makeTask('z', 'Zebra'), status: 'someday' },
+      makeTask('next', 'Next'),
+    ];
+    storeState.settings = { ...previous, savedFilters: [{ id: 'desk', name: 'Desk', view: 'contexts', criteria: { statuses: ['someday'], contexts: ['@work'] }, sortBy: 'title', sortOrder: 'desc', createdAt: now, updatedAt: now }] };
+    const savedSettings = storeState.settings;
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView initialSavedFilterId="desk" />); });
+      const titles = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem').map((node) => node.props.task.title);
+      expect(titles()).toEqual(['Zebra', 'Alpha']);
+      const chip = () => tree.root.findAllByType(FilterChip).find((node) => node.props.label === 'Desk')!;
+      expect(chip().props.selected).toBe(true);
+      await act(async () => { tree.root.findByType(TaskListSortModal).props.onSelect('title'); });
+      expect(titles()).toEqual(['Alpha', 'Zebra']);
+      expect(storeState.settings).toBe(savedSettings);
+      const filters = tree.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === 'filters.label')!;
+      await act(async () => { filters.props.onPress(); });
+      expect(tree.root.findByType(TaskFilterSheet).props.visible).toBe(true);
+      expect(tree.root.findByType(TaskFilterSheet).props.selections.statuses).toEqual(['someday']);
+      expect(tree.root.findByType(TaskFilterSheet).props.statusOptions).toContain('reference');
+      await act(async () => { chip().props.onPress(); });
+      expect(chip().props.selected).toBe(false);
+      await act(async () => { tree.update(<ContextsView initialSavedFilterId="desk" />); });
+      expect(chip().props.selected).toBe(false);
+      expect(titles()).toContain('Next');
+      expect(tree.root.findByType(TaskListSortModal).props.sortBy).toBe('default');
+      await act(async () => { tree.root.findByType(TaskListSortModal).props.onSelect('created-desc'); });
+      expect(storeState.updateSettings).toHaveBeenCalledWith({ taskSortBy: 'created-desc' });
+      storeState.settings = { ...storeState.settings, taskSortBy: 'created-desc' };
+      await act(async () => { tree.update(<ContextsView initialSavedFilterId="desk" />); });
+      expect(tree.root.findByType(TaskListSortModal).props.sortBy).toBe('created-desc');
+    } finally {
+      await act(async () => { tree?.unmount(); });
+      storeState.settings = previous;
+      storeState.tasks = [];
+    }
+  });
 
   it('shows the shared list sort, writes settings.taskSortBy, and orders rows by it', async () => {
     const original = { settings: storeState.settings, updateSettings: storeState.updateSettings };

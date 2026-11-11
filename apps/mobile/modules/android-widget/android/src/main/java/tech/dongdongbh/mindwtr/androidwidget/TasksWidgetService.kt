@@ -112,7 +112,7 @@ class TasksWidgetFactory(
   private fun taskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews {
     if (kind == WidgetKind.COMPACT) return compactTaskRow(item, palette)
     val views = RemoteViews(context.packageName, R.layout.mindwtr_widget_item)
-    val struck = item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
+    val struck = item.canComplete && item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
     val title = boundedDisplayText(item.title)
     views.setTextViewText(R.id.mindwtr_widget_item_title, if (struck) struck(title) else title)
 
@@ -125,8 +125,8 @@ class TasksWidgetFactory(
       ?: views.setThemeColor(R.id.mindwtr_widget_item_priority, "setColorFilter", palette?.mutedText, R.color.mindwtr_widget_muted_text)
 
 
-    views.setViewVisibility(R.id.mindwtr_widget_item_ring_target, if (item.id.isEmpty()) View.GONE else View.VISIBLE)
-    if (item.id.isNotEmpty()) {
+    views.setViewVisibility(R.id.mindwtr_widget_item_ring_target, if (item.id.isEmpty() || !item.canComplete) View.GONE else View.VISIBLE)
+    if (item.id.isNotEmpty() && item.canComplete) {
       views.setOnClickFillInIntent(R.id.mindwtr_widget_item_ring_target, Intent().setData(Uri.parse(WidgetTapActivity.checkoffUri(item.id))))
     }
     val contextLabel = listOfNotNull(item.statusLabel.takeIf { item.showStatus }, item.contextLabel)
@@ -174,7 +174,7 @@ class TasksWidgetFactory(
   private fun compactTaskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews =
     RemoteViews(context.packageName, R.layout.mindwtr_compact_widget_item).apply {
       val title = "• ${boundedDisplayText(item.title)}"
-      setTextViewText(R.id.mindwtr_widget_item_title, if (CheckoffStore.isStruck(context, item.id)) struck(title) else title)
+      setTextViewText(R.id.mindwtr_widget_item_title, if (item.canComplete && CheckoffStore.isStruck(context, item.id)) struck(title) else title)
       palette?.let { setTextColor(R.id.mindwtr_widget_item_title, it.text) }
       val uri = if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
       setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(uri)))

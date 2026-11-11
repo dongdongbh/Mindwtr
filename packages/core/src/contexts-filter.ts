@@ -12,7 +12,7 @@ import { isTaskFinished } from './task-status';
 import { taskMatchesFilterSearchQuery } from './task-filter-selections';
 import type { AppSettings, FilterCriteria, Project, Task, TaskStatus } from './types';
 
-export const CONTEXTS_FILTER_STATUSES = ['inbox', 'next', 'waiting', 'someday'] as const satisfies readonly TaskStatus[];
+export const CONTEXTS_FILTER_STATUSES = ['inbox', 'next', 'waiting', 'someday', 'reference'] as const satisfies readonly TaskStatus[];
 
 export function selectContextsFilterTasks(tasks: Task[], criteria: FilterCriteria, projects: Project[]): Task[] {
     const pool = criteria.statuses?.length ? tasks : tasks.filter((task) => !isTaskFinished(task));

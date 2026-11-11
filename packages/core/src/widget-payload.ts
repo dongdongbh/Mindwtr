@@ -62,6 +62,7 @@ export type WidgetSystemColorScheme = 'light' | 'dark' | null | undefined;
 export interface WidgetTaskItem {
     id: string;
     completionToken?: string;
+    canComplete?: boolean;
 
     upcomingDate?: string;
 
@@ -564,7 +565,7 @@ export function createWidgetPayloadProjection(
             : undefined;
         const item: WidgetTaskItem = {
             id: task.id,
-            completionToken: buildWidgetCompletionToken(task),
+            ...(task.status === 'reference' ? { canComplete: false } : { completionToken: buildWidgetCompletionToken(task) }),
             title: task.title,
             statusLabel: tr[`status.${task.status}`] || task.status,
             ...computeDueLabel(task.dueDate, tr, language, dayFirst, startOfToday, endOfToday),
@@ -632,7 +633,9 @@ export function createWidgetPayloadProjection(
     });
     const inboxCount = inboxTasks.length;
     const dateLabel = formatDateLabel(now, language, 'long');
-    const listContext = { data, activeTasks, inboxTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
+    const referenceTasks = tasks.filter((task) => task.status === 'reference' && !task.deletedAt
+        && isTaskInActiveProject(task, projectById) && isTaskVisibleInArea(task, areaVisibility));
+    const listContext = { data, activeTasks, referenceTasks, inboxTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
         tokenTaskIndex: options?.listIds?.some((id) => {
             const base = parseWidgetListSelection(id)?.listId ?? '';
             return base.startsWith('context:') || base.startsWith('tag:');
