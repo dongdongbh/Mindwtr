@@ -528,22 +528,30 @@ final class AttachmentCompleteSaveHostTests: XCTestCase {
         let focused = try await seed(lifecycle: ["focusedToday": true]); try await remove(focused); _ = try await save(focused); try released()
         XCTAssertEqual(try task()["isFocusedToday"] as? Int, 1)
     }
-    func testRecurringCompletionPublishesOneChildWithProvenLiveAdd() async throws {
-        let host = try await seed(lifecycle: ["status": "done", "focusedToday": false], recurring: true)
-        let added = try await add(host); try await remove(host); let uri = try XCTUnwrap(URL(string: added.targetURI)), bytes = try Data(contentsOf: uri)
-        _ = try await save(host); try released()
-        let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id != 'unrelated' ORDER BY id").utf8)) as? [[String: Any]])
-        XCTAssertEqual(rows.count, 2)
-        let source = try XCTUnwrap(rows.first { $0["id"] as? String == taskID }), child = try XCTUnwrap(rows.first { $0["id"] as? String != taskID })
-        let sourceFiles = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(source["attachments"] as? String).utf8)) as? [[String: Any]])
-        let childFiles = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(child["attachments"] as? String).utf8)) as? [[String: Any]])
-        XCTAssertTrue(sourceFiles.contains { $0["id"] as? String == added.requestId && $0["deletedAt"] == nil })
-
-
-        XCTAssertTrue(childFiles.contains { $0["uri"] as? String == target().absoluteString && $0["deletedAt"] == nil })
-        XCTAssertFalse(childFiles.contains { $0["id"] as? String == added.requestId })
-        XCTAssertTrue(FileManager.default.fileExists(atPath: target().path), "Child reference fences baseline retirement")
-        XCTAssertEqual(try Data(contentsOf: uri), bytes)
+    func testRecurringCompletionChildCopiesCurrentDraftFilesAndRetiresOnlyUnreferencedBaseline() async throws {
+        for fenced in [false, true] {
+            let previous = try isolate(); defer { root = previous }
+            var host = try await seed(lifecycle: ["status": "done", "focusedToday": false], recurring: true)
+            let added = try await add(host); try await remove(host); let uri = try XCTUnwrap(URL(string: added.targetURI)), bytes = try Data(contentsOf: uri)
+            if fenced {
+                await host.close(); var reference = baseline(0); reference["id"] = "unrelated-reference"
+                _ = try sql("UPDATE tasks SET attachments=?,rev=rev+1 WHERE id='unrelated'", [json([reference])])
+                host = core(); _ = try await host.start()
+            }
+            _ = try await save(host); try released()
+            let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id != 'unrelated' ORDER BY id").utf8)) as? [[String: Any]])
+            XCTAssertEqual(rows.count, 2)
+            let source = try XCTUnwrap(rows.first { $0["id"] as? String == taskID }), child = try XCTUnwrap(rows.first { $0["id"] as? String != taskID })
+            let sourceFiles = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(source["attachments"] as? String).utf8)) as? [[String: Any]])
+            let childFiles = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(child["attachments"] as? String).utf8)) as? [[String: Any]])
+            XCTAssertTrue(sourceFiles.contains { $0["id"] as? String == added.requestId && $0["deletedAt"] == nil })
+            XCTAssertTrue(sourceFiles.contains { $0["id"] as? String == "baseline-0" && $0["deletedAt"] is String })
+            XCTAssertTrue(childFiles.contains { $0["uri"] as? String == added.targetURI && $0["deletedAt"] == nil })
+            XCTAssertFalse(childFiles.contains { $0["id"] as? String == added.requestId })
+            XCTAssertFalse(childFiles.contains { $0["uri"] as? String == target().absoluteString })
+            XCTAssertEqual(FileManager.default.fileExists(atPath: target().path), fenced, "Only a live reference keeps the removed baseline file")
+            XCTAssertEqual(try Data(contentsOf: uri), bytes)
+        }
     }
     func testFailedCommitColdRetryUsesFrozenCompleteEnvelopeAndOneEffect() async throws {
         let faults = HostIOFaults(), host = try await seed(faults); let added = try await add(host); try await remove(host)
