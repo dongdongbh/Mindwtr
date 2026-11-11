@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
+import MindwtrNativeCore
 
 struct NavigationReplayContentEntry: View {
     let model: CoreModel
@@ -2050,10 +2051,10 @@ struct TaskCard: View {
         rowEnabled && !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeActionsEnabled(row)
     }
     private var swipeReadIdentity: String {
-        checklistIdentity + ":" + row.text("taskRevision") + ":" + row.text("status")
-            + ":" + String(row.flag("isFocusedToday")) + ":" + String(onSelection != nil)
-            + ":" + String(readOnly) + ":" + String(rowEnabled) + ":" + String(swipeInteractionDisabled)
-            + ":" + String(swipeEnabled) + ":" + String(model.taskRowSwipeLanguageGeneration)
+        NativeTaskRowSwipeRead.identity(context: model.taskCardPresentationContext, taskID: row.text("id"),
+            taskRevision: row.text("taskRevision"), status: row.text("status"), focusedToday: row.flag("isFocusedToday"),
+            selectionMode: onSelection != nil, readOnly: readOnly || row.flag("readOnly"), interactionDisabled: swipeInteractionDisabled,
+            languageGeneration: model.taskRowSwipeLanguageGeneration, ready: model.ready)
     }
     private var statusColor: Color {
         Color(hex: model.theme.object("status").object(palette.dark ? "dark" : "light").object(row.text("status")).text("text"))
@@ -2189,7 +2190,7 @@ struct TaskCard: View {
             let identity = swipeReadIdentity, displayed = row
             swipeDTO = [:]; swipePublishedKey = ""; swipePublishedRow = [:]
             guard let value = await model.readTaskRowSwipeActions(displayed, selectionMode: onSelection != nil,
-                interactionDisabled: readOnly || !rowEnabled || swipeInteractionDisabled || !model.taskRowSwipeActionsEnabled(displayed)),
+                interactionDisabled: readOnly || swipeInteractionDisabled),
                   !Task.isCancelled, identity == swipeReadIdentity else { return }
             swipePublishedRow = displayed; swipePublishedKey = identity; swipeDTO = value
         }

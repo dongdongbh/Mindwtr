@@ -2170,6 +2170,8 @@ struct SettingsScreen: View {
                 if !model.searchTestState.isEmpty {
                     Text(model.searchTestState).rnFont(12)
                         .accessibilityIdentifier("ios-search-test-state")
+                    Text(String(model.searchTestRemovals)).rnFont(12)
+                        .accessibilityIdentifier("ios-search-test-removals")
                 }
                 #endif
             }

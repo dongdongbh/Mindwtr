@@ -1471,6 +1471,18 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["ios-search-test-state"].label, "removalQueued:0")
     }
 
+    func testNativeSearchTabSwitchesKeepIndexWhileAppLockStaysOff() throws {
+        let app = try task456App("TABS")
+        app.launch(); defer { app.terminate() }
+        task456Enable(app)
+        let removals = app.staticTexts["ios-search-test-removals"].label
+        task456CloseGeneral(app)
+        for _ in 0..<3 { boardTap(app, "tab-focus"); boardTap(app, "tab-inbox") }
+        task97Open(app)
+        task456Published(app)
+        XCTAssertEqual(app.staticTexts["ios-search-test-removals"].label, removals)
+    }
+
     func testNativeSearchRouteUsesExistingQueueAndForcesView() throws {
         let app = try task456App("ROUTE", delivery: "more")
         app.launch(); defer { app.terminate() }

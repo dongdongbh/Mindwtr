@@ -1440,6 +1440,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var appIconBadgeStore: NativeAppIconBadge?
     private var searchAppLockReadPending = false
     private var searchAppLockWritePending = false
+    private var searchIndexKeptOnAppLockRereadLogged = false
+    private weak var appLockReadHost: CoreHost?
     var searchAvailable: Bool { trustedSearchSelection != nil }
     var searchConsentCanChange: Bool {
         generalPreferenceEnabled && searchConsentKnown && !searchConsentBusy && searchConsentPending == nil
@@ -2447,6 +2449,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var searchTestDeliverySent = false
     private var searchTestIdentifiers: [String: String] = [:]
     @Published private(set) var searchTestState = ""
+    @Published private(set) var searchTestRemovals = 0
     #endif
     private struct NotificationResponseOwner {
         let id: UUID
@@ -10257,7 +10260,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private func searchIndexEvent(_ outcome: String, count: Int) {
         searchPublicationError = outcome == "failed" ? label("settings.iosSearchFailed") : nil
         #if DEBUG && targetEnvironment(simulator)
-        if searchTestFake { searchTestState = outcome + ":" + String(count) }
+        if searchTestFake {
+            searchTestState = outcome + ":" + String(count)
+            if outcome == "removalQueued" { searchTestRemovals += 1 }
+        }
         #endif
         guard workspaceAdmissionsOpen, let observed = host else { return }
         let token = completedStartupToken
@@ -11538,7 +11544,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !settingsAreaCreatePresented, !settingsAreaEditActive,
               !somedayMovePending, !somedayMoveAwaitingRefresh, !somedayMoveUndoAwaitingRefresh,
               somedayMoveCreatedSectionID == nil else { return }
-        morePresented = false
+        if morePresented { morePresented = false }
         guard selectedSurface != surface else { return }
         projectTaskOrderPresented = false
         projectTaskOrderCurrent = false
@@ -16768,9 +16774,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private func readAppLock(justEnabled: Bool = false) async throws {
         let currentHost = host
-        searchAppLockReadPending = true
-
-        searchPolicyChanged(suspendNavigation: false)
+        let keepsSearchIndex = NativeSearchAppLockReread.keepsIndex(lockEnabledBefore: appLock.enabled,
+            readOnSameHost: currentHost != nil && appLockReadHost === currentHost, writing: justEnabled || searchAppLockWritePending)
+        if !keepsSearchIndex {
+            searchAppLockReadPending = true
+            searchPolicyChanged(suspendNavigation: false)
+        }
         defer { searchAppLockReadPending = false; searchPolicyChanged() }
         do {
             let options = try await query("appLockOptions", ["{}"])
@@ -16790,21 +16799,38 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                       let minutes = delay["value"] as? NSNumber, CFGetTypeID(minutes) != CFBooleanGetTypeID(),
                       [0, 1, 5, 15].contains(minutes.intValue), minutes.doubleValue == Double(minutes.intValue),
                       !delay.object("expected").isEmpty else { throw CocoaError(.coderReadCorrupt) }
-                appLockDelayRow = delay.object("row")
+                let delayRow = delay.object("row")
+                if !NativeValueEquality.same(appLockDelayRow, delayRow) { appLockDelayRow = delayRow }
                 appLockDelayExpected = delay.object("expected")
                 appLock.relockDelayMinutes = minutes.intValue
             }
-            appLockRow = options.object("row")
+            let row = options.object("row")
+            if !NativeValueEquality.same(appLockRow, row) { appLockRow = row }
             appLockExpected = options.object("expected")
             appLock.saved(value.boolValue, justEnabled: justEnabled)
-            appLockError = nil
-            appLockAwaitingRefresh = false
+            appLockReadHost = currentHost
+            if appLockError != nil { appLockError = nil }
+            if appLockAwaitingRefresh { appLockAwaitingRefresh = false }
+            if keepsSearchIndex && appLock.enabled == false { logSearchIndexKeptOnAppLockReread() }
         } catch {
             if host === currentHost {
                 appLock.readFailed()
                 appLockError = error.localizedDescription
             }
             throw error
+        }
+    }
+
+    private func logSearchIndexKeptOnAppLockReread() {
+        guard !searchIndexKeptOnAppLockRereadLogged, searchPolicyAdmitted, workspaceAdmissionsOpen, let observed = host else { return }
+        searchIndexKeptOnAppLockRereadLogged = true
+        let token = completedStartupToken
+        Task {
+            guard self.workspaceAdmissionsOpen, self.host === observed, self.completedStartupToken == token else { return }
+            _ = try? await observed.call("logLine", argumentsJSON: self.json([
+                "Native iOS system search kept on app lock re-read",
+                try self.json(["releaseCheck": "v1.3.9/ios-search-lock-reread", "outcome": "kept"]),
+            ]))
         }
     }
 
@@ -16906,7 +16932,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         _ = try await query("language", [uiLanguage, Locale.current.identifier])
         _ = try await query("iosSystemDateFormat", [Self.systemShortDateFormat()])
         if uiLanguage != currentLanguage || strings.isEmpty { try await readStrings() }
-        currentLanguage = uiLanguage
+        if currentLanguage != uiLanguage { currentLanguage = uiLanguage }
         if !writes.isEmpty {
             let key = devicePreferencePrefix + "mindwtr-language"
             if preferenceDefaults.object(forKey: key) as? String != uiLanguage { preferenceDefaults.set(uiLanguage, forKey: key) }
@@ -45829,7 +45855,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 } == true)
         }
         guard current() else { throw CancellationError() }
-        inboxCurrent = false
+        if inboxCurrent { inboxCurrent = false }
         do {
             var nextArea: CoreObject?, nextMore: CoreObject?
             if ownerID != nil {
@@ -46918,8 +46944,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             contextsGeneration += 1
             contextsCurrent = false
         }
-        area = try await query("areaFilter")
-        moreMenu = try await query("menuRead", ["more", "{}"])
+        let nextArea = try await query("areaFilter")
+        if !NativeValueEquality.same(area, nextArea) { area = nextArea }
+        let nextMore = try await query("menuRead", ["more", "{}"])
+        if !NativeValueEquality.same(moreMenu, nextMore) { moreMenu = nextMore }
         switch selectedSurface {
         case .inbox: try await readInbox()
         case .focus: await readFocus(ownsOperation: true)

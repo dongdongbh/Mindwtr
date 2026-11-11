@@ -1125,11 +1125,16 @@ final class AppLockController: ObservableObject {
     func saved(_ value: Bool, justEnabled: Bool = false) {
         let firstRead = enabled == nil
         let changed = enabled != value
-        enabled = value
+        if changed { enabled = value }
         if firstRead || changed || justEnabled { relockPolicy.reset() }
-        if !value { locked = false; errorKey = nil }
-        else if justEnabled && phase != .background && successfulAuthenticationGeneration == authenticationGeneration { locked = false; errorKey = nil }
+        if !value { clearLock() }
+        else if justEnabled && phase != .background && successfulAuthenticationGeneration == authenticationGeneration { clearLock() }
         else if firstRead || changed { lock() }
+    }
+
+    private func clearLock() {
+        if locked { locked = false }
+        if errorKey != nil { errorKey = nil }
     }
 
     func readFailed() {
