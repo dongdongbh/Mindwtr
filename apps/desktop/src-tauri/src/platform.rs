@@ -1611,7 +1611,10 @@ mod tests {
         let resolved =
             normalize_open_path(link.to_str().expect("path"), None, None).expect("resolve");
         open_local_attachment(&resolved, |target| {
-            assert_eq!(target, temp.path());
+            assert_eq!(
+                target,
+                fs::canonicalize(temp.path()).expect("canonical temp dir")
+            );
             Ok(())
         })
         .expect("reveal");

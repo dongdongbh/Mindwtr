@@ -68,14 +68,15 @@ class HostCryptoTest {
         for (case in cases) {
             val encrypted = b64(case.getString("encryptedB64"))
             val header = encrypted.copyOfRange(0, 54)
+            val aad = header + "mindwtr-sync:2\u0000document\u0000data.json".toByteArray(Charsets.UTF_8)
             val params = case.getJSONObject("params")
 
             val pass = Normalizer.normalize(case.getString("passphrase"), Normalizer.Form.NFC).toByteArray(Charsets.UTF_8)
             val key = HostCrypto.argon2id(pass, b64(case.getString("saltB64")), params.getInt("mKib"), params.getInt("t"), params.getInt("p"), 32)
             val plaintext = b64(case.getString("plaintextB64"))
-            val body = HostCrypto.aesGcmSeal(key, header.copyOfRange(34, 46), plaintext, header)
+            val body = HostCrypto.aesGcmSeal(key, header.copyOfRange(34, 46), plaintext, aad)
             assertArrayEquals(case.getString("name"), encrypted.copyOfRange(54, encrypted.size), body)
-            assertArrayEquals(case.getString("name"), plaintext, HostCrypto.aesGcmOpen(key, header.copyOfRange(34, 46), body, header))
+            assertArrayEquals(case.getString("name"), plaintext, HostCrypto.aesGcmOpen(key, header.copyOfRange(34, 46), body, aad))
         }
     }
 

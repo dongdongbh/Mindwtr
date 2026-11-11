@@ -2962,7 +2962,7 @@ describe('runSharedSyncCycle', () => {
         const installer = {} as never;
         const common = createMobileAttachmentCommon({
             fs: memory.fs, files, installer, crypto: {} as never,
-            encryption: { logSyncEncryptionEvent: async () => undefined },
+            encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: 'off' }) },
             installerMayBeMissing: () => false, timersPaused: () => true,
             uploads: { createUploadTask: () => null },
         });
@@ -3050,7 +3050,7 @@ describe('runSharedSyncCycle', () => {
         const installer = {} as never;
         const common = createMobileAttachmentCommon({
             fs: memory.fs, files, installer, crypto: {} as never,
-            encryption: { logSyncEncryptionEvent: async () => undefined },
+            encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: 'off' }) },
             installerMayBeMissing: () => false, timersPaused: () => true, uploads: { createUploadTask: () => null },
         });
         const fetcher = vi.fn(async (): Promise<Response> => { throw failure; });
@@ -3150,7 +3150,7 @@ describe('runSharedSyncCycle', () => {
             const installer = {} as never;
             const common = createMobileAttachmentCommon({
                 fs: memory.fs, files, installer, crypto: {} as never,
-                encryption: { logSyncEncryptionEvent: async () => undefined },
+                encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: 'off' }) },
                 installerMayBeMissing: () => false, timersPaused: () => true,
                 uploads: { createUploadTask: () => null },
             });
@@ -3239,7 +3239,7 @@ describe('runSharedSyncCycle', () => {
                 const installer = { installAttachmentFileGeneration: installGeneration } as never;
                 const common = createMobileAttachmentCommon({
                     fs: memory.fs, files, installer, crypto: {} as never,
-                    encryption: { logSyncEncryptionEvent: async () => undefined },
+                    encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: 'off' }) },
                     installerMayBeMissing: () => false, timersPaused: () => true,
                     uploads: { createUploadTask: () => null },
                 });
