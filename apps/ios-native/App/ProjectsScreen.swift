@@ -223,7 +223,7 @@ struct ProjectsScreen: View {
         return Button { model.selectProjectCreateArea(id) } label: {
             HStack(spacing: 6) {
                 if let color, !color.isEmpty {
-                    Circle().fill(Color(hex: color)).frame(width: 8, height: 8)
+                    Circle().fill(palette.einkSafe(Color(hex: color))).frame(width: 8, height: 8)
                         .overlay(Circle().stroke(palette.border, lineWidth: 1)).accessibilityHidden(true)
                 }
                 Text(label).rnFont(14, selected ? .semibold : .regular)
@@ -960,7 +960,6 @@ struct ProjectDetailScreen: View {
     @State private var cancelProjectConfirmPresented = false
     @State private var cancelProjectConfirmedID = ""
     @State private var cancelProjectConfirmedRevision = ""
-    @State private var projectDateDraft = Date()
     @State private var filePickerID: UUID?
     @State private var projectBulkDeleteConfirmPresented = false
 
@@ -1179,7 +1178,7 @@ struct ProjectDetailScreen: View {
                     }
                     if !model.projectTaskSortPresented { projectTaskSortErrors }
                     if model.projectDateField == nil || !model.projectCurrent {
-                        projectDateErrorView
+                        ProjectDateErrors(model: model, palette: palette)
                     }
             }
             .padding(.horizontal, 16).padding(.vertical, 8).background(palette.card)
@@ -1375,8 +1374,6 @@ struct ProjectDetailScreen: View {
         .onChange(of: model.projectRenameEditing) { renameFocused = $0 }
         .onChange(of: model.projectRenameInputEnabled) { if $0 { renameFocused = true } }
         .onChange(of: notesFocused) { if !$0 { Task { await model.flushProjectNotesEdit() } } }
-        .onChange(of: model.projectDatePicker.text("date")) { _ in updateProjectDateDraft() }
-        .onChange(of: model.projectDatePicker.text("instant")) { _ in updateProjectDateDraft() }
         .task(id: [model.projectHeader.text("id"), model.projectDetail.text("mutationRevision"),
                    model.projectCurrent ? "current" : "stale", detailsExpanded ? "expanded" : "collapsed"]) {
             if detailsExpanded && model.projectCurrent && !model.projectSelectionMode { await model.readProjectAttachments() }
@@ -1499,12 +1496,6 @@ struct ProjectDetailScreen: View {
                 .id(presentation.id)
                 .onDisappear { model.dismissProjectFileOpen(presentationID: presentation.id) }
             }
-        .sheet(isPresented: Binding(get: { model.projectDateField != nil },
-                                    set: { if !$0 && !model.appLock.concealed { model.cancelProjectDate() } })) {
-            projectDateSheet
-                .presentationDetents(model.retryNeeded ? [.large] : [.medium, .large])
-                .interactiveDismissDisabled(model.projectDatePending || model.retryNeeded || model.busy)
-        }
         .sheet(isPresented: Binding(get: {
             model.projectViewOptionsPresented || model.projectTaskSortPresented || model.projectFiltersPresented
         }, set: { if !$0 && !model.appLock.concealed {
@@ -1681,39 +1672,6 @@ struct ProjectDetailScreen: View {
             .background(palette.card, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border).allowsHitTesting(false))
             .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var projectDateErrorView: some View {
-        if let message = model.projectDateError {
-            Text(message).rnFont(13).foregroundStyle(palette.danger)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("project-date-error")
-            Button {
-                Task {
-                    if model.projectDatePending { await model.retry() }
-                    else { await model.retryProjectDateRead() }
-                }
-            } label: {
-                Text(model.label("common.retry"))
-                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).disabled(model.busy)
-            .accessibilityIdentifier("project-date-retry")
-        }
-        if let message = model.projectDateReadError {
-            Text(message).rnFont(13).foregroundStyle(palette.danger)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("project-date-read-error")
-            Button { Task { await model.retryProjectDateRead() } } label: {
-                Text(model.label("common.retry"))
-                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectDatePending)
-            .accessibilityIdentifier("project-date-read-retry")
-        }
     }
 
     private var projectTaskViewSheet: some View {
@@ -1906,72 +1864,6 @@ struct ProjectDetailScreen: View {
             .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectTaskSortPending)
             .accessibilityIdentifier("project-sort-read-retry")
         }
-    }
-
-    private var projectDateSheet: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                let field = model.projectDateField ?? "startDate"
-                let label = model.label(field == "reviewAt" ? "projects.reviewAt"
-                    : field == "startDate" ? "taskEdit.startDateLabel" : "taskEdit.dueDateLabel")
-                Text(label).rnFont(18, .semibold).foregroundStyle(palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                if !model.projectDatePicker.isEmpty {
-                    if field == "reviewAt" {
-                        DatePicker(label, selection: $projectDateDraft, displayedComponents: .date)
-                            .datePickerStyle(.wheel).labelsHidden().tint(palette.tint)
-                            .environment(\.timeZone, model.projectDateOpeningTimeZone ?? .current)
-                            .disabled(model.busy || model.projectDatePending || model.retryNeeded)
-                            .accessibilityLabel(label).accessibilityIdentifier("project-date-picker")
-                    } else {
-                        DatePicker(label, selection: $projectDateDraft, displayedComponents: .date)
-                            .datePickerStyle(.wheel).labelsHidden().tint(palette.tint)
-                            .disabled(model.busy || model.projectDatePending || model.retryNeeded)
-                            .accessibilityLabel(label).accessibilityIdentifier("project-date-picker")
-                    }
-                } else if model.projectDateReadError == nil {
-                    ProgressView().frame(maxWidth: .infinity, minHeight: 100)
-                }
-                projectDateErrorView
-                HStack(spacing: 12) {
-                    Button { model.cancelProjectDate() } label: {
-                        Text(model.label("common.cancel"))
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(model.projectDatePending || model.retryNeeded || model.busy)
-                    .accessibilityIdentifier("project-date-cancel")
-                    Button {
-                        if field == "reviewAt" {
-                            let selected = projectDateDraft
-                            Task { await model.finishProjectReviewDate(selected) }
-                        } else {
-                            let value = TaskDatePickerComponents.string(projectDateDraft, time: false)
-                            Task { await model.changeProjectDate(field, value: value) }
-                        }
-                    } label: {
-                        Text(model.label("common.done"))
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(!model.projectDateDoneEnabled)
-                    .accessibilityIdentifier("project-date-done")
-                }
-                .buttonStyle(.plain).rnFont(14, .semibold).foregroundStyle(palette.tint)
-            }
-            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(palette.card)
-        .accessibilityIdentifier("project-date-sheet")
-    }
-
-    private func updateProjectDateDraft() {
-        let picker = model.projectDatePicker
-        let date = model.projectDateField == "reviewAt"
-            ? TaskDatePickerComponents.instant(picker.text("instant"))
-            : TaskDatePickerComponents.date(picker)
-        if let date { projectDateDraft = date }
     }
 
     @ViewBuilder
@@ -2580,7 +2472,7 @@ private struct ProjectToSectionDialog: View {
             let selected = model.projectConvertDestinationID == id
             Button { model.selectProjectConvertDestination(id) } label: {
                 HStack(spacing: 10) {
-                    Circle().fill(row.text("color").isEmpty ? palette.secondary : Color(hex: row.text("color")))
+                    Circle().fill(row.text("color").isEmpty ? palette.secondary : palette.einkSafe(Color(hex: row.text("color"))))
                         .frame(width: 12, height: 12).accessibilityHidden(true)
                     Text(row.text("title")).rnFont(16, selected ? .semibold : .regular)
                         .foregroundStyle(selected ? palette.tint : palette.text)
@@ -2621,7 +2513,7 @@ private struct ProjectToSectionDialog: View {
             if !options.text("notesMessage").isEmpty { note(options.text("notesMessage"), id: "project-convert-notes") }
             note(destination.text("areaLine"), id: "project-convert-area")
             HStack(spacing: 8) {
-                Circle().fill(destination.text("color").isEmpty ? palette.secondary : Color(hex: destination.text("color")))
+                Circle().fill(destination.text("color").isEmpty ? palette.secondary : palette.einkSafe(Color(hex: destination.text("color"))))
                     .frame(width: 12, height: 12).overlay(Circle().stroke(palette.border, lineWidth: 1)).accessibilityHidden(true)
                 note(model.label("projects.convertDestinationColor"), id: "project-convert-destination-color")
             }
@@ -3157,6 +3049,7 @@ private struct ProjectDateMetadataRow: View {
     let value: String
     let hasValue: Bool
     let onResignNotes: () -> Void
+    @State private var draft: Date?
 
     var body: some View {
         let start = field == "startDate"
@@ -3197,8 +3090,107 @@ private struct ProjectDateMetadataRow: View {
                     .accessibilityIdentifier(prefix + "-clear")
                 }
             }
+            if model.projectDateField == field {
+                inlinePicker(label: label)
+                if model.projectCurrent { ProjectDateErrors(model: model, palette: palette) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: model.projectDateField) { _ in draft = nil }
+    }
+
+    private var openedDate: Date? {
+        field == "reviewAt" ? TaskDatePickerComponents.instant(model.projectDatePicker.text("instant"))
+            : TaskDatePickerComponents.date(model.projectDatePicker)
+    }
+
+    @ViewBuilder private func inlinePicker(label: String) -> some View {
+        if !model.projectDatePicker.isEmpty, let shown = draft ?? openedDate {
+            VStack(alignment: .leading, spacing: 6) {
+                compactPicker(label: label, shown: shown)
+                HStack(spacing: 12) {
+                    Button { model.cancelProjectDate() } label: {
+                        Text(model.label("common.cancel")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                    }
+                    .disabled(model.projectDatePending || model.retryNeeded || model.busy)
+                    .accessibilityIdentifier("project-date-cancel")
+                    Button { save(shown) } label: {
+                        Text(model.label("common.done")).frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
+                    }
+                    .disabled(!model.projectDateDoneEnabled)
+                    .accessibilityIdentifier("project-date-done")
+                }
+                .buttonStyle(.plain).rnFont(14, .semibold).foregroundStyle(palette.tint)
+            }
+        } else if model.projectDateReadError == nil {
+            ProgressView().frame(minHeight: 48)
+        }
+    }
+
+    @ViewBuilder private func compactPicker(label: String, shown: Date) -> some View {
+        let picker = DatePicker(label, selection: Binding(get: { shown }, set: { pick($0, shown: shown) }),
+                                displayedComponents: .date)
+            .datePickerStyle(.compact).labelsHidden().tint(palette.tint)
+            .disabled(model.busy || model.projectDatePending || model.retryNeeded)
+            .accessibilityLabel(label).accessibilityIdentifier("project-date-picker")
+        if field == "reviewAt" {
+            picker.environment(\.timeZone, model.projectDateOpeningTimeZone ?? .current)
+        } else {
+            picker
+        }
+    }
+
+    private func pick(_ date: Date, shown: Date) {
+        guard date != shown else { return }
+        draft = date
+        save(date)
+    }
+
+    private func save(_ date: Date) {
+        guard model.projectDateDoneEnabled else { return }
+        if field == "reviewAt" {
+            Task { await model.finishProjectReviewDate(date) }
+        } else {
+            let value = TaskDatePickerComponents.string(date, time: false)
+            Task { await model.changeProjectDate(field, value: value) }
+        }
+    }
+}
+
+private struct ProjectDateErrors: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        if let message = model.projectDateError {
+            Text(message).rnFont(13).foregroundStyle(palette.danger)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("project-date-error")
+            Button {
+                Task {
+                    if model.projectDatePending { await model.retry() }
+                    else { await model.retryProjectDateRead() }
+                }
+            } label: {
+                Text(model.label("common.retry"))
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(model.busy)
+            .accessibilityIdentifier("project-date-retry")
+        }
+        if let message = model.projectDateReadError {
+            Text(message).rnFont(13).foregroundStyle(palette.danger)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("project-date-read-error")
+            Button { Task { await model.retryProjectDateRead() } } label: {
+                Text(model.label("common.retry"))
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectDatePending)
+            .accessibilityIdentifier("project-date-read-retry")
+        }
     }
 }
 

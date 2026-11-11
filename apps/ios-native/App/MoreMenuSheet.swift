@@ -84,7 +84,7 @@ struct MoreMenuSheet: View {
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: item.text("icon")).font(.system(size: 18))
-                    .foregroundStyle(Color(hex: item.text("iconColor"))).opacity(supported ? 1 : 0.64).accessibilityHidden(true)
+                    .foregroundStyle(palette.einkSafe(Color(hex: item.text("iconColor")))).opacity(supported ? 1 : 0.64).accessibilityHidden(true)
                 Text(item.text("displayLabel")).rnFont(10, .bold).foregroundStyle(palette.secondary)
                     .multilineTextAlignment(.center).frame(minHeight: 16)
             }
@@ -111,7 +111,7 @@ struct MoreMenuSheet: View {
         } label: {
             VStack(spacing: 8) {
                 Image(systemName: item.text("icon")).font(.system(size: 24))
-                    .foregroundStyle(Color(hex: item.text("iconColor"))).frame(width: 44, height: 44)
+                    .foregroundStyle(palette.einkSafe(Color(hex: item.text("iconColor")))).frame(width: 44, height: 44)
                     .background(palette.filter, in: RoundedRectangle(cornerRadius: 8)).accessibilityHidden(true)
                 Text(item.text("displayLabel")).rnFont(12, .bold).foregroundStyle(palette.text).multilineTextAlignment(.center)
             }

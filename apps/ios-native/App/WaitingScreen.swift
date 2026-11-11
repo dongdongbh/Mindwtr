@@ -166,7 +166,7 @@ struct WaitingScreen: View {
                             swipe: { _ in Task { await model.activateDeferredProject(project.text("id")) } },
                             content: HStack(spacing: 10) {
                                 AppIcon(name: "folder", size: 18)
-                                    .foregroundStyle(project.text("color").isEmpty ? palette.secondary : Color(hex: project.text("color")))
+                                    .foregroundStyle(project.text("color").isEmpty ? palette.secondary : palette.einkSafe(Color(hex: project.text("color"))))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(project.text("title")).rnFont(14, .semibold).foregroundStyle(palette.text)
                                     if !project.text("areaName").isEmpty {

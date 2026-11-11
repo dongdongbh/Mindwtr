@@ -109,6 +109,18 @@ struct InboxScreen: View {
         AnyView(Group {
             if model.selectedSurface == .search {
                 SearchScreen(model: model, palette: palette)
+            } else if model.selectedSurface == .project && model.projectRowAreaOverList {
+                ZStack {
+                    VStack(spacing: 0) {
+                        header
+                        ProjectsScreen(model: model, palette: palette)
+                    }
+                    .disabled(true)
+                    ProjectDetailScreen(model: model, palette: palette).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+                }
+                .onChange(of: model.projectRowAreaReturnReady) { ready in
+                    if ready { Task { await model.returnFromProjectRowArea() } }
+                }
             } else if model.selectedSurface == .project {
                 ProjectDetailScreen(model: model, palette: palette)
             } else if model.selectedSurface == .contexts {
@@ -483,7 +495,7 @@ struct InboxScreen: View {
                 Button { Task { await model.selectArea(option.object("next")) } } label: {
                     HStack(spacing: 12) {
                         if !option.text("color").isEmpty {
-                            Circle().fill(Color(hex: option.text("color"))).frame(width: 8, height: 8)
+                            Circle().fill(palette.einkSafe(Color(hex: option.text("color")))).frame(width: 8, height: 8)
                                 .accessibilityHidden(true)
                         }
                         Text(option.text("label")).rnFont(15, .semibold).lineLimit(1).strikethrough(excluded)
@@ -1113,7 +1125,7 @@ struct InboxScreen: View {
                     AppIcon(name: "folder", size: 18).frame(width: 36, height: 36)
                         .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
                         .overlay(RoundedRectangle(cornerRadius: 10).stroke(
-                            project.text("color").isEmpty ? palette.border : Color(hex: project.text("color")), lineWidth: 1))
+                            project.text("color").isEmpty ? palette.border : palette.einkSafe(Color(hex: project.text("color"))), lineWidth: 1))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(project.text("title")).rnFont(16, .bold).lineLimit(1)
                         Text(project.text("statusLabel")).rnFont(12, .semibold).foregroundStyle(palette.secondary)
@@ -1154,13 +1166,14 @@ struct InboxScreen: View {
                 : model.selectedSurface == .review ? model.label("tab.review")
                 : model.selectedSurface == .calendar ? model.label("nav.calendar")
                 : model.selectedSurface == .board ? model.label("nav.board")
-                : model.selectedSurface == .projects ? model.label("projects.title") : model.inbox.text("title")) : "Mindwtr")
+                : model.selectedSurface == .projects || model.projectRowAreaOverList ? model.label("projects.title")
+                : model.inbox.text("title")) : "Mindwtr")
                 .rnFont(17, .bold).accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier(model.selectedSurface == .focus ? "focus-title"
                     : model.selectedSurface == .review ? "review-title"
                     : model.selectedSurface == .calendar ? "calendar-title"
                     : model.selectedSurface == .board ? "board-title"
-                    : model.selectedSurface == .projects ? "projects-title" : "inbox-title")
+                    : model.selectedSurface == .projects || model.projectRowAreaOverList ? "projects-title" : "inbox-title")
     }
 
     private var headerTools: some View {

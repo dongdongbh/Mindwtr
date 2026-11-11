@@ -1084,6 +1084,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     @Published private(set) var projectDateError: String?
     @Published private(set) var projectDateReadError: String?
     @Published private(set) var projectAreaPresented = false
+    @Published private(set) var projectRowAreaOpening = false
+    @Published private(set) var projectAreaReturnsToList = false
     @Published private(set) var projectAreaOptions: CoreObject = [:]
     @Published private(set) var projectAreaError: String?
     @Published private(set) var projectAreaReadError: String?
@@ -20116,9 +20118,25 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     func openProjectRowArea(_ row: CoreObject) async {
         let id = row.text("id")
         guard projectRowActionsEnabled, !id.isEmpty, row.text("status") != "archived" else { return }
+        projectRowAreaOpening = true
+        defer { projectRowAreaOpening = false }
         await openProject(row)
         guard selectedSurface == .project, projectHeader.text("id") == id, projectCurrent else { return }
         await openProjectArea()
+        if projectAreaPresented { projectAreaReturnsToList = true }
+        else { await closeProject() }
+    }
+
+    var projectRowAreaOverList: Bool { projectRowAreaOpening || projectAreaReturnsToList }
+    var projectRowAreaReturnReady: Bool {
+        projectAreaReturnsToList && selectedSurface == .project && !projectAreaPresented
+            && !areaManagerPresented && !busy && !retryNeeded
+    }
+
+    func returnFromProjectRowArea() async {
+        guard projectRowAreaReturnReady else { return }
+        await closeProject()
+        projectAreaReturnsToList = false
     }
 
     func openProjectRename() async {
@@ -35414,6 +35432,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private func presentProject(_ row: CoreObject, caller: Surface, ownedGuard: (() -> Bool)? = nil) async {
         guard ownedGuard?() != false else { return }
+        projectAreaReturnsToList = false
         projectTaskOrderPresented = false
         projectTaskOrderView = [:]
         projectTaskOrderError = nil
@@ -35570,6 +35589,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               !projectRenameEditing && !projectSectionsPresented && !projectAreaPresented
               && !projectTagsPresented && !projectAttachmentLinkPresented
               && !projectAttachmentEditOpening && !projectAttachmentWritePending else { return }
+        projectAreaReturnsToList = false
         projectFilterSession += 1
         projectFilterReadTask?.cancel()
         resetProjectAttachments()

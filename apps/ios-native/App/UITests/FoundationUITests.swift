@@ -14698,8 +14698,12 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["project-row-menu-up-" + alpha].exists)
         boardTap(app, "project-row-menu-area-" + alpha)
         boardEnabled(app.buttons["project-area-close"], timeout: 20)
+        let areaShot = XCTAttachment(screenshot: app.screenshot()); areaShot.name = "Project row Area sheet over the Projects list"
+        areaShot.lifetime = .keepAlways; add(areaShot)
         boardTap(app, "project-area-close")
-        boardEnabled(app.buttons["project-back"])
+        boardEnabled(app.buttons["projects-manage-areas"], timeout: 20)
+        boardEnabled(app.buttons["project-open-" + alpha])
+        XCTAssertFalse(app.buttons["project-back"].exists, "RN keeps the Projects list open under a row's Area picker")
         app.terminate()
     }
 
@@ -15336,6 +15340,37 @@ final class FoundationUITests: XCTestCase {
         projectDateRecovery(expectFailure: false)
     }
 
+    private func projectDateCalendarDays(_ app: XCUIApplication) -> XCUIElementQuery {
+        app.buttons.matching(NSPredicate(format: "label MATCHES %@ AND enabled == true", "^(Today, )?(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), [A-Z][a-z]+ [0-9]{1,2}$"))
+    }
+
+    private func openProjectDateCalendar(_ app: XCUIApplication) -> XCUIElementQuery {
+        let picker = app.datePickers["project-date-picker"]
+        boardEnabled(picker)
+        picker.tap()
+        let days = projectDateCalendarDays(app)
+        XCTAssertTrue(days.firstMatch.waitForExistence(timeout: 10), "The compact date opens RN's month calendar")
+        return days
+    }
+
+    private func projectDateSelectedDay(_ days: XCUIElementQuery) -> String {
+        let selected = days.matching(NSPredicate(format: "selected == true")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        return selected.label.split(separator: " ").last.map(String.init) ?? ""
+    }
+
+    private func pickProjectDateDay(_ days: XCUIElementQuery, _ day: String) {
+        let button = days.matching(NSPredicate(format: "label ENDSWITH %@", " " + day)).firstMatch
+        boardEnabled(button)
+        button.tap()
+    }
+
+    private func dismissProjectDateCalendar(_ app: XCUIApplication) {
+        let dismiss = app.otherElements.matching(identifier: "PopoverDismissRegion").firstMatch
+        if dismiss.exists { dismiss.tap() }
+        XCTAssertTrue(projectDateCalendarDays(app).firstMatch.waitForNonExistence(timeout: 10))
+    }
+
     private func projectDateRecovery(expectFailure: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "7f249d6d-f39a-435b-984a-9b7f2ff28a45"]
@@ -15354,42 +15389,35 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(open); open.tap()
         let picker = app.datePickers["project-date-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        let day = picker.pickerWheels.allElementsBoundByIndex.first {
-            guard let value = $0.value as? String, let number = Int(value) else { return false }
-            return (1...31).contains(number)
-        }
-        XCTAssertNotNil(day)
-        guard let day else { return }
-        let sheet = app.scrollViews["project-date-sheet"]
         func tap(_ id: String) {
             let button = app.buttons[id]
-            revealPagedElement(app, button, in: sheet)
+            revealPagedElement(app, button, in: app.scrollViews.firstMatch)
             boardEnabled(button)
             XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
             button.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: button.frame.width - 4, dy: 4)).tap()
         }
+        let days = openProjectDateCalendar(app)
         if expectFailure {
-            XCTAssertEqual(day.value as? String, "8")
-            day.adjust(toPickerWheelValue: "9")
-            let selected = picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }
-            tap("project-date-done")
+            XCTAssertEqual(projectDateSelectedDay(days), "8")
+            pickProjectDateDay(days, "9")
             let failure = app.staticTexts["project-date-error"]
             XCTAssertTrue(failure.waitForExistence(timeout: 15))
+            dismissProjectDateCalendar(app)
             for _ in 0..<2 {
                 XCTAssertFalse(app.buttons["project-date-cancel"].isEnabled)
                 XCTAssertFalse(app.buttons["project-date-done"].isEnabled)
                 XCTAssertFalse(picker.isEnabled)
-                XCTAssertEqual(picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }, selected)
                 tap("project-date-retry")
                 boardEnabled(app.buttons["project-date-retry"])
                 XCTAssertTrue(failure.exists)
             }
             let capture = XCTAttachment(screenshot: app.screenshot())
-            capture.name = "Project date failed save retains wheel draft"
+            capture.name = "Project date failed save retains compact draft"
             capture.lifetime = .keepAlways; add(capture)
         } else {
-            XCTAssertEqual(day.value as? String, "9")
+            XCTAssertEqual(projectDateSelectedDay(days), "9")
+            dismissProjectDateCalendar(app)
             XCTAssertFalse(app.staticTexts["project-date-error"].exists)
             tap("project-date-cancel")
             boardTap(app, "project-back")
@@ -16522,9 +16550,7 @@ final class FoundationUITests: XCTestCase {
         let notes = app.textViews["project-notes-input"]
         func tap(_ id: String) {
             let button = app.buttons[id]
-            let scroll = app.scrollViews["project-date-sheet"].exists
-                ? app.scrollViews["project-date-sheet"] : app.scrollViews.firstMatch
-            revealPagedElement(app, button, in: scroll)
+            revealPagedElement(app, button, in: app.scrollViews.firstMatch)
             boardEnabled(button)
             XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, id.hasPrefix("project-date-") ? 44 : 48)
             button.coordinate(withNormalizedOffset: .zero)
@@ -16541,15 +16567,12 @@ final class FoundationUITests: XCTestCase {
         }
         func day(_ expected: String, change: String? = nil) {
             XCTAssertTrue(picker.waitForExistence(timeout: 10))
-            let wheel = picker.pickerWheels.allElementsBoundByIndex.first {
-                guard let value = $0.value as? String, let number = Int(value) else { return false }
-                return (1...31).contains(number)
-            }
-            XCTAssertNotNil(wheel); XCTAssertEqual(wheel?.value as? String, expected)
-            if let change { wheel?.adjust(toPickerWheelValue: change) }
+            let days = openProjectDateCalendar(app)
+            XCTAssertEqual(projectDateSelectedDay(days), expected)
+            if let change { pickProjectDateDay(days, change) } else { dismissProjectDateCalendar(app) }
         }
-        func close(_ action: String) {
-            tap(action)
+        func close(_ action: String? = nil) {
+            if let action { tap(action) }
             let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: picker)
             XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
         }
@@ -16558,7 +16581,7 @@ final class FoundationUITests: XCTestCase {
         draft.tap(); draft.typeText("Retained review date draft")
         open("776dd5c5-1926-4da1-96ff-5d5096971050")
         tap("project-review-date-open"); day("28"); close("project-date-done")
-        tap("project-review-date-open"); day("28", change: "29"); close("project-date-cancel")
+        tap("project-review-date-open"); day("28"); close("project-date-cancel")
         boardTap(app, "project-notes-toggle"); boardEnabled(notes)
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         notes.tap()
@@ -16570,7 +16593,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(draft.value as? String, "Retained review date draft")
         open("61181128-5b30-4622-95d0-601658a9d216")
         tap("project-review-date-open"); day("7"); close("project-date-done")
-        tap("project-review-date-open"); day("7", change: "8"); close("project-date-done")
+        tap("project-review-date-open"); day("7", change: "8"); close()
         tap("project-review-date-open"); day("8"); close("project-date-done")
         boardTap(app, "project-back")
         open("7c299e65-4a02-410d-8e85-c01d0655ebda")
@@ -16622,37 +16645,32 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(open); open.tap()
         let picker = app.datePickers["project-date-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        let day = picker.pickerWheels.allElementsBoundByIndex.first {
-            guard let value = $0.value as? String, let number = Int(value) else { return false }
-            return (1...31).contains(number)
-        }
-        XCTAssertNotNil(day); guard let day else { return }
         func tap(_ id: String) {
             let button = app.buttons[id]
-            revealPagedElement(app, button, in: app.scrollViews["project-date-sheet"], outerEdge: true)
+            revealPagedElement(app, button, in: app.scrollViews.firstMatch, outerEdge: true)
             boardEnabled(button); XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, id.hasPrefix("project-date-") ? 44 : 48)
             button.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: button.frame.width - 4, dy: 4)).tap()
         }
+        let days = openProjectDateCalendar(app)
         if expectFailure {
-            XCTAssertEqual(day.value as? String, "7"); day.adjust(toPickerWheelValue: "8")
-            let selected = picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }
-            tap("project-date-done")
+            XCTAssertEqual(projectDateSelectedDay(days), "7"); pickProjectDateDay(days, "8")
             let failure = app.staticTexts["project-date-error"]
             XCTAssertTrue(failure.waitForExistence(timeout: 15))
+            dismissProjectDateCalendar(app)
             for _ in 0..<2 {
                 XCTAssertFalse(app.buttons["project-date-cancel"].isEnabled)
                 XCTAssertFalse(app.buttons["project-date-done"].isEnabled)
                 XCTAssertFalse(picker.isEnabled)
-                XCTAssertEqual(picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }, selected)
                 tap("project-date-retry"); boardEnabled(app.buttons["project-date-retry"])
                 XCTAssertTrue(failure.exists)
             }
             let capture = XCTAttachment(screenshot: app.screenshot())
-            capture.name = "Review Date failed save retains wheel"
+            capture.name = "Review Date failed save retains compact draft"
             capture.lifetime = .keepAlways; add(capture)
         } else {
-            XCTAssertEqual(day.value as? String, "8")
+            XCTAssertEqual(projectDateSelectedDay(days), "8")
+            dismissProjectDateCalendar(app)
             XCTAssertFalse(app.staticTexts["project-date-error"].exists)
             tap("project-date-cancel")
         }
@@ -16691,21 +16709,18 @@ final class FoundationUITests: XCTestCase {
             row.tap(); boardEnabled(app.buttons["project-details-toggle"])
             tap("project-details-toggle")
         }
-        func sheetTap(_ id: String) {
-            let button = app.buttons[id]
-            boardEnabled(button)
-            XCTAssertGreaterThanOrEqual(button.frame.height + 0.000001, 44)
-            button.tap()
+        func shownDay() -> String {
+            XCTAssertTrue(picker.waitForExistence(timeout: 10))
+            let days = openProjectDateCalendar(app)
+            let day = projectDateSelectedDay(days)
+            dismissProjectDateCalendar(app)
+            return day
         }
         func changeDay() {
             XCTAssertTrue(picker.waitForExistence(timeout: 10))
-            let wheel = picker.pickerWheels.allElementsBoundByIndex.first {
-                guard let value = $0.value as? String, let day = Int(value) else { return false }
-                return (1...31).contains(day)
-            }
-            XCTAssertNotNil(wheel)
-            guard let wheel, let day = Int(wheel.value as? String ?? "") else { return }
-            wheel.adjust(toPickerWheelValue: String(day < 27 ? day + 1 : day - 1))
+            let days = openProjectDateCalendar(app)
+            guard let day = Int(projectDateSelectedDay(days)) else { XCTFail("No selected day"); return }
+            pickProjectDateDay(days, String(day < 27 ? day + 1 : day - 1))
         }
         func closed() {
             let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: picker)
@@ -16716,22 +16731,21 @@ final class FoundationUITests: XCTestCase {
         draft.tap(); draft.typeText("Retained date Project draft")
         open()
 
-        tap("project-start-date-open"); changeDay(); sheetTap("project-date-cancel"); closed()
+        tap("project-start-date-open"); tap("project-date-cancel"); closed()
         tap("project-notes-toggle"); boardEnabled(notes)
         replaceProjectNotesText(notes, with: "Notes before date opens\n")
         tap("project-start-date-open")
-        changeDay(); sheetTap("project-date-done"); closed()
+        changeDay(); closed()
         boardEnabled(app.buttons["project-start-date-open"])
         XCTAssertTrue(app.buttons["project-start-date-open"].isHittable,
                       "Saving a date must retain the scrolled Project Details position")
         tap("project-start-date-open")
-        let selected = picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }
-        sheetTap("project-date-done"); closed()
-        tap("project-start-date-open"); changeDay(); sheetTap("project-date-cancel"); closed()
+        let selected = shownDay()
+        tap("project-date-done"); closed()
         tap("project-start-date-open")
-        XCTAssertEqual(picker.pickerWheels.allElementsBoundByIndex.map { $0.value as? String ?? "" }, selected)
-        sheetTap("project-date-cancel"); closed()
-        tap("project-due-date-open"); sheetTap("project-date-done"); closed()
+        XCTAssertEqual(shownDay(), selected)
+        tap("project-date-cancel"); closed()
+        tap("project-due-date-open"); tap("project-date-done"); closed()
         revealPagedElement(app, notes, in: app.scrollViews.firstMatch)
         replaceProjectNotesText(notes, with: "Notes before date clears\n")
         tap("project-start-date-clear")
