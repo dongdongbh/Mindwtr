@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ReviewScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     private var view: CoreObject { model.reviewOverview }
@@ -142,7 +142,7 @@ struct ReviewScreen: View {
 }
 
 struct ReviewStartPicker: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -176,7 +176,7 @@ struct ReviewStartPicker: View {
 }
 
 struct ReviewGuideScreen: View {
-    @ObservedObject var model: CoreModel
+    @Bindable var model: CoreModel
     let palette: AppPalette
     private var view: CoreObject { model.reviewGuide }
     private var content: CoreObject { view.object("content") }
@@ -717,7 +717,7 @@ private struct ReviewAction: View {
 }
 
 private struct ReviewFailure: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     var body: some View {
         if let error = model.reviewError {

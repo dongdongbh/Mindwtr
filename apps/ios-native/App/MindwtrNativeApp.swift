@@ -940,7 +940,7 @@ enum NativeAppModel {
 
 #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
 private struct NativeNavigationCaptureFixtureView: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @ObservedObject var session: NativeSandboxSession
     var body: some View {
         VStack(spacing: 2) {
@@ -964,7 +964,7 @@ private struct NativeNavigationCaptureFixtureView: View {
     }
 }
 struct NativeNavigationReplayFixtureView: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @ObservedObject var session: NativeSandboxSession
     var task = false
     private var prefix: String { task ? "navigation-replay-task-" : "navigation-replay-" }
@@ -989,7 +989,7 @@ struct NativeNavigationReplayFixtureView: View {
     }
 }
 private struct NativeReminderHandoverFixtureView: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @ObservedObject var session: NativeSandboxSession
     @State private var controlsVisible = true
     private let commands = ["logging", "restore-logging", "logging-on", "logging-off", "export", "wrapper", "persistent", "second", "held-dismiss", "release-persistent", "release-failure", "duplicate", "release-wrapper", "entry", "release-entry", "receipt", "release-receipt",
@@ -1066,7 +1066,7 @@ private struct NativeShareMailboxExportApp: App {
 
 struct MindwtrNativeApp: App {
     @UIApplicationDelegateAdaptor(NativeNotificationDelegate.self) private var notificationDelegate
-    @StateObject private var model = NativeAppModel.shared
+    @State private var model = NativeAppModel.shared
     @StateObject private var workspace = NativeAppModel.session
 
     var body: some Scene {
@@ -1261,12 +1261,12 @@ private struct AppLockRoot: View {
         let active: Bool
         let concealed: Bool
     }
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @ObservedObject var lock: AppLockController
     @ObservedObject var workspace: NativeSandboxSession
     @State private var confirmingCorruptDraftDiscard = false
     @State private var observedApplicationActive: Bool?
-    @StateObject private var startupPrompts = NativeStartupPrompts()
+    @State private var startupPrompts = NativeStartupPrompts()
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
@@ -1697,7 +1697,7 @@ private struct AppLockRoot: View {
 }
 
 private struct TaskRecoveryGate: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var confirmingDiscard = false
     private var retainedCleanup: Bool {
@@ -1791,7 +1791,7 @@ private struct TaskRecoveryGate: View {
 }
 
 struct TaskAttachmentRecoveryStatus: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     private var message: String? {

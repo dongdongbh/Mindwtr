@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ProcessInboxSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focusedField: String?

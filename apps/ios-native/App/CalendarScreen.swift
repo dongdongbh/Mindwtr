@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CalendarScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var allDayExpanded = false
@@ -700,7 +700,7 @@ private struct CalendarWeekdayWidths: PreferenceKey {
 }
 
 private struct CalendarEntryList<LeadingContent: View>: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let entries: [CoreObject]
     let empty: String
@@ -788,7 +788,7 @@ private extension CalendarEntryList where LeadingContent == EmptyView {
 
 private struct CalendarCandidate: View {
     let entry: CoreObject
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     var body: some View {
         Button { Task { await model.openCalendarComposer(entry) } } label: {
@@ -807,7 +807,7 @@ private struct CalendarCandidate: View {
 
 private struct CalendarItemButton: View {
     let item: CoreObject
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     var compact = false
     var timed = false
@@ -891,7 +891,7 @@ private struct CalendarAction: View {
 }
 
 struct CalendarItemSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     private var sheetTitle: some View {
         let title = Text(model.calendarItemSheet.text("title")).rnFont(19, .bold).accessibilityAddTraits(.isHeader)
@@ -945,7 +945,7 @@ struct CalendarItemSheet: View {
 }
 
 struct CalendarComposerSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private enum TimeField: Hashable { case start, end }

@@ -3,7 +3,7 @@ import UIKit
 
 
 struct FocusControlsPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var expanded: Set<String> = []
     @FocusState private var focusedField: String?
@@ -360,7 +360,7 @@ struct FocusControlsPanel: View {
 
 
 struct FocusSavedFilterDialog: View {
-    @ObservedObject var model: CoreModel
+    @Bindable var model: CoreModel
     let palette: AppPalette
     @FocusState private var nameFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -452,7 +452,7 @@ struct FocusSavedFilterDialog: View {
 
 
 struct PomodoroTimerPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     private var panel: CoreObject { model.pomodoroPanel }
     private var text: CoreObject { panel.object("text") }

@@ -2,18 +2,19 @@ import Foundation
 import SwiftUI
 
 @MainActor
-final class NativeStartupPrompts: ObservableObject {
-    @Published private(set) var prompt: CoreObject?
-    @Published private(set) var seeding = false
-    @Published private(set) var seedError: String?
-    @Published private(set) var toast: String?
+@Observable
+final class NativeStartupPrompts {
+    private(set) var prompt: CoreObject?
+    private(set) var seeding = false
+    private(set) var seedError: String?
+    private(set) var toast: String?
     private var askedStartup: UUID?
-    @Published private var heldPrompt: (startup: UUID?, prompt: CoreObject, preview: Bool)?
+    private var heldPrompt: (startup: UUID?, prompt: CoreObject, preview: Bool)?
     var holding: Bool { heldPrompt != nil }
     private var previewing = false
     private var opening = UUID()
     private var recordedShowing: UUID?
-    private var toastTask: Task<Void, Never>?
+    @ObservationIgnored private var toastTask: Task<Void, Never>?
 
     static let enabled: Bool = {
         let arguments = NativeAppLaunch.arguments
@@ -160,8 +161,8 @@ final class NativeStartupPrompts: ObservableObject {
 }
 
 struct NativeStartupPromptOverlay: View {
-    @ObservedObject var model: CoreModel
-    @ObservedObject var prompts: NativeStartupPrompts
+    let model: CoreModel
+    let prompts: NativeStartupPrompts
     let palette: AppPalette
     @Environment(\.openURL) private var openURL
 
@@ -190,8 +191,8 @@ struct NativeStartupPromptOverlay: View {
 }
 
 private struct NativePromptWindow: View {
-    @ObservedObject var model: CoreModel
-    @ObservedObject var prompts: NativeStartupPrompts
+    let model: CoreModel
+    let prompts: NativeStartupPrompts
     let open: CoreObject
     let palette: AppPalette
     let openLink: (URL) -> Void
@@ -284,8 +285,8 @@ private struct NativePromptWindow: View {
 }
 
 private struct NativeWelcomeSheet: View {
-    @ObservedObject var model: CoreModel
-    @ObservedObject var prompts: NativeStartupPrompts
+    let model: CoreModel
+    let prompts: NativeStartupPrompts
     let open: CoreObject
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var typeSize

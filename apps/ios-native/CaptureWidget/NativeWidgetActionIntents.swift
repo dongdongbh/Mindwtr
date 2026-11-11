@@ -12,7 +12,6 @@ private enum NativeWidgetTaskIntentError: LocalizedError {
     }
 }
 
-@available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct NativeCompleteWidgetTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Complete Mindwtr Task"
     static var description = IntentDescription("Queues a Mindwtr task for completion.")
@@ -45,7 +44,6 @@ struct NativeCompleteWidgetTaskIntent: AppIntent {
     }
 }
 
-@available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct NativeUndoWidgetTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Undo Mindwtr Task Completion"
     static var description = IntentDescription("Cancels a queued Mindwtr task completion.")

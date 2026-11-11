@@ -2,7 +2,6 @@ import AppIntents
 import MindwtrNativeCore
 import UIKit
 
-@available(iOS 16.0, *)
 struct MindwtrOpenQuickCaptureIntent: AppIntent {
     static var title: LocalizedStringResource = "Add Task"
     static var description = IntentDescription("Opens Mindwtr quick capture.")
@@ -22,7 +21,6 @@ struct MindwtrOpenQuickCaptureIntent: AppIntent {
     }
 }
 
-@available(iOS 17.0, *)
 struct MindwtrOpenWidgetTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Open Task"
     static var description = IntentDescription("Opens a Mindwtr task.")
@@ -52,7 +50,6 @@ struct MindwtrOpenWidgetTaskIntent: AppIntent {
     }
 }
 
-@available(iOS 16.0, *)
 struct MindwtrNativeCaptureShortcuts: AppShortcutsProvider {
     static var shortcutTileColor: ShortcutTileColor { .blue }
 
@@ -71,7 +68,7 @@ struct MindwtrNativeCaptureShortcuts: AppShortcutsProvider {
 import SwiftUI
 
 struct NativeQuickCaptureIntentFixtureView: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     var body: some View {
         VStack(spacing: 2) {
             Text(model.quickCaptureIntentFixtureState)

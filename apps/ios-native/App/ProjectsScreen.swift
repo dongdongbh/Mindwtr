@@ -11,7 +11,7 @@ private struct ProjectDetailDisplayItem: Identifiable {
 }
 
 struct ProjectsScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var titleFocused: Bool
     @Environment(\.layoutDirection) private var layoutDirection
@@ -434,7 +434,7 @@ struct ProjectsScreen: View {
 }
 
 private struct AreaManagerSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var nameFocused: Bool
     @FocusState private var renameFocused: Bool
@@ -869,7 +869,7 @@ private struct AreaManagerSheet: View {
 }
 
 struct ProjectFileAvailabilityRecoveryPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -906,7 +906,7 @@ struct ProjectFileAvailabilityRecoveryPanel: View {
 }
 
 struct ProjectFileAddRecoveryPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -944,7 +944,7 @@ struct ProjectFileAddRecoveryPanel: View {
 
 struct ProjectDetailScreen: View {
     @Environment(\.scenePhase) private var scenePhase
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var renameFocused: Bool
     @FocusState private var notesFocused: Bool
@@ -2407,7 +2407,7 @@ struct ProjectDetailScreen: View {
 
 private struct ProjectToSectionDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var titleFocused: Bool
     private var options: CoreObject { model.projectConvertOptions }
@@ -2574,7 +2574,7 @@ private struct ProjectToSectionDialog: View {
 }
 
 private struct ProjectNotesPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let notesFocus: FocusState<Bool>.Binding
     @Binding var discardNotesConfirm: Bool
@@ -2681,7 +2681,7 @@ private struct ProjectNotesPanel: View {
 }
 
 private struct ProjectNotesEditor: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let notesFocus: FocusState<Bool>.Binding
 
@@ -2720,7 +2720,7 @@ private struct ProjectNotesEditor: View {
 }
 
 private struct ProjectNotesPreview: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -2780,7 +2780,7 @@ private struct ProjectNotesPreview: View {
 }
 
 private struct ProjectAttachmentLinkSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -2870,7 +2870,7 @@ private struct ProjectAttachmentLinkSheet: View {
 
 
 private struct ProjectStatusMetadata: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let metadata: CoreObject
     let onInteraction: () -> Void
@@ -2965,7 +2965,7 @@ private struct ProjectStatusMetadata: View {
 }
 
 private struct ProjectStatusReadError: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     var body: some View {
         if let message = model.projectStatusReadError {
@@ -2986,7 +2986,7 @@ private struct ProjectStatusReadError: View {
 }
 
 private struct ProjectSectionsMetadata: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let metadata: CoreObject
     let onOpen: () -> Void
@@ -3020,7 +3020,7 @@ private struct ProjectSectionsMetadata: View {
 
 
 private struct ProjectDatesMetadata: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let metadata: CoreObject
     let onResignNotes: () -> Void
@@ -3043,7 +3043,7 @@ private struct ProjectDatesMetadata: View {
 }
 
 private struct ProjectDateMetadataRow: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let field: String
     let value: String
@@ -3158,7 +3158,7 @@ private struct ProjectDateMetadataRow: View {
 }
 
 private struct ProjectDateErrors: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -3196,7 +3196,7 @@ private struct ProjectDateErrors: View {
 
 
 private struct ProjectTagsMetadata: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let metadata: CoreObject
     let onOpen: () -> Void
@@ -3228,7 +3228,7 @@ private struct ProjectTagsMetadata: View {
 }
 
 private struct ProjectTagsSelectionSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -3327,7 +3327,7 @@ private struct ProjectTagsSelectionSheet: View {
 }
 
 private struct ProjectTagsAddForm: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var nameFocused: Bool
 
@@ -3384,7 +3384,7 @@ private struct ProjectTagsAddForm: View {
 
 
 private struct ProjectAreaMetadata: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let metadata: CoreObject
     let onOpen: () -> Void
@@ -3424,7 +3424,7 @@ private struct ProjectAreaMetadata: View {
 }
 
 private struct ProjectAreaSelectionSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -3583,7 +3583,7 @@ private struct ProjectAreaSelectionSheet: View {
 }
 
 private struct ProjectAreaCreateForm: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var nameFocused: Bool
 
@@ -3686,7 +3686,7 @@ private struct ProjectAreaCreateForm: View {
 
 
 private struct ProjectTaskOrderTable: UIViewRepresentable {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -3789,7 +3789,7 @@ private struct ProjectTaskOrderTable: UIViewRepresentable {
 }
 
 private struct ProjectBulkTagSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var inputFocused: Bool
     private var prefix: String { model.projectBulkComposerRemoving ? "project-bulk-remove-tag" : "project-bulk-tag" }

@@ -68,8 +68,7 @@ final class NativeCalendarAuthorization: @unchecked Sendable {
                     else { continuation.resume() }
                 }
             }
-            if #available(iOS 17.0, *) { store.requestFullAccessToEvents(completion: completion) }
-            else { store.requestAccess(to: .event, completion: completion) }
+            store.requestFullAccessToEvents(completion: completion)
         }
         #else
         throw HostFailure("Calendar authorization is unavailable")

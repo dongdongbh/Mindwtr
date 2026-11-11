@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WaitingScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     private var showsList: Bool { model.waitingCurrent || (model.busy && !model.waiting.isEmpty) }
@@ -213,7 +213,7 @@ struct WaitingScreen: View {
 }
 
 struct StatusListSelectButton: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let row: CoreObject
     let palette: AppPalette
     let idPrefix: String
@@ -232,7 +232,7 @@ struct StatusListSelectButton: View {
 }
 
 struct StatusListBulkBar: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let idPrefix: String
     @State private var deletePresented = false
@@ -335,7 +335,7 @@ struct StatusListBulkBar: View {
 }
 
 struct StatusListTagSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let idPrefix: String
     @FocusState private var inputFocused: Bool

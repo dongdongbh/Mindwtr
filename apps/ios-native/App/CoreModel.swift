@@ -257,10 +257,11 @@ private enum AIReadmittedSettingWrite: Equatable, Sendable {
 }
 
 @MainActor
-final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
+@Observable
+final class CoreModel: NativeQuickCaptureIntentTarget {
     enum Surface: Equatable { case inbox, focus, review, calendar, board, search, projects, project, waiting, someday, reference, history, trash, contexts, savedSearch, settings }
 
-    @Published private(set) var selectedSurface: Surface = .inbox {
+    private(set) var selectedSurface: Surface = .inbox {
         didSet {
             if selectedSurface != .inbox { foregroundSyncIntent = nil }
             if oldValue != selectedSurface {
@@ -314,23 +315,23 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
         }
     }
-    @Published private(set) var inbox: CoreObject = [:] {
+    private(set) var inbox: CoreObject = [:] {
         didSet { inboxItemIndexCache = nil; navigationReplayPublicationChanged("inbox") }
     }
-    private var inboxItemIndexCache: [[String]: Int]?
-    @Published private(set) var inboxCurrent = false
-    @Published private(set) var inboxGroupPresented = false
-    @Published private(set) var inboxReadError: String?
+    @ObservationIgnored private var inboxItemIndexCache: [[String]: Int]?
+    private(set) var inboxCurrent = false
+    private(set) var inboxGroupPresented = false
+    private(set) var inboxReadError: String?
     private var inboxParams: CoreObject = ["groupBy": "none", "collapsedGroupIds": [String](), "filters": CoreObject()]
-    @Published private(set) var inboxFiltersPresented = false
-    @Published private(set) var inboxFilterPresentation = UUID()
-    @Published private(set) var inboxSearchText = ""
-    @Published private(set) var inboxLocationText = ""
-    @Published private(set) var inboxFilterPickerName = ""
-    @Published private(set) var inboxFilterPickerQuery = ""
-    @Published private(set) var inboxFilterPicker: CoreObject = [:]
-    @Published private(set) var inboxFilterPickerCurrent = false
-    @Published private(set) var inboxFilterPickerError: String?
+    private(set) var inboxFiltersPresented = false
+    private(set) var inboxFilterPresentation = UUID()
+    private(set) var inboxSearchText = ""
+    private(set) var inboxLocationText = ""
+    private(set) var inboxFilterPickerName = ""
+    private(set) var inboxFilterPickerQuery = ""
+    private(set) var inboxFilterPicker: CoreObject = [:]
+    private(set) var inboxFilterPickerCurrent = false
+    private(set) var inboxFilterPickerError: String?
     private var inboxFilterSequence: UInt64 = 0
     private var inboxFilterTextEdits: [String: (sequence: UInt64, value: String)] = [:]
     private struct InboxFilterIntent {
@@ -344,18 +345,18 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var inboxFilterNeedsRead = false
     private var inboxFilterReadTask: Task<Void, Never>?
     private var inboxFilterReadID: UUID?
-    private var inboxFilterPickerGeneration: UInt64 = 0
+    @ObservationIgnored private var inboxFilterPickerGeneration: UInt64 = 0
     private var inboxFilterPickerDepth = 100
     private var inboxFilterPickerNeedsRead = false
     private var inboxGeneration = 0
-    @Published private(set) var inboxSelectionMode = false
-    @Published private(set) var inboxSelectedIDs: [String] = [] {
+    private(set) var inboxSelectionMode = false
+    private(set) var inboxSelectedIDs: [String] = [] {
         didSet { inboxSelectedIDBytes = Set(inboxSelectedIDs.map { Data($0.utf8) }) }
     }
     private var inboxSelectedIDBytes: Set<Data> = []
 
     func inboxTaskSelected(_ id: String) -> Bool { inboxSelectedIDBytes.contains(Data(id.utf8)) }
-    @Published private(set) var inboxBulk: CoreObject = [:]
+    private(set) var inboxBulk: CoreObject = [:]
     private var inboxSelectedRevisions: CoreObject = [:]
     private var inboxAnchorID: String?
     private var inboxRangeSelectMode = false
@@ -375,17 +376,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var inboxBulkUndoOwner: (host: CoreHost, request: String)?
     private var inboxTasksMoveOwner: (host: CoreHost, request: String)?
     private var inboxTasksRemoveTagOwner: (host: CoreHost, request: String)?
-    @Published private(set) var inboxBulkRemovePresented = false
-    @Published private(set) var inboxBulkRemoveOptions: CoreObject = [:]
-    @Published private(set) var inboxBulkRemoveQuery = ""
-    @Published private(set) var inboxBulkRemovePicks: [String] = []
-    @Published private(set) var inboxBulkRemoveItems: [CoreObject] = []
-    @Published private(set) var inboxBulkRemoveTotal = 0
-    @Published private(set) var inboxBulkRemoveCurrent = false
-    @Published private(set) var inboxBulkRemoveReading = false
-    @Published private(set) var inboxBulkRemoveReadError: String?
+    private(set) var inboxBulkRemovePresented = false
+    private(set) var inboxBulkRemoveOptions: CoreObject = [:]
+    private(set) var inboxBulkRemoveQuery = ""
+    private(set) var inboxBulkRemovePicks: [String] = []
+    private(set) var inboxBulkRemoveItems: [CoreObject] = []
+    private(set) var inboxBulkRemoveTotal = 0
+    private(set) var inboxBulkRemoveCurrent = false
+    private(set) var inboxBulkRemoveReading = false
+    private(set) var inboxBulkRemoveReadError: String?
     private var inboxBulkRemoveTask: Task<Void, Never>?
-    private var inboxBulkRemoveGeneration = 0
+    @ObservationIgnored private var inboxBulkRemoveGeneration = 0
     private var inboxBulkRemoveContext: InboxBulkConfirmation?
     private var inboxBulkRemoveIDs: [String] = []
     private var inboxBulkRemoveRevisions: CoreObject = [:]
@@ -393,19 +394,19 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var inboxBulkRemoveRevision = ""
     private var inboxTasksAddTagOwner: (host: CoreHost, request: String)?
 
-    @Published private(set) var inboxBulkOrganizePresented = false
-    @Published private(set) var inboxBulkOrganizeView: CoreObject = [:]
-    @Published private(set) var inboxBulkOrganizeInputs: [String: String] = [:]
-    @Published private(set) var inboxBulkOrganizeCurrent = false
-    @Published private(set) var inboxBulkOrganizeReading = false
-    @Published private(set) var inboxBulkOrganizeReadError: String?
-    @Published private(set) var inboxBulkOrganizePickerKind: String?
-    @Published private(set) var inboxBulkOrganizePickerQuery = ""
-    @Published private(set) var inboxBulkOrganizePicker: CoreObject = [:]
-    @Published private(set) var inboxBulkOrganizePickerItems: [CoreObject] = []
-    @Published private(set) var inboxBulkOrganizePickerReading = false
-    @Published private(set) var inboxBulkOrganizePickerCurrent = false
-    @Published private(set) var inboxBulkOrganizePickerError: String?
+    private(set) var inboxBulkOrganizePresented = false
+    private(set) var inboxBulkOrganizeView: CoreObject = [:]
+    private(set) var inboxBulkOrganizeInputs: [String: String] = [:]
+    private(set) var inboxBulkOrganizeCurrent = false
+    private(set) var inboxBulkOrganizeReading = false
+    private(set) var inboxBulkOrganizeReadError: String?
+    private(set) var inboxBulkOrganizePickerKind: String?
+    private(set) var inboxBulkOrganizePickerQuery = ""
+    private(set) var inboxBulkOrganizePicker: CoreObject = [:]
+    private(set) var inboxBulkOrganizePickerItems: [CoreObject] = []
+    private(set) var inboxBulkOrganizePickerReading = false
+    private(set) var inboxBulkOrganizePickerCurrent = false
+    private(set) var inboxBulkOrganizePickerError: String?
     private enum BulkOrganizeContext {
         case inbox(InboxBulkConfirmation)
         case project(ProjectBulkContext)
@@ -419,17 +420,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var inboxBulkOrganizeGeneration = 0
     private var inboxBulkOrganizeTask: Task<Void, Never>?
     private var inboxBulkOrganizePendingEdits: [CoreObject] = []
-    private var inboxBulkOrganizePickerGeneration = 0
+    @ObservationIgnored private var inboxBulkOrganizePickerGeneration = 0
     private var inboxBulkOrganizePickerTask: Task<Void, Never>?
     private var inboxTasksOrganizeOwner: (host: CoreHost, request: String)?
     private var inboxOrganizeDestinationCreateOwner: (host: CoreHost, request: String)?
 
-    @Published private(set) var inboxBulkTagPresented = false
-    @Published private(set) var inboxBulkTagInput = GatedTextInput(limit: .max)
+    private(set) var inboxBulkTagPresented = false
+    private(set) var inboxBulkTagInput = GatedTextInput(limit: .max)
     var inboxBulkTagText: String { inboxBulkTagInput.text }
-    @Published private(set) var inboxBulkTagOptions: CoreObject = [:]
-    @Published private(set) var inboxBulkTagReadError: String?
-    @Published private(set) var inboxBulkTagWriteError = false
+    private(set) var inboxBulkTagOptions: CoreObject = [:]
+    private(set) var inboxBulkTagReadError: String?
+    private(set) var inboxBulkTagWriteError = false
     private var inboxBulkTagReadTask: Task<Void, Never>?
     private var inboxBulkTagContext: InboxBulkConfirmation?
     private var inboxBulkTagIDs: [String] = []
@@ -442,31 +443,31 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var inboxPendingFold: (axis: String, ids: [String])?
     private var inboxGroupingOperation: String?
     private var inboxAutomaticPageAttempt: (generation: Int, offset: Int)?
-    @Published private(set) var processInboxPresented = false {
+    private(set) var processInboxPresented = false {
         didSet { if processInboxPresented { retireReviewAI(); foregroundSyncIntent = nil } else { retireProcessInboxAI() } }
     }
-    @Published private(set) var processInboxView: CoreObject = [:] {
+    private(set) var processInboxView: CoreObject = [:] {
         didSet { processInboxAIViewChanged(oldValue, processInboxView) }
     }
-    @Published private(set) var processInboxNotice: CoreObject = [:]
-    @Published private(set) var processInboxToast = ""
-    @Published private(set) var processInboxUndoLabel = ""
-    @Published private(set) var processInboxError: String?
-    @Published private(set) var processInboxReadError: String?
-    @Published private(set) var processInboxInputs: [String: String] = [:] {
+    private(set) var processInboxNotice: CoreObject = [:]
+    private(set) var processInboxToast = ""
+    private(set) var processInboxUndoLabel = ""
+    private(set) var processInboxError: String?
+    private(set) var processInboxReadError: String?
+    private(set) var processInboxInputs: [String: String] = [:] {
         didSet {
             if oldValue.mapValues({ Data($0.utf8) }) != processInboxInputs.mapValues({ Data($0.utf8) }) { processInboxAIInputChanged() }
         }
     }
-    @Published private(set) var processInboxAIWorking = false
-    @Published private(set) var processInboxAIAnswer: CoreObject = [:]
-    @Published private(set) var processInboxAIAnswerID: UUID?
+    private(set) var processInboxAIWorking = false
+    private(set) var processInboxAIAnswer: CoreObject = [:]
+    private(set) var processInboxAIAnswerID: UUID?
     private var processInboxAIRevision: UInt64 = 0
     private var processInboxAIStartID: UUID?
     private var processInboxAITask: Task<Void, Never>?
     private var processInboxAIApplyTask: Task<Void, Never>?
     private var processInboxAIApplyID: UUID?
-    @Published private var processInboxAIRetirements: [UUID: Task<Void, Never>] = [:]
+    private var processInboxAIRetirements: [UUID: Task<Void, Never>] = [:]
     private var processInboxAISettingsTask: Task<Void, Never>?
     @MainActor private final class ProcessInboxAIOwner {
         let id = UUID(), host: CoreHost, startup: UUID, session: String, taskID: String, step: String, mode: String
@@ -487,27 +488,27 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let host: CoreHost, startup: UUID, caller: Surface, session: String, taskID: String
     }
     private var processInboxAISettingsVisit: ProcessInboxAISettingsVisit?
-    @Published private(set) var mindSweepGuide: CoreObject = [:]
-    @Published private(set) var mindSweepPresented = false {
+    private(set) var mindSweepGuide: CoreObject = [:]
+    private(set) var mindSweepPresented = false {
         didSet { if mindSweepPresented { retireReviewAI(); foregroundSyncIntent = nil } }
     }
-    @Published private(set) var mindSweepStep = -1
-    @Published private(set) var mindSweepDraft = ""
-    @Published private(set) var mindSweepCaptured: [String: [String]] = [:]
-    @Published private(set) var mindSweepAddFailed = false
-    @Published private(set) var mindSweepGuideError: String?
-    @Published private(set) var focus: CoreObject = [:]
-    @Published private(set) var focusShowDetails = false
-    @Published private(set) var collapsedFocusSections: Set<String> = []
-    @Published private(set) var collapsedFocusGroups: [String: [String]] = [:]
-    @Published private(set) var focusCurrent = false
-    @Published private(set) var focusLoading = false
-    @Published private(set) var focusError: String?
-    @Published private(set) var pomodoroPanel: CoreObject = [:]
-    @Published private(set) var pomodoroError: String?
-    @Published private(set) var pomodoroPickerPresented = false
-    @Published private(set) var pomodoroTasks: [CoreObject] = []
-    @Published private(set) var pomodoroTaskCount = 0
+    private(set) var mindSweepStep = -1
+    private(set) var mindSweepDraft = ""
+    private(set) var mindSweepCaptured: [String: [String]] = [:]
+    private(set) var mindSweepAddFailed = false
+    private(set) var mindSweepGuideError: String?
+    private(set) var focus: CoreObject = [:]
+    private(set) var focusShowDetails = false
+    private(set) var collapsedFocusSections: Set<String> = []
+    private(set) var collapsedFocusGroups: [String: [String]] = [:]
+    private(set) var focusCurrent = false
+    private(set) var focusLoading = false
+    private(set) var focusError: String?
+    private(set) var pomodoroPanel: CoreObject = [:]
+    private(set) var pomodoroError: String?
+    private(set) var pomodoroPickerPresented = false
+    private(set) var pomodoroTasks: [CoreObject] = []
+    private(set) var pomodoroTaskCount = 0
     private var pomodoroFeedback: CoreObject?
     private var pomodoroCollapsed = false
     private var initialPomodoroCollapsed = false
@@ -520,7 +521,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private(set) var pomodoroAlarmTestEnabled = false
     private var pomodoroAlarmTestRetired = false
-    @Published private(set) var pomodoroAlarmTestState = ""
+    private(set) var pomodoroAlarmTestState = ""
     private var pomodoroAlarmTestOutcome = ""
     private var pomodoroAlarmTestHost: CoreHost?
     #endif
@@ -532,31 +533,31 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let before: CoreObject
     }
     private var pomodoroCommand: PomodoroCommand?
-    @Published private(set) var reviewOverview: CoreObject = [:]
-    @Published private(set) var reviewGuide: CoreObject = [:] {
+    private(set) var reviewOverview: CoreObject = [:]
+    private(set) var reviewGuide: CoreObject = [:] {
         didSet {
             if [oldValue.text("checkpoint"), oldValue.text("storageKey"), oldValue.object("content").text("step")]
                 != [reviewGuide.text("checkpoint"), reviewGuide.text("storageKey"), reviewGuide.object("content").text("step")] { retireReviewAI() }
         }
     }
-    @Published private(set) var reviewKind = ""
-    @Published private(set) var reviewCurrent = false
-    @Published private(set) var reviewError: String?
-    @Published private(set) var reviewNotice: String?
-    @Published private(set) var reviewProjectCompletionOptions: CoreObject = [:]
+    private(set) var reviewKind = ""
+    private(set) var reviewCurrent = false
+    private(set) var reviewError: String?
+    private(set) var reviewNotice: String?
+    private(set) var reviewProjectCompletionOptions: CoreObject = [:]
     private var reviewTaskWritePending = false
-    @Published private(set) var reviewPickerPresented = false { didSet { if reviewPickerPresented { retireReviewAI() } } }
-    @Published private(set) var reviewGuidePresented = false { didSet { if oldValue != reviewGuidePresented { retireReviewAI() } } }
-    @Published private(set) var reviewAIWorking = false
-    @Published private(set) var reviewAIRan = false
-    @Published private(set) var reviewAIError: String?
-    @Published private(set) var reviewAISuggestions: [CoreObject] = []
-    @Published private(set) var reviewAISelectedIDs: Set<String> = []
+    private(set) var reviewPickerPresented = false { didSet { if reviewPickerPresented { retireReviewAI() } } }
+    private(set) var reviewGuidePresented = false { didSet { if oldValue != reviewGuidePresented { retireReviewAI() } } }
+    private(set) var reviewAIWorking = false
+    private(set) var reviewAIRan = false
+    private(set) var reviewAIError: String?
+    private(set) var reviewAISuggestions: [CoreObject] = []
+    private(set) var reviewAISelectedIDs: Set<String> = []
     private var reviewAIPresentation = UUID()
     private var reviewAISelectionRevision: UInt64 = 0
     private var reviewAITask: Task<Void, Never>?
     private var reviewAIApplyTask: Task<Void, Never>?
-    @Published private var reviewAIRetirements: [UUID: Task<Void, Never>] = [:]
+    private var reviewAIRetirements: [UUID: Task<Void, Never>] = [:]
     @MainActor private final class ReviewAIOwner {
         let host: CoreHost, startup: UUID, presentation: UUID, checkpoint: String, storage: String, language: String
         let lease = NativeTaskAIEditorLease()
@@ -572,93 +573,94 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let owner: ReviewAIOwner, request: String, selectionRevision: UInt64
     }
     private var reviewAIApplyPending: ReviewAIApply?
-    @Published private(set) var reviewNested: [String: CoreObject] = [:]
-    @Published private(set) var reviewExpandedContexts: Set<String> = []
-    @Published private(set) var reviewExpandedScheduled: Set<String> = []
-    @Published private(set) var boardView: CoreObject = [:]
-    @Published private(set) var boardCurrent = false
-    @Published private(set) var boardLoading = false
-    @Published private(set) var boardError: String?
-    @Published private(set) var boardSearchText = ""
-    @Published private(set) var boardFiltersPresented = false
-    @Published private(set) var boardPickerQuery = ""
-    @Published private(set) var boardScrollGeneration = 0
-    var boardScrollAnchor = "board-top"
-    @Published private(set) var calendarView: CoreObject = [:]
-    @Published private(set) var calendarCurrent = false
-    @Published private(set) var calendarError: String?
-    @Published private(set) var calendarQuery = ""
-    @Published private(set) var calendarItemSheet: CoreObject = [:]
-    @Published private(set) var calendarItemPresented = false
-    @Published private(set) var calendarItemError: String?
-    @Published private(set) var calendarComposerView: CoreObject = [:]
-    @Published private(set) var calendarComposerPresented = false
-    @Published private(set) var calendarComposerError: String?
-    @Published private(set) var calendarNotice: String?
-    @Published private(set) var calendarEventOpenPresentation: NativeCalendarEventEditorPresentation?
-    @Published private(set) var calendarEventOpenPresented = false
-    @Published var calendarComposerQueryInput = ""
-    @Published var calendarComposerTitleInput = ""
-    @Published var calendarComposerStartInput = ""
-    @Published var calendarComposerEndInput = ""
-    @Published private(set) var focusPanel = ""
-    @Published private(set) var focusLocationText = ""
-    @Published private(set) var focusPickerName = ""
-    @Published private(set) var focusPickerQuery = ""
-    @Published private(set) var focusPicker: CoreObject = [:]
-    @Published private(set) var focusPickerCurrent = false
-    @Published private(set) var searchView: CoreObject = [:]
-    @Published private(set) var searchQuery = ""
-    @Published private(set) var searchFilters: CoreObject = [:]
-    @Published private(set) var searchLoading = false
-    @Published private(set) var searchError: String?
-    @Published private(set) var moreMenu: CoreObject = [:]
-    @Published private(set) var morePresented = false {
+    private(set) var reviewNested: [String: CoreObject] = [:]
+    private(set) var reviewExpandedContexts: Set<String> = []
+    private(set) var reviewExpandedScheduled: Set<String> = []
+    private(set) var boardView: CoreObject = [:] { didSet { boardViewRevision &+= 1 } }
+    private(set) var boardViewRevision = 0
+    private(set) var boardCurrent = false
+    private(set) var boardLoading = false
+    private(set) var boardError: String?
+    private(set) var boardSearchText = ""
+    private(set) var boardFiltersPresented = false
+    private(set) var boardPickerQuery = ""
+    private(set) var boardScrollGeneration = 0
+    @ObservationIgnored var boardScrollAnchor = "board-top"
+    private(set) var calendarView: CoreObject = [:]
+    private(set) var calendarCurrent = false
+    private(set) var calendarError: String?
+    private(set) var calendarQuery = ""
+    private(set) var calendarItemSheet: CoreObject = [:]
+    private(set) var calendarItemPresented = false
+    private(set) var calendarItemError: String?
+    private(set) var calendarComposerView: CoreObject = [:]
+    private(set) var calendarComposerPresented = false
+    private(set) var calendarComposerError: String?
+    private(set) var calendarNotice: String?
+    private(set) var calendarEventOpenPresentation: NativeCalendarEventEditorPresentation?
+    private(set) var calendarEventOpenPresented = false
+    var calendarComposerQueryInput = ""
+    var calendarComposerTitleInput = ""
+    var calendarComposerStartInput = ""
+    var calendarComposerEndInput = ""
+    private(set) var focusPanel = ""
+    private(set) var focusLocationText = ""
+    private(set) var focusPickerName = ""
+    private(set) var focusPickerQuery = ""
+    private(set) var focusPicker: CoreObject = [:]
+    private(set) var focusPickerCurrent = false
+    private(set) var searchView: CoreObject = [:]
+    private(set) var searchQuery = ""
+    private(set) var searchFilters: CoreObject = [:]
+    private(set) var searchLoading = false
+    private(set) var searchError: String?
+    private(set) var moreMenu: CoreObject = [:]
+    private(set) var morePresented = false {
         didSet {
             if morePresented {
                 retireReviewAI()
                 foregroundSyncIntent = nil
             } }
     }
-    @Published private(set) var settingsMenu: CoreObject = [:]
-    @Published private(set) var settingsSearch = ""
-    @Published private(set) var settingsManagePresented = false
-    @Published private(set) var settingsAIPresented = false
-    @Published private(set) var settingsAIProjection: NativeAISettingsProjection?
-    @Published private(set) var settingsAILoading = false
-    @Published private(set) var settingsAIReadFailed = false
-    @Published private(set) var settingsAIAdvanced = false
-    @Published private(set) var settingsAIOptions: NativeAIRequestTimeoutOptions?
-    @Published private(set) var settingsAIOptionsFailed = false
-    @Published private(set) var settingsAISaveFailed = false
+    private(set) var settingsMenu: CoreObject = [:]
+    private(set) var settingsSearch = ""
+    private(set) var settingsManagePresented = false
+    private(set) var settingsAIPresented = false
+    private(set) var settingsAIProjection: NativeAISettingsProjection?
+    private(set) var settingsAILoading = false
+    private(set) var settingsAIReadFailed = false
+    private(set) var settingsAIAdvanced = false
+    private(set) var settingsAIOptions: NativeAIRequestTimeoutOptions?
+    private(set) var settingsAIOptionsFailed = false
+    private(set) var settingsAISaveFailed = false
     private var settingsAIWrite: AIReadmittedSettingWrite?
     private var settingsAIWriteHost: CoreHost?
     private var settingsAIWriteOperationID: UUID?
-    @Published private(set) var settingsAIEffortOptions: NativeAIReasoningEffortOptions?
-    @Published private(set) var settingsAIEffortOptionsFailed = false
-    @Published private(set) var settingsAIEffortSaveFailed = false
-    @Published private(set) var settingsAIGeminiOptions: NativeAIGeminiThinkingBudgetOptions?
-    @Published private(set) var settingsAIGeminiOptionsFailed = false
-    @Published private(set) var settingsAIGeminiSaveFailed = false
+    private(set) var settingsAIEffortOptions: NativeAIReasoningEffortOptions?
+    private(set) var settingsAIEffortOptionsFailed = false
+    private(set) var settingsAIEffortSaveFailed = false
+    private(set) var settingsAIGeminiOptions: NativeAIGeminiThinkingBudgetOptions?
+    private(set) var settingsAIGeminiOptionsFailed = false
+    private(set) var settingsAIGeminiSaveFailed = false
     private var settingsAISession = UUID()
     private var settingsAIReadID: UUID?
-    @Published private var settingsAITask: Task<Void, Never>?
-    @Published private(set) var settingsAITextPresented = false
-    @Published private(set) var settingsAITextOptions: NativeAITextConfigurationOptionsV2?
-    @Published private(set) var settingsAIAnthropicThinkingOptions: NativeAIAnthropicThinkingOptions?
-    @Published private(set) var settingsAITextModelChoices: NativeAITextModelChoices?
-    @Published private(set) var settingsAITextModelDiscoveryWorking = false
-    @Published private(set) var settingsAITextModelDiscoveryError: String?
-    @Published private(set) var settingsAITextCredentialAvailable: Bool?
-    @Published private(set) var settingsAITextConsentPrompt: NativeAIConsentPrompt?
-    @Published private(set) var settingsAITextConsentRecordFailed = false
-    @Published private(set) var settingsAITextError: String?
-    @Published private(set) var settingsAITextNotice: String?
-    @Published private(set) var settingsAITextDraftGeneration = UUID()
-    @Published private var settingsAITextTask: Task<Void, Never>?
-    @Published private(set) var settingsAITextExtraBodyEditing = false
-    @Published private(set) var settingsAITextExtraBodyDraft = ""
-    @Published private(set) var settingsAITextExtraBodyError: String?
+    private var settingsAITask: Task<Void, Never>?
+    private(set) var settingsAITextPresented = false
+    private(set) var settingsAITextOptions: NativeAITextConfigurationOptionsV2?
+    private(set) var settingsAIAnthropicThinkingOptions: NativeAIAnthropicThinkingOptions?
+    private(set) var settingsAITextModelChoices: NativeAITextModelChoices?
+    private(set) var settingsAITextModelDiscoveryWorking = false
+    private(set) var settingsAITextModelDiscoveryError: String?
+    private(set) var settingsAITextCredentialAvailable: Bool?
+    private(set) var settingsAITextConsentPrompt: NativeAIConsentPrompt?
+    private(set) var settingsAITextConsentRecordFailed = false
+    private(set) var settingsAITextError: String?
+    private(set) var settingsAITextNotice: String?
+    private(set) var settingsAITextDraftGeneration = UUID()
+    private var settingsAITextTask: Task<Void, Never>?
+    private(set) var settingsAITextExtraBodyEditing = false
+    private(set) var settingsAITextExtraBodyDraft = ""
+    private(set) var settingsAITextExtraBodyError: String?
     private struct AITextExtraBodyAttempt: Equatable {
         let id: UUID
         let page: UUID
@@ -686,23 +688,23 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private var settingsAITextOwner: AITextConfigurationOwner?
     private var settingsAITextRetirementTasks: [UUID: Task<Void, Never>] = [:]
-    @Published private(set) var settingsVoicePresented = false
-    @Published private(set) var settingsVoiceOptions: NativeVoiceSettingsOptions?
-    @Published private(set) var settingsVoiceModelChoices: NativeVoiceModelChoices?
-    @Published private(set) var settingsVoiceModelDiscoveryWorking = false
-    @Published private(set) var settingsVoiceModelDiscoveryError: String?
-    @Published private(set) var settingsVoiceCredentialAvailable: Bool?
-    @Published private(set) var settingsVoiceError: String?
-    @Published private(set) var settingsVoiceNotice: String?
-    @Published private(set) var settingsVoiceDraftGeneration = UUID()
-    @Published private var settingsVoiceTask: Task<Void, Never>?
-    @Published private(set) var settingsVoiceLocalModel: NativeVoiceLocalModelState?
-    @Published private(set) var settingsVoiceLocalProgress: Double?
-    @Published private(set) var settingsVoiceLocalError: String?
-    @Published private(set) var settingsVoiceLocalNotice: String?
+    private(set) var settingsVoicePresented = false
+    private(set) var settingsVoiceOptions: NativeVoiceSettingsOptions?
+    private(set) var settingsVoiceModelChoices: NativeVoiceModelChoices?
+    private(set) var settingsVoiceModelDiscoveryWorking = false
+    private(set) var settingsVoiceModelDiscoveryError: String?
+    private(set) var settingsVoiceCredentialAvailable: Bool?
+    private(set) var settingsVoiceError: String?
+    private(set) var settingsVoiceNotice: String?
+    private(set) var settingsVoiceDraftGeneration = UUID()
+    private var settingsVoiceTask: Task<Void, Never>?
+    private(set) var settingsVoiceLocalModel: NativeVoiceLocalModelState?
+    private(set) var settingsVoiceLocalProgress: Double?
+    private(set) var settingsVoiceLocalError: String?
+    private(set) var settingsVoiceLocalNotice: String?
     private enum VoiceLocalOperation { case read, download, remove }
-    @Published private var settingsVoiceLocalOperation: VoiceLocalOperation?
-    @Published private var settingsVoiceLocalTask: Task<Void, Never>?
+    private var settingsVoiceLocalOperation: VoiceLocalOperation?
+    private var settingsVoiceLocalTask: Task<Void, Never>?
     private struct VoiceEndpointRequest: Equatable {
         let page: UUID
         let session: UUID
@@ -738,71 +740,71 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var settingsAIEffortTestHoldOnce = false
     private var settingsAIEffortRefreshTestFailureOnce = false
     private var settingsAIEffortFixtureConfigured = false
-    @Published private(set) var settingsAIEffortTestHeld = false
-    @Published private(set) var settingsAIEffortFixtureState = ""
+    private(set) var settingsAIEffortTestHeld = false
+    private(set) var settingsAIEffortFixtureState = ""
     private var settingsAIGeminiOptionsTestFailureOnce = false
     private var settingsAIGeminiTestHoldOnce = false
     private var settingsAIGeminiRefreshTestFailureOnce = false
     private var settingsAIGeminiFixtureConfigured = false
-    @Published private(set) var settingsAIGeminiTestHeld = false
-    @Published private(set) var settingsAIGeminiFixtureState = ""
-    @Published private(set) var settingsAIGeminiRetryAdmissionState = "not-invoked"
+    private(set) var settingsAIGeminiTestHeld = false
+    private(set) var settingsAIGeminiFixtureState = ""
+    private(set) var settingsAIGeminiRetryAdmissionState = "not-invoked"
     var settingsAIGeminiRetryFixtureValue: String {
         guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
               NativeAppLaunch.arguments.filter({ $0 == "--native-ai-gemini-fixture" }).count == 1,
               let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return "" }
         return settingsAIGeminiRetryAdmissionState
     }
-    @Published private(set) var settingsAITimeoutTestHeld = false
-    @Published private(set) var settingsAITimeoutFixtureState = ""
-    @Published private(set) var settingsAITestHeld = false
-    @Published private(set) var settingsAIProofState = ""
+    private(set) var settingsAITimeoutTestHeld = false
+    private(set) var settingsAITimeoutFixtureState = ""
+    private(set) var settingsAITestHeld = false
+    private(set) var settingsAIProofState = ""
     private var settingsAIProofTask: Task<Void, Never>?
     private var settingsAIProofID: UUID?
     private var settingsAIProofReadAttempts = 0
     private var settingsAIProofSearchInFlight = 0
     #endif
-    @Published private(set) var settingsAdvancedPresented = false
-    @Published private(set) var settingsAboutPresented = false
-    @Published private(set) var settingsAboutOpening = false
-    @Published private(set) var settingsAboutChecking = false
-    @Published private(set) var settingsAboutError: String?
-    @Published private(set) var settingsAboutUpdate: AboutAppStoreNotice?
+    private(set) var settingsAdvancedPresented = false
+    private(set) var settingsAboutPresented = false
+    private(set) var settingsAboutOpening = false
+    private(set) var settingsAboutChecking = false
+    private(set) var settingsAboutError: String?
+    private(set) var settingsAboutUpdate: AboutAppStoreNotice?
     private var settingsAboutSession = UUID()
-    @Published private var settingsAboutTask: Task<Void, Never>?
+    private var settingsAboutTask: Task<Void, Never>?
     private var settingsAboutBusySession: UUID?
-    @Published private(set) var settingsFeedbackPresented = false
-    @Published private(set) var settingsFeedbackConfigured: Bool?
-    @Published private(set) var settingsFeedbackLoading = false
-    @Published private(set) var settingsFeedbackSending = false
-    @Published private(set) var settingsFeedbackSent = false
-    @Published private(set) var settingsFeedbackError: String?
-    @Published private(set) var settingsFeedbackCategory = "bug"
-    @Published private(set) var settingsFeedbackLocation = ""
-    @Published private(set) var settingsFeedbackMessage = ""
-    @Published private(set) var settingsFeedbackEmail = ""
-    @Published private(set) var settingsFeedbackIncludeDiagnostics = false
+    private(set) var settingsFeedbackPresented = false
+    private(set) var settingsFeedbackConfigured: Bool?
+    private(set) var settingsFeedbackLoading = false
+    private(set) var settingsFeedbackSending = false
+    private(set) var settingsFeedbackSent = false
+    private(set) var settingsFeedbackError: String?
+    private(set) var settingsFeedbackCategory = "bug"
+    private(set) var settingsFeedbackLocation = ""
+    private(set) var settingsFeedbackMessage = ""
+    private(set) var settingsFeedbackEmail = ""
+    private(set) var settingsFeedbackIncludeDiagnostics = false
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var settingsAboutTestUnavailable = false
     private var settingsFeedbackTestUnavailable = false
     #endif
-    @Published private(set) var settingsReadError: String?
-    @Published private(set) var settingsSyncPresented = false
-    @Published private(set) var settingsSync: CoreObject = [:]
-    @Published private(set) var settingsSyncURL = ""
-    @Published private(set) var settingsSyncUsername = ""
-    @Published private(set) var settingsSyncPassword = ""
-    @Published private(set) var settingsSyncToken = ""
+    private(set) var settingsReadError: String?
+    private(set) var settingsSyncPresented = false
+    private(set) var settingsSync: CoreObject = [:]
+    private(set) var settingsSyncURL = ""
+    private(set) var settingsSyncUsername = ""
+    private(set) var settingsSyncPassword = ""
+    private(set) var settingsSyncToken = ""
     private var settingsSyncTokenEdited = false
-    @Published private(set) var settingsSyncAllowInsecure = false
-    @Published private var settingsSyncPassphrases: [String: String] = [:]
-    @Published private(set) var settingsSyncError: String?
-    @Published private(set) var settingsSyncStatus: String?
-    @Published private(set) var settingsSyncChecking = false
-    @Published private(set) var settingsSyncNeedsReload = false
-    @Published private(set) var settingsSyncRestartRequired = false
+    private(set) var settingsSyncAllowInsecure = false
+    private var settingsSyncPassphrases: [String: String] = [:]
+    private(set) var settingsSyncError: String?
+    private(set) var settingsSyncStatus: String?
+    private(set) var settingsSyncChecking = false
+    private(set) var settingsSyncNeedsReload = false
+    private(set) var settingsSyncRestartRequired = false
     private var nativeDropboxAuthorization: NativeDropboxAuthorization?
-    private weak var nativeDropboxAuthorizationHost: CoreHost?
+    @ObservationIgnored private weak var nativeDropboxAuthorizationHost: CoreHost?
     private var nativeDropboxBrowserInactive = false
     private struct SettingsDropboxOwner {
         let requestID: String
@@ -814,7 +816,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var settingsDropboxOwner: SettingsDropboxOwner?
     private var settingsDropboxTask: Task<Void, Never>?
     #if DEBUG && targetEnvironment(simulator)
-    @Published private(set) var dropboxAuthorizationFixtureState = ""
+    private(set) var dropboxAuthorizationFixtureState = ""
     #endif
 
     private func makeNativeDropboxAuthorization() -> NativeDropboxAuthorization? {
@@ -919,7 +921,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var settingsSyncDirectoryOwner: SettingsSyncDirectoryOwner?
     private var settingsSyncDirectoryTask: Task<Void, Never>?
     private var settingsSyncMissingFilesRoute: (directory: Bool, bookmark: Data?) = (false, nil)
-    @Published private var settingsSyncMissingFilesAnswered: String?
+    private var settingsSyncMissingFilesAnswered: String?
     var settingsSyncMissingFiles: CoreObject? {
         guard settingsSyncCanEdit, !settingsSyncChecking, !settingsSyncOpeningRevision.isEmpty, host != nil,
               let prompt = settingsSync["missingFiles"] as? CoreObject,
@@ -927,7 +929,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               ["title", "message", "continueLabel", "cancelLabel"].allSatisfy({ prompt[$0] is String }) else { return nil }
         return prompt
     }
-    @Published private(set) var settingsSyncDirectoryPickerID: UUID?
+    private(set) var settingsSyncDirectoryPickerID: UUID?
     private var settingsSyncOpeningRevision = ""
     private var settingsSyncValidatedURL = ""
     private var settingsSyncValidatedTokenDraft: String?
@@ -938,7 +940,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var settingsSyncTestThrowOnce = false
     private var settingsSyncEncryptionTypedThrowOnce = false
     private var settingsSyncEncryptionTypedDelayOnce = false
-    @Published private var settingsSyncEncryptionTypedHolding = false
+    private var settingsSyncEncryptionTypedHolding = false
     #endif
     var settingsSyncEncryptionTypedHeld: Bool {
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -958,14 +960,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         SettingsSyncFormKind(rawValue: settingsSync.object("panel").text("kind"))
     }
     private var settingsSyncTokenDraft: String? { settingsSyncTokenEdited ? settingsSyncToken : nil }
-    @Published private(set) var settingsRemindersPresented = false
-    @Published private(set) var appleRemindersSettings: CoreObject = [:]
-    @Published private(set) var appleRemindersLists: [CoreObject] = []
-    @Published private(set) var appleRemindersError: String?
-    @Published private(set) var appleRemindersStatus: String?
-    @Published private var appleRemindersPendingEdit: (json: String, expected: String?, host: CoreHost)?
-    @Published private var appleRemindersImportRetry = false
-    @Published private(set) var appleRemindersAutoNotice: String?
+    private(set) var settingsRemindersPresented = false
+    private(set) var appleRemindersSettings: CoreObject = [:]
+    private(set) var appleRemindersLists: [CoreObject] = []
+    private(set) var appleRemindersError: String?
+    private(set) var appleRemindersStatus: String?
+    private var appleRemindersPendingEdit: (json: String, expected: String?, host: CoreHost)?
+    private var appleRemindersImportRetry = false
+    private(set) var appleRemindersAutoNotice: String?
     private var appleRemindersAutoRequested = false
     private var appleRemindersAutoActive = false
     private var appleRemindersAutoToken: UUID?
@@ -973,7 +975,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var appleRemindersAutoTask: Task<Void, Never>?
     private var appleRemindersAutoLastRun: TimeInterval = -.infinity
     let gmailCapture = NativeGmailCaptureModel()
-    private weak var gmailCaptureHost: CoreHost?
+    @ObservationIgnored private weak var gmailCaptureHost: CoreHost?
     private var appleRemindersNoticeID = UUID()
     private var appleRemindersRaw: String?
     private var appleRemindersSession = UUID()
@@ -1005,127 +1007,127 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                         && settingsSyncTokenDraft == settingsSyncValidatedTokenDraft)))
             && settingsSync.object("panel").object(action).flag("enabled")
     }
-    @Published private(set) var manageSettings: CoreObject = [:]
-    @Published private(set) var managedSomedaySections: [CoreObject] = []
-    @Published private(set) var managedSomedayTotal = 0
-    @Published private(set) var managedAreas: [CoreObject] = []
-    @Published private(set) var managedAreasTotal = 0
-    @Published private(set) var managedInventoryRows: [String: [CoreObject]] = [:]
-    @Published private(set) var managePersonReferenceError: String?
-    @Published private(set) var settingsAreaDeleteOptions: CoreObject = [:]
-    @Published private(set) var settingsAreaDeleteError: String?
-    @Published private(set) var settingsAreaDeleteAwaitingRefresh = false
-    @Published private(set) var manageReadError: String?
-    @Published private(set) var unassignedAreaColorOptions: CoreObject = [:]
-    @Published private(set) var unassignedAreaColorDraft = ""
-    @Published private(set) var unassignedAreaColorError: String?
-    @Published private(set) var unassignedAreaColorAwaitingRefresh = false
-    @Published private(set) var somedaySectionRenameOptions: CoreObject = [:]
-    @Published private(set) var somedaySectionRenameIndex: Int?
-    @Published private(set) var somedaySectionRenameTitle = ""
-    @Published private(set) var somedaySectionRenameError: String?
-    @Published private(set) var somedaySectionRenameAwaitingRefresh = false
-    @Published private(set) var somedaySectionDeleteOptions: CoreObject = [:]
-    @Published private(set) var somedaySectionDeleteError: String?
-    @Published private(set) var somedaySectionDeleteAwaitingRefresh = false
-    @Published private(set) var somedaySectionOrderError: String?
-    @Published private(set) var somedaySectionOrderAwaitingRefresh = false
-    @Published private(set) var projects: CoreObject = [:]
-    @Published private(set) var selectedProjectTagFilter = "__all__"
-    @Published private(set) var projectTagFilterShown = false
-    @Published private(set) var projectCreateOptions: CoreObject = [:]
-    @Published private(set) var projectCreateTitle = ""
-    @Published private(set) var projectCreateAreaID: String?
-    @Published private(set) var projectCreateError: String?
-    @Published private(set) var projectCreateReadError: String?
-    @Published private(set) var focusOrderPresented = false
-    @Published private(set) var focusOrderShowHint = true
-    @Published private(set) var focusOrderView: CoreObject = [:]
-    @Published private(set) var focusOrderError: String?
+    private(set) var manageSettings: CoreObject = [:]
+    private(set) var managedSomedaySections: [CoreObject] = []
+    private(set) var managedSomedayTotal = 0
+    private(set) var managedAreas: [CoreObject] = []
+    private(set) var managedAreasTotal = 0
+    private(set) var managedInventoryRows: [String: [CoreObject]] = [:]
+    private(set) var managePersonReferenceError: String?
+    private(set) var settingsAreaDeleteOptions: CoreObject = [:]
+    private(set) var settingsAreaDeleteError: String?
+    private(set) var settingsAreaDeleteAwaitingRefresh = false
+    private(set) var manageReadError: String?
+    private(set) var unassignedAreaColorOptions: CoreObject = [:]
+    private(set) var unassignedAreaColorDraft = ""
+    private(set) var unassignedAreaColorError: String?
+    private(set) var unassignedAreaColorAwaitingRefresh = false
+    private(set) var somedaySectionRenameOptions: CoreObject = [:]
+    private(set) var somedaySectionRenameIndex: Int?
+    private(set) var somedaySectionRenameTitle = ""
+    private(set) var somedaySectionRenameError: String?
+    private(set) var somedaySectionRenameAwaitingRefresh = false
+    private(set) var somedaySectionDeleteOptions: CoreObject = [:]
+    private(set) var somedaySectionDeleteError: String?
+    private(set) var somedaySectionDeleteAwaitingRefresh = false
+    private(set) var somedaySectionOrderError: String?
+    private(set) var somedaySectionOrderAwaitingRefresh = false
+    private(set) var projects: CoreObject = [:]
+    private(set) var selectedProjectTagFilter = "__all__"
+    private(set) var projectTagFilterShown = false
+    private(set) var projectCreateOptions: CoreObject = [:]
+    private(set) var projectCreateTitle = ""
+    private(set) var projectCreateAreaID: String?
+    private(set) var projectCreateError: String?
+    private(set) var projectCreateReadError: String?
+    private(set) var focusOrderPresented = false
+    private(set) var focusOrderShowHint = true
+    private(set) var focusOrderView: CoreObject = [:]
+    private(set) var focusOrderError: String?
     private var focusOrderCurrent = false
     private var focusOrderRequest: String?
-    @Published private(set) var focusSavedFilterOperation: CoreObject = [:]
-    @Published private(set) var focusSavedFilterDialog: CoreObject = [:]
-    @Published var focusSavedFilterName = ""
-    @Published private(set) var focusSavedFilterError: String?
+    private(set) var focusSavedFilterOperation: CoreObject = [:]
+    private(set) var focusSavedFilterDialog: CoreObject = [:]
+    var focusSavedFilterName = ""
+    private(set) var focusSavedFilterError: String?
     private var focusSavedFilterOptions: CoreObject = [:]
     private var focusSavedFilterRequest: String?
-    @Published private(set) var focusGroupError: String?
+    private(set) var focusGroupError: String?
     private var focusGroupRequest: String?
     private var focusGroupExpectedResult: CoreObject?
-    @Published private(set) var taskFocusNotice: CoreObject = [:]
+    private(set) var taskFocusNotice: CoreObject = [:]
     private var taskFocusRequest: String?
     private var taskFocusExpectedID: String?
     private var taskFocusDesired: Bool?
-    @Published private(set) var projectFocusError: String?
-    @Published private(set) var projectFocusReadError: String?
-    @Published private(set) var projectRowError: String?
-    @Published private(set) var projectRenameEditing = false
-    @Published private(set) var projectRenameTitle = ""
-    @Published private(set) var projectRenameError: String?
-    @Published private(set) var projectRenameReadError: String?
-    @Published private(set) var projectFlowError: String?
-    @Published private(set) var projectFlowReadError: String?
-    @Published private(set) var projectTaskOrderPresented = false
-    @Published private(set) var projectTaskOrderView: CoreObject = [:]
-    @Published private(set) var projectTaskOrderError: String?
+    private(set) var projectFocusError: String?
+    private(set) var projectFocusReadError: String?
+    private(set) var projectRowError: String?
+    private(set) var projectRenameEditing = false
+    private(set) var projectRenameTitle = ""
+    private(set) var projectRenameError: String?
+    private(set) var projectRenameReadError: String?
+    private(set) var projectFlowError: String?
+    private(set) var projectFlowReadError: String?
+    private(set) var projectTaskOrderPresented = false
+    private(set) var projectTaskOrderView: CoreObject = [:]
+    private(set) var projectTaskOrderError: String?
     private var projectTaskOrderRequest: String?
     private var projectTaskOrderCurrent = false
-    @Published private(set) var projectTaskSortOptions: CoreObject = [:]
-    @Published private(set) var projectTaskSortPresented = false
-    @Published private(set) var projectTaskSortError: String?
-    @Published private(set) var projectTaskSortReadError: String?
-    @Published private(set) var projectStatusOpen = false
-    @Published private(set) var projectStatusError: String?
-    @Published private(set) var projectStatusReadError: String?
-    @Published private(set) var projectDateField: String?
-    @Published private(set) var projectDatePicker: CoreObject = [:]
-    @Published private(set) var projectDateOpeningTimeZone: TimeZone?
-    @Published private(set) var projectDateError: String?
-    @Published private(set) var projectDateReadError: String?
-    @Published private(set) var projectAreaPresented = false
-    @Published private(set) var projectRowAreaOpening = false
-    @Published private(set) var projectAreaReturnsToList = false
-    @Published private(set) var projectAreaOptions: CoreObject = [:]
-    @Published private(set) var projectAreaError: String?
-    @Published private(set) var projectAreaReadError: String?
-    @Published private(set) var projectAreaCreatePresented = false
-    @Published private(set) var projectAreaCreateName = ""
-    @Published private(set) var projectAreaCreateColor = ""
-    @Published private(set) var projectAreaCreateNameTaken = false
-    @Published private(set) var projectAreaCreateNameChecking = false
-    @Published private(set) var projectAreaCreateNameValid = false
-    @Published private(set) var projectAreaCreatedID: String?
-    @Published private(set) var projectTagsPresented = false
-    @Published private(set) var projectTagsAddPresented = false
-    @Published private(set) var projectTagsOptions: CoreObject = [:]
-    @Published private(set) var projectTagsDraft = ""
-    @Published private(set) var projectTagsError: String?
-    @Published private(set) var projectTagsReadError: String?
-    @Published private(set) var projectSectionsPresented = false
-    @Published private(set) var projectSectionEditing = false
-    @Published private(set) var projectSectionEditID: String?
-    @Published private(set) var projectSectionTitle = ""
-    @Published private(set) var projectSectionOptions: CoreObject = [:]
-    @Published private(set) var projectSectionFlowOptions: CoreObject = [:]
-    @Published private(set) var projectSectionOrderOptions: CoreObject = [:]
-    @Published private(set) var projectSectionError: String?
-    @Published private(set) var projectSectionReadError: String?
-    @Published private(set) var areaManagerPresented = false {
+    private(set) var projectTaskSortOptions: CoreObject = [:]
+    private(set) var projectTaskSortPresented = false
+    private(set) var projectTaskSortError: String?
+    private(set) var projectTaskSortReadError: String?
+    private(set) var projectStatusOpen = false
+    private(set) var projectStatusError: String?
+    private(set) var projectStatusReadError: String?
+    private(set) var projectDateField: String?
+    private(set) var projectDatePicker: CoreObject = [:]
+    private(set) var projectDateOpeningTimeZone: TimeZone?
+    private(set) var projectDateError: String?
+    private(set) var projectDateReadError: String?
+    private(set) var projectAreaPresented = false
+    private(set) var projectRowAreaOpening = false
+    private(set) var projectAreaReturnsToList = false
+    private(set) var projectAreaOptions: CoreObject = [:]
+    private(set) var projectAreaError: String?
+    private(set) var projectAreaReadError: String?
+    private(set) var projectAreaCreatePresented = false
+    private(set) var projectAreaCreateName = ""
+    private(set) var projectAreaCreateColor = ""
+    private(set) var projectAreaCreateNameTaken = false
+    private(set) var projectAreaCreateNameChecking = false
+    private(set) var projectAreaCreateNameValid = false
+    private(set) var projectAreaCreatedID: String?
+    private(set) var projectTagsPresented = false
+    private(set) var projectTagsAddPresented = false
+    private(set) var projectTagsOptions: CoreObject = [:]
+    private(set) var projectTagsDraft = ""
+    private(set) var projectTagsError: String?
+    private(set) var projectTagsReadError: String?
+    private(set) var projectSectionsPresented = false
+    private(set) var projectSectionEditing = false
+    private(set) var projectSectionEditID: String?
+    private(set) var projectSectionTitle = ""
+    private(set) var projectSectionOptions: CoreObject = [:]
+    private(set) var projectSectionFlowOptions: CoreObject = [:]
+    private(set) var projectSectionOrderOptions: CoreObject = [:]
+    private(set) var projectSectionError: String?
+    private(set) var projectSectionReadError: String?
+    private(set) var areaManagerPresented = false {
         didSet { if areaManagerPresented { foregroundSyncIntent = nil } }
     }
-    @Published private(set) var areaManagerProjectID: String?
-    @Published private(set) var areaCreateOptions: CoreObject = [:]
-    @Published private(set) var areaCreateName = ""
-    @Published private(set) var areaCreateColor = ""
-    @Published private(set) var areaCreateNameTaken = false
-    @Published private(set) var areaCreateNameChecking = false
-    @Published private(set) var areaCreateError: String?
-    @Published private(set) var areaCreateReadError: String?
-    @Published private(set) var settingsPersonDeleteOptions: CoreObject = [:]
-    @Published private(set) var settingsPersonDeleteError: String?
-    @Published private(set) var settingsPersonDeleteAwaitingRefresh = false
-    @Published private(set) var settingsPersonDeleteID: String?
+    private(set) var areaManagerProjectID: String?
+    private(set) var areaCreateOptions: CoreObject = [:]
+    private(set) var areaCreateName = ""
+    private(set) var areaCreateColor = ""
+    private(set) var areaCreateNameTaken = false
+    private(set) var areaCreateNameChecking = false
+    private(set) var areaCreateError: String?
+    private(set) var areaCreateReadError: String?
+    private(set) var settingsPersonDeleteOptions: CoreObject = [:]
+    private(set) var settingsPersonDeleteError: String?
+    private(set) var settingsPersonDeleteAwaitingRefresh = false
+    private(set) var settingsPersonDeleteID: String?
     var settingsPersonDeleteActive: Bool { settingsPersonDeleteID != nil }
     var settingsPersonDeleteCanCancel: Bool {
         settingsPersonDeleteActive && !busy && !retryNeeded && settingsPersonDeleteWrite.pending == nil
@@ -1137,45 +1139,45 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && settingsPersonDeleteError == nil && manageReadError == nil
     }
 
-    @Published private(set) var settingsGtdPresented = false
-    @Published private(set) var settingsGtdArchivePresented = false
-    @Published private(set) var gtdArchive: CoreObject = [:]
-    @Published private(set) var settingsGtdReviewPresented = false
-    @Published private(set) var gtdReview: CoreObject = [:]
-    @Published private(set) var settingsGtdInboxPresented = false
-    @Published private(set) var gtdInbox: CoreObject = [:]
-    @Published private(set) var settingsGtdCapturePresented = false
-    @Published private(set) var gtdCapture: CoreObject = [:]
-    @Published private(set) var settingsGtdPomodoroPresented = false
-    @Published private(set) var gtdPomodoro: CoreObject = [:]
-    @Published private(set) var gtdPomodoroFocusDraft = ""
-    @Published private(set) var gtdPomodoroBreakDraft = ""
-    @Published private(set) var gtdPomodoroNotice: String?
+    private(set) var settingsGtdPresented = false
+    private(set) var settingsGtdArchivePresented = false
+    private(set) var gtdArchive: CoreObject = [:]
+    private(set) var settingsGtdReviewPresented = false
+    private(set) var gtdReview: CoreObject = [:]
+    private(set) var settingsGtdInboxPresented = false
+    private(set) var gtdInbox: CoreObject = [:]
+    private(set) var settingsGtdCapturePresented = false
+    private(set) var gtdCapture: CoreObject = [:]
+    private(set) var settingsGtdPomodoroPresented = false
+    private(set) var gtdPomodoro: CoreObject = [:]
+    private(set) var gtdPomodoroFocusDraft = ""
+    private(set) var gtdPomodoroBreakDraft = ""
+    private(set) var gtdPomodoroNotice: String?
     private var gtdPomodoroNoticeShown = false
     private var gtdPomodoroNoticeTask: Task<Void, Never>?
     private var gtdPomodoroDraftDirty: Bool {
         settingsGtdPomodoroPresented && (gtdPomodoroFocusDraft != gtdPomodoro.object("minutes").text("focus")
             || gtdPomodoroBreakDraft != gtdPomodoro.object("minutes").text("break"))
     }
-    @Published private(set) var settingsGtdTaskEditorPresented = false
-    @Published private(set) var gtdTaskEditor: CoreObject = [:]
-    @Published private(set) var gtdTaskEditorPresetError: String?
-    @Published private(set) var gtdTaskEditorFieldId: String?
-    @Published private(set) var gtdTaskEditorExpanded: [String: Bool] = [:]
+    private(set) var settingsGtdTaskEditorPresented = false
+    private(set) var gtdTaskEditor: CoreObject = [:]
+    private(set) var gtdTaskEditorPresetError: String?
+    private(set) var gtdTaskEditorFieldId: String?
+    private(set) var gtdTaskEditorExpanded: [String: Bool] = [:]
     private var gtdTaskEditorExpandedResetKey: String?
     var gtdTaskEditorField: CoreObject {
         gtdTaskEditor.objects("groups").flatMap { $0.objects("fields") }
             .first { $0.text("id") == gtdTaskEditorFieldId } ?? [:]
     }
-    @Published private(set) var gtdCaptureAreaPicker = false
-    @Published private(set) var gtdCaptureAreaOptions: [CoreObject] = []
-    @Published private(set) var gtdCaptureAreaTotal = 0
+    private(set) var gtdCaptureAreaPicker = false
+    private(set) var gtdCaptureAreaOptions: [CoreObject] = []
+    private(set) var gtdCaptureAreaTotal = 0
     private var gtdCaptureAreaRevision = ""
-    @Published private(set) var gtdWorkflow: CoreObject = [:]
-    @Published private(set) var gtdWorkflowError: String?
-    @Published private(set) var gtdWorkflowReadError: String?
-    @Published private(set) var gtdWorkflowAwaitingRefresh = false
-    @Published private(set) var gtdScheduleDraft = ""
+    private(set) var gtdWorkflow: CoreObject = [:]
+    private(set) var gtdWorkflowError: String?
+    private(set) var gtdWorkflowReadError: String?
+    private(set) var gtdWorkflowAwaitingRefresh = false
+    private(set) var gtdScheduleDraft = ""
     private var gtdWorkflowExpected: CoreObject = [:]
     private var gtdWorkflowEdit: CoreObject = [:]
     var gtdWorkflowPending: Bool { gtdWorkflowWrite.pending != nil || gtdWorkflowAwaitingRefresh }
@@ -1185,34 +1187,34 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         ready && selectedSurface == .settings && settingsGtdPresented
             && !gtdWorkflowPending && gtdWorkflowReadError == nil && !(settingsGtdPomodoroPresented ? gtdPomodoro : settingsGtdArchivePresented ? gtdArchive : settingsGtdTaskEditorPresented ? gtdTaskEditor : settingsGtdCapturePresented ? gtdCapture : settingsGtdInboxPresented ? gtdInbox : settingsGtdReviewPresented ? gtdReview : gtdWorkflow).isEmpty
     }
-    @Published private(set) var settingsDataPresented = false
-    @Published private(set) var dataSettings: CoreObject = [:]
-    @Published private(set) var archiveRetentionCard: CoreObject = [:]
-    @Published var archiveRetentionDaysDraft = ""
-    @Published private(set) var archiveRetentionReview: CoreObject = [:]
-    @Published private(set) var archiveRetentionError: String?
+    private(set) var settingsDataPresented = false
+    private(set) var dataSettings: CoreObject = [:]
+    private(set) var archiveRetentionCard: CoreObject = [:]
+    var archiveRetentionDaysDraft = ""
+    private(set) var archiveRetentionReview: CoreObject = [:]
+    private(set) var archiveRetentionError: String?
 
-    @Published private(set) var diagnosticsSession: UUID?
-    @Published private(set) var diagnosticsOwner: UUID?
-    @Published private(set) var diagnosticsFileBusy = false
-    @Published private(set) var diagnosticsMessage: String?
-    @Published private(set) var diagnosticsReadError: String?
-    @Published private(set) var diagnosticsShare: DiagnosticsSharePayload?
-    @Published private(set) var backupShare: NativeBackupExport?
-    @Published private(set) var backupExportBusy = false
-    @Published private(set) var backupExportError: String?
+    private(set) var diagnosticsSession: UUID?
+    private(set) var diagnosticsOwner: UUID?
+    private(set) var diagnosticsFileBusy = false
+    private(set) var diagnosticsMessage: String?
+    private(set) var diagnosticsReadError: String?
+    private(set) var diagnosticsShare: DiagnosticsSharePayload?
+    private(set) var backupShare: NativeBackupExport?
+    private(set) var backupExportBusy = false
+    private(set) var backupExportError: String?
     private var backupShareHost: CoreHost?
-    @Published private(set) var backupImportPickerPresented = false
-    @Published private(set) var backupImportPickerID: UUID?
-    @Published private(set) var backupImportPickerAction: NativeBackupImportAction = .merge
-    @Published private(set) var backupImportBusy = false
-    @Published private(set) var backupImportPreview: CoreObject = [:]
-    @Published private(set) var backupImportError: String?
-    @Published private(set) var backupDocumentResult: CoreObject = [:]
-    @Published private(set) var backupDocumentPending = false
-    @Published private(set) var backupSnapshots: [BackupSnapshotRow] = []
-    @Published private(set) var backupSnapshotReadError: String?
-    @Published private(set) var backupRestoreConfirmation: CoreObject = [:]
+    private(set) var backupImportPickerPresented = false
+    private(set) var backupImportPickerID: UUID?
+    private(set) var backupImportPickerAction: NativeBackupImportAction = .merge
+    private(set) var backupImportBusy = false
+    private(set) var backupImportPreview: CoreObject = [:]
+    private(set) var backupImportError: String?
+    private(set) var backupDocumentResult: CoreObject = [:]
+    private(set) var backupDocumentPending = false
+    private(set) var backupSnapshots: [BackupSnapshotRow] = []
+    private(set) var backupSnapshotReadError: String?
+    private(set) var backupRestoreConfirmation: CoreObject = [:]
     private var backupPickerSession: UUID?
     private var backupImportID: UUID?
     private var backupImportHost: CoreHost?
@@ -1227,17 +1229,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var backupUndoSnapshotName: String?
     let settingsDiagnosticsOwner = UUID()
     private var diagnosticsCacheHost: ObjectIdentifier?
-    private var diagnosticsLockObserver: AnyCancellable?
+    @ObservationIgnored private var diagnosticsLockObserver: AnyCancellable?
     #if DEBUG && targetEnvironment(simulator)
-    @Published private(set) var diagnosticsShareTestState = ""
+    private(set) var diagnosticsShareTestState = ""
     private var diagnosticsShareTestHoldOnce = false
-    @Published private(set) var backupExportTestState = ""
+    private(set) var backupExportTestState = ""
     private var backupExportTestHoldOnce = false
     #endif
-    @Published private(set) var gettingStartedMessage: String?
-    @Published private(set) var gettingStartedError: String?
-    @Published private(set) var gettingStartedProjectID: String?
-    @Published private var gettingStartedTask: Task<Void, Never>?
+    private(set) var gettingStartedMessage: String?
+    private(set) var gettingStartedError: String?
+    private(set) var gettingStartedProjectID: String?
+    private var gettingStartedTask: Task<Void, Never>?
     @MainActor private final class GettingStartedOwner {
         let host: CoreHost
         let startup: UUID
@@ -1270,14 +1272,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && diagnosticsCacheIsCurrent && diagnosticsReadError == nil && !backupTransferActive
     }
 
-    @Published private(set) var settingsNotificationsPresented = false
-    @Published private(set) var notificationSettings: CoreObject = [:]
-    @Published private(set) var notificationSettingError: String?
-    @Published private(set) var notificationSettingReadError: String?
-    @Published private(set) var notificationSettingAwaitingRefresh = false
+    private(set) var settingsNotificationsPresented = false
+    private(set) var notificationSettings: CoreObject = [:]
+    private(set) var notificationSettingError: String?
+    private(set) var notificationSettingReadError: String?
+    private(set) var notificationSettingAwaitingRefresh = false
     private var notificationSettingExpected: CoreObject = [:]
     private var notificationSettingsSession = UUID()
-    private lazy var durableWriteModel = DurableWriteModel(
+    @ObservationIgnored private lazy var durableWriteModel = DurableWriteModel(
         isBusy: { [weak self] in self?.busy ?? true },
         begin: { [weak self] in self?.busy = true },
         finish: { [weak self] in self?.finishOperation() },
@@ -1287,17 +1289,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             self.error = error
         },
         isDefiniteRejection: { [weak self] failure in self?.isDefiniteRejection(failure) ?? false })
-    private lazy var notificationSettingWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var generalPreferenceWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var gtdWorkflowWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var areaColorWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var settingsPersonDeleteWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var settingsTaxonomyWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var settingsPersonEditWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var settingsPersonCreateWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var areaOrderWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var projectFocusWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
-    private lazy var projectMoveWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var notificationSettingWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var generalPreferenceWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var gtdWorkflowWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var areaColorWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var settingsPersonDeleteWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var settingsTaxonomyWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var settingsPersonEditWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var settingsPersonCreateWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var areaOrderWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var projectFocusWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
+    @ObservationIgnored private lazy var projectMoveWrite = DurableWriteRunner<CoreHost>(model: durableWriteModel)
 
     private func runDurableWrite(_ runner: DurableWriteRunner<CoreHost>, retry: Bool, adoptingBusy: Bool = false,
                                  _ write: DurableWriteRunner<CoreHost>.Write) async {
@@ -1316,15 +1318,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !notificationSettings.isEmpty
     }
 
-    @Published private(set) var settingsCalendarPresented = false
-    @Published private(set) var calendarSettings: CoreObject = [:]
-    @Published private(set) var calendarSubscriptions: CoreObject = [:]
-    @Published private(set) var calendarSubscriptionReadError: String?
+    private(set) var settingsCalendarPresented = false
+    private(set) var calendarSettings: CoreObject = [:]
+    private(set) var calendarSubscriptions: CoreObject = [:]
+    private(set) var calendarSubscriptionReadError: String?
     private var calendarSubscriptionExpected: CoreObject = [:]
-    @Published var calendarSubscriptionName = "" {
+    var calendarSubscriptionName = "" {
         didSet { if !oldValue.utf8.elementsEqual(calendarSubscriptionName.utf8) { calendarSubscriptionDraftID = UUID() } }
     }
-    @Published var calendarSubscriptionURL = "" {
+    var calendarSubscriptionURL = "" {
         didSet { if !oldValue.utf8.elementsEqual(calendarSubscriptionURL.utf8) { calendarSubscriptionDraftID = UUID() } }
     }
     private var calendarSubscriptionDraftID = UUID()
@@ -1337,8 +1339,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let name: String
         let defaultName: String
     }
-    @Published private(set) var calendarFileImporterID: UUID?
-    @Published private(set) var calendarFileImporterPresented = false
+    private(set) var calendarFileImporterID: UUID?
+    private(set) var calendarFileImporterPresented = false
     private var calendarFileImportClaim: CalendarFileImportClaim?
     #if DEBUG && targetEnvironment(simulator)
     private var calendarFileImportTestSource: URL?
@@ -1347,14 +1349,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private enum CalendarSettingKind { case device, subscription, subscriptionAdd, push }
     private var calendarSettingKind: CalendarSettingKind = .device
     private var calendarSubscriptionRuntimeRecovery: (host: CoreHost, request: String, kind: CalendarSettingKind)?
-    @Published private(set) var calendarSettingError: String?
-    @Published private(set) var calendarPushSettingToasts: [CoreObject] = []
-    @Published private(set) var calendarPushLifecycleError: String?
-    @Published private(set) var calendarPushDeleteConfirmation: CoreObject = [:]
+    private(set) var calendarSettingError: String?
+    private(set) var calendarPushSettingToasts: [CoreObject] = []
+    private(set) var calendarPushLifecycleError: String?
+    private(set) var calendarPushDeleteConfirmation: CoreObject = [:]
     private var calendarPushDeleteClaim: (host: CoreHost, session: UUID, edit: CoreObject)?
     private var calendarPushSettingRetry: (host: CoreHost, request: String, session: UUID)?
-    @Published private(set) var calendarSettingReadError: String?
-    @Published private(set) var calendarSettingAwaitingRefresh = false
+    private(set) var calendarSettingReadError: String?
+    private(set) var calendarSettingAwaitingRefresh = false
     private var calendarSettingsSession = UUID()
     private var calendarSettingsPageHost: CoreHost?
     private var calendarSettingRequest: String?
@@ -1365,9 +1367,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var calendarSettingWaiter: (owner: UUID, continuation: CheckedContinuation<Bool, Never>)?
     private var calendarSettingsReadTask: Task<String, Error>?
     private var calendarSettingsReadID: UUID?
-    @Published private(set) var calendarSettingsTesting = false
-    @Published private(set) var calendarSettingsTestResult: CoreObject = [:]
-    @Published private var calendarSettingsCloseTask: Task<Void, Never>?
+    private(set) var calendarSettingsTesting = false
+    private(set) var calendarSettingsTestResult: CoreObject = [:]
+    private var calendarSettingsCloseTask: Task<Void, Never>?
     private var calendarSettingsCloseID: UUID?
     private var calendarSettingsApplicationActive = false
     var calendarSettingActive: Bool {
@@ -1416,34 +1418,34 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         return calendarPushSettingEnabled && calendarSettingsPageCurrent(claim.host, session: claim.session)
     }
 
-    @Published private(set) var settingsGeneralPresented = false
-    @Published private(set) var generalSettings: CoreObject = [:]
+    private(set) var settingsGeneralPresented = false
+    private(set) var generalSettings: CoreObject = [:]
     let appLock = AppLockController()
-    @Published private(set) var appLockRow: CoreObject = [:]
-    @Published private(set) var appLockRecoveryPending = false {
+    private(set) var appLockRow: CoreObject = [:]
+    private(set) var appLockRecoveryPending = false {
         didSet { if oldValue != appLockRecoveryPending { searchPolicyChanged() } }
     }
-    @Published private(set) var appLockError: String?
-    @Published private(set) var appLockAwaitingRefresh = false {
+    private(set) var appLockError: String?
+    private(set) var appLockAwaitingRefresh = false {
         didSet { if oldValue != appLockAwaitingRefresh { searchPolicyChanged() } }
     }
     private var appLockExpected: CoreObject = [:]
     private var appLockRequest: String?
     var appLockActive: Bool { appLockRequest != nil || appLockAwaitingRefresh || appLock.authenticating }
     var appLockCanChange: Bool { generalPreferenceEnabled && !appLockActive && !appLockRow.isEmpty }
-    @Published private(set) var searchConsentEnabled = false
-    @Published private(set) var searchConsentKnown = false
-    @Published private(set) var searchConsentBusy = false
-    @Published private(set) var searchConsentPending: Bool?
-    @Published private(set) var searchConsentError: String?
-    @Published private(set) var searchPublicationError: String?
-    @Published private(set) var appIconBadgeBusy = false
-    @Published private(set) var appIconBadgeNotice: String?
-    private var appIconBadgeStore: NativeAppIconBadge?
+    private(set) var searchConsentEnabled = false
+    private(set) var searchConsentKnown = false
+    private(set) var searchConsentBusy = false
+    private(set) var searchConsentPending: Bool?
+    private(set) var searchConsentError: String?
+    private(set) var searchPublicationError: String?
+    private(set) var appIconBadgeBusy = false
+    private(set) var appIconBadgeNotice: String?
+    @ObservationIgnored private var appIconBadgeStore: NativeAppIconBadge?
     private var searchAppLockReadPending = false
     private var searchAppLockWritePending = false
     private var searchIndexKeptOnAppLockRereadLogged = false
-    private weak var appLockReadHost: CoreHost?
+    @ObservationIgnored private weak var appLockReadHost: CoreHost?
     var searchAvailable: Bool { trustedSearchSelection != nil }
     var searchConsentCanChange: Bool {
         generalPreferenceEnabled && searchConsentKnown && !searchConsentBusy && searchConsentPending == nil
@@ -1453,13 +1455,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !searchConsentBusy && appLock.enabled == false && !appLockActive && !appLockRecoveryPending
             && !searchAppLockReadPending && !searchAppLockWritePending
     }
-    @Published private(set) var generalPreferenceError: String?
-    @Published private(set) var generalPreferenceReadError: String?
-    @Published private(set) var generalPreferenceAwaitingRefresh = false
-    @Published private(set) var appLockDelayRow: CoreObject = [:]
+    private(set) var generalPreferenceError: String?
+    private(set) var generalPreferenceReadError: String?
+    private(set) var generalPreferenceAwaitingRefresh = false
+    private(set) var appLockDelayRow: CoreObject = [:]
     private var appLockDelayExpected: CoreObject = [:]
-    @Published private(set) var generalPreferencePicker: String?
-    @Published private(set) var generalRegionalOpen = false
+    private(set) var generalPreferencePicker: String?
+    private(set) var generalRegionalOpen = false
     private var generalPreferenceExpected: CoreObject = [:]
     private var generalPreferenceEdit: CoreObject = [:]
     private var generalPreferenceAcknowledged = false
@@ -1469,19 +1471,19 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !generalPreferenceActive && generalPreferenceReadError == nil && !generalSettings.isEmpty
     }
 
-    @Published private(set) var settingsTaxonomyKind: String? { didSet { settingsTaxonomyCheckDeferred = false } }
-    @Published private(set) var settingsTaxonomyAction = "rename"
-    @Published private(set) var settingsTaxonomyName = ""
-    @Published private(set) var settingsTaxonomyOptions: CoreObject = [:]
-    @Published private(set) var settingsTaxonomyError: String?
-    @Published private(set) var settingsTaxonomyReadError: String?
-    @Published private(set) var settingsTaxonomyAwaitingRefresh = false
-    @Published private(set) var settingsTaxonomyChecking = false
+    private(set) var settingsTaxonomyKind: String? { didSet { settingsTaxonomyCheckDeferred = false } }
+    private(set) var settingsTaxonomyAction = "rename"
+    private(set) var settingsTaxonomyName = ""
+    private(set) var settingsTaxonomyOptions: CoreObject = [:]
+    private(set) var settingsTaxonomyError: String?
+    private(set) var settingsTaxonomyReadError: String?
+    private(set) var settingsTaxonomyAwaitingRefresh = false
+    private(set) var settingsTaxonomyChecking = false
     private var settingsTaxonomyOriginalName = ""
     private var settingsTaxonomyAcknowledged = false
     private var settingsTaxonomyCheckCurrent = false
     private var settingsTaxonomySaveDisabled = true
-    private var settingsTaxonomyNameGeneration = 0
+    @ObservationIgnored private var settingsTaxonomyNameGeneration = 0
     var settingsTaxonomyActive: Bool { settingsTaxonomyKind != nil }
     var settingsTaxonomyPresented: Bool { settingsTaxonomyActive && settingsTaxonomyAction != "delete" }
     var settingsTaxonomyCanCancel: Bool {
@@ -1501,51 +1503,51 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         settingsTaxonomyInputEnabled && settingsTaxonomyAction == "delete" && settingsTaxonomyReadError == nil
     }
 
-    @Published private(set) var settingsPersonEditPresented = false { didSet { settingsPersonEditCheckDeferred = false } }
-    @Published private(set) var settingsPersonEditAwaitingRefresh = false
-    @Published private(set) var settingsPersonEditName = ""
-    @Published private(set) var settingsPersonEditNote = ""
-    @Published private(set) var settingsPersonEditReference = ""
-    @Published private(set) var settingsPersonEditChecking = false
-    @Published private(set) var settingsPersonEditError: String?
-    @Published private(set) var settingsPersonEditReadError: String?
-    @Published private(set) var settingsPersonCreatePresented = false { didSet { settingsPersonCreateCheckDeferred = false } }
-    @Published private(set) var settingsPersonCreateAwaitingRefresh = false
-    @Published private(set) var settingsPersonCreateName = ""
-    @Published private(set) var settingsPersonCreateNote = ""
-    @Published private(set) var settingsPersonCreateReference = ""
-    @Published private(set) var settingsPersonCreateChecking = false
-    @Published private(set) var settingsPersonCreateError: String?
-    @Published private(set) var settingsPersonCreateReadError: String?
-    @Published private(set) var settingsAreaCreatePresented = false
-    @Published private(set) var settingsAreaCreateAwaitingRefresh = false
-    @Published private(set) var areaColorOptions: CoreObject = [:]
-    @Published private(set) var expandedAreaColorID: String?
-    @Published private(set) var areaColorIntentID: String?
-    @Published private(set) var areaColorIntentColor: String?
-    @Published private(set) var areaColorError: String?
-    @Published private(set) var areaColorReadError: String?
-    @Published private(set) var areaOrderOptions: CoreObject = [:]
-    @Published private(set) var areaOrderIntent: CoreObject?
-    @Published private(set) var areaOrderError: String?
-    @Published private(set) var areaOrderReadError: String?
-    @Published private(set) var areaRenameEditingID: String?
-    @Published private(set) var areaRenameOriginalName = ""
-    @Published private(set) var areaRenameDraft = ""
-    @Published private(set) var settingsAreaEditColor = ""
-    @Published private(set) var areaRenameError: String?
-    @Published private(set) var areaRenameReadError: String?
-    @Published private(set) var areaDeleteOptions: CoreObject = [:]
-    @Published private(set) var areaDeleteIntentID: String?
-    @Published private(set) var areaDeleteError: String?
-    @Published private(set) var areaDeleteReadError: String?
-    @Published private(set) var projectSelectionMode = false
-    @Published private(set) var projectSelectedIDs: [String] = [] {
+    private(set) var settingsPersonEditPresented = false { didSet { settingsPersonEditCheckDeferred = false } }
+    private(set) var settingsPersonEditAwaitingRefresh = false
+    private(set) var settingsPersonEditName = ""
+    private(set) var settingsPersonEditNote = ""
+    private(set) var settingsPersonEditReference = ""
+    private(set) var settingsPersonEditChecking = false
+    private(set) var settingsPersonEditError: String?
+    private(set) var settingsPersonEditReadError: String?
+    private(set) var settingsPersonCreatePresented = false { didSet { settingsPersonCreateCheckDeferred = false } }
+    private(set) var settingsPersonCreateAwaitingRefresh = false
+    private(set) var settingsPersonCreateName = ""
+    private(set) var settingsPersonCreateNote = ""
+    private(set) var settingsPersonCreateReference = ""
+    private(set) var settingsPersonCreateChecking = false
+    private(set) var settingsPersonCreateError: String?
+    private(set) var settingsPersonCreateReadError: String?
+    private(set) var settingsAreaCreatePresented = false
+    private(set) var settingsAreaCreateAwaitingRefresh = false
+    private(set) var areaColorOptions: CoreObject = [:]
+    private(set) var expandedAreaColorID: String?
+    private(set) var areaColorIntentID: String?
+    private(set) var areaColorIntentColor: String?
+    private(set) var areaColorError: String?
+    private(set) var areaColorReadError: String?
+    private(set) var areaOrderOptions: CoreObject = [:]
+    private(set) var areaOrderIntent: CoreObject?
+    private(set) var areaOrderError: String?
+    private(set) var areaOrderReadError: String?
+    private(set) var areaRenameEditingID: String?
+    private(set) var areaRenameOriginalName = ""
+    private(set) var areaRenameDraft = ""
+    private(set) var settingsAreaEditColor = ""
+    private(set) var areaRenameError: String?
+    private(set) var areaRenameReadError: String?
+    private(set) var areaDeleteOptions: CoreObject = [:]
+    private(set) var areaDeleteIntentID: String?
+    private(set) var areaDeleteError: String?
+    private(set) var areaDeleteReadError: String?
+    private(set) var projectSelectionMode = false
+    private(set) var projectSelectedIDs: [String] = [] {
         didSet { projectSelectedIDBytes = Set(projectSelectedIDs.map { Data($0.utf8) }) }
     }
     private var projectSelectedIDBytes: Set<Data> = []
-    @Published private(set) var projectBulk: CoreObject = [:]
-    @Published private(set) var projectBulkError: String?
+    private(set) var projectBulk: CoreObject = [:]
+    private(set) var projectBulkError: String?
     private var projectSelectedRevisions: CoreObject = [:]
     private var projectAnchorID: String?
     private var projectRangeSelectMode = false
@@ -1553,9 +1555,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectSelectionReadOwner: UUID?
     private var projectSelectionEligibleBytes: Set<Data> = []
     private var projectSelectionEligibilityRevision = ""
-    private weak var projectSelectionEligibilityHost: CoreHost?
+    @ObservationIgnored private weak var projectSelectionEligibilityHost: CoreHost?
     private var projectSelectionEligibilitySession = 0
-    private var projectEligibilityGeneration = 0
+    @ObservationIgnored private var projectEligibilityGeneration = 0
     private struct ProjectBulkContext {
         let host: CoreHost
         let projectID: String
@@ -1593,23 +1595,23 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
     private var projectBulkOwner: (context: ProjectBulkContext, operation: ProjectBulkOperation, request: String, organizeGeneration: Int?)?
-    @Published private(set) var projectBulkComposerPresented = false
-    @Published private(set) var projectBulkComposerOptions: CoreObject = [:]
-    @Published private(set) var projectBulkTagInput = GatedTextInput(limit: 2_000)
+    private(set) var projectBulkComposerPresented = false
+    private(set) var projectBulkComposerOptions: CoreObject = [:]
+    private(set) var projectBulkTagInput = GatedTextInput(limit: 2_000)
     var projectBulkTagText: String { projectBulkTagInput.text }
-    @Published private(set) var projectBulkRemoveQuery = ""
-    @Published private(set) var projectBulkRemovePicks: [String] = []
-    @Published private(set) var projectBulkRemoveItems: [CoreObject] = []
-    @Published private(set) var projectBulkRemoveTotal = 0
-    @Published private(set) var projectBulkComposerReading = false
-    @Published private(set) var projectBulkComposerReadError: String?
+    private(set) var projectBulkRemoveQuery = ""
+    private(set) var projectBulkRemovePicks: [String] = []
+    private(set) var projectBulkRemoveItems: [CoreObject] = []
+    private(set) var projectBulkRemoveTotal = 0
+    private(set) var projectBulkComposerReading = false
+    private(set) var projectBulkComposerReadError: String?
     private var projectBulkComposerOperation: ProjectBulkOperation?
     private var projectBulkComposerContext: ProjectBulkContext?
-    private var projectBulkComposerTask: Task<Void, Never>?
-    private var projectBulkComposerGeneration = 0
+    @ObservationIgnored private var projectBulkComposerTask: Task<Void, Never>?
+    @ObservationIgnored private var projectBulkComposerGeneration = 0
     private var projectBulkRemoveCurrent = false
     private var projectBulkRemoveRevision = ""
-    @Published private(set) var projectBulkDeleteConfirmation: CoreObject = [:]
+    private(set) var projectBulkDeleteConfirmation: CoreObject = [:]
     private var projectBulkDeleteConfirmationOwner: (context: ProjectBulkContext, request: String, copy: CoreObject)?
     private struct ProjectDeleteOrigin {
         let context: ProjectBulkContext
@@ -1626,36 +1628,36 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectDeleteUndoOwner: ProjectDeleteUndoOwner?
     private var projectDeleteUndoError: (request: String, message: String)?
     private var projectBulkRetryRequest: String?
-    @Published private(set) var projectHeader: CoreObject = [:]
-    @Published private(set) var projectDetail: CoreObject = [:] { didSet { navigationReplayPublicationChanged("project") } }
-    @Published private(set) var projectDeleteNotice: CoreObject = [:]
-    @Published private(set) var projectDuplicateNotice: CoreObject = [:]
-    @Published private(set) var projectDuplicateError: String?
+    private(set) var projectHeader: CoreObject = [:]
+    private(set) var projectDetail: CoreObject = [:] { didSet { navigationReplayPublicationChanged("project") } }
+    private(set) var projectDeleteNotice: CoreObject = [:]
+    private(set) var projectDuplicateNotice: CoreObject = [:]
+    private(set) var projectDuplicateError: String?
     private var projectDuplicateRequest: String?
-    private var projectDuplicateNoticeGeneration = 0
-    @Published private(set) var projectLifecycleError: String?
+    @ObservationIgnored private var projectDuplicateNoticeGeneration = 0
+    private(set) var projectLifecycleError: String?
     private var projectLifecycleRequest: String?
     private enum ProjectLifecycleOrigin: Equatable { case project, history, weeklyReview }
     private var projectLifecycleOrigin: ProjectLifecycleOrigin = .project
     private var projectLifecycleReviewSession: UUID?
-    @Published private(set) var projectDeleteError: String?
+    private(set) var projectDeleteError: String?
     private var projectDeleteRequest: String?
     private var projectDeleteFromHistory = false
     private var projectDeleteFromList = false
     private var projectDeleteUndoRequest: String?
-    private var projectDeleteNoticeGeneration = 0
-    @Published private(set) var projectCurrent = false
-    @Published private(set) var projectError: String?
-    @Published private(set) var projectViewOptionsPresented = false
-    @Published private(set) var projectFiltersPresented = false
-    @Published private(set) var projectFilterSearchText = ""
-    @Published private(set) var projectFilterLocationText = ""
-    @Published private(set) var projectFilterPickerName = ""
-    @Published private(set) var projectFilterPickerQuery = ""
-    @Published private(set) var projectFilterPicker: CoreObject = [:]
-    @Published private(set) var projectFilterPickerCurrent = false
-    @Published private(set) var projectFilterError: String?
-    @Published private(set) var projectFilterPickerError: String?
+    @ObservationIgnored private var projectDeleteNoticeGeneration = 0
+    private(set) var projectCurrent = false
+    private(set) var projectError: String?
+    private(set) var projectViewOptionsPresented = false
+    private(set) var projectFiltersPresented = false
+    private(set) var projectFilterSearchText = ""
+    private(set) var projectFilterLocationText = ""
+    private(set) var projectFilterPickerName = ""
+    private(set) var projectFilterPickerQuery = ""
+    private(set) var projectFilterPicker: CoreObject = [:]
+    private(set) var projectFilterPickerCurrent = false
+    private(set) var projectFilterError: String?
+    private(set) var projectFilterPickerError: String?
     private var projectFilterPickerDepth = 100
     private var projectFilterPublishedSheetOpen = false
     private var projectFilterPendingEdit: CoreObject?
@@ -1689,48 +1691,48 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                                           "archive": "nativeFoundation.history.archived.view"]
     private var initialHistoryViews: [String: CoreObject] = [:]
     private let focusSectionKeys = NativeRNStartupPreferences.focusSectionKeys
-    @Published private(set) var projectNotes: CoreObject = [:]
-    @Published private(set) var projectNotesExpanded = false
-    @Published private(set) var projectNotesCurrent = false
-    @Published private(set) var projectNotesError: String?
-    @Published private(set) var projectNotesReferenceError: String?
-    @Published private(set) var projectNotesReferenceOpening = false
-    @Published private(set) var projectNotesEditMode = false
-    @Published private(set) var projectNotesDraft = ""
-    @Published private(set) var projectNotesDraftDirection = ""
-    @Published private(set) var projectNotesEditError: String?
-    @Published private(set) var projectNotesEditReadError: String?
-    @Published private(set) var projectNotesEditConflict = false
-    @Published private(set) var projectAttachmentRows: [CoreObject] = []
-    @Published private(set) var projectAttachmentsCurrent = false
-    @Published private(set) var projectAttachmentLoading = false
-    @Published private(set) var projectAttachmentError: String?
-    @Published private(set) var projectAttachmentOpening = false
-    @Published private(set) var projectAttachmentDownloadingID: String?
-    @Published private(set) var projectAttachmentOpenError: String?
-    @Published private(set) var projectFileOpenPresentation: AttachmentFileOpenPresentation?
-    @Published private(set) var projectAttachmentLinkPresented = false
-    @Published private(set) var projectAttachmentLinkDraft = ""
-    @Published private(set) var projectAttachmentLinkError: String?
-    @Published private(set) var projectAttachmentWriteError: String?
-    @Published private(set) var projectAttachmentEditReadError: String?
-    @Published private(set) var projectAttachmentEditOpening = false
-    @Published private(set) var projectFileImporterID: UUID?
-    @Published private(set) var projectFileImporterPresented = false
-    @Published private(set) var projectFileAddOpening = false
-    @Published private(set) var projectFileAddSummary: CoreObject = [:]
-    @Published private(set) var projectFileAddError: String?
-    @Published private(set) var projectFileAvailabilitySummary: CoreObject = [:]
-    @Published private(set) var projectFileAvailabilityError: String?
-    @Published var collapsedProjectAreas: Set<String> = []
-    @Published var expandedProjectSections: Set<String> = []
-    @Published private(set) var contexts: CoreObject = [:]
-    @Published private(set) var contextsSearchText = ""
-    @Published private(set) var savedSearchWriteOperation: CoreObject = [:]
-    @Published private(set) var savedSearchWriteDialog: CoreObject = [:]
-    @Published var savedSearchWriteName = ""
-    @Published private(set) var savedSearchWriteError: String?
-    @Published private(set) var savedSearchWriteOptions: CoreObject = [:]
+    private(set) var projectNotes: CoreObject = [:]
+    private(set) var projectNotesExpanded = false
+    private(set) var projectNotesCurrent = false
+    private(set) var projectNotesError: String?
+    private(set) var projectNotesReferenceError: String?
+    private(set) var projectNotesReferenceOpening = false
+    private(set) var projectNotesEditMode = false
+    private(set) var projectNotesDraft = ""
+    private(set) var projectNotesDraftDirection = ""
+    private(set) var projectNotesEditError: String?
+    private(set) var projectNotesEditReadError: String?
+    private(set) var projectNotesEditConflict = false
+    private(set) var projectAttachmentRows: [CoreObject] = []
+    private(set) var projectAttachmentsCurrent = false
+    private(set) var projectAttachmentLoading = false
+    private(set) var projectAttachmentError: String?
+    private(set) var projectAttachmentOpening = false
+    private(set) var projectAttachmentDownloadingID: String?
+    private(set) var projectAttachmentOpenError: String?
+    private(set) var projectFileOpenPresentation: AttachmentFileOpenPresentation?
+    private(set) var projectAttachmentLinkPresented = false
+    private(set) var projectAttachmentLinkDraft = ""
+    private(set) var projectAttachmentLinkError: String?
+    private(set) var projectAttachmentWriteError: String?
+    private(set) var projectAttachmentEditReadError: String?
+    private(set) var projectAttachmentEditOpening = false
+    private(set) var projectFileImporterID: UUID?
+    private(set) var projectFileImporterPresented = false
+    private(set) var projectFileAddOpening = false
+    private(set) var projectFileAddSummary: CoreObject = [:]
+    private(set) var projectFileAddError: String?
+    private(set) var projectFileAvailabilitySummary: CoreObject = [:]
+    private(set) var projectFileAvailabilityError: String?
+    var collapsedProjectAreas: Set<String> = []
+    var expandedProjectSections: Set<String> = []
+    private(set) var contexts: CoreObject = [:]
+    private(set) var contextsSearchText = ""
+    private(set) var savedSearchWriteOperation: CoreObject = [:]
+    private(set) var savedSearchWriteDialog: CoreObject = [:]
+    var savedSearchWriteName = ""
+    private(set) var savedSearchWriteError: String?
+    private(set) var savedSearchWriteOptions: CoreObject = [:]
     private var savedSearchSortHost: CoreHost?
     private var savedSearchWriteRequest: String?
     var savedSearchWritePresented: Bool { !savedSearchWriteOperation.isEmpty }
@@ -1739,9 +1741,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && (savedSearchWriteOperation.text("type") != "save" || !savedSearchWriteName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
-    @Published private(set) var savedSearch: CoreObject = [:]
-    @Published private(set) var savedSearchCurrent = false
-    @Published private(set) var savedSearchError: String?
+    private(set) var savedSearch: CoreObject = [:]
+    private(set) var savedSearchCurrent = false
+    private(set) var savedSearchError: String?
     private struct SavedSearchReturn {
         let id: String
         let caller: Surface
@@ -1759,143 +1761,143 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && !taskPresented && !capturePresented && !areaPickerPresented
     }
 
-    @Published private(set) var contextsCurrent = false
-    @Published private(set) var contextsLoading = false
-    @Published private(set) var contextsError: String?
-    @Published private(set) var waiting: CoreObject = [:]
-    @Published private(set) var waitingPerson = ""
-    @Published private(set) var waitingCurrent = false
-    @Published private(set) var waitingError: String?
-    @Published var waitingProjectsExpanded = true
-    @Published private(set) var someday: CoreObject = [:]
-    @Published private(set) var somedayCurrent = false
-    @Published private(set) var somedayError: String?
-    @Published var somedayPanel = ""
-    @Published var somedayProjectsExpanded = true
-    @Published private(set) var somedaySearchText = ""
-    @Published private(set) var somedayLocationText = ""
-    @Published private(set) var somedayPickerName = ""
-    @Published private(set) var somedayPickerQuery = ""
-    @Published private(set) var somedayPicker: CoreObject = [:]
-    @Published private(set) var somedayPickerCurrent = false
-    @Published private(set) var somedayPickerError: String?
-    @Published private(set) var somedaySectionCreateOptions: CoreObject = [:]
-    @Published private(set) var somedaySectionCreateDraft = ""
-    @Published private(set) var somedaySectionCreateError: String?
-    @Published private(set) var somedaySectionCreateReadError: String?
-    @Published private(set) var somedaySectionCreateAwaitingRefresh = false
-    @Published private(set) var somedaySectionTaskOptions: CoreObject = [:]
-    @Published private(set) var somedaySectionTaskDraft = ""
-    @Published private(set) var somedaySectionTaskError: String?
-    @Published private(set) var somedaySectionTaskReadError: String?
-    @Published private(set) var somedaySectionTaskAwaitingRefresh = false
-    @Published private(set) var somedayMoveOptions: CoreObject = [:]
-    @Published private(set) var somedayMoveReadError: String?
-    @Published private(set) var somedayMoveError: String?
-    @Published private(set) var somedayMoveAwaitingRefresh = false
-    @Published private(set) var somedayMoveNotice: CoreObject = [:]
-    @Published private(set) var somedayMoveUndoError: String?
-    @Published private(set) var somedayMoveUndoAwaitingRefresh = false
-    @Published private(set) var somedayMoveUndoFailureLabel = ""
-    @Published private(set) var reference: CoreObject = [:]
-    @Published private(set) var referenceCurrent = false
-    @Published private(set) var referenceError: String?
-    @Published private(set) var referenceSelectionMode = false
-    @Published private(set) var referenceSelectedIDs: [String] = []
-    @Published private(set) var referenceBulk: CoreObject = [:]
+    private(set) var contextsCurrent = false
+    private(set) var contextsLoading = false
+    private(set) var contextsError: String?
+    private(set) var waiting: CoreObject = [:]
+    private(set) var waitingPerson = ""
+    private(set) var waitingCurrent = false
+    private(set) var waitingError: String?
+    var waitingProjectsExpanded = true
+    private(set) var someday: CoreObject = [:]
+    private(set) var somedayCurrent = false
+    private(set) var somedayError: String?
+    var somedayPanel = ""
+    var somedayProjectsExpanded = true
+    private(set) var somedaySearchText = ""
+    private(set) var somedayLocationText = ""
+    private(set) var somedayPickerName = ""
+    private(set) var somedayPickerQuery = ""
+    private(set) var somedayPicker: CoreObject = [:]
+    private(set) var somedayPickerCurrent = false
+    private(set) var somedayPickerError: String?
+    private(set) var somedaySectionCreateOptions: CoreObject = [:]
+    private(set) var somedaySectionCreateDraft = ""
+    private(set) var somedaySectionCreateError: String?
+    private(set) var somedaySectionCreateReadError: String?
+    private(set) var somedaySectionCreateAwaitingRefresh = false
+    private(set) var somedaySectionTaskOptions: CoreObject = [:]
+    private(set) var somedaySectionTaskDraft = ""
+    private(set) var somedaySectionTaskError: String?
+    private(set) var somedaySectionTaskReadError: String?
+    private(set) var somedaySectionTaskAwaitingRefresh = false
+    private(set) var somedayMoveOptions: CoreObject = [:]
+    private(set) var somedayMoveReadError: String?
+    private(set) var somedayMoveError: String?
+    private(set) var somedayMoveAwaitingRefresh = false
+    private(set) var somedayMoveNotice: CoreObject = [:]
+    private(set) var somedayMoveUndoError: String?
+    private(set) var somedayMoveUndoAwaitingRefresh = false
+    private(set) var somedayMoveUndoFailureLabel = ""
+    private(set) var reference: CoreObject = [:]
+    private(set) var referenceCurrent = false
+    private(set) var referenceError: String?
+    private(set) var referenceSelectionMode = false
+    private(set) var referenceSelectedIDs: [String] = []
+    private(set) var referenceBulk: CoreObject = [:]
     private var referenceSelectedRevisions: CoreObject = [:]
     private var referenceAnchorID: String?
     private var referenceRangeSelectMode = false
     private var referenceBulkDeleteConfirmationContext: String?
     private var referenceTasksMoveRequest: String?
-    private var referenceTasksMoveGeneration = 0
-    @Published private(set) var referenceBulkTagPresented = false
-    @Published private(set) var referenceBulkTagInput = GatedTextInput(limit: .max)
+    @ObservationIgnored private var referenceTasksMoveGeneration = 0
+    private(set) var referenceBulkTagPresented = false
+    private(set) var referenceBulkTagInput = GatedTextInput(limit: .max)
     var referenceBulkTagText: String { referenceBulkTagInput.text }
-    @Published private(set) var referenceBulkTagOptions: CoreObject = [:]
-    @Published private(set) var referenceBulkTagReadError: String?
-    @Published private(set) var referenceBulkTagWriteError = false
+    private(set) var referenceBulkTagOptions: CoreObject = [:]
+    private(set) var referenceBulkTagReadError: String?
+    private(set) var referenceBulkTagWriteError = false
     private var referenceBulkTagReadTask: Task<Void, Never>?
-    private var referenceBulkTagReadGeneration = 0
+    @ObservationIgnored private var referenceBulkTagReadGeneration = 0
     private var referenceBulkTagIDs: [String] = []
     private var referenceBulkTagRevisions: CoreObject = [:]
     private var referenceBulkTagParams: CoreObject = [:]
     private var referenceTasksAddTagRequest: String?
-    @Published private(set) var referenceBulkRemovePresented = false
-    @Published private(set) var referenceBulkRemoveOptions: CoreObject = [:]
-    @Published private(set) var referenceBulkRemoveQuery = ""
-    @Published private(set) var referenceBulkRemovePicks: [String] = []
-    @Published private(set) var referenceBulkRemoveItems: [CoreObject] = []
-    @Published private(set) var referenceBulkRemoveTotal = 0
-    @Published private(set) var referenceBulkRemoveCurrent = false
-    @Published private(set) var referenceBulkRemoveReading = false
-    @Published private(set) var referenceBulkRemoveReadError: String?
-    @Published private(set) var referenceBulkRemoveWriteError = false
+    private(set) var referenceBulkRemovePresented = false
+    private(set) var referenceBulkRemoveOptions: CoreObject = [:]
+    private(set) var referenceBulkRemoveQuery = ""
+    private(set) var referenceBulkRemovePicks: [String] = []
+    private(set) var referenceBulkRemoveItems: [CoreObject] = []
+    private(set) var referenceBulkRemoveTotal = 0
+    private(set) var referenceBulkRemoveCurrent = false
+    private(set) var referenceBulkRemoveReading = false
+    private(set) var referenceBulkRemoveReadError: String?
+    private(set) var referenceBulkRemoveWriteError = false
     private var referenceBulkRemoveTask: Task<Void, Never>?
-    private var referenceBulkRemoveGeneration = 0
+    @ObservationIgnored private var referenceBulkRemoveGeneration = 0
     private var referenceBulkRemoveIDs: [String] = []
     private var referenceBulkRemoveRevisions: CoreObject = [:]
     private var referenceBulkRemoveParams: CoreObject = [:]
     private var referenceBulkRemoveRevision = ""
     private var referenceTasksRemoveTagRequest: String?
-    @Published var referencePanel = ""
+    var referencePanel = ""
     enum TaskListSortCaller: String { case inbox, reference, contexts }
-    @Published private(set) var taskListSortCaller: TaskListSortCaller?
+    private(set) var taskListSortCaller: TaskListSortCaller?
     private var taskListSortPresentationID = UUID()
     private var taskListSortHost: CoreHost?
-    @Published private(set) var referenceSortOptions: CoreObject = [:]
-    @Published private(set) var referenceSortError: String?
+    private(set) var referenceSortOptions: CoreObject = [:]
+    private(set) var referenceSortError: String?
     private var referenceSortRequest: String?
     private var referenceSortExpectedResult: CoreObject?
-    @Published private(set) var referenceSearchText = ""
-    @Published private(set) var referenceLocationText = ""
-    @Published private(set) var referencePickerName = ""
-    @Published private(set) var referencePickerQuery = ""
-    @Published private(set) var referencePicker: CoreObject = [:]
-    @Published private(set) var referencePickerCurrent = false
-    @Published private(set) var referencePickerError: String?
-    @Published private(set) var historyTabs: CoreObject = [:]
-    @Published private(set) var history: CoreObject = [:]
-    @Published private(set) var historyCurrent = false
-    @Published private(set) var historyError: String?
-    @Published private(set) var historyPanel = ""
-    @Published private(set) var historySearchText = ""
-    @Published private(set) var historyLocationText = ""
-    @Published private(set) var historyPickerName = ""
-    @Published private(set) var historyPickerQuery = ""
-    @Published private(set) var historyPicker: CoreObject = [:]
-    @Published private(set) var historyPickerCurrent = false
-    @Published private(set) var historyPickerError: String?
-    @Published private(set) var historyArchiveSelectionMode = false
-    @Published private(set) var historyArchiveSelectedIDs: [String] = []
+    private(set) var referenceSearchText = ""
+    private(set) var referenceLocationText = ""
+    private(set) var referencePickerName = ""
+    private(set) var referencePickerQuery = ""
+    private(set) var referencePicker: CoreObject = [:]
+    private(set) var referencePickerCurrent = false
+    private(set) var referencePickerError: String?
+    private(set) var historyTabs: CoreObject = [:]
+    private(set) var history: CoreObject = [:]
+    private(set) var historyCurrent = false
+    private(set) var historyError: String?
+    private(set) var historyPanel = ""
+    private(set) var historySearchText = ""
+    private(set) var historyLocationText = ""
+    private(set) var historyPickerName = ""
+    private(set) var historyPickerQuery = ""
+    private(set) var historyPicker: CoreObject = [:]
+    private(set) var historyPickerCurrent = false
+    private(set) var historyPickerError: String?
+    private(set) var historyArchiveSelectionMode = false
+    private(set) var historyArchiveSelectedIDs: [String] = []
     private var historyArchiveSelectedRevisions: CoreObject = [:]
     private var archivedTasksRestoreRequest: String?
-    @Published private(set) var archiveBulkDeleteConfirmation: CoreObject = [:]
-    @Published private(set) var historyDoneSelectionMode = false
-    @Published private(set) var historyDoneSelectedIDs: [String] = []
-    @Published private(set) var historyDoneBulk: CoreObject = [:]
-    @Published private(set) var doneBulkTagPresented = false
-    @Published private(set) var doneBulkTagInput = GatedTextInput(limit: .max)
+    private(set) var archiveBulkDeleteConfirmation: CoreObject = [:]
+    private(set) var historyDoneSelectionMode = false
+    private(set) var historyDoneSelectedIDs: [String] = []
+    private(set) var historyDoneBulk: CoreObject = [:]
+    private(set) var doneBulkTagPresented = false
+    private(set) var doneBulkTagInput = GatedTextInput(limit: .max)
     var doneBulkTagText: String { doneBulkTagInput.text }
-    @Published private(set) var doneBulkTagOptions: CoreObject = [:]
-    @Published private(set) var doneBulkTagReadError: String?
-    @Published private(set) var doneBulkTagWriteError = false
+    private(set) var doneBulkTagOptions: CoreObject = [:]
+    private(set) var doneBulkTagReadError: String?
+    private(set) var doneBulkTagWriteError = false
     private var doneBulkTagReadTask: Task<Void, Never>?
-    private var doneBulkTagReadGeneration = 0
+    @ObservationIgnored private var doneBulkTagReadGeneration = 0
     private var doneBulkTagIDs: [String] = []
     private var doneBulkTagRevisions: CoreObject = [:]
-    @Published private(set) var doneBulkRemovePresented = false
-    @Published private(set) var doneBulkRemoveQuery = ""
-    @Published private(set) var doneBulkRemovePicks: [String] = []
-    @Published private(set) var doneBulkRemoveOptions: CoreObject = [:]
-    @Published private(set) var doneBulkRemoveItems: [CoreObject] = []
-    @Published private(set) var doneBulkRemoveTotal = 0
-    @Published private(set) var doneBulkRemoveCurrent = false
-    @Published private(set) var doneBulkRemoveReading = false
-    @Published private(set) var doneBulkRemoveReadError: String?
-    @Published private(set) var doneBulkRemoveWriteError = false
+    private(set) var doneBulkRemovePresented = false
+    private(set) var doneBulkRemoveQuery = ""
+    private(set) var doneBulkRemovePicks: [String] = []
+    private(set) var doneBulkRemoveOptions: CoreObject = [:]
+    private(set) var doneBulkRemoveItems: [CoreObject] = []
+    private(set) var doneBulkRemoveTotal = 0
+    private(set) var doneBulkRemoveCurrent = false
+    private(set) var doneBulkRemoveReading = false
+    private(set) var doneBulkRemoveReadError: String?
+    private(set) var doneBulkRemoveWriteError = false
     private var doneBulkRemoveTask: Task<Void, Never>?
-    private var doneBulkRemoveGeneration = 0
+    @ObservationIgnored private var doneBulkRemoveGeneration = 0
     private var doneBulkRemoveIDs: [String] = []
     private var doneBulkRemoveRevisions: CoreObject = [:]
     private var doneBulkRemoveParams: CoreObject = [:]
@@ -1907,17 +1909,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var archivedTasksDeleteRequest: String?
     private var archivedTaskRestoreRequest: String?
     private var archivedTaskDeleteRequest: String?
-    @Published private(set) var trash: CoreObject = [:]
-    @Published private(set) var trashCurrent = false
-    @Published private(set) var trashError: String?
+    private(set) var trash: CoreObject = [:]
+    private(set) var trashCurrent = false
+    private(set) var trashError: String?
     private var trashRestoreRequest: (project: Bool, json: String)?
-    @Published private(set) var trashSelectionMode = false
-    @Published private(set) var trashSelectedTaskIDs: [String] = []
-    @Published private(set) var trashSelectedProjectIDs: [String] = []
+    private(set) var trashSelectionMode = false
+    private(set) var trashSelectedTaskIDs: [String] = []
+    private(set) var trashSelectedProjectIDs: [String] = []
     private var trashSelectedTaskRevisions: CoreObject = [:]
     private var trashSelectedProjectRevisions: CoreObject = [:]
-    private var trashPresentationGeneration = 0
-    private var trashReadGeneration = 0
+    @ObservationIgnored private var trashPresentationGeneration = 0
+    @ObservationIgnored private var trashReadGeneration = 0
     private var trashBusyOwner: UUID?
     private enum TrashBulkOperation {
         case restore, purge
@@ -1944,13 +1946,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let selectionMode: Bool
         let copy: CoreObject
     }
-    @Published private(set) var trashPurgeConfirmation: TrashPurgeConfirmation?
+    private(set) var trashPurgeConfirmation: TrashPurgeConfirmation?
     #if DEBUG && targetEnvironment(simulator)
-    @Published private(set) var trashBulkTestState = ""
+    private(set) var trashBulkTestState = ""
     private(set) var trashBulkFixtureEnabled = false
     private var trashBulkTestMode = ""
     private var trashBulkTestHeldOnce = false
-    private var trashBulkTestWaiter: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var trashBulkTestWaiter: CheckedContinuation<Void, Never>?
     private var trashBulkTestSelectAll = false
     private var trashBulkTestSubmissions = 0
     private var trashBulkTestLastRequest = ""
@@ -1965,16 +1967,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var trashPurgeTestRetiredConfirmation: UUID?
     private var trashPurgeTestRefreshRequest = ""
     #endif
-    @Published private(set) var theme: CoreObject = [:]
-    @Published private(set) var area: CoreObject = [:]
+    private(set) var theme: CoreObject = [:]
+    private(set) var area: CoreObject = [:]
     private var rowSwipeLanguageGeneration = 0
-    @Published private(set) var strings: CoreObject = [:] { didSet { rowSwipeLanguageGeneration += 1 } }
-    @Published private(set) var currentLanguage = "" {
+    private(set) var strings: CoreObject = [:] { didSet { rowSwipeLanguageGeneration += 1 } }
+    private(set) var currentLanguage = "" {
         didSet { if currentLanguage != oldValue { retireReviewAI(); retireProcessInboxAI(); retireTaskAI(clearOptions: true); retireCaptureCopilot(clearApplied: false) } }
     }
-    @Published private(set) var capture: CoreObject = [:]
-    @Published private(set) var ready = false { didSet { refreshNativeDropboxAuthorization() } }
-    @Published private(set) var busy = false {
+    private(set) var capture: CoreObject = [:]
+    private(set) var ready = false { didSet { refreshNativeDropboxAuthorization() } }
+    private(set) var busy = false {
         didSet {
             if busy && !oldValue, calendarPushLifecycleOwner != nil {
                 calendarPushReadmitAfterBusy = true
@@ -1992,7 +1994,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             if !busy && oldValue { requestDeferredTextInputRevalidation() }
         }
     }
-    @Published private(set) var retryNeeded = false {
+    private(set) var retryNeeded = false {
         didSet {
             projectBulkRetryRequest = nil
             rowTaskBackdateRetryRequest = nil
@@ -2098,14 +2100,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             }
         }
     }
-    @Published private(set) var error: String?
+    private(set) var error: String?
     private static let productionStartupRecoveryMessage = "Existing library requires recovery. Try again."
     var productionStartupRecoveryReason: String? {
         guard !ready, error == Self.productionStartupRecoveryMessage,
               let selection = try? NativeAppLaunch.selection.get(), case .production = selection else { return nil }
         return Self.productionStartupRecoveryMessage
     }
-    @Published var capturePresented = false {
+    var capturePresented = false {
         didSet {
             if capturePresented != oldValue {
                 capturePresentationID = UUID()
@@ -2115,27 +2117,27 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             else if voiceCaptureOwner?.saved != true { retireCaptureVoice() }
         }
     }
-    @Published private(set) var areaPickerPresented = false {
+    private(set) var areaPickerPresented = false {
         didSet { if areaPickerPresented { retireReviewAI(); foregroundSyncIntent = nil } }
     }
-    @Published private(set) var taskPresented = false {
+    private(set) var taskPresented = false {
         didSet {
             if taskPresented != oldValue { taskReferenceCopyNotice = nil }
             if taskPresented { retireReviewAI(); foregroundSyncIntent = nil }
             else { retireTaskAI(clearOptions: true); resumeVoiceSpeechWaiter() }
         }
     }
-    @Published private(set) var taskAIOptions: CoreObject = [:]
-    @Published private(set) var taskAIWorking = false
-    @Published private(set) var taskAIAnswer: CoreObject = [:]
-    @Published private(set) var taskAIAnswerID: UUID?
+    private(set) var taskAIOptions: CoreObject = [:]
+    private(set) var taskAIWorking = false
+    private(set) var taskAIAnswer: CoreObject = [:]
+    private(set) var taskAIAnswerID: UUID?
     private var taskAIInputRevision: UInt64 = 0
     private var taskAIRequestTask: Task<Void, Never>?
     private var taskAIApplyTask: Task<Void, Never>?
     private var taskAIApplyWorkID: UUID?
     private var taskAIBusyOwner: UUID?
     private var taskAIOptionsTask: Task<Void, Never>?
-    @Published private var taskAIRetirementTasks: [UUID: Task<Void, Never>] = [:]
+    private var taskAIRetirementTasks: [UUID: Task<Void, Never>] = [:]
     private var taskAIOptionsLease: NativeTaskAIEditorLease?
     private var taskAIStartID: UUID?
     private var taskAIApplyID: UUID?
@@ -2157,46 +2159,46 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
     private var taskAIOwner: TaskAIOwner?
-    @Published private(set) var taskInitialTab = "view" {
+    private(set) var taskInitialTab = "view" {
         didSet { if taskInitialTab != "task" { retireTaskAI() } }
     }
     private var taskOpeningIntent: CoreObject?
-    @Published private(set) var taskView: CoreObject = [:] { didSet { navigationReplayPublicationChanged("task") } }
-    @Published private(set) var taskError: String?
-    @Published private(set) var taskEditor: CoreObject = [:] {
+    private(set) var taskView: CoreObject = [:] { didSet { navigationReplayPublicationChanged("task") } }
+    private(set) var taskError: String?
+    private(set) var taskEditor: CoreObject = [:] {
         didSet { taskAIValuesChanged(oldValue, taskEditor); checkpointTaskDraftAfterCoreEdit() }
     }
-    @Published private(set) var taskEditorSectionHelp: CoreObject = [:]
-    @Published private(set) var taskDestination: CoreObject = [:]
-    @Published private(set) var taskDestinationKind = "" { didSet { if !taskDestinationKind.isEmpty { retireTaskAI() } } }
-    @Published private(set) var taskDestinationQuery = ""
-    @Published private(set) var taskDestinationCurrent = false
-    @Published private(set) var taskDestinationError: String?
-    @Published var taskTitleDraft = "" { didSet { taskAIRawChanged(oldValue, taskTitleDraft) } }
-    @Published var taskNoteDraft = "" { didSet { taskAIRawChanged(oldValue, taskNoteDraft) } }
-    @Published private(set) var taskEditorDraftDirection = ""
-    @Published var taskLocationDraft = "" { didSet { taskAIRawChanged(oldValue, taskLocationDraft) } }
-    @Published var taskEstimateInput = "" { didSet { taskAIRawChanged(oldValue, taskEstimateInput) } }
-    @Published var taskTimeSpentInput = "" { didSet { taskAIRawChanged(oldValue, taskTimeSpentInput) } }
-    @Published private(set) var taskChecklist: [CoreObject] = [] {
+    private(set) var taskEditorSectionHelp: CoreObject = [:]
+    private(set) var taskDestination: CoreObject = [:]
+    private(set) var taskDestinationKind = "" { didSet { if !taskDestinationKind.isEmpty { retireTaskAI() } } }
+    private(set) var taskDestinationQuery = ""
+    private(set) var taskDestinationCurrent = false
+    private(set) var taskDestinationError: String?
+    var taskTitleDraft = "" { didSet { taskAIRawChanged(oldValue, taskTitleDraft) } }
+    var taskNoteDraft = "" { didSet { taskAIRawChanged(oldValue, taskNoteDraft) } }
+    private(set) var taskEditorDraftDirection = ""
+    var taskLocationDraft = "" { didSet { taskAIRawChanged(oldValue, taskLocationDraft) } }
+    var taskEstimateInput = "" { didSet { taskAIRawChanged(oldValue, taskEstimateInput) } }
+    var taskTimeSpentInput = "" { didSet { taskAIRawChanged(oldValue, taskTimeSpentInput) } }
+    private(set) var taskChecklist: [CoreObject] = [] {
         didSet { taskAIValuesChanged(oldValue, taskChecklist); checkpointTaskDraftAfterCoreEdit() }
     }
-    @Published private(set) var taskAttachments: [CoreObject] = [] {
+    private(set) var taskAttachments: [CoreObject] = [] {
         didSet { taskAIValuesChanged(oldValue, taskAttachments); checkpointTaskDraftAfterCoreEdit() }
     }
-    @Published private(set) var taskAttachmentRows: [CoreObject] = []
+    private(set) var taskAttachmentRows: [CoreObject] = []
     enum TaskAttachmentState: Equatable {
         case none, active, interrupted, savedCleanup, discardedCleanup, blocked
     }
     enum TaskOwnedMenuAction: String { case delete, duplicate, promote }
     enum TaskOwnedMenuDisposition: Equatable { case save, discard, cancel }
     enum TaskAttachmentPickerKind: Equatable { case file, photo }
-    @Published private(set) var taskAttachmentState: TaskAttachmentState = .none
-    @Published private(set) var taskAttachmentError: String?
-    @Published private(set) var taskAttachmentWorking = false
-    @Published private(set) var taskFileImporterPresented = false { didSet { if taskFileImporterPresented { retireTaskAI() } } }
-    @Published private(set) var taskFileImporterID: UUID?
-    @Published private(set) var taskOwnedMenuAction: TaskOwnedMenuAction? { didSet { if taskOwnedMenuAction != nil { retireTaskAI() } } }
+    private(set) var taskAttachmentState: TaskAttachmentState = .none
+    private(set) var taskAttachmentError: String?
+    private(set) var taskAttachmentWorking = false
+    private(set) var taskFileImporterPresented = false { didSet { if taskFileImporterPresented { retireTaskAI() } } }
+    private(set) var taskFileImporterID: UUID?
+    private(set) var taskOwnedMenuAction: TaskOwnedMenuAction? { didSet { if taskOwnedMenuAction != nil { retireTaskAI() } } }
     private var taskAttachmentSummary: CoreObject = [:]
     private var taskAttachmentSaveRequest: String?
     private var taskAttachmentSavedResult: CoreObject?
@@ -2231,7 +2233,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var taskAttachmentDownloadTask: Task<Void, Never>?
     private var taskAttachmentDownloadAdmission = UUID()
     private var taskAttachmentDownloadUnconfirmedRequest: String?
-    @Published private(set) var taskAttachmentDownloadingID: String?
+    private(set) var taskAttachmentDownloadingID: String?
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var taskAttachmentDownloadTestThrowOnce = false
     private var taskAttachmentDownloadTestDelayOnce = false
@@ -2255,46 +2257,46 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var taskOwnedMenuSelection: TaskOwnedMenuSelection?
     private var taskStartupSaveReceipt: CoreObject?
     private var taskStartupSaveReceiptHost: CoreHost?
-    @Published private(set) var taskLinkSheet: CoreObject = [:] { didSet { if !taskLinkSheet.isEmpty { retireTaskAI() } } }
-    @Published private(set) var taskLinkSheetError: String?
-    @Published private(set) var taskLinkSubmitting = false
-    @Published private(set) var taskReferenceOpening = false { didSet { if taskReferenceOpening { retireTaskAI() } } }
-    @Published private(set) var taskReferenceError: String?
-    @Published private(set) var taskReferenceSection = "description"
-    @Published private(set) var taskAttachmentOpening = false { didSet { if taskAttachmentOpening { retireTaskAI() } } }
-    @Published private(set) var taskAttachmentOpenError: String?
-    @Published private(set) var taskFileOpenPresentation: AttachmentFileOpenPresentation?
-    @Published private(set) var taskAudioPlayback: TaskAudioPlaybackState?
+    private(set) var taskLinkSheet: CoreObject = [:] { didSet { if !taskLinkSheet.isEmpty { retireTaskAI() } } }
+    private(set) var taskLinkSheetError: String?
+    private(set) var taskLinkSubmitting = false
+    private(set) var taskReferenceOpening = false { didSet { if taskReferenceOpening { retireTaskAI() } } }
+    private(set) var taskReferenceError: String?
+    private(set) var taskReferenceSection = "description"
+    private(set) var taskAttachmentOpening = false { didSet { if taskAttachmentOpening { retireTaskAI() } } }
+    private(set) var taskAttachmentOpenError: String?
+    private(set) var taskFileOpenPresentation: AttachmentFileOpenPresentation?
+    private(set) var taskAudioPlayback: TaskAudioPlaybackState?
     private var taskAudioPlayer: TaskAttachmentAudioPlayer?
-    @Published private(set) var taskSharePayload: TaskSharePayload? { didSet { if taskSharePayload != nil { retireTaskAI() } } }
-    @Published private(set) var taskShareError: String?
+    private(set) var taskSharePayload: TaskSharePayload? { didSet { if taskSharePayload != nil { retireTaskAI() } } }
+    private(set) var taskShareError: String?
     private var taskAttachmentOpenClaim = UUID()
     private var taskAttachmentOpeningFile = false
-    @Published private(set) var taskChecklistField: CoreObject = [:]
-    @Published private(set) var taskChecklistInputs: [Int: String] = [:] { didSet { taskAIRawInputsChanged(oldValue, taskChecklistInputs) } }
-    @Published var taskChecklistAppendInput = "" { didSet { taskAIRawChanged(oldValue, taskChecklistAppendInput) } }
-    @Published private(set) var taskChecklistFocusIndex: Int?
-    @Published private(set) var taskScheduleUpdating = false
-    @Published private(set) var taskSchedulePending = false
-    @Published private(set) var taskRelativeAmountInput = "" { didSet { taskAIRawChanged(oldValue, taskRelativeAmountInput) } }
-    @Published private(set) var taskRelativeUnitInput = "" { didSet { taskAIRawChanged(oldValue, taskRelativeUnitInput) } }
-    @Published private(set) var taskRecurrenceInputs: [String: String] = [:] { didSet { taskAIRawInputsChanged(oldValue, taskRecurrenceInputs) } }
-    @Published private(set) var taskTokenInputs: [String: String] = [:] { didSet { taskAIRawInputsChanged(oldValue, taskTokenInputs) } }
-    @Published private(set) var taskTokenSuggestions: [String: CoreObject] = [:]
-    @Published private(set) var taskPersonCreateReadError: String?
-    @Published private(set) var taskTokenErrors: [String: String] = [:]
-    @Published var draft = "" {
+    private(set) var taskChecklistField: CoreObject = [:]
+    private(set) var taskChecklistInputs: [Int: String] = [:] { didSet { taskAIRawInputsChanged(oldValue, taskChecklistInputs) } }
+    var taskChecklistAppendInput = "" { didSet { taskAIRawChanged(oldValue, taskChecklistAppendInput) } }
+    private(set) var taskChecklistFocusIndex: Int?
+    private(set) var taskScheduleUpdating = false
+    private(set) var taskSchedulePending = false
+    private(set) var taskRelativeAmountInput = "" { didSet { taskAIRawChanged(oldValue, taskRelativeAmountInput) } }
+    private(set) var taskRelativeUnitInput = "" { didSet { taskAIRawChanged(oldValue, taskRelativeUnitInput) } }
+    private(set) var taskRecurrenceInputs: [String: String] = [:] { didSet { taskAIRawInputsChanged(oldValue, taskRecurrenceInputs) } }
+    private(set) var taskTokenInputs: [String: String] = [:] { didSet { taskAIRawInputsChanged(oldValue, taskTokenInputs) } }
+    private(set) var taskTokenSuggestions: [String: CoreObject] = [:]
+    private(set) var taskPersonCreateReadError: String?
+    private(set) var taskTokenErrors: [String: String] = [:]
+    var draft = "" {
         didSet { if draft != oldValue { retireCaptureCopilot(clearApplied: true) } }
     }
-    @Published var noteDraft = ""
-    @Published var contextQuery = ""
-    @Published private(set) var contextPickerPresented = false
-    @Published private(set) var notice: String?
-    @Published var bulkConfirm: CoreObject = [:] {
+    var noteDraft = ""
+    var contextQuery = ""
+    private(set) var contextPickerPresented = false
+    private(set) var notice: String?
+    var bulkConfirm: CoreObject = [:] {
         didSet { if !bulkConfirm.isEmpty { foregroundSyncIntent = nil } }
     }
 
-    @Published private(set) var completedStartupToken: UUID?
+    private(set) var completedStartupToken: UUID?
     private enum ForegroundSyncReason {
         case startup, resume, pull, retention, background, leave
         var command: String {
@@ -2335,9 +2337,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var archiveRetentionWake: Task<Void, Never>?
 
     private var foregroundSyncGeneration = 0
-    private var syncLeaveTicket = 0
+    @ObservationIgnored private var syncLeaveTicket = 0
     private var syncLeaveArmed = false
-    @Published private var foregroundSyncSceneActive = false
+    private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
     private struct ReminderLifecycleOwner {
         let id: UUID
@@ -2358,10 +2360,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var reminderRevision: UInt64 = 0
     private var reminderConfirmedRevision: UInt64 = 0
     private var reminderWakeTicket: UInt64 = 0
-    private var reminderAttemptedTicket: UInt64 = 0
+    @ObservationIgnored private var reminderAttemptedTicket: UInt64 = 0
     private var pomodoroAlarmWakeTicket: UInt64 = 0
-    private var pomodoroAlarmAttemptedTicket: UInt64 = 0
-    private var pomodoroAlarmConfirmedTicket: UInt64 = 0
+    @ObservationIgnored private var pomodoroAlarmAttemptedTicket: UInt64 = 0
+    @ObservationIgnored private var pomodoroAlarmConfirmedTicket: UInt64 = 0
     private var reminderDebounceReady = true
     private var reminderDrainLease: UIBackgroundTaskIdentifier = .invalid
     private var reminderDrainOwner: UUID?
@@ -2387,7 +2389,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var calendarPushFullPending = false
     private var calendarPushIDsPending: [Data: String] = [:]
     private var calendarPushWakeTicket: UInt64 = 0
-    private var calendarPushAttemptedTicket: UInt64 = 0
+    @ObservationIgnored private var calendarPushAttemptedTicket: UInt64 = 0
     private var calendarPushDrainLease: UIBackgroundTaskIdentifier = .invalid
     private var calendarPushDrainOwner: UUID?
     #if DEBUG && targetEnvironment(simulator)
@@ -2395,7 +2397,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         guard let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
         return NativeAppLaunch.arguments.contains("--native-calendar-push-fixture")
     }
-    @Published private(set) var calendarPushFixtureState = ""
+    private(set) var calendarPushFixtureState = ""
     private var calendarPushFixtureEnabledValue = true
     private var calendarPushFixtureTarget: String? = "fixture-B"
     private var calendarPushFixtureColor = "#3B82F6"
@@ -2407,7 +2409,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var calendarPushFixtureCancelled = 0
     private var calendarPushFixtureHoldNext = false
     private var calendarPushFixtureFailNext = false
-    private var calendarPushFixtureWaiter: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var calendarPushFixtureWaiter: CheckedContinuation<Void, Never>?
     private var calendarPushFixtureStale: (host: CoreHost, token: UUID, claim: UUID)?
     #endif
     private struct SearchLifecycleOwner {
@@ -2429,11 +2431,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var widgetCompletionLease: NativeTaskAIEditorLease?
     private var widgetNextActionDeadline: Double?
     private var productionWidgetActionDeadline: Double?
-    private weak var widgetNextPublishedHost: CoreHost?
+    @ObservationIgnored private weak var widgetNextPublishedHost: CoreHost?
     private var widgetFamilySystemColorScheme: NativeWidgetFamilySnapshot.SystemColorScheme?
     private var widgetFamilyLastObservation: NativeSearchObservation?
     private var widgetFamilyForceSnapshot = true
-    private weak var widgetFamilyPublishedHost: CoreHost?
+    @ObservationIgnored private weak var widgetFamilyPublishedHost: CoreHost?
     private var widgetFamilyPublisher: NativeWidgetFamilyPublisher?
     private var searchLifecycleOwner: SearchLifecycleOwner?
     private var searchLifecycleTask: Task<Void, Never>?
@@ -2441,7 +2443,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var searchSceneActive = false
     private var searchPublicationGeneration: UInt64 = 0
     private var searchWakeTicket: UInt64 = 0
-    private var searchAttemptedTicket: UInt64 = 0
+    @ObservationIgnored private var searchAttemptedTicket: UInt64 = 0
     private var searchForceSnapshot = true
     #if DEBUG && targetEnvironment(simulator)
     private var searchTestFake: Bool {
@@ -2450,8 +2452,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private var searchTestDeliverySent = false
     private var searchTestIdentifiers: [String: String] = [:]
-    @Published private(set) var searchTestState = ""
-    @Published private(set) var searchTestRemovals = 0
+    private(set) var searchTestState = ""
+    private(set) var searchTestRemovals = 0
     #endif
     private struct NotificationResponseOwner {
         let id: UUID
@@ -2575,9 +2577,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var navigationReplayBusyOwner: NavigationReplayOwner?
     private var navigationReplayPublications: [String: UInt64] = ["task": 0, "project": 0, "inbox": 0]
     private var navigationReplayLocalCovers: Set<UUID> = []
-    @Published private(set) var navigationReplayPhase = "idle"
-    @Published private(set) var navigationReplayTicket: NavigationReplayTicket?
-    private var entityLinkSequence: UInt64 = 0
+    private(set) var navigationReplayPhase = "idle"
+    private(set) var navigationReplayTicket: NavigationReplayTicket?
+    @ObservationIgnored private var entityLinkSequence: UInt64 = 0
     private var entityLinkPending: EntityLinkDelivery?
     private var entityLinkDeliveryToken: UInt64 = 0
     private var entityLinkLastInput: Data?
@@ -2593,16 +2595,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var entityLinkDeferredTestDelivered = false
     private var entityLinkTestReadFailures = 0
     private(set) var entityLinkTestReadEnabled = false
-    @Published private(set) var entityLinkTestReadState = ""
+    private(set) var entityLinkTestReadState = ""
     private var entityLinkTestHeldOnce = false
-    private var entityLinkTestReadWaiter: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var entityLinkTestReadWaiter: CheckedContinuation<Void, Never>?
     #endif
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     private var startupSyncTestThrowOnce = false
     private var resumeSyncTestThrowOnce = false
     #endif
 
-    private weak var inboxViewBoundaryRecordedHost: CoreHost?
+    @ObservationIgnored private weak var inboxViewBoundaryRecordedHost: CoreHost?
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
@@ -2719,9 +2721,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private var reviewProjectTaskOwner: ReviewProjectTaskOwner?
     private var reviewProjectTaskEditor: ReviewProjectTaskEditor?
-    @Published private(set) var reviewProjectTaskOptions: CoreObject = [:]
-    @Published var reviewProjectTaskText = ""
-    @Published private(set) var reviewProjectTaskError: String?
+    private(set) var reviewProjectTaskOptions: CoreObject = [:]
+    var reviewProjectTaskText = ""
+    private(set) var reviewProjectTaskError: String?
     var reviewProjectTaskPresented: Bool { reviewProjectTaskOwner != nil && !reviewProjectTaskOptions.isEmpty }
     var reviewProjectTaskCanCancel: Bool { !busy && !retryNeeded && reviewProjectTaskOwner?.request == nil }
     private var reviewGuideSession = UUID()
@@ -2749,9 +2751,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private var reminderCaptureHandoverOwner: ReminderCaptureHandoverOwner?
     private var reminderCaptureHeld = false
-    private weak var reminderHandoverDiagnosticHost: CoreHost?
+    @ObservationIgnored private weak var reminderHandoverDiagnosticHost: CoreHost?
     private var reminderHandoverDiagnosticToken: UUID?
-    private weak var intakeSameTreeDiagnosticHost: CoreHost?
+    @ObservationIgnored private weak var intakeSameTreeDiagnosticHost: CoreHost?
     private var intakeSameTreeDiagnosticToken: UUID?
     private var workspaceRetirementOwner: WorkspaceRetirementOwner?
     private var workspaceRetired = false
@@ -2804,7 +2806,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     private var boardFilters: CoreObject = [:]
     private var boardPendingEdit: CoreObject?
-    @Published private var boardActionRequest: String?
+    private var boardActionRequest: String?
     private var boardActionHost: CoreHost?
     private var boardActionForeground = 0
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
@@ -2888,18 +2890,18 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var calendarPreferenceValues: CoreObject = [:]
     private var calendarPreferencePending = false
     private var calendarPreferenceTarget: CoreObject?
-    @Published private var calendarComposerEdits: [CoreObject] = []
-    @Published private var calendarComposerEditing = false
-    private var calendarComposerGeneration = 0
+    private var calendarComposerEdits: [CoreObject] = []
+    private var calendarComposerEditing = false
+    @ObservationIgnored private var calendarComposerGeneration = 0
     private var calendarComposerSaveRequest: String?
     private var calendarComposerRecoveredResult: CoreObject?
     private var calendarComposerNavigation: (state: CoreObject, minute: Double)?
 
-    var calendarScrollAnchor = ""
-    var calendarViewportAnchors: [String: Double] = [:]
+    @ObservationIgnored var calendarScrollAnchor = ""
+    @ObservationIgnored var calendarViewportAnchors: [String: Double] = [:]
     private(set) var calendarViewportGeneration = 0
     private var previewTask: Task<Void, Never>?
-    private var previewGeneration = 0
+    @ObservationIgnored private var previewGeneration = 0
     private var previewedText = ""
     private var captureID = UUID().uuidString {
         didSet { if captureID != oldValue { retireCaptureCopilot(clearApplied: true) } }
@@ -2965,18 +2967,18 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let navigationID: UUID
         let taskID: String
     }
-    @Published private(set) var captureCopilotOptions: CoreObject = [:]
-    @Published private(set) var captureCopilotView: CoreObject = [:]
-    @Published private(set) var captureCopilotWorking = false
-    @Published private(set) var captureCopilotError: String?
+    private(set) var captureCopilotOptions: CoreObject = [:]
+    private(set) var captureCopilotView: CoreObject = [:]
+    private(set) var captureCopilotWorking = false
+    private(set) var captureCopilotError: String?
     private var captureCopilotApplied: CoreObject = ["tags": [String]()]
     private var captureCopilotSuggestion: CoreObject?
     private var captureCopilotQuestion: CoreObject?
     private var captureCopilotLanguage = ""
     private var captureCopilotTask: Task<Void, Never>?
     private var captureCopilotTaskID: UUID?
-    private var captureCopilotGeneration = 0
-    @Published private var captureCopilotEditing = false
+    @ObservationIgnored private var captureCopilotGeneration = 0
+    private var captureCopilotEditing = false
     private var capturePresentationID = UUID()
     private var captureNavigationID = UUID()
     private var captureSubmission: CaptureSubmission?
@@ -2984,10 +2986,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var captureBusyOwner: UUID?
     private var captureEditHandoff: CaptureEditHandoff?
     enum CaptureVoiceState: Equatable { case idle, requestingPermission, recording(Date), saving, savePending }
-    @Published private(set) var captureVoiceState: CaptureVoiceState = .idle
-    @Published private(set) var captureVoiceRuntime: NativeVoiceRuntime?
-    @Published private(set) var voiceNotice: String?
-    @Published private var captureVoiceTask: Task<Void, Never>?
+    private(set) var captureVoiceState: CaptureVoiceState = .idle
+    private(set) var captureVoiceRuntime: NativeVoiceRuntime?
+    private(set) var voiceNotice: String?
+    private var captureVoiceTask: Task<Void, Never>?
     private var captureVoiceEventsTask: Task<Void, Never>?
     private var voiceSpeechTask: Task<Void, Never>?
     private var voiceNoticeTask: Task<Void, Never>?
@@ -3022,8 +3024,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var voiceCaptureOwner: VoiceCaptureOwner?
     private var voiceSpeechOwner: VoiceSpeechOwner?
     #if DEBUG && targetEnvironment(simulator)
-    @Published private(set) var captureCopilotFixtureState = ""
-    @Published private(set) var captureSaveEditTestState = ""
+    private(set) var captureCopilotFixtureState = ""
+    private(set) var captureSaveEditTestState = ""
     private var captureSaveEditTestMode: String?
     private var captureSaveEditTestWaiter: CheckedContinuation<Void, Never>?
     private var captureSaveEditTestHeldOnce = false
@@ -3082,10 +3084,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var processInboxEditTask: Task<Void, Never>?
     private var processInboxTransitioning = false
     private var refreshRequested = false
-    @Published var taskStatusMenuPresented = false
+    var taskStatusMenuPresented = false
     private var viewedTaskID = ""
     private var taskSavePending = false
-    @Published private(set) var taskPreviewCompleting = false
+    private(set) var taskPreviewCompleting = false
     private var taskPreviewCompletionOwner: (id: String, session: Int)?
     private var taskChecklistLoaded = false
     private var taskOriginalChecklist: [CoreObject] = []
@@ -3095,12 +3097,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var taskChecklistWriteKind: String?
     private var taskChecklistWriteRequest: String?
     private var taskChecklistResetAcknowledgment: CoreObject?
-    @Published private(set) var taskChecklistReadPending = false
+    private(set) var taskChecklistReadPending = false
     private var taskOriginalDraft: CoreObject = [:]
     private var taskOriginalSchedule: CoreObject = [:]
     private var taskOriginalRecurrence: CoreObject = [:]
     private var taskScheduleSession = 0
-    private var taskScheduleSequence = 0
+    @ObservationIgnored private var taskScheduleSequence = 0
     private var taskScheduleEdits: [TaskScheduleEdit] = []
     private var taskScheduleTask: Task<Void, Never>?
     private var taskScheduleFailure: Error?
@@ -3121,17 +3123,17 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var taskTokenSuggestionInputs: [String: String] = [:]
     private var taskTokenReadTasks: [String: Task<Void, Never>] = [:]
     private var taskTokenGenerations: [String: Int] = [:]
-    private var taskTokenGeneration = 0
+    @ObservationIgnored private var taskTokenGeneration = 0
     private var taskTokenNeedsRead: Set<String> = []
     private var taskTokenCommitDisplay: Set<String> = []
     private var taskTokenEdited: Set<String> = []
     private var taskTokenFocused: Set<String> = []
     private var taskTokenSuppressNextBlur: Set<String> = []
-    @Published private(set) var taskRecoveryGateVisible = false
-    @Published private(set) var taskRecoveryStartupCorrupt = false
-    @Published private(set) var taskRecoveryConflict: String?
-    @Published private var taskRecoveryReviewOptions: CoreObject = [:]
-    @Published private(set) var taskRecoveryCheckpointError: String?
+    private(set) var taskRecoveryGateVisible = false
+    private(set) var taskRecoveryStartupCorrupt = false
+    private(set) var taskRecoveryConflict: String?
+    private var taskRecoveryReviewOptions: CoreObject = [:]
+    private(set) var taskRecoveryCheckpointError: String?
     private var taskRecoverySnapshot: EditorDraftSnapshot?
     private var taskRecoveryCorrupt = false
     private var taskRecoveryTouched: Set<String> = []
@@ -3140,13 +3142,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         didSet { if oldValue != taskRecoverySession { taskEditorSectionHelp = [:]; retireTaskAI(clearOptions: true); invalidateTaskAttachmentOpen() } }
     }
     private var taskRecoveryGeneration = 0
-    @Published private(set) var taskRecoveryCheckpointedGeneration = 0
+    private(set) var taskRecoveryCheckpointedGeneration = 0
     private var taskRecoveryCheckpointTask: Task<Void, Never>?
     private var taskRecoveryCheckpointTaskID: UUID?
     private var taskAttachmentCheckpointFailed: EditorDraftSnapshot?
     private var taskAttachmentCheckpointDesired: EditorDraftSnapshot?
     private var taskRecoveryBackgroundTask: UIBackgroundTaskIdentifier = .invalid
-    private var taskRecoveryBackgroundGeneration = 0
+    @ObservationIgnored private var taskRecoveryBackgroundGeneration = 0
     private var taskRecoveryHydrating = false
     private var taskRecoverySaving = false
     private struct TaskPersonCreateRequest {
@@ -3157,7 +3159,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let requestJSON: String
         let expectedID: String
     }
-    @Published private var taskPersonCreatePending: TaskPersonCreateRequest?
+    private var taskPersonCreatePending: TaskPersonCreateRequest?
     private var taskPersonCreateReadRetry: TaskPersonCreateRequest?
     var taskPersonCreateOwed: Bool { taskPersonCreatePending != nil }
     var taskPersonCreateNeedsReview: Bool { taskPersonCreateReadRetry != nil }
@@ -3167,14 +3169,14 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         taskRecoverySnapshot != nil && taskRecoveryCheckpointError == nil
             && taskRecoveryCheckpointedGeneration == taskRecoveryGeneration
     }
-    private var taskDestinationGeneration = 0
+    @ObservationIgnored private var taskDestinationGeneration = 0
     private var taskDestinationReadTask: Task<Void, Never>?
     private var taskDestinationNeedsRead = false
     private var taskDestinationDraftIdentity = ""
     private var focusState: CoreObject = [:]
     private var focusEdits: [CoreObject] = []
-    private var focusEditSequence = 0
-    @Published private var focusRefusedLocationID: Int?
+    @ObservationIgnored private var focusEditSequence = 0
+    private var focusRefusedLocationID: Int?
     #if DEBUG && targetEnvironment(simulator)
 
     private var notificationContextTestReadFailures = 0
@@ -3182,8 +3184,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var textInputTestBusyHoldOnce = false
     private var startupInventoryReadTestFailureOnce = false
     private var calendarEventTaskPredispatchTestHoldOnce = false
-    @Published private(set) var calendarEventTaskDispatchTestState = ""
-    private var calendarEventTaskDispatchTestWaiter: (intentID: UUID, continuation: CheckedContinuation<Void, Never>)?
+    private(set) var calendarEventTaskDispatchTestState = ""
+    @ObservationIgnored private var calendarEventTaskDispatchTestWaiter: (intentID: UUID, continuation: CheckedContinuation<Void, Never>)?
     private var projectAreaTestReadFailure = false
     private var projectAreaTestBlockedWrite = false
     private var projectTagTestReadFailure = false
@@ -3191,8 +3193,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectFilterTestReadFailures = 0
     private var referenceSortTestReadFailure = false
     private var referenceViewTestReadFailures = 0
-    @Published private(set) var referenceBulkRemoveTestReadEnabled = false
-    @Published private(set) var referenceBulkRemoveTestReadState = ""
+    private(set) var referenceBulkRemoveTestReadEnabled = false
+    private(set) var referenceBulkRemoveTestReadState = ""
     private var referenceBulkRemoveTestReadFailures = 0
     private var referenceBulkRemoveTestHeldQueries = Set<String>()
     private var referenceBulkRemoveTestSession = ""
@@ -3274,7 +3276,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectNotesExpectedRaw: String?
     private var projectNotesFlushTask: Task<Bool, Never>?
     private var projectNotesFlushID: UUID?
-    private var projectAttachmentReadGeneration = 0
+    @ObservationIgnored private var projectAttachmentReadGeneration = 0
     private var projectAttachmentProjectID = ""
     private var projectAttachmentRevision = ""
     private var projectAttachmentOpenClaim = UUID()
@@ -3304,7 +3306,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectAttachmentOpeningRevision = ""
     private var projectAttachmentWriteRequest: String?
     private var projectAttachmentWriteMethod = "projectAttachmentWrite"
-    private weak var projectAttachmentWriteHost: CoreHost?
+    @ObservationIgnored private weak var projectAttachmentWriteHost: CoreHost?
     private var projectAttachmentWriteExpectedID: String?
     private var projectAttachmentWriteSession = 0
     private struct ProjectFileImportClaim {
@@ -3348,8 +3350,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var projectRenameOptionsCurrent = false
     private var projectRenameRequest: String?
     private var projectRenameExpectedID: String?
-    @Published private(set) var projectFlowModePresented = false
-    @Published private(set) var projectFlowMode = "parallel"
+    private(set) var projectFlowModePresented = false
+    private(set) var projectFlowMode = "parallel"
     private var projectFlowRequest: String?
     private var projectFlowExpectedResult: CoreObject?
     private var projectTaskSortRequest: String?
@@ -3402,15 +3404,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var areaCreateRequest: String?
     private var areaCreateExpectedID: String?
     private var areaCreateOptionsCurrent = false
-    private var areaCreateNameGeneration = 0
+    @ObservationIgnored private var areaCreateNameGeneration = 0
     private var settingsPersonEditID: String?
     private var settingsPersonEditExpected: CoreObject = [:]
-    private var settingsPersonEditNameGeneration = 0
+    @ObservationIgnored private var settingsPersonEditNameGeneration = 0
     private var settingsPersonEditCheckCurrent = false
     private var settingsPersonEditSaveDisabled = true
     private var settingsPersonEditAcknowledged = false
     private var settingsPersonCreateExpectedID: String?
-    private var settingsPersonCreateNameGeneration = 0
+    @ObservationIgnored private var settingsPersonCreateNameGeneration = 0
     private var settingsPersonCreateCheckCurrent = false
     private var settingsPersonCreateSaveDisabled = true
     private var settingsPersonCreateAcknowledged = false
@@ -3426,7 +3428,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var areaRenameFromSettings = false
     private var settingsAreaEditIndex: Int?
     private var settingsAreaEditOpeningColor = ""
-    @Published private(set) var settingsAreaEditAwaitingRefresh = false
+    private(set) var settingsAreaEditAwaitingRefresh = false
     private var areaDeleteRequest: String?
     private var areaDeleteExpectedID: String?
     private var areaDeleteFromSettings = false
@@ -3435,11 +3437,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var areaDeleteOptionsCurrent = false
     private var contextsCaller: Surface = .inbox
     private var contextsSelection: CoreObject = ["filters": CoreObject()]
-    @Published private(set) var contextsFiltersPresented = false
-    @Published private(set) var contextsTaskSearchText = ""
-    @Published private(set) var contextsLocationText = ""
-    @Published private(set) var contextsPickerName = ""
-    @Published private(set) var contextsPickerQuery = ""
+    private(set) var contextsFiltersPresented = false
+    private(set) var contextsTaskSearchText = ""
+    private(set) var contextsLocationText = ""
+    private(set) var contextsPickerName = ""
+    private(set) var contextsPickerQuery = ""
     private var contextsPickerDepth = 100
     private var contextsSavedFilterDepth = 100
     private var contextsSavedFilterHost: CoreHost?
@@ -4468,8 +4470,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             && capture.object("picker").text("query") == contextQuery
     }
     func label(_ key: String) -> String { strings.text(key) }
-    @Published private(set) var taskReferenceCopyNotice: String?
-    private var taskReferenceCopyNoticeGeneration = 0
+    private(set) var taskReferenceCopyNotice: String?
+    @ObservationIgnored private var taskReferenceCopyNoticeGeneration = 0
 
     nonisolated static func taskReferenceLink(_ id: String) -> String? {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()")
@@ -6487,20 +6489,20 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         return Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev"
         #endif
     }
-    @Published private(set) var navigationReplayFixtureMode = "idle"
-    @Published private(set) var navigationReplayFixtureSettled = 0
-    @Published private(set) var navigationReplayFixtureCaptures = 0
-    @Published private(set) var navigationReplayFixtureOutcome = "none"
-    @Published private(set) var navigationReplayFixtureMarker = false
-    @Published private(set) var navigationReplayFixtureWrongEligible = false
-    @Published private(set) var navigationReplayFixtureWrongRendered = false
-    @Published private(set) var navigationReplayFixtureWrongWaiterACK = false
+    private(set) var navigationReplayFixtureMode = "idle"
+    private(set) var navigationReplayFixtureSettled = 0
+    private(set) var navigationReplayFixtureCaptures = 0
+    private(set) var navigationReplayFixtureOutcome = "none"
+    private(set) var navigationReplayFixtureMarker = false
+    private(set) var navigationReplayFixtureWrongEligible = false
+    private(set) var navigationReplayFixtureWrongRendered = false
+    private(set) var navigationReplayFixtureWrongWaiterACK = false
     private var navigationReplayFixtureOriginalLogging: Bool?
     private var navigationReplayFixtureOriginalSearchConsent: Bool?
     private var navigationReplayFixtureHoldRender = false
     private var navigationReplayFixtureHeldEntry: (NavigationReplayTicket, () -> Bool)?
     private var navigationReplayFixtureHoldTail = false
-    private var navigationReplayFixtureTailRelease: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationReplayFixtureTailRelease: CheckedContinuation<Void, Never>?
     private var navigationReplayFixtureFault = ""
     private var navigationReplayFixtureFaultArmed = false
     private final class NavigationReplaySubmissionBarrier: @unchecked Sendable {
@@ -6708,7 +6710,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
         return true
     }
-    @Published private(set) var navigationFixtureState = "unchecked"
+    private(set) var navigationFixtureState = "unchecked"
     private var navigationFixtureAccepted: [NativePersonalIntakeEvent] = []
     private var navigationFixtureConfirmed: [NativePersonalIntakeEvent] = []
     private var navigationFixtureJoined = false
@@ -6717,13 +6719,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var navigationFixtureTails = 0
     private var navigationFixtureBeforeHost = 0
     private var navigationFixtureMode = "idle"
-    private var navigationFixtureDrainReached: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationFixtureDrainReached: CheckedContinuation<Void, Never>?
     private var navigationFixtureOriginalLogging: Bool?
     private var navigationFixtureLogMarker = false
-    private var navigationFixtureReadReached: CheckedContinuation<Void, Never>?
-    private var navigationFixtureReadRelease: CheckedContinuation<Void, Never>?
-    private var navigationFixtureTailReached: CheckedContinuation<Void, Never>?
-    private var navigationFixtureTailRelease: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationFixtureReadReached: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationFixtureReadRelease: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationFixtureTailReached: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationFixtureTailRelease: CheckedContinuation<Void, Never>?
     private var navigationFixtureTokenStable = true
     private var navigationFixturePreviewStable = true
     private var navigationFixturePremature = false
@@ -6731,7 +6733,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var navigationFixtureACKArrival = false
     private var navigationFixtureColdDelivered = false
     private var navigationFixtureColdURLReceived = false
-    private var navigationFixtureColdURLWaiter: CheckedContinuation<Void, Never>?
+    @ObservationIgnored private var navigationFixtureColdURLWaiter: CheckedContinuation<Void, Never>?
     private func navigationFixtureSameRaw(_ a: NativePersonalIntakeEvent, _ b: NativePersonalIntakeEvent) -> Bool {
         a.id == b.id && a.kind == b.kind && a.receivedAtMs == b.receivedAtMs
             && a.text.map { Data($0.utf8) } == b.text.map { Data($0.utf8) }
@@ -6867,9 +6869,9 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
         return true
     }
-    @Published private(set) var reminderHandoverFixtureState = "idle"
-    @Published private(set) var reminderHandoverOwnerState = "unchecked"
-    private var reminderHandoverReceiptWaiter: CheckedContinuation<Void, Never>?
+    private(set) var reminderHandoverFixtureState = "idle"
+    private(set) var reminderHandoverOwnerState = "unchecked"
+    @ObservationIgnored private var reminderHandoverReceiptWaiter: CheckedContinuation<Void, Never>?
     private var reminderHandoverHoldReceipt = false
     private var reminderHandoverFixtureHost: CoreHost?
     private var reminderHandoverFixtureToken: UUID?
@@ -7003,15 +7005,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
         return true
     }
-    @Published private(set) var workspaceRetirementFixtureState = "idle"
-    private var workspaceRetirementReadWaiter: CheckedContinuation<Void, Never>?
+    private(set) var workspaceRetirementFixtureState = "idle"
+    @ObservationIgnored private var workspaceRetirementReadWaiter: CheckedContinuation<Void, Never>?
     private var workspaceRetirementHoldFocusRead = false
     private var workspaceRetirementCloseOriginalFixture = false
     private var workspaceRetirementIntentCaptures = 0
     private var workspaceRetirementIntentDispatches = 0
     private var workspaceRetirementDraftFixture: EditorDraftSnapshot?
     private var workspaceRetirementDraftArmed = false
-    @Published private(set) var workspaceRetirementWakeRestored = false
+    private(set) var workspaceRetirementWakeRestored = false
     var workspaceRetirementViewCurrent: Bool { selectedSurface == .focus ? focusCurrent : inboxCurrent }
     func holdWorkspaceRetirementReadFixture() {
         guard workspaceRetirementFixtureEnabled, workspaceAdmissionsOpen, ready, !busy,
@@ -11526,7 +11528,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             try await readAppLock()
             guard !appLock.concealed else { return }
             try await readSelectedSurface()
-            error = nil
+            if error != nil { error = nil }
         } catch { self.error = error.localizedDescription }
     }
 
@@ -11548,10 +11550,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               somedayMoveCreatedSectionID == nil else { return }
         if morePresented { morePresented = false }
         guard selectedSurface != surface else { return }
-        projectTaskOrderPresented = false
-        projectTaskOrderCurrent = false
-        focusOrderPresented = false
-        focusOrderCurrent = false
+        if projectTaskOrderPresented { projectTaskOrderPresented = false }
+        if projectTaskOrderCurrent { projectTaskOrderCurrent = false }
+        if focusOrderPresented { focusOrderPresented = false }
+        if focusOrderCurrent { focusOrderCurrent = false }
         selectedSurface = surface
         await refresh()
     }
@@ -16994,7 +16996,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             let key = devicePreferencePrefix + name
             if preferenceDefaults.object(forKey: key) as? String != value { preferenceDefaults.set(value, forKey: key) }
         }
-        if let value = mirrors["@mindwtr_theme"] { storedTheme = value }
+        if let value = mirrors["@mindwtr_theme"], storedTheme != value { storedTheme = value }
         if !(next as NSDictionary).isEqual(to: theme) { theme = next }
     }
 
@@ -17995,7 +17997,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     func dismissTaskFocusNotice() { taskFocusNotice = [:] }
 
-    @Published private(set) var taskCardPresentationGeneration = 0
+    private(set) var taskCardPresentationGeneration = 0
     private struct InlineChecklistOwner {
         let host: CoreHost
         let context: String
@@ -18224,15 +18226,18 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 && current.text("status") == row.text("status") && current.flag("readOnly") == row.flag("readOnly")
         }
     }
-    func taskRowSwipeActionsEnabled(_ row: CoreObject) -> Bool {
+    func taskRowSwipeActionsEnabled(_ row: CoreObject) -> Bool { taskRowSwipeActionsAdmitted && taskRowSwipeRowEligible(row) }
+    var taskRowSwipeActionsAdmitted: Bool {
         ready && workspaceAdmissionsOpen && !busy && !retryNeeded && inlineChecklistPending == nil && rowQuickStatusPending == nil
             && rowSwipeOwner == nil && !rowTaskDatesPending && !rowTaskDestinationPending && !rowTaskBackdatePending && !taskChecklistMovePending
             && !appLock.concealed && !appLock.authenticating && !settingsSyncRestartRequired && !appLockRecoveryPending
-            && UIApplication.shared.applicationState == .active && !row.flag("readOnly")
-            && !row.text("id").isEmpty && !row.text("taskRevision").isEmpty
+            && UIApplication.shared.applicationState == .active
             && (selectedSurface != .project || !projectDetail.flag("readOnly"))
-            && taskRowSwipeRowCurrent(row)
+            && (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActionsEnabled)
             && notificationResponseContextIsClean(allowingReviewGuide: true, allowingProjectNotes: selectedSurface == .project)
+    }
+    func taskRowSwipeRowEligible(_ row: CoreObject) -> Bool {
+        !row.flag("readOnly") && !row.text("id").isEmpty && !row.text("taskRevision").isEmpty && taskRowSwipeRowListed(row)
     }
     struct TaskRowSwipeActivation {
         fileprivate let host: CoreHost
@@ -18326,7 +18331,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var rowSwipeDeleteOrigin: RowSwipeDeleteOrigin?
     private var rowSwipeFailureContext: RowSwipeContext?
     private var rowSwipeRetryRequest: String?
-    @Published private(set) var rowSwipeMutationError: String?
+    private(set) var rowSwipeMutationError: String?
     var rowSwipeMutationPending: Bool { rowSwipeOwner != nil }
     private func rowSwipeWarm(_ context: RowSwipeContext) -> Bool {
         host === context.host && ready && workspaceAdmissionsOpen && context.context.utf8.elementsEqual(taskCardPresentationContext.utf8)
@@ -18526,19 +18531,19 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let context: RowTaskDatesContext
         let request: String
     }
-    @Published private(set) var rowTaskDatesPresented = false
-    @Published private(set) var rowTaskDatesModel: CoreObject = [:]
-    @Published private(set) var rowTaskDatesReading = false
-    @Published private(set) var rowTaskDatesEditing = false
-    @Published private(set) var rowTaskDatesSaveWaiting = false
-    @Published private(set) var rowTaskDatesError: String?
+    private(set) var rowTaskDatesPresented = false
+    private(set) var rowTaskDatesModel: CoreObject = [:]
+    private(set) var rowTaskDatesReading = false
+    private(set) var rowTaskDatesEditing = false
+    private(set) var rowTaskDatesSaveWaiting = false
+    private(set) var rowTaskDatesError: String?
     private(set) var rowTaskDatesPresentationID = UUID()
     private var rowTaskDatesContext: RowTaskDatesContext?
     private var rowTaskDatesMenuContext: RowTaskDatesContext?
     private var rowTaskDatesScheduleBase: CoreObject = [:]
     private var rowTaskDatesGeneration = 0
-    private var rowTaskDatesReadTask: Task<Void, Never>?
-    private var rowTaskDatesEditTask: Task<Void, Never>?
+    @ObservationIgnored private var rowTaskDatesReadTask: Task<Void, Never>?
+    @ObservationIgnored private var rowTaskDatesEditTask: Task<Void, Never>?
     private var rowTaskDatesEdits: [CoreObject] = []
     private var rowTaskDatesOwner: RowTaskDatesOwner?
     private var rowTaskDatesFailureContext: RowTaskDatesContext?
@@ -18855,12 +18860,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let context: RowTaskDestinationContext
         let request: String
     }
-    @Published private(set) var rowTaskDestinationPresented = false
-    @Published private(set) var rowTaskDestinationError: String?
+    private(set) var rowTaskDestinationPresented = false
+    private(set) var rowTaskDestinationError: String?
     private(set) var rowTaskDestinationPresentationID = UUID()
     private var rowTaskDestinationContext: RowTaskDestinationContext?
     private var rowTaskDestinationMenuContext: RowTaskDestinationContext?
-    private var rowTaskDestinationReadGeneration = 0
+    @ObservationIgnored private var rowTaskDestinationReadGeneration = 0
     private var rowTaskDestinationOwner: RowTaskDestinationOwner?
     private var rowTaskDestinationFailureContext: RowTaskDestinationContext?
     private var rowTaskDestinationRetryRequest: String?
@@ -19116,16 +19121,16 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let move: TaskChecklistMoveOwner
         let noticeGeneration: Int
     }
-    @Published private(set) var taskChecklistMovePresented = false
-    @Published private(set) var taskChecklistMoveOptions: CoreObject = [:]
-    @Published private(set) var taskChecklistMoveItems: [CoreObject] = []
-    @Published private(set) var taskChecklistMoveQuery = ""
-    @Published private(set) var taskChecklistMoveReading = false
-    @Published private(set) var taskChecklistMoveError: String?
-    @Published private(set) var taskChecklistMovePickerCurrent = false
+    private(set) var taskChecklistMovePresented = false
+    private(set) var taskChecklistMoveOptions: CoreObject = [:]
+    private(set) var taskChecklistMoveItems: [CoreObject] = []
+    private(set) var taskChecklistMoveQuery = ""
+    private(set) var taskChecklistMoveReading = false
+    private(set) var taskChecklistMoveError: String?
+    private(set) var taskChecklistMovePickerCurrent = false
     private var taskChecklistMoveContext: TaskChecklistMoveContext?
-    private var taskChecklistMoveReadTask: Task<Void, Never>?
-    private var taskChecklistMoveReadGeneration = 0
+    @ObservationIgnored private var taskChecklistMoveReadTask: Task<Void, Never>?
+    @ObservationIgnored private var taskChecklistMoveReadGeneration = 0
     private var taskChecklistMoveEntryReadID = UUID()
     private var taskChecklistMoveOwner: TaskChecklistMoveOwner?
     private var taskChecklistMoveOrigin: TaskChecklistMoveOrigin?
@@ -19419,15 +19424,15 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         let context: RowTaskBackdateContext
         let request: String
     }
-    @Published private(set) var rowTaskBackdatePresented = false
-    @Published private(set) var rowTaskBackdateOptions: CoreObject = [:]
-    @Published private(set) var rowTaskBackdateInitialDate = Date()
-    @Published private(set) var rowTaskBackdateReading = false
-    @Published private(set) var rowTaskBackdateError: String?
+    private(set) var rowTaskBackdatePresented = false
+    private(set) var rowTaskBackdateOptions: CoreObject = [:]
+    private(set) var rowTaskBackdateInitialDate = Date()
+    private(set) var rowTaskBackdateReading = false
+    private(set) var rowTaskBackdateError: String?
     private(set) var rowTaskBackdatePresentationID = UUID()
     private var rowTaskBackdateContext: RowTaskBackdateContext?
-    private var rowTaskBackdateReadTask: Task<Void, Never>?
-    private var rowTaskBackdateReadGeneration = 0
+    @ObservationIgnored private var rowTaskBackdateReadTask: Task<Void, Never>?
+    @ObservationIgnored private var rowTaskBackdateReadGeneration = 0
     private var rowTaskBackdateOwner: RowTaskBackdateOwner?
     private var rowTaskBackdateRetryRequest: String?
     var rowTaskBackdatePending: Bool { rowTaskBackdateOwner != nil }
@@ -26710,8 +26715,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private func readReview() async {
 
         guard !reviewFinishPending else { return }
-        reviewCurrent = false
-        reviewError = nil
+        if reviewCurrent { reviewCurrent = false }
+        if reviewError != nil { reviewError = nil }
         for attempt in 0..<2 {
             do {
                 if reviewGuidePresented { try await readReviewGuide() }
@@ -29599,13 +29604,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch { handleProjectBulkError(error, context: context, operation: operation, request: request) }
     }
 
-    @Published private(set) var statusListSelectionMode = false
-    @Published private(set) var statusListSelectedIDs: [String] = [] {
+    private(set) var statusListSelectionMode = false
+    private(set) var statusListSelectedIDs: [String] = [] {
         didSet { statusListSelectedIDBytes = Set(statusListSelectedIDs.map { Data($0.utf8) }) }
     }
     private var statusListSelectedIDBytes: Set<Data> = []
-    @Published private(set) var statusListBulk: CoreObject = [:]
-    @Published private(set) var statusListBulkError: String?
+    private(set) var statusListBulk: CoreObject = [:]
+    private(set) var statusListBulkError: String?
     private var statusListSelectedRevisions: CoreObject = [:]
     private var statusListSelectionSurface: Surface?
     private var statusListSelectionGeneration = 0
@@ -29620,7 +29625,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var statusListMoveOwner: (context: StatusListBulkContext, request: String, operation: StatusListBulkOperation)?
     private var statusListBulkDeleteContext: String?
     private var statusListAnchorID: String?
-    @Published private(set) var statusListRangeSelectMode = false
+    private(set) var statusListRangeSelectMode = false
 
     private static let statusListSources = ["waiting", "someday", "review", "contexts"]
     private func statusListSurface(named name: String) -> Surface {
@@ -30034,12 +30039,12 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         } catch { handleStatusListMoveError(error, context: context, request: request) }
     }
 
-    @Published private(set) var statusListTagPresented = false
-    @Published private(set) var statusListTagInput = GatedTextInput(limit: 2_000)
+    private(set) var statusListTagPresented = false
+    private(set) var statusListTagInput = GatedTextInput(limit: 2_000)
     var statusListTagText: String { statusListTagInput.text }
-    @Published private(set) var statusListTagOptions: CoreObject = [:]
-    @Published private(set) var statusListTagReadError: String?
-    private var statusListTagTask: Task<Void, Never>?
+    private(set) var statusListTagOptions: CoreObject = [:]
+    private(set) var statusListTagReadError: String?
+    @ObservationIgnored private var statusListTagTask: Task<Void, Never>?
     private var statusListTagContext: String?
     var statusListBulkTagEnabled: Bool {
         statusListSelectionWritable && !statusListTagPresented && statusListBulk.object("bar").object("addTag").flag("enabled")
@@ -35802,13 +35807,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    @Published private(set) var projectConvertPresented = false
-    @Published private(set) var projectConvertOptions: CoreObject = [:]
-    @Published private(set) var projectConvertDestinationID = ""
-    @Published private(set) var projectConvertTitle = ""
-    @Published private(set) var projectConvertReviewing = false
-    @Published private(set) var projectConvertLoading = false
-    @Published private(set) var projectConvertError: String?
+    private(set) var projectConvertPresented = false
+    private(set) var projectConvertOptions: CoreObject = [:]
+    private(set) var projectConvertDestinationID = ""
+    private(set) var projectConvertTitle = ""
+    private(set) var projectConvertReviewing = false
+    private(set) var projectConvertLoading = false
+    private(set) var projectConvertError: String?
     private var projectConvertRequest: String?
     private var projectConvertSession = UUID()
 
@@ -39257,13 +39262,13 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         catch { taskError = error.localizedDescription }
     }
 
-    @Published private(set) var referenceProjectNextActionPresented = false
-    @Published private(set) var referenceProjectNextActionOptions: CoreObject = [:]
-    @Published private(set) var referenceProjectNextActionCandidates: [CoreObject] = []
-    @Published private(set) var referenceProjectNextActionText = ""
-    @Published private(set) var referenceProjectNextActionCanSave = false
-    @Published private(set) var referenceProjectNextActionReading = false
-    @Published private(set) var referenceProjectNextActionError: String?
+    private(set) var referenceProjectNextActionPresented = false
+    private(set) var referenceProjectNextActionOptions: CoreObject = [:]
+    private(set) var referenceProjectNextActionCandidates: [CoreObject] = []
+    private(set) var referenceProjectNextActionText = ""
+    private(set) var referenceProjectNextActionCanSave = false
+    private(set) var referenceProjectNextActionReading = false
+    private(set) var referenceProjectNextActionError: String?
     private struct ReferenceProjectNextActionOwner {
         let host: CoreHost
         let surface: Surface
@@ -39275,8 +39280,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     private var referenceProjectNextActionOwner: ReferenceProjectNextActionOwner?
     private var referenceProjectNextActionOrigin: CoreObject = [:]
     private var referenceProjectNextActionRequest: String?
-    private var referenceProjectNextActionGeneration = 0
-    private var referenceProjectNextActionInputGeneration = 0
+    @ObservationIgnored private var referenceProjectNextActionGeneration = 0
+    @ObservationIgnored private var referenceProjectNextActionInputGeneration = 0
     private var referenceProjectNextActionReadTask: Task<Void, Never>?
     private var referenceProjectNextActionInputTask: Task<Void, Never>?
     private var referenceProjectNextActionEditID: String?
@@ -39522,7 +39527,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         }
     }
 
-    @Published private(set) var taskActionNotice: CoreObject = [:]
+    private(set) var taskActionNotice: CoreObject = [:]
     private var taskActionRequestID: String?
     private var taskActionUndoRequest: String?
     private var taskCompletionRequest: String?
@@ -39908,11 +39913,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
 
     private var taskPromotionRequest: String?
     private var taskPromotionExpanded = false
-    @Published private(set) var taskPromotionPresented = false
-    @Published private(set) var taskPromotionTitle = ""
-    @Published private(set) var taskPromotionExpand = false
-    @Published private(set) var taskPromotionBlockedMessage: String?
-    @Published private(set) var taskPromotionOptionsPending = false
+    private(set) var taskPromotionPresented = false
+    private(set) var taskPromotionTitle = ""
+    private(set) var taskPromotionExpand = false
+    private(set) var taskPromotionBlockedMessage: String?
+    private(set) var taskPromotionOptionsPending = false
     private var taskPromotionOptionsSession = UUID()
 
     private var taskPromotionAllowed: Bool {
@@ -42149,8 +42154,8 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
               case let .isolated(_, _, _, identifier) = try? NativeAppLaunch.selection.get() else { return false }
         return identifier.uuidString.lowercased() == "23957f26-772e-4249-beae-eddd37fb986d"
     }
-    @Published private(set) var quickCaptureIntentFixtureConfirmed = 0
-    @Published private var quickCaptureIntentFixtureRevision = 0
+    private(set) var quickCaptureIntentFixtureConfirmed = 0
+    private var quickCaptureIntentFixtureRevision = 0
     private var quickCaptureIntentFixtureBooted = false
     private var quickCaptureIntentFixtureBusy = false
     private var quickCaptureIntentFixtureConcealed = false
@@ -42190,7 +42195,7 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
     }
     #endif
 
-    private var quickCaptureIntentTask: Task<Void, Never>?
+    @ObservationIgnored private var quickCaptureIntentTask: Task<Void, Never>?
     private var quickCaptureIntentLifecycle: UInt64 = 0
 
     func registerQuickCaptureIntentTarget() {
@@ -45950,11 +45955,11 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
             inbox = nextInbox
             if !inboxFilterTextEdits.isEmpty { inboxFilterNeedsRead = true }
             syncInboxFilterText()
-            inboxCurrent = !inboxFilterWorkPending
-            inboxReadError = nil
+            if inboxCurrent == inboxFilterWorkPending { inboxCurrent = !inboxFilterWorkPending }
+            if inboxReadError != nil { inboxReadError = nil }
             if !refreshingFilterPicker { invalidateInboxFilterPicker() }
             let groupingOperation = inboxGroupingOperation
-            inboxGroupingOperation = nil
+            if groupingOperation != nil { inboxGroupingOperation = nil }
             let acceptedCurrent = {
                 self.inboxReadCurrent(owner, generation: generation, params: acceptedParams)
                     && self.preferenceDefaults === defaults && self.inboxFoldPreference == preference
@@ -46906,9 +46911,10 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
                 }
                 guard focusReadAllowed(generation, ownsOperation: ownsOperation) else { return }
                 focusState = state
-                focusEdits.removeAll()
-                focusRefusedLocationID = nil
-                focusLocationText = controls.object("filterSheet").text("location")
+                if !focusEdits.isEmpty { focusEdits.removeAll() }
+                if focusRefusedLocationID != nil { focusRefusedLocationID = nil }
+                let location = controls.object("filterSheet").text("location")
+                if focusLocationText != location { focusLocationText = location }
                 focus = next
                 focusCurrent = true
                 if !edits.isEmpty {
@@ -46943,26 +46949,26 @@ final class CoreModel: ObservableObject, NativeQuickCaptureIntentTarget {
         if selectedSurface == .board {
             boardReadTask?.cancel()
             boardGeneration += 1
-            boardCurrent = false
+            if boardCurrent { boardCurrent = false }
         }
-        if selectedSurface == .calendar { calendarCurrent = false }
-        if selectedSurface == .review { reviewCurrent = false }
+        if selectedSurface == .calendar && calendarCurrent { calendarCurrent = false }
+        if selectedSurface == .review && reviewCurrent { reviewCurrent = false }
         if selectedSurface == .focus {
             focusReadTask?.cancel()
             focusGeneration += 1
-            focusCurrent = false
+            if focusCurrent { focusCurrent = false }
         }
-        if selectedSurface == .project { projectCurrent = false }
-        if selectedSurface == .waiting { waitingCurrent = false }
-        if selectedSurface == .someday { somedayCurrent = false }
-        if selectedSurface == .reference { referenceCurrent = false }
-        if selectedSurface == .history { historyCurrent = false }
-        if selectedSurface == .trash { trashCurrent = false }
-        if selectedSurface == .savedSearch { savedSearchCurrent = false }
+        if selectedSurface == .project && projectCurrent { projectCurrent = false }
+        if selectedSurface == .waiting && waitingCurrent { waitingCurrent = false }
+        if selectedSurface == .someday && somedayCurrent { somedayCurrent = false }
+        if selectedSurface == .reference && referenceCurrent { referenceCurrent = false }
+        if selectedSurface == .history && historyCurrent { historyCurrent = false }
+        if selectedSurface == .trash && trashCurrent { trashCurrent = false }
+        if selectedSurface == .savedSearch && savedSearchCurrent { savedSearchCurrent = false }
         if selectedSurface == .contexts {
             contextsReadTask?.cancel()
             contextsGeneration += 1
-            contextsCurrent = false
+            if contextsCurrent { contextsCurrent = false }
         }
         let nextArea = try await query("areaFilter")
         if !NativeValueEquality.same(area, nextArea) { area = nextArea }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SomedayScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     private var showsList: Bool { model.somedayCurrent || (model.busy && !model.someday.isEmpty) }
@@ -252,7 +252,7 @@ struct SomedayPanel: View {
     @FocusState private var focusedField: String?
     @State private var createFocusedOnce = false
     @State private var taskFocusedOnce = false
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     private var menu: CoreObject { model.someday.object("menu") }
     private var isFilter: Bool { model.somedayPanel == "filters" }

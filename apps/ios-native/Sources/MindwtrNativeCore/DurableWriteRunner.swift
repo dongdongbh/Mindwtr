@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 public protocol DurableWriteTransport: AnyObject {
     func retryPending() async throws -> String?
@@ -26,6 +27,7 @@ public struct DurableWriteModel {
 }
 
 @MainActor
+@Observable
 public final class DurableWriteRunner<Transport: DurableWriteTransport> {
     public struct Pending {
         public let request: String

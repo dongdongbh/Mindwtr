@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MoreMenuSheet: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {

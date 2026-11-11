@@ -138,7 +138,7 @@ def overlay(project, locales):
 
     embeds = []
     for directory, name, suffix, sources, deployment in [
-        ("ShareExtension", "MindwtrNativeShare", ".share", SHARE_SOURCES, "16.0"),
+        ("ShareExtension", "MindwtrNativeShare", ".share", SHARE_SOURCES, "17.0"),
         ("CaptureWidget", "MindwtrNativeCaptureWidget", ".capture-widget", WIDGET_SOURCES, "17.0"),
     ]:
         children, builds = [], []

@@ -22,7 +22,7 @@ private struct TaskDraftDirection: ViewModifier {
 
 
 struct TaskViewSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var editing = false
     @State private var discardConfirm = false
@@ -2167,7 +2167,7 @@ struct NativeMarkdownInline: View {
 }
 
 private struct TaskScheduleField: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let field: String
     @Binding var pickerID: String
@@ -2457,7 +2457,7 @@ private struct TaskScheduleField: View {
 }
 
 struct TaskRowDatesDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var pickerField = ""
     @State private var pickerValue = Date.distantPast
@@ -2640,7 +2640,7 @@ enum TaskDatePickerComponents {
 }
 
 private struct TaskRecurrenceField: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Binding var pickerID: String
     @Binding var pickerValue: Date
@@ -2853,7 +2853,7 @@ private struct TaskBackdatedCompletionDraft {
 
 private struct TaskPromotionDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var titleFocused: Bool
     private var frozen: Bool { model.busy || model.retryNeeded }
@@ -2941,7 +2941,7 @@ private struct TaskPromotionDialog: View {
 
 private struct TaskBackdatedCompletionDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let initial: TaskBackdatedCompletionDraft
     let close: () -> Void
@@ -3054,7 +3054,7 @@ private struct TaskBackdatedCompletionDialog: View {
 }
 
 private struct TaskWaitingAssignmentDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let taskID: String
     let session: Int
@@ -3191,7 +3191,7 @@ private struct TaskWaitingAssignmentDialog: View {
 }
 
 private struct TaskMonthlyCustomDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let beforeAction: () -> Void
     let close: () -> Void
@@ -3341,7 +3341,7 @@ private struct TaskMonthlyCustomDialog: View {
 }
 
 private struct TaskTokenField: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let field: String
     let beforeAction: () -> Void
@@ -3458,7 +3458,7 @@ private struct TaskTokenField: View {
 }
 
 private struct TaskDestinationPicker: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let beforeAction: () -> Void
     @FocusState private var queryFocused: Bool
@@ -3620,7 +3620,7 @@ struct AttachmentFileActivitySheet: UIViewControllerRepresentable {
 }
 
 private struct TaskAttachmentAudioSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let presentationID: UUID
 

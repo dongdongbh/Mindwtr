@@ -1543,7 +1543,6 @@ final class FoundationUITests: XCTestCase {
     }
 
     private func task454Open(_ app: XCUIApplication, _ url: String) throws {
-        guard #available(iOS 16.4, *) else { throw XCTSkip("OS URL launching requires iOS 16.4") }
         app.open(URL(string: url)!)
     }
 
@@ -34625,8 +34624,7 @@ extension FoundationUITests {
 extension FoundationUITests {
     func testNativeNextWidgetScopedURLColdOpenAndForeignRefusal() throws {
         let run = try nativeNextWidgetRun()
-        guard #available(iOS 16.4, *),
-              let raw = ProcessInfo.processInfo.environment["MINDWTR_NEXT_WIDGET_URL"],
+        guard let raw = ProcessInfo.processInfo.environment["MINDWTR_NEXT_WIDGET_URL"],
               let url = URL(string: raw), url.scheme == "mindwtr-native-dev", url.host == "widget-task" else {
             throw XCTSkip("Root-verified widget cache URL required")
         }

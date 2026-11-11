@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ReferenceScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     @State private var bulkDeletePresented = false
@@ -147,7 +147,7 @@ struct ReferenceScreen: View {
 
 private struct ReferenceBulkTagDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     private var fields: some View {
@@ -213,7 +213,7 @@ private struct ReferenceBulkTagDialog: View {
 }
 
 private struct ReferenceBulkRemoveTagDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focused: Bool
@@ -352,7 +352,7 @@ struct ListRowEntry: Identifiable {
 
 
 struct StatusListContent: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let data: CoreObject
     let prefix: String
@@ -764,7 +764,7 @@ struct StatusListContent: View {
 
 struct TaskRowBackdateDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let options: CoreObject
     let pending: Bool
@@ -913,7 +913,7 @@ struct TaskRowBackdateDialog: View {
 }
 
 struct TaskRowDestinationDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let pending: Bool
     let error: () -> String?
@@ -1066,7 +1066,7 @@ struct TaskRowDestinationDialog: View {
 }
 
 struct ReferencePanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var focusedField: String?
     private var isFilter: Bool { model.referencePanel == "filters" }
@@ -1184,7 +1184,7 @@ struct ReferencePanel: View {
 }
 
 struct TaskListSortChoices: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let caller: CoreModel.TaskListSortCaller
     private var prefix: String { caller.rawValue }

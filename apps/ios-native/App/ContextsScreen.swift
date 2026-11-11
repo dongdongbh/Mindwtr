@@ -7,7 +7,7 @@ private struct ContextsTaskRow: Identifiable {
 }
 
 struct ContextsScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize

@@ -16,7 +16,7 @@ struct NavigationReplayContentEntry: View {
 }
 
 struct InboxScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -236,7 +236,7 @@ struct InboxScreen: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .bottom) {
                     VStack(spacing: 0) {
-                        primarySurfaceContent
+                        TaskCardListValuesProvider(model: model, content: primarySurfaceContent)
                         surfaceNotices
                     }
                     .allowsHitTesting(!model.morePresented && !model.inboxGroupPresented && !model.inboxFiltersPresented && !(model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented))
@@ -1744,6 +1744,27 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
 
 enum TaskRowSwipeHost { case local, list }
 
+struct TaskCardListValues: Equatable {
+    let presentationContext: String
+    let swipeActionsAdmitted: Bool
+}
+private struct TaskCardListValuesKey: EnvironmentKey { static let defaultValue: TaskCardListValues? = nil }
+extension EnvironmentValues {
+    var taskCardListValues: TaskCardListValues? {
+        get { self[TaskCardListValuesKey.self] }
+        set { self[TaskCardListValuesKey.self] = newValue }
+    }
+}
+
+struct TaskCardListValuesProvider<Content: View>: View {
+    let model: CoreModel
+    let content: Content
+    var body: some View {
+        content.environment(\.taskCardListValues, TaskCardListValues(
+            presentationContext: model.taskCardPresentationContext, swipeActionsAdmitted: model.taskRowSwipeActionsAdmitted))
+    }
+}
+
 private struct TaskRowSwipeButton: View {
     let action: CoreObject
     let palette: AppPalette
@@ -2002,7 +2023,7 @@ private final class TaskRowSwipePanRecognizer: UIPanGestureRecognizer {
 
 struct TaskCard: View {
     let row: CoreObject
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     var footer: String = ""
     var readOnly: Bool = false
@@ -2026,6 +2047,7 @@ struct TaskCard: View {
     var swipeInteractionDisabled = false
     @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
     @Environment(\.isEnabled) private var rowEnabled
+    @Environment(\.taskCardListValues) private var listValues
     @Environment(\.layoutDirection) private var hostLayoutDirection
     @State private var swipeDTO: CoreObject = [:]
     @State private var swipePublishedKey = ""
@@ -2048,6 +2070,7 @@ struct TaskCard: View {
     @State private var checklistReadID = UUID()
     @FocusState private var checklistInputFocused: Bool
     private var checklistIdentity: String { model.taskCardPresentationContext + ":" + row.text("id") }
+    private var displayedContext: String { listValues?.presentationContext ?? model.taskCardPresentationContext }
     private var hasInlineChecklist: Bool {
         row.text("status") != "reference" && meta.objects("parts").contains { $0.text("kind") == "checklist" }
     }
@@ -2060,11 +2083,16 @@ struct TaskCard: View {
             && model.inlineChecklistEnabled(row, writing: true)
     }
     private var meta: CoreObject { row.object("meta") }
-    private var swipeEnabled: Bool {
-        rowEnabled && !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeActionsEnabled(row)
+    private var swipeEnabled: Bool { swipeEnabled(admitted: model.taskRowSwipeActionsAdmitted) }
+    private var displayedSwipeEnabled: Bool { swipeEnabled(admitted: listValues?.swipeActionsAdmitted ?? model.taskRowSwipeActionsAdmitted) }
+    private func swipeEnabled(admitted: Bool) -> Bool {
+        rowEnabled && !readOnly && onSelection == nil && !swipeInteractionDisabled && admitted
+            && model.taskRowSwipeRowEligible(row)
     }
-    private var swipeReadIdentity: String {
-        NativeTaskRowSwipeRead.identity(context: model.taskCardPresentationContext, taskID: row.text("id"),
+    private var swipeReadIdentity: String { swipeIdentity(context: model.taskCardPresentationContext) }
+    private var displayedSwipeIdentity: String { swipeIdentity(context: displayedContext) }
+    private func swipeIdentity(context: String) -> String {
+        NativeTaskRowSwipeRead.identity(context: context, taskID: row.text("id"),
             taskRevision: row.text("taskRevision"), status: row.text("status"), focusedToday: row.flag("isFocusedToday"),
             selectionMode: onSelection != nil, readOnly: readOnly || row.flag("readOnly"), interactionDisabled: swipeInteractionDisabled,
             languageGeneration: model.taskRowSwipeLanguageGeneration, ready: model.ready)
@@ -2197,9 +2225,9 @@ struct TaskCard: View {
         .background(palette.row, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
         .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeDTO, identity: swipePublishedKey,
-            rowID: row.text("id"), palette: palette, enabled: swipeEnabled && swipePublishedKey == swipeReadIdentity,
+            rowID: row.text("id"), palette: palette, enabled: displayedSwipeEnabled && swipePublishedKey == displayedSwipeIdentity,
             closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe))
-        .task(id: swipeReadIdentity) {
+        .task(id: displayedSwipeIdentity) {
             let identity = swipeReadIdentity, displayed = row
             swipeDTO = [:]; swipePublishedKey = ""; swipePublishedRow = [:]
             guard let value = await model.readTaskRowSwipeActions(displayed, selectionMode: onSelection != nil,
@@ -2304,7 +2332,7 @@ struct TaskCard: View {
                 if defaultStatusMenu { model.retireRowQuickStatusOptions(navigationReplayCoverID) }
             }
         }
-        .onChange(of: checklistIdentity) { _ in resetInlineChecklist(); retireDefaultStatusMenu() }
+        .onChange(of: displayedContext + ":" + row.text("id")) { _ in resetInlineChecklist(); retireDefaultStatusMenu() }
         .onChange(of: InlineChecklistRevision(row: row)) { current in
             retireDefaultStatusMenu()
             checklistView = [:]
@@ -2673,7 +2701,7 @@ struct TaskCard: View {
 }
 
 struct TaskFocusNotice: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -2695,7 +2723,7 @@ struct TaskFocusNotice: View {
 }
 
 struct FailureBanner: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -2720,7 +2748,7 @@ struct FailureBanner: View {
 
 
 struct DiagnosticsFailureAction: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var diagnosticsOwner = UUID()
     @State private var diagnosticsPresented = false
@@ -2771,7 +2799,7 @@ private struct FocusOrderItem: Identifiable {
 
 
 private struct ReferenceProjectNextActionPrompt: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     private let prefix = "reference-project-next-action"
     private var options: CoreObject { model.referenceProjectNextActionOptions }
@@ -2881,7 +2909,7 @@ private struct ReferenceProjectNextActionPrompt: View {
 }
 
 private struct TaskListSortPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let caller: CoreModel.TaskListSortCaller
     private var prefix: String { caller.rawValue }
@@ -2929,7 +2957,7 @@ private struct TaskListSortPanel: View {
 }
 
 private struct InboxGroupPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     var body: some View {
@@ -2994,7 +3022,7 @@ private struct InboxGroupPanel: View {
 }
 
 private struct InboxFiltersModalContent: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @ObservedObject var lock: AppLockController
     let palette: AppPalette
 
@@ -3010,7 +3038,7 @@ private struct InboxFiltersModalContent: View {
 }
 
 private struct InboxFiltersPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var focusedField: String?
 
@@ -3050,7 +3078,7 @@ private struct InboxFiltersPanel: View {
 
 private struct InboxBulkTagDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     private var fields: some View {
@@ -3116,7 +3144,7 @@ private struct InboxBulkTagDialog: View {
 }
 
 private struct InboxBulkRemoveTagDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focused: Bool
@@ -3235,7 +3263,7 @@ private struct InboxBulkRemoveTagDialog: View {
 
 
 private struct InboxBulkOrganizeDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var dateField: String?
     @State private var pickerDate = Date()
@@ -3463,7 +3491,7 @@ private struct InboxBulkOrganizeDialog: View {
 }
 
 private struct TaskChecklistMoveDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var searchFocused: Bool

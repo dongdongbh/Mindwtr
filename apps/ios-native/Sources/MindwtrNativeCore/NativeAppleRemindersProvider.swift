@@ -269,17 +269,9 @@ private final class NativeAppleRemindersSystemSDK: NativeAppleRemindersSDK {
     }
     static func permission() -> NativeAppleRemindersPermission {
         let status = EKEventStore.authorizationStatus(for: .reminder)
-        if #available(iOS 17.0, *) {
-            switch status {
-            case .fullAccess: return .granted
-            case .writeOnly, .restricted, .denied: return .denied
-            case .notDetermined: return .undetermined
-            default: return .unavailable
-            }
-        }
         switch status {
-        case .authorized: return .granted
-        case .restricted, .denied: return .denied
+        case .fullAccess: return .granted
+        case .writeOnly, .restricted, .denied: return .denied
         case .notDetermined: return .undetermined
         default: return .unavailable
         }
@@ -289,8 +281,7 @@ private final class NativeAppleRemindersSystemSDK: NativeAppleRemindersSDK {
         let callback: (Bool, Error?) -> Void = { [store] _, error in
             withExtendedLifetime(store) { completion(error == nil ? .success(()) : .failure(.failed)) }
         }
-        if #available(iOS 17.0, *) { store.requestFullAccessToReminders(completion: callback) }
-        else { store.requestAccess(to: .reminder, completion: callback) }
+        store.requestFullAccessToReminders(completion: callback)
     }
     private static func identity(_ calendar: EKCalendar) throws -> NativeAppleReminderListIdentity {
         guard let source = calendar.source, calendar.allowedEntityTypes.contains(.reminder) else { throw NativeAppleRemindersError.listChanged }

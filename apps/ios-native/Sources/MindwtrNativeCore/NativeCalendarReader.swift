@@ -52,17 +52,10 @@ final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarR
     }
 
     static func permission(_ status: EKAuthorizationStatus) -> NativeCalendarPermission {
-        if #available(iOS 17.0, *) {
-            switch status {
-            case .fullAccess: return .granted
-            case .writeOnly, .denied, .restricted: return .denied
-            case .notDetermined: return .undetermined
-            default: return .undetermined
-            }
-        }
         switch status {
-        case .authorized: return .granted
-        case .denied, .restricted: return .denied
+        case .fullAccess: return .granted
+        case .writeOnly, .denied, .restricted: return .denied
+        case .notDetermined: return .undetermined
         default: return .undetermined
         }
     }

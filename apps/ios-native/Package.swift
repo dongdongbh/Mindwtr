@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "MindwtrNativeCore",
-    platforms: [.iOS(.v16), .macOS(.v13)],
+    platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "MindwtrNativeCore", targets: ["MindwtrNativeCore"])],
     dependencies: [.package(name: "AttachmentFileInstallerEngine", path: "../mobile/modules/attachment-file-installer/ios"), .package(path: "../mobile/modules/sync-file-lock"), .package(path: "../mobile/modules/cloudkit-sync"), .package(path: "../mobile/modules/watch-connectivity"), .package(path: "../mobile/modules/whisper-engine")],
     targets: [

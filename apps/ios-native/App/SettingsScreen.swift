@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import MindwtrNativeCore
 
 private struct AITextConfigurationCard: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var assistantDraft = ""
     @State private var copilotDraft = ""
@@ -365,7 +365,7 @@ private struct AITextConfigurationCard: View {
 }
 
 private struct SpeechSettingsCard: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var modelDraft = ""
     @State private var languageDraft = ""
@@ -696,7 +696,7 @@ private struct SpeechSettingsCard: View {
 }
 
 struct SettingsScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var gtdTimeFocused: Bool
@@ -833,7 +833,16 @@ struct SettingsScreen: View {
         .background(palette.bg)
     }
 
-    private var settingsPresentation: some View {
+    private var syncMissingFilesPresented: Binding<Bool> {
+        Binding(get: { model.settingsSyncMissingFiles != nil }, set: { presented in dismissSyncMissingFiles(presented) })
+    }
+
+    private func dismissSyncMissingFiles(_ presented: Bool) {
+        guard !presented else { return }
+        DispatchQueue.main.async { model.answerSettingsSyncMissingFiles(proceed: false) }
+    }
+
+    private var settingsAlertsEarly: some View {
         settingsBody
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             model.retireAISettingsPage()
@@ -860,12 +869,8 @@ struct SettingsScreen: View {
             Button(model.label("common.cancel"), role: .cancel) { syncBackendPending = nil }
                 .accessibilityIdentifier("sync-reload-cancel")
         } message: { Text("Your typed Sync fields will be discarded.") }
-        .alert(model.settingsSyncMissingFiles?.text("title") ?? "", isPresented: Binding(
-            get: { model.settingsSyncMissingFiles != nil },
-            set: { presented in
-                if !presented { DispatchQueue.main.async { model.answerSettingsSyncMissingFiles(proceed: false) } }
-            }
-        ), presenting: model.settingsSyncMissingFiles) { prompt in
+        .alert(model.settingsSyncMissingFiles?.text("title") ?? "", isPresented: syncMissingFilesPresented,
+            presenting: model.settingsSyncMissingFiles) { prompt in
             Button(prompt.text("cancelLabel"), role: .cancel) { model.answerSettingsSyncMissingFiles(proceed: false) }
                 .accessibilityIdentifier("sync-missing-files-cancel")
             Button(prompt.text("continueLabel")) { model.answerSettingsSyncMissingFiles(proceed: true) }
@@ -894,6 +899,10 @@ struct SettingsScreen: View {
                 if !deleteConfirmAnswered && !deleteConfirmPresented { model.cancelSomedaySectionDelete() }
             }
         }
+    }
+
+    private var settingsAlertsLate: some View {
+        settingsAlertsEarly
         .alert(model.settingsAreaDeleteOptions.object("text").text("title"),
                isPresented: $areaDeleteConfirmPresented) {
             Button(model.settingsAreaDeleteOptions.object("text").text("cancelLabel"), role: .cancel) {
@@ -957,6 +966,10 @@ struct SettingsScreen: View {
                 if !personDeleteConfirmAnswered && !personDeleteConfirmPresented { model.cancelSettingsPersonDelete() }
             }
         }
+    }
+
+    private var settingsPresentation: some View {
+        settingsAlertsLate
         .sheet(isPresented: Binding(
             get: { !model.unassignedAreaColorOptions.isEmpty },
             set: { if !$0 && !model.appLock.concealed { model.cancelUnassignedAreaColor() } }
@@ -2546,7 +2559,7 @@ struct SettingsScreen: View {
                 let fields = model.calendarSettings.object("feeds")
                 VStack(alignment: .leading, spacing: 8) {
                     Text(fields.object("name").text("label")).rnFont(14).foregroundStyle(palette.text)
-                    TextField(fields.object("name").text("placeholder"), text: $model.calendarSubscriptionName)
+                    TextField(fields.object("name").text("placeholder"), text: Bindable(model).calendarSubscriptionName)
                         .focused($calendarSubscriptionField, equals: .name).submitLabel(.next)
                         .onSubmit { calendarSubscriptionField = .url }
                         .rnFont(15).textFieldStyle(.roundedBorder).frame(minHeight: 44)
@@ -2554,7 +2567,7 @@ struct SettingsScreen: View {
                         .accessibilityIdentifier("calendar-subscription-name")
                         .disabled(!model.calendarSubscriptionEnabled)
                     Text(fields.object("url").text("label")).rnFont(14).foregroundStyle(palette.text)
-                    TextField(fields.object("url").text("placeholder"), text: $model.calendarSubscriptionURL)
+                    TextField(fields.object("url").text("placeholder"), text: Bindable(model).calendarSubscriptionURL)
                         .focused($calendarSubscriptionField, equals: .url).submitLabel(.done)
                         .onSubmit { calendarSubscriptionField = nil }
                         .rnFont(15).textFieldStyle(.roundedBorder).frame(minHeight: 44)
@@ -4232,7 +4245,7 @@ struct SettingsScreen: View {
 
 
 struct DiagnosticsCard: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let owner: UUID
     @FocusState private var retentionDaysFocused: Bool
@@ -4250,7 +4263,7 @@ struct DiagnosticsCard: View {
             Text(card.text("description")).rnFont(14).foregroundStyle(palette.secondary)
             Text(card.text("safety")).rnFont(13).foregroundStyle(palette.secondary)
             Text(card.text("current")).rnFont(14).accessibilityIdentifier("archive-retention-current")
-            TextField(card.text("daysLabel"), text: $model.archiveRetentionDaysDraft)
+            TextField(card.text("daysLabel"), text: Bindable(model).archiveRetentionDaysDraft)
                 .keyboardType(.numberPad).focused($retentionDaysFocused).textFieldStyle(.roundedBorder).frame(minHeight: 44)
                 .accessibilityLabel(card.text("daysLabel"))
                 .accessibilityIdentifier("archive-retention-days")
@@ -4298,9 +4311,7 @@ struct DiagnosticsCard: View {
             }
     }
 
-    var body: some View {
-        let pickerID = model.backupImportPickerID
-        let pickerAction = model.backupImportPickerAction
+    private var diagnosticsContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if owner == model.settingsDiagnosticsOwner {
@@ -4426,6 +4437,13 @@ struct DiagnosticsCard: View {
             .foregroundStyle(palette.text).padding(16)
         }
         .background(palette.bg).accessibilityIdentifier("diagnostics-scroll")
+    }
+
+    @ViewBuilder
+    private var diagnosticsPresented: some View {
+        let pickerID = model.backupImportPickerID
+        let pickerAction = model.backupImportPickerAction
+        diagnosticsContent
         .alert(model.label("sandbox.confirmTitle"), isPresented: $sandboxConfirm) {
             Button(model.label("common.cancel"), role: .cancel) {}
             Button(model.label("sandbox.enter")) { NativeAppModel.session.enter() }
@@ -4478,6 +4496,10 @@ struct DiagnosticsCard: View {
         } message: {
             Text(model.backupRestoreConfirmation.text("message"))
         }
+    }
+
+    var body: some View {
+        diagnosticsPresented
         .onChange(of: model.backupImportPreview.isEmpty) { empty in
             guard owner == model.settingsDiagnosticsOwner else { return }
             backupPreviewAnswered = false
@@ -4512,16 +4534,20 @@ struct DiagnosticsCard: View {
         .onChange(of: model.gettingStartedError) { error in
             if owner == model.settingsDiagnosticsOwner && error != nil { backupOpen = true }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            sandboxConfirm = false
-            if owner == model.settingsDiagnosticsOwner { model.retireGettingStartedPresentation() }
-        }
-        .onAppear {
-            guard owner == model.settingsDiagnosticsOwner else { return }
-            backupOpen = !model.backupDocumentResult.isEmpty || model.backupDocumentPending || model.backupResultReadRetryNeeded
-            backupPreviewPresented = !model.backupImportPreview.isEmpty
-            backupRestorePresented = !model.backupRestoreConfirmation.isEmpty
-        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in retireOnResignActive() }
+        .onAppear { restoreOpenPanels() }
+    }
+
+    private func retireOnResignActive() {
+        sandboxConfirm = false
+        if owner == model.settingsDiagnosticsOwner { model.retireGettingStartedPresentation() }
+    }
+
+    private func restoreOpenPanels() {
+        guard owner == model.settingsDiagnosticsOwner else { return }
+        backupOpen = !model.backupDocumentResult.isEmpty || model.backupDocumentPending || model.backupResultReadRetryNeeded
+        backupPreviewPresented = !model.backupImportPreview.isEmpty
+        backupRestorePresented = !model.backupRestoreConfirmation.isEmpty
     }
 
     @ViewBuilder
@@ -4691,7 +4717,7 @@ private struct DiagnosticsActivitySheet: UIViewControllerRepresentable {
 
 
 private struct AboutSettingsCard: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     private var appName: String {
@@ -4826,7 +4852,7 @@ private struct AboutSettingsCard: View {
 
 private struct FeedbackSettingsForm: View {
     @State private var confirmNoEmail = false
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var field: String?
@@ -4966,7 +4992,7 @@ private struct FeedbackSettingsForm: View {
 }
 
 private struct GmailCaptureCard: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     @ObservedObject var gmail: NativeGmailCaptureModel
     let palette: AppPalette
 

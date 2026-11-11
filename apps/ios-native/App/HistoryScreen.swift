@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HistoryScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -706,7 +706,7 @@ struct HistoryScreen: View {
 
 private struct HistoryDoneBulkTagDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
 
     private var fields: some View {
@@ -764,7 +764,7 @@ private struct HistoryDoneBulkTagDialog: View {
 }
 
 private struct HistoryDoneBulkRemoveTagDialog: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var focused: Bool
 
@@ -849,7 +849,7 @@ private struct HistoryDoneBulkRemoveTagDialog: View {
 
 private struct HistoryTaskCompletedAtDialog: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     let options: CoreObject
     let prefix: String
@@ -930,7 +930,7 @@ private struct HistoryTaskCompletedAtDialog: View {
 }
 
 struct HistoryPanel: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var focusedField: String?
     private var isFilter: Bool { model.historyPanel == "filters" }

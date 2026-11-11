@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct CaptureSheet: View {
-    @ObservedObject var model: CoreModel
+    @Bindable var model: CoreModel
     let palette: AppPalette
     @State private var expanded = false
     @State private var showSyntax = false
@@ -447,7 +447,7 @@ struct CaptureSheet: View {
 }
 
 private struct ContextPicker: View {
-    @ObservedObject var model: CoreModel
+    @Bindable var model: CoreModel
     let palette: AppPalette
     @FocusState private var focused: Bool
     private var picker: CoreObject { model.capture.object("picker") }

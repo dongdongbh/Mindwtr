@@ -1,6 +1,5 @@
 import AppIntents
 
-@available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct MindwtrOpenQuickCaptureIntent: AppIntent {
     static var title: LocalizedStringResource = "Add Task"
     static var description = IntentDescription("Opens Mindwtr quick capture.")

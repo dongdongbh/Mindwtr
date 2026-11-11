@@ -6,7 +6,7 @@ private struct SavedSearchTaskRow: Identifiable {
 }
 
 struct SavedSearchScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -137,7 +137,7 @@ struct SavedSearchScreen: View {
 }
 
 struct SavedSearchWriteDialog: View {
-    @ObservedObject var model: CoreModel
+    @Bindable var model: CoreModel
     let palette: AppPalette
     @FocusState private var nameFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize

@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import Combine
 import MindwtrNativeCore
 
 
@@ -8,6 +7,15 @@ struct BoardDragRowFrame: Equatable {
     let status: String
     let id: String
     let frame: CGRect
+}
+
+struct BoardDragInvalidation: Equatable {
+    let viewRevision: Int
+    let blocked: [Bool]
+
+    func invalidates(after previous: BoardDragInvalidation) -> Bool {
+        viewRevision != previous.viewRevision || zip(previous.blocked, blocked).contains { !$0 && $1 }
+    }
 }
 
 struct BoardDragColumnFrame: Equatable {
@@ -234,7 +242,7 @@ final class BoardDragDiagnostics {
 
 
 struct BoardScreen: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @FocusState private var searchFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -331,7 +339,12 @@ struct BoardScreen: View {
                 dragMeasurements = value
             }
         }
-        .onReceive(dragInvalidations) { cancelDrag(reason: "model") }
+        .onChange(of: dragInvalidation) { previous, current in
+            if current.invalidates(after: previous) { cancelDrag(reason: "model") }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            cancelDrag(reason: "model")
+        }
         .onChange(of: scenePhase) { if $0 != .active { cancelDrag(reason: "scene") } }
         .onDisappear { trackingAnchor = false; cancelDrag(reason: "disappear") }
     }
@@ -538,22 +551,12 @@ struct BoardScreen: View {
         return provider
     }
 
-    private var dragInvalidations: AnyPublisher<Void, Never> {
-        Publishers.MergeMany([
-            model.$boardView.dropFirst().map { _ in () }.eraseToAnyPublisher(),
-            model.$boardCurrent.filter { !$0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$boardLoading.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$busy.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$retryNeeded.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$ready.filter { !$0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$selectedSurface.filter { $0 != .board }.map { _ in () }.eraseToAnyPublisher(),
-            model.$taskPresented.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$areaPickerPresented.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$boardFiltersPresented.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$morePresented.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            model.$capturePresented.filter { $0 }.map { _ in () }.eraseToAnyPublisher(),
-            NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification).map { _ in () }.eraseToAnyPublisher(),
-        ]).eraseToAnyPublisher()
+    private var dragInvalidation: BoardDragInvalidation {
+        BoardDragInvalidation(viewRevision: model.boardViewRevision, blocked: [
+            !model.boardCurrent, model.boardLoading, model.busy, model.retryNeeded, !model.ready,
+            model.selectedSurface != .board, model.taskPresented, model.areaPickerPresented,
+            model.boardFiltersPresented, model.morePresented, model.capturePresented,
+        ])
     }
 
     private func traceDrag(_ stage: BoardDragDiagnostics.Stage, reason: @autoclosure () -> String,
@@ -834,7 +837,7 @@ struct SwipeActionCard<Content: View>: View {
 }
 
 struct BoardFiltersSheet: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     @State private var picker = ""
     @State private var dueExpanded = false
@@ -1036,7 +1039,7 @@ struct BoardFiltersSheet: View {
 }
 
 private struct BoardReadFailure: View {
-    @ObservedObject var model: CoreModel
+    let model: CoreModel
     let palette: AppPalette
     var body: some View {
         if let error = model.boardError {
