@@ -2,6 +2,7 @@
 
 
 export const esOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Recordatorio no válido: usa una duración admitida y una fecha y hora explícitas",
     "taskEdit.startAdvanceReminderLabel": "Antes del inicio",
     "taskEdit.advanceReminderLabel": "Recordatorio anticipado",
     "taskEdit.advanceReminderMinutes": "{count} min antes",
@@ -272,7 +273,7 @@ export const esOverrides: Record<string, string> = {
 'nav.sectionArchive': "Archivo",
 'accessibility.skipToContent': "Saltar al contenido",
 'accessibility.mainContent': "Contenido principal",
-'quickAdd.help': "Al capturar de forma rápida puedes usar los comandos /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> o !Area, @context, #tag, +Project, %Person (o %\"Full Name\"). Las fechas de vencimiento se guardan solo como fecha salvo que incluyas una hora.",
+'quickAdd.help': "Al capturar de forma rápida puedes usar los comandos /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> o !Area, @context, #tag, +Project, %Person (o %\"Full Name\"). Las fechas de vencimiento se guardan solo como fecha salvo que incluyas una hora.",
 'quickAdd.example': "Ejemplo: Llamar a mamá /due:tomorrow @phone",
 'quickAdd.pastedImageTitle': "Captura de pantalla",
 'quickAdd.pastedImageSaving': "Adjuntando imagen...",

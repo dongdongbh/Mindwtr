@@ -1,5 +1,6 @@
 
 export const en: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Invalid reminder: use a supported duration and an explicit date and time",
     "taskEdit.startAdvanceReminderLabel": "Before start",
     "taskEdit.advanceReminderLabel": "Advance reminder",
     "taskEdit.advanceReminderMinutes": "{count} min before",
@@ -272,7 +273,7 @@ export const en: Record<string, string> = {
         'accessibility.mainContent': 'Main content',
 
 
-        'quickAdd.help': 'Quick add supports /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> or !Area, @context, #tag, +Project, %Person (or %"Full Name"). Due dates stay date-only unless you include a time.',
+        'quickAdd.help': 'Quick add supports /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> or !Area, @context, #tag, +Project, %Person (or %"Full Name"). Due dates stay date-only unless you include a time.',
         'quickAdd.example': 'e.g. Call mom /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'Screenshot',
         'quickAdd.pastedImageSaving': 'Attaching image...',

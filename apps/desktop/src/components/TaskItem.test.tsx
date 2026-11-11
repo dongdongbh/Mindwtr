@@ -1151,6 +1151,35 @@ describe('TaskItem', () => {
         });
     });
 
+    it.each([
+        { command: 'remind-due', token: '1d', date: '2030-11-12T17:00', expected: 1440, field: 'dueReminderLeadMinutes' },
+        { command: 'remind-start', token: '30m', date: '2030-11-12T09:00', expected: 30, field: 'startReminderLeadMinutes' },
+        { command: 'remind-due', token: '1d', date: '2030-11-12', expected: 0, field: 'dueReminderLeadMinutes' },
+        { command: 'remind-start', token: '1d', date: '2030-11-12T09:00', expected: 0, field: 'startReminderLeadMinutes' },
+        { command: 'remind-start', token: '0m', date: undefined, expected: 0, field: 'startReminderLeadMinutes' },
+    ] as const)('applies accepted $command:$token only with supported existing dates', async ({ command, token, date, expected, field }) => {
+        const editableTask: Task = { ...mockTask, title: 'Email', status: 'next', dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0,
+            ...(command === 'remind-due' ? { dueDate: date } : { startTime: date }) };
+        act(() => {
+            useTaskStore.setState({ tasks: [editableTask], _allTasks: [editableTask], _tasksById: new Map([[editableTask.id, editableTask]]) });
+        });
+        const view = render(<LanguageProvider><TaskItem task={editableTask} /></LanguageProvider>);
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        const titleInput = view.getByDisplayValue('Email');
+        if (!(titleInput instanceof HTMLInputElement)) throw new Error('Expected title input');
+        const commandText = `/${command}:${token}`;
+        const typedTitle = `Email ${commandText}`;
+        fireEvent.change(titleInput, { target: { value: typedTitle } });
+        titleInput.setSelectionRange(typedTitle.length, typedTitle.length);
+        fireEvent.click(titleInput);
+        expect(await view.findByRole('option', { name: commandText })).toBeInTheDocument();
+        await act(async () => { fireEvent.keyDown(titleInput, { key: 'Enter' }); });
+        const accepted = expected > 0 || token === '0m';
+        await waitFor(() => expect(titleInput.value).toBe(accepted ? 'Email' : typedTitle));
+        await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Save' })); });
+        await waitFor(() => expect(useTaskStore.getState()._tasksById.get(editableTask.id)?.[field]).toBe(expected));
+    });
+
     it('appends accepted slash notes instead of overwriting an existing description', async () => {
         const editableTask: Task = {
             ...mockTask,

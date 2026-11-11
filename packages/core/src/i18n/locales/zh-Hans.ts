@@ -1,5 +1,6 @@
 
 export const zhHans: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "提醒无效：请使用支持的时长，并明确指定日期和时间",
     "taskEdit.startAdvanceReminderLabel": "开始前提醒",
     "taskEdit.advanceReminderLabel": "提前提醒",
     "taskEdit.advanceReminderMinutes": "提前 {count} 分钟",
@@ -345,7 +346,7 @@ export const zhHans: Record<string, string> = {
         'nav.sectionLists': '列表',
         'nav.sectionOrganize': '整理',
         'nav.sectionArchive': '归档',
-        'quickAdd.help': '快速添加支持 /start:<when>、/due:<when>、/review:<when>、 /estimate:45m、/note:<text>、/link:<url>、/energy:<level>、/priority:<level>、/next、/* focus、/area:<name> 或 !Area、@context、#tag、+Project、%Person（或 %"Full Name"）。',
+        'quickAdd.help': '快速添加支持 /start:<when>、/due:<when>、/review:<when>, /remind-due:1d, /remind-start:30m、 /estimate:45m、/note:<text>、/link:<url>、/energy:<level>、/priority:<level>、/next、/* focus、/area:<name> 或 !Area、@context、#tag、+Project、%Person（或 %"Full Name"）。',
         'quickAdd.example': '示例：给妈妈打电话 /due:tomorrow @phone',
         'quickAdd.inlineHint': '试试：给妈妈打电话 /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': '快速添加语法帮助',

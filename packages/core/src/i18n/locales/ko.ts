@@ -1,5 +1,6 @@
 
 export const koOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "잘못된 알림: 지원되는 기간과 명시적인 날짜 및 시간을 입력하세요",
     "taskEdit.startAdvanceReminderLabel": "시작 전",
     "settings.speechUseGemini": "Gemini 사용",
     "settings.speechNativeUnsupported": "이 음성 제공업체는 아직 여기서 지원되지 않습니다. 음성 입력을 사용하려면 Gemini, OpenAI 또는 Whisper를 선택하세요.",
@@ -310,7 +311,7 @@ export const koOverrides: Record<string, string> = {
         'nav.sectionArchive': '보관함',
 
 
-        'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
+        'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
         'quickAdd.example': '예: 엄마에게 전화 /due:tomorrow @전화',
         'quickAdd.inlineHint': '예: 엄마에게 전화 /due:tomorrow 5pm @전화 #가족',
         'quickAdd.syntaxHelp': '빠른 추가 문법 도움말',

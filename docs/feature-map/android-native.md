@@ -502,3 +502,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/scripts/device.mjs`, `apps/android-native/scripts/device-lock.mjs`, `apps/android-native/scripts/run-device-batch.mjs`, `apps/android-native/scripts/phone-queue.mjs`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostNetwork.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/IcuDateTimeFormat.kt`
 - Checks: `apps/android-native/scripts/check-net-device.mjs`, `apps/android-native/scripts/check-intl-device.mjs`, `apps/android-native/scripts/run-device-batch.test.mjs`, `apps/android-native/scripts/check-boot-gates.mjs`
 - Notes: The net check needs `debug.mindwtr.native.net_check=<port>` and ends by stopping the host on purpose. The intl check compares the phone's output with RN's Hermes baseline in `apps/android-native/scripts/intl-hermes-baseline.json`.
+
+## Capture reminder syntax (#1545)
+
+- Reach: Quick capture or task capture title, then Save.
+- Syntax: `/due:tomorrow 5pm /remind-due:1d` and `/start:tomorrow 9am /remind-start:30m`. Positive leads require the matching explicit date command with an explicit time. Units are integer `m`, `h`, `d`, `w`; due accepts 0–10080 minutes and start accepts only 0/5/15/30/60. `0m` turns the advance reminder off. Invalid tokens remain visible, show a warning and refuse save. Existing task reminder policy and device notification settings apply.
+- Code: `packages/core/src/quick-add.ts`, `packages/core/src/quick-add-preview.ts`, `packages/core/src/capture.ts`
+- Checks: `packages/core/src/quick-add-reminders.test.ts`, `packages/core/src/task-reminder-policy.test.ts`, `packages/core/src/native-host-contract-prepared-capture.test.ts`, `packages/core/src/native-host-contract-prepared-lines.test.ts`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`

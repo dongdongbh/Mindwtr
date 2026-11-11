@@ -1,5 +1,6 @@
 
 export const trOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Geçersiz hatırlatıcı: desteklenen bir süre ve açık tarih ve saat kullanın",
     'task.copyDetails': "Görev ayrıntılarını kopyala",
     "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",
     "settings.speechUseGemini": "Gemini'yi kullan",
@@ -179,7 +180,7 @@ export const trOverrides: Record<string, string> = {
         'nav.sectionLists': 'Listeler',
         'nav.sectionOrganize': 'Organize et',
         'nav.sectionArchive': 'Arşiv',
-        'quickAdd.help': 'Hızlı ekleme /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> veya !Area, @context, #tag, +Project, %Person (veya %"Full Name") komutlarını destekler.',
+        'quickAdd.help': 'Hızlı ekleme /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> veya !Area, @context, #tag, +Project, %Person (veya %"Full Name") komutlarını destekler.',
         'quickAdd.example': 'Örnek: Annemi ara /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Deneyin: Annemi ara /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hızlı ekleme sözdizimi yardımı',

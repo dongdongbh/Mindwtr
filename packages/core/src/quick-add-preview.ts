@@ -77,7 +77,9 @@ export function buildQuickAddPreviewEntries(
         entries.push({
             id: `warning:${command}`,
             kind: 'warning',
-            label: tFallback(t, 'quickAdd.invalidDateCommand', 'Invalid date command'),
+            label: /^\/remind(?:-|:)/i.test(command)
+                ? tFallback(t, 'quickAdd.invalidReminderCommand', 'Invalid reminder: use a supported duration and an explicit date and time')
+                : tFallback(t, 'quickAdd.invalidDateCommand', 'Invalid date command'),
             value: command,
             tone: 'warning',
         });
@@ -116,6 +118,22 @@ export function buildQuickAddPreviewEntries(
             kind: 'start',
             label: tFallback(t, 'taskEdit.startDateLabel', 'Start Date'),
             value: formatPreviewDate(startValue, formatDate),
+            tone: 'default',
+        });
+    }
+    for (const [id, kind, minutes, label] of [
+        ['due-reminder', 'due', props.dueReminderLeadMinutes, tFallback(t, 'taskEdit.advanceReminderLabel', 'Advance reminder')],
+        ['start-reminder', 'start', props.startReminderLeadMinutes, tFallback(t, 'taskEdit.startAdvanceReminderLabel', 'Before start')],
+    ] as const) {
+        if (minutes === undefined) continue;
+        entries.push({
+            id, kind, label,
+            value: minutes === 0 ? tFallback(t, 'taskEdit.repeatReminderOff', 'Off')
+                : minutes === 10080 ? tFallback(t, 'taskEdit.advanceReminderWeek', '1 week before')
+                : minutes === 1440 ? tFallback(t, 'taskEdit.advanceReminderDay', '1 day before')
+                : minutes === 2880 ? tFallback(t, 'taskEdit.advanceReminderTwoDays', '2 days before')
+                : minutes === 60 ? tFallback(t, 'taskEdit.advanceReminderHour', '1 hour before')
+                : tFallback(t, 'taskEdit.advanceReminderMinutes', '{count} min before').replace('{count}', String(minutes)),
             tone: 'default',
         });
     }

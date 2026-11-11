@@ -1,5 +1,6 @@
 
 export const ruOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Недопустимое напоминание: укажите поддерживаемый интервал и точные дату и время",
     'task.copyDetails': "Копировать сведения о задаче",
     "taskEdit.startAdvanceReminderLabel": "До начала",
     "settings.speechUseGemini": "Использовать Gemini",

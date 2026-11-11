@@ -2,6 +2,7 @@
 
 
 export const jaOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "無効なリマインダー：対応する期間と明確な日付・時刻を指定してください",
     "taskEdit.startAdvanceReminderLabel": "開始前",
     "taskEdit.advanceReminderLabel": "事前リマインダー",
     "taskEdit.advanceReminderMinutes": "{count} 分前",
@@ -276,7 +277,7 @@ export const jaOverrides: Record<string, string> = {
         'accessibility.mainContent': 'メインコンテンツ',
 
 
-        'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>、 /estimate:45m、/note:<メモ>、/link:<URL>、/energy:<レベル>、/priority:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
+        'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>, /remind-due:1d, /remind-start:30m、 /estimate:45m、/note:<メモ>、/link:<URL>、/energy:<レベル>、/priority:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
         'quickAdd.example': '例：母に電話する /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'スクリーンショット',
         'quickAdd.pastedImageSaving': '画像を添付しています…',

@@ -1,5 +1,6 @@
 
 export const svOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Ogiltig påminnelse: ange en stödd tidsperiod och ett uttryckligt datum och klockslag",
     "taskEdit.startAdvanceReminderLabel": "Före start",
     "taskEdit.advanceReminderLabel": "Förhandspåminnelse",
     "taskEdit.advanceReminderMinutes": "{count} min före",
@@ -275,7 +276,7 @@ export const svOverrides: Record<string, string> = {
         'accessibility.skipToContent': 'Hoppa till innehåll',
         'accessibility.mainContent': 'Huvudinnehåll',
 
-        'quickAdd.help': 'Snabbtillägg stödjer /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* fokus, /area:<name> eller !Area, @context, #tag, +Project, %Person (eller %"Full Name"). Förfallodatum blir bara ett datum utan tid, om du inte anger en tid också.',
+        'quickAdd.help': 'Snabbtillägg stödjer /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* fokus, /area:<name> eller !Area, @context, #tag, +Project, %Person (eller %"Full Name"). Förfallodatum blir bara ett datum utan tid, om du inte anger en tid också.',
         'quickAdd.example': 't.ex. Ring mamma /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'Skärmbild',
         'quickAdd.pastedImageSaving': 'Bifogar bild...',

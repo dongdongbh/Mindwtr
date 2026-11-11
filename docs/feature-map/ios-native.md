@@ -347,3 +347,10 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Code: `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeSearchIndex.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeSearchSnapshot.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testNativeSearch…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeSearchConsentTests.swift`
 - Notes: It is off by default and stays paused while App lock is on. It publishes only task titles and project names.
+
+## Capture reminder syntax (#1545)
+
+- Reach: Quick capture or task capture title, then Save.
+- Syntax: `/due:tomorrow 5pm /remind-due:1d` and `/start:tomorrow 9am /remind-start:30m`. Positive leads require the matching explicit date command with an explicit time. Units are integer `m`, `h`, `d`, `w`; due accepts 0–10080 minutes and start accepts only 0/5/15/30/60. `0m` turns the advance reminder off. Invalid tokens remain visible, show a warning and refuse save. Existing task reminder policy and device notification settings apply.
+- Code: `packages/core/src/quick-add.ts`, `packages/core/src/quick-add-preview.ts`, `packages/core/src/capture.ts`
+- Checks: `packages/core/src/quick-add-reminders.test.ts`, `packages/core/src/task-reminder-policy.test.ts`, `packages/core/src/native-host-contract-prepared-capture.test.ts`, `packages/core/src/native-host-contract-prepared-lines.test.ts`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`

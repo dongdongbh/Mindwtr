@@ -275,6 +275,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'overWork',
     'published', 'downloaded',
+    'dueLeadMinutes', 'startLeadMinutes',
 ];
 
 describe('release diagnostics field names', () => {

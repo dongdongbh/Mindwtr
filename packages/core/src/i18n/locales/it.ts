@@ -1,5 +1,6 @@
 
 export const itOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Promemoria non valido: usa una durata supportata e una data e ora esplicite",
     'task.copyDetails': "Copia dettagli attività",
     "taskEdit.startAdvanceReminderLabel": "Prima dell’inizio",
     "settings.speechUseGemini": "Usa Gemini",
@@ -175,7 +176,7 @@ export const itOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Archivio',
 
 
-        'quickAdd.help': 'L\'aggiunta rapida supporta /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> o !Area, @context, #tag, +Project, %Person (o %"Full Name").',
+        'quickAdd.help': 'L\'aggiunta rapida supporta /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> o !Area, @context, #tag, +Project, %Person (o %"Full Name").',
         'quickAdd.example': 'Esempio: Chiama la mamma /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Prova: Chiama la mamma /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Aiuto sulla sintassi di aggiunta rapida',

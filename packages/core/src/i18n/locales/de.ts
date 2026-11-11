@@ -1,5 +1,6 @@
 
 export const deOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Ungültige Erinnerung: unterstützte Dauer und ausdrückliches Datum mit Uhrzeit angeben",
     'task.copyDetails': "Aufgabendetails kopieren",
     "taskEdit.startAdvanceReminderLabel": "Vor dem Start",
     "settings.speechUseGemini": "Gemini verwenden",
@@ -221,7 +222,7 @@ export const deOverrides: Record<string, string> = {
         'accessibility.mainContent': 'Hauptinhalt',
 
 
-        'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
+        'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
         'quickAdd.example': 'Beispiel: Mama anrufen /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tipp: Mama anrufen /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hilfe zur Schnell-Hinzufügen-Syntax',

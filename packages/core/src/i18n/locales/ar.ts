@@ -1,5 +1,6 @@
 
 export const arOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "تذكير غير صالح: استخدم مدة مدعومة وتاريخًا ووقتًا محددين",
     'task.copyDetails': "نسخ تفاصيل المهمة",
     "taskEdit.startAdvanceReminderLabel": "قبل البدء",
     "settings.desktopAppLockDesc": "اطلب Windows Hello أو Touch ID (أو كلمة مرور Mac) عند فتح Mindwtr وبعد ابتعادك. هذا يخفي نافذة التطبيق فقط؛ يظل بإمكان أداة macOS وواجهة API المحلية وخادم MCP قراءة بياناتك.",

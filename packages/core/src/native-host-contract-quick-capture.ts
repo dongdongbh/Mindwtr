@@ -2,6 +2,7 @@ import { applyPreparedCaptureData, applyPreparedCaptureLinesData } from './prepa
 import { serializeBackupData } from './backup-transfer';
 import { applyCapturedProject, resolveCaptureAreaQuery, resolveCaptureProjectQuery, type CaptureTaskPlan } from './capture';
 import { safeParseDate, type DateFormatter } from './date';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './due-reminder-lead';
 import type { TranslateFn } from './i18n';
 import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult } from './native-host-contract';
 import { createNativeRequestReceipts, requestProjects, requestRowId, withRequestProject } from './native-request-receipts';
@@ -264,6 +265,8 @@ const CAPTURE_TASK_CHECKS: Partial<Record<keyof Task, (value: unknown) => boolea
     energyLevel: (v) => ['low', 'medium', 'high'].includes(v as string),
     assignedTo: isNonemptyText, description: (v) => isText(v, NOTE_LIMIT + TEXT_LIMIT),
     startTime: isCaptureDate, dueDate: isCaptureDate, reviewAt: isCaptureDate,
+    dueReminderLeadMinutes: (v) => normalizeDueReminderLeadMinutes(v) !== undefined,
+    startReminderLeadMinutes: (v) => normalizeStartReminderLeadMinutes(v) !== undefined,
     projectId: isNonemptyText, sectionId: isNonemptyText, areaId: isNonemptyText,
     order: (v) => typeof v === 'number' && Number.isFinite(v),
     orderNum: (v) => typeof v === 'number' && Number.isFinite(v),

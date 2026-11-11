@@ -12,6 +12,7 @@ import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
 import { getPersonOptionNames } from './people';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { minutesToTimeEstimate, parseTimeEstimateInput } from './calendar-scheduling';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './due-reminder-lead';
 
 
 export {
@@ -172,7 +173,7 @@ export function parseProcessInboxTitleInput(
 
 export interface QuickAddDateCommandsResult {
     title: string;
-    props: Pick<Partial<Task>, 'startTime' | 'dueDate' | 'reviewAt'>;
+    props: Pick<Partial<Task>, 'startTime' | 'dueDate' | 'reviewAt' | 'dueReminderLeadMinutes' | 'startReminderLeadMinutes'>;
     invalidDateCommands?: string[];
 }
 
@@ -214,8 +215,8 @@ const QUICK_ADD_FOCUS_COMMAND_PATTERN = String.raw`\*(?:\s+focus\b)?`;
 
 
 const QUICK_ADD_COMMAND_START = String.raw`(?:^|\s)`;
-const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|priority:|estimate:|duration:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b)|$)`;
-const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|priority:|estimate:|duration:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b))|$)`;
+const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|remind-due:|remind-start:|remind:|project:|area:|energy:|priority:|estimate:|duration:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b)|$)`;
+const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|remind-due:|remind-start:|remind:|project:|area:|energy:|priority:|estimate:|duration:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b))|$)`;
 const SIMPLE_TASK_TOKEN_RE = /[@#][\p{L}\p{N}_-]+/gu;
 
 
@@ -695,7 +696,7 @@ function parseDateCommand(
     working: string,
     now: Date,
     options: DateCommandParseOptions = {},
-): { value?: string; working: string; invalidCommand?: string } {
+): { value?: string; working: string; invalidCommand?: string; hasExplicitTime?: boolean } {
     const match = working.match(new RegExp(`${QUICK_ADD_COMMAND_START}\\/${command}:([\\s\\S]+?)${QUICK_ADD_COMMAND_BOUNDARY}`, 'i'));
     if (!match) return { working };
 
@@ -738,6 +739,7 @@ function parseDateCommand(
 
 
         value: formatDueDateValue(parsed),
+        hasExplicitTime: parsedNaturalDate?.hasExplicitTime,
         working: nextWorking,
     };
 }
@@ -751,6 +753,8 @@ function parseDateCommandsFromWorking(
     startTime?: string;
     dueDate?: string;
     reviewAt?: string;
+    dueReminderLeadMinutes?: number;
+    startReminderLeadMinutes?: number;
     invalidDateCommands?: string[];
 } {
     const invalidDateCommands: string[] = [];
@@ -770,11 +774,37 @@ function parseDateCommandsFromWorking(
     if (reviewResult.invalidCommand) invalidDateCommands.push(reviewResult.invalidCommand);
     working = reviewResult.working;
 
+    for (const command of working.matchAll(new RegExp(`${QUICK_ADD_COMMAND_START}\\/remind:([\\s\\S]*?)${QUICK_ADD_COMMAND_BOUNDARY}`, 'gi'))) {
+        invalidDateCommands.push(restoreEscapes(command[0].trim()));
+    }
+
+    let dueReminderLeadMinutes: number | undefined;
+    let startReminderLeadMinutes: number | undefined;
+    working = working.replace(/(?:^|\s)\/remind-(due|start):([^\s]*)/gi, (raw, target: string, token: string) => {
+        const duration = /^(\d+)(m|h|d|w)$/i.exec(restoreEscapes(token));
+        const units: Record<string, number> = { m: 1, h: 60, d: 1440, w: 10080 };
+        const unit = duration?.[2]?.toLowerCase();
+        const minutes = duration && unit && unit in units
+            ? Number(duration[1]) * units[unit] : undefined;
+        const isDue = target.toLowerCase() === 'due';
+        const lead = isDue ? normalizeDueReminderLeadMinutes(minutes) : normalizeStartReminderLeadMinutes(minutes);
+        const explicitTime = isDue ? dueResult.hasExplicitTime : startResult.hasExplicitTime;
+        if (lead === undefined || (lead > 0 && !explicitTime)) {
+            invalidDateCommands.push(restoreEscapes(raw.trim()));
+            return raw;
+        }
+        if (isDue) dueReminderLeadMinutes = lead;
+        else startReminderLeadMinutes = lead;
+        return '';
+    });
+
     return {
         working,
         startTime,
         dueDate,
         reviewAt,
+        dueReminderLeadMinutes,
+        startReminderLeadMinutes,
         invalidDateCommands: invalidDateCommands.length > 0 ? invalidDateCommands : undefined,
     };
 }
@@ -831,6 +861,8 @@ export function parseQuickAddDateCommands(
         startTime,
         dueDate,
         reviewAt,
+        dueReminderLeadMinutes,
+        startReminderLeadMinutes,
         invalidDateCommands,
     } = parseDateCommandsFromWorking(protectedInput, now, options);
 
@@ -842,6 +874,8 @@ export function parseQuickAddDateCommands(
             ...(startTime ? { startTime } : {}),
             ...(dueDate ? { dueDate } : {}),
             ...(reviewAt ? { reviewAt } : {}),
+            ...(dueReminderLeadMinutes !== undefined ? { dueReminderLeadMinutes } : {}),
+            ...(startReminderLeadMinutes !== undefined ? { startReminderLeadMinutes } : {}),
         },
         invalidDateCommands,
     };
@@ -1009,6 +1043,8 @@ export function parseQuickAdd(
         startTime,
         dueDate,
         reviewAt,
+        dueReminderLeadMinutes,
+        startReminderLeadMinutes,
         invalidDateCommands,
     } = parseDateCommandsFromWorking(working, now, options);
     working = workingWithoutDates;
@@ -1088,7 +1124,7 @@ export function parseQuickAdd(
 
     const title = restoreEscapes(working.replace(/\s{2,}/g, ' ').trim());
 
-    const rawDetectedDate = dueDate || hadExplicitDueCommand || hasInvalidEstimateCommand || options.naturalLanguageDates === false
+    const rawDetectedDate = dueDate || hadExplicitDueCommand || hasInvalidEstimateCommand || invalidDateCommands?.length || options.naturalLanguageDates === false
         ? undefined
         : detectTrailingDate(title, now);
     const detectedDate = rawDetectedDate && preserveText
@@ -1100,6 +1136,8 @@ export function parseQuickAdd(
     if (startTime) props.startTime = startTime;
     if (dueDate) props.dueDate = dueDate;
     if (reviewAt) props.reviewAt = reviewAt;
+    if (dueReminderLeadMinutes !== undefined) props.dueReminderLeadMinutes = dueReminderLeadMinutes;
+    if (startReminderLeadMinutes !== undefined) props.startReminderLeadMinutes = startReminderLeadMinutes;
     if (description) props.description = description;
     if (contexts.size > 0) props.contexts = Array.from(contexts);
     if (tags.size > 0) props.tags = Array.from(tags);

@@ -1,5 +1,6 @@
 
 export const hiOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "अमान्य अनुस्मारक: समर्थित अवधि और स्पष्ट तारीख व समय दें",
     'task.copyDetails': "कार्य का विवरण कॉपी करें",
     "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",
     "settings.speechUseGemini": "Gemini का उपयोग करें",

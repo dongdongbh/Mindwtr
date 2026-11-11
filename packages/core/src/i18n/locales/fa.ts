@@ -1,5 +1,6 @@
 
 export const faOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "یادآور نامعتبر: مدت پشتیبانی‌شده و تاریخ و زمان مشخص وارد کنید",
     "taskEdit.startAdvanceReminderLabel": "پیش از شروع",
     "taskEdit.advanceReminderLabel": "یادآوری پیشاپیش",
     "taskEdit.advanceReminderMinutes": "{count} دقیقه قبل",
@@ -278,7 +279,7 @@ export const faOverrides: Record<string, string> = {
         'accessibility.skipToContent': 'پرش به محتوا',
         'accessibility.mainContent': 'محتوای اصلی',
 
-        'quickAdd.help': 'افزودن سریع از /start:<زمان>، /due:<زمان>، /review:<زمان>، /estimate:45m، /note:<متن>، /link:<آدرس>، /energy:<سطح>، /priority:<سطح>، /next، /* تمرکز، /area:<نام> یا !حوزه، @زمینه، #برچسب، +پروژه، %شخص (یا %"نام کامل") پشتیبانی می‌کند. تاریخ سررسید بدون ساعت باقی می‌ماند مگر اینکه ساعتی هم وارد کنید.',
+        'quickAdd.help': 'افزودن سریع از /start:<زمان>، /due:<زمان>، /review:<زمان>, /remind-due:1d, /remind-start:30m، /estimate:45m، /note:<متن>، /link:<آدرس>، /energy:<سطح>، /priority:<سطح>، /next، /* تمرکز، /area:<نام> یا !حوزه، @زمینه، #برچسب، +پروژه، %شخص (یا %"نام کامل") پشتیبانی می‌کند. تاریخ سررسید بدون ساعت باقی می‌ماند مگر اینکه ساعتی هم وارد کنید.',
         'quickAdd.example': 'مثلاً: تماس با مامان /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'اسکرین‌شات',
         'quickAdd.pastedImageSaving': 'در حال پیوست کردن تصویر...',

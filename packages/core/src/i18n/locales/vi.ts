@@ -1,4 +1,5 @@
 export const viOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Lời nhắc không hợp lệ: dùng khoảng thời gian được hỗ trợ và ngày giờ rõ ràng",
     'task.copyDetails': "Sao chép chi tiết công việc",
     "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
     "settings.speechUseGemini": "Dùng Gemini",
@@ -254,7 +255,7 @@ export const viOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Lưu trữ',
 
 
-        'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
+        'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
         'quickAdd.example': 'Ví dụ: Gọi cho mẹ /start:tomorrow /due:tomorrow 5pm @phone #family',
         'quickAdd.pasteImagesHint': 'Dán hình ảnh hoặc ảnh chụp màn hình bằng {{shortcut}} để đính kèm.',
         'quickAdd.placeholder': 'Thêm nhiệm vụ… dùng @ngữ cảnh +Dự án #thẻ',

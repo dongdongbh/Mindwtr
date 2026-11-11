@@ -5,6 +5,7 @@ import { getQuickAddProjectInitialProps } from './quick-add';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { resolveCaptureStatusForStart } from './store-helpers';
+import { logInfo } from './logger';
 
 
 export type CaptureAssemblyInput = {
@@ -315,6 +316,14 @@ export function planCaptureTask(
 
     if (props.projectId) {
         props = applyCapturedProject(props, props.projectId);
+    }
+
+    if (input.parsed.props.dueReminderLeadMinutes !== undefined || input.parsed.props.startReminderLeadMinutes !== undefined) {
+        logInfo('Capture reminder options prepared', {
+            scope: 'capture', category: 'validation', force: true,
+            context: { releaseCheck: 'v1.3.9/capture-reminder-syntax', outcome: 'prepared',
+                dueLeadMinutes: props.dueReminderLeadMinutes ?? 0, startLeadMinutes: props.startReminderLeadMinutes ?? 0 },
+        });
     }
 
     return {
