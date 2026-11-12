@@ -1808,6 +1808,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var somedaySectionTaskReadError: String?
     private(set) var somedaySectionTaskAwaitingRefresh = false
     private(set) var somedayMoveOptions: CoreObject = [:]
+    private(set) var somedayProjectMove: CoreObject = [:]
+    private(set) var somedayProjectMoveError: String?
+    @ObservationIgnored private var somedayProjectMoveProject: CoreObject = [:]
+    @ObservationIgnored private var somedayProjectMoveRequest: String?
     private(set) var somedayMoveReadError: String?
     private(set) var somedayMoveError: String?
     private(set) var somedayMoveAwaitingRefresh = false
@@ -3564,7 +3568,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var waitingLoadedDepth = 50
     private var waitingCollectionDepth: [String: Int] = [:]
     private var somedayCaller: Surface = .inbox
-    private var somedayParams: CoreObject = [:]
+    private var somedayParams: CoreObject = ["projectsInSections": true]
     private var somedayLoadedDepth = 50
     private var somedayDeferredDepth = 100
     private var somedayTextEdits: [String: CoreObject] = [:]
@@ -4386,7 +4390,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         ready && selectedSurface == .waiting && waitingCurrent && !busy && !retryNeeded && !taskPresented
     }
     var somedayActionsEnabled: Bool {
-        ready && selectedSurface == .someday && somedayCurrent && !busy && !retryNeeded && !taskPresented
+        ready && selectedSurface == .someday && somedayCurrent && !busy && !retryNeeded && !taskPresented && somedayProjectMove.isEmpty
     }
     var somedayPickerActionsEnabled: Bool { somedayActionsEnabled && somedayPickerCurrent }
     var somedaySectionCreatePending: Bool { somedaySectionCreateRequest != nil }
@@ -8322,7 +8326,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                        "manageAreaEditCommit"].contains(recovery.text("method")) {
                 selectedSurface = .settings
                 settingsManagePresented = true
-            } else if ["somedaySectionCreateWrite", "somedaySectionTaskCommit", "somedaySectionMoveCommit",
+            } else if ["somedaySectionCreateWrite", "somedayProjectSectionMoveWrite", "somedaySectionTaskCommit", "somedaySectionMoveCommit",
                        "somedaySectionMoveUndoCommit", "somedaySectionBulkMoveCommit",
                        "somedaySectionBulkMoveUndoCommit"].contains(recovery.text("method")) {
                 selectedSurface = .someday
@@ -21285,8 +21289,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let origin = selectedSurface
         guard (origin == .waiting && waitingActionsEnabled) || (origin == .someday && somedayActionsEnabled),
               projectStatusRequest == nil,
-              let row = (origin == .waiting ? waiting : someday).object("deferred").object("rows")
-                .objects("items").first(where: { Data($0.text("id").utf8) == Data(id.utf8) }),
+              let row = (origin == .waiting ? waiting.object("deferred").object("rows").objects("items") : somedayProjectRows)
+                .first(where: { Data($0.text("id").utf8) == Data(id.utf8) }),
               !id.isEmpty, let title = row["title"] as? String else { return }
         busy = true
         defer { finishOperation() }
@@ -21294,8 +21298,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             let options = try await query("projectStatusOptions", [try json(["projectId": id])])
             let canChange = try validatedProjectStatusOptions(options, id: id)
             let project = options.object("project")
-            let current = (origin == .waiting ? waiting : someday).object("deferred").object("rows")
-                .objects("items").first(where: { Data($0.text("id").utf8) == Data(id.utf8) })
+            let current = (origin == .waiting ? waiting.object("deferred").object("rows").objects("items") : somedayProjectRows)
+                .first(where: { Data($0.text("id").utf8) == Data(id.utf8) })
             guard canChange, selectedSurface == origin,
                   (origin == .waiting ? waitingCurrent : somedayCurrent),
                   let current, let currentTitle = current["title"] as? String,
@@ -28493,8 +28497,108 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func effectiveSomedayParams(_ snapshot: CoreObject) -> CoreObject {
-        ["sortBy": snapshot.text("sortBy"), "groupBy": snapshot.text("groupBy"),
-         "showDetails": snapshot.flag("showDetails"), "filters": snapshot.object("filters").object("state")]
+        ["sortBy": snapshot.text("sortBy"), "groupBy": snapshot.text("groupBy"), "showDetails": snapshot.flag("showDetails"),
+         "projectsInSections": true, "filters": snapshot.object("filters").object("state")]
+    }
+
+    private var somedayProjectRows: [CoreObject] {
+        someday.object("deferred").object("rows").objects("items")
+            + someday.objects("items").filter { $0.text("type") == "project" }.map { $0.object("project") }
+    }
+
+    var somedayProjectMoveActionsEnabled: Bool {
+        ready && selectedSurface == .someday && !somedayProjectMove.isEmpty && !busy && !retryNeeded
+            && somedayProjectMoveRequest == nil && !taskPresented
+    }
+
+    func openSomedayProjectMove(_ item: CoreObject) async {
+        let project = item.object("project"), groupID = item.text("groupId"), prefix = "view-section:someday:"
+        guard somedayActionsEnabled, somedayPanel.isEmpty, somedayProjectMove.isEmpty, somedayProjectMoveRequest == nil,
+              item.text("type") == "project", !project.text("id").isEmpty, !project.text("projectRevision").isEmpty,
+              groupID.hasPrefix(prefix) else { return }
+        busy = true
+        defer { finishOperation() }
+        somedayProjectMoveError = nil
+        do {
+            func page(_ offset: Int, revision: String?) async throws -> CoreObject {
+                var input: CoreObject = ["projectId": project.text("id"), "offset": offset, "limit": 100]
+                if let revision { input["revision"] = revision }
+                let dialog = try await query("menuRead", ["moveDialog", try json(input)])
+                let choices = dialog.object("choices"), items = choices.objects("items")
+                guard !dialog.text("revision").isEmpty, !dialog.text("title").isEmpty, !dialog.text("cancelLabel").isEmpty,
+                      choices.number("total") > offset, items.count == min(100, choices.number("total") - offset),
+                      revision.map({ $0 == dialog.text("revision") }) != false,
+                      items.allSatisfy({ Set($0.keys) == Set(["sectionId", "title", "selected"])
+                          && ($0["sectionId"] is NSNull || ($0["sectionId"] as? String)?.isEmpty == false)
+                          && !$0.text("title").isEmpty && $0["selected"] is Bool }) else { throw CocoaError(.coderReadCorrupt) }
+                return dialog
+            }
+            var dialog = try await page(0, revision: nil)
+            var items = dialog.object("choices").objects("items")
+            while items.count < dialog.object("choices").number("total") {
+                items += try await page(items.count, revision: dialog.text("revision")).object("choices").objects("items")
+            }
+            guard selectedSurface == .someday, somedayCurrent else { return }
+            var choices = dialog.object("choices")
+            choices["items"] = items
+            dialog["choices"] = choices
+            let from = String(groupID.dropFirst(prefix.count))
+            dialog["fromSectionId"] = from.isEmpty ? NSNull() as Any : from as Any
+            somedayProjectMoveProject = project
+            somedayProjectMove = dialog
+        } catch { somedayError = error.localizedDescription }
+    }
+
+    func closeSomedayProjectMove() {
+        guard somedayProjectMoveRequest == nil, !busy, !retryNeeded else { return }
+        somedayProjectMove = [:]
+        somedayProjectMoveProject = [:]
+        somedayProjectMoveError = nil
+    }
+
+    func chooseSomedayProjectSection(_ index: Int) async {
+        guard somedayProjectMoveActionsEnabled else { return }
+        let items = somedayProjectMove.object("choices").objects("items")
+        guard items.indices.contains(index) else { return }
+        busy = true
+        defer { finishOperation() }
+        somedayProjectMoveError = nil
+        do {
+            let request = try json(["requestId": UUID().uuidString.lowercased(), "projectId": somedayProjectMoveProject.text("id"),
+                                    "projectRevision": somedayProjectMoveProject.text("projectRevision"),
+                                    "fromSectionId": somedayProjectMove["fromSectionId"] ?? NSNull(),
+                                    "sectionId": items[index]["sectionId"] ?? NSNull()])
+            somedayProjectMoveRequest = request
+            let result = try await query("somedayProjectSectionMoveWrite", [request])
+            try acknowledgeSomedayProjectMove(result)
+            await readSomeday()
+        } catch { handleSomedayProjectMoveError(error) }
+    }
+
+    private func acknowledgeSomedayProjectMove(_ result: CoreObject) throws {
+        guard let request = somedayProjectMoveRequest, let frozen = try? decode(request),
+              Set(result.keys) == Set(["id", "changed"]), result.text("id") == frozen.text("projectId"),
+              let changed = result["changed"] as? NSNumber, CFGetTypeID(changed) == CFBooleanGetTypeID() else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        somedayProjectMoveRequest = nil
+        somedayProjectMove = [:]
+        somedayProjectMoveProject = [:]
+        somedayProjectMoveError = nil
+        retryNeeded = false
+        error = nil
+    }
+
+    private func handleSomedayProjectMoveError(_ failure: Error) {
+        if somedayProjectMoveRequest != nil && isDefiniteRejection(failure) {
+            somedayProjectMoveRequest = nil
+            retryNeeded = false
+            error = nil
+        } else {
+            retryNeeded = somedayProjectMoveRequest != nil
+            if retryNeeded { error = failure.localizedDescription }
+        }
+        somedayProjectMoveError = failure.localizedDescription
     }
 
     private func somedayPage(params: CoreObject, offset: Int, limit: Int, revision: String? = nil,
@@ -36080,8 +36184,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         if selectedSurface == .someday {
             guard somedayActionsEnabled, visibleDescriptionReference(descriptionSourceID, kind: "project", id: row.text("id"))
-                || someday.object("deferred").object("rows").objects("items")
-                .contains(where: { $0.text("id") == row.text("id") }) else { return }
+                || somedayProjectRows.contains(where: { $0.text("id") == row.text("id") }) else { return }
         }
         if selectedSurface == .reference {
             guard referenceActionsEnabled, reference.objects("items").contains(where: { item in
@@ -45505,6 +45608,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 await refreshManageAfterSomedayRename()
                 return
             }
+            if let request = somedayProjectMoveRequest {
+                let result: CoreObject
+                if let acknowledgment { result = try decode(acknowledgment) }
+                else { result = try await query("somedayProjectSectionMoveRetryOutcome", [request]) }
+                try acknowledgeSomedayProjectMove(result)
+                if selectedSurface == .someday { await readSomeday() }
+                return
+            }
             if let request = unassignedAreaColorRequest {
                 let result: CoreObject
                 if let acknowledgment { result = try decode(acknowledgment) }
@@ -46176,6 +46287,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             }
             if somedaySectionRenameRequest != nil {
                 await handleSomedaySectionRenameError(error)
+                return
+            }
+            if somedayProjectMoveRequest != nil {
+                handleSomedayProjectMoveError(error)
                 return
             }
             if unassignedAreaColorRequest != nil {

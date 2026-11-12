@@ -7134,6 +7134,86 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(replayedOutcome["changed"] as? Bool, true)
     }
 
+    private func seedSomedayProjectSections() throws -> String {
+        var settings = try calendarPreferenceSettings()
+        var gtd = settings["gtd"] as? [String: Any] ?? [:]
+        var sections = gtd["viewSections"] as? [String: Any] ?? [:]
+        sections["someday"] = [["id": "later", "title": "Later", "order": 0]]
+        gtd["viewSections"] = sections
+        settings["gtd"] = gtd
+        try writeCalendarPreferenceSettings(settings)
+        let id = "parked-1319", at = "2026-10-01T12:00:00.000Z"
+        let sqlite = try SQLiteBridge(url: database)
+        _ = try sqlite.execute("INSERT INTO projects (id, title, status, color, orderNum, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                               parametersJSON: json([id, "Parked 1319", "someday", "#123456", 0, at, at, 1]))
+        sqlite.close()
+        return id
+    }
+
+    private func somedayProjectMovePayload(_ core: CoreHost, projectId: String, sectionId: String?,
+                                           id: String = UUID().uuidString.lowercased()) async throws -> String {
+        let view = try object(await core.call("menuRead", argumentsJSON: json(["someday", json([
+            "groupBy": "viewSection", "projectsInSections": true, "offset": 0, "limit": 50])])))
+        let items = try XCTUnwrap(view["items"] as? [[String: Any]])
+        let item = try XCTUnwrap(items.first { $0["type"] as? String == "project" && $0["id"] as? String == projectId })
+        let group = try XCTUnwrap(item["groupId"] as? String), prefix = "view-section:someday:"
+        XCTAssertTrue(group.hasPrefix(prefix)); XCTAssertTrue(view["deferred"] is NSNull)
+        let from = String(group.dropFirst(prefix.count))
+        let project = try XCTUnwrap(item["project"] as? [String: Any])
+        return try json([json(["requestId": id, "projectId": projectId, "projectRevision": XCTUnwrap(project["projectRevision"]),
+                               "fromSectionId": from.isEmpty ? NSNull() as Any : from as Any, "sectionId": (sectionId as Any?) ?? NSNull()])])
+    }
+
+    private func storedProjectSomedaySection(_ id: String) throws -> String? {
+        let sqlite = try SQLiteBridge(url: database); defer { sqlite.close() }
+        let rows = try JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT viewSectionIds FROM projects WHERE id = ?",
+            parametersJSON: json([id])).utf8)) as? [[String: Any]]
+        guard let raw = rows?.first?["viewSectionIds"] as? String else { return nil }
+        return try object(raw)["someday"] as? String
+    }
+
+    func testSomedayProjectSectionMoveWritesProbesAndRecoversAfterAFailedSave() async throws {
+        let id = try seedSomedayProjectSections()
+        let faults = HostIOFaults()
+        var saved: [String] = []
+        faults.commandDiagnostic = { saved.append($0) }
+        let core = host(faults)
+        _ = try await core.start()
+        let same = try await somedayProjectMovePayload(core, projectId: id, sectionId: nil)
+        var journals = 0
+        faults.journalWrite = { journals += 1 }
+        let unchanged = try object(await core.call("somedayProjectSectionMoveWrite", argumentsJSON: same))
+        XCTAssertEqual(unchanged["changed"] as? Bool, false); XCTAssertEqual(journals, 0)
+        let move = try await somedayProjectMovePayload(core, projectId: id, sectionId: "later")
+        let moved = try object(await core.call("somedayProjectSectionMoveWrite", argumentsJSON: move))
+        XCTAssertEqual(try json(moved), try json(["id": id, "changed": true]))
+        XCTAssertEqual(try storedProjectSomedaySection(id), "later")
+        XCTAssertEqual(saved.filter { $0 == "somedayProjectSectionMoveSaved" }.count, 1)
+        let outcome = try object(await core.call("somedayProjectSectionMoveRetryOutcome", argumentsJSON: move))
+        XCTAssertEqual(outcome["changed"] as? Bool, true)
+        await expectFailure("STALE_REVISION") { _ = try await core.call("somedayProjectSectionMoveWrite", argumentsJSON: same) }
+        await expectFailure("INVALID_INPUT") {
+            _ = try await core.call("somedayProjectSectionMoveWrite", argumentsJSON: json([json(["requestId": "nope", "projectId": id])]))
+        }
+        let back = try await somedayProjectMovePayload(core, projectId: id, sectionId: nil)
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected project section COMMIT failure") } }
+        await expectFailure("SAVE_FAILED") { _ = try await core.call("somedayProjectSectionMoveWrite", argumentsJSON: back) }
+        await expectFailure("SAVE_FAILED") { _ = try await core.retryPending() }
+        XCTAssertEqual((try object(String(decoding: try Data(contentsOf: journal), as: UTF8.self)))["argumentsJSON"] as? String, back)
+        XCTAssertEqual(try storedProjectSomedaySection(id), "later")
+        await core.close()
+        let replay = host()
+        let window = try object(await replay.start())
+        let recovery = try XCTUnwrap(window["recovery"] as? [String: Any])
+        XCTAssertEqual(recovery["method"] as? String, "somedayProjectSectionMoveWrite")
+        XCTAssertEqual(try json(XCTUnwrap(recovery["result"])), try json(["id": id, "changed": true]))
+        XCTAssertNil(try storedProjectSomedaySection(id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        let replayed = try object(await replay.call("somedayProjectSectionMoveRetryOutcome", argumentsJSON: back))
+        XCTAssertEqual(replayed["changed"] as? Bool, true)
+        await replay.close()
+    }
+
     func testSomedaySectionRenameLostAcknowledgmentReplaysWithoutAnotherWrite() async throws {
         try await seedCalendarPreferenceTask()
         var settings = try calendarPreferenceSettings()

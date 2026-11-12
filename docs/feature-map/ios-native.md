@@ -200,12 +200,12 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Someday/Maybe
 
-- Reach: Menu › Someday. Section headings have Add task. The task status menu has Move to section. Long-press a task card to select; the bulk bar also has Move to section.
-- Shortcuts: Swipe right on a deferred project row to reactivate it.
-- Selectors: `someday-scroll`, `someday-overflow-button`, `someday-section-create-input`, `someday-section-create-save`, `someday-section-move-new-section`, `someday-section-move-undo`, `someday-section-task-input`, `someday-bulk-move-section`, `someday-section-move-choice-` (+ index)
-- Code: `apps/ios-native/App/SomedayScreen.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testSomedaySection…, testSomedayNested…, testSomedayGroupFilter…, testStatusListBulkSomedayMoveToSection…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testSomedaySectionBulkMove…)
-- Notes: Move-to-section Undo lasts only for the session and does not return after restart. Bulk Move to section moves only the selected tasks not already in that section, ends the selection, and its Undo restores each task's own earlier section. Section rename and delete live in Settings › Manage.
+- Reach: Menu › Someday. Section headings have Add task. The task status menu has Move to section. Long-press a task card to select; the bulk bar also has Move to section. Grouped by section, parked (Someday) projects sit inside their section above its tasks, as RN does (#1319); other groupings keep the projects block above the list.
+- Shortcuts: Swipe right on a parked project row to reactivate it. Long-press a parked project row in a section for Move to section…
+- Selectors: `someday-scroll`, `someday-overflow-button`, `someday-section-create-input`, `someday-section-create-save`, `someday-section-move-new-section`, `someday-section-move-undo`, `someday-section-task-input`, `someday-bulk-move-section`, `someday-section-move-choice-` (+ index), `someday-project-` (+ project id, + `-move-section` for its menu item), `someday-project-move-choice-` (+ index), `someday-project-move-cancel`
+- Code: `apps/ios-native/App/SomedayScreen.swift`, `apps/ios-native/App/CoreModel.swift` (somedayProjectMove…), `packages/core/src/native-host-contract-someday-project-section-move.ts`
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testSomedaySection…, testSomedayNested…, testSomedayGroupFilter…, testStatusListBulkSomedayMoveToSection…, testSomedayProjectsSitInTheirSection…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testSomedaySectionBulkMove…, testSomedayProjectSectionMove…), `packages/core/src/native-host-contract-menu-views.test.ts` (checked iOS write)
+- Notes: Move-to-section Undo lasts only for the session and does not return after restart. Bulk Move to section moves only the selected tasks not already in that section, ends the selection, and its Undo restores each task's own earlier section. Section rename and delete live in Settings › Manage. A project's Move to section dialog lists existing sections only; create a new section from More › New section first.
 
 ## Waiting and Someday bulk selection
 

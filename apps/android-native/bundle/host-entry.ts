@@ -4456,6 +4456,15 @@ globalThis.MindwtrHost = {
     somedaySectionRenameRetryOutcome(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.probeSomedaySectionRenameOutcome(JSON.parse(json))); });
     },
+    somedayProjectSectionMoveValidate(json: string): string {
+        return submit(async () => unwrap(contract.validateSomedayProjectSectionMoveWrite(JSON.parse(json))));
+    },
+    somedayProjectSectionMoveWrite(json: string): string {
+        return submit(async () => unwrap(await contract.moveSomedayProjectToSectionChecked(JSON.parse(json))));
+    },
+    somedayProjectSectionMoveRetryOutcome(json: string): string {
+        return submit(async () => { requireSaved(); return unwrap(contract.probeSomedayProjectSectionMoveOutcome(JSON.parse(json))); });
+    },
     unassignedAreaColorOptions(json: string): string {
         return submit(async () => { requireSaved(); return unwrap(contract.getUnassignedAreaColorOptions(JSON.parse(json))); });
     },

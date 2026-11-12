@@ -739,6 +739,8 @@ struct SwipeActionCard<Content: View>: View {
     var complete: () -> Void = {}
     var orderActions: [CoreObject] = []
     var order: (String) -> Void = { _ in }
+    var sectionMoveLabel: String = ""
+    var sectionMove: () -> Void = {}
     let content: Content
     @GestureState private var offset: CGFloat = 0
 
@@ -762,6 +764,7 @@ struct SwipeActionCard<Content: View>: View {
                 }
                 if !leftLabel.isEmpty { Button(leftLabel) { swipe("left") }.disabled(!enabled) }
                 if !rightLabel.isEmpty { Button(rightLabel) { swipe("right") }.disabled(!enabled) }
+                if !sectionMoveLabel.isEmpty { Button(sectionMoveLabel) { sectionMove() }.disabled(!enabled) }
                 ForEach(moveDestinations.indices, id: \.self) { index in
                     let destination = moveDestinations[index]
                     Button(moveLabel + " " + destination.text("label")) { move(destination.text("status")) }
@@ -784,6 +787,10 @@ struct SwipeActionCard<Content: View>: View {
                 if !leftLabel.isEmpty { Button(leftLabel, systemImage: leftSystemImage) { swipe("left") }.disabled(!enabled) }
                 if !rightLabel.isEmpty {
                     Button(rightLabel, systemImage: "trash", role: .destructive) { swipe("right") }.disabled(!enabled)
+                }
+                if !sectionMoveLabel.isEmpty {
+                    Button(sectionMoveLabel, systemImage: "folder") { sectionMove() }
+                        .accessibilityIdentifier(id + "-move-section").disabled(!enabled)
                 }
                 if !moveDestinations.isEmpty {
                     Menu(moveLabel) {

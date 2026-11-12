@@ -41,6 +41,9 @@ struct SomedayScreen: View {
                                              onSelectionStart: selectable ? { row in Task { await model.selectStatusListTask(row) } } : nil)
                                 }
                                 .id(row.text("id"))
+                            } else if item.text("type") == "project" {
+                                projectRow(item.object("project"), activateLabel: item.text("activateLabel"), sectionItem: item)
+                                    .id("project:" + item.text("id"))
                             } else if item.text("type") == "heading" {
                                 HStack(spacing: 8) {
                                     Text(item.text("title")).rnFont(13, .bold)
@@ -78,6 +81,7 @@ struct SomedayScreen: View {
             .accessibilityIdentifier("someday-scroll")
             .refreshable { await model.pullToRefresh() }
         }
+        .overlay { if !model.somedayProjectMove.isEmpty { projectMoveDialog } }
         .onChange(of: scenePhase) { model.statusListSelectionOwnerChanged(active: $0 == .active) }
         .onDisappear { model.statusListSelectionOwnerChanged(active: false) }
         .task(id: scenePhase == .active) {
@@ -204,29 +208,7 @@ struct SomedayScreen: View {
                 if model.somedayProjectsExpanded {
                     let entries = collection.objects("items")
                     ForEach(entries.indices, id: \.self) { index in
-                        let project = entries[index]
-                        SwipeActionCard(
-                            palette: palette, enabled: model.somedayActionsEnabled,
-                            id: "someday-project-" + project.text("id"),
-                            leftLabel: deferred.text("activateLabel"), rightLabel: "",
-                            leftSystemImage: "arrow.uturn.backward",
-                            open: { Task { await model.openProject(project) } },
-                            swipe: { _ in Task { await model.activateDeferredProject(project.text("id")) } },
-                            content: HStack(spacing: 10) {
-                                AppIcon(name: "folder", size: 18)
-                                    .foregroundStyle(project.text("color").isEmpty ? palette.secondary : palette.einkSafe(Color(hex: project.text("color"))))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(project.text("title")).rnFont(14, .semibold).foregroundStyle(palette.text)
-                                    if !project.text("areaName").isEmpty {
-                                        Text(project.text("areaName")).rnFont(12).foregroundStyle(palette.secondary)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 10).padding(.horizontal, 12).frame(minHeight: 44)
-                            .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
-                        )
+                        projectRow(entries[index], activateLabel: deferred.text("activateLabel"))
                     }
                     if entries.count < collection.number("total") {
                         moreButton("someday-more-deferredProjects") { await model.loadMoreSomeday(deferred: true) }
@@ -237,6 +219,82 @@ struct SomedayScreen: View {
             .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).padding(.bottom, 4)
         }
+    }
+
+    private func projectRow(_ project: CoreObject, activateLabel: String, sectionItem: CoreObject? = nil) -> some View {
+        SwipeActionCard(
+            palette: palette, enabled: model.somedayActionsEnabled,
+            id: "someday-project-" + project.text("id"),
+            leftLabel: activateLabel, rightLabel: "",
+            leftSystemImage: "arrow.uturn.backward",
+            open: { Task { await model.openProject(project) } },
+            swipe: { _ in Task { await model.activateDeferredProject(project.text("id")) } },
+            sectionMoveLabel: sectionItem == nil ? "" : model.someday.object("text").text("moveToSection"),
+            sectionMove: { if let sectionItem { Task { await model.openSomedayProjectMove(sectionItem) } } },
+            content: HStack(spacing: 10) {
+                AppIcon(name: "folder", size: 18)
+                    .foregroundStyle(project.text("color").isEmpty ? palette.secondary : palette.einkSafe(Color(hex: project.text("color"))))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(project.text("title")).rnFont(14, .semibold).foregroundStyle(palette.text)
+                    if !project.text("areaName").isEmpty {
+                        Text(project.text("areaName")).rnFont(12).foregroundStyle(palette.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 10).padding(.horizontal, 12).frame(minHeight: 44)
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+        )
+    }
+
+    private var projectMoveDialog: some View {
+        let dialog = model.somedayProjectMove, choices = dialog.object("choices").objects("items")
+        return ZStack {
+            Color.black.opacity(0.35).ignoresSafeArea()
+                .onTapGesture { model.closeSomedayProjectMove() }.accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(dialog.text("title")).rnFont(17, .bold).accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 4)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(choices.indices, id: \.self) { index in
+                            let choice = choices[index]
+                            Button { Task { await model.chooseSomedayProjectSection(index) } } label: {
+                                HStack(spacing: 10) {
+                                    Text(choice.text("title")).rnFont(15, choice.flag("selected") ? .semibold : .regular)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    if choice.flag("selected") {
+                                        Image(systemName: "checkmark").font(.system(size: 16)).foregroundStyle(palette.tint)
+                                    }
+                                }
+                                .padding(.horizontal, 10).frame(minHeight: 48).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(!model.somedayProjectMoveActionsEnabled)
+                            .accessibilityAddTraits(choice.flag("selected") ? .isSelected : [])
+                            .accessibilityIdentifier("someday-project-move-choice-" + String(index))
+                        }
+                    }
+                }
+                .frame(maxHeight: 360).fixedSize(horizontal: false, vertical: true)
+                if let message = model.somedayProjectMoveError {
+                    Text(message).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("someday-project-move-error")
+                }
+                if model.retryNeeded {
+                    Button(model.label("common.retry")) { Task { await model.retry() } }
+                        .rnFont(14, .semibold).frame(minHeight: 44).disabled(model.busy)
+                        .accessibilityIdentifier("someday-project-move-retry")
+                }
+                Button(dialog.text("cancelLabel")) { model.closeSomedayProjectMove() }
+                    .rnFont(15, .semibold).foregroundStyle(palette.tint).frame(maxWidth: .infinity, minHeight: 44)
+                    .disabled(model.busy || model.retryNeeded).accessibilityIdentifier("someday-project-move-cancel")
+            }
+            .padding(16).frame(maxWidth: 440).background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1)).padding(.horizontal, 24)
+        }
+        .foregroundStyle(palette.text).accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape) { model.closeSomedayProjectMove() }
     }
 
     private func moreButton(_ identifier: String, action: @escaping () async -> Void) -> some View {

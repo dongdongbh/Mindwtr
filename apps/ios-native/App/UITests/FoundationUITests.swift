@@ -10641,6 +10641,47 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons["someday-overflow-button"])
     }
 
+    func testSomedayProjectsSitInTheirSectionAndMoveFromALongPress() throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_SOMEDAY_PROJECTS_UI_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("A staged library with parked project parked-1319 (no section) and Someday section later is required")
+        }
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]; app.launch()
+        defer { app.terminate() }
+        task79OpenSomeday(app)
+        let row = app.buttons["someday-project-parked-1319"]
+        boardEnabled(row, timeout: 30)
+        XCTAssertFalse(app.buttons["someday-projects-toggle"].exists)
+        func inNoSection(_ expected: Bool) {
+            let later = app.staticTexts["someday-heading-view-section:someday:later"]
+            let none = app.staticTexts["someday-heading-view-section:someday:"]
+            XCTAssertTrue(later.waitForExistence(timeout: 20)); XCTAssertTrue(none.waitForExistence(timeout: 20))
+            expectation(for: NSPredicate { _, _ in
+                row.exists && row.frame.minY > later.frame.minY && (row.frame.minY > none.frame.minY) == expected
+            }, evaluatedWith: row)
+            waitForExpectations(timeout: 20)
+        }
+        inNoSection(true)
+        row.press(forDuration: 1.0)
+        boardTap(app, "someday-project-parked-1319-move-section")
+        boardEnabled(app.buttons["someday-project-move-cancel"], timeout: 20)
+        XCTAssertTrue(app.buttons["someday-project-move-choice-0"].isSelected)
+        boardTap(app, "someday-project-move-cancel")
+        XCTAssertTrue(app.buttons["someday-project-move-cancel"].waitForNonExistence(timeout: 10))
+        row.press(forDuration: 1.0)
+        boardTap(app, "someday-project-parked-1319-move-section")
+        let later = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "someday-project-move-choice-", "Later")).firstMatch
+        boardEnabled(later, timeout: 20); later.tap()
+        XCTAssertTrue(app.buttons["someday-project-move-cancel"].waitForNonExistence(timeout: 30))
+        inNoSection(false)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        processEditorObserve(app, "G5 parked project moved into the Later section")
+        app.terminate(); app.launch(); task79OpenSomeday(app)
+        boardEnabled(row, timeout: 30)
+        inNoSection(false)
+    }
+
     private func somedaySectionMoveFlow(library: String) {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", library]; app.launch()

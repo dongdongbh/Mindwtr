@@ -5865,6 +5865,10 @@ private final class Engine: @unchecked Sendable {
             try validateSomedaySectionRenameJournal(command)
             if case .success(let value) = command.terminal { try validateSomedaySectionRenameAcknowledgment(command, value: value) }
         }
+        if let command = pending, command.method == "somedayProjectSectionMoveWrite" {
+            _ = try invoke("somedayProjectSectionMoveValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateSomedayProjectSectionMoveAcknowledgment(arguments: journalArguments(command), value: value) }
+        }
         if let command = pending, command.method == "somedaySectionDeleteWrite" {
             try validateSomedaySectionDeleteJournal(command)
             if case .success(let value) = command.terminal { try validateSomedaySectionDeleteAcknowledgment(command, value: value) }
@@ -14668,7 +14672,7 @@ private final class Engine: @unchecked Sendable {
             if ["gtdArchiveOptions", "gtdTaskEditorFieldOptions", "taskOpenTab", "archiveRetentionOptions", "archiveRetentionReview", "captureCopilotEdit", "captureCopilotSubmit"].contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
-            if ["mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "projectMoveWrite", "projectMoveRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if ["mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "projectMoveWrite", "projectMoveRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedayProjectSectionMoveWrite", "somedayProjectSectionMoveRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
         if pomodoroOwned {
@@ -14806,7 +14810,7 @@ private final class Engine: @unchecked Sendable {
                     throw CoreHostRejection(message: failure.message)
                 }
             }
-            if ["focusGroupRetryOutcome", "taskListSortRetryOutcome", "unassignedAreaColorRetryOutcome", "somedaySectionCreateRetryOutcome", "somedaySectionRenameRetryOutcome", "somedaySectionDeleteRetryOutcome", "somedaySectionOrderRetryOutcome", "somedaySectionTaskRetryOutcome", "projectCreateRetryOutcome", "projectSectionCreateRetryOutcome", "projectSectionRenameRetryOutcome", "projectSectionDeleteRetryOutcome", "projectSectionOrderRetryOutcome", "projectMoveRetryOutcome", "appLockRetryOutcome", "gtdWorkflowRetryOutcome", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteRetryOutcome", "managePersonCreateRetryOutcome", "areaCreateRetryOutcome", "areaColorRetryOutcome", "areaRenameRetryOutcome", "manageAreaEditRetryOutcome", "areaOrderRetryOutcome", "areaDeleteRetryOutcome", "manageAreaDeleteRetryOutcome", "projectFocusRetryOutcome", "taskFocusRetryOutcome", "focusOrderRetryOutcome", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameRetryOutcome", "projectFlowRetryOutcome", "projectTaskSortRetryOutcome", "projectTaskOrderRetryOutcome", "projectNotesWriteRetryOutcome", "projectTagsWriteRetryOutcome", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusRetryOutcome", "projectDateRetryOutcome", "projectAreaRetryOutcome"].contains(method) {
+            if ["focusGroupRetryOutcome", "taskListSortRetryOutcome", "unassignedAreaColorRetryOutcome", "somedaySectionCreateRetryOutcome", "somedaySectionRenameRetryOutcome", "somedayProjectSectionMoveRetryOutcome", "somedaySectionDeleteRetryOutcome", "somedaySectionOrderRetryOutcome", "somedaySectionTaskRetryOutcome", "projectCreateRetryOutcome", "projectSectionCreateRetryOutcome", "projectSectionRenameRetryOutcome", "projectSectionDeleteRetryOutcome", "projectSectionOrderRetryOutcome", "projectMoveRetryOutcome", "appLockRetryOutcome", "gtdWorkflowRetryOutcome", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteRetryOutcome", "managePersonCreateRetryOutcome", "areaCreateRetryOutcome", "areaColorRetryOutcome", "areaRenameRetryOutcome", "manageAreaEditRetryOutcome", "areaOrderRetryOutcome", "areaDeleteRetryOutcome", "manageAreaDeleteRetryOutcome", "projectFocusRetryOutcome", "taskFocusRetryOutcome", "focusOrderRetryOutcome", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameRetryOutcome", "projectFlowRetryOutcome", "projectTaskSortRetryOutcome", "projectTaskOrderRetryOutcome", "projectNotesWriteRetryOutcome", "projectTagsWriteRetryOutcome", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusRetryOutcome", "projectDateRetryOutcome", "projectAreaRetryOutcome"].contains(method) {
                 do {
                     let value = try invoke(method, arguments: args)
                     if method == "appLockRetryOutcome" {
@@ -14862,6 +14866,9 @@ private final class Engine: @unchecked Sendable {
                     }
                     if method == "somedaySectionRenameRetryOutcome" {
                         try validateSomedaySectionRenameAcknowledgment(arguments: args, value: value)
+                    }
+                    if method == "somedayProjectSectionMoveRetryOutcome" {
+                        try validateSomedayProjectSectionMoveAcknowledgment(arguments: args, value: value)
                     }
                     if method == "somedaySectionDeleteRetryOutcome" {
                         try validateSomedaySectionDeleteAcknowledgment(arguments: args, value: value)
@@ -15399,6 +15406,20 @@ private final class Engine: @unchecked Sendable {
         if method == "somedaySectionCreateWrite" {
             do { _ = try invoke("somedaySectionCreateValidate", arguments: args) }
             catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") {
+                throw CoreHostRejection(message: failure.message)
+            }
+        }
+        if method == "somedayProjectSectionMoveWrite" {
+            do {
+                let expected = try invoke("somedayProjectSectionMoveValidate", arguments: args)
+                let result = try NativeJSON.jsonObject(with: Data(expected.utf8)) as? [String: Any]
+                try validateSomedayProjectSectionMoveAcknowledgment(arguments: args, value: expected)
+                if result?["changed"] as? Bool == false {
+                    let probed = try invoke("somedayProjectSectionMoveRetryOutcome", arguments: args)
+                    try validateSomedayProjectSectionMoveAcknowledgment(arguments: args, value: probed)
+                    return probed
+                }
+            } catch let failure as HostFailure where failure.message.hasPrefix("INVALID_INPUT:") || failure.message.hasPrefix("STALE_REVISION:") {
                 throw CoreHostRejection(message: failure.message)
             }
         }
@@ -17884,6 +17905,11 @@ private final class Engine: @unchecked Sendable {
                 try validateSomedaySectionRenameAcknowledgment(command, value: probed)
                 try validateSomedaySectionRenameAcknowledgment(command, value: value)
             }
+            if command.method == "somedayProjectSectionMoveWrite", case .success(let value) = terminal {
+                let probed = try invoke("somedayProjectSectionMoveRetryOutcome", arguments: journalArguments(command))
+                try validateSomedayProjectSectionMoveAcknowledgment(arguments: journalArguments(command), value: probed)
+                try validateSomedayProjectSectionMoveAcknowledgment(arguments: journalArguments(command), value: value)
+            }
             if command.method == "unassignedAreaColorWrite", case .success(let value) = terminal {
                 let probed = try invoke("unassignedAreaColorRetryOutcome", arguments: journalArguments(command))
                 try validateUnassignedAreaColorAcknowledgment(command, value: probed)
@@ -18445,6 +18471,10 @@ private final class Engine: @unchecked Sendable {
         if command.method == "somedaySectionRenameWrite" {
             try validateSomedaySectionRenameJournal(command)
             if case .success(let value) = terminal { try validateSomedaySectionRenameAcknowledgment(command, value: value) }
+        }
+        if command.method == "somedayProjectSectionMoveWrite" {
+            _ = try invoke("somedayProjectSectionMoveValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal { try validateSomedayProjectSectionMoveAcknowledgment(arguments: journalArguments(command), value: value) }
         }
         if command.method == "somedaySectionDeleteWrite" {
             try validateSomedaySectionDeleteJournal(command)
@@ -19304,6 +19334,11 @@ private final class Engine: @unchecked Sendable {
 #endif
             NSLog("Native iOS Someday section renamed releaseCheck=v1.3.4/ios-someday-section-rename outcome=confirmed")
         }
+        if command.method == "somedayProjectSectionMoveWrite", case .success = terminal {
+#if DEBUG
+            faults?.commandDiagnostic?("somedayProjectSectionMoveSaved")
+#endif
+        }
         if command.method == "somedaySectionDeleteWrite", case .success = terminal {
 #if DEBUG
             faults?.commandDiagnostic?("somedaySectionDeleteSaved")
@@ -19352,7 +19387,7 @@ private final class Engine: @unchecked Sendable {
             || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["rowQuickStatusCommit", "inlineChecklistCommit", "doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "rowTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "inboxTasksAddTagCommit", "projectTasksAddTagCommit", "inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "projectTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit", "referenceTasksMoveCommit", "inboxTasksMoveCommit", "projectTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "trashItemsRestoreCommit", "trashItemsPurgeCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "projectTasksDeleteCommit", "projectTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "weeklyReviewProjectTaskCommit", "inboxPreparedCommit", "inboxUndoCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectMoveCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2", "iosAIRequestTimeoutCommit", "iosAIReasoningEffortCommit", "iosAIGeminiThinkingBudgetCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedayProjectSectionMoveWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "weeklyReviewProjectTaskCommit", "inboxPreparedCommit", "inboxUndoCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectMoveCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2", "iosAIRequestTimeoutCommit", "iosAIReasoningEffortCommit", "iosAIGeminiThinkingBudgetCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (Self.somedayMoveCommits.contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit", "captureLinesCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -20809,6 +20844,20 @@ private final class Engine: @unchecked Sendable {
               resultID.utf8.elementsEqual(expectedID.utf8),
               Self.isBoolean(result["existing"]), result["existing"] as? Bool == expectedExisting else {
             throw HostFailure("Malformed Someday section creation acknowledgment")
+        }
+    }
+
+    private func validateSomedayProjectSectionMoveAcknowledgment(arguments: [Any], value: String) throws {
+        let validated = try invoke("somedayProjectSectionMoveValidate", arguments: arguments)
+        guard let expected = try NativeJSON.jsonObject(with: Data(validated.utf8)) as? [String: Any],
+              Set(expected.keys) == Set(["id", "changed"]),
+              let expectedID = expected["id"] as? String, !expectedID.isEmpty,
+              Self.isBoolean(expected["changed"]), let expectedChanged = expected["changed"] as? Bool,
+              let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(result.keys) == Set(["id", "changed"]),
+              let resultID = result["id"] as? String, resultID.utf8.elementsEqual(expectedID.utf8),
+              Self.isBoolean(result["changed"]), result["changed"] as? Bool == expectedChanged else {
+            throw HostFailure("Malformed Someday project section move acknowledgment")
         }
     }
 
@@ -26071,7 +26120,7 @@ private final class Engine: @unchecked Sendable {
     private func journalLegacyAndCaptureArguments(_ command: PendingCommand, retainedOrdinary: Bool = false) throws -> [Any] {
 
 
-        if ["complete", "setAreaFilter", "supportPromptShown", "saveDraft", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit"].contains(command.method) {
+        if ["complete", "setAreaFilter", "supportPromptShown", "saveDraft", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedayProjectSectionMoveWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite", "somedaySectionTaskCommit"].contains(command.method) {
 
 
             guard !retainedOrdinary || ["complete", "saveDraft"].contains(command.method) else { throw Self.retainedOrdinaryFailure }
@@ -26898,6 +26947,9 @@ private final class Engine: @unchecked Sendable {
             && json.utf8.count > 2_100_000 {
             throw HostFailure("INVALID_INPUT: Someday section task transport is too large")
         }
+        if ["somedayProjectSectionMoveWrite", "somedayProjectSectionMoveRetryOutcome"].contains(method) && json.utf8.count > 8_192 {
+            throw HostFailure("INVALID_INPUT: Someday project section move transport is too large")
+        }
         if ["somedaySectionOrderOptions", "somedaySectionOrderWrite", "somedaySectionOrderRetryOutcome"].contains(method)
             && json.utf8.count > 2_100_000 {
             throw HostFailure("INVALID_INPUT: Someday section order transport is too large")
@@ -27146,6 +27198,20 @@ private final class Engine: @unchecked Sendable {
                       expected["updatedAt"] is NSNull || expected["updatedAt"] is String else {
                     throw HostFailure("INVALID_INPUT: Someday section creation needs exact raw sections, stamp, title, and lowercase UUID")
                 }
+            }
+        }
+        if ["somedayProjectSectionMoveWrite", "somedayProjectSectionMoveRetryOutcome"].contains(method) {
+            let section = { (value: Any?) -> Bool in
+                value is NSNull || (value as? String).map({ !$0.isEmpty && $0.utf16.count <= 500 && !$0.contains("\0") }) == true
+            }
+            guard let encoded = args.first as? String, encoded.utf8.count <= 4_096,
+                  let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["requestId", "projectId", "projectRevision", "fromSectionId", "sectionId"]),
+                  let requestID = input["requestId"] as? String, requestID == UUID(uuidString: requestID)?.uuidString.lowercased(),
+                  let projectID = input["projectId"] as? String, !projectID.isEmpty, projectID.utf16.count <= 500, !projectID.contains("\0"),
+                  let revision = input["projectRevision"] as? String, !revision.isEmpty, revision.utf16.count <= 200,
+                  section(input["fromSectionId"]), section(input["sectionId"]) else {
+                throw HostFailure("INVALID_INPUT: Someday project section move needs a project, its revision, both sections and a lowercase UUID")
             }
         }
         if ["somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome"].contains(method) {

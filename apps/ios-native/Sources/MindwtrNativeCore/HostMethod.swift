@@ -54,6 +54,7 @@ struct HostMethod: Equatable {
         "unassignedAreaColorOptions": .readText, "unassignedAreaColorWrite": .writeText, "unassignedAreaColorRetryOutcome": .readText,
         "somedaySectionCreateOptions": .readText, "somedaySectionCreateWrite": .writeText, "somedaySectionCreateRetryOutcome": .readText,
         "somedaySectionRenameOptions": .readText, "somedaySectionRenameWrite": .writeText, "somedaySectionRenameRetryOutcome": .readText,
+        "somedayProjectSectionMoveWrite": .writeText, "somedayProjectSectionMoveRetryOutcome": .readText,
         "somedaySectionDeleteOptions": .readText, "somedaySectionDeleteWrite": .writeText, "somedaySectionDeleteRetryOutcome": .readText,
         "somedaySectionOrderOptions": .readText, "somedaySectionOrderWrite": .writeText, "somedaySectionOrderRetryOutcome": .readText,
         "somedaySectionTaskOptions": .readText, "somedaySectionTaskPrepare": .readText, "somedaySectionTaskCommit": .writeText, "somedaySectionTaskRetryOutcome": .readText,

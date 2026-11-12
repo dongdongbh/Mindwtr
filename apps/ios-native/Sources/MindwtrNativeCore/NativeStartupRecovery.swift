@@ -32,7 +32,7 @@ struct NativeStartupRecovery: Equatable {
         "referenceTasksRemoveTagCommit", "reminderCompletionCommit", "reminderSnoozeCommit", "rowQuickStatusCommit",
         "rowTaskBackdateCommit", "rowTaskDatesCommit", "rowTaskDestinationCommit", "rowTaskFocusCommit",
         "savedSearchCommit", "somedaySectionCreateWrite", "somedaySectionDeleteWrite", "somedaySectionOrderWrite",
-        "somedaySectionRenameWrite", "somedaySectionTaskCommit", "taskChecklistMoveCommit", "taskChecklistMoveUndoCommit",
+        "somedaySectionRenameWrite", "somedayProjectSectionMoveWrite", "somedaySectionTaskCommit", "taskChecklistMoveCommit", "taskChecklistMoveUndoCommit",
         "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskFocusCommit", "taskListSortWrite",
         "taskPromoteCommit", "taskPromoteUndoCommit", "trashItemsPurgeCommit", "trashItemsRestoreCommit",
         "trashProjectRestoreCommit", "trashTaskRestoreCommit", "unassignedAreaColorWrite", "weeklyReviewProjectTaskCommit",

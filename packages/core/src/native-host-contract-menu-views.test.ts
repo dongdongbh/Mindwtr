@@ -179,6 +179,46 @@ describe('native host contract: More sheet and list views', () => {
         expect(host.getSomedayMoveDialog({ projectId: active.id })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
+    it('moves a parked Someday project through the checked iOS write, which replays, probes and refuses stale rows (#1319)', async () => {
+        freezeClock();
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host, recorder } = await openHost(scenario('someday', 'sections'), saveData);
+        const project = useTaskStore.getState()._allProjects.find((row) => row.status === 'someday')!;
+        const section = () => useTaskStore.getState()._projectsById.get(project.id)!.viewSectionIds?.someday;
+        const input = { requestId: generateUUID(), projectId: project.id, projectRevision: projectRevision(project.id),
+            fromSectionId: null, sectionId: 's-later' };
+        expect(host.validateSomedayProjectSectionMoveWrite(input)).toEqual({ ok: true, value: { id: project.id, changed: true } });
+        expect(host.probeSomedayProjectSectionMoveOutcome(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(value(await host.moveSomedayProjectToSectionChecked(input))).toEqual({ id: project.id, changed: true });
+        expect(section()).toBe('s-later');
+        expect(recorder.log).toHaveLength(1);
+        expect(value(await host.moveSomedayProjectToSectionChecked(input))).toEqual({ id: project.id, changed: true });
+        expect(value(host.probeSomedayProjectSectionMoveOutcome(input))).toEqual({ id: project.id, changed: true });
+        expect(recorder.log).toHaveLength(1);
+        const view = value(host.getSomedayView({ groupBy: 'viewSection', projectsInSections: true, offset: 0, limit: 100 }));
+        expect(view.items.find((item) => item.type === 'project' && item.id === project.id)).toMatchObject({ groupId: 'view-section:someday:s-later' });
+
+        const back = { requestId: generateUUID(), projectId: project.id, projectRevision: input.projectRevision, fromSectionId: 's-later', sectionId: null };
+        expect(await host.moveSomedayProjectToSectionChecked(back)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const fresh = { ...back, projectRevision: projectRevision(project.id) };
+        expect(await host.moveSomedayProjectToSectionChecked({ ...fresh, requestId: generateUUID(), fromSectionId: null }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await host.moveSomedayProjectToSectionChecked({ ...fresh, requestId: generateUUID(), sectionId: 'gone' }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(section()).toBe('s-later');
+        expect(value(await host.moveSomedayProjectToSectionChecked(fresh))).toEqual({ id: project.id, changed: true });
+        expect(section()).toBeUndefined();
+        const same = { requestId: generateUUID(), projectId: project.id, projectRevision: projectRevision(project.id), fromSectionId: null, sectionId: null };
+        const writes = recorder.log.length;
+        expect(value(await host.moveSomedayProjectToSectionChecked(same))).toEqual({ id: project.id, changed: false });
+        expect(recorder.log).toHaveLength(writes);
+        expect(host.validateSomedayProjectSectionMoveWrite({ ...same, extra: 1 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.validateSomedayProjectSectionMoveWrite({ ...same, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const active = useTaskStore.getState()._allProjects.find((row) => row.status === 'active')!;
+        expect(await host.moveSomedayProjectToSectionChecked({ ...same, requestId: generateUUID(), projectId: active.id,
+            projectRevision: projectRevision(active.id), sectionId: 's-later' })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
     it('moves a task to a project or an area from its status menu, as React Native does', async () => {
         freezeClock();
         const { host, recorder } = await openHost(scenario('someday', 'sections'));
