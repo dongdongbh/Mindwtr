@@ -116,6 +116,18 @@ describe('actual iOS search publication bridge', () => {
         expect(f.writes).toEqual([]);
     });
 
+    it('republishes when a live review comes due, as the RN Watch does, and ignores deleted reviews', async () => {
+        const f = fixture(), due = f.now() + 30 * 60_000;
+        await f.boot(data([task('due', { status: 'waiting', reviewAt: new Date(due).toISOString() }),
+            task('gone', { status: 'waiting', reviewAt: new Date(f.now() + 60_000).toISOString(), deletedAt: at }),
+            task('later', { status: 'waiting', reviewAt: new Date(2026, 9, 12, 9).toISOString() })]));
+        const before = f.observe();
+        expect(before.nextAt).toBe(due);
+        f.time(due - 1); expect(f.observe()).toEqual(before);
+        f.time(due); expect(f.observe()).toEqual({ ready: true, revision: before.revision + 1, nextAt: new Date(2026, 9, 10).getTime() });
+        expect(f.writes).toEqual([]);
+    });
+
     it('invalidates for backward clock, local day and timezone even at the same offset', async () => {
         const f = fixture(); await f.boot();
         let before = f.observe(); f.time(f.now() - 1_000); expect(f.observe().revision).toBe(before.revision + 1);

@@ -4252,7 +4252,7 @@ export { createPomodoroState, sanitizePomodoroDurations } from ${JSON.stringify(
 export { isTaskActionable, isTaskCancelled } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-status.ts'))};
 export { createWidgetPayloadProjection, createPublishedWidgetProjection, iosWidgetProjectionOptions, IOS_WIDGET_FAMILY_CACHE_ITEMS } from ${JSON.stringify(resolve(app, '../../packages/core/src/widget-payload.ts'))};
 export { focusWidgetFilterKey } from ${JSON.stringify(resolve(app, '../../packages/core/src/focus-widget-filter.ts'))};
-export { getNextFutureStartRevealAt } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-utils.ts'))};
+export { getNextFutureStartRevealAt, getNextReviewDueAt } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-utils.ts'))};
 export { resolveEntityOpenTarget } from ${JSON.stringify(resolve(app, '../../packages/core/src/entry-points.ts'))};
 export { resolveMobileAppLockRelockDelayMinutes } from ${JSON.stringify(resolve(app, '../../packages/core/src/general-settings-model.ts'))};
 export { compareAppVersions, fetchAppStoreInfo, UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY, shouldCheckForAppUpdate } from ${JSON.stringify(resolve(app, '../../packages/core/src/app-store-update.ts'))};

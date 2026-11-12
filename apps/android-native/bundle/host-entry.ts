@@ -113,6 +113,7 @@ import {
     setStorageTimeoutMs,
     getStorageTimeoutMs,
     getNextFutureStartRevealAt,
+    getNextReviewDueAt,
     compareAppVersions,
     fetchAppStoreInfo,
     UPDATE_BADGE_AVAILABLE_KEY,
@@ -3821,9 +3822,9 @@ globalThis.MindwtrHost = {
         if (changed) {
             nextAt = null;
             if (saved) try {
-                const reveal = getNextFutureStartRevealAt(state._allTasks, now);
                 const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-                nextAt = reveal === null ? midnight : Math.min(reveal, midnight);
+                nextAt = Math.min(midnight, getNextFutureStartRevealAt(state._allTasks, now) ?? midnight,
+                    getNextReviewDueAt(state._allTasks, now) ?? midnight);
                 const after = iosSearchSavedState();
                 if (!Number.isFinite(nextAt) || nextAt <= nowMs || after.adapter !== saved.adapter
                     || after.generation !== saved.generation || after.state._allTasks !== state._allTasks

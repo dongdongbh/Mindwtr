@@ -725,6 +725,22 @@ export function getNextFutureStartRevealAt(
 }
 
 
+export function getNextReviewDueAt(
+    tasks: ReadonlyArray<Pick<Task, 'reviewAt' | 'deletedAt'>>,
+    now: Date = new Date(),
+): number | null {
+    const nowMs = now.getTime();
+    let next: number | null = null;
+    for (const task of tasks) {
+        if (task.deletedAt) continue;
+        const reviewAt = safeParseDate(task.reviewAt)?.getTime();
+        if (reviewAt === undefined || reviewAt <= nowMs) continue;
+        if (next === null || reviewAt < next) next = reviewAt;
+    }
+    return next;
+}
+
+
 export function isSequentialChainStatus(status: TaskStatus | undefined): boolean {
     return status === 'next' || status === 'waiting';
 }

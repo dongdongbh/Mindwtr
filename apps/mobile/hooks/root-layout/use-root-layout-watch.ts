@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
-import { getNextFutureStartRevealAt, safeParseDate, useTaskStore, type AppData, type Language, type Task } from '@mindwtr/core';
+import { getNextFutureStartRevealAt, getNextReviewDueAt, useTaskStore, type AppData, type Language } from '@mindwtr/core';
 
 import {
   activateWatchConnectivity,
@@ -20,16 +20,6 @@ const WATCH_SNAPSHOT_RELEASE_CHECK = 'v1.3.0/watch-snapshot';
 const WATCH_NUMERIC_BRIDGE_RELEASE_CHECK = 'v1.3.0/watch-numeric-bridge';
 const WATCH_PUBLICATION_COALESCE_MS = 120;
 
-
-function getNextReviewDueAt(tasks: readonly Task[], nowMs: number): number | null {
-  let next: number | null = null;
-  for (const task of tasks) {
-    const reviewAt = safeParseDate(task.reviewAt)?.getTime();
-    if (reviewAt === undefined || reviewAt <= nowMs) continue;
-    if (next === null || reviewAt < next) next = reviewAt;
-  }
-  return next;
-}
 
 export function useRootLayoutWatch({
     canonicalDataReady,
@@ -70,7 +60,7 @@ export function useRootLayoutWatch({
     const rememberInputs = (inputs: ReturnType<typeof readInputs>) => {
       lastInputs = inputs;
       const startAt = getNextFutureStartRevealAt(inputs[0]);
-      const reviewAt = getNextReviewDueAt(inputs[0], Date.now());
+      const reviewAt = getNextReviewDueAt(inputs[0]);
       nextRevealAt = startAt === null ? reviewAt : reviewAt === null ? startAt : Math.min(startAt, reviewAt);
     };
     const forgetPublished = () => {

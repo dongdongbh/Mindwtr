@@ -26,6 +26,7 @@ import {
     getWaitingPerson,
     groupCompletedTasksLast,
     getNextFutureStartRevealAt,
+    getNextReviewDueAt,
     getUpcomingDeferredTasks,
     isTaskFutureStart,
     shouldShowTaskForStart,
@@ -1098,6 +1099,22 @@ describe('task-utils', () => {
             expect(getNextFutureStartRevealAt(tasks, now)).toBe(at(14, 30).getTime());
             expect(getNextFutureStartRevealAt([{ startTime: at(8).toISOString() }], now)).toBeNull();
             expect(getNextFutureStartRevealAt([], now)).toBeNull();
+        });
+
+        it('reports the earliest future review time of a live task, on any later day', () => {
+            const at = (d: number, h = 0) => new Date(2026, 4, d, h, 0, 0, 0);
+            const tasks = [
+                { reviewAt: at(9, 9).toISOString() },
+                { reviewAt: at(4, 8).toISOString() },
+                { reviewAt: at(3, 7).toISOString(), deletedAt: at(1).toISOString() },
+                { reviewAt: at(2, 8).toISOString() },
+                { reviewAt: 'not a date' },
+                { reviewAt: undefined },
+            ];
+
+            expect(getNextReviewDueAt(tasks, now)).toBe(at(4, 8).getTime());
+            expect(getNextReviewDueAt([{ reviewAt: at(2, 8).toISOString() }], now)).toBeNull();
+            expect(getNextReviewDueAt([], now)).toBeNull();
         });
     });
 
