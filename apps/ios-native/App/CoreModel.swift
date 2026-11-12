@@ -2029,10 +2029,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func busyChangedForShownState() {
         busyShownTicket &+= 1
-        guard busy else { publishShownState(); return }
+        guard busy else { publishShownState(); replayHeldTap(); return }
         let ticket = busyShownTicket
+        let delay = heldTapTestSession ? 3_000_000_000 : CoreModel.busyShownDelay
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: CoreModel.busyShownDelay)
+            try? await Task.sleep(nanoseconds: delay)
             guard let self, self.busy, self.busyShownTicket == ticket else { return }
             if !self.busyShown { self.busyShown = true }
             self.publishShownState()
@@ -2058,6 +2059,40 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func operationBusy(shown: Bool) -> Bool { shown ? busyShown : busy }
+
+    typealias HeldTapAction = @MainActor () async -> Void
+    struct HeldTapContext: Equatable, Sendable {
+        let host: ObjectIdentifier?
+        let surface: Surface
+        let sheets: [Bool]
+    }
+    @ObservationIgnored private var heldTap = NativeHeldTap<HeldTapContext, HeldTapAction>()
+    @ObservationIgnored private var heldTapTestSession = false
+    @ObservationIgnored private var heldTapTestBusyHoldOnce = false
+    @TaskLocal private static var heldTapOrigin: NativeHeldTapOrigin<HeldTapContext>?
+
+    private var heldTapContext: HeldTapContext {
+        HeldTapContext(host: host.map(ObjectIdentifier.init), surface: selectedSurface, sheets: [
+            taskPresented, capturePresented, morePresented, areaPickerPresented, inboxSortPresented, inboxGroupPresented,
+            inboxFiltersPresented, contextsSortPresented, contextsFiltersPresented, calendarComposerPresented, mindSweepPresented,
+            processInboxPresented, focusOrderPresented, settingsSyncPresented, reviewGuidePresented, taskStatusMenuPresented,
+            !focusPanel.isEmpty,
+        ])
+    }
+
+    private func heldWhileBusy(_ action: @escaping HeldTapAction) -> Bool {
+        guard busy, ready, !retryNeeded, !appLock.concealed, !appLock.authenticating else { return false }
+        heldTap.hold(action, context: heldTapContext, now: .now, replaying: CoreModel.heldTapOrigin)
+        return true
+    }
+
+    private func replayHeldTap() {
+        guard heldTap.isHolding else { return }
+        Task { [weak self] in
+            guard let self, let held = self.heldTap.take(context: self.heldTapContext, now: .now) else { return }
+            await CoreModel.$heldTapOrigin.withValue(held.origin) { await held.action() }
+        }
+    }
     private(set) var retryNeeded = false {
         didSet {
             projectBulkRetryRequest = nil
@@ -7782,6 +7817,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     backupExportTestHoldOnce = arguments.contains("--native-backup-export-hold-once")
                     taskRecoveryResolverTestFailure = arguments.contains("--native-task116-resolver-failure-once")
                     textInputTestBusyHoldOnce = arguments.contains("--native-text-input-busy-hold-once")
+                    heldTapTestSession = arguments.contains("--native-held-tap-busy-hold-once")
+                    heldTapTestBusyHoldOnce = heldTapTestSession
                     #endif
                     settingsAITestDelayOnce = arguments.contains("--native-ai-summary-delay-once")
                     settingsAITestFailureOnce = arguments.contains("--native-ai-summary-read-failure-once")
@@ -11861,6 +11898,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard !busy else { refreshRequested = true; return }
         busy = true
         defer { finishOperation() }
+        if heldTapTestBusyHoldOnce, selectedSurface == .focus {
+            heldTapTestBusyHoldOnce = false
+            try? await Task.sleep(nanoseconds: 900_000_000)
+        }
         do {
             if !(keepsPreferences && preferencesReadHost === host) { try await readPreferences() }
             guard !appLock.concealed else { return }
@@ -11870,6 +11911,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func selectSurface(_ surface: Surface) async {
+        if heldWhileBusy({ [weak self] in await self?.selectSurface(surface) }) { return }
         guard !contextsSortPresented, !contextsFiltersPresented, !reviewProjectTaskPresented else { return }
         guard !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked else { return }
         guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
@@ -11896,6 +11938,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func toggleMore() async {
+        if heldWhileBusy({ [weak self] in await self?.toggleMore() }) { return }
         guard !contextsSortPresented, !contextsFiltersPresented, !reviewProjectTaskPresented else { return }
         guard !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked else { return }
         guard !settingsSyncPresented, !settingsSyncRestartRequired else { return }
@@ -26715,6 +26758,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func performReviewTaskAction(_ action: CoreObject) async {
+        if heldWhileBusy({ [weak self] in await self?.performReviewTaskAction(action) }) { return }
         guard reviewActionsEnabled, !reviewGuidePresented,
               reviewOverview.objects("items").contains(where: { item in
                   item.text("type") == "task" && ["markReviewed", "advance"].contains(where: {
@@ -26764,6 +26808,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func editReviewOverview(scope: String? = nil, expansion: CoreObject? = nil) async {
+        if heldWhileBusy({ [weak self] in await self?.editReviewOverview(scope: scope, expansion: expansion) }) { return }
         guard reviewActionsEnabled, !reviewGuidePresented else { return }
         if let scope {
             guard reviewOverview.object("scope").objects("options").contains(where: { $0.text("id") == scope }) else { return }
@@ -26777,6 +26822,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openReviewGuide(_ kind: String) async {
+        if heldWhileBusy({ [weak self] in await self?.openReviewGuide(kind) }) { return }
         guard ready, selectedSurface == .review, !busy, !retryNeeded, !taskPresented, !mindSweepPresented,
               reviewOverview.object("startReview").objects("options").contains(where: { $0.text("id") == kind }) else { return }
         if reviewKind != kind {
@@ -26804,6 +26850,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func closeReviewGuide() async {
+        if heldWhileBusy({ [weak self] in await self?.closeReviewGuide() }) { return }
         guard !busy, !retryNeeded, !taskPresented, !mindSweepPresented, !processInboxPresented, reviewProjectTaskOwner == nil else { return }
         reviewGuidePresented = false
         reviewFinishPending = false
@@ -26817,6 +26864,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func moveReview(_ direction: String) async {
+        if heldWhileBusy({ [weak self] in await self?.moveReview(direction) }) { return }
         guard reviewActionsEnabled, reviewGuidePresented, ["back", "next"].contains(direction),
               let checkpoint = reviewGuide.object(direction)["checkpoint"] as? String else { return }
         retireReviewAI()
@@ -26839,6 +26887,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openWeeklyReviewProjectTask(_ id: String) async {
+        if heldWhileBusy({ [weak self] in await self?.openWeeklyReviewProjectTask(id) }) { return }
         guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "weekly",
               reviewGuide.objects("items").contains(where: { $0.text("type") == "project" && $0.text("id") == id }), let ownerHost = host else { return }
         let owner = ReviewProjectTaskOwner(host: ownerHost, guide: reviewGuideSession, checkpoint: reviewGuide.text("checkpoint"), projectID: id)
@@ -26862,6 +26911,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func submitWeeklyReviewProjectTask(openAfterSave: Bool) async {
+        if heldWhileBusy({ [weak self] in await self?.submitWeeklyReviewProjectTask(openAfterSave: openAfterSave) }) { return }
         guard var owner = reviewProjectTaskOwner, reviewProjectTaskOwned(owner), !busy, !retryNeeded,
               !appLock.concealed, owner.request == nil, !reviewProjectTaskText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do {
@@ -26928,6 +26978,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func expandWeeklyReviewProject(_ id: String) async {
+        if heldWhileBusy({ [weak self] in await self?.expandWeeklyReviewProject(id) }) { return }
         guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "weekly",
               let item = reviewGuide.objects("items").first(where: { $0.text("type") == "project" && $0.text("id") == id }) else { return }
         reviewExpandedProject = item.flag("expanded") ? nil : id
@@ -26937,6 +26988,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func toggleReviewLater(_ id: String, weekly: Bool) async {
+        if heldWhileBusy({ [weak self] in await self?.toggleReviewLater(id, weekly: weekly) }) { return }
         guard reviewActionsEnabled else { return }
         let current = weekly ? reviewGuide : reviewOverview
         guard weekly == reviewGuidePresented, !weekly || reviewKind == "weekly",
@@ -26961,6 +27013,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func requestWeeklyReviewProjectCompletion(_ id: String) async {
+        if heldWhileBusy({ [weak self] in await self?.requestWeeklyReviewProjectCompletion(id) }) { return }
         guard reviewActionsEnabled, weeklyReviewCompletionCurrent(id) else { return }
         let session = reviewGuideSession
         let sourceHost = host
@@ -27036,6 +27089,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func finishReview() async {
+        if heldWhileBusy({ [weak self] in await self?.finishReview() }) { return }
         guard selectedSurface == .review, reviewGuidePresented, !busy, !retryNeeded, !mindSweepPresented,
               !reviewGuide.object("finish").isEmpty, reviewCurrent || reviewFinishPending else { return }
         retireReviewAI()
@@ -27078,6 +27132,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func loadMoreReview() async {
+        if heldWhileBusy({ [weak self] in await self?.loadMoreReview() }) { return }
         guard reviewActionsEnabled else { return }
         let view = reviewGuidePresented ? reviewGuide : reviewOverview
         guard view.objects("items").count < view.number("total") else { return }
@@ -27091,6 +27146,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func loadMoreReviewNested(_ list: String, key: String = "") async {
+        if heldWhileBusy({ [weak self] in await self?.loadMoreReviewNested(list, key: key) }) { return }
         guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "weekly",
               let window = reviewNested[list + ":" + key], window.objects("items").count < window.number("total") else { return }
         reviewNestedDepth[list + ":" + key] = window.objects("items").count + pageSize
@@ -28692,7 +28748,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openReferenceSort() async { await openTaskListSort(.reference) }
-    func openInboxSort() async { await openTaskListSort(.inbox) }
+    func openInboxSort() async {
+        if heldWhileBusy({ [weak self] in await self?.openInboxSort() }) { return }
+        await openTaskListSort(.inbox)
+    }
     func openContextsSort() async { await openTaskListSort(.contexts) }
 
     private func openTaskListSort(_ caller: TaskListSortCaller) async {
@@ -28883,6 +28942,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openInboxGroup() async {
+        if heldWhileBusy({ [weak self] in await self?.openInboxGroup() }) { return }
         guard inboxGroupEnabled else { return }
         inboxGroupPresented = true
         await retryInboxGrouping()
@@ -28909,6 +28969,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func toggleInboxSection(_ id: String) async {
+        if heldWhileBusy({ [weak self] in await self?.toggleInboxSection(id) }) { return }
         guard inboxActionsEnabled, inboxFoldPreferenceWritable,
               inboxCollapsedGroups[inboxParams.text("groupBy")] == nil
                 || inboxFoldIDs(inboxCollapsedGroups[inboxParams.text("groupBy")]) != nil,
@@ -28952,6 +29013,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openInboxFilters() {
+        if heldWhileBusy({ [weak self] in self?.openInboxFilters() }) { return }
         guard inboxFiltersEnabled else { return }
         observeDiagnosticsConcealment()
         inboxFilterPresentation = UUID()
@@ -29001,6 +29063,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func editInboxFilter(_ edit: CoreObject) async {
+        if heldWhileBusy({ [weak self] in await self?.editInboxFilter(edit) }) { return }
         guard inboxFiltersPresented ? inboxFilterControlsEnabled : inboxActionsEnabled,
               inboxOffersFilterEdit(edit) else { return }
         inboxFilterSequence &+= 1
@@ -30651,6 +30714,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func selectInboxTask(_ displayed: CoreObject) async {
+        if heldWhileBusy({ [weak self] in await self?.selectInboxTask(displayed) }) { return }
         guard inboxActionsEnabled, !taskStatusMenuPresented, !displayed.flag("readOnly"),
               UIApplication.shared.applicationState == .active, let owner = host else { return }
         let params = inboxParams, selected = inboxSelectedIDs, revisions = inboxSelectedRevisions
@@ -38642,6 +38706,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openSearch() {
+        if heldWhileBusy({ [weak self] in self?.openSearch() }) { return }
         guard !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked else { return }
         guard !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending else { return }
         guard !savedSearchWritePresented, ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !capturePresented, !areaPickerPresented, !taskPresented,
@@ -38769,6 +38834,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openAreaPicker() async {
+        if heldWhileBusy({ [weak self] in await self?.openAreaPicker() }) { return }
         guard !contextsSortPresented, !contextsFiltersPresented, !reviewProjectTaskPresented else { return }
         guard !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked else { return }
         guard ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !capturePresented, !taskPresented,
@@ -38919,6 +38985,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func loadMoreFocus(_ key: String) async {
+        if heldWhileBusy({ [weak self] in await self?.loadMoreFocus(key) }) { return }
         guard focusActionsEnabled, let section = focus.objects("sections").first(where: { $0.text("key") == key }),
               section.objects("rows").count < section.number("rowTotal") else { return }
         focusLoadedDepth[key] = section.objects("rows").count + pageSize
@@ -38947,6 +39014,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openTask(_ id: String, descriptionSourceID: String? = nil) async {
+        if heldWhileBusy({ [weak self] in await self?.openTask(id, descriptionSourceID: descriptionSourceID) }) { return }
         let acknowledgedReviewTask = reviewProjectTaskEditor.map { pending in
             pending.taskID == id && reviewProjectTaskOwned(pending.owner) && workspaceAdmissionsOpen && !appLock.concealed
         } == true
@@ -42804,6 +42872,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openCapture(admission: (@MainActor () -> Bool)? = nil) async {
+        if heldWhileBusy({ [weak self] in await self?.openCapture(admission: admission) }) { return }
         guard admission?() != false, shareCaptureOwner == nil else { return }
         observeDiagnosticsConcealment()
         guard !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked else { return }
@@ -46655,6 +46724,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openFocusSavedFilter(_ operation: CoreObject, message: String = "") async {
+        if heldWhileBusy({ [weak self] in await self?.openFocusSavedFilter(operation, message: message) }) { return }
         guard focusControlsEnabled, focusSavedFilterRequest == nil else { return }
         let controls = focus.object("controls")
         let saving = operation.text("type") == "save"
@@ -46819,6 +46889,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openFocusOrder() async {
+        if heldWhileBusy({ [weak self] in await self?.openFocusOrder() }) { return }
         guard focusActionsEnabled, !focus.object("controls").object("reorder").isEmpty else { return }
         busy = true
         focusOrderError = nil
@@ -46833,6 +46904,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func closeFocusOrder() {
+        if heldWhileBusy({ [weak self] in self?.closeFocusOrder() }) { return }
         guard !busy, !retryNeeded, focusOrderRequest == nil else { return }
         focusOrderPresented = false
         focusOrderCurrent = false
@@ -46877,6 +46949,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func moveFocusTask(from source: IndexSet, to destination: Int) async {
+        if heldWhileBusy({ [weak self] in await self?.moveFocusTask(from: source, to: destination) }) { return }
         guard focusOrderInputEnabled, source.count == 1, let index = source.first else { return }
         var ids = focusOrderView.objects("rows").map { $0.text("id") }
         guard ids.indices.contains(index), (0...ids.count).contains(destination),
@@ -46886,6 +46959,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func moveFocusTask(_ row: CoreObject, up: Bool) async {
+        if heldWhileBusy({ [weak self] in await self?.moveFocusTask(row, up: up) }) { return }
         guard focusOrderInputEnabled, let ids = row[up ? "moveUp" : "moveDown"] as? [String] else { return }
         await saveFocusOrder(ids)
     }
@@ -47167,6 +47241,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func openFocusPanel(_ name: String) {
+        if heldWhileBusy({ [weak self] in self?.openFocusPanel(name) }) { return }
         guard focusControlsEnabled, ["view", "filters"].contains(name) else { return }
         focusPanel = name
     }
@@ -47251,6 +47326,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func toggleFocusGroup(section key: String, id: String) {
+        if heldWhileBusy({ [weak self] in self?.toggleFocusGroup(section: key, id: id) }) { return }
         guard focusControlsEnabled,
               focus.objects("sections").contains(where: { section in
                   guard section.text("key") == key else { return false }
@@ -47266,12 +47342,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func toggleFocusSection(_ key: String) {
+        if heldWhileBusy({ [weak self] in self?.toggleFocusSection(key) }) { return }
         guard focusControlsEnabled, focusSectionKeys.contains(key) else { return }
         if !collapsedFocusSections.insert(key).inserted { collapsedFocusSections.remove(key) }
         saveFocusExpandedSections()
     }
 
     func toggleOtherFocusSections() {
+        if heldWhileBusy({ [weak self] in self?.toggleOtherFocusSections() }) { return }
         let otherKeys = focusSectionKeys.filter { $0 != "focus" }
         let visible = Set(focus.objects("sections").filter { $0.number("total") > 0 }.map { $0.text("key") })
             .union(focus.objects("reviewProjects").isEmpty ? [] : ["reviewProjects"])
@@ -47293,6 +47371,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func editFocusControl(_ edit: CoreObject) {
+        if heldWhileBusy({ [weak self] in self?.editFocusControl(edit) }) { return }
         guard focusControlsEnabled, !edit.isEmpty else { return }
         enqueueFocusEdit(["edit": edit])
         focusLoadedDepth = [:]
@@ -47300,6 +47379,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func selectFocusSavedFilter(_ id: String) {
+        if heldWhileBusy({ [weak self] in self?.selectFocusSavedFilter(id) }) { return }
         guard focusControlsEnabled, focus.object("controls").object("savedFilters").object("chips").objects("items")
             .contains(where: { $0.text("id") == id }) else { return }
 
@@ -47367,6 +47447,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func loadMoreFocusControls(saved: Bool = false) {
+        if heldWhileBusy({ [weak self] in self?.loadMoreFocusControls(saved: saved) }) { return }
         guard (saved ? focusControlsEnabled : focusPickerActionsEnabled) else { return }
         let list = saved ? focus.object("controls").object("savedFilters").object("chips") : focusPicker
         guard list.objects("items").count < list.number("total") else { return }

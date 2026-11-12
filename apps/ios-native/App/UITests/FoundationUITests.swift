@@ -37868,6 +37868,22 @@ extension FoundationUITests {
                        "Expected \(value), found \(String(describing: element.value))", file: file, line: line)
     }
 
+    func testTabTapDuringHiddenWorkOpensWhenTheWorkEnds() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-held-tap-busy-hold-once",
+                               "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-inbox"], timeout: 40)
+        if !app.buttons["tab-inbox"].isSelected { boardTap(app, "tab-inbox") }
+        boardEnabled(app.buttons["tab-focus"], timeout: 30)
+        app.buttons["tab-focus"].tap()
+        app.buttons["tab-inbox"].tap()
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["tab-inbox"])
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["tab-focus"].isSelected)
+    }
+
     func testTaskNoteMarkdownToolbarPairingAndListContinuationMatchRN() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()
