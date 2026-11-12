@@ -34740,7 +34740,7 @@ extension FoundationUITests {
         let token = String(components.path.dropFirst())
         XCTAssertGreaterThan(token.count, 65)
         components.path = "/" + (token.first == "0" ? "1" : "0") + String(token.dropFirst())
-        app.open(try XCTUnwrap(components.url))
+        task454OpenInRunningApp(try XCTUnwrap(components.url).absoluteString)
         boardEnabled(app.buttons["capture-open"], timeout: 30)
         let wrong = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"),
             object: app.staticTexts.matching(identifier: "task-view-task-title").firstMatch)
