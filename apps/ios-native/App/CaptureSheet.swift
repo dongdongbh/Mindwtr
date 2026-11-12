@@ -53,7 +53,7 @@ struct CaptureSheet: View {
                 Button { model.requestCaptureClose() } label: {
                     Color.black.opacity(0.35).ignoresSafeArea().contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
                 .accessibilityLabel(model.bulkConfirm.text("cancelLabel"))
                 .accessibilityIdentifier("capture-lines-backdrop")
                 ViewThatFits(in: .vertical) {
@@ -80,7 +80,7 @@ struct CaptureSheet: View {
                 Button { model.requestCaptureClose() } label: {
                     AppIcon(name: "x", size: 18).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
                 .accessibilityLabel(model.bulkConfirm.text("cancelLabel"))
                 .accessibilityIdentifier("capture-lines-close")
             }
@@ -98,14 +98,14 @@ struct CaptureSheet: View {
             Text(model.bulkConfirm.text("cancelLabel")).rnFont(14, .semibold)
                 .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
         .accessibilityIdentifier("capture-lines-cancel")
         Button { Task { await model.confirmCaptureLines() } } label: {
             Text(model.bulkConfirm.text("confirmLabel")).rnFont(14, .bold)
                 .foregroundStyle(palette.captureForeground).padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 44).background(palette.captureBackground, in: RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain).disabled(!model.canConfirmCaptureLines)
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.canConfirmCaptureLines })
         .accessibilityIdentifier("capture-lines-create")
     }
 
@@ -120,7 +120,7 @@ struct CaptureSheet: View {
                     AppIcon(name: "x", size: 18).foregroundStyle(palette.secondary).frame(width: 48, height: 48)
                         .contentShape(Rectangle()).padding(.vertical, -6)
                 }
-                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
                 .accessibilityLabel(copy.text("close")).accessibilityIdentifier("capture-close")
             }
             .padding(.bottom, 10)
@@ -131,10 +131,7 @@ struct CaptureSheet: View {
                         Text(copy.text("inputLabel")).rnFont(15).foregroundStyle(palette.secondary)
                             .padding(.horizontal, 12).padding(.vertical, 11).allowsHitTesting(false).accessibilityHidden(true)
                     }
-                    CaptureTextInput(text: $model.draft, enabled: !model.busy && !model.retryNeeded && !model.captureLinesConfirmationPresented,
-                        color: UIColor(palette.text), label: copy.text("inputLabel"), hint: copy.text("inputHint")) {
-                        Task { await model.saveCapture() }
-                    }
+                    CaptureDraftInput(model: model, palette: palette, copy: copy)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 44)
                 }
@@ -150,7 +147,7 @@ struct CaptureSheet: View {
                         if model.captureVoiceIsRecording { Text(model.label("quickAdd.audioStopAndSave")).rnFont(11, .semibold) }
                     }.frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 }.buttonStyle(.plain).foregroundStyle(model.captureVoiceIsRecording ? palette.danger : palette.secondary)
-                    .disabled(model.captureVoiceIsRecording ? !model.captureVoiceCanStop : !model.captureVoiceCanStart)
+                    .modifier(ModelDisabled { model.captureVoiceIsRecording ? !model.captureVoiceCanStop : !model.captureVoiceCanStart })
                     .accessibilityLabel(model.label(model.captureVoiceIsRecording ? "quickAdd.audioStopAndSave" : "quickAdd.audioRecord"))
                     .accessibilityIdentifier(model.captureVoiceIsRecording ? "capture-voice-stop" : "capture-voice-record")
             }
@@ -159,7 +156,7 @@ struct CaptureSheet: View {
                 .rnFont(15).lineLimit(1...4).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
                 .background(palette.input, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
-                .disabled(model.busy || model.retryNeeded).accessibilityLabel(copy.text("noteLabel"))
+                .modifier(ModelDisabled { model.busy || model.retryNeeded }).accessibilityLabel(copy.text("noteLabel"))
                 .accessibilityIdentifier("capture-note")
                 .padding(.top, 8)
 
@@ -227,7 +224,7 @@ struct CaptureSheet: View {
                     Task { await model.editCapture(model.capture.object("addAnother").object("edit")) }
                 })) { Text(copy.text("addAnother")) }
                     .labelsHidden().toggleStyle(.switch).fixedSize()
-                    .disabled(model.busy || model.retryNeeded).accessibilityIdentifier("capture-add-another")
+                    .modifier(ModelDisabled { model.busy || model.retryNeeded }).accessibilityIdentifier("capture-add-another")
                 Text(copy.text("addAnother")).rnFont(12, .semibold)
                 Spacer(minLength: 0)
             }
@@ -296,7 +293,7 @@ struct CaptureSheet: View {
                                 .background(palette.filter, in: Capsule())
                                 .overlay(Capsule().stroke(palette.border, lineWidth: 1))
                         }
-                        .buttonStyle(.plain).disabled(!model.captureCopilotCanSuggest)
+                        .buttonStyle(.plain).modifier(ModelDisabled { !model.captureCopilotCanSuggest })
                         .accessibilityIdentifier("capture-copilot-suggest")
                         Spacer(minLength: 0)
                     }
@@ -313,7 +310,7 @@ struct CaptureSheet: View {
                                         .padding(.horizontal, 12).frame(minHeight: 44)
                                         .overlay(Capsule().stroke(palette.border, lineWidth: 1))
                                 }
-                                .buttonStyle(.plain).disabled(!model.captureCopilotCanApply)
+                                .buttonStyle(.plain).modifier(ModelDisabled { !model.captureCopilotCanApply })
                                 .accessibilityIdentifier("capture-copilot-chip-\(index)")
                             }
                             if !model.captureCopilotView.object("applyAll").isEmpty {
@@ -323,7 +320,7 @@ struct CaptureSheet: View {
                                     Text(model.captureCopilotView.object("applyAll").text("label")).rnFont(12, .bold)
                                         .foregroundStyle(palette.tint).padding(.horizontal, 12).frame(minHeight: 44)
                                 }
-                                .buttonStyle(.plain).disabled(!model.captureCopilotCanApply)
+                                .buttonStyle(.plain).modifier(ModelDisabled { !model.captureCopilotCanApply })
                                 .accessibilityIdentifier("capture-copilot-apply-all")
                             }
                         }
@@ -348,7 +345,7 @@ struct CaptureSheet: View {
                 .frame(minWidth: 80, minHeight: 44).padding(.horizontal, 16)
                 .overlay(Capsule().stroke(palette.border, lineWidth: 1))
         }
-        .buttonStyle(.plain).disabled(model.captureVoiceIsRecording ? !model.captureVoiceCanStop : (!model.canSave || model.captureVoiceWorking))
+        .buttonStyle(.plain).modifier(ModelDisabled { model.captureVoiceIsRecording ? !model.captureVoiceCanStop : (!model.canSave || model.captureVoiceWorking) })
         .accessibilityIdentifier("capture-save-edit")
         if !model.captureVoiceIsRecording {
         Button { Task { await model.saveCapture() } } label: {
@@ -357,7 +354,7 @@ struct CaptureSheet: View {
                 .frame(minWidth: 72, minHeight: 44).padding(.horizontal, 16)
                 .background(palette.captureBackground, in: Capsule())
         }
-        .buttonStyle(.plain).disabled(!model.canSave || model.captureVoiceWorking)
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.canSave || model.captureVoiceWorking })
         .accessibilityIdentifier("capture-save")
         }
     }
@@ -401,7 +398,7 @@ struct CaptureSheet: View {
             .padding(.horizontal, 12).frame(minHeight: 40)
             .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(palette.border, lineWidth: 1))
         }
-        .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
         .accessibilityLabel(model.capture.object("contexts").text("accessibilityLabel"))
         .accessibilityIdentifier("capture-contexts")
         .onLongPressGesture {
@@ -417,7 +414,7 @@ struct CaptureSheet: View {
             .padding(.horizontal, 12).frame(minHeight: 40)
             .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(palette.border, lineWidth: 1))
         }
-        .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || !model.capture.object("focus").flag("enabled"))
+        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded || !model.capture.object("focus").flag("enabled") })
         .accessibilityLabel(model.capture.object("focus").text("accessibilityLabel"))
         .accessibilityIdentifier("capture-focus")
         Button { expanded.toggle() } label: {
@@ -441,7 +438,7 @@ struct CaptureSheet: View {
                     .padding(.horizontal, 10).frame(minHeight: 44)
                     .overlay(Capsule().stroke(date.flag("selected") ? palette.tint : palette.border, lineWidth: 1))
             }
-            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+            .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
         }
     }
 }
@@ -461,7 +458,7 @@ private struct ContextPicker: View {
                 Button { model.closeContextPicker() } label: {
                     AppIcon(name: "x", size: 18).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
                 .accessibilityLabel(model.label("common.close"))
                 .accessibilityIdentifier("capture-context-close")
             }
@@ -470,7 +467,7 @@ private struct ContextPicker: View {
                 .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
                 .focused($focused).textInputAutocapitalization(.never).autocorrectionDisabled()
-                .submitLabel(.done).disabled(model.busy || model.retryNeeded)
+                .submitLabel(.done).modifier(ModelDisabled { model.busy || model.retryNeeded })
                 .accessibilityLabel(picker.text("placeholder"))
                 .accessibilityIdentifier("capture-context-query")
                 .onSubmit { addContext() }
@@ -484,7 +481,7 @@ private struct ContextPicker: View {
                     .foregroundStyle(palette.tint).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .padding(.horizontal, 12)
                 }
-                .buttonStyle(.plain).disabled(!model.contextPickerReady)
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.contextPickerReady })
                 .accessibilityLabel(picker.object("add").text("accessibilityLabel"))
                 .accessibilityIdentifier("capture-context-add")
             }
@@ -501,7 +498,7 @@ private struct ContextPicker: View {
                                     .overlay(Capsule().stroke(palette.border, lineWidth: 1))
                                     .frame(minHeight: 44).contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain).disabled(!model.contextPickerReady)
+                            .buttonStyle(.plain).modifier(ModelDisabled { !model.contextPickerReady })
                             .accessibilityLabel(item.text("accessibilityLabel"))
                             .accessibilityIdentifier("capture-context-remove-" + item.text("label"))
                         }
@@ -517,7 +514,7 @@ private struct ContextPicker: View {
                         Text(picker.object("clear").text("label")).rnFont(14, .semibold)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 12)
                     }
-                    .buttonStyle(.plain).disabled(!model.contextPickerReady)
+                    .buttonStyle(.plain).modifier(ModelDisabled { !model.contextPickerReady })
                     .accessibilityIdentifier("capture-context-clear")
                     ForEach(picker.objects("items").indices, id: \.self) { index in
                         let item = picker.objects("items")[index]
@@ -534,12 +531,12 @@ private struct ContextPicker: View {
                             .frame(minHeight: 44).padding(.horizontal, 12)
                             .background(item.flag("selected") ? palette.filter : .clear, in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.plain).disabled(!model.contextPickerReady)
+                        .buttonStyle(.plain).modifier(ModelDisabled { !model.contextPickerReady })
                         .accessibilityLabel(item.text("accessibilityLabel"))
                         .accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
                         .accessibilityIdentifier("capture-context-option-" + item.text("label"))
                     }
-                    if !model.contextPickerReady { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                    ModelShown { !model.contextPickerReady } content: { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
                 .padding(.vertical, 6)
             }
@@ -571,6 +568,19 @@ private struct CaptureCorners: Shape {
     }
 }
 
+
+private struct CaptureDraftInput: View {
+    @Bindable var model: CoreModel
+    let palette: AppPalette
+    let copy: CoreObject
+
+    var body: some View {
+        CaptureTextInput(text: $model.draft, enabled: !model.busy && !model.retryNeeded && !model.captureLinesConfirmationPresented,
+            color: UIColor(palette.text), label: copy.text("inputLabel"), hint: copy.text("inputHint")) {
+            Task { await model.saveCapture() }
+        }
+    }
+}
 
 private struct CaptureTextInput: UIViewRepresentable {
     @Binding var text: String

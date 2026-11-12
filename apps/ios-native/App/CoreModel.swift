@@ -278,8 +278,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             if oldValue != selectedSurface && (oldValue == .inbox || selectedSurface == .inbox) {
                 clearInboxTaskSelection()
                 inboxGeneration += 1
-                inboxCurrent = false
-                inboxGroupPresented = false
+                if inboxCurrent { inboxCurrent = false }
+                if inboxGroupPresented { inboxGroupPresented = false }
                 retireInboxFilterPresentation()
             }
             if referenceSortRequest == nil, let caller = taskListSortCaller,
@@ -443,6 +443,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var inboxPendingFold: (axis: String, ids: [String])?
     private var inboxGroupingOperation: String?
     private var inboxAutomaticPageAttempt: (generation: Int, offset: Int)?
+    @ObservationIgnored private var inboxAutomaticPageWaiting: [String]?
     private(set) var processInboxPresented = false {
         didSet { if processInboxPresented { retireReviewAI(); foregroundSyncIntent = nil } else { retireProcessInboxAI() } }
     }
@@ -28480,6 +28481,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked
     }
 
+    func replayInboxAutomaticPage() async {
+        guard let row = inboxAutomaticPageWaiting else { return }
+        inboxAutomaticPageWaiting = nil
+        await loadMore(automaticRow: row)
+    }
+
     func inboxItemIdentity(_ item: CoreObject) -> [String] {
         [inbox.text("groupBy"), item.text("type"), item.text("id"), item.text("groupId"), item.object("row").text("id")]
     }
@@ -38361,7 +38368,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     func loadMore(automaticRow: [String]? = nil) async {
         guard inboxActionsEnabled, let owner = host,
-              items.count < inbox.number("total") else { return }
+              items.count < inbox.number("total") else {
+            if let automaticRow, !inboxActionsEnabled, items.count < inbox.number("total"),
+               let index = inboxItemIndex(automaticRow), index >= max(0, items.count - 5) {
+                inboxAutomaticPageWaiting = automaticRow
+            }
+            return
+        }
         let snapshot = inbox, offset = items.count
         let params = inboxParams, generation = inboxGeneration
         let selectionGeneration = inboxSelectionGeneration, selected = inboxSelectedIDs
@@ -45993,7 +46006,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 inboxPendingFold = nil
             }
 
-            inboxParams = acceptedParams
+            if !NativeValueEquality.same(inboxParams, acceptedParams) { inboxParams = acceptedParams }
             if let intent {
                 inboxPendingFilterEdit = nil
                 if let type = intent.textType, inboxFilterTextEdits[type]?.sequence == intent.textSequence {
@@ -46807,11 +46820,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func requestFocusRead(delay: UInt64 = 150_000_000) {
         focusGeneration += 1
         focusReadTask?.cancel()
-        focusCurrent = false
-        focusOrderCurrent = false
-        focusPickerCurrent = false
-        focusLoading = true
-        focusError = nil
+        if focusCurrent { focusCurrent = false }
+        if focusOrderCurrent { focusOrderCurrent = false }
+        if focusPickerCurrent { focusPickerCurrent = false }
+        if !focusLoading { focusLoading = true }
+        if focusError != nil { focusError = nil }
         focusNeedsRead = true
         scheduleFocusRead(delay: delay)
     }
@@ -46875,12 +46888,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let savedDepth = focusSavedDepth
         let loaded = focusLoadedDepth
         focusNeedsRead = false
-        focusCurrent = false
-        focusOrderCurrent = false
-        focusPickerCurrent = false
-        focusLoading = true
-        focusError = nil
-        defer { if generation == focusGeneration { focusLoading = false } }
+        if focusCurrent { focusCurrent = false }
+        if focusOrderCurrent { focusOrderCurrent = false }
+        if focusPickerCurrent { focusPickerCurrent = false }
+        if !focusLoading { focusLoading = true }
+        if focusError != nil { focusError = nil }
+        defer { if generation == focusGeneration, focusLoading { focusLoading = false } }
         for attempt in 0..<2 {
             do {
                 var next = try await focusPage(state: focusState)
