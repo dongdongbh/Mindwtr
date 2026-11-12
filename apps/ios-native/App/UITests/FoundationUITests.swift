@@ -21377,6 +21377,8 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(renamed.waitForExistence(timeout: 30))
         let titleID = renamed.identifier
         renamed.tap()
+        enabled(app.buttons["task-mode-view"])
+        app.buttons["task-mode-view"].tap()
         XCTAssertTrue(app.staticTexts["Native edit survives restart."].waitForExistence(timeout: 10))
         app.buttons["task-mode-edit"].tap()
         note.tap()
@@ -21386,6 +21388,8 @@ final class FoundationUITests: XCTestCase {
         discard.tap()
         XCTAssertTrue(renamed.waitForExistence(timeout: 10))
         renamed.tap()
+        enabled(app.buttons["task-mode-view"])
+        app.buttons["task-mode-view"].tap()
         XCTAssertTrue(app.staticTexts["Native edit survives restart."].waitForExistence(timeout: 10))
         app.buttons["task-view-close"].tap()
         let status = app.buttons["task-status-" + String(titleID.dropFirst("task-title-".count))]
