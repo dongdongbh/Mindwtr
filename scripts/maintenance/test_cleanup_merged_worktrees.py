@@ -300,6 +300,29 @@ class CleanupTests(unittest.TestCase):
         self.age()
         self.assert_skip("symlinked_worktree_content")
 
+    def commit_link(self, relative, target):
+        link = self.worktree / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target, target_is_directory=True)
+        self.git(self.worktree, "add", relative)
+        self.git(self.worktree, "commit", "-m", "tracked link")
+        self.git(self.repo, "merge", "--ff-only", "retained-topic")
+        self.git(self.repo, "push", "origin", "main")
+        self.age()
+
+    def test_tracked_symlink_inside_worktree_is_unlinked_not_followed(self):
+        (self.worktree / "shared" / "res").mkdir(parents=True)
+        (self.worktree / "shared" / "res" / "layout.xml").write_text("shared resource")
+        self.git(self.worktree, "add", "shared")
+        self.commit_link("widget/src/main/res", "../../../shared/res")
+        item = self.candidate(self.run_cleanup())
+        self.assertEqual(item["decision"], "removed")
+        self.assertFalse(self.worktree.exists())
+
+    def test_tracked_relative_symlink_escaping_worktree_skips(self):
+        self.commit_link("widget/res", "../../outside")
+        self.assert_skip("symlinked_worktree_content")
+
     def test_unknown_ignored_configuration_skips_without_reading_content(self):
         self.ignored_file(".env", b"PRIVATE_FIXTURE_CONTENT")
         report = self.assert_skip("unknown_ignored_content")

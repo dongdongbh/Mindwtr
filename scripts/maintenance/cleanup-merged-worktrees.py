@@ -240,7 +240,25 @@ def reverse_applies_to(path: Path, repo: Path, commit: str) -> bool:
         return git_exit(repo, "apply", "--cached", "-R", "--check", "-", input=patch, env=env).returncode == 0
 
 
-def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None) -> int:
+def internal_tracked_links(path: Path) -> set[str]:
+    links: set[str] = set()
+    for field in run_git(path, "ls-files", "-s", "-z").split(b"\0"):
+        meta, _, name = field.partition(b"\t")
+        if not meta.startswith(b"120000 "):
+            continue
+        relative = os.fsdecode(name)
+        try:
+            target = os.readlink(path / relative)
+        except OSError:
+            continue
+        resolved = os.path.normpath(os.path.join(os.path.dirname(relative), target))
+        if not os.path.isabs(target) and resolved != ".." and not resolved.startswith("../"):
+            links.add(relative)
+    return links
+
+
+def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None,
+                   allowed_links: set[str] | None = None) -> int:
     newest = 0
     pending = [path]
     try:
@@ -255,7 +273,8 @@ def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None
                     if stat.S_ISLNK(info.st_mode):
                         relative = Path(entry.path).relative_to(path).as_posix()
                         group = generated_group(relative)
-                        if group is None or group not in (allowed_generated_groups or []):
+                        generated = group is not None and group in (allowed_generated_groups or [])
+                        if not generated and relative not in (allowed_links or set()):
                             raise SafetyError("symlinked_worktree_content")
 
 
@@ -555,7 +574,7 @@ class Cleanup:
             if changes and proof is None:
                 raise SafetyError("dirty_or_untracked")
             groups, evidence = ignored_inventory(path)
-            newest = activity_mtime(path, groups)
+            newest = activity_mtime(path, groups, internal_tracked_links(path))
             result.update(newest_activity_utc=dt.datetime.fromtimestamp(newest / 1e9, dt.timezone.utc).isoformat(),
                           generated_group_count=len(groups), evidence_present=evidence)
             if newest > int((self.now() - self.older_than_days * 86400) * 1e9):
