@@ -37897,6 +37897,8 @@ extension FoundationUITests {
         let row = app.buttons["Markdown assist task"]
         boardEnabled(row, timeout: 30); row.tap(); boardTap(app, "task-mode-edit")
         let note = app.textViews["task-editor-note"], scroll = app.scrollViews["task-editor-scroll"]
+        let details = app.buttons["task-editor-section-details"]
+        for _ in 0..<12 where !note.exists && !details.isHittable { scroll.swipeUp() }
         if !note.exists { boardTap(app, "task-editor-section-details") }
         for _ in 0..<12 where !(note.exists && note.isHittable) { scroll.swipeUp() }
         boardEnabled(note, timeout: 15); note.tap()
