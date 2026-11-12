@@ -10680,6 +10680,25 @@ final class FoundationUITests: XCTestCase {
         app.terminate(); app.launch(); task79OpenSomeday(app)
         boardEnabled(row, timeout: 30)
         inNoSection(false)
+        row.press(forDuration: 1.0)
+        boardTap(app, "someday-project-parked-1319-move-section")
+        boardTap(app, "someday-project-move-new-section")
+        let input = app.textFields["someday-section-create-input"]
+        boardEnabled(input, timeout: 20); input.tap(); input.typeText("Fresh 1319")
+        boardTap(app, "someday-section-create-save")
+        XCTAssertTrue(input.waitForNonExistence(timeout: 30))
+        let fresh = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "someday-heading-", "Fresh 1319")).firstMatch
+        XCTAssertTrue(fresh.waitForExistence(timeout: 30))
+        let none = app.staticTexts["someday-heading-view-section:someday:"]
+        expectation(for: NSPredicate { _, _ in
+            row.exists && row.frame.minY > fresh.frame.minY && row.frame.minY < none.frame.minY
+                && !app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "someday-heading-")).allElementsBoundByIndex
+                    .contains { $0.frame.minY > fresh.frame.minY && $0.frame.minY < row.frame.minY }
+        }, evaluatedWith: row)
+        waitForExpectations(timeout: 30)
+        XCTAssertFalse(app.buttons["someday-project-move-cancel"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        processEditorObserve(app, "G5 parked project moved into a section created from its move dialog")
     }
 
     private func somedaySectionMoveFlow(library: String) {

@@ -81,7 +81,7 @@ struct SomedayScreen: View {
             .accessibilityIdentifier("someday-scroll")
             .refreshable { await model.pullToRefresh() }
         }
-        .overlay { if !model.somedayProjectMove.isEmpty { projectMoveDialog } }
+        .overlay { if !model.somedayProjectMove.isEmpty && model.somedayPanel.isEmpty { projectMoveDialog } }
         .onChange(of: scenePhase) { model.statusListSelectionOwnerChanged(active: $0 == .active) }
         .onDisappear { model.statusListSelectionOwnerChanged(active: false) }
         .task(id: scenePhase == .active) {
@@ -274,6 +274,14 @@ struct SomedayScreen: View {
                             .accessibilityAddTraits(choice.flag("selected") ? .isSelected : [])
                             .accessibilityIdentifier("someday-project-move-choice-" + String(index))
                         }
+                        Button { Task { await model.openSomedayProjectSectionCreate() } } label: {
+                            Text("+ " + model.label("viewSections.add")).rnFont(15, .medium)
+                                .foregroundStyle(palette.tint)
+                                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                                .padding(.horizontal, 10).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.somedayProjectMoveActionsEnabled)
+                        .accessibilityIdentifier("someday-project-move-new-section")
                     }
                 }
                 .frame(maxHeight: 360).fixedSize(horizontal: false, vertical: true)

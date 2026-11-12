@@ -3580,6 +3580,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var somedaySectionCreateRequest: String?
     private var somedaySectionCreateRequestID: String?
     private var somedaySectionCreateReturnsToMove = false
+    @ObservationIgnored private var somedaySectionCreateReturnsToProjectMove = false
+    @ObservationIgnored private var somedayProjectMoveCreatedSectionID: String?
     private var somedayMoveCreatedSectionID: String?
     private var somedaySectionTaskSectionID: String?
     private var somedaySectionTaskEnvelope: String?
@@ -4390,7 +4392,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         ready && selectedSurface == .waiting && waitingCurrent && !busy && !retryNeeded && !taskPresented
     }
     var somedayActionsEnabled: Bool {
-        ready && selectedSurface == .someday && somedayCurrent && !busy && !retryNeeded && !taskPresented && somedayProjectMove.isEmpty
+        ready && selectedSurface == .someday && somedayCurrent && !busy && !retryNeeded && !taskPresented
+            && (somedayProjectMove.isEmpty || somedayPanel == "newSection")
     }
     var somedayPickerActionsEnabled: Bool { somedayActionsEnabled && somedayPickerCurrent }
     var somedaySectionCreatePending: Bool { somedaySectionCreateRequest != nil }
@@ -27752,6 +27755,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         somedayMoveChoiceToast = ""
         somedayMoveCreatedSectionID = nil
         somedaySectionCreateReturnsToMove = false
+        somedaySectionCreateReturnsToProjectMove = false
     }
 
     func openSomedaySectionCreate(fromMove: Bool = false) async {
@@ -27759,6 +27763,17 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               !somedaySectionCreatePending, !capturePresented, !areaPickerPresented,
               !fromMove || somedayMoveActionsEnabled else { return }
         somedaySectionCreateReturnsToMove = fromMove
+        somedayPanel = "newSection"
+        somedaySectionCreateDraft = ""
+        somedaySectionCreateError = nil
+        somedaySectionCreateReadError = nil
+        somedaySectionCreateAwaitingRefresh = false
+        await readSomedaySectionCreateOptions()
+    }
+
+    func openSomedayProjectSectionCreate() async {
+        guard somedayProjectMoveActionsEnabled, !somedaySectionCreatePending, !capturePresented, !areaPickerPresented else { return }
+        somedaySectionCreateReturnsToProjectMove = true
         somedayPanel = "newSection"
         somedaySectionCreateDraft = ""
         somedaySectionCreateError = nil
@@ -27841,6 +27856,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             throw CocoaError(.coderReadCorrupt)
         }
         if somedaySectionCreateReturnsToMove { somedayMoveCreatedSectionID = result.text("id") }
+        if somedaySectionCreateReturnsToProjectMove { somedayProjectMoveCreatedSectionID = result.text("id") }
         somedaySectionCreateRequest = nil
         somedaySectionCreateRequestID = nil
         somedaySectionCreateOptions = [:]
@@ -27863,6 +27879,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 somedaySectionCreateReturnsToMove = false
                 somedayPanel = "moveSection"
                 await resumeSomedayMoveAfterCreate()
+            } else if somedaySectionCreateReturnsToProjectMove {
+                somedaySectionCreateReturnsToProjectMove = false
+                somedayPanel = ""
+                if let created = somedayProjectMoveCreatedSectionID {
+                    somedayProjectMoveCreatedSectionID = nil
+                    if !somedayProjectMove.isEmpty { await writeSomedayProjectMove(sectionID: created) }
+                }
             } else {
                 somedayPanel = ""
             }
@@ -28508,7 +28531,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     var somedayProjectMoveActionsEnabled: Bool {
         ready && selectedSurface == .someday && !somedayProjectMove.isEmpty && !busy && !retryNeeded
-            && somedayProjectMoveRequest == nil && !taskPresented
+            && somedayProjectMoveRequest == nil && !taskPresented && somedayPanel.isEmpty
+            && somedayProjectMoveCreatedSectionID == nil
     }
 
     func openSomedayProjectMove(_ item: CoreObject) async {
@@ -28562,12 +28586,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard items.indices.contains(index) else { return }
         busy = true
         defer { finishOperation() }
+        await writeSomedayProjectMove(sectionID: items[index]["sectionId"] ?? NSNull())
+    }
+
+    private func writeSomedayProjectMove(sectionID: Any) async {
         somedayProjectMoveError = nil
         do {
             let request = try json(["requestId": UUID().uuidString.lowercased(), "projectId": somedayProjectMoveProject.text("id"),
                                     "projectRevision": somedayProjectMoveProject.text("projectRevision"),
                                     "fromSectionId": somedayProjectMove["fromSectionId"] ?? NSNull(),
-                                    "sectionId": items[index]["sectionId"] ?? NSNull()])
+                                    "sectionId": sectionID])
             somedayProjectMoveRequest = request
             let result = try await query("somedayProjectSectionMoveWrite", [request])
             try acknowledgeSomedayProjectMove(result)
