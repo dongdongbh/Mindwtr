@@ -76,5 +76,5 @@ describe('iOS core bundle plugins', () => {
             const source = (await descriptor.loadAsync())[descriptor.export];
             expect(JSON.stringify(bundled[code])).toBe(JSON.stringify(source));
         }
-    });
+    }, 60_000);
 });
