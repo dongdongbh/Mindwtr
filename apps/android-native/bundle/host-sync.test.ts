@@ -695,6 +695,46 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.schedules).toEqual([]);
     });
 
+    it('schedules a local change sync with the RN debounce and shared pacing, never for its own writes', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const edit = () => core.useTaskStore.setState((state) => ({
+            _allTasks: [...state._allTasks, { id: `local-${now}`, title: 'Synthetic', status: 'inbox', tags: [], contexts: [],
+                createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }],
+            lastDataChangeAt: core.getNextDataChangeAt(state.lastDataChangeAt, now) }) as never);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
+        now += 10_000;
+        edit();
+        expect(fixture.sync.syncChangeSchedule(false)).toEqual({ delayMs: null });
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
+        edit();
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 2_000 });
+        now += 1_000;
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 1_000 });
+        edit();
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 5_000 });
+        now += 5_000;
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 0 });
+        expect(await fixture.sync.performStoredAutomaticSync('change')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
+
+        now += 1_000;
+        edit();
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 4_000 });
+        expect(await fixture.sync.performStoredAutomaticSync('change')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 5_000 });
+        now += 5_000;
+        expect(await fixture.sync.performStoredAutomaticSync('change')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.state().cycles).toBe(3);
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
+        expect(fixture.schedules).toEqual([]);
+    });
+
     it('runs an explicit stored pull despite automatic resume pacing and preserves configuration', async () => {
         resetForTests(); serve();
         spyOn(Date, 'now').mockReturnValue(100_000);

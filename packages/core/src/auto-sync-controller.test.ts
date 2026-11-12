@@ -785,6 +785,54 @@ describe('createAutoSyncController platform policy switches', () => {
         controller.dispose();
     });
 
+    it('reports the exact wait an undeferred platform must sleep before an automatic request can run', async () => {
+        const scheduler = createManualScheduler(100_000);
+        let outcome: { success: boolean; error?: string } = { success: true };
+        const performSync = vi.fn(async () => {
+            await new Promise<void>((resolve) => { scheduler.setTimer(() => resolve(), 1_000); });
+            return outcome;
+        });
+        let pending = false;
+        const controller = createAutoSyncController({
+            ...noopPorts,
+            allowDeferredWork: false,
+            performSync,
+            hasPendingLocalChanges: () => pending,
+            minIntervalMs: 5_000,
+            autoFailureCooldownMs: 60_000,
+            adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 300_000 },
+            now: scheduler.now,
+            setTimer: scheduler.setTimer,
+            clearTimer: scheduler.clearTimer,
+        });
+        expect(controller.getAutoSyncWaitMs()).toBe(0);
+
+        const first = controller.requestAutoSync(0, 'startup');
+        await settle();
+        await scheduler.advanceBy(1_000);
+        await first;
+        expect(controller.getAutoSyncWaitMs()).toBe(9_000);
+        pending = true;
+        expect(controller.getAutoSyncWaitMs()).toBe(5_000);
+
+        await scheduler.advanceBy(2_000);
+        await controller.requestAutoSync(undefined, 'data-change');
+        expect(performSync).toHaveBeenCalledTimes(1);
+        await scheduler.advanceBy(controller.getAutoSyncWaitMs());
+        outcome = { success: false, error: 'boom' };
+        const second = controller.requestAutoSync(undefined, 'data-change');
+        await settle();
+        await scheduler.advanceBy(1_000);
+        await second;
+        expect(performSync).toHaveBeenCalledTimes(2);
+        expect(controller.getAutoSyncWaitMs()).toBe(60_000);
+        await scheduler.advanceBy(60_000);
+        expect(controller.getAutoSyncWaitMs()).toBe(0);
+        expect(scheduler.getTimerCount()).toBe(0);
+
+        controller.dispose();
+    });
+
     it('reads the pacing cadence on every use so a platform can switch it at runtime', async () => {
         const scheduler = createManualScheduler(0);
         let cadence = { minIntervalMs: 0, debounceFirstChangeMs: 2_000, debounceContinuousChangeMs: 5_000 };

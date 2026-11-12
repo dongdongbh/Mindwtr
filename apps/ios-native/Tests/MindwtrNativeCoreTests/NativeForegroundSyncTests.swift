@@ -179,6 +179,24 @@ final class NativeForegroundSyncTests: XCTestCase {
         try await assertStoredSkip(backend: nil, command: "syncLeave")
     }
 
+    func testChangeOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: "off", command: "syncChange")
+    }
+
+    func testSyncChangeScheduleWithoutARemoteBackendSchedulesNothing() async throws {
+        let (host, state) = try host(backend: "off")
+        let before = try Data(contentsOf: manifest)
+        _ = try await host.start()
+        let initial = try await host.syncChangeSchedule()
+        XCTAssertNil(initial.delayMs)
+        _ = try await host.foregroundSync(command: "syncChange", requestJSON: "{}")
+        let after = try await host.syncChangeSchedule()
+        XCTAssertNil(after.delayMs, "Sync off never schedules a local change sync")
+        XCTAssertTrue(state.recorded.isEmpty, "Scheduling a local change sync never reads a secret")
+        XCTAssertEqual(try Data(contentsOf: manifest), before, "Scheduling a local change sync writes nothing")
+        await host.close()
+    }
+
     func testSyncChangeObservationWithoutARemoteBackendReportsNothingPending() async throws {
         let (host, state) = try host(backend: "off")
         let before = try Data(contentsOf: manifest)
@@ -197,7 +215,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let (host, state) = try host(backend: "webdav")
         _ = try await host.start()
         let before = try Data(contentsOf: manifest)
-        for command in ["syncStored", "syncResume", "syncLeave", "syncPull"] {
+        for command in ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPull"] {
             for input in ["[]", "null", "{\"manual\":false}", "{\"revision\":\"synthetic\"}",
                           "{\"webdav\":{\"url\":\"https://native-fixture.invalid/data.json\",\"password\":\"synthetic-only\"}}"] {
                 do {
@@ -217,7 +235,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let (host, state) = try host(backend: "cloudkit")
         let before = try Data(contentsOf: manifest)
         _ = try await host.start()
-        for command in ["syncStored", "syncResume", "syncLeave", "syncPull"] {
+        for command in ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPull"] {
             let response = try object(await host.foregroundSync(command: command, requestJSON: "{}"))
             XCTAssertEqual(response["ok"] as? Bool, false)
             XCTAssertEqual((response["error"] as? [String: Any])?["code"] as? String, "ACTION_FAILED")

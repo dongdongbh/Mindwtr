@@ -99,6 +99,7 @@ export type AutoSyncController = {
 
     takePendingSuspendedRequest: () => boolean;
     getLastAutoSyncAt: () => number;
+    getAutoSyncWaitMs: () => number;
     dispose: () => void;
 };
 
@@ -498,6 +499,11 @@ export const createAutoSyncController = (
             return pending;
         },
         getLastAutoSyncAt: () => lastAutoSyncAt,
+        getAutoSyncWaitMs: () => {
+            const nowMs = now();
+            const { minIntervalMs } = resolveEffectiveMinIntervalMs(undefined);
+            return Math.max(0, autoSyncRetryAfter - nowMs, minIntervalMs - (nowMs - lastAutoSyncAt));
+        },
         dispose: () => {
             disposed = true;
             clearSyncDebounce();

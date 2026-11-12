@@ -564,6 +564,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     let iosAutomaticFrame: AutomaticFrame | null = null;
     let iosUploadedChangeAt = useTaskStore.getState().lastDataChangeAt;
     const hasPendingLocalChange = () => useTaskStore.getState().lastDataChangeAt !== iosUploadedChangeAt;
+    let iosChangeSeenAt = iosUploadedChangeAt;
+    let iosChangeDueAt: number | null = null;
 
     const assertSelfHostedSyncAdmission = async () => {
         if (platform !== 'ios') return;
@@ -676,6 +678,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         periodicSyncIntervalMs: null,
         getCadence: () => getMobileAutoSyncCadence(iosAutomaticBackend),
         adaptivePacing: { durationMultiplier: 9, maxIntervalMs: 5 * 60_000 },
+        hasPendingLocalChanges: hasPendingLocalChange,
         isRuntimeActive: () => !fatalCleanupError && iosAutomaticFrame !== null,
         isIgnorableFailure: (error) => !error || isLikelyOfflineSyncError(error),
         reportError: (_label, error) => {
@@ -704,12 +707,13 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         const answer = await performSync(undefined, { manual: true });
         return { success: answer.success === true, skipped: Boolean(answer.skipped) };
     };
-    const performStoredAutomaticSync = async (reason: 'startup' | 'resume' | 'leave') => {
+    const performStoredAutomaticSync = async (reason: 'startup' | 'resume' | 'leave' | 'change') => {
         if (fatalCleanupError) throw fatalCleanupError;
-        if (platform !== 'ios' || !['startup', 'resume', 'leave'].includes(reason)) {
+        if (platform !== 'ios' || !['startup', 'resume', 'leave', 'change'].includes(reason)) {
             throw new Error('Stored automatic sync is unavailable on this host');
         }
         if (iosAutomaticFrame) throw new Error('An automatic foreground sync is already in progress');
+        if (reason === 'change') iosChangeDueAt = null;
         const frame: AutomaticFrame = { result: null };
         iosAutomaticFrame = frame;
         try {
@@ -722,8 +726,12 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             const controller = automaticController();
             if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
                 <= getMobileAutoSyncCadence(backend).foregroundMinIntervalMs) return { success: true, skipped: true };
-            await controller.requestAutoSync(0, reason === 'leave' ? 'app-state-background' : reason);
+            if (reason === 'change') await controller.requestAutoSync(undefined, 'data-change');
+            else await controller.requestAutoSync(0, reason === 'leave' ? 'app-state-background' : reason);
             if (fatalCleanupError) throw fatalCleanupError;
+            if (reason === 'change' && !frame.result && hasPendingLocalChange()) {
+                iosChangeDueAt = Date.now() + getMobileAutoSyncCadence(backend).debounceContinuousChangeMs;
+            }
             return frame.result ? { success: frame.result.success === true, skipped: Boolean(frame.result.skipped) }
                 : { success: true, skipped: true };
         } catch (error) {
@@ -734,6 +742,23 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
 
 
     const syncChangeObservation = () => ({ pending: hasPendingLocalChange() });
+
+    const syncChangeSchedule = (eligible: boolean): { delayMs: number | null } => {
+        const changeAt = useTaskStore.getState().lastDataChangeAt;
+        if (fatalCleanupError || !eligible || !hasPendingLocalChange()) {
+            iosChangeSeenAt = changeAt;
+            iosChangeDueAt = null;
+            return { delayMs: null };
+        }
+        const nowMs = Date.now();
+        if (changeAt !== iosChangeSeenAt) {
+            const cadence = getMobileAutoSyncCadence(iosAutomaticBackend);
+            iosChangeDueAt = nowMs + (iosChangeDueAt === null ? cadence.debounceFirstChangeMs : cadence.debounceContinuousChangeMs);
+            iosChangeSeenAt = changeAt;
+        }
+        if (iosChangeDueAt === null) return { delayMs: null };
+        return { delayMs: Math.max(0, iosChangeDueAt - nowMs, iosAutomaticController?.getAutoSyncWaitMs() ?? 0) };
+    };
 
     const backgroundSyncWanted = async () => {
         const { backend, configured } = await service.getMobileSyncConfigurationStatus();
@@ -937,6 +962,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         performStoredAutomaticSync,
         performStoredManualSync,
         syncChangeObservation,
+        syncChangeSchedule,
         attachmentsHost: attachments?.contractHost ?? null,
         prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,
 

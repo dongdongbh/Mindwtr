@@ -2363,12 +2363,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private(set) var completedStartupToken: UUID?
     private enum ForegroundSyncReason {
-        case startup, resume, pull, retention, background, leave
+        case startup, resume, pull, retention, background, leave, change
         var command: String {
             switch self {
             case .startup: return "syncStored"
             case .resume, .background: return "syncResume"
             case .leave: return "syncLeave"
+            case .change: return "syncChange"
             case .pull: return "syncPull"
             case .retention: return "archiveRetention"
             }
@@ -2404,6 +2405,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var foregroundSyncGeneration = 0
     @ObservationIgnored private var syncLeaveTicket = 0
     private var syncLeaveArmed = false
+    @ObservationIgnored private var syncChangeTicket = 0
+    @ObservationIgnored private var syncChangeWake: Task<Void, Never>?
     private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
     private struct ReminderLifecycleOwner {
@@ -9411,6 +9414,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     func externalContextBecameClean() {
         watchCommandsChanged()
+        observeChangeSync()
         if productionWidgetFamilyEligible {
             requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
         }
@@ -11211,6 +11215,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         archiveRetentionWake?.cancel()
         archiveRetentionWake = nil
         archiveRetentionRequested = false
+        syncChangeTicket &+= 1
+        syncChangeWake?.cancel(); syncChangeWake = nil
         if !holdingRunningSync { syncLeaveArmed = false }
         observeLeaveSync()
     }
@@ -11230,6 +11236,32 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                   let self, self.host === currentHost, self.syncLeaveTicket == ticket else { return }
             if observation.pending { self.admitLeaveSync() } else { self.syncLeaveArmed = false }
         }
+    }
+
+    private func observeChangeSync() {
+        guard foregroundSyncSceneActive, let currentHost = syncTriggerHost else { return }
+        syncChangeTicket &+= 1
+        let ticket = syncChangeTicket
+        Task { [weak self] in
+            guard let schedule = try? await currentHost.syncChangeSchedule(),
+                  let self, self.host === currentHost, self.syncChangeTicket == ticket else { return }
+            self.syncChangeWake?.cancel(); self.syncChangeWake = nil
+            guard let delayMs = schedule.delayMs else { return }
+            self.syncChangeWake = Task { [weak self] in
+                do { try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000) } catch { return }
+                guard let self, self.host === currentHost, self.syncChangeTicket == ticket else { return }
+                self.syncChangeWake = nil
+                self.admitChangeSync(currentHost)
+            }
+        }
+    }
+
+    private func admitChangeSync(_ currentHost: CoreHost) {
+        guard foregroundSyncSceneActive, syncTriggerHost === currentHost, foregroundSyncIntent == nil,
+              foregroundSyncOwner == nil, let token = completedStartupToken else { return }
+        foregroundSyncIntent = ForegroundSyncIntent(id: UUID(), host: currentHost, startupToken: token,
+            reason: .change, foregroundRequested: true)
+        admitForegroundSync()
     }
 
     private func admitLeaveSync() {
@@ -11496,6 +11528,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func foregroundSyncContextClean(_ reason: ForegroundSyncReason) -> Bool {
         if reason == .retention { return notificationResponseContextClean && surfaceRefreshAllowed && selectedSurface != .project }
+        if reason == .change { return notificationResponseContextClean && surfaceRefreshAllowed }
         return reason == .pull ? operationContextClean : foregroundSyncInboxClean
     }
 
@@ -11594,7 +11627,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 } else {
                     try self.validateForegroundSyncReply(result)
                     syncSucceeded = result.flag("ok") && result.object("value").flag("success")
-                    self.archiveRetentionRequested = true
+                    if owner.reason == .change {
+                        guard syncSucceeded, !result.object("value").flag("skipped") else { return }
+                    } else { self.archiveRetentionRequested = true }
                 }
             } catch is CancellationError {
                 await self.logSyncCancelledCleanly(owner.reason.command)
@@ -11607,6 +11642,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             do {
                 if owner.reason == .retention {
                     if retentionPurged { try await self.readSelectedSurface() }
+                } else if owner.reason == .change {
+                    try await self.readSelectedSurface()
                 } else if owner.reason == .pull {
                     if self.selectedSurface == .calendar { self.calendarFeedRefreshRequested = true }
                     try await self.readPreferences()
@@ -48001,6 +48038,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             gmailCapture.admit()
             admitBackgroundSync()
             observeLeaveSync()
+            observeChangeSync()
             #if DEBUG && targetEnvironment(simulator)
             publishTrashBulkTestState()
             #endif

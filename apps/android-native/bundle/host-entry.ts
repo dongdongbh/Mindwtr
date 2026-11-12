@@ -3787,6 +3787,18 @@ globalThis.MindwtrHost = {
             return iosManualSync?.syncChangeObservation() ?? { pending: false };
         });
     },
+    iosSyncChangeSchedule(): string {
+        const count = arguments.length;
+        return submit(async () => {
+            if (count !== 0) throw new Error('INVALID_INPUT: Sync change schedule takes no arguments');
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter) throw new Error('NOT_READY: Sync change schedule is unavailable');
+            if (!iosManualSync) return { delayMs: null };
+            const stored = (await keyValue.get(SYNC_BACKEND_KEY))?.trim();
+            const eligible = stored === 'webdav' || stored === 'cloudkit' && iosCloudKitAvailable()
+                || stored === 'cloud' && isNativeIosSelfHostedProvider(await keyValue.get(CLOUD_PROVIDER_KEY));
+            return iosManualSync.syncChangeSchedule(eligible);
+        });
+    },
     iosSearchObservation(): string {
         if (arguments.length !== 0) throw new Error('INVALID_INPUT: Search observation takes no arguments');
         if (globalThis.__mindwtrHostPlatform !== 'ios') throw iosSearchUnavailable();
@@ -8896,12 +8908,12 @@ globalThis.MindwtrHost = {
         return submit(async (signal) => {
             if (iosForegroundFailure) throw iosForegroundFailure;
             const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
-            const IOS_STORED_SYNC_COMMANDS = ['syncStored', 'syncResume', 'syncLeave', 'syncPull'];
+            const IOS_STORED_SYNC_COMMANDS = ['syncStored', 'syncResume', 'syncLeave', 'syncChange', 'syncPull'];
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || (name !== 'archiveRetention' && !globalThis.__mindwtrSyncSecrets)) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncLeave', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncLeave', 'syncChange', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
                 'answerSyncMissingFiles', 'continueSyncWithoutFiles'];
             if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
                 || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
@@ -9080,7 +9092,7 @@ globalThis.MindwtrHost = {
                 if (IOS_STORED_SYNC_COMMANDS.includes(name)) {
                     const answer = name === 'syncPull' ? await iosManualSync!.performStoredManualSync()
                         : await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup'
-                            : name === 'syncLeave' ? 'leave' : 'resume');
+                            : name === 'syncLeave' ? 'leave' : name === 'syncChange' ? 'change' : 'resume');
                     await flushPendingSave();
                     requireSaved();
                     const after = getPersistenceStatus();
@@ -9100,18 +9112,20 @@ globalThis.MindwtrHost = {
                             || option === 'cloudkit' && iosCloudKitAvailable() || option === 'dropbox' && !!dropboxConfig);
                     }
                 }
-                if (currentTargetURI === undefined && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
+                if (currentTargetURI === undefined && !(name === 'syncChange' && storedResult?.skipped)
+                    && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
                     && 'status' in result.value && result.value.status === 'available')) try {
                     const diagnostic = name === 'projectAttachmentDownload' ? { message: 'Native iOS Project file availability settled', releaseCheck: 'v1.3.5/ios-project-file-download' }
                         : name === 'syncStored' ? { message: 'Native iOS stored Sync command settled', releaseCheck: 'v1.3.5/ios-stored-sync' }
                         : name === 'syncPull' ? { message: 'Native iOS pull Sync command settled', releaseCheck: 'v1.3.9/ios-pull-sync' }
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
                         : name === 'syncLeave' ? { message: 'Native iOS automatic Sync trigger settled', releaseCheck: 'v1.3.9/ios-sync-triggers' }
+                        : name === 'syncChange' ? { message: 'Native iOS local change Sync settled', releaseCheck: 'v1.3.9/ios-change-sync' }
                         : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                         message: diagnostic.message,
                         context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: name === 'projectAttachmentDownload' ? 'available'
-                            : name === 'syncLeave' && storedResult ? (!storedResult.success ? 'failed' : storedResult.skipped ? 'skipped' : 'synced') : 'settled' },
+                            : (name === 'syncLeave' || name === 'syncChange') && storedResult ? (!storedResult.success ? 'failed' : storedResult.skipped ? 'skipped' : 'synced') : 'settled' },
                     }, { force: true });
                 } catch {                                                              }
                 return result;

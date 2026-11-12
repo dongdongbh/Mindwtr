@@ -10,4 +10,15 @@ final class NativeSyncChangeObservationTests: XCTestCase {
             XCTAssertThrowsError(try NativeSyncChangeObservation(json: json), json)
         }
     }
+
+    func testScheduleDecodesABoundedWholeDelayOrNothing() throws {
+        XCTAssertNil(try NativeSyncChangeSchedule(json: #"{"delayMs":null}"#).delayMs)
+        XCTAssertEqual(try NativeSyncChangeSchedule(json: #"{"delayMs":0}"#).delayMs, 0)
+        XCTAssertEqual(try NativeSyncChangeSchedule(json: #"{"delayMs":1999.2}"#).delayMs, 2_000)
+        XCTAssertEqual(try NativeSyncChangeSchedule(json: #"{"delayMs":1e12}"#).delayMs, NativeSyncChangeSchedule.maximumDelayMs)
+        for json in [#"{}"#, #"{"delayMs":-1}"#, #"{"delayMs":true}"#, #"{"delayMs":"5"}"#, #"{"delayMs":5,"pending":true}"#,
+                     #"{"delayMs":5,"delayMs":6}"#, #"[5]"#, #"5"#] {
+            XCTAssertThrowsError(try NativeSyncChangeSchedule(json: json), json)
+        }
+    }
 }
