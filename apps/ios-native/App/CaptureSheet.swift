@@ -575,7 +575,8 @@ private struct CaptureDraftInput: View {
     let copy: CoreObject
 
     var body: some View {
-        CaptureTextInput(text: $model.draft, enabled: !model.busy && !model.retryNeeded && !model.captureLinesConfirmationPresented,
+        CaptureTextInput(text: $model.draft, enabled: !model.busyShown && !model.retryNeeded && !model.captureLinesConfirmationPresented,
+            accepts: { [model] in !model.busy && !model.retryNeeded && !model.captureLinesConfirmationPresented },
             color: UIColor(palette.text), label: copy.text("inputLabel"), hint: copy.text("inputHint")) {
             Task { await model.saveCapture() }
         }
@@ -585,6 +586,7 @@ private struct CaptureDraftInput: View {
 private struct CaptureTextInput: UIViewRepresentable {
     @Binding var text: String
     let enabled: Bool
+    let accepts: () -> Bool
     let color: UIColor
     let label: String
     let hint: String
@@ -640,7 +642,7 @@ private struct CaptureTextInput: UIViewRepresentable {
         init(_ parent: CaptureTextInput) { self.parent = parent }
         func textViewDidChange(_ view: UITextView) { parent.text = view.text }
         func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            guard parent.enabled else { return false }
+            guard parent.enabled, parent.accepts() else { return false }
             if text == "\n", view.markedTextRange == nil { parent.submit(); return false }
             return true
         }

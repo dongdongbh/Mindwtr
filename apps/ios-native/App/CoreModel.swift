@@ -1971,13 +1971,23 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var trashPurgeTestRefreshRequest = ""
     #endif
     private(set) var theme: CoreObject = [:]
-    private(set) var area: CoreObject = [:]
+    private(set) var area: CoreObject = [:] { didSet { dropCapturePreread() } }
     private var rowSwipeLanguageGeneration = 0
     private(set) var strings: CoreObject = [:] { didSet { rowSwipeLanguageGeneration += 1 } }
     private(set) var currentLanguage = "" {
-        didSet { if currentLanguage != oldValue { retireReviewAI(); retireProcessInboxAI(); retireTaskAI(clearOptions: true); retireCaptureCopilot(clearApplied: false) } }
+        didSet { if currentLanguage != oldValue { retireReviewAI(); retireProcessInboxAI(); retireTaskAI(clearOptions: true); retireCaptureCopilot(clearApplied: false); dropCapturePreread() } }
     }
     private(set) var capture: CoreObject = [:]
+    private struct CapturePreread {
+        let host: ObjectIdentifier
+        let language: String
+        let addAnother: Bool
+        let view: CoreObject
+    }
+    @ObservationIgnored private var capturePreread: CapturePreread?
+    @ObservationIgnored private var capturePrereadTask: Task<Void, Never>?
+    @ObservationIgnored private var capturePrereadGeneration = 0
+    private(set) var capturePrereadConfirming = false
     private(set) var ready = false { didSet { refreshNativeDropboxAuthorization() } }
     private(set) var busy = false {
         didSet {
@@ -2159,6 +2169,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             }
             if capturePresented { retireReviewAI(); foregroundSyncIntent = nil }
             else if voiceCaptureOwner?.saved != true { retireCaptureVoice() }
+            if !capturePresented && oldValue { Task { [weak self] in self?.admitCapturePreread() } }
         }
     }
     private(set) var areaPickerPresented = false {
@@ -2652,6 +2663,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
+                dropCapturePreread()
                 nativeDropboxAuthorization?.retire(); nativeDropboxAuthorization = nil; nativeDropboxAuthorizationHost = nil
                 heldReminderReplayEnabled = false
                 taskCardPresentationGeneration += 1
@@ -4506,7 +4518,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var canSave: Bool {
         ready && capturePresented && !appLock.concealed && !appLock.authenticating
             && UIApplication.shared.applicationState == .active && !busy && !retryNeeded && !capturePending
-            && !contextPickerPresented && !captureLinesConfirmationPresented && !captureCopilotEditing && captureIsCurrent && capture.flag("canSave")
+            && !contextPickerPresented && !captureLinesConfirmationPresented && !captureCopilotEditing && !capturePrereadConfirming
+            && captureIsCurrent && capture.flag("canSave")
     }
     var captureLinesConfirmationPresented: Bool { captureLinesConfirmation != nil && !bulkConfirm.isEmpty }
     var canConfirmCaptureLines: Bool {
@@ -16962,6 +16975,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func readPreferences() async throws {
         preferencesReadHost = nil
+        dropCapturePreread()
         let currentHost = host
         try await readLanguage()
         try await readTheme()
@@ -42395,34 +42409,112 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               !projectRenameEditing,
               !calendarComposerPresented, !mindSweepPresented, !processInboxPresented else { return }
         morePresented = false
+        guard admission?() != false else { return }
+        if capture.isEmpty, let preread = takeCapturePreread() {
+            applyCaptureOpenView(preread.view)
+            capturePrereadConfirming = true
+            presentCapture()
+            Task { await confirmCapturePreread(preread) }
+            return
+        }
+        if !capture.isEmpty {
+            presentCapture()
+            Task { await refreshCaptureCopilotOptions() }
+            return
+        }
+        guard await openCaptureView(admission: admission) else { return }
+        await refreshCaptureCopilotOptions()
+    }
+
+    private func openCaptureView(admission: (@MainActor () -> Bool)?) async -> Bool {
         busy = true
         defer { finishOperation() }
         do {
-            if capture.isEmpty {
-                var opened = try await query("captureOpen", beforeDispatch: admission)
-                guard admission?() != false else { return }
-                if (preferenceDefaults.object(forKey: preference) as? Bool) ?? initialAddAnother {
-                    let result = try await query("captureEdit", [try json([
-                        "text": "", "options": opened.object("options"),
-                        "edit": ["type": "setAddAnother", "value": true]])], beforeDispatch: admission)
-                    guard admission?() != false else { return }
-                    opened = result.object("view")
-                }
-                capture = opened
-                captureID = UUID().uuidString
-                draft = ""
-                noteDraft = opened.object("options").text("note")
-                contextQuery = ""
-                contextPickerPresented = false
-                previewedText = ""
-            }
-            guard admission?() != false else { return }
-            notice = nil
-            capturePresented = true
-            await refreshCaptureCopilotOptions()
+            guard let opened = try await readCaptureOpenView(addAnother: captureAddAnotherDefault, admission: admission) else { return false }
+            applyCaptureOpenView(opened)
+            guard admission?() != false else { return false }
+            presentCapture()
+            return true
         } catch {
             if admission?() != false { self.error = error.localizedDescription }
+            return false
         }
+    }
+
+    private var captureAddAnotherDefault: Bool { (preferenceDefaults.object(forKey: preference) as? Bool) ?? initialAddAnother }
+
+    private func readCaptureOpenView(addAnother: Bool, admission: (@MainActor () -> Bool)?) async throws -> CoreObject? {
+        var opened = try await query("captureOpen", beforeDispatch: admission)
+        guard admission?() != false else { return nil }
+        if addAnother {
+            let result = try await query("captureEdit", [try json([
+                "text": "", "options": opened.object("options"),
+                "edit": ["type": "setAddAnother", "value": true]])], beforeDispatch: admission)
+            guard admission?() != false else { return nil }
+            opened = result.object("view")
+        }
+        return opened
+    }
+
+    private func applyCaptureOpenView(_ opened: CoreObject) {
+        capture = opened
+        captureID = UUID().uuidString
+        draft = ""
+        noteDraft = opened.object("options").text("note")
+        contextQuery = ""
+        contextPickerPresented = false
+        previewedText = ""
+    }
+
+    private func presentCapture() {
+        notice = nil
+        capturePresented = true
+    }
+
+    private func takeCapturePreread() -> CapturePreread? {
+        guard let preread = capturePreread else { return nil }
+        capturePreread = nil
+        guard let owner = host, preread.host == ObjectIdentifier(owner), preread.language == currentLanguage,
+              preread.addAnother == captureAddAnotherDefault else { return nil }
+        return preread
+    }
+
+    private func dropCapturePreread() {
+        capturePrereadGeneration &+= 1
+        capturePreread = nil
+    }
+
+    private func admitCapturePreread() {
+        guard capturePreread == nil, capturePrereadTask == nil, ready, workspaceAdmissionsOpen, !busy, !retryNeeded,
+              capture.isEmpty, !capturePresented, shareCaptureOwner == nil, !appLock.concealed, let owner = host else { return }
+        let generation = capturePrereadGeneration, language = currentLanguage, addAnother = captureAddAnotherDefault
+        let current: @MainActor () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.host === owner && self.capturePrereadGeneration == generation && self.capture.isEmpty && !self.capturePresented
+        }
+        capturePrereadTask = Task { [weak self] in
+            let view = try? await self?.readCaptureOpenView(addAnother: addAnother, admission: current)
+            guard let self else { return }
+            self.capturePrereadTask = nil
+            guard let view, current() else { return }
+            self.capturePreread = CapturePreread(host: ObjectIdentifier(owner), language: language, addAnother: addAnother, view: view)
+        }
+    }
+
+    private func confirmCapturePreread(_ preread: CapturePreread) async {
+        let presentation = capturePresentationID, identifier = captureID
+        let current: @MainActor () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.capturePresented && self.capturePresentationID == presentation && self.captureID == identifier
+        }
+        defer { if capturePrereadConfirming { capturePrereadConfirming = false } }
+        guard let fresh = try? await readCaptureOpenView(addAnother: preread.addAnother, admission: current), current() else { return }
+        if !NativeValueEquality.same(fresh.object("options"), preread.view.object("options")) {
+            var options = fresh.object("options")
+            options["note"] = capture.object("options")["note"] ?? ""
+            capture["options"] = options
+        }
+        textChanged()
     }
 
     func openProcessInbox() async {
@@ -43613,8 +43705,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 guard !Task.isCancelled, generation == previewGeneration else { return }
                 let value = try await readCapture(text: text, note: note, options: options, picker: picker)
                 guard !Task.isCancelled, generation == previewGeneration, !busy, !retryNeeded else { return }
-                capture = value
-                previewedText = text
+                if !NativeValueEquality.same(capture, value) { capture = value }
+                if previewedText != text { previewedText = text }
                 await refreshCaptureCopilotOptions()
             } catch {
                 guard !Task.isCancelled, generation == previewGeneration else { return }
@@ -43646,7 +43738,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func applyCaptureEdit(_ edit: CoreObject?, clearContextQuery: Bool = false, closeContextPicker: Bool = false) async {
-        guard !busy, !retryNeeded, !captureLinesConfirmationPresented else { return }
+        guard !busy, !retryNeeded, !captureLinesConfirmationPresented, !capturePrereadConfirming else { return }
         busy = true
         invalidatePreview()
         retireCaptureCopilot(clearApplied: false)
@@ -47592,6 +47684,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             admitReminderLifecycle(); admitCalendarPushLifecycle(); admitSearchLifecycle(); admitNotificationResponses()
             if entityLinkTask == nil { requestEntityLinks() }
             admitShareCapture()
+            admitCapturePreread()
             requestQuickCaptureIntent()
             admitAppleRemindersAutoImport()
             gmailCapture.admit()
