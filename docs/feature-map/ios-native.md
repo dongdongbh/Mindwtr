@@ -67,7 +67,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `inbox-bulk-count`, `inbox-bulk-range`, `inbox-bulk-exit`, `inbox-bulk-delete`, `inbox-bulk-confirm`, `inbox-bulk-tag-open`, `inbox-bulk-remove-tag-open`, `inbox-bulk-organize-open`
 - Code: `apps/ios-native/App/InboxScreen.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testInboxBulk…)
-- Notes: Bulk Delete confirms first and then offers Undo.
+- Notes: Bulk Delete confirms first and then offers Undo. Organize dates show the localized short date and switch to `YYYY-MM-DD` while you edit them, as in RN (#1231).
 
 ## Process Inbox
 

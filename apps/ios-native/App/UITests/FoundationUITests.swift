@@ -33291,7 +33291,7 @@ extension FoundationUITests {
         boardEnabled(app.buttons["inbox-organize-cancel"])
         _ = task743Control(app, "inbox-organize-status-__KEEP__")
     }
-    private func task743Text(_ app: XCUIApplication, _ id: String, _ value: String, prefix: String = "inbox-organize") {
+    private func task743Text(_ app: XCUIApplication, _ id: String, _ value: String, shown: String? = nil, prefix: String = "inbox-organize") {
         let input = task743Control(app, id, text: true, prefix: prefix); input.tap()
         let previous = input.value as? String ?? ""
         let actual = previous == input.placeholderValue ? "" : previous
@@ -33313,7 +33313,7 @@ extension FoundationUITests {
         guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: exact, object: nil)], timeout: 5) == .completed else {
             XCTFail("Task743 field did not accept exact UTF8 intent"); return
         }
-        if id != prefix + "-picker-search" { task743DismissKeyboard(app, id, value, prefix: prefix) }
+        if id != prefix + "-picker-search" { task743DismissKeyboard(app, id, shown ?? value, prefix: prefix) }
     }
     private func task743DismissKeyboard(_ app: XCUIApplication, _ id: String, _ value: String, preservingCreate: Bool = false, prefix: String = "inbox-organize") {
         let input = app.textFields[id], keyboard = app.keyboards.firstMatch
@@ -33439,9 +33439,13 @@ extension FoundationUITests {
         XCTAssertTrue(app.textFields["inbox-organize-picker-search"].waitForNonExistence(timeout: 15))
         task743Control(app, "inbox-organize-status-waiting").tap()
         task743Text(app, "inbox-organize-delegateWho", "Task743 Team")
-        task743Text(app, "inbox-organize-startDate", "2031-03-10")
-        task743Text(app, "inbox-organize-dueDate", "2031-03-12")
-        task743Text(app, "inbox-organize-reviewDate", "2031-03-14")
+        task743Text(app, "inbox-organize-startDate", "2031-03-10", shown: "3/10/31")
+        task743Text(app, "inbox-organize-dueDate", "2031-03-12", shown: "3/12/31")
+        task743Text(app, "inbox-organize-reviewDate", "2031-03-14", shown: "3/14/31")
+        let editedStart = task743Control(app, "inbox-organize-startDate", text: true); editedStart.tap()
+        let editable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in (editedStart.value as? String) == "2031-03-10" }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [editable], timeout: 5), .completed, "A focused bulk Organize date shows the editable ISO value")
+        task743DismissKeyboard(app, "inbox-organize-startDate", "3/10/31")
         task743Text(app, "inbox-organize-contexts", "@École, @shared")
         task743Text(app, "inbox-organize-tags", "新, #École")
         boardEnabled(app.buttons["inbox-organize-apply"]); boardTap(app, "inbox-organize-apply")
@@ -35623,7 +35627,7 @@ extension FoundationUITests {
         task743Control(app, prefix + "-status-waiting", prefix: prefix).tap()
         XCTAssertFalse(app.buttons[prefix + "-apply"].isEnabled)
         task743Text(app, prefix + "-delegateWho", "Project Organize Team", prefix: prefix)
-        task743Text(app, prefix + "-dueDate", "2031-03-12", prefix: prefix)
+        task743Text(app, prefix + "-dueDate", "2031-03-12", shown: "3/12/31", prefix: prefix)
         task743Text(app, prefix + "-contexts", "@office", prefix: prefix)
         task743Text(app, prefix + "-tags", "ProjectOrganizeUI", prefix: prefix)
         boardEnabled(app.buttons[prefix + "-apply"]); boardTap(app, prefix + "-apply")

@@ -3352,6 +3352,7 @@ private struct InboxBulkOrganizeDialog: View {
     let palette: AppPalette
     @State private var dateField: String?
     @State private var pickerDate = Date()
+    @FocusState private var editingField: String?
     private var view: CoreObject { model.inboxBulkOrganizeView }
     private var prefix: String { model.bulkOrganizeIsProject ? "project-organize" : "inbox-organize" }
     private var locked: Bool { !model.inboxBulkOrganizeControlsEnabled }
@@ -3480,13 +3481,19 @@ private struct InboxBulkOrganizeDialog: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(part.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
             TextField(part.text("placeholder"), text: Binding(
-                get: { model.inboxBulkOrganizeInputs[field] ?? part.text("value") },
+                get: { shownText(field, part: part) },
                 set: { model.setInboxBulkOrganizeText(field, value: $0) }))
+                .focused($editingField, equals: field)
                 .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).disabled(locked)
                 .accessibilityLabel(part.text("label")).accessibilityIdentifier(prefix + "-" + field)
         }
+    }
+    private func shownText(_ field: String, part: CoreObject) -> String {
+        let typed = model.inboxBulkOrganizeInputs[field] ?? part.text("value")
+        guard editingField != field, typed == part.text("value"), let display = part["displayValue"] as? String else { return typed }
+        return display
     }
     private func date(_ part: CoreObject) -> some View {
         let field = part.text("field")
