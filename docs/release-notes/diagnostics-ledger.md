@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.9 (add before tagging, trim in the release after)
 
+- **`v1.3.9/mobile-editor-sheet-close`** — `apps/mobile/components/task-edit/use-task-edit-actions.ts`. An attempted close of a dirty editor logs `outcome=prompt-requested`. On iOS, edit a preview checklist and swipe down: the editor must remain behind the unsaved-changes prompt; Cancel retains the draft, Discard closes it, and Save closes only after successful persistence. Confirm Focus remains interactive afterward. (#1552)
+
 - **`v1.3.9/speech-parse-endpoint`** — `packages/core/src/speech-to-task.ts`, `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`. Smart Parse logs `outcome=started` (shared runtime) or `outcome=routed` (native iOS) and `destination=configured` for a custom speech server, or `default` for OpenAI. No endpoint, credential, transcript, or model is logged. Confirm the custom server receives parsing requests, including retries, and the resulting task has parsed fields. The marker confirms routing selection, not server success. (#1551)
 
 - **`v1.3.9/sqlite-access-event-filter`** — `apps/desktop/src/lib/local-data-watcher.ts`. Logs once per watcher controller when an access-only SQLite-directory event is ignored. Expect `outcome=ignored`, fewer no-change SQLite refreshes while idle, and continued refresh after genuine external edits. The marker proves filtering ran, not a measured disk-write reduction. (#1548)
