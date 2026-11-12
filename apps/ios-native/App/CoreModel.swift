@@ -259,7 +259,7 @@ private enum AIReadmittedSettingWrite: Equatable, Sendable {
 @MainActor
 @Observable
 final class CoreModel: NativeQuickCaptureIntentTarget {
-    enum Surface: Equatable { case inbox, focus, review, calendar, board, search, projects, project, waiting, someday, reference, history, trash, contexts, savedSearch, settings }
+    enum Surface: Equatable { case inbox, focus, review, calendar, board, search, projects, project, waiting, someday, reference, history, trash, contexts, savedSearch, widgetList, settings }
 
     private(set) var selectedSurface: Surface = .inbox {
         didSet {
@@ -1761,6 +1761,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var savedSearchLoadedDepth = 50
     var savedSearchActionsEnabled: Bool {
         ready && selectedSurface == .savedSearch && savedSearchCurrent && !busy && !retryNeeded && !savedSearchWritePresented
+            && !taskPresented && !capturePresented && !areaPickerPresented
+    }
+    private(set) var widgetList: CoreObject = [:]
+    private(set) var widgetListCurrent = false
+    private(set) var widgetListError: String?
+    private var widgetListID = ""
+    @ObservationIgnored private var widgetListCaller: Surface = .focus
+    @ObservationIgnored private var widgetListLoadedDepth = 50
+    var widgetListActionsEnabled: Bool {
+        ready && selectedSurface == .widgetList && widgetListCurrent && !busy && !retryNeeded
             && !taskPresented && !capturePresented && !areaPickerPresented
     }
 
@@ -8660,17 +8670,18 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return "iosProductionWidgetTaskOpen"
     }
 
-    private static let routeDestinations = ["focus", "focusFilter", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
+    private static let routeDestinations = ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
     private static let silentRouteDestinations = ["shortcutCapture", "contextAutomation"]
     private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday,
                                                            "projects": .projects, "review": .review, "calendar": .calendar]
 
     private func entityRouteShapeValid(_ route: CoreObject, allowed: [String]) -> Bool {
         let type = route.text("type")
-        let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId", "focusFilter": "savedFilterId"][type]
+        let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId", "widgetList": "listId"][type]
+        let limit = type == "widgetList" ? 1_024 : 500
         let fields: Set<String> = identifier.map({ Set(["type", $0]) }) ?? ["type"]
         return allowed.contains(type) && Set(route.keys) == fields && route.values.allSatisfy({ $0 is String })
-            && (identifier.map({ !route.text($0).isEmpty && route.text($0).utf16.count <= 500 }) ?? true)
+            && (identifier.map({ !route.text($0).isEmpty && route.text($0).utf16.count <= limit }) ?? true)
     }
 
     private func openContextsSavedFilter(_ id: String) async {
@@ -8681,14 +8692,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         contextsLoadedDepth = pageSize
         await openContexts()
-    }
-
-    private func presentFocusSavedFilter(id: String) async {
-        if focusState.text("savedFilterId") != id, !focusEdits.contains(where: { $0.text("savedID") == id }) {
-            enqueueFocusEdit(["savedID": id])
-            focusLoadedDepth = [:]
-        }
-        if selectedSurface == .focus { await refresh() } else { await selectSurface(.focus) }
     }
 
     private func openShortcutCapture(_ url: String, owner: EntityLinkOwner) async -> Bool {
@@ -9536,7 +9539,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "review": await self.openReview()
                 case "calendar": await self.openCalendar()
                 case "contexts": await self.openContextsSavedFilter(route.text("savedFilterId"))
-                case "focusFilter": await self.presentFocusSavedFilter(id: route.text("savedFilterId"))
+                case "widgetList": await self.openWidgetList(route.text("listId"))
                 case "shortcutCapture":
                     guard case .url(let url) = delivery.input else { return }
                     shortcutCaptureHandled = await self.openShortcutCapture(url, owner: owner)
@@ -9559,8 +9562,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "capture": acknowledged = self.capturePresented
                 case "contextAutomation": acknowledged = contextAutomationHandled
                 case "shortcutCapture": acknowledged = shortcutCaptureHandled
-                case "focusFilter": acknowledged = self.selectedSurface == .focus && self.focusCurrent && self.focusEdits.isEmpty
-                    && self.focusState.text("savedFilterId") == route.text("savedFilterId") && self.focusError == nil
+                case "widgetList": acknowledged = self.selectedSurface == .widgetList && self.widgetListCurrent
+                    && self.widgetList.text("id") == route.text("listId") && self.widgetListError == nil
                 default: acknowledged = CoreModel.routeSurfaces[type] == self.selectedSurface && !self.busy && self.error == nil
                 }
                 guard acknowledged else { return }
@@ -11678,6 +11681,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .reference: return reference
         case .contexts: return contexts
         case .savedSearch: return savedSearch
+        case .widgetList: return widgetList
         case .project: return projectDetail
         case .board: return boardView
         case .calendar: return calendarView
@@ -18223,6 +18227,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .project: context = [projectHeader.text("id"), projectFilterSession, projectSelectionMode]
         case .contexts: context = [contextsSelection, statusListSelectionMode]
         case .savedSearch: context = [savedSearchID, savedSearch.text("query"), savedSearch.object("filters")]
+        case .widgetList: context = [widgetListID]
         case .waiting: context = [statusListSelectionMode]
         case .someday: context = [somedayParams, statusListSelectionMode]
         case .history: context = [historyTabs, historyParamsByTab, historyDoneSelectionMode]
@@ -18248,6 +18253,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .someday: return somedayActionsEnabled && !statusListSelectionMode
         case .contexts: return contextsActionsEnabled && !statusListSelectionMode
         case .savedSearch: return savedSearchActionsEnabled
+        case .widgetList: return widgetListActionsEnabled
         case .history: return historyDoneRowActionsEnabled && !historyArchived
         default: return false
         }
@@ -18288,6 +18294,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             rows = contexts.objects("rows")
         case .savedSearch:
             rows = savedSearch.objects("rows")
+        case .widgetList:
+            rows = widgetList.objects("rows")
         case .history:
             guard !historyArchived else { return [] }
             rows = history.objects("items").filter { $0.text("type") == "task" }.map { $0.object("row") }
@@ -32315,6 +32323,90 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
+    private func openWidgetList(_ id: String) async {
+        guard ready, !busy, !retryNeeded, !taskPresented, !capturePresented, !areaPickerPresented, !id.isEmpty else { return }
+        if selectedSurface != .widgetList { widgetListCaller = selectedSurface }
+        if widgetListID != id || selectedSurface != .widgetList {
+            widgetListID = id
+            widgetList = [:]
+            widgetListCurrent = false
+            widgetListError = nil
+            widgetListLoadedDepth = pageSize
+        }
+        morePresented = false
+        selectedSurface = .widgetList
+        await refresh()
+    }
+
+    func closeWidgetList() async {
+        guard selectedSurface == .widgetList, !busy, !retryNeeded, !taskPresented else { return }
+        selectedSurface = widgetListCaller
+        await refresh()
+    }
+
+    func retryWidgetList() async {
+        guard selectedSurface == .widgetList, !busy, !retryNeeded, !taskPresented else { return }
+        await refresh()
+    }
+
+    func loadMoreWidgetList() async {
+        guard widgetListActionsEnabled, widgetList.objects("rows").count < widgetList.number("total") else { return }
+        widgetListLoadedDepth = widgetList.objects("rows").count + pageSize
+        busy = true
+        defer { finishOperation() }
+        await readWidgetList()
+    }
+
+    func focusWidgetListToken(_ token: String) {
+        guard widgetListActionsEnabled, widgetList.objects("rows").contains(where: { row in
+            row.object("meta").objects("parts").contains(where: {
+                ["context", "tag"].contains($0.text("kind")) && $0.text("text") == token
+            })
+        }) else { return }
+        contextsIntents.append(["kind": "focus", "value": token])
+        contextsLoadedDepth = pageSize
+        Task { await openContexts() }
+    }
+
+    private func readWidgetList() async {
+        let id = widgetListID
+        widgetListCurrent = false
+        widgetListError = nil
+        func current() -> Bool { !Task.isCancelled && selectedSurface == .widgetList && widgetListID == id && !taskPresented && !retryNeeded }
+        for attempt in 0..<2 {
+            do {
+                var next = try await query("menuRead", ["widgetList", try json(["id": id, "offset": 0, "limit": pageSize])])
+                guard current() else { return }
+                guard next.number("version") == 1, next.text("id") == id, !next.text("revision").isEmpty,
+                      next.number("total") >= 0, next.objects("rows").count == min(pageSize, next.number("total")) else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                var rows = next.objects("rows")
+                let target = min(widgetListLoadedDepth, next.number("total"))
+                while rows.count < target {
+                    let limit = min(followUpWindow, target - rows.count)
+                    let page = try await query("menuRead", ["widgetList", try json([
+                        "id": id, "offset": rows.count, "limit": limit, "revision": next.text("revision")])])
+                    guard current() else { return }
+                    guard page.text("id") == id, page.text("revision") == next.text("revision"),
+                          page.number("total") == next.number("total"), page.objects("rows").count == limit else {
+                        throw CocoaError(.coderReadCorrupt)
+                    }
+                    rows += page.objects("rows")
+                }
+                guard Set(rows.map { $0.text("id") }).count == rows.count,
+                      rows.allSatisfy({ !$0.text("id").isEmpty }) else { throw CocoaError(.coderReadCorrupt) }
+                next["rows"] = rows
+                widgetList = next
+                widgetListCurrent = true
+                return
+            } catch {
+                guard current() else { return }
+                if attempt == 1 { widgetListError = error.localizedDescription }
+            }
+        }
+    }
+
     func openTrash() async {
         guard ready, !settingsPersonCreatePresented, !settingsPersonEditPresented && !settingsTaxonomyActive && !generalPreferenceActive, !settingsPersonDeleteActive, !busy, !retryNeeded, !taskPresented, !capturePresented, !areaPickerPresented else { return }
         if selectedSurface != .trash { trashCaller = selectedSurface }
@@ -35695,6 +35787,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 })
             }) else { return }
         }
+        if selectedSurface == .widgetList {
+            guard widgetListActionsEnabled, widgetList.objects("rows").contains(where: { task in
+                task.object("meta").objects("parts").contains(where: {
+                    $0.text("kind") == "project" && $0.text("projectId") == row.text("id")
+                })
+            }) else { return }
+        }
         if selectedSurface == .search {
             guard searchActionsEnabled,
                   searchView.objects("projects").contains(where: { $0.text("id") == row.text("id") }) else { return }
@@ -38753,6 +38852,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         if selectedSurface == .savedSearch {
             guard savedSearchActionsEnabled, savedSearch.objects("rows").contains(where: { $0.text("id") == id }) else { return }
+        }
+        if selectedSurface == .widgetList {
+            guard widgetListActionsEnabled, widgetList.objects("rows").contains(where: { $0.text("id") == id }) else { return }
         }
         if selectedSurface == .history {
             guard historyActionsEnabled, history.objects("items").contains(where: {
@@ -44204,6 +44306,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 $0.text("id") == id && !$0.flag("readOnly") && $0.text("status") != "reference"
             }) else { return }
         }
+        if selectedSurface == .widgetList {
+            guard widgetListActionsEnabled, widgetList.objects("rows").contains(where: {
+                $0.text("id") == id && !$0.flag("readOnly") && $0.text("status") != "reference"
+            }) else { return }
+        }
         let projectRow = selectedSurface == .project ? projectDetail.objects("items").first(where: {
             $0.text("type") == "task" && $0.object("row").text("id").utf8.elementsEqual(id.utf8)
                 && $0.object("row").text("taskRevision").utf8.elementsEqual(taskRevision.utf8)
@@ -47352,6 +47459,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if selectedSurface == .history && historyCurrent { historyCurrent = false }
         if selectedSurface == .trash && trashCurrent { trashCurrent = false }
         if selectedSurface == .savedSearch && savedSearchCurrent { savedSearchCurrent = false }
+        if selectedSurface == .widgetList && widgetListCurrent { widgetListCurrent = false }
         if selectedSurface == .contexts {
             contextsReadTask?.cancel()
             contextsGeneration += 1
@@ -47408,6 +47516,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .history: await readHistory()
         case .trash: await readTrash()
         case .savedSearch: await readSavedSearch()
+        case .widgetList: await readWidgetList()
         case .search:
             invalidateSearch()
             await readSearch(generation: searchGeneration, ownsOperation: true)

@@ -61,7 +61,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         for outcome in ["opened", "skipped"] {
             result.append(("Native iOS shortcut capture opened", ["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": outcome]))
         }
-        for destination in ["focus", "focusFilter", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"] {
+        for destination in ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"] {
             result.append(("Native iOS widget route opened", ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": destination, "outcome": "opened"]))
         }
         for outcome in ["completed", "ignored"] {

@@ -26638,7 +26638,7 @@ private final class Engine: @unchecked Sendable {
         case "Native iOS widget route opened":
             valid = Set(context.keys) == Set(["releaseCheck", "destination", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-widget-routes"
-                && ["focus", "focusFilter", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"].contains(context["destination"] as? String ?? "")
+                && ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"].contains(context["destination"] as? String ?? "")
                 && context["outcome"] as? String == "opened"
         case "Native iOS Add Task shortcut presented":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])
@@ -28984,7 +28984,7 @@ private final class Engine: @unchecked Sendable {
             }
         }
         if method == "menuRead" {
-            guard let name = args[0] as? String, ["more", "savedSearch", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "inboxTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "reviewProjectCompletionOptions", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
+            guard let name = args[0] as? String, ["more", "savedSearch", "widgetList", "projects", "projectDetailView", "projectTaskOrderView", "projectDetailFilterView", "projectDetailFilterOptions", "waiting", "someday", "reference", "history", "done", "bulk", "archive", "archiveTokens", "inboxTokens", "trash", "contexts", "focus", "focusSection", "focusControls", "collection", "reviewOverview", "reviewProjectCompletionOptions", "dailyReview", "weeklyReview", "weeklyReviewList", "calendar", "calendarItem", "calendarPreferences", "board", "boardList", "settingsMenu", "dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport", "generalSettings", "manageSettings", "manageAreas", "managePeople", "manageContexts", "manageTags", "managePersonCreateCheck", "manageTaxonomyCheck", "managePersonEditCheck", "somedaySections"].contains(name),
                   let json = args[1] as? String else {
                 throw HostFailure("Unsupported native menu read or JSON object input")
             }
@@ -29116,6 +29116,16 @@ private final class Engine: @unchecked Sendable {
                           edit["range"] == nil || Self.isBoolean(edit["range"]) else {
                         throw HostFailure(inboxSelection ? "INVALID_INPUT: Inbox selection requires a bounded row and range flag" : "INVALID_INPUT: Done selection requires a bounded row and range flag")
                     }
+                }
+            }
+            if name == "widgetList" {
+                guard json.utf8.count <= 2_000_000,
+                      Set(input.keys).isSubset(of: ["id", "offset", "limit", "revision"]),
+                      let id = input["id"] as? String, !id.isEmpty, id.utf16.count <= 1_024,
+                      (input["offset"] == nil || Self.isInteger(input["offset"]) && (0...9_007_199_254_740_991).contains((input["offset"] as? NSNumber)?.doubleValue ?? -1)),
+                      (input["limit"] == nil || Self.isInteger(input["limit"]) && (1...100).contains((input["limit"] as? NSNumber)?.intValue ?? 0)),
+                      (input["revision"] == nil || input["revision"] is String) else {
+                    throw HostFailure("INVALID_INPUT: Unsupported native widget list input")
                 }
             }
             if name == "savedSearch" {

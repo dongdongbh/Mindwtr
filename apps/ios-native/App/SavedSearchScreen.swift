@@ -136,6 +136,59 @@ struct SavedSearchScreen: View {
     }
 }
 
+struct WidgetListScreen: View {
+    let model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if let error = model.widgetListError {
+                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                        .accessibilityIdentifier("widget-list-error")
+                    Button(model.label("common.retry")) { Task { await model.retryWidgetList() } }
+                        .rnFont(14, .semibold).frame(minHeight: 44)
+                        .disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("widget-list-retry")
+                }
+                let rows = model.widgetList.objects("rows")
+                ForEach(rows.map(SavedSearchTaskRow.init)) { entry in
+                    TaskCard(row: entry.row, model: model, palette: palette,
+                             onProject: { project in Task { await model.openProject(project) } },
+                             onToken: { model.focusWidgetListToken($0) })
+                        .disabled(!model.widgetListCurrent || !model.widgetListActionsEnabled)
+                }
+                if rows.count < model.widgetList.number("total") {
+                    Button { Task { await model.loadMoreWidgetList() } } label: {
+                        Text(model.label("common.more")).rnFont(13, .semibold)
+                            .padding(.horizontal, 16).frame(minHeight: 44)
+                            .background(palette.filter, in: Capsule()).contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!model.widgetListCurrent || !model.widgetListActionsEnabled)
+                    .accessibilityIdentifier("widget-list-more")
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                }
+                let empty = model.widgetList.object("empty")
+                if model.widgetListCurrent && rows.isEmpty && !empty.isEmpty {
+                    Text(empty.text("message")).rnFont(16).foregroundStyle(palette.secondary)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity).padding(24)
+                        .accessibilityIdentifier("widget-list-empty")
+                }
+                if model.busy || (!model.widgetListCurrent && model.widgetListError == nil) {
+                    ProgressView().frame(maxWidth: .infinity).padding(12)
+                        .accessibilityLabel(model.label("common.loading"))
+                }
+            }
+            .padding(16)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("widget-list-scroll")
+        .refreshable { await model.pullToRefresh() }
+    }
+}
+
 struct SavedSearchWriteDialog: View {
     @Bindable var model: CoreModel
     let palette: AppPalette

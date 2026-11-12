@@ -132,14 +132,15 @@ final class EntityOpenHostTests: XCTestCase {
             ("/someday", ["type": "someday"]), ("/capture-quick?mode=text", ["type": "capture"]),
             ("open-feature?feature=projects", ["type": "projects"]), ("open-feature?feature=review", ["type": "review"]),
             ("open-feature?feature=calendar", ["type": "calendar"]), ("open-feature?feature=inbox", ["type": "inbox"]),
-            ("/widget-list/next", ["type": "focus"]), ("/widget-list/upcoming", ["type": "focus"]),
+            ("/widget-list/next", ["type": "widgetList", "listId": "next"]), ("/widget-list/upcoming", ["type": "widgetList", "listId": "upcoming"]),
             ("/widget-list/filter%3Acalls", ["type": "contexts", "savedFilterId": "calls"]),
             ("/widget-list/filter%3Acalls?source=shortcut", ["type": "contexts", "savedFilterId": "calls"]),
-            ("/widget-list/filter%3Afocus-only", ["type": "focusFilter", "savedFilterId": "focus-only"]),
-            ("/widget-list/filter%3Afocus-only?source=shortcut", ["type": "focusFilter", "savedFilterId": "focus-only"]),
+            ("/widget-list/filter%3Afocus-only", ["type": "widgetList", "listId": "filter:focus-only"]),
+            ("/widget-list/filter%3Afocus-only?source=shortcut", ["type": "widgetList", "listId": "filter:focus-only"]),
             ("/capture?title=PRIVATE&requestId=0f8fad5b-d9cb-469f-a165-70867728950e", ["type": "shortcutCapture"]),
-            ("/widget-list/filter%3Anext-only", ["type": "none"]), ("/widget-list/filter%3Amissing", ["type": "none"]),
-            ("/widget-list/context%3A%40phone", ["type": "none"]), ("/widget-list/%E0%A4%A", ["type": "none"]),
+            ("/widget-list/filter%3Anext-only", ["type": "widgetList", "listId": "filter:next-only"]), ("/widget-list/filter%3Amissing", ["type": "none"]),
+            ("/widget-list/context%3A%40phone", ["type": "widgetList", "listId": "context:@phone"]), ("/widget-list/project%3Ap", ["type": "none"]),
+            ("/widget-list/%E0%A4%A", ["type": "none"]),
             ("/not-a-route", ["type": "none"]),
         ]
         for (path, expected) in routes {
@@ -229,6 +230,41 @@ final class EntityOpenHostTests: XCTestCase {
         for input in ["[]", "[1]", "[\"a\",\"b\"]", try json([String(repeating: "x", count: 16_001)])] {
             do { _ = try await reopened.call("iosShortcutCaptureDraft", argumentsJSON: input); XCTFail("Expected bounded shortcut capture refusal") } catch {}
         }
+    }
+
+    func testWidgetListReadServesTheRNListScreenWithoutDomainWrites() async throws {
+        try await seed()
+        let core = host(); _ = try await core.start()
+        let before = try rows()
+        func list(_ id: String, offset: Int = 0, limit: Int = 50) async throws -> [String: Any] {
+            let raw = try await core.call("menuRead", argumentsJSON: json(["widgetList", json(["id": id, "offset": offset, "limit": limit])]))
+            return try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        }
+        for id in ["next", "upcoming", "filter:focus-only", "filter:next-only", "context:@phone", "tag:#errand"] {
+            let value = try await list(id)
+            XCTAssertEqual(value["version"] as? Int, 1, id)
+            XCTAssertEqual(value["id"] as? String, id)
+            XCTAssertEqual(value["found"] as? Bool, true, id)
+            XCTAssertFalse((value["title"] as? String ?? "").isEmpty, id)
+            XCTAssertFalse((value["revision"] as? String ?? "").isEmpty, id)
+            let rows = try XCTUnwrap(value["rows"] as? [[String: Any]], id)
+            XCTAssertEqual(rows.count, min(50, value["total"] as? Int ?? -1), id)
+            XCTAssertEqual(value["empty"] is NSNull, !rows.isEmpty, id)
+        }
+        let focusFilter = try await list("filter:focus-only")
+        XCTAssertEqual(focusFilter["title"] as? String, "Focus only")
+        let missing = try await list("filter:missing")
+        XCTAssertEqual(missing["found"] as? Bool, false)
+        XCTAssertEqual((missing["rows"] as? [Any])?.count, 0)
+        XCTAssertNotNil((missing["empty"] as? [String: Any])?["message"] as? String)
+        for input in [["id": ""], ["id": String(repeating: "x", count: 1_025)], ["id": "next", "limit": 101],
+                      ["id": "next", "offset": -1], ["id": "next", "extra": true]] as [[String: Any]] {
+            do {
+                _ = try await core.call("menuRead", argumentsJSON: json(["widgetList", json(input)]))
+                XCTFail("Expected bounded widget list input refusal")
+            } catch {}
+        }
+        XCTAssertEqual(try rows(), before)
     }
 
     func testReadWaitsForCanonicalStartup() async throws {
