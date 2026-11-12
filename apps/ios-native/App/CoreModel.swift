@@ -18730,7 +18730,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         rowTaskDatesReadTask?.cancel(); rowTaskDatesReadTask = nil
         rowTaskDatesEditTask?.cancel(); rowTaskDatesEditTask = nil; rowTaskDatesEdits = []
         rowTaskDatesReading = false; rowTaskDatesEditing = false; rowTaskDatesSaveWaiting = false
-        rowTaskDatesPresented = false; rowTaskDatesContext = nil; rowTaskDatesMenuContext = nil
+        rowTaskDatesPresented = false; rowTaskDatesContext = nil
+        if rowTaskDatesMenuContext != nil { rowTaskDatesMenuContext = nil }
         rowTaskDatesModel = [:]; rowTaskDatesScheduleBase = [:]
         if !rowTaskDatesPending { rowTaskDatesError = nil; rowTaskDatesFailureContext = nil }
     }
@@ -19036,7 +19037,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
     func retireRowTaskDestinationPresentation() {
         rowTaskDestinationReadGeneration += 1
-        rowTaskDestinationPresented = false; rowTaskDestinationContext = nil; rowTaskDestinationMenuContext = nil
+        rowTaskDestinationPresented = false; rowTaskDestinationContext = nil
+        if rowTaskDestinationMenuContext != nil { rowTaskDestinationMenuContext = nil }
         if !rowTaskDestinationPending { rowTaskDestinationError = nil; rowTaskDestinationFailureContext = nil }
     }
     func cancelRowTaskDestination() {
