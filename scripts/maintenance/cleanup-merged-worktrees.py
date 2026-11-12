@@ -27,6 +27,8 @@ DEFAULT_MIN_FREE_GB = 60
 DEFAULT_LOCK_PATH = Path.home() / ".local" / "state" / "mindwtr-worktree-cleanup.lock"
 GIT_TIMEOUT_SECONDS = 120
 PROBE_TIMEOUT_SECONDS = 60
+UNSTATTABLE_MOUNT_WARNING = re.compile(
+    rb"lsof: WARNING: can't stat\(\) [^\n]* file system ([^\n]+)\n      Output information may be incomplete\.\n")
 PROTECTED_NAMES = {"native-ios-foundation", "ios-editor-draft-recovery", "apple-ui-wda"}
 GENERATED_PREFIXES = (
     ("apps", "ios-native", ".build"),
@@ -290,6 +292,13 @@ def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None
     return newest
 
 
+def only_unrelated_mount_warnings(stderr: bytes, path: Path) -> bool:
+    mounts = [Path(os.fsdecode(mount)) for mount in UNSTATTABLE_MOUNT_WARNING.findall(stderr)]
+    return UNSTATTABLE_MOUNT_WARNING.sub(b"", stderr) == b"" and all(
+        mount.is_absolute() and mount != path and mount not in path.parents and path not in mount.parents
+        for mount in mounts)
+
+
 def process_active(path: Path) -> bool:
 
 
@@ -301,13 +310,11 @@ def process_active(path: Path) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         raise SafetyError("process_probe_unavailable") from None
-    if result.stderr or result.returncode not in (0, 1):
+    if (result.stderr and not only_unrelated_mount_warnings(result.stderr, path)) or result.returncode not in (0, 1):
         raise SafetyError("process_probe_failed")
-    if result.returncode == 0:
-        if not result.stdout:
-            raise SafetyError("process_probe_failed")
-        return True
     if result.stdout:
+        return True
+    if result.returncode == 0:
         raise SafetyError("process_probe_failed")
     return False
 

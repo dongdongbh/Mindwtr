@@ -756,7 +756,8 @@ class CleanupTests(unittest.TestCase):
 
     def test_lsof_no_match_active_and_uncertain_exit_contract(self):
         for code, stdout, stderr, expected in [(1, b"", b"", False), (0, b"p123\0", b"", True),
-                                               (1, b"", b"warning", "process_probe_failed"),
+                                               (1, b"", b"warning", "process_probe_failed"), (0, b"", b"", "process_probe_failed"),
+                                               (1, b"p123\0", b"warning", "process_probe_failed"),
                                                (2, b"", b"", "process_probe_failed")]:
             with self.subTest(code=code, stderr=stderr), patch.object(cleanup.subprocess, "run", return_value=subprocess.CompletedProcess([], code, stdout, stderr)):
                 if isinstance(expected, bool):
@@ -765,6 +766,23 @@ class CleanupTests(unittest.TestCase):
                     with self.assertRaisesRegex(cleanup.SafetyError, expected):
                         cleanup.process_active(self.worktree)
 
+
+    def test_lsof_warnings_only_tolerated_for_unrelated_unstattable_mounts(self):
+        def warning(mount):
+            return b"lsof: WARNING: can't stat() overlay file system " + os.fsencode(mount) + b"\n      Output information may be incomplete.\n"
+        docker = warning("/var/lib/docker/rootfs/overlayfs/abc") + warning("/run/docker/netns/49619eb775ba")
+        for stderr, expected in [(docker, False), (warning(self.worktree / "mounted"), "process_probe_failed"),
+                                 (warning("/"), "process_probe_failed"), (warning(self.worktree), "process_probe_failed"),
+                                 (docker + b"lsof: other warning\n", "process_probe_failed")]:
+            with self.subTest(stderr=stderr), patch.object(cleanup.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, b"", stderr)):
+                if expected is False:
+                    self.assertFalse(cleanup.process_active(self.worktree))
+                else:
+                    with self.assertRaisesRegex(cleanup.SafetyError, expected):
+                        cleanup.process_active(self.worktree)
+        for code in (0, 1):
+            with patch.object(cleanup.subprocess, "run", return_value=subprocess.CompletedProcess([], code, b"p123\0", docker)):
+                self.assertTrue(cleanup.process_active(self.worktree))
 
 if __name__ == "__main__":
     unittest.main()
