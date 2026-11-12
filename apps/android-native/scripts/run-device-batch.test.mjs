@@ -1,9 +1,14 @@
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { buildSteps, checkArgs, defaultChecks, harnessChecks, parseArgs, setenvArgs, unreachable, verdict, withAdbPort } from './run-device-batch.mjs';
+import { apkDrift, buildSteps, checkApks, checkArgs, defaultChecks, harnessChecks, parseArgs, pinApks, setenvArgs, unreachable, verdict, withAdbPort } from './run-device-batch.mjs';
 import { DEFAULT_ADB } from './device.mjs';
+
+const readCheck = (check) => readFileSync(new URL(`./${check}.mjs`, import.meta.url), 'utf8');
 
 test('parses options and check names', () => {
     const o = parseArgs(['--tree', '/w/t', '--harness', '/h', '--log', '/l', '--no-build', 'check-intl-device.mjs', 'check-language-device']);
@@ -26,11 +31,57 @@ test('default checks: projects first, upgrade last, new checks before upgrade, h
         ['check-projects-device', 'capture-parity-screens', 'check-intl-device', 'check-zebra-device', 'check-upgrade-device']);
 });
 
-test('only projects and startup get extra arguments', () => {
-    assert.deepEqual(checkArgs('check-projects-device'), ['--prune-old']);
-    assert.equal(checkArgs('check-startup-device').length, 2);
-    assert.match(checkArgs('check-startup-device')[0], /benchmarkSeed\.apk$/);
-    assert.deepEqual(checkArgs('check-intl-device'), []);
+test('each check names the APKs it installs, and gets them as its arguments', () => {
+    const apks = (check) => checkApks(check, readCheck(check));
+    assert.deepEqual(apks('check-intl-device'), ['play/debug/app-play-debug.apk']);
+    assert.deepEqual(apks('check-projects-device'), ['play/debug/app-play-debug.apk']);
+    assert.deepEqual(apks('check-bgsync-device'), ['play/debug/app-play-debug.apk', 'foss/debug/app-foss-debug.apk']);
+    assert.deepEqual(apks('check-startup-device'), ['play/benchmarkSeed/app-play-benchmarkSeed.apk', 'play/benchmark/app-play-benchmark.apk']);
+    assert.deepEqual(apks('check-onboarding-device'), ['play/benchmarkSeed/app-play-benchmarkSeed.apk']);
+    for (const check of ['check-upgrade-device', 'capture-parity-screens', 'check-data-device', 'check-data-deadlines-device']) assert.deepEqual(apks(check), [], check);
+    assert.deepEqual(checkArgs('check-projects-device', ['/log/apks/play/debug/app-play-debug.apk']), ['/log/apks/play/debug/app-play-debug.apk', '--prune-old']);
+    assert.deepEqual(checkArgs('check-intl-device', ['/log/apks/x.apk']), ['/log/apks/x.apk']);
+    assert.deepEqual(checkArgs('check-upgrade-device', []), []);
+});
+
+test('every check that installs the debug APK takes its path as an argument, so it can install the copy', () => {
+    const checks = defaultChecks(readdirSync(new URL('.', import.meta.url)));
+    const debugChecks = checks.filter((check) => checkApks(check, readCheck(check)).includes('play/debug/app-play-debug.apk'));
+    assert.ok(debugChecks.length > 50);
+    for (const check of debugChecks) {
+        assert.match(readCheck(check), /const apk = apkArg \?\? resolve\(app, 'android\/app\/build\/outputs\/apk\/play\/debug\/app-play-debug\.apk'\)/, check);
+    }
+    assert.match(readCheck('check-bgsync-device'), /const fossApk = fossApkArg \?\? /);
+});
+
+test('the batch installs its own copy of each APK, so a rebuild in the tree mid-batch changes nothing', () => {
+    const tree = mkdtempSync(join(tmpdir(), 'batch-tree-'));
+    const log = mkdtempSync(join(tmpdir(), 'batch-log-'));
+    try {
+        const source = (apk) => join(tree, 'apps/android-native/android/app/build/outputs/apk', apk);
+        for (const apk of ['play/debug/app-play-debug.apk', 'foss/debug/app-foss-debug.apk']) {
+            mkdirSync(dirname(source(apk)), { recursive: true });
+            writeFileSync(source(apk), `first build of ${apk}`);
+        }
+        const pinned = pinApks(tree, join(log, 'apks'), ['play/debug/app-play-debug.apk', 'foss/debug/app-foss-debug.apk', 'play/debug/app-play-debug.apk']);
+        assert.deepEqual(pinned.map(({ apk, path }) => [apk, path]), [
+            ['play/debug/app-play-debug.apk', join(log, 'apks/play/debug/app-play-debug.apk')],
+            ['foss/debug/app-foss-debug.apk', join(log, 'apks/foss/debug/app-foss-debug.apk')],
+        ]);
+        assert.match(pinned[0].sha, /^[0-9a-f]{64}$/);
+
+        writeFileSync(source('play/debug/app-play-debug.apk'), 'gates rebuilt this APK');
+        assert.equal(apkDrift(pinned), null);
+        assert.equal(readFileSync(pinned[0].path, 'utf8'), 'first build of play/debug/app-play-debug.apk');
+        assert.deepEqual(checkArgs('check-bgsync-device', pinned.map(({ path }) => path)), [pinned[0].path, pinned[1].path]);
+
+        writeFileSync(pinned[1].path, 'swapped copy');
+        assert.equal(apkDrift(pinned), `STOP: pinned APK changed mid-batch: ${pinned[1].path} ${pinned[1].sha} now ${createHash('sha256').update('swapped copy').digest('hex')}`);
+        assert.throws(() => pinApks(tree, join(log, 'apks'), ['play/benchmark/app-play-benchmark.apk']), /ENOENT/);
+    } finally {
+        rmSync(tree, { recursive: true, force: true });
+        rmSync(log, { recursive: true, force: true });
+    }
 });
 
 test('verdict passes only when every check exits 0', () => {
@@ -64,7 +115,6 @@ test('a phone that is not "device" stops the batch with one line naming the port
 });
 
 
-const readCheck = (check) => readFileSync(new URL(`./${check}.mjs`, import.meta.url), 'utf8');
 const stepNames = (checks) => buildSteps('/w/t', harnessChecks(checks, readCheck)).map(([name]) => name);
 
 test('a run of only non-harness checks skips the harness step', () => {

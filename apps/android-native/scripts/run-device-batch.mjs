@@ -2,7 +2,8 @@
 
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, closeSync, copyFileSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,7 +15,11 @@ const SDK = '/home/dd/Android/Sdk';
 const LOCK_TIMED_OUT = 75;
 const here = dirname(fileURLToPath(import.meta.url));
 const scriptsDir = 'apps/android-native/scripts';
-const apkDir = 'apps/android-native/android/app/build/outputs/apk/play';
+const apkRoot = 'apps/android-native/android/app/build/outputs/apk';
+const PLAY_APK = 'play/debug/app-play-debug.apk';
+const FOSS_APK = 'foss/debug/app-foss-debug.apk';
+const SEED_APK = 'play/benchmarkSeed/app-play-benchmarkSeed.apk';
+const BENCHMARK_APK = 'play/benchmark/app-play-benchmark.apk';
 
 
 const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption-device', 'check-widgets-device',
@@ -78,11 +83,31 @@ export function verdict(results) {
         : `VERDICT FAIL ${passed}/${results.length}: ${failed.join(' ') || 'no checks ran'}`;
 }
 
-export function checkArgs(check) {
-    if (check === 'check-projects-device') return ['--prune-old'];
-    if (check === 'check-startup-device') return [`${apkDir}/benchmarkSeed/app-play-benchmarkSeed.apk`, `${apkDir}/benchmark/app-play-benchmark.apk`];
-    if (check === 'check-onboarding-device') return [`${apkDir}/benchmarkSeed/app-play-benchmarkSeed.apk`];
-    return [];
+export function checkApks(check, source) {
+    if (check === 'check-startup-device') return [SEED_APK, BENCHMARK_APK];
+    if (check === 'check-onboarding-device') return [SEED_APK];
+    if (check === 'check-bgsync-device') return [PLAY_APK, FOSS_APK];
+    return source.includes(PLAY_APK) ? [PLAY_APK] : [];
+}
+
+export function checkArgs(check, pinnedApks) {
+    return [...pinnedApks, ...(check === 'check-projects-device' ? ['--prune-old'] : [])];
+}
+
+const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+
+export function pinApks(tree, folder, apks) {
+    return [...new Set(apks)].map((apk) => {
+        const path = join(folder, apk);
+        mkdirSync(dirname(path), { recursive: true });
+        copyFileSync(join(tree, apkRoot, apk), path);
+        return { apk, path, sha: sha256(path) };
+    });
+}
+
+export function apkDrift(pinned) {
+    const changed = pinned.map((p) => ({ ...p, now: sha256(p.path) })).filter((p) => p.now !== p.sha);
+    return changed.length ? `STOP: pinned APK changed mid-batch: ${changed.map((p) => `${p.path} ${p.sha} now ${p.now}`).join(', ')}` : null;
 }
 
 
@@ -177,19 +202,14 @@ function main() {
         say(stop);
         process.exit(1);
     }
-    const needHarness = harnessChecks(checks, (check) => readFileSync(join(opts.tree, scriptsDir, `${check}.mjs`), 'utf8'));
+    const readCheck = (check) => readFileSync(join(opts.tree, scriptsDir, `${check}.mjs`), 'utf8');
+    const needHarness = harnessChecks(checks, readCheck);
     let harnessFailed = false;
     if (opts.build) {
         if (!needHarness.length) say('harness=skipped (no check needs it)');
         for (const [name, cmd, args, extra] of buildSteps(opts.tree, needHarness)) {
             const code = run(cmd, args, `${name}.log`, extra);
             say(`${name}=${code}`);
-            if (name === 'gradle' && code === 0) {
-                const apk = join(opts.tree, apkDir, 'debug/app-play-debug.apk');
-                const sha = spawnSync('sha256sum', [apk], { encoding: 'utf8' }).stdout.slice(0, 12);
-                say(`apk sha ${sha}`);
-            }
-
             if (code !== 0 && name === 'harness' && needHarness.length < checks.length) {
                 say(`harness failed (${opts.log}/harness.log): not run: ${needHarness.join(' ')}`);
                 harnessFailed = true;
@@ -201,8 +221,26 @@ function main() {
         }
     }
 
+    const apksOf = new Map(checks.map((check) => [check, checkApks(check, readCheck(check))]));
+    let pinned;
+    try {
+        pinned = pinApks(opts.tree, join(opts.log, 'apks'), [...apksOf.values()].flat());
+    } catch (error) {
+        say(`STOP: could not copy the APKs into ${opts.log}/apks: ${error.message}`);
+        say(`VERDICT FAIL 0/${checks.length}: not run, APK copy failed`);
+        process.exit(1);
+    }
+    for (const { path, sha } of pinned) say(`apk ${path} sha256 ${sha} head ${head}`);
+    const pinnedPath = new Map(pinned.map(({ apk, path }) => [apk, path]));
+
     const results = [];
-    for (const check of checks) {
+    for (const [index, check] of checks.entries()) {
+        const drift = apkDrift(pinned);
+        if (drift) {
+            say(drift);
+            for (const skipped of checks.slice(index)) results.push({ check: skipped, exit: 1 });
+            finish(results);
+        }
         if (harnessFailed && needHarness.includes(check)) {
             say(`## ${check} ${hhmm()}`);
             say('EXIT=1 not run, harness failed');
@@ -214,7 +252,7 @@ function main() {
         }
         adb('settings', 'put', 'system', 'accelerometer_rotation', '1');
         say(`## ${check} ${hhmm()}`);
-        const code = run('timeout', ['3600', process.execPath, `${scriptsDir}/${check}.mjs`, SERIAL, ...checkArgs(check)], `${check}.log`);
+        const code = run('timeout', ['3600', process.execPath, `${scriptsDir}/${check}.mjs`, SERIAL, ...checkArgs(check, apksOf.get(check).map((apk) => pinnedPath.get(apk)))], `${check}.log`);
         say(`EXIT=${code} rotation=${adb('settings', 'get', 'system', 'accelerometer_rotation')}`);
         results.push({ check, exit: code });
     }
