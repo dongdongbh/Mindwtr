@@ -607,31 +607,34 @@ private struct KeptTabSurfaces: View {
     let palette: AppPalette
     let selected: CoreModel.Surface
     @State private var visited: Set<CoreModel.Surface> = []
+    private static let kept: [CoreModel.Surface] = [.inbox, .review, .focus]
 
     var body: some View {
-        ZStack(alignment: .top) {
+        TabView(selection: Binding(get: { Self.kept.contains(selected) ? selected : .calendar }, set: { _ in })) {
             tab(.inbox) { InboxSurface(model: model, palette: palette) }
             tab(.review) { ReviewScreen(model: model, palette: palette) }
             tab(.focus) { FocusSurface(model: model, palette: palette) }
+            tab(.calendar) { EmptyView() }
         }
         .onChange(of: selected, initial: true) { previous, surface in
             if !visited.contains(surface) { visited.insert(surface) }
-            if previous != surface, [.inbox, .review, .focus].contains(surface) {
+            if previous != surface, Self.kept.contains(surface) {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
             if surface == .inbox { Task { await model.recordInboxViewBoundaryRendered() } }
         }
     }
 
-    @ViewBuilder private func tab<Content: View>(_ surface: CoreModel.Surface, @ViewBuilder content: () -> Content) -> some View {
-        if surface == selected || visited.contains(surface) {
-            TaskCardListValuesProvider(model: model, surface: surface, content: content())
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .opacity(surface == selected ? 1 : 0)
-                .zIndex(surface == selected ? 1 : 0)
-                .allowsHitTesting(surface == selected)
-                .accessibilityHidden(surface != selected)
+    private func tab<Content: View>(_ surface: CoreModel.Surface, @ViewBuilder content: () -> Content) -> some View {
+        Group {
+            if Self.kept.contains(surface) && (surface == selected || visited.contains(surface)) {
+                TaskCardListValuesProvider(model: model, surface: surface, content: content())
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(palette.bg)
+        .toolbar(.hidden, for: .tabBar)
+        .tag(surface)
     }
 }
 
