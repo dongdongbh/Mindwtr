@@ -78,6 +78,10 @@ struct TaskViewSheet: View {
             || model.taskFileOpenPresentation != nil
             || ownedMenuPromptVisible || !model.taskAIAnswer.isEmpty || model.taskPromotionPresented
     }
+    private var navigationLocallyCovered: Bool {
+        discardConfirm || monthlyCustom != nil || waitingAssignment != nil || backdatedCompletion != nil
+            || ownedMenuPromptVisible || !datePickerID.isEmpty || checklistReordering
+    }
     private var navigationReplayUncovered: Bool {
         !editing && !discardConfirm && !modalPresented && !attachmentRecoveryFrozen && !checklistReordering
             && focusedChecklistIndex == nil && model.taskSharePayload == nil
@@ -133,6 +137,9 @@ struct TaskViewSheet: View {
             }
         }
         #endif
+        .onAppear { model.taskSheetLocalCover(navigationLocallyCovered) }
+        .onChange(of: navigationLocallyCovered) { _, covered in model.taskSheetLocalCover(covered) }
+        .onDisappear { model.taskSheetLocalCover(false) }
         .sheet(item: Binding(get: { model.taskSharePayload }, set: { if $0 == nil { model.dismissTaskShare() } })) { payload in
             TaskActivitySheet(payload: payload)
         }

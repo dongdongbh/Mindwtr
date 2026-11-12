@@ -1687,6 +1687,22 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-view-close")
     }
 
+    func testNativeEntityLinkCleanEditorClosesAndOpensTheLinkAtOnce() throws {
+        let app = try task454App("CLEANSHEET")
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-focus"], timeout: 40)
+        boardTap(app, "tab-focus"); boardTap(app, "task-title-task454-a")
+        boardTap(app, "task-mode-edit")
+        let title = app.textFields["task-editor-title"]
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, "Task454 first preview")
+        try task454Open(app, "mindwtr-native-dev://open?task=task454-b")
+        task454Preview(app, title: "Task454 second preview")
+        boardTap(app, "task-view-close")
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "task-view-task-title").firstMatch.waitForExistence(timeout: 2))
+    }
+
     func testNativeEntityLinkReadFailureWaitsForFreshForegroundWake() throws {
         let app = try task454App("READFAIL")
         app.launchArguments.append("--native-entity-read-failure")

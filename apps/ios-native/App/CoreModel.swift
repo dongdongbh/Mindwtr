@@ -9429,6 +9429,33 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
+    @ObservationIgnored private var taskSheetLocallyCovered = false
+
+    func taskSheetLocalCover(_ covered: Bool) { taskSheetLocallyCovered = covered }
+
+    private var taskSheetClosableForNavigation: Bool {
+        taskPresented && !taskSheetLocallyCovered && taskOpeningIntent == nil && !taskDirty
+            && processInboxEditorReturn == nil && !taskPreviewCompleting && !taskPersonCreateOwed
+            && taskRecoveryGeneration == 0 && taskRecoverySnapshot == nil && taskRecoveryTouched.isEmpty
+            && !taskRecoveryChecklistTouched && !taskRecoveryAttachmentsOwned && !taskHasActiveAttachmentOwner
+            && taskAttachmentState == .none && taskChecklistWriteKind == nil && !taskChecklistReadPending
+            && !taskScheduleUpdating && !taskAIWorking && taskAIAnswer.isEmpty && taskDestinationKind.isEmpty
+            && !taskPromotionPresented && taskShareError == nil && taskAttachmentOpenError == nil
+            && notificationResponseContextIsClean(allowingEntityPreview: true)
+    }
+
+    private func dismissCleanTaskSheetForNavigation() {
+        guard taskSheetClosableForNavigation else { return }
+        dismissTask(refreshCaller: false)
+        guard let currentHost = host else { return }
+        Task {
+            _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                "Native iOS task editor dismissed on navigation",
+                #"{"releaseCheck":"v1.3.9/ios-editor-navigation","outcome":"closed-clean"}"#,
+            ]))
+        }
+    }
+
     func suspendEntityLinks() {
         suspendQuickCaptureIntent()
         suspendShareCapture()
@@ -9473,6 +9500,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func admitEntityLinks() {
+        if let delivery = entityLinkPending, navigationInspection == .ordinary, navigationCaptureOwner == nil,
+           reminderCaptureHandoverOwner == nil, entityLinkTask == nil, notificationResponseTask == nil,
+           entityLinkWake != entityLinkAttemptedWake, ready, !busy, !retryNeeded, !settingsSyncRestartRequired,
+           !appLockRecoveryPending, notificationResponseForeground, !delivery.input.isSearch || searchPolicyAdmitted {
+            dismissCleanTaskSheetForNavigation()
+        }
         guard navigationInspection == .ordinary, navigationCaptureOwner == nil,
               reminderCaptureHandoverOwner == nil, entityLinkTask == nil, notificationResponseTask == nil,
               entityLinkWake != entityLinkAttemptedWake, let delivery = entityLinkPending,
@@ -9722,6 +9755,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let action = captured.response.action
         let finishing = notificationResponseRetry?.item?.response.requestID == captured.response.requestID
             ? notificationResponseRetry?.terminalOutcome : nil
+        if finishing == nil && action == .open && notificationResponseForeground { dismissCleanTaskSheetForNavigation() }
         if finishing == nil && action != .dismiss && !notificationResponseContextClean { return false }
         if finishing == nil && action == .open && !notificationResponseForeground { return false }
         if notificationResponseRetry?.item?.response.requestID != captured.response.requestID {
