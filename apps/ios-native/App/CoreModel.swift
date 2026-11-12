@@ -26753,8 +26753,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         view["items"] = items
         for key in ["offset", "limit", "revision"] { params.removeValue(forKey: key) }
-        reviewOverviewParams = params
-        reviewOverview = view
+        if !NativeValueEquality.same(reviewOverviewParams, params) { reviewOverviewParams = params }
+        if !NativeValueEquality.same(reviewOverview, view) { reviewOverview = view }
     }
 
     private func readReviewGuide() async throws {
@@ -45952,8 +45952,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     inboxFilterTextEdits.removeValue(forKey: type)
                 }
             }
-            if let nextArea, let nextMore { area = nextArea; moreMenu = nextMore }
-            inbox = nextInbox
+            if let nextArea, let nextMore {
+                if !NativeValueEquality.same(area, nextArea) { area = nextArea }
+                if !NativeValueEquality.same(moreMenu, nextMore) { moreMenu = nextMore }
+            }
+            if NativeValueEquality.same(inbox, nextInbox) { navigationReplayPublicationChanged("inbox") } else { inbox = nextInbox }
             if !inboxFilterTextEdits.isEmpty { inboxFilterNeedsRead = true }
             syncInboxFilterText()
             if inboxCurrent == inboxFilterWorkPending { inboxCurrent = !inboxFilterWorkPending }
@@ -46911,13 +46914,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     picker = try await focusControlList(pickerName, snapshot: next, query: pickerQuery, depth: pickerDepth)
                 }
                 guard focusReadAllowed(generation, ownsOperation: ownsOperation) else { return }
-                focusState = state
+                if !NativeValueEquality.same(focusState, state) { focusState = state }
                 if !focusEdits.isEmpty { focusEdits.removeAll() }
                 if focusRefusedLocationID != nil { focusRefusedLocationID = nil }
                 let location = controls.object("filterSheet").text("location")
                 if focusLocationText != location { focusLocationText = location }
-                focus = next
-                focusCurrent = true
+                if !NativeValueEquality.same(focus, next) { focus = next }
+                if !focusCurrent { focusCurrent = true }
                 if !edits.isEmpty {
                     NSLog("Native iOS Focus controls applied releaseCheck=v1.3.3/native-ios-focus-controls")
                 }

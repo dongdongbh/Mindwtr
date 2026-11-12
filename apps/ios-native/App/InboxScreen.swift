@@ -552,40 +552,8 @@ struct InboxScreen: View {
                             .accessibilityIdentifier("inbox-group-retry")
                     }
                     ForEach(inboxRows, id: \.id) { entry in
-                        let item = entry.item
-                        Group {
-                            if item.text("type") == "section" { inboxSection(item) }
-                            else if item.text("type") == "task" {
-                                let row = item.object("row")
-                                let selected = model.inboxTaskSelected(row.text("id"))
-                                HStack(spacing: 8) {
-                                    if model.inboxSelectionMode, !row.flag("readOnly") {
-                                        Button { Task { await model.selectInboxTask(row) } } label: {
-                                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 22)).foregroundStyle(palette.tint)
-                                                .frame(width: 45, height: 45).contentShape(Rectangle())
-                                        }
-                                        .buttonStyle(.plain).accessibilityLabel(row.text("title"))
-                                        .accessibilityAddTraits(selected ? .isSelected : [])
-                                        .accessibilityIdentifier("inbox-select-" + (item.text("groupId").isEmpty ? "none" : item.text("groupId")) + "-" + row.text("id"))
-                                    }
-                                    TaskCard(row: row, model: model, palette: palette,
-                                             readOnly: model.inboxSelectionMode || row.flag("readOnly"),
-                                             hideStatusBadge: model.inboxSelectionMode,
-                                             onSelection: model.inboxSelectionMode && !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
-                                             onSelectionStart: !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
-                                             swipeHost: .list)
-                                        .accessibilityIdentifier("inbox-item-" + item.text("groupId") + "-" + row.text("id"))
-                                }
-                                    .disabled(!model.inboxActionsEnabled)
-                            }
-                        }
-                        .onAppear {
-                            Task { await model.loadMore(automaticRow: entry.id) }
-                        }
-                        .onChange(of: model.inboxActionsEnabled) { enabled in
-                            if enabled { Task { await model.loadMore(automaticRow: entry.id) } }
-                        }
+                        InboxListRow(model: model, item: entry.item, palette: palette).equatable()
+                            .modifier(InboxAutomaticPage(model: model, identity: entry.id))
                     }
                     if model.items.count < model.inbox.number("total") {
                         Button { Task { await model.loadMore() } } label: {
@@ -701,28 +669,6 @@ struct InboxScreen: View {
             .contentShape(Rectangle())
     }
 
-    @ViewBuilder private func inboxSection(_ item: CoreObject) -> some View {
-        if item.flag("collapsible") {
-            Button { Task { await model.toggleInboxSection(item.text("id")) } } label: { inboxSectionLabel(item) }
-                .buttonStyle(.plain).disabled(!model.inboxActionsEnabled)
-                .accessibilityValue(model.label(item.flag("collapsed") ? "markdown.expand" : "markdown.collapse"))
-                .accessibilityIdentifier("inbox-section-" + item.text("id"))
-        } else { inboxSectionLabel(item).accessibilityAddTraits(.isHeader) }
-    }
-
-    private func inboxSectionLabel(_ item: CoreObject) -> some View {
-        HStack(spacing: 6) {
-            if item.flag("collapsible") {
-                AppIcon(name: "chevron", size: 15).rotationEffect(.degrees(item.flag("collapsed") ? -90 : 0))
-                    .foregroundStyle(palette.secondary)
-            }
-            Text(item.text("title")).rnFont(13, .bold).foregroundStyle(item.flag("muted") ? palette.secondary : palette.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(String(item.number("count"))).rnFont(12, .semibold).foregroundStyle(palette.secondary)
-        }
-        .frame(minHeight: 44).contentShape(Rectangle()).padding(.top, 4)
-    }
-
     private var focusContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -776,16 +722,13 @@ struct InboxScreen: View {
                                     let groupID = laterToday ? "focus:schedule:later-today" : rowGroup?.text("id")
                                     let collapsed = groupID.map { (model.collapsedFocusGroups[key] ?? []).contains($0) } ?? false
                                     if !collapsed {
-                                        TaskCard(row: row, model: model, palette: palette,
-                                                 footer: row.text("revealLabel").isEmpty ? row.text("laterTodayLabel") : row.text("revealLabel"),
-                                                 showDetails: model.focusShowDetails, showFocusToggle: true,
-                                                 onProject: { project in Task { await model.openProject(project) } })
+                                        FocusTaskRow(model: model, row: row, palette: palette, showDetails: model.focusShowDetails).equatable()
                                             .padding(.leading, section.objects("groups").isEmpty ? 0 : 25)
                                             .overlay(alignment: .leading) {
                                                 if !section.objects("groups").isEmpty { palette.border.frame(width: 2).padding(.leading, 13) }
                                             }
                                             .accessibilityIdentifier("focus-group-item-" + (groupID ?? "none") + "-" + row.text("id"))
-                                            .padding(.bottom, 8).disabled(!model.focusActionsEnabled)
+                                            .padding(.bottom, 8).modifier(ModelDisabled { !model.focusActionsEnabled })
                                     }
                                 }
                                 .id(key + ":" + String(rowIndex) + ":" + row.text("id"))
@@ -1527,6 +1470,98 @@ struct InboxScreen: View {
     }
 }
 
+private struct InboxListRow: View, Equatable {
+    let model: CoreModel
+    let item: CoreObject
+    let palette: AppPalette
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.model === rhs.model && lhs.palette == rhs.palette && NativeValueEquality.same(lhs.item, rhs.item)
+    }
+
+    var body: some View {
+        if item.text("type") == "section" { section }
+        else if item.text("type") == "task" { taskRow(item.object("row")) }
+    }
+
+    @ViewBuilder private var section: some View {
+        if item.flag("collapsible") {
+            Button { Task { await model.toggleInboxSection(item.text("id")) } } label: { sectionLabel }
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsEnabled })
+                .accessibilityValue(model.label(item.flag("collapsed") ? "markdown.expand" : "markdown.collapse"))
+                .accessibilityIdentifier("inbox-section-" + item.text("id"))
+        } else { sectionLabel.accessibilityAddTraits(.isHeader) }
+    }
+
+    private var sectionLabel: some View {
+        HStack(spacing: 6) {
+            if item.flag("collapsible") {
+                AppIcon(name: "chevron", size: 15).rotationEffect(.degrees(item.flag("collapsed") ? -90 : 0))
+                    .foregroundStyle(palette.secondary)
+            }
+            Text(item.text("title")).rnFont(13, .bold).foregroundStyle(item.flag("muted") ? palette.secondary : palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(String(item.number("count"))).rnFont(12, .semibold).foregroundStyle(palette.secondary)
+        }
+        .frame(minHeight: 44).contentShape(Rectangle()).padding(.top, 4)
+    }
+
+    private func taskRow(_ row: CoreObject) -> some View {
+        let selected = model.inboxTaskSelected(row.text("id"))
+        return HStack(spacing: 8) {
+            if model.inboxSelectionMode, !row.flag("readOnly") {
+                Button { Task { await model.selectInboxTask(row) } } label: {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22)).foregroundStyle(palette.tint)
+                        .frame(width: 45, height: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(row.text("title"))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("inbox-select-" + (item.text("groupId").isEmpty ? "none" : item.text("groupId")) + "-" + row.text("id"))
+            }
+            TaskCard(row: row, model: model, palette: palette,
+                     readOnly: model.inboxSelectionMode || row.flag("readOnly"),
+                     hideStatusBadge: model.inboxSelectionMode,
+                     onSelection: model.inboxSelectionMode && !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
+                     onSelectionStart: !row.flag("readOnly") ? { row in Task { await model.selectInboxTask(row) } } : nil,
+                     swipeHost: .list)
+                .accessibilityIdentifier("inbox-item-" + item.text("groupId") + "-" + row.text("id"))
+        }
+        .modifier(ModelDisabled { !model.inboxActionsEnabled })
+    }
+}
+
+private struct FocusTaskRow: View, Equatable {
+    let model: CoreModel
+    let row: CoreObject
+    let palette: AppPalette
+    let showDetails: Bool
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.model === rhs.model && lhs.palette == rhs.palette && lhs.showDetails == rhs.showDetails
+            && NativeValueEquality.same(lhs.row, rhs.row)
+    }
+
+    var body: some View {
+        TaskCard(row: row, model: model, palette: palette,
+                 footer: row.text("revealLabel").isEmpty ? row.text("laterTodayLabel") : row.text("revealLabel"),
+                 showDetails: showDetails, showFocusToggle: true,
+                 onProject: { project in Task { await model.openProject(project) } })
+    }
+}
+
+private struct InboxAutomaticPage: ViewModifier {
+    let model: CoreModel
+    let identity: [String]
+    func body(content: Content) -> some View {
+        content
+            .onAppear { Task { await model.loadMore(automaticRow: identity) } }
+            .onChange(of: model.inboxActionsEnabled) { enabled in
+                if enabled { Task { await model.loadMore(automaticRow: identity) } }
+            }
+    }
+}
+
 private struct TaskCardSelectionLongPress: ViewModifier {
     @Environment(\.isEnabled) private var interactionEnabled
     let identity: String
@@ -1744,15 +1779,16 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
 
 enum TaskRowSwipeHost { case local, list }
 
-struct TaskCardListValues: Equatable {
-    let presentationContext: String
-    let swipeActionsAdmitted: Bool
-}
-private struct TaskCardListValuesKey: EnvironmentKey { static let defaultValue: TaskCardListValues? = nil }
+private struct TaskCardPresentationContextKey: EnvironmentKey { static let defaultValue: String? = nil }
+private struct TaskRowSwipeAdmittedKey: EnvironmentKey { static let defaultValue: Bool? = nil }
 extension EnvironmentValues {
-    var taskCardListValues: TaskCardListValues? {
-        get { self[TaskCardListValuesKey.self] }
-        set { self[TaskCardListValuesKey.self] = newValue }
+    var taskCardPresentationContext: String? {
+        get { self[TaskCardPresentationContextKey.self] }
+        set { self[TaskCardPresentationContextKey.self] = newValue }
+    }
+    var taskRowSwipeAdmitted: Bool? {
+        get { self[TaskRowSwipeAdmittedKey.self] }
+        set { self[TaskRowSwipeAdmittedKey.self] = newValue }
     }
 }
 
@@ -1760,9 +1796,14 @@ struct TaskCardListValuesProvider<Content: View>: View {
     let model: CoreModel
     let content: Content
     var body: some View {
-        content.environment(\.taskCardListValues, TaskCardListValues(
-            presentationContext: model.taskCardPresentationContext, swipeActionsAdmitted: model.taskRowSwipeActionsAdmitted))
+        content.environment(\.taskCardPresentationContext, model.taskCardPresentationContext)
+            .environment(\.taskRowSwipeAdmitted, model.taskRowSwipeActionsAdmitted)
     }
+}
+
+private struct ModelDisabled: ViewModifier {
+    let disabled: () -> Bool
+    func body(content: Content) -> some View { content.disabled(disabled()) }
 }
 
 private struct TaskRowSwipeButton: View {
@@ -1826,14 +1867,21 @@ private struct TaskRowSwipeTray: ViewModifier {
     let layoutDirection: LayoutDirection
     let activate: (CoreObject, String) -> Void
     var cornerRadius: CGFloat = 14
+    var admission: CoreModel? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isEnabled) private var interactionEnabled
+    @Environment(\.taskRowSwipeAdmitted) private var listAdmitted
     @State private var offset: CGFloat = 0
     @State private var openingOffset: CGFloat = 0
     @State private var dragAxis = 0
     @State private var width: CGFloat = 320
-    private var left: [CoreObject] { enabled ? actions.objects("swipeRight").filter { $0.flag("enabled") } : [] }
-    private var right: [CoreObject] { enabled ? actions.objects("swipeLeft").filter { $0.flag("enabled") } : [] }
+    private var active: Bool {
+        guard let admission else { return enabled }
+        return enabled && interactionEnabled && (listAdmitted ?? admission.taskRowSwipeActionsAdmitted)
+    }
+    private var left: [CoreObject] { active ? actions.objects("swipeRight").filter { $0.flag("enabled") } : [] }
+    private var right: [CoreObject] { active ? actions.objects("swipeLeft").filter { $0.flag("enabled") } : [] }
     private var buttonWidth: CGFloat { min(64, max(44, width / CGFloat(max(1, max(left.count, right.count))))) }
     private var leftWidth: CGFloat { CGFloat(left.count) * buttonWidth }
     private var rightWidth: CGFloat { CGFloat(right.count) * buttonWidth }
@@ -1886,7 +1934,7 @@ private struct TaskRowSwipeTray: ViewModifier {
             }
             .onChange(of: identity) { _ in close() }
             .onChange(of: closeGeneration) { _ in close() }
-            .onChange(of: enabled) { if !$0 { close() } }
+            .onChange(of: active) { if !$0 { close() } }
             .onChange(of: scenePhase) { if $0 != .active { close() } }
             .onDisappear { offset = 0; dragAxis = 0; openingOffset = 0 }
         }
@@ -1905,11 +1953,11 @@ private struct TaskRowSwipeTray: ViewModifier {
             && abs(translation.width) > abs(translation.height) * 1.25
     }
     private func dragBegan() {
-        guard enabled, !left.isEmpty || !right.isEmpty else { return }
+        guard active, !left.isEmpty || !right.isEmpty else { return }
         dragAxis = 1; openingOffset = offset
     }
     private func dragChanged(_ translation: CGSize) {
-        guard enabled, !left.isEmpty || !right.isEmpty else { return }
+        guard active, !left.isEmpty || !right.isEmpty else { return }
         if dragAxis == 0 {
             if Self.isHorizontalIntent(translation) {
                 dragAxis = 1; openingOffset = offset
@@ -2046,8 +2094,7 @@ struct TaskCard: View {
     var onSwipeOrganize: ((CoreObject) -> Void)? = nil
     var swipeInteractionDisabled = false
     @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
-    @Environment(\.isEnabled) private var rowEnabled
-    @Environment(\.taskCardListValues) private var listValues
+    @Environment(\.taskCardPresentationContext) private var listPresentationContext
     @Environment(\.layoutDirection) private var hostLayoutDirection
     @State private var swipeDTO: CoreObject = [:]
     @State private var swipePublishedKey = ""
@@ -2070,7 +2117,7 @@ struct TaskCard: View {
     @State private var checklistReadID = UUID()
     @FocusState private var checklistInputFocused: Bool
     private var checklistIdentity: String { model.taskCardPresentationContext + ":" + row.text("id") }
-    private var displayedContext: String { listValues?.presentationContext ?? model.taskCardPresentationContext }
+    private var displayedContext: String { listPresentationContext ?? model.taskCardPresentationContext }
     private var hasInlineChecklist: Bool {
         row.text("status") != "reference" && meta.objects("parts").contains { $0.text("kind") == "checklist" }
     }
@@ -2083,12 +2130,10 @@ struct TaskCard: View {
             && model.inlineChecklistEnabled(row, writing: true)
     }
     private var meta: CoreObject { row.object("meta") }
-    private var swipeEnabled: Bool { swipeEnabled(admitted: model.taskRowSwipeActionsAdmitted) }
-    private var displayedSwipeEnabled: Bool { swipeEnabled(admitted: listValues?.swipeActionsAdmitted ?? model.taskRowSwipeActionsAdmitted) }
-    private func swipeEnabled(admitted: Bool) -> Bool {
-        rowEnabled && !readOnly && onSelection == nil && !swipeInteractionDisabled && admitted
-            && model.taskRowSwipeRowEligible(row)
+    private var swipeCandidate: Bool {
+        !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeRowEligible(row)
     }
+    private var swipeEnabled: Bool { model.taskRowSwipeActionsAdmitted && swipeCandidate }
     private var swipeReadIdentity: String { swipeIdentity(context: model.taskCardPresentationContext) }
     private var displayedSwipeIdentity: String { swipeIdentity(context: displayedContext) }
     private func swipeIdentity(context: String) -> String {
@@ -2143,7 +2188,7 @@ struct TaskCard: View {
                                         }
                                         .frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).disabled(onSelection != nil || !model.inlineChecklistEnabled(row))
+                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row) })
                                     .accessibilityValue(checklistExpanded ? model.label("common.close") : model.label("common.open"))
                                     .accessibilityIdentifier("task-inline-checklist-" + row.text("id"))
                                 } else if part.text("kind") == "completed", row.text("status") == "done", let onCompletedAt {
@@ -2153,7 +2198,7 @@ struct TaskCard: View {
                                     } label: {
                                         Text(metadata([part])).rnFont(12, .medium).frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || readOnly || row.flag("readOnly"))
+                                    .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded || readOnly || row.flag("readOnly") })
                                     .accessibilityLabel(model.label("task.editCompletedAt"))
                                     .accessibilityIdentifier("task-completed-at-" + row.text("id"))
                                 } else if part.text("kind") == "project", !part.text("projectId").isEmpty, let onProject {
@@ -2164,7 +2209,7 @@ struct TaskCard: View {
                                     } label: {
                                         Text(metadata([part])).rnFont(12, .medium).frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                                    .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
                                     .accessibilityIdentifier("task-project-" + row.text("id") + "-" + part.text("projectId"))
                                 } else if ["context", "tag"].contains(part.text("kind")), let onToken {
                                     Button {
@@ -2173,7 +2218,7 @@ struct TaskCard: View {
                                     } label: {
                                         Text(metadata([part])).rnFont(12, .medium).frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                                    .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
                                     .accessibilityLabel(model.label(part.text("kind") == "context" ? "task.aria.openContext" : "task.aria.openTag")
                                         .replacingOccurrences(of: "{{name}}", with: part.text("text"))
                                         .replacingOccurrences(of: "{name}", with: part.text("text")))
@@ -2214,7 +2259,9 @@ struct TaskCard: View {
                 } label: {
                     AppIcon(name: "status", size: 20).foregroundStyle(statusColor).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.taskStatusMenuPresented || row.flag("readOnly") || readOnly || onSelection != nil || statusOptionsTask != nil)
+                .buttonStyle(.plain).modifier(ModelDisabled { [statusBlocked = row.flag("readOnly") || readOnly || onSelection != nil || statusOptionsTask != nil] in
+                    model.busy || model.retryNeeded || model.taskStatusMenuPresented || statusBlocked
+                })
                 .accessibilityLabel(model.label("task.aria.changeStatus").replacingOccurrences(of: "{{status}}", with: meta.text("statusLabel")))
                 .accessibilityHint(model.label("task.aria.changeStatusHint"))
                 .accessibilityIdentifier("task-status-" + row.text("id"))
@@ -2225,8 +2272,8 @@ struct TaskCard: View {
         .background(palette.row, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
         .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeDTO, identity: swipePublishedKey,
-            rowID: row.text("id"), palette: palette, enabled: displayedSwipeEnabled && swipePublishedKey == displayedSwipeIdentity,
-            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe))
+            rowID: row.text("id"), palette: palette, enabled: swipeCandidate && swipePublishedKey == displayedSwipeIdentity,
+            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe, admission: model))
         .task(id: displayedSwipeIdentity) {
             let identity = swipeReadIdentity, displayed = row
             swipeDTO = [:]; swipePublishedKey = ""; swipePublishedRow = [:]
@@ -2337,12 +2384,6 @@ struct TaskCard: View {
             retireDefaultStatusMenu()
             checklistView = [:]
             if checklistExpanded { loadInlineChecklist(displayed: current.row) }
-        }
-        .onChange(of: model.busy) { busy in
-            if !busy && checklistExpanded && checklistReadTask == nil
-                && checklistView.text("taskRevision") != row.text("taskRevision") && model.inlineChecklistEnabled(row) {
-                loadInlineChecklist()
-            }
         }
         .onChange(of: onSelection != nil) { selecting in
             if selecting { resetInlineChecklist(); retireDefaultStatusMenu() }
@@ -2546,6 +2587,12 @@ struct TaskCard: View {
             }
         }
         .padding(.top, 4)
+        .onChange(of: model.busy) { busy in
+            if !busy && checklistExpanded && checklistReadTask == nil
+                && checklistView.text("taskRevision") != row.text("taskRevision") && model.inlineChecklistEnabled(row) {
+                loadInlineChecklist()
+            }
+        }
     }
 
     private func submitInlineChecklistInput() {
@@ -2660,7 +2707,9 @@ struct TaskCard: View {
                     AppFocusStar(focused: row.flag("isFocusedToday"), palette: palette, size: 20)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(!model.taskFocusInputEnabled(row) || !focusBlockedReason.isEmpty)
+                .buttonStyle(.plain).modifier(ModelDisabled { [blocked = !focusBlockedReason.isEmpty] in
+                    blocked || !model.taskFocusInputEnabled(row)
+                })
                 .accessibilityLabel(focusBlockedReason.isEmpty
                     ? model.label(row.flag("isFocusedToday") ? "agenda.removeFromFocus" : "agenda.addToFocus")
                     : focusBlockedReason)

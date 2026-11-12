@@ -1,7 +1,7 @@
 import SwiftUI
 
 
-struct AppPalette {
+struct AppPalette: Equatable {
     let values: [String]
     let dark: Bool
     let material: Bool
