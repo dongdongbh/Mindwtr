@@ -26397,6 +26397,13 @@ private final class Engine: @unchecked Sendable {
             }
             return args
         }
+        if method == "iosShortcutCaptureDraft" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, args[0].utf16.count <= 16_000 else {
+                throw HostFailure("INVALID_INPUT: Shortcut capture requires one bounded URL string")
+            }
+            return args
+        }
         if method == "iosContextAutomation" {
             guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
                   args.count == 1, args[0].utf16.count <= 16_000 else {
@@ -26620,6 +26627,10 @@ private final class Engine: @unchecked Sendable {
                 && (context["count"] as? NSNumber).map({ (0.0...13.0).contains($0.doubleValue) }) == true
         case "Native iOS Next widget task opened":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "opened"])
+        case "Native iOS shortcut capture opened":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.9/ios-shortcut-capture"
+                && ["opened", "skipped"].contains(context["outcome"] as? String ?? "")
         case "Native iOS context automation handled":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-context-automation"
@@ -26627,7 +26638,7 @@ private final class Engine: @unchecked Sendable {
         case "Native iOS widget route opened":
             valid = Set(context.keys) == Set(["releaseCheck", "destination", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-widget-routes"
-                && ["focus", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"].contains(context["destination"] as? String ?? "")
+                && ["focus", "focusFilter", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"].contains(context["destination"] as? String ?? "")
                 && context["outcome"] as? String == "opened"
         case "Native iOS Add Task shortcut presented":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])
@@ -26781,7 +26792,7 @@ private final class Engine: @unchecked Sendable {
         if method == "iosSearchOpen", json.utf8.count > 8_192 {
             throw HostFailure("INVALID_INPUT: Search open request is too large")
         }
-        if ["iosEntityOpen", "iosProductionWidgetTaskOpen", "iosContextAutomation"].contains(method), json.utf8.count > 128_000 {
+        if ["iosEntityOpen", "iosProductionWidgetTaskOpen", "iosContextAutomation", "iosShortcutCaptureDraft"].contains(method), json.utf8.count > 128_000 {
             throw HostFailure("INVALID_INPUT: Entity open request is too large")
         }
         if method == "iosNotificationOpen", json.utf8.count > 400_000 {

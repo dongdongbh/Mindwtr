@@ -7,7 +7,7 @@ import { readWatchOpenAIRuntime, buildWatchOpenAITranscription, decodeWatchOpenA
 import { ingestIOSWatchBatch, readIOSWatchBatchOutcome, ingestIOSWatchAudio, readIOSWatchAudioOutcome, readIOSWatchAudioNeedsTranscript } from './ios-watch-ingest';
 import { createNativeShareCaptureMethods } from '../../../packages/core/src/native-share-capture';
 import { readIOSShareCaptureDraft } from './ios-share-capture';
-import { resolveNativeRouteDestination } from '../../../packages/core/src/native-route-destination';
+import { resolveNativeRouteDestination, resolveNativeShortcutCaptureDraft } from '../../../packages/core/src/native-route-destination';
 import {
     DEFAULT_GLOBAL_SEARCH_FILTERS,
     getOnboardingGuideUrl,
@@ -4070,6 +4070,19 @@ globalThis.MindwtrHost = {
                 || Object.entries(payload).some(([field, value]) => !['notificationId', 'actionIdentifier', 'taskId', 'projectId', 'context', 'kind'].includes(field)
                     || typeof value !== 'string')) throw invalid();
             return unwrap(contract.routeNotificationOpen(payload));
+        });
+    },
+    iosShortcutCaptureDraft(url: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof url !== 'string' || url.length > 16_000) {
+                throw new Error('INVALID_INPUT: Invalid shortcut capture URL');
+            }
+            requireSaved();
+            const scheme = ['mindwtr', 'mindwtr-native-dev'].find((name) => url.slice(0, name.length + 1).toLowerCase() === `${name}:`);
+            if (!scheme || isSandboxMode()) return { type: 'none' };
+            const state = useTaskStore.getState();
+            return resolveNativeShortcutCaptureDraft(`mindwtr:${url.slice(scheme.length + 1)}`,
+                { tasks: state._allTasks, projects: state.projects });
         });
     },
     iosContextAutomation(url: string): string {

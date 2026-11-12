@@ -8660,14 +8660,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return "iosProductionWidgetTaskOpen"
     }
 
-    private static let routeDestinations = ["focus", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
-    private static let silentRouteDestinations = ["contextAutomation"]
+    private static let routeDestinations = ["focus", "focusFilter", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
+    private static let silentRouteDestinations = ["shortcutCapture", "contextAutomation"]
     private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday,
                                                            "projects": .projects, "review": .review, "calendar": .calendar]
 
     private func entityRouteShapeValid(_ route: CoreObject, allowed: [String]) -> Bool {
         let type = route.text("type")
-        let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId"][type]
+        let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId", "focusFilter": "savedFilterId"][type]
         let fields: Set<String> = identifier.map({ Set(["type", $0]) }) ?? ["type"]
         return allowed.contains(type) && Set(route.keys) == fields && route.values.allSatisfy({ $0 is String })
             && (identifier.map({ !route.text($0).isEmpty && route.text($0).utf16.count <= 500 }) ?? true)
@@ -8681,6 +8681,66 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         contextsLoadedDepth = pageSize
         await openContexts()
+    }
+
+    private func presentFocusSavedFilter(id: String) async {
+        if focusState.text("savedFilterId") != id, !focusEdits.contains(where: { $0.text("savedID") == id }) {
+            enqueueFocusEdit(["savedID": id])
+            focusLoadedDepth = [:]
+        }
+        if selectedSurface == .focus { await refresh() } else { await selectSurface(.focus) }
+    }
+
+    private func openShortcutCapture(_ url: String, owner: EntityLinkOwner) async -> Bool {
+        let prefill: CoreObject
+        do { prefill = try decode(try await owner.host.call("iosShortcutCaptureDraft", argumentsJSON: json([url]))) }
+        catch is CoreHostRejection { return true }
+        catch { return false }
+        guard entityLinkCurrent(owner), notificationResponseContextClean else { return false }
+        let fields: Set<String> = ["type", "captureId", "text", "note", "projectId"]
+        if prefill.text("type") == "none", Set(prefill.keys) == ["type"] {
+            await recordShortcutCapture(owner, outcome: "skipped")
+            return true
+        }
+        let captureId = prefill.text("captureId")
+        guard prefill.text("type") == "draft", Set(prefill.keys) == fields, prefill.values.allSatisfy({ $0 is String }),
+              !prefill.text("text").isEmpty, captureId.isEmpty || UUID(uuidString: captureId) != nil else { return true }
+        guard ready, !busy, !retryNeeded, !capturePresented, shareCaptureOwner == nil, !taskPresented else { return false }
+        let current: @MainActor () -> Bool = { self.entityLinkCurrent(owner) && self.notificationResponseContextClean }
+        let text = prefill.text("text"), note = prefill.text("note"), projectID = prefill.text("projectId")
+        busy = true
+        defer { finishOperation() }
+        do {
+            var view = try await query("captureOpen", beforeDispatch: current)
+            if (preferenceDefaults.object(forKey: preference) as? Bool) ?? initialAddAnother {
+                view = try await query("captureEdit", [try json(["text": text, "options": view.object("options"),
+                    "edit": ["type": "setAddAnother", "value": true]])], beforeDispatch: current).object("view")
+            }
+            view = try await query("captureEdit", [try json(["text": text, "options": view.object("options"),
+                "edit": ["type": "setNote", "value": note]])], beforeDispatch: current).object("view")
+            if !projectID.isEmpty {
+                view = try await query("captureEdit", [try json(["text": text, "options": view.object("options"),
+                    "edit": ["type": "selectProject", "projectId": projectID]])], beforeDispatch: current).object("view")
+            }
+            guard current() else { return false }
+            morePresented = false
+            capture = view; captureID = captureId.isEmpty ? UUID().uuidString : captureId
+            draft = text; noteDraft = note; contextQuery = ""; contextPickerPresented = false; previewedText = "\u{0}"
+            notice = nil
+            capturePresented = true
+            await refreshCaptureCopilotOptions()
+        } catch is CoreHostRejection {
+            return true
+        } catch { return false }
+        await recordShortcutCapture(owner, outcome: "opened")
+        return true
+    }
+
+    private func recordShortcutCapture(_ owner: EntityLinkOwner, outcome: String) async {
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS shortcut capture opened",
+            try json(["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": outcome]),
+        ]))
     }
 
     private var contextAutomationNamespace: String? {
@@ -9451,7 +9511,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     return
                 }
                 self.releaseEntityLinkBusy(owner.id, settling: false)
-                var contextAutomationHandled = false
+                var contextAutomationHandled = false, shortcutCaptureHandled = false
                 switch type {
                 case "task":
                     await self.selectSurface(.focus)
@@ -9476,6 +9536,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "review": await self.openReview()
                 case "calendar": await self.openCalendar()
                 case "contexts": await self.openContextsSavedFilter(route.text("savedFilterId"))
+                case "focusFilter": await self.presentFocusSavedFilter(id: route.text("savedFilterId"))
+                case "shortcutCapture":
+                    guard case .url(let url) = delivery.input else { return }
+                    shortcutCaptureHandled = await self.openShortcutCapture(url, owner: owner)
                 case "capture": await self.openCapture(admission: { self.entityLinkCurrent(owner) && self.notificationResponseContextClean })
                 case "contextAutomation":
                     guard case .url(let url) = delivery.input else { return }
@@ -9494,6 +9558,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     && self.contextsSelection.text("savedFilterId") == route.text("savedFilterId") && self.contextsError == nil
                 case "capture": acknowledged = self.capturePresented
                 case "contextAutomation": acknowledged = contextAutomationHandled
+                case "shortcutCapture": acknowledged = shortcutCaptureHandled
+                case "focusFilter": acknowledged = self.selectedSurface == .focus && self.focusCurrent && self.focusEdits.isEmpty
+                    && self.focusState.text("savedFilterId") == route.text("savedFilterId") && self.focusError == nil
                 default: acknowledged = CoreModel.routeSurfaces[type] == self.selectedSurface && !self.busy && self.error == nil
                 }
                 guard acknowledged else { return }

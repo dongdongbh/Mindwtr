@@ -58,6 +58,7 @@ final class EntityOpenHostTests: XCTestCase {
         settings["savedFilters"] = [
             ["id": "calls", "name": "Calls", "view": "contexts", "criteria": [String: Any](), "createdAt": at, "updatedAt": at],
             ["id": "focus-only", "name": "Focus only", "view": "focus", "criteria": [String: Any](), "createdAt": at, "updatedAt": at],
+            ["id": "next-only", "name": "Next only", "view": "next", "criteria": [String: Any](), "createdAt": at, "updatedAt": at],
         ] as [[String: Any]]
         _ = try sql.execute("UPDATE settings SET data=? WHERE id=1", parametersJSON: json([json(settings)]))
     }
@@ -109,7 +110,7 @@ final class EntityOpenHostTests: XCTestCase {
         let core = host(); _ = try await core.start()
         let before = try rows()
         for url in ["mindwtr://open?task=reference-task", "https://open?task=reference-task",
-                    "mindwtr-native-row://open?task=reference-task", "mindwtr-native-dev://capture?title=PRIVATE",
+                    "mindwtr-native-row://open?task=reference-task", "mindwtr-native-dev://capture?note=PRIVATE",
                     "mindwtr-native-dev://global-search?q=PRIVATE", "mindwtr-native-dev://share", "mindwtr-native-dev://oauth",
                     link("area=a"), link("task=&project=%20&area=a"), "PRIVATE_BAD_URL", ""] {
             let actual = try await route(core, url)
@@ -134,7 +135,10 @@ final class EntityOpenHostTests: XCTestCase {
             ("/widget-list/next", ["type": "focus"]), ("/widget-list/upcoming", ["type": "focus"]),
             ("/widget-list/filter%3Acalls", ["type": "contexts", "savedFilterId": "calls"]),
             ("/widget-list/filter%3Acalls?source=shortcut", ["type": "contexts", "savedFilterId": "calls"]),
-            ("/widget-list/filter%3Afocus-only", ["type": "none"]), ("/widget-list/filter%3Amissing", ["type": "none"]),
+            ("/widget-list/filter%3Afocus-only", ["type": "focusFilter", "savedFilterId": "focus-only"]),
+            ("/widget-list/filter%3Afocus-only?source=shortcut", ["type": "focusFilter", "savedFilterId": "focus-only"]),
+            ("/capture?title=PRIVATE&requestId=0f8fad5b-d9cb-469f-a165-70867728950e", ["type": "shortcutCapture"]),
+            ("/widget-list/filter%3Anext-only", ["type": "none"]), ("/widget-list/filter%3Amissing", ["type": "none"]),
             ("/widget-list/context%3A%40phone", ["type": "none"]), ("/widget-list/%E0%A4%A", ["type": "none"]),
             ("/not-a-route", ["type": "none"]),
         ]
@@ -144,7 +148,7 @@ final class EntityOpenHostTests: XCTestCase {
             XCTAssertEqual(production, expected, path)
             XCTAssertEqual(development, expected, path)
         }
-        for url in ["mindwtr://capture?title=PRIVATE", "mindwtr://global-search?q=PRIVATE", "mindwtr-native-dev:///focus"] {
+        for url in ["mindwtr://capture?note=PRIVATE", "mindwtr://global-search?q=PRIVATE", "mindwtr-native-dev:///focus"] {
             let value = try await productionRoute(core, url)
             XCTAssertEqual(value, ["type": "none"])
         }
@@ -188,6 +192,43 @@ final class EntityOpenHostTests: XCTestCase {
             do { _ = try await core.call("iosContextAutomation", argumentsJSON: input); XCTFail("Expected bounded context automation refusal") } catch {}
         }
         XCTAssertEqual(try rows(), before)
+    }
+
+    func testShortcutCaptureLinkReadsTheRNPrefillAndOpensEachRequestOnce() async throws {
+        try await seed()
+        let request = "0f8fad5b-d9cb-469f-a165-70867728950e"
+        let core = host(); _ = try await core.start()
+        let before = try rows()
+        func draft(_ url: String) async throws -> [String: String] {
+            let raw = try await core.call("iosShortcutCaptureDraft", argumentsJSON: json([url]))
+            return try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: String])
+        }
+        let encodedProject = encoded(projectID)
+        let full = try await draft("mindwtr:///capture?title=C%2B%2B%20call&requestId=" + request.uppercased()
+            + "&note=Ask%20twice&tags=errand,%23home&project=" + encodedProject)
+        XCTAssertEqual(full, ["type": "draft", "captureId": request, "text": "C++ call #errand #home", "note": "Ask twice", "projectId": projectID])
+        let created = try await draft("mindwtr-native-dev:///capture?title=Plan&project=New%20Garden")
+        XCTAssertEqual(created, ["type": "draft", "captureId": "", "text": "Plan +\"New Garden\"", "note": "", "projectId": ""])
+        let archived = try await draft("mindwtr:///capture?title=Plan&project=archived-project")
+        XCTAssertEqual(archived["projectId"], "")
+        XCTAssertEqual(archived["text"], "Plan")
+        for url in ["mindwtr:///capture?note=Only", "https:///capture?title=Plan", "mindwtr:///focus"] {
+            let quiet = try await draft(url)
+            XCTAssertEqual(quiet, ["type": "none"], url)
+        }
+        XCTAssertEqual(try rows(), before)
+        do {
+            let sql = try SQLiteBridge(url: database); defer { sql.close() }
+            _ = try sql.execute("INSERT INTO tasks(id,title,status,contexts,tags,description,createdAt,updatedAt,deletedAt,rev,revBy,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES (?,'PRIVATE_TASK','inbox','[]','[]','PRIVATE_NOTES',?,?,NULL,3,'fixture',0,0,0,0)",
+                                parametersJSON: json([request, at, at]))
+        }
+        await core.close()
+        let reopened = host(); _ = try await reopened.start()
+        let raw = try await reopened.call("iosShortcutCaptureDraft", argumentsJSON: json(["mindwtr:///capture?title=Plan&requestId=" + request]))
+        XCTAssertEqual(try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: String]), ["type": "none"])
+        for input in ["[]", "[1]", "[\"a\",\"b\"]", try json([String(repeating: "x", count: 16_001)])] {
+            do { _ = try await reopened.call("iosShortcutCaptureDraft", argumentsJSON: input); XCTFail("Expected bounded shortcut capture refusal") } catch {}
+        }
     }
 
     func testReadWaitsForCanonicalStartup() async throws {

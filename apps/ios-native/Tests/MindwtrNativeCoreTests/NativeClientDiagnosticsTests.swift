@@ -58,7 +58,10 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         for outcome in ["notified", "quiet", "failed"] {
             result.append(("Native iOS context automation handled", ["releaseCheck": "v1.3.9/ios-context-automation", "outcome": outcome]))
         }
-        for destination in ["focus", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"] {
+        for outcome in ["opened", "skipped"] {
+            result.append(("Native iOS shortcut capture opened", ["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": outcome]))
+        }
+        for destination in ["focus", "focusFilter", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"] {
             result.append(("Native iOS widget route opened", ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": destination, "outcome": "opened"]))
         }
         for outcome in ["completed", "ignored"] {
@@ -213,6 +216,12 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ["releaseCheck": "v1.3.9/ios-context-automation"],
         ] {
             refused.append(try json(["Native iOS context automation handled", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": "saved"],
+            ["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": "opened", "title": "private"],
+        ] {
+            refused.append(try json(["Native iOS shortcut capture opened", json(context)]))
         }
         let finishMessage = "Native iOS navigation finish settlement confirmed"
         for invalid in [

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveNativeRouteDestination } from './native-route-destination';
+import { resolveNativeRouteDestination, resolveNativeShortcutCaptureDraft } from './native-route-destination';
 import { openScreenHost, value } from './screen-parity.replay';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
-import type { SavedFilter } from './types';
+import type { Project, SavedFilter } from './types';
 
 const at = '2026-11-12T00:00:00.000Z';
 const filter = (id: string, view: SavedFilter['view'], extra: Partial<SavedFilter> = {}): SavedFilter => ({
@@ -12,6 +12,7 @@ const savedFilters = [
     filter('calls', 'contexts'),
     filter('id:with/slash 漢', 'contexts'),
     filter('focus-only', 'focus'),
+    filter('next-only', 'next'),
     filter('deleted', 'contexts', { deletedAt: at }),
     filter('x'.repeat(501), 'contexts'),
 ];
@@ -43,6 +44,9 @@ describe('native route destinations for widget and system links', () => {
         ['encoded saved filter ID', `mindwtr:///widget-list/${encodeURIComponent('filter:id:with/slash 漢')}`,
             { type: 'contexts', savedFilterId: 'id:with/slash 漢' }],
         ['developer scheme', 'mindwtr-native-dev:///waiting', { type: 'waiting' }],
+        ['Focus saved filter', 'mindwtr:///widget-list/filter%3Afocus-only?source=shortcut', { type: 'focusFilter', savedFilterId: 'focus-only' }],
+        ['prefilled shortcut capture', 'mindwtr:///capture?title=Buy%20milk&requestId=x', { type: 'shortcutCapture' }],
+        ['developer prefilled capture', 'mindwtr-native-dev:///capture?title=Buy', { type: 'shortcutCapture' }],
         ['open feature Projects', 'mindwtr://open-feature?feature=projects', { type: 'projects' }],
         ['open feature Review', 'mindwtr://open-feature?feature=weekly-review', { type: 'review' }],
         ['open feature Calendar', 'mindwtr://open-feature?feature=calendar', { type: 'calendar' }],
@@ -57,7 +61,7 @@ describe('native route destinations for widget and system links', () => {
     });
 
     it.each([
-        ['non-Contexts saved filter', 'mindwtr:///widget-list/filter%3Afocus-only'],
+        ['saved filter with a list view', 'mindwtr:///widget-list/filter%3Anext-only'],
         ['deleted saved filter', 'mindwtr:///widget-list/filter%3Adeleted'],
         ['missing saved filter', 'mindwtr:///widget-list/filter%3Amissing'],
         ['oversize saved filter ID', `mindwtr:///widget-list/filter%3A${'x'.repeat(501)}`],
@@ -68,7 +72,7 @@ describe('native route destinations for widget and system links', () => {
         ['empty list', 'mindwtr:///widget-list/'],
         ['unknown route', 'mindwtr:///not-a-route'],
         ['task route', 'mindwtr://open?task=missing'],
-        ['prefilled shortcut capture', 'mindwtr://capture?title=PRIVATE'],
+        ['capture link without a title', 'mindwtr://capture?note=PRIVATE'],
         ['search', 'mindwtr://global-search?q=PRIVATE'],
         ['context link without a known action', 'mindwtr://context?name=home&action=enter'],
         ['foreign scheme', 'https://example.com/focus'],
@@ -85,5 +89,40 @@ describe('native route destinations for widget and system links', () => {
         await flushPendingSave();
         expect(useTaskStore.getState().settings).toBe(before.settings);
         expect(useTaskStore.getState()._allTasks).toBe(before._allTasks);
+    });
+});
+
+describe('native shortcut capture drafts', () => {
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const project = (projectId: string, title: string, status: Project['status'] = 'active'): Project => ({
+        id: projectId, title, status, color: '#123456', order: 0, tagIds: [], createdAt: at, updatedAt: at,
+    });
+    const data = { tasks: [{ id: 'existing' }], projects: [project('p-home', 'Home Base'), project('p-old', 'Old', 'archived')] };
+    const draft = (query: string) => resolveNativeShortcutCaptureDraft(`mindwtr:///capture?${query}`, data);
+
+    it('fills the RN capture fields and keeps the request ID as the capture ID', () => {
+        expect(draft(`title=Buy%20milk&requestId=${id.toUpperCase()}&note=Two%20litres&tags=errand,%23home,errand&project=home%20base`))
+            .toEqual({ type: 'draft', captureId: id, text: 'Buy milk #errand #home', note: 'Two litres', projectId: 'p-home' });
+    });
+    it('keeps a plus sign that Shortcuts sends as %2B', () => {
+        expect(draft(`title=C%2B%2B%20notes&requestId=${id}`)).toMatchObject({ text: 'C++ notes' });
+    });
+    it('asks quick add to create a missing project, as RN does', () => {
+        expect(draft('title=Plan&project=Garden')).toMatchObject({ text: 'Plan +Garden', projectId: '', captureId: '' });
+        expect(draft('title=Plan&project=New%20Garden')).toMatchObject({ text: 'Plan +"New Garden"', projectId: '' });
+    });
+    it('drops a project that cannot take tasks, as RN does', () => {
+        expect(draft('title=Plan&project=Old')).toMatchObject({ text: 'Plan', projectId: '' });
+    });
+    it('opens a request only once after its task exists', () => {
+        expect(resolveNativeShortcutCaptureDraft(`mindwtr:///capture?title=Plan&requestId=${id}`,
+            { ...data, tasks: [{ id }] })).toEqual({ type: 'none' });
+    });
+    it('ignores a request ID that is not a UUID', () => {
+        expect(draft('title=Plan&requestId=existing')).toMatchObject({ type: 'draft', captureId: '' });
+    });
+    it('opens nothing without a title', () => {
+        expect(draft('note=Only%20a%20note')).toEqual({ type: 'none' });
+        expect(resolveNativeShortcutCaptureDraft('mindwtr:///focus', data)).toEqual({ type: 'none' });
     });
 });
