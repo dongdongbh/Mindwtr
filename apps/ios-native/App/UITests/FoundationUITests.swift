@@ -1596,6 +1596,10 @@ final class FoundationUITests: XCTestCase {
         try task454Open(app, "mindwtr-native-dev:///widget-list/filter%3Amissing")
         boardEnabled(app.buttons["tab-menu"], timeout: 30)
         XCTAssertTrue(app.buttons["tab-focus"].isSelected)
+        try task454Open(app, "mindwtr-native-dev:///capture?note=Only")
+        XCTAssertTrue(app.descendants(matching: .any)["link-notice"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons["tab-inbox"].isSelected)
+        XCTAssertFalse(app.textViews["capture-input"].exists)
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
 

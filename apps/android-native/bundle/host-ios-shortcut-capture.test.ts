@@ -39,7 +39,7 @@ describe('iOS shortcut capture draft bridge', () => {
     it.each(['mindwtr', 'mindwtr-native-dev'])('reads the %s capture link read-only', async (scheme) => {
         const f = await fixture(), before = useTaskStore.getState();
         expect(await f.port.iosShortcutCaptureDraft(`${scheme}:///capture?title=Call&requestId=${id}&note=Ask&tags=a,b&project=home`))
-            .toEqual({ type: 'draft', captureId: id, text: 'Call #a #b', note: 'Ask', projectId: 'p-home' });
+            .toEqual({ type: 'draft', captureId: id, text: 'Call', note: 'Ask', projectId: 'p-home', tags: ['#a', '#b'] });
         await flushPendingSave();
         expect(useTaskStore.getState()._allTasks).toBe(before._allTasks);
         expect(f.writes).toEqual([]);

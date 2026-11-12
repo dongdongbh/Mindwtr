@@ -9,11 +9,12 @@ export type NativeRouteDestination =
     | { type: 'none' | 'focus' | 'inbox' | 'waiting' | 'someday' | 'projects' | 'review' | 'calendar' | 'capture'
         | 'shortcutCapture' | 'contextAutomation' }
     | { type: 'contexts'; savedFilterId: string }
-    | { type: 'widgetList'; listId: string };
+    | { type: 'widgetList'; listId: string }
+    | { type: 'notice'; title: string; message: string };
 
 export type NativeShortcutCaptureDraft =
     | { type: 'none' }
-    | { type: 'draft'; captureId: string; text: string; note: string; projectId: string };
+    | { type: 'draft'; captureId: string; text: string; note: string; projectId: string; tags: string[] };
 
 const SURFACE_ROUTES = new Map<string, NativeRouteDestination>([
     ['/focus', { type: 'focus' }],
@@ -30,6 +31,8 @@ const PROJECT_LIST_PREFIX = 'project:';
 const SAVED_FILTER_ID_LIMIT = 500;
 const NONE: NativeRouteDestination = { type: 'none' };
 const CAPTURE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CAPTURE_TAG_LIMIT = 50;
+const CAPTURE_TAG_LENGTH = 200;
 
 const isShortcutCapture = (target: NativeEntryPoint) => target.captureModal !== null
     && typeof target.captureModal.params.initialValue === 'string' && target.captureModal.params.origin === undefined;
@@ -58,6 +61,9 @@ function widgetListDestination(route: string, savedFilters: unknown): NativeRout
 
 export function resolveNativeRouteDestination(target: NativeEntryPoint, savedFilters: unknown): NativeRouteDestination {
     if (target.contextAutomation) return { type: 'contextAutomation' };
+    if (target.notice && target.route === '/inbox' && !target.taskId && !target.projectId && !target.captureModal) {
+        return { type: 'notice', title: 'title' in target.notice ? target.notice.title : '', message: target.notice.message };
+    }
     if (target.taskId || target.projectId || target.search || target.notice) return NONE;
     if (target.captureModal) {
         if (isShortcutCapture(target)) return { type: 'shortcutCapture' };
@@ -85,13 +91,13 @@ export function resolveNativeShortcutCaptureDraft(
     const match = payload.project
         ? data.projects.find((project) => project.id === payload.project || project.title.toLowerCase() === reference)
         : undefined;
-    const text = [payload.title, ...normalizeShortcutTags(payload.tags), payload.project && !match ? projectToken(payload.project) : '']
-        .filter(Boolean).join(' ');
+    const text = [payload.title, payload.project && !match ? projectToken(payload.project) : ''].filter(Boolean).join(' ');
     return {
         type: 'draft',
         captureId,
         text,
         note: payload.note ?? '',
         projectId: match && isSelectableProjectForTaskAssignment(match) ? match.id : '',
+        tags: normalizeShortcutTags(payload.tags).filter((tag) => tag.length <= CAPTURE_TAG_LENGTH).slice(0, CAPTURE_TAG_LIMIT),
     };
 }

@@ -8671,12 +8671,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private static let routeDestinations = ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
-    private static let silentRouteDestinations = ["shortcutCapture", "contextAutomation"]
+    private static let silentRouteDestinations = ["shortcutCapture", "contextAutomation", "notice"]
     private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday,
-                                                           "projects": .projects, "review": .review, "calendar": .calendar]
+                                                           "projects": .projects, "review": .review, "calendar": .calendar, "notice": .inbox]
 
     private func entityRouteShapeValid(_ route: CoreObject, allowed: [String]) -> Bool {
         let type = route.text("type")
+        if type == "notice" {
+            return allowed.contains(type) && Set(route.keys) == ["type", "title", "message"] && route.values.allSatisfy({ $0 is String })
+                && !route.text("message").isEmpty && route.text("message").utf16.count <= 4_000 && route.text("title").utf16.count <= 4_000
+        }
         let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId", "widgetList": "listId"][type]
         let limit = type == "widgetList" ? 1_024 : 500
         let fields: Set<String> = identifier.map({ Set(["type", $0]) }) ?? ["type"]
@@ -8694,19 +8698,36 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         await openContexts()
     }
 
+    private(set) var linkNotice: CoreObject = [:]
+    @ObservationIgnored private var linkNoticeTask: Task<Void, Never>?
+
+    private func showLinkNotice(title: String, message: String) {
+        linkNoticeTask?.cancel()
+        let notice: CoreObject = ["title": title, "message": message, "id": UUID().uuidString]
+        linkNotice = notice
+        linkNoticeTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 4_200_000_000) } catch { return }
+            guard let self, self.linkNotice.text("id") == notice.text("id") else { return }
+            self.linkNotice = [:]
+        }
+    }
+
     private func openShortcutCapture(_ url: String, owner: EntityLinkOwner) async -> Bool {
         let prefill: CoreObject
         do { prefill = try decode(try await owner.host.call("iosShortcutCaptureDraft", argumentsJSON: json([url]))) }
         catch is CoreHostRejection { return true }
         catch { return false }
         guard entityLinkCurrent(owner), notificationResponseContextClean else { return false }
-        let fields: Set<String> = ["type", "captureId", "text", "note", "projectId"]
+        let fields: Set<String> = ["type", "captureId", "text", "note", "projectId", "tags"]
         if prefill.text("type") == "none", Set(prefill.keys) == ["type"] {
             await recordShortcutCapture(owner, outcome: "skipped")
             return true
         }
         let captureId = prefill.text("captureId")
-        guard prefill.text("type") == "draft", Set(prefill.keys) == fields, prefill.values.allSatisfy({ $0 is String }),
+        guard prefill.text("type") == "draft", Set(prefill.keys) == fields,
+              prefill.filter({ $0.key != "tags" }).values.allSatisfy({ $0 is String }),
+              let tags = prefill["tags"] as? [String], tags.count <= 50, Set(tags).count == tags.count,
+              tags.allSatisfy({ !$0.isEmpty && $0.utf16.count <= 200 }),
               !prefill.text("text").isEmpty, captureId.isEmpty || UUID(uuidString: captureId) != nil else { return true }
         guard ready, !busy, !retryNeeded, !capturePresented, shareCaptureOwner == nil, !taskPresented else { return false }
         let current: @MainActor () -> Bool = { self.entityLinkCurrent(owner) && self.notificationResponseContextClean }
@@ -8728,6 +8749,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             guard current() else { return false }
             morePresented = false
             capture = view; captureID = captureId.isEmpty ? UUID().uuidString : captureId
+            captureCopilotApplied = ["tags": tags]
             draft = text; noteDraft = note; contextQuery = ""; contextPickerPresented = false; previewedText = "\u{0}"
             notice = nil
             capturePresented = true
@@ -9540,6 +9562,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "calendar": await self.openCalendar()
                 case "contexts": await self.openContextsSavedFilter(route.text("savedFilterId"))
                 case "widgetList": await self.openWidgetList(route.text("listId"))
+                case "notice":
+                    await self.selectSurface(.inbox)
+                    guard self.entityLinkCurrent(owner), self.selectedSurface == .inbox else { return }
+                    self.showLinkNotice(title: route.text("title"), message: route.text("message"))
+                    await self.recordShortcutCapture(owner, outcome: "unavailable")
                 case "shortcutCapture":
                     guard case .url(let url) = delivery.input else { return }
                     shortcutCaptureHandled = await self.openShortcutCapture(url, owner: owner)

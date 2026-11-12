@@ -58,7 +58,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         for outcome in ["notified", "quiet", "failed"] {
             result.append(("Native iOS context automation handled", ["releaseCheck": "v1.3.9/ios-context-automation", "outcome": outcome]))
         }
-        for outcome in ["opened", "skipped"] {
+        for outcome in ["opened", "skipped", "unavailable"] {
             result.append(("Native iOS shortcut capture opened", ["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": outcome]))
         }
         for destination in ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"] {

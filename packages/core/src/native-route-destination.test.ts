@@ -50,6 +50,10 @@ describe('native route destinations for widget and system links', () => {
         ['Focus saved filter', 'mindwtr:///widget-list/filter%3Afocus-only?source=shortcut', { type: 'widgetList', listId: 'filter:focus-only' }],
         ['prefilled shortcut capture', 'mindwtr:///capture?title=Buy%20milk&requestId=x', { type: 'shortcutCapture' }],
         ['developer prefilled capture', 'mindwtr-native-dev:///capture?title=Buy', { type: 'shortcutCapture' }],
+        ['missing task link notice', 'mindwtr://open?task=missing', { type: 'notice', title: '',
+            message: 'This task is not in this library. It may have been deleted or not synced to this device.' }],
+        ['capture link without a title', 'mindwtr:///capture?note=PRIVATE', { type: 'notice', title: 'Capture shortcut unavailable',
+            message: 'Mindwtr could not read a task title from that shortcut link.' }],
         ['open feature Projects', 'mindwtr://open-feature?feature=projects', { type: 'projects' }],
         ['open feature Review', 'mindwtr://open-feature?feature=weekly-review', { type: 'review' }],
         ['open feature Calendar', 'mindwtr://open-feature?feature=calendar', { type: 'calendar' }],
@@ -73,8 +77,6 @@ describe('native route destinations for widget and system links', () => {
         ['unknown list', 'mindwtr:///widget-list/someday'],
         ['empty list', 'mindwtr:///widget-list/'],
         ['unknown route', 'mindwtr:///not-a-route'],
-        ['task route', 'mindwtr://open?task=missing'],
-        ['capture link without a title', 'mindwtr://capture?note=PRIVATE'],
         ['search', 'mindwtr://global-search?q=PRIVATE'],
         ['context link without a known action', 'mindwtr://context?name=home&action=enter'],
         ['foreign scheme', 'https://example.com/focus'],
@@ -104,7 +106,10 @@ describe('native shortcut capture drafts', () => {
 
     it('fills the RN capture fields and keeps the request ID as the capture ID', () => {
         expect(draft(`title=Buy%20milk&requestId=${id.toUpperCase()}&note=Two%20litres&tags=errand,%23home,errand&project=home%20base`))
-            .toEqual({ type: 'draft', captureId: id, text: 'Buy milk #errand #home', note: 'Two litres', projectId: 'p-home' });
+            .toEqual({ type: 'draft', captureId: id, text: 'Buy milk', note: 'Two litres', projectId: 'p-home', tags: ['#errand', '#home'] });
+    });
+    it('keeps a tag with a space whole, as RN does', () => {
+        expect(draft('title=Plan&tags=two%20words,%20one%20')).toMatchObject({ text: 'Plan', tags: ['#two words', '#one'] });
     });
     it('keeps a plus sign that Shortcuts sends as %2B', () => {
         expect(draft(`title=C%2B%2B%20notes&requestId=${id}`)).toMatchObject({ text: 'C++ notes' });

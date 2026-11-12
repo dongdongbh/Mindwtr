@@ -219,6 +219,7 @@ describe('closed production widget task URL read', () => {
         ['mindwtr:///widget-list/filter%3Alegacy', { type: 'none' }],
         ['mindwtr://global-search?q=PRIVATE', { type: 'none' }],
         ['mindwtr://capture?title=PRIVATE', { type: 'shortcutCapture' }],
+        ['mindwtr://capture?note=PRIVATE', { type: 'notice', title: 'Capture shortcut unavailable', message: 'Mindwtr could not read a task title from that shortcut link.' }],
         ['mindwtr://share', { type: 'none' }],
         ['mindwtr://oauth', { type: 'none' }],
     ])('routes production widget screen link %s read-only', async (url, expected) => {

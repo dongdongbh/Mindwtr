@@ -110,7 +110,7 @@ final class EntityOpenHostTests: XCTestCase {
         let core = host(); _ = try await core.start()
         let before = try rows()
         for url in ["mindwtr://open?task=reference-task", "https://open?task=reference-task",
-                    "mindwtr-native-row://open?task=reference-task", "mindwtr-native-dev://capture?note=PRIVATE",
+                    "mindwtr-native-row://open?task=reference-task",
                     "mindwtr-native-dev://global-search?q=PRIVATE", "mindwtr-native-dev://share", "mindwtr-native-dev://oauth",
                     link("area=a"), link("task=&project=%20&area=a"), "PRIVATE_BAD_URL", ""] {
             let actual = try await route(core, url)
@@ -149,7 +149,10 @@ final class EntityOpenHostTests: XCTestCase {
             XCTAssertEqual(production, expected, path)
             XCTAssertEqual(development, expected, path)
         }
-        for url in ["mindwtr://capture?note=PRIVATE", "mindwtr://global-search?q=PRIVATE", "mindwtr-native-dev:///focus"] {
+        let unavailable = try await productionRoute(core, "mindwtr://capture?note=PRIVATE")
+        XCTAssertEqual(unavailable, ["type": "notice", "title": "Capture shortcut unavailable",
+                                     "message": "Mindwtr could not read a task title from that shortcut link."])
+        for url in ["mindwtr://global-search?q=PRIVATE", "mindwtr-native-dev:///focus"] {
             let value = try await productionRoute(core, url)
             XCTAssertEqual(value, ["type": "none"])
         }
@@ -200,22 +203,26 @@ final class EntityOpenHostTests: XCTestCase {
         let request = "0f8fad5b-d9cb-469f-a165-70867728950e"
         let core = host(); _ = try await core.start()
         let before = try rows()
-        func draft(_ url: String) async throws -> [String: String] {
+        func draft(_ url: String) async throws -> [String: Any] {
             let raw = try await core.call("iosShortcutCaptureDraft", argumentsJSON: json([url]))
-            return try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: String])
+            return try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any])
         }
+        func same(_ value: [String: Any], _ expected: [String: Any]) throws -> Bool { try json(value) == json(expected) }
         let encodedProject = encoded(projectID)
         let full = try await draft("mindwtr:///capture?title=C%2B%2B%20call&requestId=" + request.uppercased()
             + "&note=Ask%20twice&tags=errand,%23home&project=" + encodedProject)
-        XCTAssertEqual(full, ["type": "draft", "captureId": request, "text": "C++ call #errand #home", "note": "Ask twice", "projectId": projectID])
+        XCTAssertTrue(try same(full, ["type": "draft", "captureId": request, "text": "C++ call", "note": "Ask twice",
+                                      "projectId": projectID, "tags": ["#errand", "#home"]]))
         let created = try await draft("mindwtr-native-dev:///capture?title=Plan&project=New%20Garden")
-        XCTAssertEqual(created, ["type": "draft", "captureId": "", "text": "Plan +\"New Garden\"", "note": "", "projectId": ""])
+        XCTAssertTrue(try same(created, ["type": "draft", "captureId": "", "text": "Plan +\"New Garden\"", "note": "", "projectId": "", "tags": [String]()]))
+        let spaced = try await draft("mindwtr:///capture?title=Plan&tags=two%20words")
+        XCTAssertEqual(spaced["tags"] as? [String], ["#two words"])
         let archived = try await draft("mindwtr:///capture?title=Plan&project=archived-project")
-        XCTAssertEqual(archived["projectId"], "")
-        XCTAssertEqual(archived["text"], "Plan")
+        XCTAssertEqual(archived["projectId"] as? String, "")
+        XCTAssertEqual(archived["text"] as? String, "Plan")
         for url in ["mindwtr:///capture?note=Only", "https:///capture?title=Plan", "mindwtr:///focus"] {
             let quiet = try await draft(url)
-            XCTAssertEqual(quiet, ["type": "none"], url)
+            XCTAssertEqual(quiet as? [String: String], ["type": "none"], url)
         }
         XCTAssertEqual(try rows(), before)
         do {

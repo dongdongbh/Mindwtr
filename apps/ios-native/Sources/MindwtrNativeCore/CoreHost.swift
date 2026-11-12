@@ -26630,7 +26630,7 @@ private final class Engine: @unchecked Sendable {
         case "Native iOS shortcut capture opened":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-shortcut-capture"
-                && ["opened", "skipped"].contains(context["outcome"] as? String ?? "")
+                && ["opened", "skipped", "unavailable"].contains(context["outcome"] as? String ?? "")
         case "Native iOS context automation handled":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-context-automation"

@@ -142,6 +142,17 @@ struct InboxScreen: View {
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(palette.text).background(palette.filter)
             }
+            if !model.linkNotice.isEmpty && !model.taskPresented {
+                VStack(alignment: .leading, spacing: 2) {
+                    if !model.linkNotice.text("title").isEmpty {
+                        Text(model.linkNotice.text("title")).rnFont(14, .semibold)
+                    }
+                    Text(model.linkNotice.text("message")).rnFont(14)
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(palette.text).background(palette.filter)
+                .accessibilityElement(children: .combine).accessibilityIdentifier("link-notice")
+            }
             if !model.projectDuplicateNotice.isEmpty && !model.taskPresented {
                 Text(model.projectDuplicateNotice.text("message")).rnFont(14)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
