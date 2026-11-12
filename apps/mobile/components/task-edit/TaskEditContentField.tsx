@@ -797,7 +797,8 @@ export function TaskEditContentField({
                                         <View
                                             style={[
                                                 styles.checklistItem,
-                                                { borderBottomColor: tc.border, backgroundColor: tc.cardBg },
+                                                { borderBottomColor: tc.border,
+                                                    ...(checklistDrag.indicator?.row === checklistItemKey ? { backgroundColor: tc.cardBg } : {}) },
                                             ]}
                                         >
                                             {renderChecklistHandle(checklistItemKey)}

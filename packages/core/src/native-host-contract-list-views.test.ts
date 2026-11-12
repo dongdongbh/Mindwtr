@@ -103,8 +103,8 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const legacy = value(host.getContextsView({ offset: 0, limit: 100 }));
         expect(legacy.rows.map((row) => row.id)).toContain('reference');
         const sheet = value(host.getContextsView({ filterSheetOpen: true, offset: 0, limit: 100 }));
-        expect(sheet.filters.state.statuses).toEqual(['inbox', 'next', 'waiting', 'someday']);
-        expect(sheet.rows.map((row) => row.id)).not.toContain('reference');
+        expect(sheet.filters.state.statuses).toEqual(['inbox', 'next', 'waiting', 'someday', 'reference']);
+        expect(sheet.rows.map((row) => row.id)).toContain('reference');
         const clearedStatuses = value(host.getContextsView({ filterSheetOpen: true, filters: { statuses: ['someday'] }, filterEdit: { type: 'toggleStatus', value: 'someday' }, offset: 0, limit: 100 }));
         expect(clearedStatuses.filters.state.statuses).toEqual([]);
         const reread = value(host.getContextsView({ filterSheetOpen: true, filters: clearedStatuses.filters.state, offset: 0, limit: 100 }));
@@ -136,12 +136,17 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const page = host.getContextsView({ offset: 50, limit: 50, filters: canonical,
             filterSheetOpen: true, savedFilterId: first.savedFilterId, preservedCriteria: first.preservedCriteria, revision: first.revision });
         expect(page).toMatchObject({ ok: true, value: { revision: first.revision, total: first.total } });
-        expect(first.filters?.state.statuses).toEqual(['inbox', 'next', 'waiting', 'someday']);
-        expect(first.total).toBe(63);
+        expect(first.filters?.state.statuses).toEqual(['inbox', 'next', 'waiting', 'someday', 'reference']);
+        expect(first.total).toBe(126);
         const second = value(page);
-        expect(second.rows).toHaveLength(13);
-        expect(new Set([...first.rows, ...second.rows].map(row => row.id)).size).toBe(63);
-        expect([...first.rows, ...second.rows].every(row => row.status === 'next')).toBe(true);
+        expect(second.rows).toHaveLength(50);
+        const third = value(host.getContextsView({ offset: 100, limit: 50, filters: canonical,
+            filterSheetOpen: true, savedFilterId: first.savedFilterId, preservedCriteria: first.preservedCriteria, revision: first.revision }));
+        expect(third.rows).toHaveLength(26);
+        const rows = [...first.rows, ...second.rows, ...third.rows];
+        expect(new Set(rows.map(row => row.id)).size).toBe(126);
+        expect(rows.filter(row => row.status === 'next')).toHaveLength(63);
+        expect(rows.filter(row => row.status === 'reference')).toHaveLength(63);
     });
 
     it('keeps enhanced paging revisions across native sorted-object serialization', async () => {
