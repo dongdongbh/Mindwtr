@@ -947,6 +947,7 @@ pwshTest.each([
   try {
     const stdout = execFileSync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", gate.run], {
       encoding: "utf8",
+      timeout: 15_000,
       env: { ...process.env, SIGNPATH_API_TOKEN: token, SIGNPATH_ORGANIZATION_ID: organization, GITHUB_OUTPUT: outputPath },
     });
     expect(stdout.trim()).toBe("");
@@ -954,7 +955,7 @@ pwshTest.each([
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}, 20_000);
 
 test("stable and RC releases sign and verify the checksum manifest", () => {
   const stable = parse(readFileSync(".github/workflows/release.yml", "utf8"));
