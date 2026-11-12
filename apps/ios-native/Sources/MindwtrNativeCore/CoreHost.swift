@@ -26397,6 +26397,13 @@ private final class Engine: @unchecked Sendable {
             }
             return args
         }
+        if method == "iosContextAutomation" {
+            guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
+                  args.count == 1, args[0].utf16.count <= 16_000 else {
+                throw HostFailure("INVALID_INPUT: Context automation requires one bounded URL string")
+            }
+            return args
+        }
         if method == "iosSearchOpen" {
             guard let args = (try? NativeJSON.jsonObject(with: Data(json.utf8))) as? [String],
                   args.count == 1, !args[0].isEmpty, args[0].utf16.count <= 500 else {
@@ -26613,6 +26620,10 @@ private final class Engine: @unchecked Sendable {
                 && (context["count"] as? NSNumber).map({ (0.0...13.0).contains($0.doubleValue) }) == true
         case "Native iOS Next widget task opened":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "opened"])
+        case "Native iOS context automation handled":
+            valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.9/ios-context-automation"
+                && ["notified", "quiet", "failed"].contains(context["outcome"] as? String ?? "")
         case "Native iOS widget route opened":
             valid = Set(context.keys) == Set(["releaseCheck", "destination", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-widget-routes"
@@ -26770,7 +26781,7 @@ private final class Engine: @unchecked Sendable {
         if method == "iosSearchOpen", json.utf8.count > 8_192 {
             throw HostFailure("INVALID_INPUT: Search open request is too large")
         }
-        if ["iosEntityOpen", "iosProductionWidgetTaskOpen"].contains(method), json.utf8.count > 128_000 {
+        if ["iosEntityOpen", "iosProductionWidgetTaskOpen", "iosContextAutomation"].contains(method), json.utf8.count > 128_000 {
             throw HostFailure("INVALID_INPUT: Entity open request is too large")
         }
         if method == "iosNotificationOpen", json.utf8.count > 400_000 {

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import UserNotifications
 import XCTest
 @testable import MindwtrNativeCore
 
@@ -149,6 +150,42 @@ final class EntityOpenHostTests: XCTestCase {
         XCTAssertEqual(foreign, ["type": "none"])
         XCTAssertEqual(try rows(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+    }
+
+    func testContextAutomationLinkBuildsTheRNNotificationAndItsTapOpensContexts() async throws {
+        try await seed()
+        do {
+            let sql = try SQLiteBridge(url: database); defer { sql.close() }
+            _ = try sql.execute("INSERT INTO tasks(id,title,status,contexts,tags,description,createdAt,updatedAt,deletedAt,rev,revBy,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES ('home-task','Call home','next',?,'[]','PRIVATE_NOTES',?,?,NULL,3,'fixture',0,0,0,0)",
+                                parametersJSON: json([json(["@home"]), at, at]))
+        }
+        let core = host(); _ = try await core.start()
+        let before = try rows(), namespace = "tech.dongdongbh.mindwtr.native.dev"
+        let raw = try await core.call("iosContextAutomation", argumentsJSON: json(["mindwtr://activate-context?context=home"]))
+        let reply = try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: String])
+        XCTAssertEqual(Set(reply.keys), ["type", "title", "message", "context"])
+        XCTAssertEqual(reply["type"], "notify")
+        XCTAssertEqual(reply["context"], "@home")
+        XCTAssertTrue(reply["message"]?.contains("Call home") == true)
+        let request = try XCTUnwrap(NativeContextAutomationNotification.request(title: XCTUnwrap(reply["title"]),
+            message: XCTUnwrap(reply["message"]), context: XCTUnwrap(reply["context"]), namespace: namespace))
+        let response = try XCTUnwrap(NativeReminderResponse.capture(request, deliveredAt: Date(), receivedAt: Date(),
+            actionIdentifier: UNNotificationDefaultActionIdentifier, namespace: namespace))
+        let opened = try await core.call("iosNotificationOpen", argumentsJSON: json([response.payloadJSON]))
+        XCTAssertEqual(try XCTUnwrap(NativeJSON.jsonObject(with: Data(opened.utf8)) as? [String: String]), ["type": "contexts", "token": "@home"])
+        for url in ["mindwtr-native-dev://activate-context/home", "mindwtr://deactivate-context?context=home",
+                    "mindwtr://activate-context?context=garden", "https://activate-context?context=home"] {
+            let quiet = try await core.call("iosContextAutomation", argumentsJSON: json([url]))
+            XCTAssertEqual(try XCTUnwrap(NativeJSON.jsonObject(with: Data(quiet.utf8)) as? [String: String]), ["type": "none"], url)
+        }
+        let developmentRoute = try await route(core, "mindwtr-native-dev://activate-context/home")
+        let productionAutomationRoute = try await productionRoute(core, "mindwtr://activate-context?context=home")
+        XCTAssertEqual(developmentRoute, ["type": "contextAutomation"])
+        XCTAssertEqual(productionAutomationRoute, ["type": "contextAutomation"])
+        for input in ["[]", "[1]", "[\"a\",\"b\"]", try json([String(repeating: "x", count: 16_001)])] {
+            do { _ = try await core.call("iosContextAutomation", argumentsJSON: input); XCTFail("Expected bounded context automation refusal") } catch {}
+        }
+        XCTAssertEqual(try rows(), before)
     }
 
     func testReadWaitsForCanonicalStartup() async throws {

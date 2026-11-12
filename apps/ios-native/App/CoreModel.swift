@@ -8661,6 +8661,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private static let routeDestinations = ["focus", "waiting", "someday", "contexts", "capture"]
+    private static let silentRouteDestinations = ["contextAutomation"]
     private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday]
 
     private func entityRouteShapeValid(_ route: CoreObject, allowed: [String]) -> Bool {
@@ -8679,6 +8680,37 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         contextsLoadedDepth = pageSize
         await openContexts()
+    }
+
+    private var contextAutomationNamespace: String? {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return nil }
+        switch selection {
+        case .production: return NativeLaunchSelection.productionNamespace
+        case let .standard(_, _, namespace), let .isolated(_, _, namespace, _): return namespace
+        case .rehearsal: return nil
+        }
+    }
+
+    private func notifyContextAutomation(_ url: String, owner: EntityLinkOwner) async -> Bool {
+        let reply: CoreObject
+        do { reply = try decode(try await owner.host.call("iosContextAutomation", argumentsJSON: json([url]))) }
+        catch is CoreHostRejection { return true }
+        catch { return false }
+        guard entityLinkCurrent(owner) else { return false }
+        let notify = reply.text("type") == "notify"
+        let fields: Set<String> = notify ? ["type", "title", "message", "context"] : ["type"]
+        guard notify || reply.text("type") == "none", Set(reply.keys) == fields, reply.values.allSatisfy({ $0 is String }) else { return true }
+        var outcome = "quiet"
+        if notify {
+            guard let namespace = contextAutomationNamespace else { return true }
+            outcome = await NativeContextAutomationNotification.post(title: reply.text("title"), message: reply.text("message"),
+                context: reply.text("context"), namespace: namespace) ? "notified" : "failed"
+        }
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS context automation handled",
+            try json(["releaseCheck": "v1.3.9/ios-context-automation", "outcome": outcome]),
+        ]))
+        return true
     }
 
     private func widgetTaskID(_ url: URL, host original: CoreHost) -> String? {
@@ -9128,11 +9160,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                               widgetURL.map({ self.widgetTaskID($0, host: owner.host) == searchTask }) ?? true else { throw NavigationReplayFailure.held }
                         let type = route.text("type"), identifier = route.text("type") == "task" ? "taskId" : "projectId"
                         let allowed = original.kind == .spotlight || widgetURL != nil ? ["task", "inbox"]
-                            : ["none", "task", "project", "inbox"] + CoreModel.routeDestinations
+                            : ["none", "task", "project", "inbox"] + CoreModel.routeDestinations + CoreModel.silentRouteDestinations
                         guard self.entityRouteShapeValid(route, allowed: allowed) else {
                             throw NavigationReplayFailure.held
                         }
-                        if type == "none" || CoreModel.routeDestinations.contains(type) { owner.outcome = .ignored }
+                        if type == "none" || (CoreModel.routeDestinations + CoreModel.silentRouteDestinations).contains(type) {
+                            owner.outcome = .ignored
+                        }
                         else {
                             try await self.presentNavigationReplayDestination(type, target: route.text(identifier), owner: owner)
                             guard self.navigationReplayCurrent(owner), !self.busy, let item = owner.admitting else { throw NavigationReplayFailure.held }
@@ -9404,7 +9438,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
                 let type = route.text("type")
                 let types = delivery.input.isSearch || delivery.input.widgetURL != nil ? ["inbox", "task"]
-                    : ["none", "inbox", "task", "project"] + CoreModel.routeDestinations
+                    : ["none", "inbox", "task", "project"] + CoreModel.routeDestinations + CoreModel.silentRouteDestinations
                 guard self.entityRouteShapeValid(route, allowed: types) else {
                     self.entityLinkPending = nil
                     await self.recordEntityLink(owner, kind: "none", outcome: "refused")
@@ -9416,6 +9450,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     return
                 }
                 self.releaseEntityLinkBusy(owner.id, settling: false)
+                var contextAutomationHandled = false
                 switch type {
                 case "task":
                     await self.selectSurface(.focus)
@@ -9438,6 +9473,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "someday": await self.openSomeday()
                 case "contexts": await self.openContextsSavedFilter(route.text("savedFilterId"))
                 case "capture": await self.openCapture(admission: { self.entityLinkCurrent(owner) && self.notificationResponseContextClean })
+                case "contextAutomation":
+                    guard case .url(let url) = delivery.input else { return }
+                    contextAutomationHandled = await self.notifyContextAutomation(url, owner: owner)
                 default: return
                 }
                 guard self.entityLinkCurrent(owner) else { return }
@@ -9451,6 +9489,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "contexts": acknowledged = self.selectedSurface == .contexts && self.contextsCurrent && self.contextsIntents.isEmpty
                     && self.contextsSelection.text("savedFilterId") == route.text("savedFilterId") && self.contextsError == nil
                 case "capture": acknowledged = self.capturePresented
+                case "contextAutomation": acknowledged = contextAutomationHandled
                 default: acknowledged = CoreModel.routeSurfaces[type] == self.selectedSurface && !self.busy && self.error == nil
                 }
                 guard acknowledged else { return }
@@ -9482,6 +9521,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         await navigationCaptureTailFixture()
         #endif
         guard entityLinkCurrent(owner) else { return }
+        if CoreModel.silentRouteDestinations.contains(kind) { return }
         if CoreModel.routeDestinations.contains(kind), outcome == "opened" {
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS widget route opened",

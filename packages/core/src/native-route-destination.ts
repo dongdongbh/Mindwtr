@@ -3,7 +3,7 @@ import { normalizeSavedFilters } from './saved-filters';
 import { normalizeWidgetListDestinationId } from './widget-list-destination';
 
 export type NativeRouteDestination =
-    | { type: 'none' | 'focus' | 'inbox' | 'waiting' | 'someday' | 'capture' }
+    | { type: 'none' | 'focus' | 'inbox' | 'waiting' | 'someday' | 'capture' | 'contextAutomation' }
     | { type: 'contexts'; savedFilterId: string };
 
 const SURFACE_ROUTES = new Map<string, NativeRouteDestination>([
@@ -40,7 +40,8 @@ function widgetListDestination(route: string, savedFilters: unknown): NativeRout
 }
 
 export function resolveNativeRouteDestination(target: NativeEntryPoint, savedFilters: unknown): NativeRouteDestination {
-    if (target.taskId || target.projectId || target.search || target.notice || target.contextAutomation) return NONE;
+    if (target.contextAutomation) return { type: 'contextAutomation' };
+    if (target.taskId || target.projectId || target.search || target.notice) return NONE;
     if (target.captureModal) return isSystemQuickCapture(target) ? { type: 'capture' } : NONE;
     if (target.capture) return { type: 'capture' };
     if (!target.route) return NONE;

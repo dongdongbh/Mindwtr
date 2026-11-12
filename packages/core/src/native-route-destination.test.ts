@@ -43,6 +43,10 @@ describe('native route destinations for widget and system links', () => {
         ['encoded saved filter ID', `mindwtr:///widget-list/${encodeURIComponent('filter:id:with/slash 漢')}`,
             { type: 'contexts', savedFilterId: 'id:with/slash 漢' }],
         ['developer scheme', 'mindwtr-native-dev:///waiting', { type: 'waiting' }],
+        ['context activation', 'mindwtr://activate-context?context=home', { type: 'contextAutomation' }],
+        ['context deactivation', 'mindwtr://deactivate-context/home', { type: 'contextAutomation' }],
+        ['context query action', 'mindwtr://context?name=home&action=on', { type: 'contextAutomation' }],
+        ['developer context activation', 'mindwtr-native-dev://activate-context/%40home', { type: 'contextAutomation' }],
     ])('opens %s', async (_label, url, expected) => {
         const scheme = url.startsWith('mindwtr-native-dev:') ? 'mindwtr-native-dev' : 'mindwtr';
         expect(await resolve(url, scheme)).toEqual(expected);
@@ -62,7 +66,7 @@ describe('native route destinations for widget and system links', () => {
         ['task route', 'mindwtr://open?task=missing'],
         ['prefilled shortcut capture', 'mindwtr://capture?title=PRIVATE'],
         ['search', 'mindwtr://global-search?q=PRIVATE'],
-        ['context automation', 'mindwtr://context?name=home&action=enter'],
+        ['context link without a known action', 'mindwtr://context?name=home&action=enter'],
         ['foreign scheme', 'https://example.com/focus'],
     ])('keeps %s a no-op', async (_label, url) => {
         expect(await resolve(url)).toEqual({ type: 'none' });

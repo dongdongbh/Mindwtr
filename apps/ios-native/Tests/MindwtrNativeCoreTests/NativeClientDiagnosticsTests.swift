@@ -55,6 +55,9 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
             ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
         ]
+        for outcome in ["notified", "quiet", "failed"] {
+            result.append(("Native iOS context automation handled", ["releaseCheck": "v1.3.9/ios-context-automation", "outcome": outcome]))
+        }
         for destination in ["focus", "waiting", "someday", "contexts", "capture"] {
             result.append(("Native iOS widget route opened", ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": destination, "outcome": "opened"]))
         }
@@ -203,6 +206,13 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ["releaseCheck": "v1.3.8/ios-widget-routes", "destination": "focus", "outcome": "opened"],
         ] {
             refused.append(try json(["Native iOS widget route opened", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.9/ios-context-automation", "outcome": "opened"],
+            ["releaseCheck": "v1.3.9/ios-context-automation", "outcome": "notified", "context": "@home"],
+            ["releaseCheck": "v1.3.9/ios-context-automation"],
+        ] {
+            refused.append(try json(["Native iOS context automation handled", json(context)]))
         }
         let finishMessage = "Native iOS navigation finish settlement confirmed"
         for invalid in [

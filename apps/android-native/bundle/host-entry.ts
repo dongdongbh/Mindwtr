@@ -4072,6 +4072,18 @@ globalThis.MindwtrHost = {
             return unwrap(contract.routeNotificationOpen(payload));
         });
     },
+    iosContextAutomation(url: string): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios' || typeof url !== 'string' || url.length > 16_000) {
+                throw new Error('INVALID_INPUT: Invalid context automation URL');
+            }
+            const scheme = ['mindwtr', 'mindwtr-native-dev'].find((name) => url.slice(0, name.length + 1).toLowerCase() === `${name}:`);
+            if (!scheme || isSandboxMode()) return { type: 'none' };
+            const { notification } = unwrap(contract.runContextAutomation({ url: `mindwtr:${url.slice(scheme.length + 1)}` }));
+            if (!notification || !notification.data.context) return { type: 'none' };
+            return { type: 'notify', title: notification.title, message: notification.message, context: notification.data.context };
+        });
+    },
     reminderSnoozePrepare(raw: string, storedAlarms: string | null, storedState: string | null, granted: boolean): string {
         return submit(async () => iosReminderSnooze.prepare(raw, storedAlarms, storedState, granted));
     },
