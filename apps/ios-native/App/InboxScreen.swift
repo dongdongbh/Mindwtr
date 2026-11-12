@@ -1832,18 +1832,26 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
 enum TaskRowSwipeHost { case local, list }
 
 private struct TaskCardPresentationContextKey: EnvironmentKey { static let defaultValue: String? = nil }
+private struct TaskCardSurfaceKey: EnvironmentKey { static let defaultValue: CoreModel.Surface? = nil }
 extension EnvironmentValues {
     var taskCardPresentationContext: String? {
         get { self[TaskCardPresentationContextKey.self] }
         set { self[TaskCardPresentationContextKey.self] = newValue }
     }
+    var taskCardSurface: CoreModel.Surface? {
+        get { self[TaskCardSurfaceKey.self] }
+        set { self[TaskCardSurfaceKey.self] = newValue }
+    }
 }
 
 struct TaskCardListValuesProvider<Content: View>: View {
     let model: CoreModel
+    var surface: CoreModel.Surface? = nil
     let content: Content
     var body: some View {
-        content.environment(\.taskCardPresentationContext, model.taskCardPresentationContext)
+        content
+            .environment(\.taskCardPresentationContext, surface.map { model.taskCardListContext($0) } ?? model.taskCardPresentationContext)
+            .environment(\.taskCardSurface, surface)
     }
 }
 
@@ -1914,6 +1922,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     let activate: (CoreObject, String) -> Void
     var cornerRadius: CGFloat = 14
     var admission: CoreModel? = nil
+    var admissionSurface: CoreModel.Surface? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isEnabled) private var interactionEnabled
@@ -1923,7 +1932,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     @State private var width: CGFloat = 320
     private var active: Bool {
         guard let admission else { return enabled }
-        return enabled && interactionEnabled && admission.taskRowSwipeActionsShown
+        return enabled && interactionEnabled && admission.taskRowSwipeActionsShown(admissionSurface)
     }
     private var left: [CoreObject] { active ? actions.objects("swipeRight").filter { $0.flag("enabled") } : [] }
     private var right: [CoreObject] { active ? actions.objects("swipeLeft").filter { $0.flag("enabled") } : [] }
@@ -2141,6 +2150,7 @@ struct TaskCard: View {
     var swipeInteractionDisabled = false
     @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
     @Environment(\.taskCardPresentationContext) private var listPresentationContext
+    @Environment(\.taskCardSurface) private var listSurface
     @Environment(\.layoutDirection) private var hostLayoutDirection
     @State private var swipeCloseGeneration = 0
     @State private var selectionPressStartedAt = Date.distantPast
@@ -2170,15 +2180,15 @@ struct TaskCard: View {
     private var checklistWritable: Bool {
         !readOnly && onSelection == nil && !checklistView.isEmpty && !checklistView.flag("readOnly")
             && checklistView.text("taskRevision").utf8.elementsEqual(row.text("taskRevision").utf8)
-            && model.inlineChecklistEnabled(row, writing: true)
+            && model.inlineChecklistEnabled(row, writing: true, surface: listSurface)
     }
     private var meta: CoreObject { row.object("meta") }
     private var swipeCandidate: Bool {
-        !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeRowEligible(row)
+        !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeRowEligible(row, surface: listSurface)
     }
     private var swipeEnabled: Bool { model.taskRowSwipeActionsAdmitted && swipeCandidate }
     private var swipeActions: CoreObject { swipeCandidate ? model.taskRowSwipeActions(row) : [:] }
-    private var swipeReadIdentity: String { swipeIdentity(context: model.taskCardPresentationContext) }
+    private var swipeReadIdentity: String { swipeIdentity(context: listSurface.map { model.taskCardListContext($0) } ?? model.taskCardPresentationContext) }
     private var displayedSwipeIdentity: String { swipeIdentity(context: displayedContext) }
     private func swipeIdentity(context: String) -> String {
         NativeTaskRowSwipeRead.identity(context: context, taskID: row.text("id"),
@@ -2232,7 +2242,7 @@ struct TaskCard: View {
                                         }
                                         .frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row, shown: true) })
+                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row, shown: true, surface: listSurface) })
                                     .accessibilityValue(checklistExpanded ? model.label("common.close") : model.label("common.open"))
                                     .accessibilityIdentifier("task-inline-checklist-" + row.text("id"))
                                 } else if part.text("kind") == "completed", row.text("status") == "done", let onCompletedAt {
@@ -2317,7 +2327,8 @@ struct TaskCard: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
         .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeActions, identity: displayedSwipeIdentity,
             rowID: row.text("id"), palette: palette, enabled: swipeCandidate,
-            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe, admission: model))
+            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe,
+            admission: model, admissionSurface: listSurface))
         .overlay(alignment: .leading) {
             if !meta.text("priority").isEmpty {
                 RoundedRectangle(cornerRadius: 2)
@@ -2594,14 +2605,14 @@ struct TaskCard: View {
             if let checklistError {
                 Text(checklistError).rnFont(14).foregroundStyle(palette.secondary)
                 Button(model.label("common.retry")) { beforeAction?(); loadInlineChecklist() }
-                    .buttonStyle(.plain).frame(minHeight: 44).disabled(!model.inlineChecklistEnabled(row))
+                    .buttonStyle(.plain).frame(minHeight: 44).disabled(!model.inlineChecklistEnabled(row, surface: listSurface))
             }
             if checklistSection.objects("items").count < checklistSection.number("total") {
                 Button(model.label("common.more")) {
                     beforeAction?(); checklistInputFocused = false
                     loadInlineChecklist(more: true)
                 }
-                .buttonStyle(.plain).frame(minHeight: 44).disabled(checklistReadTask != nil || !model.inlineChecklistEnabled(row))
+                .buttonStyle(.plain).frame(minHeight: 44).disabled(checklistReadTask != nil || !model.inlineChecklistEnabled(row, surface: listSurface))
             }
             if !readOnly && !row.flag("readOnly") && !checklistView.flag("readOnly"), !checklistSection.object("add").isEmpty {
                 let add = checklistSection.object("add")
@@ -2744,7 +2755,7 @@ struct TaskCard: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).modifier(ModelDisabled { [blocked = !focusBlockedReason.isEmpty] in
-                    blocked || !model.taskFocusInputEnabled(row, shown: true)
+                    blocked || !model.taskFocusInputEnabled(row, shown: true, surface: listSurface)
                 })
                 .accessibilityLabel(focusBlockedReason.isEmpty
                     ? model.label(row.flag("isFocusedToday") ? "agenda.removeFromFocus" : "agenda.addToFocus")
