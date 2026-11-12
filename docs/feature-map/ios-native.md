@@ -27,7 +27,7 @@ Almost every UI test lives in one file, `apps/ios-native/App/UITests/FoundationU
 Widgets, App Intents and Siri, the Share Extension and the Watch app belong to the RN app. They are not in `apps/ios-native`.
 
 - Widgets: `apps/mobile/widgets-ios`, wired by `apps/mobile/plugins/ios-widgets-and-shortcuts.js`.
-- App Intents and Siri: `apps/mobile/ios-app-intents` and `apps/mobile/modules/ios-siri-actions`.
+- App Intents and Siri: `apps/mobile/ios-app-intents` and `apps/mobile/modules/ios-siri-actions`. This client has its own foreground intents (see Shortcuts and Siri below).
 - Share Extension: the `expo-share-intent` plugin in `apps/mobile/app.json`.
 - Watch: `apps/mobile/targets/watch` and `apps/mobile/plugins/ios-watch.js`.
 - RN Spotlight: `apps/mobile/modules/apple-task-search`. This client has its own opt-in Spotlight entry (see System search below).
@@ -366,6 +366,14 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Code: `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeSearchIndex.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeSearchSnapshot.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testNativeSearch…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeSearchConsentTests.swift`
 - Notes: It is off by default and stays paused while App lock is on. It publishes only task titles and project names.
+
+## Shortcuts and Siri
+
+- Reach: the Shortcuts app › Mindwtr, or Siri with the App Shortcut phrases: "Capture in Mindwtr", "Add to Mindwtr", "Create a task in Mindwtr" (Capture Task); "Open Mindwtr", "Open a list in Mindwtr", "Show Mindwtr" (Open List); "Add a task in Mindwtr", "Open quick capture in Mindwtr" (Add Task).
+- Actions: Capture to Mindwtr (Task, Note, Tags, Project), Open Mindwtr List (Inbox, Focus, Waiting, Someday, Projects, Review, Calendar), Open Mindwtr Saved List (any saved filter), Add Task (quick capture). Titles, parameters, phrases and dialogs match RN's `apps/mobile/ios-app-intents/MindwtrSiriCaptureIntents.swift`.
+- Code: `apps/ios-native/App/NativeCaptureIntents.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeShortcutIntentLinks.swift`
+- Checks: `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeShortcutIntentLinksTests.swift`, `scripts/ci/validate-ios-app-intents-availability.js`
+- Notes: Each action opens RN's link (`mindwtr:///capture?…`, `mindwtr:///open-feature?feature=…`, `mindwtr:///widget-list/filter:<id>?source=shortcut`) through the app's own link router. The production app sends `mindwtr:` links; the `native.dev` app sends the same paths as `mindwtr-native-dev:` links, which its router accepts. The router resolves Open List for all seven lists. A saved Contexts filter opens Contexts with that filter selected; a saved filter of any other view opens the Widget list screen. A prefilled capture link opens the capture sheet filled in, and one with no title shows "Capture shortcut unavailable". The saved-list picker reads the saved filters from the widget payload that the production app publishes to its App Group, so a new filter appears after Mindwtr publishes once; the `native.dev` app has no saved lists. Not built yet: RN's background Add to Mindwtr (`Documents/pending-captures`) and Get Mindwtr Tasks (`mindwtr-ios-shortcuts-snapshot`); this client neither drains that queue nor publishes that snapshot.
 
 ## Capture reminder syntax (#1545)
 

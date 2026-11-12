@@ -20,13 +20,19 @@ const widgetSources = fs
     text: fs.readFileSync(path.join(widgetsDir, name), 'utf8'),
   }));
 
+const nativeSources = [
+  'apps/ios-native/App/NativeCaptureIntents.swift',
+  'apps/ios-native/CaptureWidget/NativeCaptureWidgetIntent.swift',
+  'apps/ios-native/CaptureWidget/NativeWidgetActionIntents.swift',
+].map((name) => ({ label: name, text: fs.readFileSync(path.join(repoRoot, name), 'utf8') }));
+
 const supportedModesMatches = source.match(/static\s+var\s+supportedModes\s*:\s*IntentModes/g) || [];
 if (supportedModesMatches.length === 0) {
   console.error('Expected at least one AppIntent supportedModes declaration.');
   process.exit(1);
 }
 
-for (const { label, text } of [{ label: 'ios-app-intents/MindwtrSiriCaptureIntents.swift', text: source }, ...widgetSources]) {
+for (const { label, text } of [{ label: 'ios-app-intents/MindwtrSiriCaptureIntents.swift', text: source }, ...widgetSources, ...nativeSources]) {
   const declared = text.match(/static\s+var\s+supportedModes\s*:\s*IntentModes/g) || [];
   const guarded = text.match(
     /#if compiler\(>=6\.0\)\s*\n\s*@available\(iOS 26\.0, \*\)\s*\n\s*static\s+var\s+supportedModes\s*:\s*IntentModes\s*\{/g
@@ -41,12 +47,13 @@ for (const { label, text } of [{ label: 'ios-app-intents/MindwtrSiriCaptureInten
 }
 
 const appShortcutPhrases = source.match(/phrases:\s*\[[\s\S]*?\]/g) || [];
+const nativeShortcutPhrases = nativeSources.flatMap(({ text }) => text.match(/phrases:\s*\[[\s\S]*?\]/g) || []);
 if (appShortcutPhrases.length === 0) {
   console.error('Expected Mindwtr AppShortcut phrases.');
   process.exit(1);
 }
 
-const parameterWrappedValueDefaults = source.match(
+const parameterWrappedValueDefaults = [source, ...nativeSources.map(({ text }) => text)].join('\n').match(
   /@Parameter\([^)]*\)\s*\n\s*var\s+\w+\s*:[^\n=]+=[^\n]+/g
 ) || [];
 if (parameterWrappedValueDefaults.length > 0) {
@@ -61,7 +68,7 @@ if (parameterWrappedValueDefaults.length > 0) {
 }
 
 const stringParameterInterpolation = /\\\(\\\.\$(task|note|tags|project)\)/;
-if (appShortcutPhrases.some((phraseBlock) => stringParameterInterpolation.test(phraseBlock))) {
+if ([...appShortcutPhrases, ...nativeShortcutPhrases].some((phraseBlock) => stringParameterInterpolation.test(phraseBlock))) {
   console.error(
     'Mindwtr AppShortcut phrases must not interpolate String parameters.'
   );
