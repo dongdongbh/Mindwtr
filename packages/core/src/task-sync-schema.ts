@@ -5,7 +5,7 @@ import schemaFixture from './task-sync-schema.fixture.json';
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './due-reminder-lead';
 import type { Task } from './types';
 import { normalizeTaskStatus } from './task-status';
-import { normalizeTaskReminderPolicy } from './task-reminder-policy';
+import { isSingleTaskReminder, normalizeTaskReminderPolicy } from './task-reminder-policy';
 import {
     fromBool,
     fromJson,
@@ -161,7 +161,7 @@ const taskColumnValues = (task: Task): Record<string, unknown> => {
         isFocusedToday: toBool(task.isFocusedToday),
         timeEstimate: task.timeEstimate ?? null,
         timeSpentMinutes: task.timeSpentMinutes ?? null,
-        suppressMindwtrReminders: toBool(task.suppressMindwtrReminders),
+        suppressMindwtrReminders: toBool(isSingleTaskReminder(task) || task.suppressMindwtrReminders),
         reminderPolicy: normalizeTaskReminderPolicy(task.reminderPolicy) ?? null,
         reviewAt: task.reviewAt ?? null,
         completedAt: task.completedAt ?? null,

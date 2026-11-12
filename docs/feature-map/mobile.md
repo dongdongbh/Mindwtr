@@ -436,3 +436,10 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Syntax: `/due:tomorrow 5pm /remind-due:1d` and `/start:tomorrow 9am /remind-start:30m`. Positive leads require the matching explicit date command with an explicit time. Units are integer `m`, `h`, `d`, `w`; due accepts 0–10080 minutes and start accepts only 0/5/15/30/60. `0m` turns the advance reminder off. Invalid tokens remain visible, show a warning and refuse save. Existing task reminder policy and device notification settings apply.
 - Code: `packages/core/src/quick-add.ts`, `packages/core/src/quick-add-preview.ts`, `packages/core/src/capture.ts`
 - Checks: `packages/core/src/quick-add-reminders.test.ts`, `packages/core/src/task-reminder-policy.test.ts`, `packages/core/src/native-host-contract-prepared-capture.test.ts`, `packages/core/src/native-host-contract-prepared-lines.test.ts`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`
+
+### Selective task reminders (#1547)
+
+- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time; its advance reminder replaces the date-time alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
+- Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
+- Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
+- Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.

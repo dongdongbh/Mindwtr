@@ -5516,7 +5516,8 @@ fn normalize_task_reminder_patch(patch: &mut Map<String, Value>, default_skip: b
         patch.insert("startReminderLeadMinutes".to_string(), json!(0));
     }
     if let Some(policy) = patch.get("reminderPolicy").and_then(Value::as_str) {
-        let skip = policy == "skip" || (policy == "inherit" && default_skip);
+        let skip =
+            matches!(policy, "skip" | "start" | "due") || (policy == "inherit" && default_skip);
         patch.insert("suppressMindwtrReminders".to_string(), Value::Bool(skip));
     } else if patch.contains_key("reminderPolicy") {
         patch.remove("reminderPolicy");
@@ -5585,9 +5586,9 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             }
             "reminderPolicy" => {
                 value.is_null()
-                    || value
-                        .as_str()
-                        .is_some_and(|policy| matches!(policy, "inherit" | "send" | "skip"))
+                    || value.as_str().is_some_and(|policy| {
+                        matches!(policy, "inherit" | "send" | "skip" | "start" | "due")
+                    })
             }
             "textDirection" => {
                 value.is_null()
@@ -7676,6 +7677,16 @@ mod tests {
             (json!({"suppressMindwtrReminders": false}), "send", false),
             (json!({"suppressMindwtrReminders": true}), "skip", true),
             (
+                json!({"reminderPolicy": "start", "suppressMindwtrReminders": false}),
+                "start",
+                true,
+            ),
+            (
+                json!({"reminderPolicy": "due", "suppressMindwtrReminders": false}),
+                "due",
+                true,
+            ),
+            (
                 json!({"reminderPolicy": "send", "suppressMindwtrReminders": true}),
                 "send",
                 false,
@@ -7711,6 +7722,18 @@ mod tests {
         .unwrap();
         assert_eq!(data["tasks"][0]["reminderPolicy"], "send");
         assert_eq!(data["tasks"][0]["suppressMindwtrReminders"], false);
+        for policy in ["start", "due"] {
+            patch_task_in_data(
+                &mut data,
+                "policy",
+                json!({"reminderPolicy":policy,"suppressMindwtrReminders":false})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(data["tasks"][0]["reminderPolicy"], policy);
+            assert_eq!(data["tasks"][0]["suppressMindwtrReminders"], true);
+        }
         let mut legacy = json!({"id":"legacy", "title":"Legacy", "status":"next", "suppressMindwtrReminders":false}).as_object().unwrap().clone();
         apply_task_patch(
             &mut legacy,

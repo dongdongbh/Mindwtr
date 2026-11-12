@@ -992,6 +992,7 @@ private fun Reminders(model: InboxViewModel, editor: TaskEditor, locked: Boolean
             }
         }
     }
+    if (!reminders.getBoolean("showDueAdvance")) return
     if (!reminders.getBoolean("showSkip") && editor.text("dueDate").isEmpty() && ((editor.value("dueReminderLeadMinutes") as? Number)?.toInt() ?: 0) == 0) return
     var advanceExpanded by rememberSaveable(editor.id) { mutableStateOf(false) }
     val advanceEnabled = reminders.getBoolean("showAdvance")

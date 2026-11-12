@@ -1,4 +1,4 @@
-import { getTaskReminderPolicy, normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
+import { getTaskReminderPolicy, normalizeTaskReminderPolicy, suppressLegacyTaskReminders } from './task-reminder-policy';
 import type { Task, TaskStatus } from './types';
 import type { TaskStore } from './store-types';
 import { getReferenceTaskFieldClears, getTaskOrder, resolveCaptureStatusForStart, type ProjectOrderReserver } from './store-helpers';
@@ -94,7 +94,7 @@ export function buildNewTask({
 
         isFocusedToday: initialTaskProps.isFocusedToday ?? false,
         reminderPolicy,
-        suppressMindwtrReminders: !shouldSendTaskReminders({ reminderPolicy }, state.settings),
+        suppressMindwtrReminders: suppressLegacyTaskReminders({ reminderPolicy }, state.settings),
         ...referenceClears,
         areaId: resolvedAreaId,
         projectId: resolvedProjectId,

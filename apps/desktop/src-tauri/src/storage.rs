@@ -1806,7 +1806,8 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("focusOrder").and_then(|v| v.as_f64()),
             task.get("isFocusedToday").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
             task.get("timeEstimate").and_then(|v| v.as_str()),
-            task.get("suppressMindwtrReminders").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+            (task.get("suppressMindwtrReminders").and_then(Value::as_bool).unwrap_or(false)
+                || matches!(task.get("reminderPolicy").and_then(Value::as_str), Some("start" | "due"))) as i32,
             task.get("repeatReminderMinutes").and_then(|v| v.as_i64()),
             task.get("reviewAt").and_then(|v| v.as_str()),
             task.get("completedAt").and_then(|v| v.as_str()),
@@ -1830,7 +1831,7 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("purgedAt").and_then(|v| v.as_str()),
             task.get("timeSpentMinutes").and_then(|v| v.as_i64()),
             task.get("archivedAt").and_then(|v| v.as_str()),
-            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
+            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip" | "start" | "due")),
             task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
             task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
         ],
@@ -2018,7 +2019,10 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
         );
     }
     if let Ok(Some(policy)) = row.get::<_, Option<String>>("reminderPolicy") {
-        if matches!(policy.as_str(), "inherit" | "send" | "skip") {
+        if matches!(
+            policy.as_str(),
+            "inherit" | "send" | "skip" | "start" | "due"
+        ) {
             map.insert("reminderPolicy".to_string(), Value::String(policy));
         }
     }
@@ -3492,7 +3496,8 @@ fn replace_prepared_data_in_transaction(
                 task.get("focusOrder").and_then(|v| v.as_f64()),
                 task.get("isFocusedToday").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
                 task.get("timeEstimate").and_then(|v| v.as_str()),
-                task.get("suppressMindwtrReminders").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+                (task.get("suppressMindwtrReminders").and_then(Value::as_bool).unwrap_or(false)
+                || matches!(task.get("reminderPolicy").and_then(Value::as_str), Some("start" | "due"))) as i32,
                 task.get("repeatReminderMinutes").and_then(|v| v.as_i64()),
                 task.get("reviewAt").and_then(|v| v.as_str()),
                 task.get("completedAt").and_then(|v| v.as_str()),
@@ -3516,7 +3521,7 @@ fn replace_prepared_data_in_transaction(
                 task.get("purgedAt").and_then(|v| v.as_str()),
                 task.get("timeSpentMinutes").and_then(|v| v.as_i64()),
             task.get("archivedAt").and_then(|v| v.as_str()),
-            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
+            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip" | "start" | "due")),
             task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
             task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
             ],
@@ -6749,9 +6754,9 @@ mod tests {
             .unwrap();
         assert!(legacy.get("reminderPolicy").is_none());
         assert_eq!(legacy["suppressMindwtrReminders"], false);
-        for policy in ["inherit", "send", "skip"] {
+        for policy in ["inherit", "send", "skip", "start", "due"] {
             let task = serde_json::json!({"id":policy,"title":"Policy","status":"next","tags":[],"contexts":[],
-                "createdAt":"2026-01-01","updatedAt":"2026-01-01","reminderPolicy":policy,"repeatReminderMinutes":15});
+                "createdAt":"2026-01-01","updatedAt":"2026-01-01","reminderPolicy":policy,"repeatReminderMinutes":15,"rev":2,"suppressMindwtrReminders":false});
             upsert_task_row(&conn, &task).unwrap();
             let read = conn
                 .query_row(
@@ -6762,7 +6767,40 @@ mod tests {
                 .unwrap();
             assert_eq!(read["reminderPolicy"], policy);
             assert_eq!(read["repeatReminderMinutes"], 15);
+            assert_eq!(
+                read["suppressMindwtrReminders"],
+                matches!(policy, "start" | "due")
+            );
+            let mut stale = task.clone();
+            stale["rev"] = serde_json::json!(1);
+            stale.as_object_mut().unwrap().remove("reminderPolicy");
+            upsert_task_row(&conn, &stale).unwrap();
+            let retained = conn
+                .query_row(
+                    "SELECT * FROM tasks WHERE id=?1",
+                    [policy],
+                    row_to_task_value,
+                )
+                .unwrap();
+            assert_eq!(retained, read);
         }
+        let mut persisted = read_sqlite_data(&conn).unwrap();
+        persisted["tasks"].as_array_mut().unwrap().retain(|task| {
+            matches!(
+                task.get("reminderPolicy").and_then(Value::as_str),
+                Some("start" | "due")
+            )
+        });
+        let mut full_replacement = Connection::open_in_memory().unwrap();
+        initialize_sqlite_schema(&mut full_replacement).unwrap();
+        let mut incoming = persisted.clone();
+        for task in incoming["tasks"].as_array_mut().unwrap() {
+            task["suppressMindwtrReminders"] = serde_json::json!(false);
+        }
+        assert_eq!(
+            replace_json_in_sqlite(&mut full_replacement, &incoming).unwrap(),
+            persisted
+        );
         conn.execute(
             "UPDATE tasks SET reminderPolicy='sometimes' WHERE id='legacy'",
             [],

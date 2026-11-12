@@ -28,7 +28,7 @@ import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, 
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
-import { getTaskReminderPolicy } from './task-reminder-policy';
+import { getTaskReminderPolicy, normalizeTaskReminderPolicy } from './task-reminder-policy';
 import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import type { AppSettings, FilterCriteria } from './types';
@@ -851,7 +851,7 @@ const DRAFT_VALUE_CHECKS: Record<TaskDraftField, (value: unknown) => boolean> = 
     startReminderLeadMinutes: (value) => value === undefined || normalizeStartReminderLeadMinutes(value) !== undefined,
     repeatReminderMinutes: isUnsetOrMinutes,
     suppressMindwtrReminders: isBoolean,
-    reminderPolicy: (value) => value === 'inherit' || value === 'send' || value === 'skip',
+    reminderPolicy: (value) => normalizeTaskReminderPolicy(value) !== undefined,
 };
 const toDraftValues = (input: Record<string, unknown>): Partial<TaskDraft> => Object.fromEntries(
     Object.entries(input).map(([field, value]) => [field, value === null && UNSET_DRAFT_FIELDS.has(field) ? undefined : value]),

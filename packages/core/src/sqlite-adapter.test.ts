@@ -792,14 +792,27 @@ describeSqlite('SqliteAdapter', () => {
         expect(loaded.tasks[0]).toMatchObject({ id: 'legacy', suppressMindwtrReminders: false });
         expect(loaded.tasks[0].reminderPolicy).toBeUndefined();
         expect(allSql(db, 'SELECT reminderPolicy FROM tasks')).toEqual([{ reminderPolicy: null }]);
-        for (const reminderPolicy of ['inherit', 'send', 'skip'] as const) {
+        for (const reminderPolicy of ['inherit', 'send', 'skip', 'start', 'due'] as const) {
             await adapter.saveTask({ ...loaded.tasks[0], id: reminderPolicy, reminderPolicy, repeatReminderMinutes: 15 });
         }
         const reloaded = await adapter.getData();
-        for (const reminderPolicy of ['inherit', 'send', 'skip'] as const) {
+        for (const reminderPolicy of ['inherit', 'send', 'skip', 'start', 'due'] as const) {
             expect(reloaded.tasks.find((task) => task.id === reminderPolicy)).toMatchObject({ reminderPolicy, repeatReminderMinutes: 15 });
         }
         expect(reloaded.tasks.find((task) => task.id === 'legacy')?.reminderPolicy).toBeUndefined();
+    });
+
+    it.each(['start', 'due'] as const)('keeps newer %s policy and safe legacy suppression across task and snapshot saves', async (reminderPolicy) => {
+        const current: Task = { id: reminderPolicy, title: 'Selected reminder', status: 'next', tags: [], contexts: [],
+            reminderPolicy, suppressMindwtrReminders: false, rev: 2, createdAt: '2026-01-01', updatedAt: '2026-01-01' };
+        await adapter.saveTask(current);
+        expect((await adapter.getData()).tasks[0]).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true, rev: 2 });
+        const stale = { ...current, reminderPolicy: undefined, suppressMindwtrReminders: false, rev: 1 };
+        await adapter.saveTask(stale);
+        expect((await adapter.getData()).tasks[0]).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true, rev: 2 });
+        const saved = await adapter.getData();
+        await adapter.saveData({ ...saved, tasks: [stale] });
+        expect((await adapter.getData()).tasks[0]).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true, rev: 2 });
     });
 
     it('migrates advance reminder absence and round-trips explicit Off without resurrecting the old value', async () => {

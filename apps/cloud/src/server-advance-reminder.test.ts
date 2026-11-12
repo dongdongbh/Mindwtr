@@ -37,3 +37,21 @@ describe('start advance reminder trust boundaries', () => {
         }
     });
 });
+
+
+describe('task reminder policy trust boundaries', () => {
+    test('accepts all policies and legacy absence for REST and sync documents', () => {
+        for (const reminderPolicy of [undefined, null, 'inherit', 'send', 'skip', 'start', 'due']) {
+            expect(validateAppData({ ...document(undefined), tasks: [{ ...task, reminderPolicy }] }).ok).toBe(true);
+            expect(validateEntityProps('task', 'create', { reminderPolicy }).ok).toBe(true);
+            expect(validateEntityProps('task', 'patch', { reminderPolicy }).ok).toBe(true);
+        }
+    });
+    test('rejects malformed policies before REST and sync document writes', () => {
+        for (const reminderPolicy of ['', 'sometimes', 1, true, {}, []]) {
+            expect(validateAppData({ ...document(undefined), tasks: [{ ...task, reminderPolicy }] }).ok).toBe(false);
+            expect(validateEntityProps('task', 'create', { reminderPolicy }).ok).toBe(false);
+            expect(validateEntityProps('task', 'patch', { reminderPolicy }).ok).toBe(false);
+        }
+    });
+});

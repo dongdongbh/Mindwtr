@@ -29,7 +29,7 @@ const TASK_FIELD_ZOD_SCHEMAS: Partial<Record<keyof Task, z.ZodTypeAny>> = {
   isFocusedToday: z.boolean().describe("Marked as today's focus list"),
   timeSpentMinutes: z.number().int().nonnegative().describe('Total minutes worked on the task'),
   suppressMindwtrReminders: z.boolean().describe('Skip Mindwtr start/due reminders for this task'),
-  reminderPolicy: z.enum(['inherit', 'send', 'skip']).describe('Inherit the global task reminder default, explicitly send, or skip start/due reminders'),
+  reminderPolicy: z.enum(['inherit', 'send', 'skip', 'start', 'due']).describe('Inherit the global default, send start/due reminders, skip them, or send one reminder for only the start or due date'),
   repeatReminderMinutes: z.number().int().nonnegative().describe(
     'Repeat the due-time reminder every N minutes (presets 5|10|15|30|60); 0/absent = off'
   ),

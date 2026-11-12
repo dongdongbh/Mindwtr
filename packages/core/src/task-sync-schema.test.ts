@@ -78,12 +78,15 @@ describe('Task sync schema contract', () => {
         expect(Object.keys(mapped).sort()).toEqual(sorted(fieldNames));
     });
 
-    it.each(['inherit', 'send', 'skip'] as const)('round-trips %s reminder policy through SQLite and a sync document', (reminderPolicy) => {
+    it.each(['inherit', 'send', 'skip', 'start', 'due'] as const)('round-trips %s reminder policy through SQLite and a sync document', (reminderPolicy) => {
         const task = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy };
         const values = taskToSqliteRow(task);
         const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
         const reloaded = mapSqliteTaskRow(row);
         expect(reloaded.reminderPolicy).toBe(reminderPolicy);
+        if (reminderPolicy === 'start' || reminderPolicy === 'due') {
+            expect(reloaded.suppressMindwtrReminders).toBe(true);
+        }
         const normalized = normalizeTaskForSyncMerge(reloaded, task.updatedAt);
         expect(normalizeTaskForSyncMerge(normalized, task.updatedAt)).toEqual(normalized);
         expect(normalizeTaskForContentComparison(reloaded).reminderPolicy).toBe(reminderPolicy);
@@ -94,6 +97,17 @@ describe('Task sync schema contract', () => {
         const second = mergeAppDataWithStats(first.data, first.data, { nowIso: task.updatedAt });
         expect(second.stats.tasks.conflicts).toBe(0);
         expect(second.data).toEqual(first.data);
+    });
+
+    it.each(['start', 'due'] as const)('persists %s with safe legacy suppression even when input has a false flag', (reminderPolicy) => {
+        const task = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy, suppressMindwtrReminders: false };
+        const values = taskToSqliteRow(task);
+        const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
+        expect(row.suppressMindwtrReminders).toBe(1);
+        expect(mapSqliteTaskRow(row)).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
+        const normalized = normalizeTaskForSyncMerge(task, task.updatedAt);
+        expect(normalized).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
+        expect(normalizeTaskForSyncMerge(normalized, task.updatedAt)).toEqual(normalized);
     });
 
     it.each([true, false])('keeps absent legacy policy explicit after SQLite and older-client sync (skip=%s)', (suppressMindwtrReminders) => {
@@ -111,12 +125,12 @@ describe('Task sync schema contract', () => {
         expect(shouldSendTaskReminders(merged.data.tasks[0], { taskReminderDefault: 'skip' })).toBe(!suppressMindwtrReminders);
     });
 
-    it('retains a newer policy when merging with an older client that omits the field', () => {
-        const current = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy: 'inherit' as const, rev: 2 };
-        const legacy = { ...current, reminderPolicy: undefined, rev: 1 };
+    it.each(['inherit', 'start', 'due'] as const)('retains newer %s policy when merging with an older client that omits the field', (reminderPolicy) => {
+        const current = { ...TASK_SYNC_SCHEMA_FIXTURE, deletedAt: undefined, purgedAt: undefined, reminderPolicy, rev: 2, suppressMindwtrReminders: true };
+        const legacy = { ...current, reminderPolicy: undefined, suppressMindwtrReminders: false, rev: 1 };
         const forward = mergeAppDataWithStats(mockAppData([current]), mockAppData([legacy]), { nowIso: current.updatedAt });
         const reverse = mergeAppDataWithStats(mockAppData([legacy]), mockAppData([current]), { nowIso: current.updatedAt });
-        expect(forward.data.tasks[0].reminderPolicy).toBe('inherit');
+        expect(forward.data.tasks[0]).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
         expect(reverse.data).toEqual(forward.data);
         const second = mergeAppDataWithStats(forward.data, forward.data, { nowIso: current.updatedAt });
         expect(second.stats.tasks.conflicts).toBe(0);

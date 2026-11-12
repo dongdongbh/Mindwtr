@@ -624,7 +624,7 @@ describe('task reminder policy controls', () => {
         const draft = createTaskDraft({ ...task, reminderPolicy });
         const before = structuredClone(draft);
         const model = getTaskEditorReminders(draft, (key) => key, { taskReminderDefault, notificationsEnabled: false });
-        expect(model.policyOptions.map((option) => option.value)).toEqual(['inherit', 'send', 'skip']);
+        expect(model.policyOptions.map((option) => option.value)).toEqual(['inherit', 'send', 'skip', 'start', 'due']);
         expect(model.policyOptions.filter((option) => option.selected).map((option) => option.value)).toEqual([reminderPolicy]);
         expect(model.policyOptions[0].label).toBe(`Use default (${taskReminderDefault === 'skip' ? 'Skip' : 'Send'})`);
         expect(model.showRepeat).toBe(showRepeat);
@@ -632,6 +632,37 @@ describe('task reminder policy controls', () => {
         expect(model.disabledHint).toContain('turned off');
         expect(draft).toEqual(before);
     });
+    it.each(['start', 'due'] as const)('shows only the %s advance and preserves hidden settings', (reminderPolicy) => {
+        const draft = createTaskDraft({ ...task, startTime: '2026-10-15T09:00', reminderPolicy,
+            suppressMindwtrReminders: true, startReminderLeadMinutes: 15, dueReminderLeadMinutes: 30 });
+        const before = structuredClone(draft);
+        const model = getTaskEditorReminders(draft, (key) => key, { taskReminderDefault: 'skip' });
+        expect(model.policyValueLabel).toBe(reminderPolicy === 'start' ? 'Start only' : 'Due only');
+        expect(model.policyOptions.filter((option) => option.selected).map((option) => option.value)).toEqual([reminderPolicy]);
+        expect(model.startAdvance?.enabled ?? false).toBe(reminderPolicy === 'start');
+        expect(model.showDueAdvance).toBe(reminderPolicy === 'due');
+        expect(model.showAdvance).toBe(reminderPolicy === 'due');
+        expect(model.showRepeat).toBe(false);
+        expect(model.hint).toContain('or its advance time instead');
+        expect(model.hint).toContain('Repeat reminders are ignored');
+        expect(draft).toEqual(before);
+        const restored = getTaskEditorReminders(setTaskDraftField(draft, 'reminderPolicy', 'send'), (key) => key);
+        expect(restored.startAdvance?.valueLabel).toBe('15 min before');
+        expect(restored.advanceValueLabel).toBe('30 min before');
+        expect(restored.repeatValueLabel).toBe('Every 15 min');
+        expect(restored.showRepeat).toBe(true);
+    });
+
+    it.each(['start', 'due'] as const)('keeps %s-only inactive without a matching explicit time', (reminderPolicy) => {
+        const draft = createTaskDraft({ ...task, startTime: '2026-10-15', dueDate: '2026-10-15', reminderPolicy });
+        const model = getTaskEditorReminders(draft, (key) => key);
+        expect(model.startAdvance).toBeNull();
+        expect(model.showAdvance).toBe(false);
+        expect(model.showRepeat).toBe(false);
+        expect(draft.startTime).toBe('2026-10-15');
+        expect(draft.dueDate).toBe('2026-10-15');
+    });
+
     it('keeps date-only reminders out of the controls and never invents a time', () => {
         const draft = createTaskDraft({ ...task, dueDate: '2026-10-15', reminderPolicy: 'send' });
         const model = getTaskEditorReminders(draft, (key) => key);
@@ -650,8 +681,8 @@ describe('advance reminder editor', () => {
         const model = getTaskEditorReminders(createTaskDraft(task), t);
         expect(model.showAdvance).toBe(true);
         expect(model.advanceValueLabel).toBe('Off');
-        expect(model.advanceOptions.map(({ value }) => value)).toEqual([0, 5, 15, 30, 60, 1440, 2880, 10080]);
-        expect(model.advanceOptions.map(({ label }) => label)).toEqual(['Off', '5 min before', '15 min before', '30 min before', '1 hour before', '1 day before', '2 days before', '1 week before']);
+        expect(model.advanceOptions.map(({ value }) => value)).toEqual([0, 5, 15, 30, 60, 120, 1440, 2880, 10080]);
+        expect(model.advanceOptions.map(({ label }) => label)).toEqual(['Off', '5 min before', '15 min before', '30 min before', '1 hour before', '120 min before', '1 day before', '2 days before', '1 week before']);
     });
     it('shows a valid stored nonpreset without offering custom input', () => {
         const model = getTaskEditorReminders(createTaskDraft({ ...task, dueReminderLeadMinutes: 90 }), t);

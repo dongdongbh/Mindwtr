@@ -36,6 +36,9 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.9 (add before tagging, trim in the release after)
 
+- **selective-task-reminder** (#1547) — `packages/core/src/mobile-reminder-alarms.ts`, `packages/core/src/native-host-contract-reminders.ts`, `apps/desktop/src/lib/notification-service.tsx`. Select Start only or Due only and optionally choose an advance time. Diagnostics must show `v1.3.9/selective-task-reminder` with `scheduled` (React Native), `planned` (native host), or `delivered` (desktop). Native planning is not OS delivery proof: confirm exactly one chosen alert and no alert at the other date or original date-time when an advance time is selected. No task content is logged.
+
+
 - **`v1.3.9/widget-contexts-filter`** — React Native Contexts view after applying a saved filter from a widget link. Message: `Widget Contexts filter selected`, `outcome=selected`. Tester: tap a Context-filter widget header, confirm the saved filter is selected and its controls can be changed; include Reference and exclude a project, then check matching widget rows. Reference rows open without a completion action. No filter names, identifiers, or task content are logged. (#1485)
 
 - **`v1.3.9/checklist-handle-drag`** — React Native `TaskEditContentField.tsx`, `Checklist handle drag applied to draft` with `stage=draft-moved` after one handle drop updates the draft. Tester: drag sideways beyond the handle, then vertically across a long checklist; the moving row must follow the finger and neighbors must preview its slot. Cancel a drag to restore the order, switch row action menus, then Save and reopen to verify text, checkmarks and order. The marker proves the draft move ran, not native gesture smoothness or persistence. No content or IDs are logged. (#1483)

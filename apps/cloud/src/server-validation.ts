@@ -7,6 +7,7 @@ import {
     normalizeRecurrenceForLoad,
     normalizeRelativeStartOffset,
     normalizeRepeatReminderMinutes,
+    normalizeTaskReminderPolicy,
     normalizeDueReminderLeadMinutes,
     normalizeStartReminderLeadMinutes,
     normalizeTimeSpentMinutes,
@@ -52,7 +53,7 @@ const ATTACHMENT_LOCAL_STATUS_VALUES = new Set(['available', 'missing', 'uploadi
 
 function validateTaskReminderPolicy(value: Record<string, unknown>): string | null {
     const policy = value.reminderPolicy;
-    return policy == null || policy === 'inherit' || policy === 'send' || policy === 'skip'
+    return policy == null || normalizeTaskReminderPolicy(policy) !== undefined
         ? null
         : 'Invalid task reminderPolicy';
 }

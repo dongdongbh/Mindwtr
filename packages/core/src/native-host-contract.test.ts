@@ -2174,6 +2174,18 @@ describe('native host contract', () => {
                 expect(storedTask().reminderPolicy).toBe('inherit');
             });
 
+            it.each(['start', 'due'] as const)('saves %s policy through native draft validation with safe legacy suppression', async (reminderPolicy) => {
+                const host = await activateEditor([editTask({ reminderPolicy: 'send', suppressMindwtrReminders: false })]);
+                const original = openDraft(host);
+                const next = edited(host, original, { type: 'fields', patch: { reminderPolicy } }).draft;
+                expect(next.reminderPolicy).toBe(reminderPolicy);
+                expect(host.editTaskDraft({ id: 'edit', draft: next })).toMatchObject({ ok: true });
+                expect(await host.saveTaskDraft({ id: 'edit', ...changes(original, next), requestId: newRequestId() }))
+                    .toMatchObject({ ok: true, value: { draft: { reminderPolicy, suppressMindwtrReminders: true } } });
+                expect(storedTask()).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
+                expect(openDraft(host)).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
+            });
+
             it('saves a task policy and both advance reminders on that task only', async () => {
                 const timed = { startTime: '2026-09-26T20:00:00.000Z', dueDate: '2026-09-26T21:00:00.000Z', reminderPolicy: 'inherit' as const };
                 const other = task('other', '2026-09-01T00:00:00.000Z', { title: 'Other', status: 'next', ...timed });
