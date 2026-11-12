@@ -43,6 +43,8 @@ struct TaskViewSheet: View {
     @State private var checklistDragRow: String?
     @State private var checklistDragTarget: String?
     @State private var checklistDragPointer: CGFloat = 0
+    @State private var checklistDragStartPointer: CGFloat = 0
+    @State private var checklistDragOriginY: CGFloat = 0
     @State private var checklistFrames: [String: CGRect] = [:]
     @State private var checklistViewport = CGRect.zero
     @State private var checklistActionRow: String?
@@ -931,6 +933,7 @@ struct TaskViewSheet: View {
         let labels = field.object("labels")
         let items = field.objects("items")
         let sessionRows = checklistRowSession.sync(items)
+        let order = sessionRows.map(\.identity)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 label(field.text("label"))
@@ -965,15 +968,14 @@ struct TaskViewSheet: View {
                         checklistEditRow(item, placeholder: labels.text("placeholder"), bullets: field.flag("bullets"))
                     }
                 }
+                .background(checklistDragRow == row.identity ? palette.card : Color.clear)
+                .offset(y: checklistDragOffset(row.identity, order: order))
                 .id("task-checklist-row-\(row.identity)")
                 .background(GeometryReader { geometry in
                     Color.clear.preference(key: ChecklistRowFramesPreference.self,
                         value: [row.identity: geometry.frame(in: .global)])
                 })
-                .overlay(alignment: .top) {
-                    if checklistDragTarget == row.identity { Rectangle().fill(palette.tint).frame(height: 2) }
-                }
-                .opacity(checklistDragRow == row.identity ? 0.6 : 1)
+                .zIndex(checklistDragRow == row.identity ? 1 : 0)
             }
             if !checklistReordering, field.flag("canAdd") {
                 Button {
@@ -1035,6 +1037,8 @@ struct TaskViewSheet: View {
                     guard !frozen, model.taskChecklistField.objects("items").count > 1 else { return }
                     if checklistDragRow == nil {
                         endEditingBeforeAction(); focusedChecklistIndex = nil; checklistActionRow = nil
+                        checklistDragStartPointer = value.startLocation.y
+                        checklistDragOriginY = checklistFrames[identity]?.minY ?? 0
                         checklistDragRow = identity
                     }
                     checklistDragPointer = value.location.y
@@ -1050,6 +1054,17 @@ struct TaskViewSheet: View {
                     if let from, let to, from != to { moveChecklistItem(from: from, to: to, dragged: true) }
                 })
             .disabled(frozen)
+    }
+
+    private func checklistDragOffset(_ identity: String, order: [String]) -> CGFloat {
+        guard let dragged = checklistDragRow, let frame = checklistFrames[dragged] else { return 0 }
+        if identity == dragged { return checklistDragPointer - checklistDragStartPointer + checklistDragOriginY - frame.minY }
+        guard let target = checklistDragTarget, let from = order.firstIndex(of: dragged),
+              let to = order.firstIndex(of: target), let index = order.firstIndex(of: identity) else { return 0 }
+        let slot = frame.height + 8
+        if from < index && index <= to { return -slot }
+        if to <= index && index < from { return slot }
+        return 0
     }
 
     private func checklistDropTarget() -> String? {
