@@ -784,7 +784,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
 
     private fun stepEditor(engine: CoreHost, current: TaskEditor, sent: Map<String, String>, edit: String): Stepped {
-        val queued = edit.takeIf { it.isNotEmpty() }?.let { JSONObject(it).optJSONObject("checklist") }
+        val queued = checklistEditOf(edit)
 
         val listEdit = queued?.let { currentChecklistEdit(it, current.checklistNow) }
         val checked = listEdit?.let { engine.editTaskChecklist(current.id, draftJson(sent), current.checklistNow, it.toString()) }
