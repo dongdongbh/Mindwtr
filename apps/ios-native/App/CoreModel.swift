@@ -8660,9 +8660,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return "iosProductionWidgetTaskOpen"
     }
 
-    private static let routeDestinations = ["focus", "waiting", "someday", "contexts", "capture"]
+    private static let routeDestinations = ["focus", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
     private static let silentRouteDestinations = ["contextAutomation"]
-    private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday]
+    private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday,
+                                                           "projects": .projects, "review": .review, "calendar": .calendar]
 
     private func entityRouteShapeValid(_ route: CoreObject, allowed: [String]) -> Bool {
         let type = route.text("type")
@@ -9471,6 +9472,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "focus": await self.selectSurface(.focus)
                 case "waiting": await self.openWaiting()
                 case "someday": await self.openSomeday()
+                case "projects": await self.openProjects()
+                case "review": await self.openReview()
+                case "calendar": await self.openCalendar()
                 case "contexts": await self.openContextsSavedFilter(route.text("savedFilterId"))
                 case "capture": await self.openCapture(admission: { self.entityLinkCurrent(owner) && self.notificationResponseContextClean })
                 case "contextAutomation":

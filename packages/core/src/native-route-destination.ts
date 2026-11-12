@@ -3,7 +3,7 @@ import { normalizeSavedFilters } from './saved-filters';
 import { normalizeWidgetListDestinationId } from './widget-list-destination';
 
 export type NativeRouteDestination =
-    | { type: 'none' | 'focus' | 'inbox' | 'waiting' | 'someday' | 'capture' | 'contextAutomation' }
+    | { type: 'none' | 'focus' | 'inbox' | 'waiting' | 'someday' | 'projects' | 'review' | 'calendar' | 'capture' | 'contextAutomation' }
     | { type: 'contexts'; savedFilterId: string };
 
 const SURFACE_ROUTES = new Map<string, NativeRouteDestination>([
@@ -11,6 +11,9 @@ const SURFACE_ROUTES = new Map<string, NativeRouteDestination>([
     ['/inbox', { type: 'inbox' }],
     ['/waiting', { type: 'waiting' }],
     ['/someday', { type: 'someday' }],
+    ['/projects', { type: 'projects' }],
+    ['/review-tab', { type: 'review' }],
+    ['/calendar', { type: 'calendar' }],
 ]);
 const WIDGET_LIST_ROUTE = '/widget-list/';
 const FOCUS_SECTION_LISTS = new Set(['next', 'upcoming']);

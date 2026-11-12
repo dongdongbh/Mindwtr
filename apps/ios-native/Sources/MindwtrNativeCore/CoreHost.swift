@@ -26627,7 +26627,7 @@ private final class Engine: @unchecked Sendable {
         case "Native iOS widget route opened":
             valid = Set(context.keys) == Set(["releaseCheck", "destination", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-widget-routes"
-                && ["focus", "waiting", "someday", "contexts", "capture"].contains(context["destination"] as? String ?? "")
+                && ["focus", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"].contains(context["destination"] as? String ?? "")
                 && context["outcome"] as? String == "opened"
         case "Native iOS Add Task shortcut presented":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])

@@ -129,6 +129,8 @@ final class EntityOpenHostTests: XCTestCase {
         let routes: [(String, [String: String])] = [
             ("/focus", ["type": "focus"]), ("/inbox", ["type": "inbox"]), ("/waiting", ["type": "waiting"]),
             ("/someday", ["type": "someday"]), ("/capture-quick?mode=text", ["type": "capture"]),
+            ("open-feature?feature=projects", ["type": "projects"]), ("open-feature?feature=review", ["type": "review"]),
+            ("open-feature?feature=calendar", ["type": "calendar"]), ("open-feature?feature=inbox", ["type": "inbox"]),
             ("/widget-list/next", ["type": "focus"]), ("/widget-list/upcoming", ["type": "focus"]),
             ("/widget-list/filter%3Acalls", ["type": "contexts", "savedFilterId": "calls"]),
             ("/widget-list/filter%3Acalls?source=shortcut", ["type": "contexts", "savedFilterId": "calls"]),
