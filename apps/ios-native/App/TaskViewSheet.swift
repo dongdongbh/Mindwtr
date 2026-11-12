@@ -558,7 +558,11 @@ struct TaskViewSheet: View {
     private var editorFields: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                label(strings.text("taskEdit.titleLabel"))
+                HStack(spacing: 12) {
+                    label(strings.text("taskEdit.titleLabel"))
+                    Spacer(minLength: 0)
+                    if model.taskEditorFocusStarShown { focusStarButton }
+                }
                 TextField(strings.text("taskEdit.titleLabel"), text: Binding(
                     get: { model.taskTitleDraft }, set: { model.setTaskTitleDraft($0) }), axis: .vertical)
                     .rnFont(16).lineLimit(2...6).padding(12)
@@ -1505,6 +1509,30 @@ struct TaskViewSheet: View {
         default:
             EmptyView()
         }
+    }
+
+    private var focusStarButton: some View {
+        let star = model.taskEditor.object("focusStar")
+        let focused = star.flag("isFocused")
+        let enabled = star.flag("canToggle")
+        let action = strings.text(star.text("labelKey"))
+        let queuedHint = strings.text("agenda.focusWhenAvailable")
+        let available = star.flag("queued") ? (focused ? action + ". " + queuedHint : queuedHint) : action
+        let blocked = star["blockedText"] as? String ?? ""
+        return Button {
+            endEditingBeforeAction()
+            Task { _ = await model.editTaskFocusStar() }
+        } label: {
+            AppFocusStar(focused: focused, disabled: !enabled, palette: palette, size: 18)
+                .frame(width: 28, height: 28)
+                .background(palette.filter, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(palette.border, lineWidth: 1))
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(frozen || !enabled)
+        .accessibilityLabel(blocked.isEmpty ? available : blocked)
+        .accessibilityAddTraits(focused ? .isSelected : [])
+        .accessibilityIdentifier("task-editor-focus-star")
     }
 
     private func label(_ text: String) -> some View {

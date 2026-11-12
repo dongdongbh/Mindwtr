@@ -40509,6 +40509,38 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && (taskEditor.object("options")["statuses"] as? [String] ?? []).contains(status)
     }
 
+    var taskEditorFocusStarShown: Bool {
+        !taskEditor.isEmpty && !taskEditor.flag("readOnly") && taskEditor["focusStar"] is CoreObject
+            && taskOriginalDraft.text("status") != "archived" && taskDraft.text("status") != "reference"
+    }
+
+    func editTaskFocusStar() async -> Bool {
+        guard taskPresented, taskEditorFocusStarShown, taskEditor.object("focusStar").flag("canToggle"),
+              !busy, !retryNeeded, !taskPreviewCompleting,
+              taskChecklistWriteKind == nil, !taskChecklistReadPending else { return false }
+        taskRecoveryOwn(["focusedToday"])
+        let id = viewedTaskID
+        let session = taskScheduleSession
+        busy = true
+        taskError = nil
+        defer { finishOperation() }
+        do {
+            try await resolveTaskEditorInputs()
+            guard taskPresented, viewedTaskID == id, taskScheduleSession == session,
+                  !taskEditor.flag("readOnly") else { throw CancellationError() }
+            let star = taskEditor.object("focusStar")
+            guard star.flag("canToggle") else { return false }
+            let editor = try await query("editDraft", [try json(taskEditRequest(
+                ["type": "fields", "patch": ["focusedToday": !star.flag("isFocused")]]))])
+            guard taskPresented, viewedTaskID == id, taskScheduleSession == session else { throw CancellationError() }
+            taskEditor = editor
+            return true
+        } catch {
+            taskError = error.localizedDescription
+            return false
+        }
+    }
+
     func editTaskStatus(_ status: String, assignedTo: String? = nil,
                         expectedID: String? = nil, expectedSession: Int? = nil, previewCompletion: Bool = false) async -> Bool {
         guard !taskPreviewCompleting || previewCompletion else { return false }

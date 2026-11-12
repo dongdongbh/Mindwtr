@@ -18614,6 +18614,51 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
     }
 
+    func testTaskEditorFocusStarSavesAndRefusesPastTheLimit() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", "163d398f-1da1-4310-aa97-17ef3f25ce5e"]
+        app.launch(); openTaskFocusTest(app)
+        let aID = "acc031d9-9cac-4296-8420-840bcd17a562"
+        let bID = "d55f6859-cf8e-4643-a1ad-eff6db59262e"
+        let focusScroll = app.scrollViews.containing(.button, identifier: "focus-view-options").firstMatch
+        let editorStar = app.buttons["task-editor-focus-star"]
+        func openEditor(_ id: String) {
+            let title = app.buttons["task-title-" + id].firstMatch
+            revealPagedElement(app, title, in: focusScroll); boardEnabled(title); title.tap()
+            boardTap(app, "task-mode-edit")
+            XCTAssertTrue(editorStar.waitForExistence(timeout: 30))
+        }
+        func expectLabel(_ element: XCUIElement, _ label: String) {
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", label), object: element)], timeout: 15), .completed)
+        }
+        openEditor(aID)
+        boardEnabled(editorStar); expectLabel(editorStar, "Add to today's focus")
+        XCTAssertFalse(editorStar.isSelected)
+        XCTAssertGreaterThanOrEqual(editorStar.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(editorStar.frame.height, 44)
+        editorStar.tap()
+        expectLabel(editorStar, "Remove from focus"); XCTAssertTrue(editorStar.isSelected)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Task editor Focus star"; shot.lifetime = .keepAlways; add(shot)
+        boardTap(app, "task-editor-save")
+        XCTAssertTrue(app.buttons["task-editor-save"].waitForNonExistence(timeout: 30))
+        let listStar = app.buttons["task-focus-" + aID].firstMatch
+        revealPagedElement(app, listStar, in: focusScroll); boardEnabled(listStar)
+        expectLabel(listStar, "Remove from focus")
+        openEditor(bID)
+        XCTAssertFalse(editorStar.isEnabled)
+        XCTAssertTrue(editorStar.label.contains("1"))
+        XCTAssertFalse(editorStar.isSelected)
+        boardTap(app, "task-view-close")
+        app.terminate(); app.launch(); openTaskFocusTest(app)
+        revealPagedElement(app, listStar, in: focusScroll); boardEnabled(listStar)
+        expectLabel(listStar, "Remove from focus"); listStar.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in !listStar.exists || listStar.label != "Remove from focus" }, object: nil)], timeout: 15), .completed)
+        app.terminate()
+    }
+
     func testDailyReviewTaskFocusStar() {
         let app = XCUIApplication()
         app.launchArguments = ["--native-ui-test-library", "e331ca00-fa05-40cc-8ef0-be82a1bd4d41"]

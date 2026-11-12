@@ -4698,6 +4698,48 @@ final class CoreHostTests: XCTestCase {
         }
     }
 
+    func testEditorFocusStarTogglesTheDraftAndSaveRefusesAFilledFocus() async throws {
+        let writer = host()
+        _ = try await writer.start()
+        let id = UUID().uuidString.lowercased(), other = UUID().uuidString.lowercased()
+        _ = try await writer.call("captureSubmit", argumentsJSON: capture(writer, title: "Editor star", id: id))
+        _ = try await writer.call("captureSubmit", argumentsJSON: capture(writer, title: "Other star", id: other))
+        await writer.close()
+        var settings = try calendarPreferenceSettings()
+        var gtd = settings["gtd"] as? [String: Any] ?? [:]
+        gtd["focusTaskLimit"] = 1
+        settings["gtd"] = gtd
+        try writeCalendarPreferenceSettings(settings)
+        let sqlite = try SQLiteBridge(url: database)
+        _ = try sqlite.execute("UPDATE tasks SET status = 'next' WHERE id IN (?, ?)", parametersJSON: json([id, other]))
+        sqlite.close()
+        let core = host()
+        _ = try await core.start()
+        let editor = try object(await core.call("editorModel", argumentsJSON: json([id])))
+        let star = try XCTUnwrap(editor["focusStar"] as? [String: Any])
+        XCTAssertEqual(star["isFocused"] as? Bool, false)
+        XCTAssertEqual(star["canToggle"] as? Bool, true)
+        XCTAssertEqual(star["queued"] as? Bool, false)
+        XCTAssertEqual(star["labelKey"] as? String, "agenda.addToFocus")
+        XCTAssertTrue(star["blockedText"] is NSNull)
+        let draft = try XCTUnwrap(editor["draft"] as? [String: Any])
+        let starred = try object(await core.call("editDraft", argumentsJSON: json([json([
+            "id": id, "draft": draft, "edit": ["type": "fields", "patch": ["focusedToday": true]]])])))
+        XCTAssertEqual((starred["draft"] as? [String: Any])?["focusedToday"] as? Bool, true)
+        let starredStar = try XCTUnwrap(starred["focusStar"] as? [String: Any])
+        XCTAssertEqual(starredStar["isFocused"] as? Bool, true)
+        XCTAssertEqual(starredStar["labelKey"] as? String, "agenda.removeFromFocus")
+        XCTAssertEqual((try storedTask(id)["isFocusedToday"] as? NSNumber)?.boolValue ?? false, false)
+        let fill = try await taskFocusRequest(core, focused: true, taskID: other)
+        _ = try await core.call("taskFocusWrite", argumentsJSON: json([json(fill)]))
+        let reopened = try object(await core.call("editorModel", argumentsJSON: json([id])))
+        let blocked = try XCTUnwrap(reopened["focusStar"] as? [String: Any])
+        XCTAssertEqual(blocked["canToggle"] as? Bool, false)
+        XCTAssertTrue((blocked["blockedText"] as? String ?? "").contains("1"))
+        await expectFailure { _ = try await core.call("saveDraft", argumentsJSON: datePayload(id, editor: editor, patch: ["focusedToday": true])) }
+        XCTAssertEqual((try storedTask(id)["isFocusedToday"] as? NSNumber)?.boolValue ?? false, false)
+    }
+
     func testFocusReorderControlCarriesTheScreenHint() async throws {
         let initializer = host()
         _ = try await initializer.start()
