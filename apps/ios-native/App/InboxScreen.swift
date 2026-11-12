@@ -1608,7 +1608,7 @@ private struct InboxAutomaticPageReplay: View {
     let model: CoreModel
     var body: some View {
         Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
-            .onChange(of: model.inboxActionsEnabled) { enabled in
+            .onChange(of: model.inboxActionsEnabled) { _, enabled in
                 if enabled { Task { await model.replayInboxAutomaticPage() } }
             }
     }
