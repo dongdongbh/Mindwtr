@@ -1,5 +1,9 @@
 # Performance and stability handoff
 
+## Desktop idle SQLite watcher, November 12
+
+[Evidence](idle-sqlite-watcher-2026-11-12.md): ignore access-only filesystem events before local storage refresh and File Sync reconciliation. Registered-callback regression reproduces redundant reads; real Linux SQLite reads emit access events. Full Linux Mint idle-write reduction remains unconfirmed; preserve WAL/content changes and obtain reporter confirmation.
+
 ## Mobile editor Preview completion, November 10
 
 [Evidence and validation](preview-completion-render-stability-2026-11-10.md): the

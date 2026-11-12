@@ -194,6 +194,38 @@ afterEach(async () => {
 });
 
 describe('local-data-watcher', () => {
+    it('does not read storage again for read-side filesystem events', async () => {
+        const callbacks: Array<(event: { paths: string[]; type?: unknown }) => void> = [];
+        const readStorageSnapshot = vi.fn(async () => externalData);
+        const readDataJson = vi.fn(async () => externalData);
+        const controller = createLocalDataWatcherController({
+            readStorageSnapshot, readDataJson,
+            watchFile: async (_path, callback) => { callbacks.push(callback); return () => undefined; },
+            schedule: scheduleMock, cancelSchedule: cancelScheduleMock,
+            now: () => nowMs,
+        });
+        await controller.start('/synthetic/data.json', '/synthetic/mindwtr.db');
+        for (const type of [
+            { access: { kind: 'open', mode: 'any' } },
+            { access: { kind: 'close', mode: 'read' } },
+            { access: { kind: 'close', mode: 'write' } },
+            { modify: { kind: 'metadata', mode: 'access-time' } },
+        ]) {
+            nowMs += 3000;
+            callbacks[0]({ paths: ['/synthetic/data.json'], type });
+            callbacks[1]({ paths: ['/synthetic/mindwtr.db'], type });
+            await flushScheduledTimers();
+        }
+        expect(readDataJson).not.toHaveBeenCalled();
+        expect(readStorageSnapshot).not.toHaveBeenCalled();
+        nowMs += 3000;
+        callbacks[1]({ paths: ['/synthetic/mindwtr.db-wal'], type: { modify: { kind: 'data', mode: 'content' } } });
+        await flushScheduledTimers();
+        await controller.testUtils.waitForPendingSqliteRefreshForTests();
+        expect(readStorageSnapshot).toHaveBeenCalledOnce();
+        controller.stop();
+    });
+
     it('replays JSON and SQLite events after a failed workspace transition releases its lease', async () => {
         const readDataJson = vi.fn(async () => externalData);
         const readStorageSnapshot = vi.fn(async () => externalData);
