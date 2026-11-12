@@ -1,9 +1,9 @@
 import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Area, Project, Section, Task } from './types';
 import type { PreparedAreaAuthority, PreparedAreaCreate, PreparedNativeSaveBoundary } from './store-types';
-import type { NativeInboxTasksMoveParams } from './native-host-contract-inbox-bulk-status';
+import type { NativeInboxTasksMoveParams, NativeReviewTasksParams } from './native-host-contract-inbox-bulk-status';
 import type { NativeProjectOrganizeDestinationCreateRequest, NativeProjectOrganizeDestinationCreatePrepared } from './native-host-contract-project-organize-create';
-import { tasksOrganizeScope } from './native-host-contract-inbox-bulk-organize';
+import { organizeListSource, tasksOrganizeScope } from './native-host-contract-inbox-bulk-organize';
 import { exact, iso, record } from './native-host-contract-project-shared';
 import { readBulkOrganizeDraftShape, type createBulkActionMethods } from './native-host-contract-bulk-actions';
 import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, EMPTY_BULK_ORGANIZE_DRAFT,
@@ -28,10 +28,10 @@ import { detachReferenceBatchJson, detachReferenceBatchValue, readStatusBatchSel
     validReferenceBatchProject, validReferenceBatchArea, type NativeReferenceTasksMoveScope } from './native-host-contract-reference-bulk-status';
 
 export type NativeInboxOrganizeDestinationCreateRequest = {
-    requestId: string; source: 'inbox'; kind: 'project' | 'area'; name: string;
+    requestId: string; kind: 'project' | 'area'; name: string;
     draft: BulkOrganizeDraft; offerRevision: string; taskIds: string[];
-    taskRevisions: Record<string, string>; params: NativeInboxTasksMoveParams;
-};
+    taskRevisions: Record<string, string>;
+} & ({ source: 'inbox'; params: NativeInboxTasksMoveParams } | { source: 'review'; params: NativeReviewTasksParams });
 export type NativeInboxOrganizeDestinationCreateResult = { id: string; changed: true };
 type Pair<T> = { before: T | null; after: T };
 export type NativeInboxOrganizeDestinationCreatePrepared = {
@@ -60,21 +60,23 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
     ({ ok: false, error: { code, message } });
 const selectionRequest = (r: Request) => {
     const base = { requestId: r.requestId, taskIds: r.taskIds, taskRevisions: r.taskRevisions, status: 'next' as const };
-    return r.source === 'project' ? { ...base, source: r.source, params: r.params }
-        : { ...base, source: r.source, params: r.params };
+    if (r.source === 'project') return { ...base, source: r.source, params: r.params };
+    if (r.source === 'review') return { ...base, source: r.source, params: r.params };
+    return { ...base, source: r.source, params: r.params };
 };
 const scopeRequest = (r: Request) => {
     const draft: BulkOrganizeDraft = { ...r.draft, status: BULK_ORGANIZE_KEEP };
     const base = { requestId: r.requestId, taskIds: r.taskIds, taskRevisions: r.taskRevisions, draft };
-    return r.source === 'project' ? { ...base, source: r.source, params: r.params }
-        : { ...base, source: r.source, params: r.params };
+    if (r.source === 'project') return { ...base, source: r.source, params: r.params };
+    if (r.source === 'review') return { ...base, source: r.source, params: r.params };
+    return { ...base, source: r.source, params: r.params };
 };
 const readRequest = (value: unknown, source: Source): Request | null => {
     const r = detachReferenceBatchJson<Request>(value);
     return r && exact(r, ['requestId', 'source', 'kind', 'name', 'draft', 'offerRevision', 'taskIds', 'taskRevisions', 'params'])
         && (r.kind === 'project' || r.kind === 'area') && text(r.name, 100_000) && r.name === r.name.trim()
         && text(r.offerRevision, 100_000) && record(r.draft) && exact(r.draft, Object.keys(EMPTY_BULK_ORGANIZE_DRAFT))
-        && readBulkOrganizeDraftShape(r.draft) && readStatusBatchSelectionRequest(selectionRequest(r), source) ? r : null;
+        && readBulkOrganizeDraftShape(r.draft) && readStatusBatchSelectionRequest(selectionRequest(r), organizeListSource(r, source)) ? r : null;
 };
 const normalized = (name: string) => name.trim().toLowerCase();
 const restoreTarget = (r: Request, areas: Area[]) => r.kind === 'area'
@@ -141,7 +143,7 @@ const requiredDates = (scope: Prepared['scope'], source: Source) => requiredRefe
 const selectedMatch = (p: Pick<Prepared, 'request' | 'scope' | 'preparedAt' | 'futureBoundary' | 'dates'>) =>
     statusBatchSourcesMatch(selectionRequest(p.request), p.scope.inbox, p.preparedAt,
         { futureBoundary: p.futureBoundary, dates: new Map(p.dates.map(row => [row.value, row])) });
-const validScope = (s: unknown, source: Source): s is Prepared['scope'] => {
+const validScope = (s: unknown, source: Request['source']): s is Prepared['scope'] => {
     if (!record(s) || !exact(s, ['inbox', 'allProjects', 'allAreas', 'restoration', 'defaultProjectFlowMode'])
         || !record(s.inbox) || !exact(s.inbox, ['tasks', 'projects', 'sections', 'areas', 'settings'])
         || !record(s.inbox.settings) || !same(statusBatchSettings(s.inbox.settings, source), s.inbox.settings)
@@ -175,7 +177,7 @@ export const readOrganizeDestinationCreateEnvelope = (input: unknown, source: So
     const r = readRequest(e.request, source); const p = e.prepared;
     if (!r || !exact(p, ['version', 'request', 'scope', 'resolution', 'effect', 'deviceIdBefore', 'deviceIdToInitialize',
         'preparedAt', 'updateAt', 'preparedLocalDay', 'preparedOffsetMinutes', 'boundaryOffsetMinutes', 'futureBoundary', 'dates', 'result'])
-        || p.version !== 1 || !same(p.request, r) || !validScope(p.scope, source)
+        || p.version !== 1 || !same(p.request, r) || !validScope(p.scope, r.source)
         || (p.deviceIdBefore !== null && !text(p.deviceIdBefore, 500))
         || (p.deviceIdBefore === null ? typeof p.deviceIdToInitialize !== 'string' || !UUID.test(p.deviceIdToInitialize) : p.deviceIdToInitialize !== null)
         || !iso(p.preparedAt) || !iso(p.updateAt) || !iso(p.futureBoundary) || Date.parse(p.updateAt) < Date.parse(p.preparedAt)
@@ -255,7 +257,7 @@ export function createOrganizeDestinationCreateMethods(deps: {
         return saved;
     } });
     const offeredNow = (request: Request): NativeHostResult<null> => {
-        const offered = deps.getBulkActions({ list: source, params: request.params, taskIds: request.taskIds,
+        const offered = deps.getBulkActions({ list: request.source, params: request.params, taskIds: request.taskIds,
             organize: { draft: request.draft }, picker: { kind: request.kind, query: request.name, offset: 0, limit: 1 } });
         if (!offered.ok) return offered;
         const view = offered.value;
@@ -329,8 +331,9 @@ export function createOrganizeDestinationCreateMethods(deps: {
             if (prewriteFailure) return prewriteFailure;
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize destination creation result does not match its journal`);
             if (confirmed.ok) {
-                try { logInfo(`Native ${label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-organize-destination-create' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
+                const list = envelope.request.source;
+                try { logInfo(`Native ${list === 'review' ? 'Review' : label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(list !== 'inbox' ? { force: true } : {}),
+                    context: { releaseCheck: list === 'project' ? 'v1.3.9/ios-project-organize-destination-create' : list === 'review' ? 'v1.3.9/ios-review-bulk-organize' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
                 catch { }
             }
             return confirmed;

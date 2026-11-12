@@ -182,12 +182,12 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Review and Contexts bulk selection
 
-- Reach: Review (scope All or Due, groups expanded) or Contexts › long-press a task card. A bar shows the count, all six statuses, Add tag and Delete. Review also offers Share.
+- Reach: Review (scope All or Due, groups expanded) or Contexts › long-press a task card. A bar shows the count, all six statuses, Add tag and Delete. Review also offers Organize (first, filled) and Share.
 - Shortcuts: Tap a row's circle or card to toggle it.
-- Selectors: screen prefix `review` or `contexts`, then `-bulk-count`, `-bulk-exit`, `-select-` (+ task id), `-bulk-status-` (+ status), `-bulk-tag-open`, `-bulk-share` (Review only), `-bulk-delete`, `-bulk-confirm`; `review-scroll`, `contexts-scroll`; Undo is `task-` + `statusListBulkDelete` + `-undo`
+- Selectors: screen prefix `review` or `contexts`, then `-bulk-count`, `-bulk-exit`, `-select-` (+ task id), `-bulk-status-` (+ status), `-bulk-tag-open`, `-bulk-organize-open` and `-bulk-share` (Review only), `-bulk-delete`, `-bulk-confirm`; `review-scroll`, `contexts-scroll`; Undo is `task-` + `statusListBulkDelete` + `-undo`. The Review Organize dialog reuses the Inbox dialog, so its controls read review-organize-apply, review-organize-project and so on
 - Code: `apps/ios-native/App/ReviewScreen.swift`, `apps/ios-native/App/ContextsScreen.swift`, `apps/ios-native/App/WaitingScreen.swift` (StatusListBulkBar), `apps/ios-native/App/CoreModel.swift` (statusList…)
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testShownListBulk…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testReviewAndContextsBulk…, testReviewBulkMoveColdRecovery…)
-- Notes: Review ends the selection when the scope changes or a selected row is folded away, as mobile does. Contexts drops only the selected rows a chip, search or filter hides. Mark reviewed, Organize, Remove tag, and Contexts' Add/Remove context are not built yet.
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testShownListBulk…, testReviewBulkOrganize…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testReviewAndContextsBulk…, testReviewBulkMoveColdRecovery…, testReviewBulkOrganizeRides…), `packages/core/src/native-host-contract-review-contexts-bulk.test.ts`
+- Notes: Review ends the selection when the scope changes or a selected row is folded away, as mobile does. Contexts drops only the selected rows a chip, search or filter hides. Review Organize writes through the Inbox Organize family with source `review`, so its failed-save retry and cold recovery match Inbox. Mark reviewed, Remove tag, and Contexts' Add/Remove context are not built yet.
 
 ## Waiting For
 

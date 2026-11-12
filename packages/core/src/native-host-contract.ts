@@ -2081,7 +2081,7 @@ export function createNativeHostContract(options: {
         ...createProjectTasksAddTagMethods({ readiness, save }),
         ...createInboxTasksRemoveTagMethods({ readiness, save }),
         ...createProjectTasksRemoveTagMethods({ readiness, save }),
-        ...createInboxTasksOrganizeMethods({ readiness, save }),
+        ...createInboxTasksOrganizeMethods({ readiness, save, shown: bulkSelectionShown }),
         ...createProjectTasksOrganizeMethods({ readiness, save }),
         ...createReferenceTasksRemoveTagMethods({ readiness, save }),
         ...createArchivedTasksDeleteMethods({ readiness, save, t: () => translate, shown: bulkSelectionShown }),

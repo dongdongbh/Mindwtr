@@ -5954,7 +5954,7 @@ private final class Engine: @unchecked Sendable {
         case Self.ownedSaveMethod, Self.mixedSaveMethod:
             let actual = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any]
             recovery.requestId = actual?["cancellation"] is [String: Any] ? cancelRequestId : nil
-        case "inboxTasksMoveCommit", "inboxTasksAddTagCommit":
+        case "inboxTasksMoveCommit", "inboxTasksAddTagCommit", "inboxTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit":
             recovery.source = statusListMoveSource(command)
         case "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "projectTasksDeleteCommit", "projectTasksDeleteUndoCommit":
             let source = historyBulkSource(command)
@@ -22053,7 +22053,10 @@ private final class Engine: @unchecked Sendable {
         var selection = request
         selection.removeValue(forKey: "draft")
         selection["status"] = "next"
-        return validTaskListMoveRequest(selection, source: source)
+        return validTaskListMoveRequest(selection, source: source, statusLists: reviewOrganize(request, source: source))
+    }
+    private static func reviewOrganize(_ request: [String: Any], source: String) -> Bool {
+        source == "inbox" && request["source"] as? String == "review"
     }
     private static func validTaskListOrganizeDestinationCreateRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "draft", "params", "source", "kind", "name", "offerRevision"]),
@@ -22066,7 +22069,7 @@ private final class Engine: @unchecked Sendable {
         selection.removeValue(forKey: "draft")
         for field in ["kind", "name", "offerRevision"] { selection.removeValue(forKey: field) }
         selection["status"] = "next"
-        return validTaskListMoveRequest(selection, source: source)
+        return validTaskListMoveRequest(selection, source: source, statusLists: reviewOrganize(request, source: source))
     }
 
     private static func validTaskListRemoveTagResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {

@@ -411,7 +411,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private enum BulkOrganizeContext {
         case inbox(InboxBulkConfirmation)
         case project(ProjectBulkContext)
-        var source: String { switch self { case .inbox: return "inbox"; case .project: return "project" } }
+        case review(StatusListBulkContext)
+        var source: String { switch self { case .inbox: return "inbox"; case .project: return "project"; case .review: return "review" } }
     }
     private var inboxBulkOrganizeContext: BulkOrganizeContext?
     private var inboxBulkOrganizeIDs: [String] = []
@@ -8197,6 +8198,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 if statusListMoveOwner != nil { _ = try await settleStatusListMoveReceipt(on: currentHost) }
                 clearStatusListSelection()
                 selectedSurface = statusListSurface(named: source)
+            }
+            if ["inboxTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit"].contains(recovery.text("method")), recovery.text("source") == "review" {
+                let result = recovery.object("result"), creation = recovery.text("method") == "inboxOrganizeDestinationCreateCommit"
+                let changed = (result["changed"] as? NSNumber).map({ CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue }) == true
+                let count = (result["count"] as? NSNumber).map({ CFGetTypeID($0) != CFBooleanGetTypeID() && (1...10_000).contains($0.intValue) }) == true
+                guard changed, creation ? Set(result.keys) == Set(["id", "changed"]) && !result.text("id").isEmpty
+                        : Set(result.keys) == Set(["count", "changed"]) && count else { throw CocoaError(.coderReadCorrupt) }
+                if statusListMoveOwner != nil { _ = try await settleStatusListMoveReceipt(on: currentHost) }
+                clearStatusListSelection()
+                selectedSurface = .review
             }
             if ["inboxTasksMoveCommit", "inboxTasksAddTagCommit", "inboxTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit"].contains(recovery.text("method")), recovery.text("source") == "inbox" {
                 selectedSurface = .inbox
@@ -30296,6 +30307,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
     private func clearStatusListSelection() {
         retireStatusListTag()
+        if bulkOrganizeIsReview { retireBulkOrganize() }
         statusListSelectionGeneration += 1
         statusListSelectionMode = false; statusListSelectionSurface = nil
         statusListAnchorID = nil; statusListRangeSelectMode = false
@@ -30396,8 +30408,15 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private enum StatusListBulkOperation {
-        case move, addTag
-        var family: String { self == .move ? "inboxTasksMove" : "inboxTasksAddTag" }
+        case move, addTag, organize, destinationCreate
+        var family: String {
+            switch self {
+            case .move: return "inboxTasksMove"
+            case .addTag: return "inboxTasksAddTag"
+            case .organize: return "inboxTasksOrganize"
+            case .destinationCreate: return "inboxOrganizeDestinationCreate"
+            }
+        }
     }
     private func statusListMoveOwned(_ context: StatusListBulkContext, request: String) -> Bool {
         statusListMoveOwner?.context.host === context.host && statusListMoveOwner?.request.utf8.elementsEqual(request.utf8) == true
@@ -30446,7 +30465,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             guard statusListMoveOwned(context, request: request) else { return }
             let warm = statusListBulkWarm(context)
             try acknowledgeStatusListBulk(result, context: context, request: request, operation: operation, warm: warm, allowNoop: true)
-            if warm { await publishStatusListBulk(result, context: context, operation: operation) }
+            if warm { await publishStatusListBulk(result, context: context, operation: operation, request: request) }
         } catch {
             guard statusListMoveOwned(context, request: request) else { return }
             if !dispatched { statusListMoveOwner = nil; return }
@@ -30456,7 +30475,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func validStatusListBulkResult(_ result: CoreObject, request: String, operation: StatusListBulkOperation,
                                            source: String? = nil, allowNoop: Bool = false) throws {
         let frozen = try decode(request)
+        if operation == .destinationCreate {
+            guard frozen.text("source") == "review", source.map({ $0 == "review" }) != false,
+                  Set(result.keys) == Set(["id", "changed"]), (result["changed"] as? NSNumber).map({ CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue }) == true,
+                  !result.text("id").isEmpty, result.text("id").utf16.count <= 500 else { throw CocoaError(.coderReadCorrupt) }
+            return
+        }
         guard Self.statusListSources.contains(frozen.text("source")), source.map({ $0 == frozen.text("source") }) != false,
+              operation != .organize || frozen.text("source") == "review",
               let ids = frozen["taskIds"] as? [String],
               let count = result["count"] as? NSNumber, CFGetTypeID(count) != CFBooleanGetTypeID(),
               count.doubleValue >= 0, count.doubleValue <= Double(ids.count), count.doubleValue.rounded(.down) == count.doubleValue else {
@@ -30479,10 +30505,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if statusListBulkRetryRequest?.utf8.elementsEqual(request.utf8) == true {
             statusListBulkRetryRequest = nil; retryNeeded = false; error = nil
         }
-        guard warm, operation == .move || result.flag("changed") else { return }
+        guard warm, operation != .destinationCreate, operation == .move || result.flag("changed") else { return }
         clearStatusListSelection()
     }
-    private func publishStatusListBulk(_ result: CoreObject, context: StatusListBulkContext, operation: StatusListBulkOperation) async {
+    private func publishStatusListBulk(_ result: CoreObject, context: StatusListBulkContext, operation: StatusListBulkOperation,
+                                       request: String? = nil) async {
+        if operation == .destinationCreate {
+            if let request { await chooseCreatedReviewOrganizeDestination(result, request: request) }
+            return
+        }
+        if operation == .organize, bulkOrganizeIsReview { retireBulkOrganize() }
         guard operation == .move || result.flag("changed") else { return }
         let generation = statusListSelectionGeneration
         let current = { self.statusListBulkWarm(context, generation: generation) }
@@ -30501,8 +30533,26 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                   !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
             message = notice.text("title") + ": " + notice.text("message")
         }
-        showTaskActionNotice(["operation": operation == .move ? "statusListBulkMove" : "statusListBulkTag",
+        showTaskActionNotice(["operation": operation == .move ? "statusListBulkMove" : operation == .organize ? "statusListBulkOrganize" : "statusListBulkTag",
                               "source": statusListName(context.surface), "undoEnabled": false, "message": message])
+    }
+    private func chooseCreatedReviewOrganizeDestination(_ result: CoreObject, request: String) async {
+        guard case .review(let context)? = inboxBulkOrganizeContext else { return }
+        let generation = inboxBulkOrganizeGeneration
+        let current = { self.inboxBulkOrganizeGeneration == generation && self.inboxOrganizeContextCurrent(.review(context)) }
+        guard current() else { return }
+        do {
+            let kind = try decode(request).text("kind"), id = result.text("id")
+            let field = kind == "project" ? "projectChoice" : "areaChoice"
+            let bulk = try await inboxOrganizeRead(edit: ["type": kind == "project" ? "setProject" : "setArea", "value": id], current: current)
+            guard current() else { return }
+            guard bulk.object("organize").object("draft").text(field).utf8.elementsEqual(id.utf8) else { throw CocoaError(.coderReadCorrupt) }
+            installInboxOrganizeView(bulk); retireInboxOrganizePicker()
+        } catch {
+            guard current() else { return }
+            inboxBulkOrganizeCurrent = false; inboxBulkOrganizePickerCurrent = false
+            inboxBulkOrganizeReadError = error.localizedDescription
+        }
     }
     private func handleStatusListMoveError(_ failure: Error, context: StatusListBulkContext, request: String) {
         guard statusListMoveOwned(context, request: request) else { return }
@@ -30558,7 +30608,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             if let acknowledgment, !inboxExactJSON(result, try decode(acknowledgment)) { throw CocoaError(.coderReadCorrupt) }
             let warm = statusListBulkWarm(context)
             try acknowledgeStatusListBulk(result, context: context, request: request, operation: operation, warm: warm)
-            if warm { await publishStatusListBulk(result, context: context, operation: operation) }
+            if warm { await publishStatusListBulk(result, context: context, operation: operation, request: request) }
         } catch { handleStatusListMoveError(error, context: context, request: request) }
     }
 
@@ -31504,12 +31554,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         inboxBulkOrganizePresented && !busy && !retryNeeded && !bulkOrganizeMutationPending
     }
     var bulkOrganizeIsProject: Bool { inboxBulkOrganizeContext?.source == "project" }
+    private var bulkOrganizeIsReview: Bool { inboxBulkOrganizeContext?.source == "review" }
+    var bulkOrganizeSource: String { inboxBulkOrganizeContext?.source ?? "inbox" }
     var projectBulkOrganizePresented: Bool { inboxBulkOrganizePresented && bulkOrganizeIsProject }
     var bulkOrganizeVisible: Bool {
         inboxBulkOrganizePresented && !appLock.concealed
-            && (bulkOrganizeIsProject ? selectedSurface == .project : selectedSurface == .inbox)
+            && selectedSurface == (bulkOrganizeIsProject ? .project : bulkOrganizeIsReview ? .review : .inbox)
     }
-    private var bulkOrganizeMutationPending: Bool { bulkOrganizeIsProject ? projectBulkOwner != nil : inboxBulkMutationPending }
+    private var bulkOrganizeMutationPending: Bool {
+        bulkOrganizeIsProject ? projectBulkOwner != nil : bulkOrganizeIsReview ? statusListMoveOwner != nil : inboxBulkMutationPending
+    }
     private func inboxOrganizeContextCurrent(_ context: BulkOrganizeContext) -> Bool {
         guard inboxBulkOrganizePresented, context.source == inboxBulkOrganizeContext?.source else { return false }
         switch context {
@@ -31520,7 +31574,25 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             return projectBulkContextCurrent(value, allowingOrganize: true) && inboxExactJSON(projectSelectedIDs, inboxBulkOrganizeIDs)
                 && inboxExactJSON(projectSelectedRevisions, inboxBulkOrganizeRevisions)
                 && (try? json(inboxBulkOrganizeParams)).map({ $0.utf8.elementsEqual(value.params.utf8) }) == true
+        case .review(let value):
+            return statusListBulkWarm(value) && statusListSelectionMode && statusListSelectionSurface == .review
+                && statusListCurrent(.review) && inboxExactJSON(statusListSelectedIDs, inboxBulkOrganizeIDs)
+                && inboxExactJSON(statusListSelectedRevisions, inboxBulkOrganizeRevisions)
+                && inboxExactJSON(statusListParams(.review), inboxBulkOrganizeParams)
         }
+    }
+    var statusListBulkOrganizeEnabled: Bool {
+        statusListSelectionWritable && statusListSelectionSurface == .review && !inboxBulkOrganizePresented
+            && statusListBulk.object("bar").object("organize").flag("enabled")
+    }
+    func openReviewBulkOrganize() {
+        guard statusListBulkOrganizeEnabled, let owner = host else { return }
+        retireBulkOrganize()
+        inboxBulkOrganizeContext = .review(StatusListBulkContext(host: owner, surface: .review,
+            selectionGeneration: statusListSelectionGeneration, foreground: foregroundSyncGeneration))
+        inboxBulkOrganizeIDs = statusListSelectedIDs; inboxBulkOrganizeRevisions = statusListSelectedRevisions
+        inboxBulkOrganizeParams = statusListParams(.review); inboxBulkOrganizePresented = true
+        inboxBulkOrganizePendingEdits = [[:]]; drainInboxBulkOrganizeEdits()
     }
     private func inboxOrganizeContextCurrent(_ context: InboxBulkConfirmation) -> Bool { inboxOrganizeContextCurrent(.inbox(context)) }
     var projectBulkOrganizeEnabled: Bool { projectBulkRangeEnabled && projectBulk.object("bar").object("organize").flag("enabled") }
@@ -31555,7 +31627,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         retireBulkOrganize()
     }
     private func retireInboxBulkOrganize() {
-        guard !bulkOrganizeIsProject else { return }; retireBulkOrganize()
+        guard !bulkOrganizeIsProject, !bulkOrganizeIsReview else { return }; retireBulkOrganize()
     }
     private func retireProjectBulkOrganize() {
         guard bulkOrganizeIsProject else { return }; retireBulkOrganize()
@@ -31605,6 +31677,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let result = try await query("menuRead", ["bulk", try json(request)], beforeDispatch: current)
         guard current(), !result.text("revision").isEmpty else { throw CancellationError() }
         if context.source == "project" { try validateProjectTaskBulk(result, snapshot: ["revision": result.text("revision")]) }
+        else if context.source == "review" { try validateStatusListBulk(result, surface: .review, revision: nil, subsetOf: inboxBulkOrganizeIDs) }
         else { try validateInboxTaskBulk(result, snapshot: ["revision": result.text("revision")]) }
         guard let ids = result["selectedIds"] as? [String], let revisions = result["taskRevisions"] as? CoreObject,
               inboxExactJSON(ids, inboxBulkOrganizeIDs), inboxExactJSON(revisions, inboxBulkOrganizeRevisions),
@@ -31629,7 +31702,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               !inboxBulkOrganizePendingEdits.isEmpty, let context = inboxBulkOrganizeContext else { return }
         let generation = inboxBulkOrganizeGeneration
         let current = { self.inboxBulkOrganizeGeneration == generation && self.inboxOrganizeContextCurrent(context)
-            && !self.busy && !self.retryNeeded && !self.inboxBulkMutationPending }
+            && !self.busy && !self.retryNeeded && !self.inboxBulkMutationPending && !self.bulkOrganizeMutationPending }
         inboxBulkOrganizeReading = true
         inboxBulkOrganizeTask = Task {
             defer {
@@ -31767,6 +31840,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             switch context {
             case .inbox(let value): await performInboxOrganizeWrite(request, creation: true, context: value)
             case .project(let value): await writeProjectBulk(.destinationCreate, fields: [:], context: value, frozenRequest: request)
+            case .review:
+                await writeStatusListBulk(.destinationCreate, fields: ["kind": kind, "name": name,
+                    "draft": inboxBulkOrganizeView.object("draft"), "offerRevision": inboxBulkOrganizeRevision])
             }
         } catch { inboxBulkOrganizeReadError = error.localizedDescription }
     }
@@ -31779,6 +31855,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             switch context {
             case .inbox(let value): await performInboxOrganizeWrite(request, creation: false, context: value)
             case .project(let value): await writeProjectBulk(.organize, fields: [:], context: value, frozenRequest: request)
+            case .review: await writeStatusListBulk(.organize, fields: ["draft": inboxBulkOrganizeView.object("draft")])
             }
         } catch { inboxBulkOrganizeReadError = error.localizedDescription }
     }

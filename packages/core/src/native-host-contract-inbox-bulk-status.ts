@@ -12,10 +12,14 @@ export type NativeInboxTasksMoveParams = { groupBy?: TaskGroupBy; collapsedGroup
 export type NativeInboxTasksMoveRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>;
     source: 'inbox'; status: NativeInboxTasksMoveStatus; params: NativeInboxTasksMoveParams };
 export type NativeInboxTasksMoveResult = { count: number; status: NativeInboxTasksMoveStatus };
+export type NativeReviewTasksParams = { scope?: 'due' | 'all'; expandedAreaIds?: string[]; expandedProjectIds?: string[];
+    expandedLaterProjectIds?: string[] };
 export type NativeStatusListTasksMoveRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string> } & (
     | { source: 'waiting'; status: Exclude<TaskStatus, 'waiting' | 'archived'>; params: { person?: string } }
     | { source: 'someday'; status: Exclude<TaskStatus, 'someday' | 'archived'>; params: { sortBy?: TaskSortBy; groupBy?: SomedayGroupBy;
         showDetails?: boolean; projectsInSections?: boolean; filters?: Partial<ListFilterState> } });
+export type NativeReviewTasksMoveRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>;
+    source: 'review'; status: Exclude<TaskStatus, 'archived'>; params: NativeReviewTasksParams };
 export type NativeInboxTasksMovePrepared = Omit<NativeReferenceTasksMovePrepared, 'request' | 'result'> & {
     request: NativeInboxTasksMoveRequest; result: NativeInboxTasksMoveResult;
 };

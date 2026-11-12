@@ -30,7 +30,7 @@ import { isFoldIdList, isText, readFilterState } from './native-host-contract-me
 import { resolveListFilterState, type ListFilterState } from './list-filter-state';
 import { projectFromSqliteRow, projectToSqliteRow, PROJECT_SQLITE_COLUMNS } from './project-sync-schema';
 import { normalizeRelativeStartOffset } from './task-relative-start';
-import type { NativeInboxTasksMoveRequest, NativeInboxTasksMovePrepared, NativeStatusListTasksMoveRequest } from './native-host-contract-inbox-bulk-status';
+import type { NativeInboxTasksMoveRequest, NativeInboxTasksMovePrepared, NativeStatusListTasksMoveRequest, NativeReviewTasksMoveRequest } from './native-host-contract-inbox-bulk-status';
 import type { TaskGroupBy } from './task-group-sections';
 import type { TaskLoadTemporalContext } from './task-status';
 import type { NativeProjectTasksMoveRequest, NativeProjectTasksMovePrepared } from './native-host-contract-project-bulk-status';
@@ -59,7 +59,7 @@ export type NativeReferenceTasksMovePreparation = { kind: 'prepared'; prepared: 
 
 type MoveSource = 'reference' | 'inbox' | 'project' | 'waiting' | 'someday' | 'review' | 'contexts';
 type MoveFamily = 'reference' | 'inbox' | 'project';
-type MoveRequest = NativeReferenceTasksMoveRequest | NativeInboxTasksMoveRequest | NativeProjectTasksMoveRequest | NativeStatusListTasksMoveRequest;
+type MoveRequest = NativeReferenceTasksMoveRequest | NativeInboxTasksMoveRequest | NativeProjectTasksMoveRequest | NativeStatusListTasksMoveRequest | NativeReviewTasksMoveRequest;
 type MovePrepared = Omit<NativeReferenceTasksMovePrepared, 'request' | 'result'> & {
     request: MoveRequest; result: { count: number; status: MoveRequest['status'] };
 };

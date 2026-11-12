@@ -254,6 +254,11 @@ struct StatusListBulkBar: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    let organize = bar.object("organize")
+                    if idPrefix == "review" && !organize.isEmpty {
+                        action(organize.text("label"), id: "-bulk-organize-open", enabled: model.statusListBulkOrganizeEnabled,
+                               primary: true) { model.openReviewBulkOrganize() }
+                    }
                     let statuses = bar.objects("statuses")
                     ForEach(statuses.indices, id: \.self) { index in
                         let option = statuses[index]
@@ -318,11 +323,12 @@ struct StatusListBulkBar: View {
     }
 
     private func action(_ title: String, accessibility: String? = nil, id: String, enabled: Bool,
-                        destructive: Bool = false, selected: Bool = false, run: @escaping () -> Void) -> some View {
+                        destructive: Bool = false, selected: Bool = false, primary: Bool = false, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             Text(title).rnFont(13, .semibold).fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(primary ? palette.onTint : destructive ? palette.danger : palette.tint)
                 .padding(.horizontal, 12).frame(minWidth: 45, minHeight: 45)
-                .background(selected ? palette.tint.opacity(0.18) : palette.card, in: RoundedRectangle(cornerRadius: 8))
+                .background(primary ? palette.tint : selected ? palette.tint.opacity(0.18) : palette.card, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border).allowsHitTesting(false))
                 .contentShape(Rectangle())
         }

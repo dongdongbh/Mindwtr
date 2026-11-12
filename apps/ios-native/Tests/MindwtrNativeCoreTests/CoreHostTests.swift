@@ -39155,6 +39155,36 @@ extension CoreHostTests {
         await cold.close()
     }
 
+    func testReviewBulkOrganizeRidesTheInboxOrganizeFamilyAndColdRecoveryReportsReviewSource() async throws {
+        _ = try await seedShownListBulk()
+        let faults = HostIOFaults(), writer = host(faults, bundleURL: try dateBundle(at: archive180Clock))
+        _ = try await writer.start()
+        let (params, shown) = try await shownListParams(writer, list: "review")
+        let selected = Array(shown.prefix(2))
+        let bulk = try object(await writer.call("menuRead", argumentsJSON: json(["bulk", json([
+            "list": "review", "params": params, "taskIds": selected, "organize": ["draft": organize743EmptyDraft]])])))
+        XCTAssertEqual(((bulk["bar"] as? [String: Any])?["organize"] as? [String: Any])?["enabled"] as? Bool, true)
+        XCTAssertNotNil((bulk["organize"] as? [String: Any])?["draft"])
+        var draft = organize743EmptyDraft; draft["tags"] = "#ReviewOrganized"
+        var request = try await shownListRequest(writer, list: "review", params: params, ids: selected)
+        request.removeValue(forKey: "status"); request["draft"] = draft
+        var contexts = request; contexts["source"] = "contexts"
+        await expectFailure("INVALID_INPUT") { _ = try await writer.call("inboxTasksOrganizeWrite", argumentsJSON: json([json(contexts)])) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Review Organize COMMIT failure") } }
+        await expectFailure("SAVE_FAILED") { _ = try await writer.call("inboxTasksOrganizeWrite", argumentsJSON: json([json(request)])) }
+        await writer.close()
+        let cold = host(bundleURL: try dateBundle(at: archive180Clock, suffix: "MindwtrHost.inboxTasksOrganizePrepare=function(){throw new Error('Review Organize must not reprepare');};"))
+        let startup = try object(await cold.start()), recovery = try XCTUnwrap(startup["recovery"] as? [String: Any])
+        XCTAssertEqual(recovery["method"] as? String, "inboxTasksOrganizeCommit")
+        XCTAssertEqual(recovery["source"] as? String, "review")
+        XCTAssertEqual(try json(XCTUnwrap(recovery["result"])), try json(["count": selected.count, "changed": true]))
+        for id in selected { XCTAssertTrue((try storedTask(id)["tags"] as? String ?? "").contains("#ReviewOrganized")) }
+        let outcome = try object(await cold.call("inboxTasksOrganizeRetryOutcome", argumentsJSON: json([json(request)])))
+        XCTAssertEqual(outcome["kind"] as? String, "confirmed")
+        await cold.close()
+    }
+
     func testInboxBulkMove740RepeatedFailuresBlockUnrelatedWritesAndColdReplayExactEnvelopeWithoutPrepare() async throws {
         let ids = try await seedInboxMove740(), faults = HostIOFaults()
         let writer = host(faults, bundleURL: try dateBundle(at: archive180Clock, suffix: inboxMove740IdentityFixture()))

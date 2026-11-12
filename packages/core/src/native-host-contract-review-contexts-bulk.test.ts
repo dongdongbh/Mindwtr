@@ -4,6 +4,7 @@ import { taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import * as logger from './logger';
 import type { AppData, Task } from './types';
+import { EMPTY_BULK_ORGANIZE_DRAFT } from './task-list-bulk-actions';
 
 const openSqliteHost: typeof openHost = (seed, wrap, bindings) => openHost(seed, wrap, bindings, { rejectConcurrentWrites: true });
 const NOW = '2026-11-04T13:00:00.000Z';
@@ -36,7 +37,8 @@ describe('Review and Contexts bulk selection through the shared bulk read and st
             const bulk = value(sqlite.host.getBulkActions({ list: 'review', params: REVIEW, taskIds: ['home-1'], selectionEdit: { taskId: 'later' } }));
             expect(bulk.selectedIds).toEqual(['home-1', 'later']);
             expect(bulk.bar.statuses.map((status) => status.status)).toEqual(['inbox', 'next', 'waiting', 'someday', 'done', 'reference']);
-            expect([bulk.bar.organize, bulk.bar.removeTag, bulk.removeTag, bulk.moveToSection]).toEqual([null, null, null, null]);
+            expect(bulk.bar.organize).toMatchObject({ enabled: true });
+            expect([bulk.bar.removeTag, bulk.removeTag, bulk.moveToSection]).toEqual([null, null, null]);
             expect(bulk.shareText).toContain('Task home-1');
             expect(value(sqlite.host.getBulkActions({ list: 'waiting', params: {}, taskIds: [] })).shareText).toBeUndefined();
             const log = vi.spyOn(logger, 'logInfo');
@@ -46,6 +48,41 @@ describe('Review and Contexts bulk selection through the shared bulk read and st
             expect(['home-1', 'later', 'work'].map((row) => useTaskStore.getState()._tasksById.get(row)?.status)).toEqual(['reference', 'reference', 'next']);
             expect(log).toHaveBeenCalledWith('Native Review bulk status confirmed', expect.objectContaining({ force: true,
                 context: { releaseCheck: 'v1.3.9/ios-status-list-bulk-status', count: 2, status: 'reference', outcome: 'moved' } }));
+        } finally { await sqlite.close(); }
+    });
+
+    it('organizes drawn Review rows through the shared Organize family, creates a destination, and refuses hidden rows', async () => {
+        clock(); const sqlite = await openSqliteHost(seed());
+        try {
+            const taskIds = ['home-1', 'later'];
+            const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, tags: '#reviewed' };
+            const picker = value(sqlite.host.getBulkActions({ list: 'review', params: REVIEW, taskIds, organize: { draft },
+                picker: { kind: 'project', query: 'Greenhouse', offset: 0, limit: 100 } }));
+            expect(picker.organize?.draft.tags).toBe('#reviewed');
+            expect(picker.picker?.create?.name).toBe('Greenhouse');
+            const log = vi.spyOn(logger, 'logInfo');
+            const create = { requestId: id(20), source: 'review' as const, kind: 'project' as const, name: 'Greenhouse', draft: picker.organize!.draft,
+                offerRevision: picker.revision, taskIds, taskRevisions: revisions(taskIds), params: REVIEW };
+            const created = value(await sqlite.host.prepareInboxOrganizeDestinationCreate(create as never));
+            const project = value(await sqlite.host.commitPreparedInboxOrganizeDestinationCreate({ request: create, prepared: created.prepared } as never));
+            expect(project).toEqual({ id: id(20), changed: true });
+            expect(useTaskStore.getState().projects.some((row) => row.id === id(20) && row.title === 'Greenhouse')).toBe(true);
+            const chosen = { ...draft, projectChoice: id(20) };
+            const input = { requestId: id(21), source: 'review' as const, taskIds, taskRevisions: revisions(taskIds), draft: chosen, params: REVIEW };
+            const prepared = value(await sqlite.host.prepareInboxTasksOrganize(input as never));
+            if (prepared.kind !== 'prepared') throw new Error('Review Organize must prepare');
+            expect(value(sqlite.host.validatePreparedInboxTasksOrganize({ request: input, prepared: prepared.prepared } as never))).toEqual({ count: 2, changed: true });
+            expect(value(await sqlite.host.commitPreparedInboxTasksOrganize({ request: input, prepared: prepared.prepared } as never))).toEqual({ count: 2, changed: true });
+            expect(taskIds.map((row) => useTaskStore.getState()._tasksById.get(row)?.projectId)).toEqual([id(20), id(20)]);
+            expect(useTaskStore.getState()._tasksById.get('home-1')?.tags).toContain('#reviewed');
+            expect(useTaskStore.getState()._tasksById.get('work')?.projectId).toBe('p1');
+            expect(log).toHaveBeenCalledWith('Native Review bulk Organize confirmed', expect.objectContaining({ force: true,
+                context: { releaseCheck: 'v1.3.9/ios-review-bulk-organize', count: 2, outcome: 'organized' } }));
+            const folded = { ...REVIEW, expandedProjectIds: [] as string[] };
+            const hidden = { requestId: id(22), source: 'review' as const, taskIds: ['work'], taskRevisions: revisions(['work']), draft, params: folded };
+            expect(await sqlite.host.prepareInboxTasksOrganize(hidden as never)).toMatchObject({ ok: false });
+            expect(await sqlite.host.prepareInboxTasksOrganize({ ...input, requestId: id(23), source: 'contexts', params: CONTEXTS } as never))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         } finally { await sqlite.close(); }
     });
 

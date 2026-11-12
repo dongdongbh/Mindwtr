@@ -2,7 +2,8 @@ import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Project, Section, Task } from './types';
 import type { PreparedAreaAuthority, PreparedNativeSaveBoundary } from './store-types';
 import type { NativeProjectTasksOrganizeRequest, NativeProjectTasksOrganizePrepared } from './native-host-contract-project-bulk-organize';
-import type { NativeInboxTasksMoveParams } from './native-host-contract-inbox-bulk-status';
+import type { NativeInboxTasksMoveParams, NativeReviewTasksParams } from './native-host-contract-inbox-bulk-status';
+import type { NativeShownSelection } from './native-host-contract-reference-bulk-status';
 import type { RecurrenceProjection } from './recurrence';
 import { projectNextRecurringTask } from './recurrence';
 import { exact, iso, record } from './native-host-contract-project-shared';
@@ -27,8 +28,8 @@ import { detachReferenceBatchJson, detachReferenceBatchValue, readStatusBatchSel
     requiredReferenceBatchDates, validReferenceBatchTask, validReferenceBatchProject, validReferenceBatchArea,
     validReferenceBatchRecurrenceProjection, referenceTasksMoveScope, type NativeReferenceTasksMoveScope } from './native-host-contract-reference-bulk-status';
 
-export type NativeInboxTasksOrganizeRequest = { requestId: string; source: 'inbox'; taskIds: string[];
-    taskRevisions: Record<string, string>; draft: BulkOrganizeDraft; params: NativeInboxTasksMoveParams };
+export type NativeInboxTasksOrganizeRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>;
+    draft: BulkOrganizeDraft } & ({ source: 'inbox'; params: NativeInboxTasksMoveParams } | { source: 'review'; params: NativeReviewTasksParams });
 export type NativeInboxTasksOrganizeResult = { count: number; changed: boolean };
 export type NativeInboxTasksOrganizePrepared = {
     version: 1; request: NativeInboxTasksOrganizeRequest; scope: NativeReferenceTasksMoveScope;
@@ -56,16 +57,19 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
 const selectionRequest = (request: OrganizeRequest) => {
     const base = { requestId: request.requestId, taskIds: request.taskIds, taskRevisions: request.taskRevisions,
         status: request.draft.status === 'done' ? 'done' as const : 'next' as const };
-    return request.source === 'project' ? { ...base, source: request.source, params: request.params }
-        : { ...base, source: request.source, params: request.params };
+    if (request.source === 'project') return { ...base, source: request.source, params: request.params };
+    if (request.source === 'review') return { ...base, source: request.source, params: request.params };
+    return { ...base, source: request.source, params: request.params };
 };
+export const organizeListSource = (request: { source?: unknown }, family: OrganizeSource): 'inbox' | 'project' | 'review' =>
+    family === 'inbox' && request.source === 'review' ? 'review' : family;
 const readRequest = (input: unknown, source: OrganizeSource): OrganizeRequest | null => {
     const request = detachReferenceBatchJson<OrganizeRequest>(input);
     return request && exact(request, ['requestId', 'source', 'taskIds', 'taskRevisions', 'draft', 'params'])
         && record(request.draft) && exact(request.draft, Object.keys(EMPTY_BULK_ORGANIZE_DRAFT))
         && readBulkOrganizeDraftShape(request.draft)
         && (request.draft.status !== 'waiting' || Boolean(request.draft.delegateWho.trim()))
-        && readStatusBatchSelectionRequest(selectionRequest(request), source) ? request : null;
+        && readStatusBatchSelectionRequest(selectionRequest(request), organizeListSource(request, source)) ? request : null;
 };
 const offersChoices = (request: OrganizeRequest, scope: NativeReferenceTasksMoveScope): boolean => {
     const choice = (value: string, ids: string[]) => value === BULK_ORGANIZE_KEEP || value === BULK_ORGANIZE_NONE || ids.includes(value);
@@ -140,7 +144,7 @@ export const readTasksOrganizeEnvelope = (input: unknown, source: OrganizeSource
         || !Array.isArray(raw.scope.sections) || !raw.scope.sections.every(row => record(row) && text(row.id, 500)
             && text(row.projectId, 500) && validSection(row, row.id, row.projectId)) || !unique(raw.scope.sections)
         || !Array.isArray(raw.scope.areas) || !raw.scope.areas.every(validReferenceBatchArea) || !unique(raw.scope.areas)
-        || !record(raw.scope.settings) || !same(statusBatchSettings(raw.scope.settings, source), raw.scope.settings)
+        || !record(raw.scope.settings) || !same(statusBatchSettings(raw.scope.settings, request.source), raw.scope.settings)
         || !record(raw.effect) || !exact(raw.effect, ['tasks', 'createdTasks', 'projects', 'sections'])
         || !Array.isArray(raw.effect.tasks) || !Array.isArray(raw.effect.createdTasks)
         || !Array.isArray(raw.effect.projects) || !Array.isArray(raw.effect.sections)
@@ -181,7 +185,7 @@ export const tasksOrganizeAuthorityMatches = (prepared: OrganizePrepared, data: 
 };
 
 export function createTasksOrganizeMethods(deps: {
-    readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
+    readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>; shown?: NativeShownSelection;
 }, source: OrganizeSource) {
     const label = source === 'project' ? 'Project' : 'Inbox';
     const family = `${source}TasksOrganize`;
@@ -249,8 +253,9 @@ export function createTasksOrganizeMethods(deps: {
             if (!request) return fail('INVALID_INPUT', `Select saved ${label} tasks with exact revisions, a complete Organize draft and list scope`);
             const memory = useTaskStore.getState(); const now = new Date();
             if (!statusBatchSourcesMatch(selectionRequest(request), { tasks: memory._allTasks, projects: memory._allProjects,
-                sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }, now.toISOString()))
-                return fail('STALE_REVISION', `${label} selection changed since it was shown`);
+                sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }, now.toISOString())
+                || (request.source === 'review' && deps.shown?.(request) !== true))
+                return fail('STALE_REVISION', `${request.source === 'review' ? 'Review' : label} selection changed since it was shown`);
             if (!offersChoices(request, { tasks: memory._allTasks, projects: memory._allProjects,
                 sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }))
                 return fail('INVALID_INPUT', `${label} Organize destination is not offered`);
@@ -324,8 +329,9 @@ export function createTasksOrganizeMethods(deps: {
             if (prewriteFailure) return prewriteFailure;
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize result does not match its journal`);
             if (confirmed.ok) {
-                try { logInfo(`Native ${label} bulk Organize confirmed`, { scope: 'native-host', category: 'storage', ...(source === 'project' ? { force: true } : {}),
-                    context: { releaseCheck: source === 'project' ? 'v1.3.9/ios-project-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
+                const list = envelope.request.source;
+                try { logInfo(`Native ${list === 'review' ? 'Review' : label} bulk Organize confirmed`, { scope: 'native-host', category: 'storage', ...(list !== 'inbox' ? { force: true } : {}),
+                    context: { releaseCheck: list === 'project' ? 'v1.3.9/ios-project-bulk-organize' : list === 'review' ? 'v1.3.9/ios-review-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
                 catch { }
             }
             return confirmed;

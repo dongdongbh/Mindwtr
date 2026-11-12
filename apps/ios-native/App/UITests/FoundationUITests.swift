@@ -32949,6 +32949,54 @@ extension FoundationUITests {
     func testShownListBulkContextsSelectionFilterPruneTagDeleteUndoAndMove() throws { try shownListBulk("contexts") }
     func testShownListBulkContextsLargestText() throws { try shownListBulk("contexts", largest: true) }
 
+    func testReviewBulkOrganizeCancelCreateProjectAndApply() throws {
+        continueAfterFailure = false
+        guard let library = ProcessInfo.processInfo.environment["MINDWTR_SHOWN_LIST_BULK_UI_LIBRARY"],
+              let uuid = UUID(uuidString: library), uuid.uuidString.lowercased() == library else {
+            throw XCTSkip("An externally staged canonical Review and Contexts bulk library is required")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-menu"], timeout: 40)
+        if app.buttons["tab-review"].exists { boardTap(app, "tab-review") } else { boardTap(app, "tab-menu"); boardTap(app, "menu-review") }
+        boardEnabled(app.buttons["review-start"])
+        boardTap(app, "review-scope-all"); boardTap(app, "review-expand-cycle"); boardTap(app, "review-expand-cycle")
+        let prefix = "review-organize", first = "shown-bulk-review-01", second = "shown-bulk-review-02"
+        let title = task192Reveal(app, "task-title-" + first, buttons: true, scrollID: "review-scroll", scans: 60)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8)
+        statusListBulkCount(app, "review", 1)
+        task192Reveal(app, "review-select-" + second, buttons: true, scrollID: "review-scroll", scans: 60).tap()
+        statusListBulkCount(app, "review", 2)
+        func open() {
+            let control = task192Reveal(app, "review-bulk-organize-open", buttons: true, scrollID: "review-bulk-actions-scroll", horizontal: true, scans: 12)
+            boardEnabled(control, timeout: 20)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44 - 0.01); XCTAssertTrue(control.isHittable)
+            control.tap()
+            boardEnabled(app.buttons[prefix + "-cancel"], timeout: 30)
+            _ = task743Control(app, prefix + "-status-__KEEP__", prefix: prefix)
+        }
+        open()
+        boardTap(app, prefix + "-cancel")
+        XCTAssertTrue(app.buttons[prefix + "-cancel"].waitForNonExistence(timeout: 20))
+        statusListBulkCount(app, "review", 2)
+        open()
+        let name = "Review Organize " + String(library.prefix(8))
+        task743Control(app, prefix + "-project", prefix: prefix).tap()
+        task743Text(app, prefix + "-picker-search", name, prefix: prefix)
+        task743DismissKeyboard(app, prefix + "-picker-search", name, preservingCreate: true, prefix: prefix)
+        task743Control(app, prefix + "-picker-create", prefix: prefix).tap()
+        XCTAssertTrue(app.textFields[prefix + "-picker-search"].waitForNonExistence(timeout: 30))
+        XCTAssertEqual(task743Control(app, prefix + "-project", prefix: prefix).label, "Project: " + name)
+        task743Text(app, prefix + "-tags", "#reviewOrganized", prefix: prefix)
+        processEditorObserve(app, "G12 Review Organize dialog with a created Project before Apply")
+        boardEnabled(app.buttons[prefix + "-apply"]); boardTap(app, prefix + "-apply")
+        XCTAssertTrue(app.staticTexts["task-statusListBulkOrganize-notice"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons[prefix + "-apply"].exists)
+        XCTAssertFalse(app.staticTexts["review-bulk-count"].exists)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
     func testStatusListBulkWaitingSelectionPersonPruneAndMove() throws { try statusListBulk("waiting", largest: false) }
     func testStatusListBulkSomedaySelectionAndMove() throws { try statusListBulk("someday", largest: false) }
     func testStatusListBulkWaitingLargestText() throws { try statusListBulk("waiting", largest: true) }

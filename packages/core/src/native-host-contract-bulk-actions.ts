@@ -75,7 +75,7 @@ export type NativeBulkReadList = NativeBulkList | 'project' | 'review' | 'contex
 const BULK_READ_LISTS: readonly NativeBulkReadList[] = [...BULK_LISTS, 'project', 'review', 'contexts'];
 const BULK_READ_SCREENS: Record<NativeBulkReadList, (typeof TASK_LIST_BULK_SCREENS)[keyof typeof TASK_LIST_BULK_SCREENS]> = {
     ...TASK_LIST_BULK_SCREENS,
-    review: { status: 'all', organize: false, moveToSection: false, removeTags: false },
+    review: { status: 'all', organize: true, moveToSection: false, removeTags: false },
     contexts: { status: 'all', organize: false, moveToSection: false, removeTags: false },
 };
 
@@ -509,7 +509,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             if (!read.ok) return read;
             const { revision: listRevision, rows } = read.value;
             const removeTagPicker = input.picker?.kind === 'removeTag';
-            const organizePicker = (input.list === 'inbox' || input.list === 'project') && input.organize !== undefined
+            const organizePicker = (input.list === 'inbox' || input.list === 'project' || input.list === 'review') && input.organize !== undefined
                 && (input.picker?.kind === 'project' || input.picker?.kind === 'area');
             if (!removeTagPicker && !organizePicker && (input.picker?.offset ?? 0) > 0 && input.picker?.revision !== listRevision) return fail('STALE_REVISION', 'The list changed; open the picker again');
             const selectable = selectableIds(rows);
@@ -570,7 +570,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                     JSON.stringify(selection.map((id) => [id, taskRevisionOf(state._tasksById.get(id)!)])),
                     JSON.stringify(organize!.draft),
                 ])}`;
-                if ((input.picker?.offset ?? 0) > 0 && input.picker?.revision !== revision) return fail('STALE_REVISION', `The selection or ${input.list === 'project' ? 'Project' : 'Inbox'} destination offer changed; open the picker again`);
+                if ((input.picker?.offset ?? 0) > 0 && input.picker?.revision !== revision) return fail('STALE_REVISION', `The selection or ${input.list === 'project' ? 'Project' : input.list === 'review' ? 'Review' : 'Inbox'} destination offer changed; open the picker again`);
             }
 
             let picker: NativeBulkPicker | null = null;

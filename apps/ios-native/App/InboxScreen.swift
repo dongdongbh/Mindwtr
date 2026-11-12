@@ -3394,7 +3394,7 @@ private struct InboxBulkOrganizeDialog: View {
     @State private var pickerDate = Date()
     @FocusState private var editingField: String?
     private var view: CoreObject { model.inboxBulkOrganizeView }
-    private var prefix: String { model.bulkOrganizeIsProject ? "project-organize" : "inbox-organize" }
+    private var prefix: String { model.bulkOrganizeSource + "-organize" }
     private var locked: Bool { !model.inboxBulkOrganizeControlsEnabled }
 
     var body: some View {
