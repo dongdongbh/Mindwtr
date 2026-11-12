@@ -175,6 +175,13 @@ private struct ForegroundBoundarySnapshot {
     let requests: Int
 }
 
+private final class ForegroundWriteOrder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+    func finish() { lock.lock(); finished = true; lock.unlock() }
+    var done: Bool { lock.lock(); defer { lock.unlock() }; return finished }
+}
+
 private final class ForegroundBoundaryState: @unchecked Sendable {
     private let lock = NSLock()
     private var armed = false
@@ -792,6 +799,78 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         XCTAssertNotNil(read["diagnostics"], "The cancelled turn left the store saved and ordinary reads admitted")
         let pulled = try await command(host, "syncPull")
         XCTAssertEqual(pulled["success"] as? Bool, true)
+        await host.close()
+    }
+
+    private static func captureTask(_ host: CoreHost, _ title: String) async throws {
+        let encode = { (value: Any) in String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self) }
+        let raw = try await host.call("captureOpen")
+        let opened = try XCTUnwrap(NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        let request = try encode(["text": title, "options": try XCTUnwrap(opened["options"]),
+                                  "captureId": UUID().uuidString.lowercased(), "openAfterSave": false])
+        _ = try await host.call("captureSubmit", argumentsJSON: try encode([request]))
+    }
+
+    private func liveTaskTitles() throws -> Set<String> {
+        let sql = try SQLiteBridge(url: database); defer { sql.close() }
+        let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("SELECT title FROM tasks WHERE deletedAt IS NULL").utf8)) as? [[String: Any]])
+        return Set(rows.compactMap { $0["title"] as? String })
+    }
+
+    func testLocalChangeSyncHoldsATapThatArrivesMidMergeThenRunsItAndKeepsBothChanges() async throws {
+        try await seed()
+        let setup = core()
+        try await openAndTest(setup); try await save(setup); await setup.close()
+        let host = core()
+        _ = try await host.start()
+        try await Self.captureTask(host, "Local change before the sync")
+        var document = try object(String(decoding: try XCTUnwrap(remote.bytes("/sync/data.json")), as: UTF8.self))
+        let at = ISO8601DateFormatter().string(from: Date())
+        document["tasks"] = (document["tasks"] as? [[String: Any]] ?? []) + [["id": UUID().uuidString.lowercased(), "title": "Remote change",
+            "status": "inbox", "tags": [], "contexts": [], "createdAt": at, "updatedAt": at, "rev": 1, "revBy": "remote-fixture"]]
+        remote.seed("/sync/data.json", bytes: Data(try json(document).utf8))
+
+        let gate = remote.holdNextRequest()
+        let sync = Task { try await host.foregroundSync(command: "syncChange", requestJSON: "{}") }
+        XCTAssertEqual(gate.reached.wait(timeout: .now() + 30), .success, "The change sync must reach the network")
+        let order = ForegroundWriteOrder()
+        let tap = Task { try await Self.captureTask(host, "Tap during the merge"); order.finish() }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(order.done, "A write that arrives during the merge waits for the sync's engine turn")
+        gate.release.signal()
+
+        let reply = try object(await sync.value)
+        XCTAssertEqual(reply["ok"] as? Bool, true)
+        XCTAssertEqual(try json(try XCTUnwrap(reply["value"] as? [String: Any])), try json(["success": true, "skipped": false]))
+        try await tap.value
+        XCTAssertTrue(order.done, "The waiting write runs after the sync instead of being refused")
+        XCTAssertTrue(try liveTaskTitles().isSuperset(of: ["Remote change", "Local change before the sync", "Tap during the merge"]),
+            "The merge and both local writes are all kept")
+        let uploaded = String(decoding: try XCTUnwrap(remote.bytes("/sync/data.json")), as: UTF8.self)
+        XCTAssertTrue(uploaded.contains("Local change before the sync"))
+        XCTAssertFalse(uploaded.contains("Tap during the merge"), "The write that waited is not inside the finished merge")
+        let schedule = try await host.syncChangeSchedule()
+        XCTAssertNotNil(schedule.delayMs, "The write that waited is the next pending change")
+        await host.close()
+    }
+
+    func testLocalChangeSyncWaitsWithoutARestartWhileAWriteIsUnconfirmed() async throws {
+        try await seed()
+        let setup = core()
+        try await openAndTest(setup); try await save(setup); await setup.close()
+        let faults = HostIOFaults()
+        faults.journalRemove = { throw HostFailure("Synthetic journal removal failure") }
+        let host = core(faults: faults)
+        _ = try await host.start()
+        do { try await Self.captureTask(host, "Unconfirmed write"); XCTFail("The write must stay unconfirmed") } catch {}
+        let before = remote.recorded.count
+        do {
+            _ = try await host.foregroundSync(command: "syncChange", requestJSON: "{}")
+            XCTFail("A change sync cannot start while a write is unconfirmed")
+        } catch {
+            XCTAssertTrue(error is CoreHostRejection, "The change sync waits with a plain refusal, not a restart failure: \(error)")
+        }
+        XCTAssertEqual(remote.recorded.count, before, "The refused change sync reaches no network")
         await host.close()
     }
 

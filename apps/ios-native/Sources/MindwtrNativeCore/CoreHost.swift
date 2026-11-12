@@ -30012,8 +30012,25 @@ private final class Engine: @unchecked Sendable {
         return { try await NativeCloudKitBridge.accountStatus(containerIdentifier: container) }
     }
 
+    private static let changeSyncDeferred = CoreHostRejection(message: "NOT_READY: The local change sync waits for the current operation")
+
+    private func changeSyncEngineIdle() throws -> Bool {
+        try started && !closed && lockFD >= 0 && context != nil && !recoveryActivationPending && !invoking
+            && !fileSyncCloseFailed && !cleanupOwed && foregroundCleanupCancellation == nil && !foregroundCleanupActive
+            && pending == nil && ordinaryMutationDepth == 0 && retainedOrdinaryTurn == nil && providerCopy == nil
+            && projectFileAddTurn == nil && projectDownloadTurn == nil && taskDownloadTurn == nil
+            && projectAvailabilityTurn == nil && encryptionUnlockTurn == nil && captureAITurn == nil
+            && aiConfigurationTurn == nil && aiTextConfigurationTurn == nil && aiReadmittedSettingTurn == nil
+            && taskAITurn == nil && dropboxTurn == nil && fileSyncTurn == nil && cleanupTurn == nil
+            && (try? turnAdmission.admitInvoke("iosForegroundSync")) != nil
+            && mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil
+            && mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil
+            && mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil
+    }
+
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
+        if command == "syncChange", (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
         var cancelSettled = false
         do {
             try denyCleanupOwner()
