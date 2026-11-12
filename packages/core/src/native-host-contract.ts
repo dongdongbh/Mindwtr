@@ -24,7 +24,7 @@ import {
 } from './project-task-list-model';
 import { buildProjectTaskReorderModel, projectTaskOrderIdentities, projectTaskOrderToken } from './project-task-reorder';
 import { buildProjectGroups, getProjectMoveOptions, type ProjectAreaGroup, type ProjectTagFilter } from './project-grouping';
-import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime } from './task-utils';
+import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime, sortTasksBySavedPreference } from './task-utils';
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
@@ -4877,7 +4877,7 @@ function createListViewMethods(deps: ListViewDeps) {
         getContextsView(input: {
             tokens?: string[]; matchMode?: ContextOrTagMatchMode; searchQuery?: string; selectedIds?: string[];
             filters?: Partial<ListFilterState>; filterEdit?: ListFilterEdit; savedFilterId?: string | null;
-            preservedCriteria?: FilterCriteria; filterSheetOpen?: boolean;
+            preservedCriteria?: FilterCriteria; filterSheetOpen?: boolean; sortOverride?: TaskSortBy | null;
             filterPicker?: { name: 'projects' | 'tokens'; query?: string; offset?: number; limit?: number; revision?: string };
             savedFiltersWindow?: { offset: number; limit: number; revision?: string };
             picker?: { field: BulkTaskTokenField; mode: BulkTaskTokenMode; query?: string; offset?: number; limit?: number; revision?: string };
@@ -4894,6 +4894,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 || (input.savedFilterId !== undefined && input.savedFilterId !== null && (typeof input.savedFilterId !== 'string' || input.savedFilterId.length > 200))
                 || (input.preservedCriteria !== undefined && !isPreservedFilterCriteria(input.preservedCriteria))
                 || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
+                || (input.sortOverride !== undefined && input.sortOverride !== null && !TASK_LIST_SORT_OPTIONS.includes(input.sortOverride))
                 || (filterPicker !== undefined && !(isObjectRecord(filterPicker)
                     && (filterPicker.name === 'projects' || filterPicker.name === 'tokens')
                     && (filterPicker.query === undefined || (typeof filterPicker.query === 'string' && filterPicker.query.length <= 500))
@@ -4927,7 +4928,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 const offset = picker.offset ?? 0;
                 return { field, mode, total: items.length, items: items.slice(offset, offset + (picker.limit ?? NATIVE_HOST_MAX_WINDOW)) };
             };
-            const view = cached('contexts', JSON.stringify([revision, tokens, matchMode, input.searchQuery ?? '', selectedIds, filters, input.filterEdit, input.savedFilterId, input.preservedCriteria, input.filterSheetOpen]), () => {
+            const view = cached('contexts', JSON.stringify([revision, tokens, matchMode, input.searchQuery ?? '', selectedIds, filters, input.filterEdit, input.savedFilterId, input.preservedCriteria, input.filterSheetOpen, input.sortOverride === undefined, input.sortOverride]), () => {
                 const { state, areaById, projectById, selection } = areaScope();
                 const filter = buildContextsFilterModel({
                     tasks: state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter: selection })),
@@ -4938,6 +4939,15 @@ function createListViewMethods(deps: ListViewDeps) {
                 });
                 const index = buildContextsTokenIndex(filter.tasks, { includeFinished: true });
                 const model = buildContextsViewModel({ index, settings: state.settings, selectedTokens: tokens, matchMode, searchQuery: input.searchQuery ?? '' });
+                const savedSortFilter = input.sortOverride === undefined ? null : filter.activeSavedFilter;
+                const sortOverride = savedSortFilter ? input.sortOverride ?? null : null;
+                const savedSort = savedSortFilter?.sortBy && savedSortFilter.sortBy !== 'default' ? savedSortFilter.sortBy : null;
+                const sortBy = sortOverride ?? savedSort ?? model.sortBy;
+                const shownSort = TASK_LIST_SORT_OPTIONS.find((option) => option === sortBy) ?? model.sortBy;
+                const tasks = sortOverride ? sortTasksBy(model.tasks, sortOverride)
+                    : savedSort ? sortTasksBySavedPreference(model.tasks, savedSort, {
+                        projects: state.projects, prioritizeByPriority: resolveTaskRowFeatures(state.settings).priorities, sortOrder: savedSortFilter?.sortOrder,
+                    }) : model.tasks;
                 const next = (nextTokens: string[], nextMode: ContextOrTagMatchMode) => ({ tokens: nextTokens, matchMode: resolveContextsMatchMode(nextTokens, nextMode) });
                 const labels = getContextsMatchModeLabels(t);
                 const onScreen = new Set(model.tasks.map((task) => task.id));
@@ -4946,6 +4956,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
                 return {
                     model,
+                    tasks,
+                    sortOverride,
                     filter,
                     selected,
                     taskRevisions: taskRevisionsOf(selected),
@@ -4966,10 +4978,10 @@ function createListViewMethods(deps: ListViewDeps) {
                     sort: {
                         title: t('sort.label'),
                         accessibilityLabel: getTaskListHeaderText({
-                            sortByLabel: getTaskSortByLabel(model.sortBy, t), hasActiveFilters: false, filterActiveCount: 0, t,
+                            sortByLabel: getTaskSortByLabel(sortBy, t), hasActiveFilters: false, filterActiveCount: 0, t,
                         }).sortAccessibilityLabel,
                         options: getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, state.settings)
-                            .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === model.sortBy })),
+                            .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === shownSort })),
                     },
                     empty: model.tasks.length === 0 ? getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: tokens }, t) : null,
                     bulk: selected.length === 0 ? null : {
@@ -5013,7 +5025,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 saveControls: (() => {
                     const criteria = getContextsSaveCriteria(view.filter.criteria, tokens, matchMode, [input.searchQuery ?? '', view.filter.resolved.searchQuery]);
                     return criteria && !(input.searchQuery ?? '').trim() && !view.filter.resolved.searchQuery.trim()
-                        ? { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: criteria, sortBy: view.model.sortBy } : null;
+                        ? { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: criteria,
+                            ...(input.sortOverride === undefined ? { sortBy: view.model.sortBy } : view.sortOverride ? { sortBy: view.sortOverride } : {}) } : null;
                 })(),
                 filterPicker: filterPicker ? (() => {
                     const query = filterPicker.query ?? '';
@@ -5029,8 +5042,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 chips: view.chips,
                 matchMode: view.matchMode,
                 sort: view.sort,
-                total: view.model.tasks.length,
-                rows: view.model.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
+                total: view.tasks.length,
+                rows: view.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
                 empty: view.empty,
                 selectedIds: view.selected,
                 taskRevisions: view.taskRevisions,

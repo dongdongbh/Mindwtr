@@ -85,6 +85,20 @@ private val ROUTES = mapOf("/waiting" to (MenuScreen.Waiting to null), "/someday
     "/reference" to (MenuScreen.Reference to null), "/done" to (MenuScreen.History to "done"), "/archived" to (MenuScreen.History to "archived"))
 fun isMenuRoute(route: String?) = route in ROUTES
 
+internal fun widgetContextsFilterId(view: JSONObject): String? = view.optString("contextsFilterId").takeUnless { view.isNull("contextsFilterId") || it.isEmpty() }
+
+internal fun contextsSortOverride(view: JSONObject?, value: String): String? = value.takeIf { view?.isNull("savedFilterId") == false }
+
+internal fun contextsWithSavedFilter(own: JSONObject, id: String?): JSONObject = JSONObject(own.toString())
+    .put("savedFilterId", id ?: JSONObject.NULL).put("tokens", JSONArray()).put("matchMode", "all").put("filters", JSONObject())
+    .apply { remove("preservedCriteria"); remove("sortOverride") }
+
+internal fun contextsAfterSave(own: JSONObject, savedFilterId: String): JSONObject = JSONObject(own.toString())
+    .put("savedFilterId", savedFilterId).put("tokens", JSONArray()).apply { remove("preservedCriteria"); remove("sortOverride") }
+
+internal fun leavesSavedContexts(from: MenuScreen?, to: MenuScreen?, own: JSONObject) =
+    from == MenuScreen.Contexts && to != MenuScreen.Contexts && !own.isNull("savedFilterId")
+
 
 class MenuItem(val json: JSONObject, val row: TaskRow?) {
 
@@ -432,6 +446,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     private fun leave(back: MenuScreen?) {
         shell.closeRowChecklists()
+        if (leavesSavedContexts(screen, back, own("contexts"))) keepContextsSavedFilter(null)
         if (screen == MenuScreen.Projects) shell.closeProject()
 
         if (screen == MenuScreen.Weekly) shell.ai.leaveReview()
@@ -478,6 +493,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
                     own.optJSONArray("except")?.let { put("selectAll", JSONObject().put("except", it)) } ?: put("selectedIds", own.optJSONArray("selected") ?: JSONArray())
                 }
             "contexts" -> kept(listOf("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"))
+                .put("sortOverride", own.opt("sortOverride") ?: JSONObject.NULL)
                 .put("selectedIds", own.optJSONArray("selected") ?: JSONArray()).also {
                     if (dialog?.optString("kind") == "filters") it.put("filterSheetOpen", true)
                     dialogInputs(list, it)
@@ -566,6 +582,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     private fun show(list: String, next: MenuPage) {
         if (list != this.list) return
         shell.readSucceeded()
+        if (list == "widgetList") widgetContextsFilterId(next.view)?.let { return openWidgetContextsFilter(it) }
 
         loaded = if (list in BULK_LISTS && own(list).optJSONObject("bulk") == null) next.withBulk(null) else next
         editOwn(list) {
@@ -724,11 +741,18 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
 
     fun selectContextsSavedFilter(id: String?) {
-        editOwn("contexts") {
-            put("savedFilterId", id ?: JSONObject.NULL).put("tokens", JSONArray()).put("matchMode", "all")
-            put("filters", JSONObject()).remove("preservedCriteria")
-        }
+        keepContextsSavedFilter(id)
         reload()
+    }
+
+    private fun keepContextsSavedFilter(id: String?) = keepOwn("contexts", contextsWithSavedFilter(own("contexts"), id))
+
+    private fun openWidgetContextsFilter(id: String) {
+        keepContextsSavedFilter(id)
+        editOwn("contexts") { remove("searchQuery"); remove("selected") }
+        open(MenuScreen.Contexts)
+        shell.anyTime({ it.logLine("Native Android widget Contexts filter selected releaseCheck=v1.3.9/widget-contexts-filter",
+            JSONObject().put("releaseCheck", "v1.3.9/widget-contexts-filter").put("outcome", "selected")) }, {})
     }
 
 
@@ -791,7 +815,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     fun sort(value: String) {
         when (val list = list ?: return) {
-            "reference", "inbox", "contexts" -> send(FailedAction("taskListSort", value))
+            "contexts" -> contextsSortOverride(page?.view, value)?.let { editOwn(list) { put("sortOverride", it) }; reload() } ?: send(FailedAction("taskListSort", value))
+            "reference", "inbox" -> send(FailedAction("taskListSort", value))
             "done" -> { ListViewState.read(prefs, DONE_VIEW_KEY).copy(sortBy = value).save(prefs, DONE_VIEW_KEY); reload() }
             "archive" -> { ListViewState.read(prefs, ARCHIVED_VIEW_KEY).copy(sortBy = value).save(prefs, ARCHIVED_VIEW_KEY); reload() }
             else -> { editOwn(list) { put("sortBy", value) }; reload() }
@@ -1547,11 +1572,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             "bulkAction" -> bulkDone(action, reply)
             "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> {
                 if (action.kind == "focusSave" && JSONObject(action.title).optString("view") == "contexts") {
-                    editOwn("contexts") {
-                        put("savedFilterId", reply.getJSONObject("controls").getString("savedFilterId"))
-                        put("tokens", JSONArray())
-                        remove("preservedCriteria")
-                    }
+                    keepOwn("contexts", contextsAfterSave(own("contexts"), reply.getJSONObject("controls").getString("savedFilterId")))
                     closeDialog("contextsSave")
                     Log.i(CoreHost.TAG, "Native Context filter saved releaseCheck=v1.3.8/context-filter-save outcome=confirmed")
                 } else focusControls.done(action, reply)

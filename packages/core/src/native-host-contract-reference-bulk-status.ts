@@ -69,7 +69,7 @@ const STATUS_LIST_SOURCES: readonly MoveSource[] = ['inbox', 'waiting', 'someday
 const SHOWN_SOURCES: readonly MoveSource[] = ['review', 'contexts'];
 const MOVE_LABELS: Record<MoveSource, string> = { reference: 'Reference', inbox: 'Inbox', project: 'Project', waiting: 'Waiting', someday: 'Someday', review: 'Review', contexts: 'Contexts' };
 const REVIEW_PARAMS = ['scope', 'expandedAreaIds', 'expandedProjectIds', 'expandedLaterProjectIds'];
-const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria'];
+const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria', 'sortOverride'];
 const isTextList = (value: unknown): boolean => Array.isArray(value) && value.length <= 10_000 && value.every((item) => isText(item, 500));
 const shownParams = (source: MoveSource, params: Record<string, unknown>): boolean => source === 'review'
     ? Object.keys(params).every((name) => REVIEW_PARAMS.includes(name))
@@ -80,7 +80,8 @@ const shownParams = (source: MoveSource, params: Record<string, unknown>): boole
         && (params.matchMode === undefined || params.matchMode === 'all' || params.matchMode === 'any')
         && (params.searchQuery === undefined || (typeof params.searchQuery === 'string' && params.searchQuery.length <= 2000))
         && record(params.filters) && (params.savedFilterId === undefined || params.savedFilterId === null || isText(params.savedFilterId, 200))
-        && (params.preservedCriteria === undefined || record(params.preservedCriteria));
+        && (params.preservedCriteria === undefined || record(params.preservedCriteria))
+        && (params.sortOverride === undefined || params.sortOverride === null || isText(params.sortOverride, 50));
 const SOMEDAY_PARAMS = ['sortBy', 'groupBy', 'showDetails', 'projectsInSections', 'filters'];
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;

@@ -2949,7 +2949,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(code(kotlinFiles.join('\n') + inboxUi + bulkUi + focusControlsUi + focusModelKt), /inboxWindow|callAsync\("window"|InboxPage|Part\.Inbox/, 'no getInboxWindow read is left in Kotlin');
     assert.match(model, /private class Lists\(val focus: FocusView\?, val projects: ProjectsView\?, val projectId: String\?, val project: ProjectDetail\?, val areas: AreaFilter\)/);
     assert.match(menuModel, /if \(list != this\.list\) return\s+shell\.readSucceeded\(\)/, 'the Inbox view\'s (or a Menu list\'s) success clears a read\'s failure');
-    assert.match(menuModel, /"reference", "inbox", "contexts" -> send\(FailedAction\("taskListSort", value\)\)/);
+    assert.match(menuModel, /"reference", "inbox" -> send\(FailedAction\("taskListSort", value\)\)/);
+    assert.match(menuModel, /"contexts" -> contextsSortOverride\(page\?\.view, value\)\?\.let \{ editOwn\(list\) \{ put\("sortOverride", it\) \}; reload\(\) \} \?: send\(FailedAction\("taskListSort", value\)\)/, 'a Contexts sort under a saved filter is a temporary override, never a global taskListSort write (#1485)');
+    assert.match(menuModel, /internal fun contextsSortOverride\(view: JSONObject\?, value: String\): String\? = value\.takeIf \{ view\?\.isNull\("savedFilterId"\) == false \}/);
     assert.match(menuModel, /"inbox" -> kept\(listOf\("groupBy", "filters"\)\)\.put\("collapsedGroupIds", GroupCollapse\.axis\(prefs, "inbox", own\.optString\("groupBy", "none"\), 200\)\)/);
     assert.match(menuModel, /if \(list == "inbox" && collapse != null\) GroupCollapse\.keep\(prefs, list, axis, collapse\.getJSONArray\("collapsedGroupIds"\)\)/);
     assert.match(menuUi, /Choice\(option\.getString\("label"\), option\.getBoolean\("selected"\)\) \{ sort\(option\.optJSONObject\("edit"\)\?\.getString\("sortBy"\) \?: option\.getString\("value"\)\) \}/);
@@ -3032,7 +3034,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /first\.optJSONObject\("bulk"\)\?\.takeIf \{ list == "review" \}/);
     assert.match(menuModel, /JSONObject\(params\.toString\(\)\)\.apply \{\s+remove\("organize"\); remove\("picker"\)/, 'later windows go without the dialog\'s inputs');
     for (const list of ['review']) assert.match(menuModel, new RegExp(`"${list}" -> kept\\([\\s\\S]{0,240}?\\.also \\{ dialogInputs\\(list, it\\) \\}`), `${list}'s read carries its open dialog`);
-    assert.match(menuModel, /"contexts" -> kept\(listOf\("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"\)\)[\s\S]{0,120}\.also \{\s+if \(dialog\?\.optString\("kind"\) == "filters"\) it\.put\("filterSheetOpen", true\)\s+dialogInputs\(list, it\)\s+\}/, 'Contexts carries the filter sheet and its open dialog');
+    assert.match(menuModel, /"contexts" -> kept\(listOf\("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"\)\)\s+\.put\("sortOverride", own\.opt\("sortOverride"\) \?: JSONObject\.NULL\)[\s\S]{0,120}\.also \{\s+if \(dialog\?\.optString\("kind"\) == "filters"\) it\.put\("filterSheetOpen", true\)\s+dialogInputs\(list, it\)\s+\}/, 'Contexts carries the filter sheet and its open dialog');
     assert.match(menuModel, /if \(list == "review"\) bulkEdit\?\.optJSONObject\("organizeEdit"\)\?\.let \{ params\.optJSONObject\("organize"\)\?\.put\("edit", it\) \}/);
     assert.match(organizeKt, /into\.put\("organize", JSONObject\(\)\.put\("draft", open\.optJSONObject\("draft"\) \?: JSONObject\(\)\)\)/);
     assert.match(bulkUi, /val bulk = page\?\.bulk\?\.takeIf \{ list in BULK_LISTS \} \?: return/, 'the lists\' bar never draws Review\'s');
@@ -3352,6 +3354,14 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /route\.startsWith\("\/widget-list\/"\) -> menu\.openWidgetList\(Uri\.decode\(route\.removePrefix\("\/widget-list\/"\)\)\)/);
     assert.match(menuModel, /"widgetList" -> JSONObject\(\)\.put\("id", own\.optString\("id"\)\)/);
     assert.match(menuModel, /MenuScreen\.WidgetList -> "widgetList"/);
+    assert.match(menuModel, /shell\.readSucceeded\(\)\s+if \(list == "widgetList"\) widgetContextsFilterId\(next\.view\)\?\.let \{ return openWidgetContextsFilter\(it\) \}/, 'a saved Contexts filter link opens the Contexts screen (#1485)');
+    assert.match(menuModel, /private fun openWidgetContextsFilter\(id: String\) \{\s+keepContextsSavedFilter\(id\)\s+editOwn\("contexts"\) \{ remove\("searchQuery"\); remove\("selected"\) \}\s+open\(MenuScreen\.Contexts\)\s+shell\.anyTime\(\{ it\.logLine\("Native Android widget Contexts filter selected releaseCheck=v1\.3\.9\/widget-contexts-filter"/);
+    assert.match(menuModel, /private fun keepContextsSavedFilter\(id: String\?\) = keepOwn\("contexts", contextsWithSavedFilter\(own\("contexts"\), id\)\)/, 'choosing a saved filter drops the temporary sort');
+    assert.match(menuModel, /internal fun contextsWithSavedFilter\(own: JSONObject, id: String\?\): JSONObject = JSONObject\(own\.toString\(\)\)\s+\.put\("savedFilterId", id \?: JSONObject\.NULL\)\.put\("tokens", JSONArray\(\)\)\.put\("matchMode", "all"\)\.put\("filters", JSONObject\(\)\)\s+\.apply \{ remove\("preservedCriteria"\); remove\("sortOverride"\) \}/);
+    assert.match(menuModel, /if \(action\.kind == "focusSave" && JSONObject\(action\.title\)\.optString\("view"\) == "contexts"\) \{\s+keepOwn\("contexts", contextsAfterSave\(own\("contexts"\), reply\.getJSONObject\("controls"\)\.getString\("savedFilterId"\)\)\)/, 'a saved Contexts filter drops the temporary sort (#1485 D1)');
+    assert.match(menuModel, /internal fun contextsAfterSave\(own: JSONObject, savedFilterId: String\): JSONObject = JSONObject\(own\.toString\(\)\)\s+\.put\("savedFilterId", savedFilterId\)\.put\("tokens", JSONArray\(\)\)\.apply \{ remove\("preservedCriteria"\); remove\("sortOverride"\) \}/);
+    assert.match(menuModel, /private fun leave\(back: MenuScreen\?\) \{\s+shell\.closeRowChecklists\(\)\s+if \(leavesSavedContexts\(screen, back, own\("contexts"\)\)\) keepContextsSavedFilter\(null\)/, 'leaving the stacked Contexts screen drops its saved filter and temporary sort, as RN unmounts it (#1485 D2)');
+    assert.match(menuModel, /internal fun leavesSavedContexts\(from: MenuScreen\?, to: MenuScreen\?, own: JSONObject\) =\s+from == MenuScreen\.Contexts && to != MenuScreen\.Contexts && !own\.isNull\("savedFilterId"\)/);
     const widgetListKt = source('WidgetListScreen.kt');
     assert.match(widgetListKt, /TaskRowItem\(model, it, status = RowStatus\.Badge, details = true\)/);
     assert.doesNotMatch(code(widgetListKt), /getString\("(id|status|title)"\)|filter\s*\{|sorted/, 'the screen draws core\'s list, no policy of its own');

@@ -114,6 +114,63 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
     });
 
 
+    it('sorts a selected saved Contexts filter by its saved sort, and a sort override never writes the global sort (#1485)', async () => {
+        const stamp = fixture.contexts.now;
+        const task = (id: string, day: number): Task => ({ id, title: id, status: 'next', contexts: ['@desk'], tags: [],
+            createdAt: `2026-01-0${day}T00:00:00.000Z`, updatedAt: stamp });
+        const part: ListViewsPart = { ...fixture.contexts, tasks: [task('Alpha', 2), task('Bravo', 3), task('Charlie', 1)], projects: [], areas: [],
+            settings: { saved: { taskSortBy: 'created', savedFilters: [{ id: 'desk', name: 'Desk', view: 'contexts', criteria: { contexts: ['@desk'] },
+                sortBy: 'title', sortOrder: 'desc', createdAt: stamp, updatedAt: stamp }] } } };
+        const { host, recorder } = await openHost(part, { name: 'Saved sort', settings: 'saved', actions: [] });
+        const read = (input: Partial<Parameters<typeof host.getContextsView>[0]>) => value(host.getContextsView({ offset: 0, limit: 100, ...input }));
+        const ids = (input: Partial<Parameters<typeof host.getContextsView>[0]>) => read(input).rows.map((row) => row.id);
+        const shownSort = (input: Partial<Parameters<typeof host.getContextsView>[0]>) => read(input).sort.options.find((option) => option.selected)?.value;
+        expect(ids({ savedFilterId: 'desk' })).toEqual(['Charlie', 'Alpha', 'Bravo']);
+        expect(shownSort({ savedFilterId: 'desk' })).toBe('created');
+        expect(ids({ savedFilterId: 'desk', sortOverride: null })).toEqual(['Charlie', 'Bravo', 'Alpha']);
+        expect(shownSort({ savedFilterId: 'desk', sortOverride: null })).toBe('title');
+        expect(ids({ savedFilterId: 'desk', sortOverride: 'title' })).toEqual(['Alpha', 'Bravo', 'Charlie']);
+        expect(shownSort({ savedFilterId: 'desk', sortOverride: 'created-desc' })).toBe('created-desc');
+        expect(ids({ sortOverride: 'title' })).toEqual(['Charlie', 'Alpha', 'Bravo']);
+        expect(shownSort({ sortOverride: 'title' })).toBe('created');
+        expect(host.getContextsView({ savedFilterId: 'desk', sortOverride: 'completed' as never, offset: 0, limit: 100 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(useTaskStore.getState().settings.taskSortBy).toBe('created');
+        expect(recorder.log).toEqual([]);
+    });
+
+    it('pages a saved Contexts filter in its override order (#1485)', async () => {
+        const stamp = fixture.contexts.now;
+        const tasks: Task[] = Array.from({ length: 130 }, (_, index) => ({ id: `t${String(index).padStart(3, '0')}`, title: `Task ${String(129 - index).padStart(3, '0')}`,
+            status: 'next', contexts: ['@desk'], tags: [], createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(), updatedAt: stamp }));
+        const part: ListViewsPart = { ...fixture.contexts, tasks, projects: [], areas: [],
+            settings: { saved: { taskSortBy: 'created', savedFilters: [{ id: 'desk', name: 'Desk', view: 'contexts', criteria: { contexts: ['@desk'] },
+                createdAt: stamp, updatedAt: stamp }] } } };
+        const { host } = await openHost(part, { name: 'Paged override', settings: 'saved', actions: [] });
+        const input = { savedFilterId: 'desk', sortOverride: 'title' as const };
+        const first = value(host.getContextsView({ ...input, offset: 0, limit: 100 }));
+        const second = value(host.getContextsView({ ...input, offset: 100, limit: 100, revision: first.revision }));
+        expect([...first.rows, ...second.rows].map((row) => row.title)).toEqual(tasks.map((task) => task.title).sort());
+        expect(second.rows).toHaveLength(30);
+    });
+
+    it('saves a native Contexts filter without a sort, and an iOS save keeps the global sort (#1485)', async () => {
+        const stamp = fixture.contexts.now;
+        const part: ListViewsPart = { ...fixture.contexts, tasks: [{ id: 'a', title: 'a', status: 'next', contexts: ['@desk'], tags: [], createdAt: stamp, updatedAt: stamp }],
+            projects: [], areas: [], settings: { saved: { taskSortBy: 'created' } } };
+        const { host } = await openHost(part, { name: 'Save sort', settings: 'saved', actions: [] });
+        const read = { tokens: ['@desk'], filters: { statuses: ['next' as const] }, offset: 0, limit: 100 };
+        const save = async (controls: unknown, name: string) => {
+            value(await host.saveFocusFilter({ requestId: generateUUID(), controls: controls as never, name, view: 'contexts' }));
+            return useTaskStore.getState().settings.savedFilters!.find((filter) => filter.name === name)!;
+        };
+        const native = await save(value(host.getContextsView({ ...read, sortOverride: null })).saveControls, 'Native');
+        expect(native).not.toHaveProperty('sortBy');
+        expect(native.view).toBe('contexts');
+        const ios = await save(value(host.getContextsView(read)).saveControls, 'iOS');
+        expect(ios.sortBy).toBe('created');
+    });
+
+
     it('filters Contexts by status without writing', async () => {
         const { host, recorder } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
         const input = { offset: 0, limit: 100, tokens: ['@phone'], matchMode: 'all' as const };
