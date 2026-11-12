@@ -71,7 +71,7 @@ const reportRefusal = (write: Promise<unknown>, outcome: 'recreated' | 'cleared'
 export type NativeAndroidCalendar = NativeCalendarHost & {
     startPush(): Promise<'unavailable' | 'off' | 'pushed' | 'failed'>;
     snapshot(): string;
-    pushChanged(token: string): Promise<'unavailable' | 'off' | 'unchanged' | 'replaced' | 'pushed' | 'failed'>;
+    pushChanged(token: string): Promise<'unavailable' | 'off' | 'unchanged' | 'pushed' | 'failed'>;
 };
 
 export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCall, fileCall: () => FileCall,
@@ -137,8 +137,7 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
             if (await keyValue.get(CALENDAR_PUSH_ENABLED_KEY) !== '1') return 'off';
             const changed = calendarPushChangedTaskIds(before, useTaskStore.getState()._allTasks);
             if (changed.length === 0) return 'unchanged';
-            return bound.run(changed).then(() => 'pushed' as const,
-                (error: unknown) => (error instanceof Error && error.message.startsWith('NOT_READY') ? 'replaced' as const : 'failed' as const));
+            return bound.run(changed).then(() => 'pushed' as const, () => 'failed' as const);
         },
         startPush: async () => {
             const bound = lifecycle;

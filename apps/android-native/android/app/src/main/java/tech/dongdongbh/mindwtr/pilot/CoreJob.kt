@@ -47,13 +47,15 @@ internal object CoreJob {
 
         fun appActive(): Boolean = false
 
+        fun coldCalendarSnapshot(): String? = null
+
         fun calendarSnapshot(): String? = null
 
         fun calendarPush(job: String, snapshot: String): String = "unavailable"
     }
 
 
-    fun run(name: String?, input: Map<String, String?>, boot: () -> Calls, post: (JSONObject) -> Unit, refreshWidgets: () -> Unit,
+    fun run(name: String?, input: Map<String, String?>, boot: (snapshotBeforeReplay: Boolean) -> Calls, post: (JSONObject) -> Unit, refreshWidgets: () -> Unit,
             log: (String, JSONObject) -> Unit, syncAgain: () -> Boolean = { true }, ensureSync: () -> Boolean = { true }): Outcome {
         val line = JSONObject().put("job", name ?: JSONObject.NULL)
         if (name !in JOBS) {
@@ -63,10 +65,12 @@ internal object CoreJob {
         var recovered = false
         var calls: Calls? = null
         var snapshot: String? = null
+        var worked = false
         val outcome = try {
-            val host = boot().also { calls = it }
-            if (name in TASK_CHANGING_JOBS && !host.appActive()) snapshot = runCatching { host.calendarSnapshot() }.getOrNull()
-            if (!host.recover() || !host.drain()) Outcome.Retry
+            val host = boot(name in TASK_CHANGING_JOBS).also { calls = it }
+            if (name in TASK_CHANGING_JOBS && !host.appActive()) snapshot = host.coldCalendarSnapshot() ?: runCatching { host.calendarSnapshot() }.getOrNull()
+            worked = host.recover() && host.drain()
+            if (!worked) Outcome.Retry
             else when (name) {
                 WIDGET_REFRESH -> {
                     refreshWidgets()
@@ -120,7 +124,7 @@ internal object CoreJob {
         if (outcome == Outcome.Success && name != WIDGET_REFRESH) refreshWidgets()
         val taken = snapshot
         val host = calls
-        if (outcome == Outcome.Success && taken != null && host != null && !host.appActive()) runCatching { host.calendarPush(name.orEmpty(), taken) }
+        if (worked && taken != null && host != null && !host.appActive()) runCatching { host.calendarPush(name.orEmpty(), taken) }
         return outcome
     }
 

@@ -76,10 +76,10 @@ internal object ProcessCoreHost {
     val booted: Boolean get() = synchronized(this) { boot != null }
 
 
-    fun get(app: Application, language: String? = null, sandboxRequest: String? = null): CoreHost {
+    fun get(app: Application, language: String? = null, sandboxRequest: String? = null, beforeReplay: ((CoreHost) -> Unit)? = null): CoreHost {
         var starter = false
         val task = synchronized(this) {
-            boot ?: FutureTask { start(app, language, sandboxRequest) }.also {
+            boot ?: FutureTask { start(app, language, sandboxRequest, beforeReplay) }.also {
                 boot = it
                 boots += 1
                 starter = true
@@ -106,15 +106,15 @@ internal object ProcessCoreHost {
     fun isSandbox(host: CoreHost) = host === sandboxHost
 
 
-    private fun start(app: Application, language: String?, sandboxRequest: String?): CoreHost =
-        try { open(app, language, sandboxRequest) } catch (_: SandboxRequestExpired) {
+    private fun start(app: Application, language: String?, sandboxRequest: String?, beforeReplay: ((CoreHost) -> Unit)?): CoreHost =
+        try { open(app, language, sandboxRequest, beforeReplay) } catch (_: SandboxRequestExpired) {
             Log.w(CoreHost.TAG, "Native Android sandbox request refused by core; restarting into the real workspace releaseCheck=v1.3.9/native-sandbox")
             Workspace.restart(app)
             throw IllegalStateException("The process did not restart")
         }
 
 
-    private fun open(app: Application, language: String?, sandboxRequest: String?): CoreHost {
+    private fun open(app: Application, language: String?, sandboxRequest: String?, beforeReplay: ((CoreHost) -> Unit)?): CoreHost {
         application = app
         val scratch = Workspace.scratch(app)
         val sandbox = sandboxRequest != null
@@ -157,6 +157,7 @@ internal object ProcessCoreHost {
 
 
             recoverInstalls(installer)
+            beforeReplay?.let { hook -> runCatching { hook(runtime) } }
             if (replay(runtime)) recovered(app, runtime, deferSync = true)
 
 

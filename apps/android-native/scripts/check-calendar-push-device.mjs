@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { createHash, randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -35,8 +35,11 @@ const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'
 
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const TITLES = { timed: `CP${run} timed`, allDay: `CP${run} allday`, done: `CP${run} done`, gone: `CP${run} gone`, off: `CP${run} afteroff`, mine: `CP${run} mine`,
-    shade: `CP${run} shade` };
+    shade: `CP${run} shade`, cold: `CP${run} cold` };
 const BACKGROUND_LINE = 'Native Android calendar push after background work releaseCheck=v1.3.9/native-calendar-push-background';
+const CAPTURE = `${PKG}/tech.dongdongbh.mindwtr.androidwidget.CaptureIntentReceiver`;
+const CAPTURE_CONFIG = 'no_backup/android-capture-intent.json';
+const CAPTURE_TOKEN = randomBytes(32).toString('hex');
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
@@ -207,7 +210,12 @@ let keptNotifications;
 let calendarId = null;
 let unmarkedId = null;
 let created = false;
+let keptCaptureConfig;
 const restore = async () => {
+    try {
+        if (keptCaptureConfig === '') runAs(`rm -f ${CAPTURE_CONFIG}`);
+        else if (keptCaptureConfig !== undefined) runAs(`echo ${Buffer.from(keptCaptureConfig).toString('base64')} | base64 -d > ${CAPTURE_CONFIG}`);
+    } catch (error) { console.error(`RESTORE: the capture intent setting was not put back (${error.message})`); }
     try { if (calendarId && unmarkedId) sh(`content delete --uri ${EVENTS} --where "_id=${unmarkedId} AND calendar_id=${calendarId}"`); } catch {}
     try {
         if (created && mindwtrCalendar()) {
@@ -340,6 +348,21 @@ try {
     check(!front().includes(`${PKG}/`) && /"job":"reminderDone"/.test(line.replace(/\\/g, '')) && /"outcome":"pushed"/.test(line.replace(/\\/g, '')),
         '(6b) with the app closed, Done on the reminder pushes the calendar in the background: the event is gone and the log shows the push (C4d)');
     check(otherEvents(calendarId) === otherBefore, '(6b) no event in any other calendar changed');
+
+    keptCaptureConfig = runAs(`cat ${CAPTURE_CONFIG} 2>/dev/null || true`);
+    runAs(`mkdir -p no_backup && echo ${Buffer.from(JSON.stringify({ enabled: true, token: CAPTURE_TOKEN })).toString('base64')} | base64 -d > ${CAPTURE_CONFIG}`);
+    for (let attempt = 0; attempt < 10 && pid(); attempt += 1) { try { runAs(`kill -9 ${pid()}`); } catch {} await sleep(500); }
+    if (pid()) fail('the app process did not die before the cold capture');
+    sh('logcat -c');
+    const coldDue = localDue(2, 17, 0);
+    const answer = /result=(-?\d+)/.exec(sh(`am broadcast -n ${CAPTURE} -a tech.dongdongbh.mindwtr.action.CAPTURE --es text '${TITLES.cold} /due:${coldDue.text}' --es token '${CAPTURE_TOKEN}'`))?.[1];
+    if (answer !== '-1') fail(`the capture intent answered ${answer ?? 'nothing'}, not RESULT_OK`);
+    const coldId = (await waitUntil('the cold capture stored', () => task(TITLES.cold), 120_000, 2000)).id;
+    const coldEvent = await waitUntil('the cold capture\'s event', () => eventFor(calendarId, coldId), 120_000, 2000);
+    const coldLine = (adbRaw('logcat', '-d', '-s', `${TAG}:*`).toString('utf8').split('\n').find((entry) => entry.includes(BACKGROUND_LINE)) ?? '').replace(/\\/g, '');
+    check(!front().includes(`${PKG}/`) && Number(coldEvent.dtstart) === coldDue.ms && /"job":"ingest"/.test(coldLine) && /"outcome":"pushed"/.test(coldLine),
+        '(6c) with the app process killed, a dated capture through the capture intent starts a fresh process whose boot ingests it, and the background push still adds its event; the log shows job=ingest outcome=pushed (C4d)');
+    check(otherEvents(calendarId) === otherBefore, '(6c) no event in any other calendar changed');
     device.launch(ACTIVITY);
     await waitFor('the app', (current) => Boolean(tab(current, en['tab.menu'])), 60_000);
 

@@ -23,6 +23,10 @@ class CoreJobTest {
     private var calendarFailure: Throwable? = null
     private val calendarPushes = mutableListOf<String>()
     private val calendarSnapshots = mutableListOf<String>()
+    private val coldBootAsks = mutableListOf<Boolean>()
+    private var workerStartsProcess = false
+    private var bootIngests = false
+    private var coldToken: String? = null
 
     private val calls = object : CoreJob.Calls {
         override fun recover(): Boolean {
@@ -45,6 +49,7 @@ class CoreJobTest {
             return JSONObject().put("schedule", syncWanted)
         }
         override fun appActive() = appActive
+        override fun coldCalendarSnapshot() = coldToken
         override fun calendarSnapshot(): String {
             calendarSnapshots += "after ${events.last()}"
             return "snap${calendarSnapshots.size}"
@@ -66,7 +71,14 @@ class CoreJobTest {
     }
 
     private fun run(job: String?, input: Map<String, String?> = emptyMap()) = CoreJob.run(job, input,
-        boot = { events += "boot"; bootFailure?.let { throw it }; calls },
+        boot = { snapshotBeforeReplay ->
+            coldBootAsks += snapshotBeforeReplay
+            if (snapshotBeforeReplay && workerStartsProcess) coldToken = "cold".also { calendarSnapshots += "before boot replay" }
+            events += "boot"
+            if (bootIngests) events += "boot ingest"
+            bootFailure?.let { throw it }
+            calls
+        },
         post = { events += "post ${it.getString("title")}" },
         refreshWidgets = { events += "widgets" },
         syncAgain = { events += "again"; nextStored },
@@ -302,6 +314,25 @@ class CoreJobTest {
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
         assertEquals(emptyList<String>(), calendarPushes)
         assertEquals(listOf("after boot"), calendarSnapshots)
+        assertEquals(listOf(true, false, false, true), coldBootAsks)
+    }
+
+
+    @Test fun aCaptureTheWorkerIngestsWhileStartingTheProcessIsPushedFromASnapshotTakenBeforeTheReplay() {
+        workerStartsProcess = true
+        bootIngests = true
+        assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
+        assertEquals(listOf("before boot replay"), calendarSnapshots)
+        assertEquals(listOf("ingest cold after widgets"), calendarPushes)
+    }
+
+
+    @Test fun aJobThatChangedTasksPushesThemEvenWhenItEndsInRetry() {
+        ensured = false
+        assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
+        remindersFailure = IllegalStateException("cycle failed")
+        assertEquals(CoreJob.Outcome.Retry, run(CoreJob.REMINDER_DONE, mapOf("requestId" to "r", "taskId" to "t")))
+        assertEquals(listOf("ingest snap1 after ensure", "reminderDone snap2 after reminders cycle "), calendarPushes)
     }
 
 

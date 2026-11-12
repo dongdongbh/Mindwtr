@@ -632,11 +632,17 @@ assert.match(hostEntry, /calendarPushSnapshot\(\): string \{\s+return submit\(as
 assert.ok(Number(/const CALENDAR_BACKGROUND_PUSH_MS = ([\d_]+);/.exec(hostEntry)[1].replace(/_/g, '')) < Number(/OPERATION_DEADLINE_MS = ([\d_]+)L?/.exec(coreHost)[1].replace(/_/g, '')),
     'a slow background calendar push answers timeout before the host call deadline cancels other host calls');
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreJob.kt'), 'utf8'),
-    /private val TASK_CHANGING_JOBS = setOf\(INGEST, REMINDER_DONE, SYNC\)[\s\S]*?val host = boot\(\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+if \(!host\.recover\(\)[\s\S]*?if \(outcome == Outcome\.Success && name != WIDGET_REFRESH\) refreshWidgets\(\)\s+val taken = snapshot\s+val host = calls\s+if \(outcome == Outcome\.Success && taken != null && host != null && !host\.appActive\(\)\) runCatching \{ host\.calendarPush\(name\.orEmpty\(\), taken\) \}\s+return outcome/,
+    /private val TASK_CHANGING_JOBS = setOf\(INGEST, REMINDER_DONE, SYNC\)[\s\S]*?val host = boot\(name in TASK_CHANGING_JOBS\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = host\.coldCalendarSnapshot\(\) \?: runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+worked = host\.recover\(\) && host\.drain\(\)[\s\S]*?if \(outcome == Outcome\.Success && name != WIDGET_REFRESH\) refreshWidgets\(\)\s+val taken = snapshot\s+val host = calls\s+if \(worked && taken != null && host != null && !host\.appActive\(\)\) runCatching \{ host\.calendarPush\(name\.orEmpty\(\), taken\) \}\s+return outcome/,
     'after a capture or check-off ingest, a notification Done or a background sync, a closed app pushes the calendar; an open app pushes through its own subscription');
 assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreWork.kt'), 'utf8'),
     /override fun calendarPush\(job: String, snapshot: String\): String \{\s+val outcome = runCatching \{ host\.calendarPushBackground\(snapshot\) \}\.getOrDefault\("failed"\)\s+if \(outcome == "pushed" \|\| outcome == "failed" \|\| outcome == "timeout"\) host\.logLine\("Native Android calendar push after background work releaseCheck=v1\.3\.9\/native-calendar-push-background"/,
-    'the background push logs only a push that ran, never while push is off, when nothing changed or when a newer push replaced it');
+    'the background push logs only a push that ran, never while push is off or when nothing changed');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8'),
+    /beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/,
+    'a worker that starts the process notes the tasks before the start replays the journal and drains the captures, so a killed-app capture is still pushed (C4d)');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreWork.kt'), 'utf8'),
+    /ProcessCoreHost\.get\(app, language, beforeReplay = \{ runtime: CoreHost -> coldSnapshot = runtime\.calendarPushSnapshot\(\) \}\.takeIf \{ snapshotBeforeReplay \}\)/,
+    'CoreWork takes the pre-replay snapshot only when CoreJob asks for it');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
 
 assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
@@ -1083,7 +1089,7 @@ assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S
 }
 
 
-assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
+assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*recoverInstalls\(installer\)\s*beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCore", "AndroidAttachmentInstallerFileOps"\)\.map \{ "main\/java\/\$installer\/\$it\.kt" \}\)/);
 
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCoreTest", "AndroidAttachmentInstallerFileOpsTest"\)\.map \{ "test\/java\/\$installer\/\$it\.kt" \}\)/);
@@ -1768,7 +1774,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(owner, /private fun replay\(runtime: CoreHost\): Boolean \{\s+val replay = runtime\.replayJournal\(\)\s+replay\.owed\?\.let \{ recordFailure\(PendingFailure\(FailedAction\("journal", ""\), it, null\)\); return false \}\s+if \(replay\.left > 0\) return true\s+val pruneStarted = SystemClock\.elapsedRealtime\(\)\s+runCatching \{ runtime\.pruneReceipts\(\) \}[\s\S]*?return true\s+\}/);
 
 
-    assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
+    assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/syncStart\(/g).length, 1, 'one start of the triggers, in startSync');
     assert.equal([activity, model, owner, menuModel].join('\n').match(/startSync\(app, runtime\)/g).length, 3, 'startSync only in recovered, after the drain (held for the first screen\'s content, or CoreWork\'s through startSyncWithScreen)');
 
@@ -2028,7 +2034,7 @@ assert.match(labelsKt, /strings = LABEL_KEYS\.filter\(values::has\)\.associateWi
 assert.match(labelsKt, /if \(logged\.add\(name\)\) Log\.w\(/, 'a missing key is logged once');
 assert.equal(kotlinFiles.join('\n').match(/Labels\.load\(/g).length, 1);
 assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
-assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
+assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
 
 
 assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = isSandbox\(runtime\) \|\| StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
@@ -4074,7 +4080,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(nativeContext, /if \(context\.length > MAX_TRIGGER_TEXT\) return "too-long"\s+return if \(runCatching \{ enqueue\(mapOf\("action" to action, "context" to context\)\) \}\.isSuccess\) "queued" else "failed"/);
 
     const coreJob = source('CoreJob.kt');
-    assert.match(coreJob, /val host = boot\(\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
+    assert.match(coreJob, /val host = boot\(name in TASK_CHANGING_JOBS\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = host\.coldCalendarSnapshot\(\) \?: runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+worked = host\.recover\(\) && host\.drain\(\)\s+if \(!worked\) Outcome\.Retry/);
     assert.match(owner, /fun recover\(runtime: CoreHost\): Boolean \{\s+val owed = failure \?: return true\s+if \(owed\.action\.kind != "journal"\) return false\s+runtime\.replayJournal\(\)\.owed\?\.let \{ return false \}\s+clearFailure\(owed\.action\)\s+return true\s+\}/);
     assert.match(source('CoreWork.kt'), /override fun recover\(\) = ProcessCoreHost\.recover\(host\)\s+override fun drain\(\) = ProcessCoreHost\.recovered\(app, host\)/, 'CoreWork drains through the start order');
 
@@ -4087,7 +4093,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(coreWork, /else if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.S\) setExpedited\(OutOfQuotaPolicy\.RUN_AS_NON_EXPEDITED_WORK_REQUEST\)/);
     assert.match(coreWork, /fun enqueue\(context: Context, job: String, input: Map<String, String> = emptyMap\(\)\): Operation = enqueue\(context, job, input, ExistingWorkPolicy\.REPLACE\)/, 'a new drain request never waits behind a back-off');
     assert.match(coreWork, /work\.enqueueUniqueWork\(INGEST_WORK, policy, request\)/);
-    assert.match(coreWork, /val host = ProcessCoreHost\.get\(app, language\)/, 'the job runs on this process\'s one host');
+    assert.match(coreWork, /val host = ProcessCoreHost\.get\(app, language, beforeReplay = /, 'the job runs on this process\'s one host');
 
     const pendingTs = readFileSync(resolve(app, '../../packages/core/src/pending-captures.ts'), 'utf8');
     assert.equal(/const val DIRECTORY = "([^"]+)"/.exec(rnWidget('PendingCaptureWriter.kt'))[1], /export const PENDING_CAPTURES_DIRECTORY = '([^']+)'/.exec(pendingTs)[1]);

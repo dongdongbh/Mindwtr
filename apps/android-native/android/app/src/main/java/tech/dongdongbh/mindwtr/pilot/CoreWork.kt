@@ -117,15 +117,17 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
         if (Workspace.sandbox) return Result.retry()
         val input = inputData.keyValueMap.filterKeys { it != JOB }.mapValues { it.value as? String }
         var booted: CoreHost? = null
+        var coldSnapshot: String? = null
 
         val log: (String, JSONObject) -> Unit = { message, fields ->
             booted.let { host -> if (host != null) host.logLine(message, fields) else Log.i(CoreHost.TAG, "$message $fields") }
         }
         val outcome = CoreJob.run(inputData.getString(JOB), input,
-            boot = {
+            boot = { snapshotBeforeReplay ->
 
                 val language = app.getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE).getString(LANGUAGE_KEY, null)
-                val host = ProcessCoreHost.get(app, language).also { booted = it }
+                val host = ProcessCoreHost.get(app, language, beforeReplay = { runtime: CoreHost -> coldSnapshot = runtime.calendarPushSnapshot() }.takeIf { snapshotBeforeReplay })
+                    .also { booted = it }
                 check(!ProcessCoreHost.isSandbox(host)) { "A background job never runs in a sandbox process" }
                 object : CoreJob.Calls {
                     override fun recover() = ProcessCoreHost.recover(host)
@@ -149,6 +151,7 @@ class CoreWork(context: Context, params: WorkerParameters) : Worker(context, par
                         return host.backgroundSync(trigger, if (ProcessCoreHost.appActive) 0 else stored).also { owed.settle(stored) }
                     }
                     override fun appActive() = ProcessCoreHost.appActive
+                    override fun coldCalendarSnapshot() = coldSnapshot
                     override fun calendarSnapshot() = host.calendarPushSnapshot()
                     override fun calendarPush(job: String, snapshot: String): String {
                         val outcome = runCatching { host.calendarPushBackground(snapshot) }.getOrDefault("failed")

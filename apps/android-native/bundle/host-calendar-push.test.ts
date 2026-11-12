@@ -156,12 +156,12 @@ describe('a background job pushes only the tasks it changed (C4d, RN subscriptio
         expect(device.state.calls).toEqual([]);
     });
 
-    it('a rejected push answers failed, and a push a newer one replaced answers replaced', async () => {
+    it('a rejected push answers failed, including a push host that is not ready', async () => {
         const { app } = await seeded('1');
-        for (const [error, expected] of [[new Error('boom'), 'failed'], [new Error('NOT_READY: Calendar push lifecycle changed'), 'replaced']] as const) {
+        for (const [error, expected] of [[new Error('boom'), 'failed'], [new Error('NOT_READY: Calendar push lifecycle is unavailable'), 'failed']] as const) {
             app.host.bindPushLifecycle!({ start: async () => true, stop: () => {}, run: async () => { throw error; } });
             const token = app.host.snapshot();
-            await useTaskStore.getState().updateTask('t2', { title: `PRIVATE ${expected}` });
+            await useTaskStore.getState().updateTask('t2', { title: `PRIVATE ${error.message}` });
             expect(await app.host.pushChanged(token)).toBe(expected);
         }
         expect(await app.host.pushChanged('calendar-unknown')).toBe('unavailable');

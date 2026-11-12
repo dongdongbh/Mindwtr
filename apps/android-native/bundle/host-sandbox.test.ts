@@ -13,6 +13,7 @@ beforeAll(async () => {
             import { isSandboxMode } from '../../../packages/core/src/sandbox';
             globalThis.fixture = {
                 addTask: (title) => useTaskStore.getState().addTask(title),
+                addDatedTask: (title) => useTaskStore.getState().addTask(title, { dueDate: '2026-12-01' }),
                 titles: () => useTaskStore.getState()._allTasks.filter((task) => !task.deletedAt).map((task) => task.title),
                 sandbox: () => isSandboxMode(),
             };
@@ -23,15 +24,19 @@ beforeAll(async () => {
 });
 afterEach(() => { for (const database of databases.splice(0)) database.close(); });
 
-const fixture = () => {
+type FixtureOptions = { kv?: Record<string, string>; calendarCall?: (request: { op: string }) => unknown; firesAtOnceMs?: number };
+
+const fixture = (options: FixtureOptions = {}) => {
+    const kv = options.kv ? new Map(Object.entries(options.kv)) : null;
+    const firesAtOnce = (run: () => void, ms?: number) => setTimeout(run, ms === options.firesAtOnceMs ? 0 : ms);
     const database = new Database(':memory:'); databases.push(database);
     const sql = { statements: 0 };
     const logText = { value: '' };
     const calendarCalls: string[] = [];
     const state: Record<string, any> = {
-        AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout,
+        AbortController, URL, TextEncoder, TextDecoder, setTimeout: options.firesAtOnceMs ? firesAtOnce : setTimeout, clearTimeout,
         __mindwtrHostPlatform: 'android', console: { info() {}, warn() {}, error() {}, log() {} },
-        __mindwtrCalendarCall: (op: string) => { calendarCalls.push(op); return JSON.stringify({ ok: true, value: null }); },
+        __mindwtrCalendarCall: options.calendarCall ?? ((op: string) => { calendarCalls.push(op); return JSON.stringify({ ok: true, value: null }); }),
         __mindwtrNative: {
             sqlExec: (text: string) => { sql.statements += 1; database.exec(text); return null; },
             sqlRun: (text: string, params: string) => { sql.statements += 1; database.query(text).run(...JSON.parse(params)); return null; },
@@ -44,8 +49,11 @@ const fixture = () => {
                 if (operation === 'exists') return logText.value ? '1' : '';
                 return ['path', 'ensure'].includes(operation) ? 'files/logs/mindwtr.log' : '';
             },
-            rnStateCommit: () => null, kvGet: () => JSON.stringify([null]), kvSet: () => null, kvRemove: () => null,
-            kvMultiGet: (keys: string) => JSON.stringify((JSON.parse(keys) as string[]).map((key) => [key, null])), kvMultiSet: () => null, kvMultiRemove: () => null,
+            rnStateCommit: () => null, kvGet: (key: string) => JSON.stringify([kv?.get(key) ?? null]),
+            kvSet: (key: string, value: string) => { kv?.set(key, value); return null; }, kvRemove: (key: string) => { kv?.delete(key); return null; },
+            kvMultiGet: (keys: string) => JSON.stringify((JSON.parse(keys) as string[]).map((key) => [key, kv?.get(key) ?? null])),
+            kvMultiSet: (pairs: string) => { for (const [key, value] of JSON.parse(pairs) as [string, string][]) kv?.set(key, value); return null; },
+            kvMultiRemove: (keys: string) => { for (const key of JSON.parse(keys) as string[]) kv?.delete(key); return null; },
             fileList: () => 'null', fileRead: () => '', fileDelete: () => null, hostEvent: () => null, debugProp: () => '',
         },
     };
@@ -105,6 +113,17 @@ describe('the Android Sandbox boot (RN #1196, #1273, #1340)', () => {
         const personalSnapshot = await source.poll(source.state.MindwtrHost.calendarPushSnapshot());
         expect(await source.poll(source.state.MindwtrHost.calendarPushBackground(personalSnapshot.value.token))).toEqual({ ok: true, value: { outcome: 'off' } });
         expect([...f.calendarCalls, ...source.calendarCalls]).toEqual([]);
+    });
+
+    it('a background calendar push that outlasts its 20 s limit answers timeout and leaves the host call deadline alone (C4d)', async () => {
+        const asked: string[] = [];
+        const f = fixture({ kv: { 'mindwtr:calendar-push-sync:enabled': '1' }, firesAtOnceMs: 20_000,
+            calendarCall: (request) => { asked.push(request.op); return new Promise(() => {}); } });
+        expect((await f.poll(f.state.MindwtrHost.boot('', '', 'journaled'))).ok).toBe(true);
+        const snapshot = await f.poll(f.state.MindwtrHost.calendarPushSnapshot());
+        await f.state.fixture.addDatedTask('Dated task');
+        expect(await f.poll(f.state.MindwtrHost.calendarPushBackground(snapshot.value.token))).toEqual({ ok: true, value: { outcome: 'timeout' } });
+        expect(asked.length).toBeGreaterThan(0);
     });
 
     it('boots personal from an expired, malformed or missing request', async () => {
