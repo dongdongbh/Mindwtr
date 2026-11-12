@@ -1446,6 +1446,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var searchAppLockWritePending = false
     private var searchIndexKeptOnAppLockRereadLogged = false
     @ObservationIgnored private weak var appLockReadHost: CoreHost?
+    @ObservationIgnored private weak var preferencesReadHost: CoreHost?
     var searchAvailable: Bool { trustedSearchSelection != nil }
     var searchConsentCanChange: Bool {
         generalPreferenceEnabled && searchConsentKnown && !searchConsentBusy && searchConsentPending == nil
@@ -8202,9 +8203,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
                 selectedSurface = .inbox
             }
-            try await readLanguage()
-            try await readTheme()
-            try await readAppLock()
+            try await readPreferences()
             if boardRecoveredResult != nil { selectedSurface = .board }
             if calendarComposerRecoveredResult != nil { selectedSurface = .calendar }
             if let recovered = calendarEventTaskRecoveredResult, host === recovered.host { selectedSurface = .calendar }
@@ -11376,9 +11375,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     if retentionPurged { try await self.readSelectedSurface() }
                 } else if owner.reason == .pull {
                     if self.selectedSurface == .calendar { self.calendarFeedRefreshRequested = true }
-                    try await self.readLanguage()
-                    try await self.readTheme()
-                    try await self.readAppLock()
+                    try await self.readPreferences()
                     guard self.foregroundSyncCurrent(owner) else { return }
                     try await self.readSelectedSurface()
                     self.error = syncSucceeded ? nil : self.label("settings.syncFailureGeneric")
@@ -11498,7 +11495,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         Task { await refresh() }
     }
 
-    func refresh() async {
+    func refresh(keepsPreferences: Bool = false) async {
         guard workspaceAdmissionsOpen else { return }
         if let owner = reviewProjectTaskOwner, !reviewProjectTaskOwned(owner) {
             reviewProjectTaskOwner = nil; reviewProjectTaskOptions = [:]; reviewProjectTaskText = ""; reviewProjectTaskError = nil
@@ -11523,9 +11520,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         busy = true
         defer { finishOperation() }
         do {
-            try await readLanguage()
-            try await readTheme()
-            try await readAppLock()
+            if !(keepsPreferences && preferencesReadHost === host) { try await readPreferences() }
             guard !appLock.concealed else { return }
             try await readSelectedSurface()
             if error != nil { error = nil }
@@ -11555,7 +11550,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if focusOrderPresented { focusOrderPresented = false }
         if focusOrderCurrent { focusOrderCurrent = false }
         selectedSurface = surface
-        await refresh()
+        await refresh(keepsPreferences: true)
     }
 
     func toggleMore() async {
@@ -14890,9 +14885,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         backupImportError = nil
         defer { finishOperation() }
         do {
-            try await readLanguage()
-            try await readTheme()
-            try await readAppLock()
+            try await readPreferences()
             try await readDataSettings()
         } catch { backupImportError = backupTransferFailure(mode: backupDocumentMode) }
     }
@@ -15009,9 +15002,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
         guard settingsDataPresented, !appLock.concealed else { return }
         do {
-            try await readLanguage()
-            try await readTheme()
-            try await readAppLock()
+            try await readPreferences()
             try await readSettingsMenu()
             try await readDataSettings()
         } catch { backupImportError = backupTransferFailure(mode: backupDocumentMode) }
@@ -16818,6 +16809,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             if keepsSearchIndex && appLock.enabled == false { logSearchIndexKeptOnAppLockReread() }
         } catch {
             if host === currentHost {
+                preferencesReadHost = nil
                 appLock.readFailed()
                 appLockError = error.localizedDescription
             }
@@ -16918,6 +16910,15 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             retryNeeded = appLockRequest != nil
             if retryNeeded { error = failure.localizedDescription }
         }
+    }
+
+    private func readPreferences() async throws {
+        preferencesReadHost = nil
+        let currentHost = host
+        try await readLanguage()
+        try await readTheme()
+        try await readAppLock()
+        if host === currentHost { preferencesReadHost = currentHost }
     }
 
     private func readLanguage() async throws {
