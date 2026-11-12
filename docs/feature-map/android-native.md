@@ -132,9 +132,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Task View tab and checklist
 
 - Reach: Editor › View tab. The checklist has add, reorder by drag, and Reset checklist.
-- Selectors: `task-view`, `view-checklist-add`, `checklist-add-item`, `checklist-item-input`, `checklist-reset`
+- Shortcuts: Drag a checklist row by its two-bar handle. The row follows the finger and the rows in between shift to show the drop slot, as in RN (#1483). Release commits the move; a cancelled drag puts every row back. Tap a handle for its row actions.
+- Selectors: `task-view`, `view-checklist-add`, `checklist-add-item`, `checklist-item-input`, `checklist-drag-` (+ item index), `checklist-reset`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskView.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ChecklistDrag.kt`
-- Checks: `apps/android-native/scripts/check-settings-editor-device.mjs`, `apps/android-native/scripts/check-editor-menu-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistAddTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ChecklistDragTest.kt`
+- Checks: `apps/android-native/scripts/check-checklist-drag-device.mjs`, `apps/android-native/scripts/check-settings-editor-device.mjs`, `apps/android-native/scripts/check-editor-menu-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistAddTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ChecklistDragTest.kt`
 - Notes: Settings › GTD › Task editor layout decides whether a task opens on Preview (View) or on the Form.
 
 ## Task editor menu

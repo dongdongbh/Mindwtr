@@ -63,3 +63,13 @@ internal fun checklistEdgeScroll(pointer: Float, top: Float, bottom: Float, edge
     pointer > bottom - edge -> minOf(16f, maxOf(0f, pointer - bottom + edge) / 4f)
     else -> 0f
 }
+
+internal fun checklistPreviewShift(position: Int, from: Int, to: Int, height: Float): Float = when {
+    from < 0 || to < 0 -> 0f
+    position in (from + 1)..to -> -height
+    position in to until from -> height
+    else -> 0f
+}
+
+internal fun checklistDropPreviewHeld(droppedOrder: List<String>?, order: List<String>, editsPending: Boolean): Boolean =
+    droppedOrder == null || (droppedOrder == order && editsPending)

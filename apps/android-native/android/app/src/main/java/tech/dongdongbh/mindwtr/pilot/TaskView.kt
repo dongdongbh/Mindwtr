@@ -13,7 +13,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -60,6 +60,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -90,6 +91,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.zIndex
 import org.json.JSONObject
 
 
@@ -371,7 +374,14 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
     var dragRow by remember(editor.session) { mutableStateOf<String?>(null) }
     var dragTarget by remember(editor.session) { mutableStateOf<String?>(null) }
     var dragPointer by remember(editor.session) { mutableFloatStateOf(0f) }
+    var dragStart by remember(editor.session) { mutableFloatStateOf(0f) }
+    var dragOrigin by remember(editor.session) { mutableFloatStateOf(0f) }
     var actionRow by remember(editor.session) { mutableStateOf<String?>(null) }
+    var droppedOrder by remember(editor.session) { mutableStateOf<List<String>?>(null) }
+    val previewRow = dragRow.takeIf { checklistDropPreviewHeld(droppedOrder, rows.map { it.identity }, editsPending) }
+    LaunchedEffect(previewRow, droppedOrder) {
+        if (droppedOrder != null && previewRow == null) { dragRow = null; dragTarget = null; droppedOrder = null }
+    }
     val structuralEnabled = !locked && !editsPending && dragRow == null
     fun dropIndex(): Int? {
         if (rows.any { frames[it.identity] == null }) return null
@@ -380,18 +390,20 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
     fun finishDrag(commit: Boolean) {
         val from = rows.indexOfFirst { it.identity == dragRow }
         val to = dropIndex()
-        dragRow = null
-        dragTarget = null
         scroll?.dragging?.invoke(false)
         if (commit && !locked && !editsPending && from >= 0 && to != null && from != to) {
+            droppedOrder = rows.map { it.identity }
             session.expectMove(from, to)
             editChecklist(JSONObject().put("kind", "move").put("from", from).put("to", to))
             Log.i(CoreHost.TAG, "Checklist handle drag submitted releaseCheck=v1.3.8/checklist-handle-drag")
+        } else {
+            dragRow = null
+            dragTarget = null
         }
     }
     LaunchedEffect(dragRow) {
         if (dragRow == null) return@LaunchedEffect
-        while (dragRow != null) {
+        while (dragRow != null && droppedOrder == null) {
             latestScroll?.let { adapter ->
                 adapter.state.scrollBy(checklistEdgeScroll(dragPointer, adapter.viewport.top, adapter.viewport.bottom, edge))
             }
@@ -419,31 +431,44 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
             }
         }
         val shape = RoundedCornerShape(10.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(8.dp)) {
-            for (row in rows) key(row.identity) {
+        val dragFrom = rows.indexOfFirst { it.identity == previewRow }
+        val dragTo = rows.indexOfFirst { it.identity == dragTarget }
+        Column(Modifier.fillMaxWidth().background(c.cardBg, shape).rnBorder(1.dp, c.border, shape).padding(8.dp)) {
+            for ((position, row) in rows.withIndex()) key(row.identity) {
                 val item = row.item
                 val index = item.getInt("index")
-                Column(Modifier.fillMaxWidth().onGloballyPositioned { frames[row.identity] = it.boundsInWindow() }
-                    .fade(if (dragRow == row.identity) 0.6f else 1f)
-                    .background(if (dragTarget == row.identity) c.filterBg else c.cardBg)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                val dragged = row.identity == previewRow
+                Column(Modifier.fillMaxWidth().onGloballyPositioned { frames[row.identity] = Rect(it.positionInWindow(), it.size.toSize()) }
+                    .zIndex(if (dragged) 1f else 0f)
+                    .graphicsLayer {
+                        val draggedFrame = previewRow?.let { frames[it] }
+                        translationY = when {
+                            draggedFrame == null -> 0f
+                            dragged -> dragPointer - dragStart - (draggedFrame.top - dragOrigin)
+                            else -> checklistPreviewShift(position, dragFrom, dragTo, draggedFrame.height)
+                        }
+                    }
+                    .then(if (dragged) Modifier.background(c.cardBg) else Modifier)) {
+                    Row(Modifier.fillMaxWidth().then(if (ordering && reorder) Modifier else Modifier.rnBorderBottom(c.border)), verticalAlignment = Alignment.CenterVertically) {
                         Box {
                             var handleTop by remember(row.identity) { mutableFloatStateOf(0f) }
-                            Box(Modifier.size(44.dp).onGloballyPositioned { handleTop = it.boundsInWindow().top }
+                            Box(Modifier.size(44.dp).onGloballyPositioned { handleTop = it.positionInWindow().y }
                                 .semantics { contentDescription = labels.getString("drag"); role = Role.Button }
                                 .testTag("checklist-drag-$index")
                                 .pointerInput(row.identity, !locked && !editsPending) {
                                     if (!locked && !editsPending && rows.size > 1) detectDragGestures(
-                                        onDragStart = { offset ->
+                                        orientationLock = null,
+                                        onDragStart = { down, slopTriggerChange, overSlop ->
                                             focusManager.clearFocus(); keyboard?.hide(); actionRow = null
-                                            dragPointer = handleTop + offset.y; dragRow = row.identity
+                                            dragPointer = handleTop + slopTriggerChange.position.y - overSlop.y; dragStart = handleTop + down.position.y
+                                            dragOrigin = frames[row.identity]?.top ?: 0f; dragRow = row.identity
                                             scroll?.dragging?.invoke(true)
                                         },
-                                        onDragEnd = { finishDrag(true) }, onDragCancel = { finishDrag(false) },
+                                        onDragEnd = { _ -> finishDrag(true) }, onDragCancel = { finishDrag(false) },
                                         onDrag = { change, amount -> change.consume(); dragPointer += amount.y })
                                 }
                                 .clickable(enabled = structuralEnabled) { actionRow = row.identity }, contentAlignment = Alignment.Center) {
-                                Text("≡", style = rnText(22, 400), color = c.secondaryText)
+                                Icon(SettingsIonicons.ReorderTwo, null, tint = c.secondaryText, modifier = Modifier.size(22.dp))
                             }
                             DropdownMenu(expanded = actionRow == row.identity, onDismissRequest = { actionRow = null }) {
                                 fun move(to: Int) {
@@ -525,7 +550,7 @@ private fun ChecklistItemRow(model: InboxViewModel, editor: TaskEditor, field: J
     val focus = remember { FocusRequester() }
     LaunchedEffect(checklistFocus) { if (checklistFocus == id) { runCatching { focus.requestFocus() }; checklistFocused() } }
     val struck = item.getBoolean("struck")
-    Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         val done = item.getBoolean("completed")
         val label = item.getString("checkboxLabel")
         Box(Modifier.size(44.dp).clearAndSetSemantics {
