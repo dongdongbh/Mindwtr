@@ -84,7 +84,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `focus-title`, `focus-view-options`, `focus-filters-open`, `focus-toggle-sections`, `focus-reorder-toggle`, `focus-reorder-list`, `focus-saved-strip`, `focus-filter-save`, `task-focus-blocked`
 - Code: `apps/ios-native/App/InboxScreen.swift`, `apps/ios-native/App/FocusControlsPanel.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testFocus…, testTaskFocus…)
-- Notes: Reorder refuses more than 100 displayed rows. Filters reset on restart, but section folds and Show details persist on the device.
+- Notes: Reorder refuses more than 100 displayed rows; its button carries RN's translated VoiceOver hint (`focus.reorderScreenHint`). Filters reset on restart, but section folds and Show details persist on the device.
 - Notes: Focus task dates show Today, Tomorrow, or a full localized weekday for the next six days, with explicit times retained. Start uses an arrow and Due a calendar; accessible labels retain the field and exact date. Past dates and dates at least seven days away stay exact. Labels refresh at local midnight and when the app returns to the foreground.
 
 ## Pomodoro

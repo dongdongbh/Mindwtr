@@ -4698,6 +4698,25 @@ final class CoreHostTests: XCTestCase {
         }
     }
 
+    func testFocusReorderControlCarriesTheScreenHint() async throws {
+        let initializer = host()
+        _ = try await initializer.start()
+        await initializer.close()
+        let sqlite = try SQLiteBridge(url: database)
+        let at = "2026-09-26T12:00:00.000Z"
+        for (index, id) in ["focus-hint-a", "focus-hint-b"].enumerated() {
+            _ = try sqlite.execute("INSERT INTO tasks (id, title, status, orderNum, isFocusedToday, showFutureRecurrence, suppressMindwtrReminders, pushCount, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                   parametersJSON: json([id, id, "next", index, 1, 0, 0, 0, at, at, 1]))
+        }
+        sqlite.close()
+        let core = host()
+        _ = try await core.start()
+        let view = try object(await core.call("menuRead", argumentsJSON: json(["focus", json(["limit": 50, "controls": [:]])])))
+        let reorder = try XCTUnwrap((view["controls"] as? [String: Any])?["reorder"] as? [String: Any])
+        XCTAssertEqual(reorder["label"] as? String, "Reorder")
+        XCTAssertEqual(reorder["screenHint"] as? String, "Opens a focused screen for reordering these tasks")
+    }
+
     func testFocusControlsFilterSortAndSavedApplyReadWithoutWrites() async throws {
         let source = try dateBundle(at: "2026-09-27T12:00:00.000Z")
         let initializer = host(bundleURL: source)

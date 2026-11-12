@@ -919,6 +919,7 @@ struct InboxScreen: View {
                     .foregroundStyle(palette.secondary).frame(minHeight: 44).padding(.horizontal, 6)
                 }
                 .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsShown })
+                .accessibilityHint(reorder.text("screenHint"))
                 .accessibilityIdentifier("focus-reorder-toggle")
             }
         }
