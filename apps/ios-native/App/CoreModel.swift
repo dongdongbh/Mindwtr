@@ -48196,3 +48196,11 @@ struct TaskRowSwipeInput: Hashable {
     let status: String
     let focused: Bool
 }
+
+extension CoreModel {
+    func markdownEditorRead(_ name: String, _ input: CoreObject) async -> CoreObject? {
+        guard ["markdownToolbarActions", "markdownToolbarApply", "markdownTextChange"].contains(name),
+              let encoded = try? json(input) else { return nil }
+        return try? await query("menuRead", [name, encoded])
+    }
+}

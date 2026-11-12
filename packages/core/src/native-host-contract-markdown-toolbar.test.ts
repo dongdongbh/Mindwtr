@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyMarkdownToolbarAction, MARKDOWN_TOOLBAR_ACTIONS } from './markdown';
 import { createNativeHostContract } from './native-host-contract';
+import { useTaskStore } from './store';
 
 
 describe('the native Markdown toolbar', () => {
@@ -33,6 +34,45 @@ describe('the native Markdown toolbar', () => {
         for (const input of [null, {}, { value: 'a', start: 0, end: 0, action: 'underline' }, { value: 'a', start: 0, end: 2, action: 'bold' },
             { value: 'a', start: 1, end: 0, action: 'bold' }, { value: 'a', start: 0.5, end: 1, action: 'bold' }, { value: 1, start: 0, end: 0, action: 'bold' }]) {
             expect(host.applyMarkdownToolbar(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+    });
+
+    it('pairs, links and continues one typed edit as RN\'s task description does, and only continues project notes', () => {
+        const host = createNativeHostContract();
+        const change = (previous: string, next: string, start: number, end: number, pairs = true) =>
+            host.applyMarkdownTextChange({ previous, next, start, end, pairs });
+        expect(change('a', 'a[', 1, 1)).toEqual({ ok: true, value: { changed: true, value: 'a[]', start: 2, end: 2 } });
+        expect(change('see note', 'see [', 4, 8)).toEqual({ ok: true, value: { changed: true, value: 'see [note]', start: 5, end: 9 } });
+        expect(change('a]', 'a]]', 1, 1)).toEqual({ ok: true, value: { changed: true, value: 'a]', start: 2, end: 2 } });
+        expect(change('docs', 'https://mindwtr.app', 0, 4))
+            .toEqual({ ok: true, value: { changed: true, value: '[docs](https://mindwtr.app)', start: 27, end: 27 } });
+        expect(change('- milk', '- milk\n', 6, 6)).toEqual({ ok: true, value: { changed: true, value: '- milk\n- ', start: 9, end: 9 } });
+        expect(change('1. one', '1. one\n', 6, 6)).toEqual({ ok: true, value: { changed: true, value: '1. one\n2. ', start: 10, end: 10 } });
+        expect(change('- [x] done', '- [x] done\n', 10, 10)).toEqual({ ok: true, value: { changed: true, value: '- [x] done\n- [ ] ', start: 17, end: 17 } });
+        expect(change('a', 'a[', 1, 1, false)).toEqual({ ok: true, value: { changed: false, value: 'a[', start: 1, end: 1 } });
+        expect(change('- milk', '- milk\n', 6, 6, false)).toEqual({ ok: true, value: { changed: true, value: '- milk\n- ', start: 9, end: 9 } });
+        expect(change('plain', 'plainx', 5, 5)).toEqual({ ok: true, value: { changed: false, value: 'plainx', start: 5, end: 5 } });
+    });
+
+    it('leaves every typed edit alone when Markdown editor assist is off', () => {
+        const host = createNativeHostContract();
+        const settings = useTaskStore.getState().settings;
+        useTaskStore.setState({ settings: { ...settings, markdownEditorAssist: false } });
+        try {
+            expect(host.applyMarkdownTextChange({ previous: 'a', next: 'a[', start: 1, end: 1, pairs: true }))
+                .toEqual({ ok: true, value: { changed: false, value: 'a[', start: 1, end: 1 } });
+            expect(host.applyMarkdownTextChange({ previous: '- milk', next: '- milk\n', start: 6, end: 6, pairs: false }))
+                .toEqual({ ok: true, value: { changed: false, value: '- milk\n', start: 6, end: 6 } });
+        } finally {
+            useTaskStore.setState({ settings });
+        }
+    });
+
+    it('refuses a text change without both texts, a selection inside the earlier text and a pairing mode', () => {
+        const host = createNativeHostContract();
+        for (const input of [null, {}, { previous: 'a', next: 'ab', start: 0, end: 2, pairs: true }, { previous: 'a', next: 'ab', start: 1, end: 0, pairs: true },
+            { previous: 'a', next: 1, start: 0, end: 0, pairs: true }, { previous: 'a', next: 'ab', start: 0, end: 0 }, { previous: 'a', next: 'ab', start: 0.5, end: 1, pairs: true }]) {
+            expect(host.applyMarkdownTextChange(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         }
     });
 });

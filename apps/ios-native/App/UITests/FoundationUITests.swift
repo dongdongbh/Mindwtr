@@ -37840,3 +37840,54 @@ extension FoundationUITests {
         XCTAssertTrue(window.waitForNonExistence(timeout: 10))
     }
 }
+
+extension FoundationUITests {
+    private func markdownValue(_ element: XCUIElement, _ value: String, file: StaticString = #filePath, line: UInt = #line) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: 10), .completed,
+                       "Expected \(value), found \(String(describing: element.value))", file: file, line: line)
+    }
+
+    func testTaskNoteMarkdownToolbarPairingAndListContinuationMatchRN() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        let capture = app.textViews["capture-input"]
+        boardEnabled(capture); capture.tap(); capture.typeText("Markdown assist task")
+        boardTap(app, "capture-save")
+        let row = app.buttons["Markdown assist task"]
+        boardEnabled(row, timeout: 30); row.tap(); boardTap(app, "task-mode-edit")
+        let note = app.textViews["task-editor-note"], scroll = app.scrollViews["task-editor-scroll"]
+        for _ in 0..<12 where !(note.exists && note.isHittable) { scroll.swipeUp() }
+        boardEnabled(note, timeout: 15); note.tap()
+
+        let bold = app.buttons["markdown-toolbar-bold"], undo = app.buttons["markdown-toolbar-undo"]
+        boardEnabled(bold, timeout: 15)
+        for id in ["heading", "bold", "italic", "strikethrough", "link", "code", "codeBlock", "quote", "horizontalRule",
+                   "bulletList", "orderedList", "taskList"] {
+            XCTAssertTrue(app.buttons["markdown-toolbar-" + id].exists, "RN's toolbar has \(id)")
+        }
+        XCTAssertFalse(undo.isEnabled)
+
+        note.typeText("[")
+        markdownValue(note, "[]")
+        note.typeText("x")
+        markdownValue(note, "[x]")
+        undo.tap(); markdownValue(note, "[]")
+        undo.tap(); markdownValue(note, "")
+        XCTAssertFalse(undo.isEnabled)
+
+        note.typeText("- milk\n")
+        markdownValue(note, "- milk\n- ")
+        note.typeText("eggs")
+        markdownValue(note, "- milk\n- eggs")
+        bold.tap()
+        markdownValue(note, "- milk\n- eggs****")
+        note.typeText("b")
+        markdownValue(note, "- milk\n- eggs**b**")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Markdown toolbar"; shot.lifetime = .keepAlways; add(shot)
+    }
+}

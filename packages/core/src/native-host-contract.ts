@@ -239,7 +239,16 @@ import { getTaskListHeaderText, isStatusListTaskReadOnly, type ListFilterOptions
 import { getProjectAccentColor } from './task-accent-color';
 import { formatListItemCount } from './list-count';
 import type { ContextOrTagMatchMode } from './hierarchy-utils';
-import { applyMarkdownToolbarAction, getInlineMarkdownPreview, MARKDOWN_TOOLBAR_ACTIONS, type MarkdownToolbarActionId } from './markdown';
+import {
+    applyMarkdownPairInsertion,
+    applyMarkdownToolbarAction,
+    applyMarkdownUrlPaste,
+    continueMarkdownOnTextChange,
+    getInlineMarkdownPreview,
+    isMarkdownEditorAssistEnabled,
+    MARKDOWN_TOOLBAR_ACTIONS,
+    type MarkdownToolbarActionId,
+} from './markdown';
 import { createMarkdownLinkLookup, resolveMarkdownBlocks, resolveMarkdownInline, type MarkdownInline, type ResolvedMarkdownBlock } from './markdown-blocks';
 import { resolveAutoTextDirection } from './text-direction';
 import { taskMatchesFilterSelections } from './task-filter-selections';
@@ -2260,6 +2269,25 @@ export function createNativeHostContract(options: {
             }
             const { value, selection } = applyMarkdownToolbarAction(input.value, { start: input.start, end: input.end }, input.action);
             return { ok: true, value: { value, start: selection.start, end: selection.end } };
+        },
+
+
+        applyMarkdownTextChange(input: { previous: string; next: string; start: number; end: number; pairs: boolean }): NativeHostResult<{ changed: boolean; value: string; start: number; end: number }> {
+            const index = (value: unknown, max: number): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= max;
+            if (!input || typeof input.previous !== 'string' || typeof input.next !== 'string' || input.previous.length > 1_000_000
+                || input.next.length > 1_000_000 || !index(input.start, input.previous.length) || !index(input.end, input.previous.length)
+                || input.start > input.end || typeof input.pairs !== 'boolean') {
+                return fail('INVALID_INPUT', 'The text before and after one edit, the selection before it and the pairing mode are required');
+            }
+            const selection = { start: input.start, end: input.end };
+            const options = { assist: isMarkdownEditorAssistEnabled(useTaskStore.getState().settings) };
+            const assisted = (input.pairs
+                ? applyMarkdownUrlPaste(input.previous, input.next, selection, options)
+                    ?? applyMarkdownPairInsertion(input.previous, input.next, selection, options)
+                : null) ?? continueMarkdownOnTextChange(input.previous, input.next, selection, options);
+            return { ok: true, value: assisted
+                ? { changed: true, value: assisted.value, start: assisted.selection.start, end: assisted.selection.end }
+                : { changed: false, value: input.next, start: input.start, end: input.end } };
         },
 
         getStrings(input: { keys: string[] }): NativeHostResult<{ language: Language; strings: Record<string, string>; missing: string[] }> {

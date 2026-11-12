@@ -1546,6 +1546,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
 
     markdownToolbarActions: () => contract.getMarkdownToolbarActions(),
     markdownToolbarApply: (input) => contract.applyMarkdownToolbar(input),
+    markdownTextChange: (input) => contract.applyMarkdownTextChange(input),
 };
 
 

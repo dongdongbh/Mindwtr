@@ -947,7 +947,7 @@ struct ProjectDetailScreen: View {
     let model: CoreModel
     let palette: AppPalette
     @FocusState private var renameFocused: Bool
-    @FocusState private var notesFocused: Bool
+    @State private var notesFocused = false
     @FocusState private var sectionFocused: Bool
     @FocusState private var filterFocusedField: String?
     @State private var detailsExpanded = false
@@ -2576,7 +2576,7 @@ private struct ProjectToSectionDialog: View {
 private struct ProjectNotesPanel: View {
     let model: CoreModel
     let palette: AppPalette
-    let notesFocus: FocusState<Bool>.Binding
+    let notesFocus: Binding<Bool>
     @Binding var discardNotesConfirm: Bool
     let onResign: () -> Void
 
@@ -2683,7 +2683,7 @@ private struct ProjectNotesPanel: View {
 private struct ProjectNotesEditor: View {
     let model: CoreModel
     let palette: AppPalette
-    let notesFocus: FocusState<Bool>.Binding
+    let notesFocus: Binding<Bool>
 
     var body: some View {
         Group {
@@ -2694,21 +2694,17 @@ private struct ProjectNotesEditor: View {
                             .rnFont(14).foregroundStyle(palette.secondary).padding(.top, 8).padding(.leading, 5)
                             .accessibilityHidden(true)
                     }
-                    TextEditor(text: Binding(get: { model.projectNotesDraft },
-                                             set: { model.setProjectNotesDraft($0) }))
-                        .focused(notesFocus)
-                        .rnFont(15)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: 160)
-                        .disabled(!model.projectNotesEditInputEnabled)
-                        .environment(\.layoutDirection,
-                            (model.projectNotesDraftDirection.isEmpty ? model.projectNotes.text("direction")
-                                : model.projectNotesDraftDirection) == "rtl" ? .rightToLeft : .leftToRight)
+                    NativeMarkdownTextEditor(text: Binding(get: { model.projectNotesDraft },
+                                                           set: { model.setProjectNotesDraft($0) }),
+                        enabled: model.projectNotesEditInputEnabled, pairs: false, fontSize: 15, minHeight: 160,
+                        rightToLeft: (model.projectNotesDraftDirection.isEmpty ? model.projectNotes.text("direction")
+                            : model.projectNotesDraftDirection) == "rtl",
+                        palette: palette, label: model.label("project.notes"), identifier: "project-notes-input",
+                        focused: notesFocus, read: { await model.markdownEditorRead($0, $1) })
                         .task(id: [model.projectHeader.text("id"), model.projectHeader.text("title"),
                                    model.projectNotesDraft, model.projectNotes.text("direction")]) {
                             await model.refreshProjectNotesDraftDirection()
                         }
-                        .accessibilityIdentifier("project-notes-input")
                 }
                 .padding(8).background(palette.card, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))

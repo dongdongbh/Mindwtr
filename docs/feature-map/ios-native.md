@@ -115,6 +115,14 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 - Preview completion: Mark Done in the visible Status card flushes pending checklist input, changes the same draft to Done, then invokes its normal owned Save. The handler requires the same host/task/session and an accepted draft edit. Repeat taps and competing Save/Close are blocked while it runs. Failed writes keep the draft and existing Retry/Save; uncertain retries replay the retained request and close only after acknowledgement. Reference, terminal, Trash, projected and archived-project/read-only previews have no action. Checks: `apps/ios-native/Tests/MindwtrNativeCoreTests/PreviewCompletionHostTests.swift` and the two `testPreviewMarkDone...` UI cases.
 
+## Markdown editor
+
+- Reach: Task editor › Edit › Description, or Project Details › Notes › Edit. Tap the text. The format toolbar sits above the keyboard.
+- Selectors: `markdown-toolbar-` followed by the core action id (`heading`, `bold`, `italic`, `strikethrough`, `link`, `code`, `codeBlock`, `quote`, `horizontalRule`, `bulletList`, `orderedList`, `taskList`), `markdown-toolbar-undo`, `task-editor-note`, `project-notes-input`
+- Code: `apps/ios-native/App/TaskViewSheet.swift` (NativeMarkdownTextEditor and NativeMarkdownToolbar), `apps/ios-native/Sources/MindwtrNativeCore/NativeMarkdownHistory.swift`, `packages/core/src/native-host-contract.ts` (getMarkdownToolbarActions, applyMarkdownToolbar and applyMarkdownTextChange)
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskNoteMarkdownToolbar…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeMarkdownHistoryTests.swift`, `packages/core/src/native-host-contract-markdown-toolbar.test.ts`
+- Notes: Core supplies the buttons, their order, their labels and every rule, as in RN. The task description pairs `[`, `(` and backticks, turns a pasted URL over a selection into a link, and continues lists and quotes on Return. Project notes only continue lists, as in RN. Settings › GTD › Editor typing help turns pairing, linking and continuation off. Typed text always stays: a rule's result applies only if nothing was typed after the edit it answers. Undo keeps the last 100 steps, as in RN. Icons are SF Symbols that stand in for RN's Ionicons and FontAwesome glyphs.
+
 ## Task attachments
 
 - Reach: Task editor › Add link, Add file or Add photo. Tap a link title or file to open it.

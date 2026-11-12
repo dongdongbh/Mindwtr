@@ -829,15 +829,13 @@ struct TaskViewSheet: View {
         } else if field == "description" {
             VStack(alignment: .leading, spacing: 8) {
                 label(strings.text("taskEdit.descriptionLabel"))
-                TextEditor(text: Binding(get: { model.taskNoteDraft }, set: { model.setTaskNoteDraft($0) }))
-                    .rnFont(16).scrollContentBackground(.hidden).frame(minHeight: 220)
-                    .modifier(TaskDraftDirection(direction: model.taskEditorDraftDirection == "rtl"
-                        ? .rightToLeft : .leftToRight))
+                NativeMarkdownTextEditor(text: Binding(get: { model.taskNoteDraft }, set: { model.setTaskNoteDraft($0) }),
+                    enabled: !model.taskScheduleUpdating, pairs: true, fontSize: 16, minHeight: 220,
+                    rightToLeft: model.taskEditorDraftDirection == "rtl", palette: palette,
+                    label: strings.text("taskEdit.descriptionLabel"), identifier: "task-editor-note",
+                    read: { await model.markdownEditorRead($0, $1) })
                     .padding(8).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
-                    .accessibilityLabel(strings.text("taskEdit.descriptionLabel"))
-                    .accessibilityIdentifier("task-editor-note")
-                    .disabled(model.taskScheduleUpdating)
             }
         } else if field == "location" {
             VStack(alignment: .leading, spacing: 8) {
@@ -3800,4 +3798,292 @@ private struct ChecklistRowFramesPreference: PreferenceKey {
 private struct ChecklistViewportPreference: PreferenceKey {
     static var defaultValue = CGRect.zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+struct NativeMarkdownTextEditor: UIViewRepresentable {
+    @Binding var text: String
+    let enabled: Bool
+    let pairs: Bool
+    let fontSize: CGFloat
+    let minHeight: CGFloat
+    let rightToLeft: Bool
+    let palette: AppPalette
+    let label: String
+    let identifier: String
+    var focused: Binding<Bool>?
+    let read: @MainActor (String, CoreObject) async -> CoreObject?
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.backgroundColor = .clear
+        view.isScrollEnabled = false
+        view.adjustsFontForContentSizeCategory = true
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.text = text
+        view.delegate = context.coordinator
+        context.coordinator.view = view
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        if !(view.text ?? "").utf16.elementsEqual(text.utf16) {
+            let selection = view.selectedRange, length = (text as NSString).length
+            view.text = text
+            coordinator.history.externalChange()
+            let start = min(selection.location, length)
+            view.selectedRange = NSRange(location: start, length: min(selection.length, length - start))
+        }
+        if view.isEditable != enabled {
+            view.isEditable = enabled
+            view.isUserInteractionEnabled = enabled
+            view.accessibilityTraits = enabled ? view.accessibilityTraits.subtracting(.notEnabled) : view.accessibilityTraits.union(.notEnabled)
+        }
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: fontSize))
+        if view.font != font { view.font = font }
+        view.textColor = UIColor(palette.text)
+        view.tintColor = UIColor(palette.tint)
+        view.semanticContentAttribute = rightToLeft ? .forceRightToLeft : .forceLeftToRight
+        view.textAlignment = rightToLeft ? .right : .left
+        view.accessibilityLabel = label
+        view.accessibilityIdentifier = identifier
+        coordinator.toolbar?.apply(palette)
+        if let focused, !focused.wrappedValue, coordinator.reportedFocus, view.isFirstResponder {
+            DispatchQueue.main.async { [weak view] in _ = view?.resignFirstResponder() }
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite else { return nil }
+        let measured = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: max(minHeight, measured.height))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    @MainActor final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: NativeMarkdownTextEditor
+        weak var view: UITextView?
+        var history = NativeMarkdownHistory()
+        var toolbar: NativeMarkdownToolbar?
+        var reportedFocus = false
+        private var before: NativeMarkdownEdit?
+        private var actionsRequested = false
+
+        init(_ parent: NativeMarkdownTextEditor) { self.parent = parent }
+
+        func textViewDidBeginEditing(_ view: UITextView) {
+            reportedFocus = true
+            if let focused = parent.focused, !focused.wrappedValue { focused.wrappedValue = true }
+            requestActions()
+        }
+
+        func textViewDidEndEditing(_ view: UITextView) {
+            reportedFocus = false
+            if let focused = parent.focused, focused.wrappedValue { focused.wrappedValue = false }
+        }
+
+        func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            guard parent.enabled else { return false }
+            let selected = view.selectedRange
+            before = NativeMarkdownEdit(text: view.text ?? "", start: selected.location, end: NSMaxRange(selected))
+            return true
+        }
+
+        func textViewDidChange(_ view: UITextView) {
+            let next = view.text ?? ""
+            let base = before
+            before = nil
+            if let base, !base.text.utf16.elementsEqual(next.utf16) { history.record(base) } else { history.externalChange() }
+            parent.text = next
+            toolbar?.setUndoEnabled(history.canUndo)
+            view.invalidateIntrinsicContentSize()
+            guard let base, view.markedTextRange == nil else { return }
+            let ticket = history.ticket(expecting: next)
+            let input: CoreObject = ["previous": base.text, "next": next, "start": base.start, "end": base.end, "pairs": parent.pairs]
+            Task { [weak self] in
+                guard let self, let reply = await self.parent.read("markdownTextChange", input), let view = self.view,
+                      view.markedTextRange == nil,
+                      let edit = self.history.applyAssist(ticket, current: view.text ?? "", reply: reply) else { return }
+                self.show(edit, in: view)
+            }
+        }
+
+        private func requestActions() {
+            guard !actionsRequested else { return }
+            actionsRequested = true
+            Task { [weak self] in
+                guard let self else { return }
+                let reply = await self.parent.read("markdownToolbarActions", [:])
+                let actions = (reply ?? [:]).objects("actions").compactMap(NativeMarkdownToolbar.Action.init)
+                guard !actions.isEmpty else { self.actionsRequested = false; return }
+                let toolbar = NativeMarkdownToolbar(actions: actions, undoLabel: reply?.text("undoLabel") ?? "",
+                    palette: self.parent.palette, apply: { [weak self] in self?.apply($0) }, undo: { [weak self] in self?.undo() })
+                toolbar.setUndoEnabled(self.history.canUndo)
+                self.toolbar = toolbar
+                guard let view = self.view else { return }
+                view.inputAccessoryView = toolbar
+                if view.isFirstResponder { view.reloadInputViews() }
+            }
+        }
+
+        private func apply(_ action: String) {
+            guard parent.enabled, let view, view.markedTextRange == nil else { return }
+            let selected = view.selectedRange
+            let base = NativeMarkdownEdit(text: view.text ?? "", start: selected.location, end: NSMaxRange(selected))
+            let ticket = history.ticket(expecting: base.text)
+            let input: CoreObject = ["value": base.text, "start": base.start, "end": base.end, "action": action]
+            Task { [weak self] in
+                guard let self, let reply = await self.parent.read("markdownToolbarApply", input), let view = self.view,
+                      view.markedTextRange == nil,
+                      let edit = self.history.applyToolbar(ticket, current: view.text ?? "", before: base, reply: reply) else { return }
+                self.show(edit, in: view)
+            }
+        }
+
+        private func undo() {
+            guard parent.enabled, let view, view.markedTextRange == nil, let edit = history.undo() else { return }
+            show(edit, in: view)
+        }
+
+        private func show(_ edit: NativeMarkdownEdit, in view: UITextView) {
+            view.text = edit.text
+            view.selectedRange = NSRange(location: edit.start, length: edit.end - edit.start)
+            parent.text = edit.text
+            toolbar?.setUndoEnabled(history.canUndo)
+            view.invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+final class NativeMarkdownToolbar: UIView {
+    struct Action {
+        let id: String
+        let label: String
+        let shortLabel: String
+
+        init?(_ object: CoreObject) {
+            guard !object.text("id").isEmpty else { return nil }
+            id = object.text("id"); label = object.text("label"); shortLabel = object.text("shortLabel")
+        }
+    }
+
+    private final class Button: UIButton {
+        var pressedColor: UIColor = .clear
+        override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? pressedColor : .clear } }
+        override var isEnabled: Bool { didSet { alpha = isEnabled ? 1 : 0.35 } }
+    }
+
+    private let actions: [Action]
+    private let scroll = UIScrollView()
+    private let hairline = UIView()
+    private let divider = UIView()
+    private let undoButton = Button(type: .custom)
+    private var buttons: [Button] = []
+    private var paletteValues: [String] = []
+    private var styledSize: CGFloat = 0
+    private var textColor: UIColor = .label
+
+    init(actions: [Action], undoLabel: String, palette: AppPalette, apply: @escaping (String) -> Void, undo: @escaping () -> Void) {
+        self.actions = actions
+        let width = UIScreen.main.bounds.width
+        super.init(frame: CGRect(x: 0, y: 0, width: width, height: NativeMarkdownToolbar.buttonSize(width: width, count: actions.count) + 8))
+        autoresizingMask = [.flexibleWidth]
+        accessibilityIdentifier = "markdown-toolbar"
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.delaysContentTouches = true
+        addSubview(scroll); addSubview(hairline); addSubview(divider); addSubview(undoButton)
+        for action in actions {
+            let button = Button(type: .custom)
+            button.accessibilityLabel = action.label
+            button.accessibilityIdentifier = "markdown-toolbar-" + action.id
+            button.addAction(UIAction { _ in apply(action.id) }, for: .touchUpInside)
+            buttons.append(button)
+            scroll.addSubview(button)
+        }
+        undoButton.accessibilityLabel = undoLabel
+        undoButton.accessibilityIdentifier = "markdown-toolbar-undo"
+        undoButton.addAction(UIAction { _ in undo() }, for: .touchUpInside)
+        self.apply(palette)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    static func buttonSize(width: CGFloat, count: Int) -> CGFloat {
+        let available = max(0, width - 16 - 18 - 2 * CGFloat(max(0, count - 1)))
+        return max(32, min(40, (available / CGFloat(count + 1)).rounded(.down)))
+    }
+
+    func setUndoEnabled(_ enabled: Bool) { if undoButton.isEnabled != enabled { undoButton.isEnabled = enabled } }
+
+    func apply(_ palette: AppPalette) {
+        guard palette.values != paletteValues else { return }
+        paletteValues = palette.values
+        backgroundColor = UIColor(palette.bg)
+        hairline.backgroundColor = UIColor(palette.border)
+        divider.backgroundColor = UIColor(palette.border)
+        divider.alpha = 0.8
+        textColor = UIColor(palette.text)
+        for button in buttons + [undoButton] { button.pressedColor = UIColor(palette.filter) }
+        styledSize = 0
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = Self.buttonSize(width: bounds.width, count: actions.count)
+        if size != styledSize { style(size) }
+        let line = 1 / max(1, window?.screen.scale ?? UIScreen.main.scale)
+        let y = ((bounds.height - size) / 2).rounded()
+        hairline.frame = CGRect(x: 0, y: 0, width: bounds.width, height: line)
+        undoButton.frame = CGRect(x: bounds.width - 8 - size, y: y, width: size, height: size)
+        divider.frame = CGRect(x: undoButton.frame.minX - 3 - line, y: ((bounds.height - 20) / 2).rounded(), width: line, height: 20)
+        scroll.frame = CGRect(x: 8, y: 0, width: max(0, divider.frame.minX - 3 - 2 - 8), height: bounds.height)
+        var x: CGFloat = 0
+        for button in buttons {
+            button.frame = CGRect(x: x, y: y, width: size, height: size)
+            x += size + 2
+        }
+        scroll.contentSize = CGSize(width: max(0, x - 2) + 4, height: bounds.height)
+    }
+
+    private func style(_ size: CGFloat) {
+        styledSize = size
+        let icon = max(18, min(22, (size * 0.58).rounded()))
+        let font = max(12, min(14, (size * 0.36).rounded()))
+        for (button, action) in zip(buttons, actions) {
+            button.layer.cornerRadius = 7
+            button.clipsToBounds = true
+            if let symbol = Self.symbol(action.id) {
+                let point = ["italic", "strikethrough"].contains(action.id) ? max(12, (icon * 0.64).rounded()) : icon
+                button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: point)), for: .normal)
+                button.tintColor = textColor
+            } else {
+                button.setTitle(action.shortLabel, for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: font, weight: .bold)
+                button.setTitleColor(textColor, for: .normal)
+            }
+        }
+        undoButton.layer.cornerRadius = 7
+        undoButton.clipsToBounds = true
+        undoButton.setImage(UIImage(systemName: "arrow.uturn.backward", withConfiguration: UIImage.SymbolConfiguration(pointSize: icon)), for: .normal)
+        undoButton.tintColor = textColor
+    }
+
+    static func symbol(_ id: String) -> String? {
+        switch id {
+        case "bulletList": return "list.bullet"
+        case "orderedList": return "list.bullet.circle"
+        case "taskList": return "checkmark.square"
+        case "horizontalRule": return "minus"
+        case "quote": return "ellipsis.bubble"
+        case "link": return "link"
+        case "code": return "chevron.left.forwardslash.chevron.right"
+        case "codeBlock": return "ellipsis.curlybraces"
+        case "italic": return "italic"
+        case "strikethrough": return "strikethrough"
+        default: return nil
+        }
+    }
 }
