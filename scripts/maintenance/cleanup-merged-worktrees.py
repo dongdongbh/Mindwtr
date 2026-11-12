@@ -16,12 +16,15 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from typing import Callable
 import uuid
 
 
 ARCHIVE_RESERVE_BYTES = 512 * 1024 * 1024
+DEFAULT_MIN_FREE_GB = 60
+DEFAULT_LOCK_PATH = Path.home() / ".local" / "state" / "mindwtr-worktree-cleanup.lock"
 GIT_TIMEOUT_SECONDS = 120
 PROBE_TIMEOUT_SECONDS = 60
 PROTECTED_NAMES = {"native-ios-foundation", "ios-editor-draft-recovery", "apple-ui-wda"}
@@ -34,8 +37,27 @@ GENERATED_PREFIXES = (
     ("apps", "android-native", ".gradle"),
     ("apps", "android-native", "build"),
     ("apps", "android-native", "app", "build"),
+    ("apps", "android-native", "android", ".gradle"),
+    ("apps", "android-native", "android", ".kotlin"),
+    ("apps", "android-native", "android", "build"),
+    ("apps", "android-native", "android", "app", "build"),
+    ("apps", "android-native", "android", "app", ".cxx"),
+    ("apps", "android-native", "android", "widget", "build"),
+    ("apps", "android-native", "android", "app", "src", "main", "assets", "core-host.js"),
+    ("apps", "ios-native", "Resources", "core-host.js"),
+    ("apps", "ios-native", "Resources", "label-keys.json"),
+    ("apps", "ios-native", "Sources", "MindwtrNativeCore", "Resources", "sandbox-host.js"),
+    ("apps", "mobile", ".expo"),
+    ("apps", "mobile", "expo-env.d.ts"),
+    ("apps", "mobile", "modules", "whisper-engine", ".tests-tmp"),
+    ("apps", "desktop", "dist"),
+    ("apps", "desktop", "src-tauri", "gen", "schemas"),
     (".gradle",),
+    (".venv-comments",),
+    ("coverage",),
 )
+PACKAGE_GENERATED_NAMES = ("node_modules", "coverage")
+
 
 
 class SafetyError(Exception):
@@ -80,17 +102,24 @@ def inside(path: Path, parent: Path) -> bool:
     return False
 
 
-def run_git(repo: Path, *args: str, accepted: tuple[int, ...] = (0,)) -> bytes:
-    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1")
+def git_exit(repo: Path, *args: str, input: bytes | None = None,
+             env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    environment = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1",
+                       GIT_LITERAL_PATHSPECS="1", **(env or {}))
     try:
-        result = subprocess.run(
+        return subprocess.run(
             ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c",
              "core.untrackedCache=false", "-C", str(repo), *args],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=GIT_TIMEOUT_SECONDS,
-            check=False, env=env,
+            input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=GIT_TIMEOUT_SECONDS,
+            check=False, env=environment,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise SafetyError("git_unavailable_or_timed_out") from None
+
+
+def run_git(repo: Path, *args: str, accepted: tuple[int, ...] = (0,), input: bytes | None = None,
+            env: dict[str, str] | None = None) -> bytes:
+    result = git_exit(repo, *args, input=input, env=env)
     if result.returncode not in accepted:
         raise SafetyError("git_operation_failed")
     return result.stdout
@@ -129,8 +158,10 @@ def generated_group(relative: str) -> str | None:
         return parts[0]
     if parts[0] == "node_modules":
         return "node_modules"
-    if len(parts) >= 3 and parts[0] in ("apps", "packages") and parts[2] == "node_modules":
+    if len(parts) >= 3 and parts[0] in ("apps", "packages") and parts[2] in PACKAGE_GENERATED_NAMES:
         return "/".join(parts[:3])
+    if "__pycache__" in parts[:-1]:
+        return "/".join(parts[:parts.index("__pycache__") + 1])
     for prefix in GENERATED_PREFIXES:
         if parts[:len(prefix)] == prefix:
             return "/".join(prefix)
@@ -156,6 +187,57 @@ def ignored_inventory(path: Path) -> tuple[list[str], bool]:
         if run_git(path, "ls-files", "-z", "--", group):
             raise SafetyError("generated_path_contains_tracked_source")
     return sorted(groups), evidence
+
+
+def status_changes(path: Path) -> list[tuple[str, str]]:
+    output = run_git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                     "--ignore-submodules=none", "--no-renames")
+    return [(os.fsdecode(field[:2]), os.fsdecode(field[3:])) for field in output.split(b"\0") if field]
+
+
+def tree_entries(repo: Path, commit: str) -> dict[str, tuple[str, str]]:
+    entries: dict[str, tuple[str, str]] = {}
+    for field in run_git(repo, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
+        if field:
+            meta, _, name = field.partition(b"\t")
+            mode, _, object_id = os.fsdecode(meta).split()
+            entries[os.fsdecode(name)] = (mode, object_id)
+    return entries
+
+
+def worktree_mode(path: Path, relative: str) -> str | None:
+    try:
+        info = (path / relative).lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return "unsupported"
+    return "100755" if info.st_mode & stat.S_IXUSR else "100644"
+
+
+def matches_tree_entry(path: Path, relative: str, entries: dict[str, tuple[str, str]]) -> bool:
+    expected = entries.get(relative)
+    if worktree_mode(path, relative) != (expected[0] if expected else None):
+        return False
+    if expected is None:
+        return True
+    try:
+        with open_evidence_file(path, relative) as source:
+            data = source.read()
+    except SafetyError:
+        return False
+    return os.fsdecode(run_git(path, "hash-object", "--no-filters", "--stdin", input=data)).strip() == expected[1]
+
+
+def reverse_applies_to(path: Path, repo: Path, commit: str) -> bool:
+    patch = run_git(path, "diff", "HEAD", "--binary", "--no-renames", "--no-ext-diff", "--no-textconv",
+                    "--ignore-submodules=none")
+    if not patch:
+        return False
+    with tempfile.TemporaryDirectory(prefix="mindwtr-cleanup-index-") as scratch:
+        env = {"GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        run_git(repo, "read-tree", commit, env=env)
+        return git_exit(repo, "apply", "--cached", "-R", "--check", "-", input=patch, env=env).returncode == 0
 
 
 def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None) -> int:
@@ -363,7 +445,8 @@ class Cleanup:
                  older_than_days: int = 10, protect: list[Path] | None = None,
                  now: Callable[[], float] = time.time,
                  probe: Callable[[Path], bool] = process_active,
-                 free_bytes: Callable[[Path], int] = lambda path: shutil.disk_usage(path).free):
+                 free_bytes: Callable[[Path], int] = lambda path: shutil.disk_usage(path).free,
+                 lock_path: Path = DEFAULT_LOCK_PATH, min_free_gb: float = DEFAULT_MIN_FREE_GB):
         self.repo = checked_path(repo)
         self.worktree_root = checked_path(worktree_root)
         self.archive_root = checked_path(archive_root, must_exist=False)
@@ -373,6 +456,12 @@ class Cleanup:
             raise SafetyError("archive_root_inside_source")
         if older_than_days < 1:
             raise SafetyError("invalid_age")
+        if not min_free_gb >= 0:
+            raise SafetyError("invalid_min_free")
+        self.lock_path = checked_path(lock_path, must_exist=False)
+        self.min_free_bytes = int(min_free_gb * 1024**3)
+        self.origin_entries: dict[str, tuple[str, str]] | None = None
+        self.proven_changes: dict[str, list[tuple[str, str]]] = {}
         self.protect = [checked_path(path, must_exist=False) for path in (protect or [])]
         self.now, self.probe, self.free_bytes = now, probe, free_bytes
         self.older_than_days = older_than_days
@@ -392,8 +481,11 @@ class Cleanup:
         info = self.archive_root.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise SafetyError("archive_root_must_be_private_owned_directory")
-        path = self.archive_root / ".cleanup.lock"
-        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        checked_path(self.lock_path, must_exist=False)
+        try:
+            descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        except OSError:
+            raise SafetyError("cleanup_lock_unavailable") from None
         try:
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
@@ -407,9 +499,27 @@ class Cleanup:
             os.close(descriptor)
             raise
 
+    def changes_on_origin_main(self, path: Path, changes: list[tuple[str, str]]) -> str | None:
+        if any(code != "??" and (code[0] not in " MAD" or code[1] not in " MD") for code, _ in changes):
+            return None
+        if self.origin_entries is None:
+            self.origin_entries = tree_entries(self.repo, self.origin_head)
+        untracked = [relative for code, relative in changes if code == "??"]
+        tracked = [relative for code, relative in changes if code != "??"]
+        if not all(matches_tree_entry(path, relative, self.origin_entries) for relative in untracked):
+            return None
+        if all(matches_tree_entry(path, relative, self.origin_entries) for relative in tracked):
+            return "bytes_equal_origin_main"
+        modes_match = all(worktree_mode(path, relative) == self.origin_entries.get(relative, (None,))[0]
+                          for relative in tracked)
+        if modes_match and reverse_applies_to(path, self.repo, self.origin_head):
+            return "diff_reverse_applies_to_origin_main"
+        return None
+
     def assess(self, record: dict) -> dict:
         result = {"path": record["path"], "head": record.get("head"),
                   "branch": record.get("branch"), "decision": "skip"}
+        self.proven_changes.pop(record["path"], None)
         try:
             path = checked_path(record["path"])
             if path.samefile(self.repo):
@@ -440,7 +550,9 @@ class Cleanup:
 
 
                     raise SafetyError("hidden_index_flags")
-            if run_git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"):
+            changes = status_changes(path)
+            proof = self.changes_on_origin_main(path, changes) if changes else None
+            if changes and proof is None:
                 raise SafetyError("dirty_or_untracked")
             groups, evidence = ignored_inventory(path)
             newest = activity_mtime(path, groups)
@@ -450,7 +562,12 @@ class Cleanup:
                 raise SafetyError("recent_activity")
             if self.probe(path):
                 raise SafetyError("active_process")
-            result.update(decision="eligible", reason="clean_merged_inactive")
+            if changes:
+                self.proven_changes[str(path)] = changes
+                result.update(decision="eligible", reason="merged_inactive_changes_on_origin_main",
+                              changed_path_count=len(changes), change_proof=proof)
+            else:
+                result.update(decision="eligible", reason="clean_merged_inactive")
         except SafetyError as error:
             result["reason"] = str(error)
         except OSError:
@@ -464,10 +581,10 @@ class Cleanup:
 
         total = 10240 + sum(1024 + ((item.get("size", 0) + 511) // 512) * 512 for item in manifest)
         estimate = total + (total + 99) // 100
-        budget = estimate + max(ARCHIVE_RESERVE_BYTES, (estimate + 9) // 10)
+        budget = estimate + max(ARCHIVE_RESERVE_BYTES, (estimate + 9) // 10) + self.min_free_bytes
         try:
             if self.free_bytes(self.archive_root) < budget:
-                raise SafetyError("insufficient_archive_space")
+                raise SafetyError("low_disk")
         except OSError:
             raise SafetyError("archive_space_probe_failed") from None
         name = worktree.name + "-" + head[:12] + "-" + uuid.uuid4().hex
@@ -506,6 +623,16 @@ class Cleanup:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def discard_changes_on_origin_main(self, path: Path) -> None:
+        changes = self.proven_changes.get(str(path), [])
+        tracked = [os.fsencode(relative) for code, relative in changes if code != "??"]
+        if tracked:
+            run_git(path, "restore", "--source=HEAD", "--staged", "--worktree", "--pathspec-from-file=-",
+                    "--pathspec-file-nul", input=b"\0".join(tracked))
+        for code, relative in changes:
+            if code == "??":
+                checked_path(path / relative).unlink()
+
     def retire(self, initial: dict) -> dict:
         result = dict(initial)
         path = Path(initial["path"])
@@ -532,6 +659,7 @@ class Cleanup:
                 raise SafetyError("recheck_head_changed")
             if evidence_manifest(path / ".orchestrator") != manifest:
                 raise SafetyError("evidence_changed")
+            self.discard_changes_on_origin_main(path)
             run_git(self.repo, "worktree", "remove", "--", str(path))
             result.update(decision="removed", reason="retired")
             receipt.update(status="removed", removed_at_utc=dt.datetime.fromtimestamp(self.now(), dt.timezone.utc).isoformat())
@@ -559,6 +687,7 @@ class Cleanup:
                 report["origin_main_freshly_fetched"] = True
             self.origin_head = os.fsdecode(run_git(self.repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")).strip()
             report["origin_main_head"] = self.origin_head
+            self.origin_entries = None
             if not apply:
                 report["ref_freshness"] = "cached_ref_only_not_verified"
             for record in registrations(self.repo):
@@ -599,10 +728,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protect", type=Path, action="append", default=[])
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK_PATH)
+    parser.add_argument("--min-free-gb", type=float, default=DEFAULT_MIN_FREE_GB)
     args = parser.parse_args(argv)
     try:
         cleanup = Cleanup(args.repo, args.worktree_root, args.archive_root,
-                          older_than_days=args.older_than_days, protect=args.protect)
+                          older_than_days=args.older_than_days, protect=args.protect,
+                          lock_path=args.lock, min_free_gb=args.min_free_gb)
         if args.report:
             validate_report_path(args.report, cleanup.archive_root, apply=args.apply)
         report = cleanup.run(apply=args.apply)
