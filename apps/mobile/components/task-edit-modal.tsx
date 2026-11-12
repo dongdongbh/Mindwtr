@@ -1147,6 +1147,7 @@ function TaskEditModalInner({
     const handleViewStatusUpdate = useCallback((status: TaskStatus) => {
         requestStatusChange(status);
     }, [requestStatusChange]);
+    const [isChecklistDragging, setIsChecklistDragging] = useState(false);
     const isTaskFormTextInputFocused = isTitleInputFocused
         || descriptionEditor.isDescriptionInputFocused
         || isContextInputFocused
@@ -1291,7 +1292,7 @@ function TaskEditModalInner({
                             horizontal
                             pagingEnabled
                             keyboardShouldPersistTaps="handled"
-                            scrollEnabled={!isMarkdownOverlayOpen && !isTaskFormTextInputFocused}
+                            scrollEnabled={!isMarkdownOverlayOpen && !isTaskFormTextInputFocused && !isChecklistDragging}
                             scrollEventThrottle={16}
                             showsHorizontalScrollIndicator={false}
                             directionalLockEnabled
@@ -1305,6 +1306,7 @@ function TaskEditModalInner({
                                 accessibilityElementsHidden={editTab !== 'task' || submissionPending || completionRetryPending}
                                 importantForAccessibility={editTab !== 'task' || submissionPending || completionRetryPending ? 'no-hide-descendants' : 'auto'}>
                             <TaskEditFormTab
+                                onChecklistDragChange={setIsChecklistDragging}
                                 focusStar={focusStar}
                                 accessibilityHidden={editTab !== 'task'}
                                 t={t}

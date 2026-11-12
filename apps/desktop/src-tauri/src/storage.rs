@@ -1806,7 +1806,8 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("focusOrder").and_then(|v| v.as_f64()),
             task.get("isFocusedToday").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
             task.get("timeEstimate").and_then(|v| v.as_str()),
-            task.get("suppressMindwtrReminders").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+            (task.get("suppressMindwtrReminders").and_then(Value::as_bool).unwrap_or(false)
+                || matches!(task.get("reminderPolicy").and_then(Value::as_str), Some("start" | "due"))) as i32,
             task.get("repeatReminderMinutes").and_then(|v| v.as_i64()),
             task.get("reviewAt").and_then(|v| v.as_str()),
             task.get("completedAt").and_then(|v| v.as_str()),
@@ -1830,7 +1831,7 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("purgedAt").and_then(|v| v.as_str()),
             task.get("timeSpentMinutes").and_then(|v| v.as_i64()),
             task.get("archivedAt").and_then(|v| v.as_str()),
-            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
+            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip" | "start" | "due")),
             task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
             task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
         ],
@@ -2018,7 +2019,10 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
         );
     }
     if let Ok(Some(policy)) = row.get::<_, Option<String>>("reminderPolicy") {
-        if matches!(policy.as_str(), "inherit" | "send" | "skip") {
+        if matches!(
+            policy.as_str(),
+            "inherit" | "send" | "skip" | "start" | "due"
+        ) {
             map.insert("reminderPolicy".to_string(), Value::String(policy));
         }
     }
@@ -3492,7 +3496,8 @@ fn replace_prepared_data_in_transaction(
                 task.get("focusOrder").and_then(|v| v.as_f64()),
                 task.get("isFocusedToday").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
                 task.get("timeEstimate").and_then(|v| v.as_str()),
-                task.get("suppressMindwtrReminders").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+                (task.get("suppressMindwtrReminders").and_then(Value::as_bool).unwrap_or(false)
+                || matches!(task.get("reminderPolicy").and_then(Value::as_str), Some("start" | "due"))) as i32,
                 task.get("repeatReminderMinutes").and_then(|v| v.as_i64()),
                 task.get("reviewAt").and_then(|v| v.as_str()),
                 task.get("completedAt").and_then(|v| v.as_str()),
@@ -3516,7 +3521,7 @@ fn replace_prepared_data_in_transaction(
                 task.get("purgedAt").and_then(|v| v.as_str()),
                 task.get("timeSpentMinutes").and_then(|v| v.as_i64()),
             task.get("archivedAt").and_then(|v| v.as_str()),
-            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
+            task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip" | "start" | "due")),
             task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
             task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
             ],
@@ -4044,6 +4049,31 @@ pub(crate) async fn get_data(app: tauri::AppHandle) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || load_data_snapshot(&app))
         .await
         .map_err(|e| e.to_string())?
+}
+
+fn read_trusted_sqlite_for_encryption_upgrade(db_path: &Path) -> Result<Value, String> {
+    if !db_path.is_file() {
+        return Err(
+            "SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: canonical SQLite database is unavailable"
+                .into(),
+        );
+    }
+    let connection =
+        Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| format!("SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: {error}"))?;
+    read_sqlite_snapshot(&connection)
+        .map_err(|error| format!("SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: {error}"))
+}
+
+#[tauri::command]
+pub(crate) async fn read_sync_encryption_trusted_local(
+    app: tauri::AppHandle,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        read_trusted_sqlite_for_encryption_upgrade(&get_db_path(&app))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 pub(crate) fn load_data_snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
@@ -6045,6 +6075,37 @@ mod tests {
     use std::sync::{Arc, Barrier};
 
     #[test]
+    fn encryption_upgrade_never_uses_json_when_canonical_sqlite_is_unreadable() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("mindwtr.db");
+        let canonical = b"unreadable canonical SQLite";
+        fs::write(&database, canonical).unwrap();
+        let backup = directory.path().join("data.json");
+        fs::write(&backup, br#"{"tasks":[{"id":"recoverable","title":"Only in JSON"}],"projects":[],"settings":{}}"#).unwrap();
+        assert!(read_json_with_retries(&backup, 1).is_ok());
+        assert!(read_trusted_sqlite_for_encryption_upgrade(&database)
+            .unwrap_err()
+            .contains("TRUSTED_LOCAL_REQUIRED"));
+        assert_eq!(fs::read(&database).unwrap(), canonical);
+        assert!(backup.exists());
+        assert!(
+            read_trusted_sqlite_for_encryption_upgrade(&directory.path().join("missing.db"))
+                .is_err()
+        );
+        assert!(!directory.path().join("missing.db").exists());
+    }
+
+    #[test]
+    fn encryption_upgrade_reads_an_initialized_empty_canonical_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("mindwtr.db");
+        drop(open_sqlite_path(&database).unwrap());
+        let data = read_trusted_sqlite_for_encryption_upgrade(&database).unwrap();
+        assert_eq!(data["tasks"], serde_json::json!([]));
+        assert_eq!(data["projects"], serde_json::json!([]));
+    }
+
+    #[test]
     fn reliability_schema_extension_preserves_an_existing_version_sixteen_database() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("version-sixteen.db");
@@ -6693,9 +6754,9 @@ mod tests {
             .unwrap();
         assert!(legacy.get("reminderPolicy").is_none());
         assert_eq!(legacy["suppressMindwtrReminders"], false);
-        for policy in ["inherit", "send", "skip"] {
+        for policy in ["inherit", "send", "skip", "start", "due"] {
             let task = serde_json::json!({"id":policy,"title":"Policy","status":"next","tags":[],"contexts":[],
-                "createdAt":"2026-01-01","updatedAt":"2026-01-01","reminderPolicy":policy,"repeatReminderMinutes":15});
+                "createdAt":"2026-01-01","updatedAt":"2026-01-01","reminderPolicy":policy,"repeatReminderMinutes":15,"rev":2,"suppressMindwtrReminders":false});
             upsert_task_row(&conn, &task).unwrap();
             let read = conn
                 .query_row(
@@ -6706,7 +6767,40 @@ mod tests {
                 .unwrap();
             assert_eq!(read["reminderPolicy"], policy);
             assert_eq!(read["repeatReminderMinutes"], 15);
+            assert_eq!(
+                read["suppressMindwtrReminders"],
+                matches!(policy, "start" | "due")
+            );
+            let mut stale = task.clone();
+            stale["rev"] = serde_json::json!(1);
+            stale.as_object_mut().unwrap().remove("reminderPolicy");
+            upsert_task_row(&conn, &stale).unwrap();
+            let retained = conn
+                .query_row(
+                    "SELECT * FROM tasks WHERE id=?1",
+                    [policy],
+                    row_to_task_value,
+                )
+                .unwrap();
+            assert_eq!(retained, read);
         }
+        let mut persisted = read_sqlite_data(&conn).unwrap();
+        persisted["tasks"].as_array_mut().unwrap().retain(|task| {
+            matches!(
+                task.get("reminderPolicy").and_then(Value::as_str),
+                Some("start" | "due")
+            )
+        });
+        let mut full_replacement = Connection::open_in_memory().unwrap();
+        initialize_sqlite_schema(&mut full_replacement).unwrap();
+        let mut incoming = persisted.clone();
+        for task in incoming["tasks"].as_array_mut().unwrap() {
+            task["suppressMindwtrReminders"] = serde_json::json!(false);
+        }
+        assert_eq!(
+            replace_json_in_sqlite(&mut full_replacement, &incoming).unwrap(),
+            persisted
+        );
         conn.execute(
             "UPDATE tasks SET reminderPolicy='sometimes' WHERE id='legacy'",
             [],

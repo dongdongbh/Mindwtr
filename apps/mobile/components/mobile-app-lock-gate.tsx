@@ -12,11 +12,15 @@ import {
   authenticateWithDeviceLock,
   getMobileAppLockErrorKey,
   isWithinMobileAppLockRelockDelay,
+  MobileAppLockEnableContext,
   shouldAttemptMobileAppLockAuthentication,
 } from '@/lib/mobile-app-lock';
 
 type MobileAppLockGateProps = {
   enabled: boolean;
+  securityReady: boolean;
+  startupLoadFailed?: boolean;
+  onRetryStartup?: () => void;
   children: React.ReactNode;
 
   onLockedChange?: (locked: boolean) => void;
@@ -24,7 +28,7 @@ type MobileAppLockGateProps = {
 
 const AUTHENTICATE_AFTER_ACTIVE_DELAY_MS = 250;
 
-export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileAppLockGateProps) {
+export function MobileAppLockGate({ enabled, securityReady, startupLoadFailed = false, onRetryStartup, children, onLockedChange }: MobileAppLockGateProps) {
 
   const relockDelayMinutes = useTaskStore((state) => (
     resolveMobileAppLockRelockDelayMinutes(state.settings?.security?.mobileAppLockRelockDelayMinutes)
@@ -33,6 +37,7 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
   const filledButton = useFilledButtonColors();
   const { t } = useLanguage();
   const [locked, setLocked] = useState(enabled);
+  const [contentAuthorized, setContentAuthorized] = useState(false);
   const [authenticating, setAuthenticating] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [lockNonce, setLockNonce] = useState(0);
@@ -40,24 +45,56 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const authInFlightRef = useRef(false);
+  const authEpochRef = useRef(0);
   const wasEnabledRef = useRef(enabled);
+  const securityReadyRef = useRef(securityReady);
+  securityReadyRef.current = securityReady;
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
 
   const leftUnlockedAtRef = useRef<number | null>(null);
 
-  const coversApp = enabled && locked;
+  const needsEnableAuthentication = enabled && !wasEnabledRef.current;
+  const isLocked = locked || needsEnableAuthentication;
+  const coversApp = !securityReady || (enabled && isLocked);
   useEffect(() => {
     onLockedChange?.(coversApp);
   }, [coversApp, onLockedChange]);
+
+  useEffect(() => {
+    if (securityReady) return;
+    setContentAuthorized(false);
+    setLocked(true);
+    wasEnabledRef.current = false;
+    setLockNonce((value) => value + 1);
+    void logInfo('App lock waiting for canonical security settings', {
+      scope: 'app-lock',
+      extra: { releaseCheck: 'v1.3.9/app-lock-canonical-startup', outcome: 'held' },
+      force: true,
+    }).catch(() => undefined);
+  }, [securityReady]);
+
+  const confirmAuthenticatedEnable = useCallback(() => {
+    if (!securityReadyRef.current || AppState.currentState !== 'active'
+      || useTaskStore.getState().settings.security?.mobileAppLockEnabled !== true) return;
+    wasEnabledRef.current = true;
+    setLocked(false);
+    setContentAuthorized(true);
+    setErrorKey(null);
+  }, []);
+
+  useEffect(() => {
+    authEpochRef.current += 1;
+  }, [enabled, securityReady]);
 
   const resolveText = useCallback((key: string, fallback: string) => (
     translateWithFallback(t, key, fallback)
   ), [t]);
 
   const authenticate = useCallback(async () => {
-    if (!enabled || authInFlightRef.current) return;
+    if (!securityReady || !enabled || authInFlightRef.current) return;
     authInFlightRef.current = true;
+    const authEpoch = authEpochRef.current;
     setAuthenticating(true);
     setErrorKey(null);
     try {
@@ -66,8 +103,11 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
         cancelLabel: resolveText('common.cancel', 'Cancel'),
         fallbackLabel: resolveText('appLock.useDevicePasscode', 'Use device passcode'),
       });
+      if (authEpoch !== authEpochRef.current) return;
       if (result.success) {
+        wasEnabledRef.current = true;
         setLocked(false);
+        setContentAuthorized(true);
         setErrorKey(null);
         return;
       }
@@ -78,7 +118,7 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
       authInFlightRef.current = false;
       setAuthenticating(false);
     }
-  }, [enabled, resolveText]);
+  }, [enabled, resolveText, securityReady]);
 
   useEffect(() => {
     if (!enabled) {
@@ -90,7 +130,8 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
 
     if (!wasEnabledRef.current) {
       wasEnabledRef.current = true;
-      setLocked(false);
+      setLocked(true);
+      setLockNonce((value) => value + 1);
       setErrorKey(null);
       return;
     }
@@ -139,8 +180,8 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
     if (!shouldAttemptMobileAppLockAuthentication({
       appState,
       authenticating,
-      enabled,
-      locked,
+      enabled: enabled && securityReady,
+      locked: isLocked,
       lockNonce,
       promptedNonce,
     })) {
@@ -152,10 +193,35 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
       void authenticate();
     }, AUTHENTICATE_AFTER_ACTIVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [appState, authenticate, authenticating, enabled, locked, lockNonce, promptedNonce]);
+  }, [appState, authenticate, authenticating, enabled, isLocked, lockNonce, promptedNonce, securityReady]);
+
+  if (!securityReady) {
+    return (
+      <SafeAreaView style={[styles.container, styles.content, { backgroundColor: tc.bg }]}>
+        <Text style={[styles.description, { color: tc.text }]} accessibilityLiveRegion="polite">
+          {startupLoadFailed
+            ? resolveText('appLock.loadFailed', 'Mindwtr could not load your data. Try again.')
+            : resolveText('common.loading', 'Loading...')}
+        </Text>
+        {startupLoadFailed && onRetryStartup && (
+          <TouchableOpacity onPress={onRetryStartup} style={[styles.unlockButton, { backgroundColor: filledButton.backgroundColor }]}>
+            <Text style={[styles.unlockText, { color: filledButton.textColor ?? tc.onTint }]}>
+              {resolveText('common.retry', 'Try again')}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  const content = (
+    <MobileAppLockEnableContext.Provider value={confirmAuthenticatedEnable}>
+      {children}
+    </MobileAppLockEnableContext.Provider>
+  );
 
   if (!enabled) {
-    return <>{children}</>;
+    return content;
   }
 
   const message = errorKey
@@ -200,15 +266,15 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
   if (Platform.OS === 'android') {
     return (
       <>
-        {children}
+        {contentAuthorized && content}
         <Modal
-          visible={locked}
+          visible={isLocked}
           animationType="none"
           statusBarTranslucent
           navigationBarTranslucent
           onRequestClose={() => {}}
         >
-          {locked && (appState === 'active' ? lockScreen : (
+          {isLocked && (appState === 'active' ? lockScreen : (
             <View testID="app-lock-privacy-cover" style={{ flex: 1, backgroundColor: tc.bg }} />
           ))}
         </Modal>
@@ -216,7 +282,7 @@ export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileA
     );
   }
 
-  return locked ? lockScreen : <>{children}</>;
+  return isLocked ? lockScreen : content;
 }
 
 const styles = StyleSheet.create({

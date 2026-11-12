@@ -83,6 +83,13 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Checks: `apps/mobile/components/use-quick-capture-audio.test.tsx`, `apps/mobile/lib/speech-to-text.test.ts`
 - Notes: Transcription runs only when Settings › Advanced › AI assistant › Enable speech to text is on. The provider is local Whisper or a cloud provider. The recording can also be kept as an audio attachment.
 
+## Queued Android capture
+
+- Reach: Android Quick capture widget, Quick Settings tile, or capture shortcut.
+- Code: `apps/mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget/QuickCaptureActivity.kt`, `packages/core/src/pending-captures.ts`
+- Checks: `packages/core/src/pending-captures.test.ts`, `apps/mobile/lib/pending-captures.test.ts`
+- Notes: Text and audio queue ingestion uses the configured default area, including active-filter mode. Explicit area/project choices take precedence. Missing or deleted default areas remain unassigned.
+
 ## Full-screen capture (system entry)
 
 - Reach: Opened by the share sheet, Control Center, a capture deep link, and `mindwtr:///capture-quick` without `entry=details`.
@@ -104,9 +111,9 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Checklist and attachments
 
 - Reach: Task editor › checklist field and attachments field. Task rows also show checklist progress.
-- Shortcuts: In the checklist order panel, long press and drag a row.
+- Shortcuts: Drag a checklist row by its handle; the row follows the finger and neighboring rows preview its slot. Sideways movement keeps the drag active. Release commits the draft move; cancellation restores the original positions. Tap a handle for row actions; tapping another handle switches the menu on release. Both editor scroll views stay locked during handle contact; edge scrolling remains available. The order panel also provides up/down buttons.
 - Selectors: `mobile-checklist-add-item`, `mobile-checklist-order-toggle`, `mobile-checklist-order-panel`, `mobile-checklist-row-` (+ item key), `mobile-checklist-drag-` (+ item key), `mobile-checklist-move-up-` (+ item id), `mobile-checklist-move-down-` (+ item id)
-- Code: `apps/mobile/components/task-edit/TaskEditContentField.tsx`, `apps/mobile/components/task-edit/use-task-edit-attachments.ts`, `apps/mobile/components/swipeable-task-item/useSwipeableChecklist.ts`
+- Code: `apps/mobile/components/task-edit/TaskEditContentField.tsx`, `apps/mobile/components/task-edit/use-checklist-handle-drag.tsx`, `apps/mobile/components/task-edit/use-task-edit-attachments.ts`, `apps/mobile/components/swipeable-task-item/useSwipeableChecklist.ts`
 - Checks: `apps/mobile/components/task-edit/TaskEditContentField.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-attachments.test.tsx`, `apps/mobile/tests/attachments.parity.test.tsx`
 - Notes: Attachments are buffered with the Task draft and count as pending edits.
 
@@ -168,6 +175,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/views/contexts-view.tsx`, `apps/mobile/app/(drawer)/contexts.tsx`, `apps/mobile/app/(drawer)/(tabs)/contexts-tab.tsx`
 - Checks: `apps/mobile/components/views/contexts-view.test.tsx`, `apps/mobile/components/views/contexts-view.parity.test.tsx`
 - Notes: Several selected tokens match in "all" mode by default; the view can switch to "any".
+- Notes: A saved Contexts filter opened from a widget uses this full view with the saved filter selected, including its saved criteria and sort. Filter controls and chips remain editable. Clearing the selection does not reapply the widget filter. Other saved-filter views keep their existing destinations.
 
 ## Waiting For
 
@@ -274,7 +282,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `regional-formats-toggle`, `app-lock-privacy-cover`
 - Code: `apps/mobile/components/settings/general-settings-screen.tsx`, `packages/core/src/general-settings-model.ts`, `apps/mobile/components/mobile-app-lock-gate.tsx`
 - Checks: `apps/mobile/components/settings/general-settings-screen.test.tsx`, `apps/mobile/components/mobile-app-lock-gate.test.tsx`
-- Notes: App lock uses the device lock and protects the app view, not the database. On Android, a native window keeps the mounted app and its dialogs private while away, showing a blank cover. The unlock panel appears only while active and locked.
+- Notes: App lock uses the device lock and protects the app view, not the database. On Android, a native window keeps the mounted app and its dialogs private while away, showing a blank cover. The unlock panel appears only while active and locked. Private screens wait for the authoritative local database at startup; a backup snapshot cannot decide whether the app is locked. A failed load shows a generic retry screen. Enabling App lock in Settings reuses only that action’s just-completed device authentication; an asynchronously loaded enabled preference requires unlocking.
 
 ## Settings › GTD
 
@@ -311,6 +319,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/settings/sync-settings-screen.tsx`, `apps/mobile/components/settings/sync-settings-webdav-panel.tsx`, `apps/mobile/components/settings/sync-settings-dropbox-panel.tsx`, `apps/mobile/components/settings/sync-settings-file-panel.tsx`, `apps/mobile/components/settings/sync-settings-selfhosted-panel.tsx`, `apps/mobile/components/settings/sync-settings-cloudkit-panel.tsx`, `apps/mobile/components/settings/sync-settings-encryption-card.tsx`
 - Checks: `apps/mobile/components/settings/sync-settings-screen.parity.test.tsx`, `apps/mobile/components/settings/sync-settings-encryption-card.test.tsx`, `apps/mobile/components/settings/use-sync-settings-transport-actions.test.tsx`
 - Notes: A new backend stays inactive until its probe passes; each sync is one Sync run in core. Use the `sync-device-testing` skill for real backends.
+- Upgrade: Settings › Sync › Encryption › Upgrade sync encryption opens an explicit current-passphrase confirmation. Update every device first; older clients cannot read the result. The service uses a verified durable local copy and refuses mismatches or unavailable storage. Keep the upgrade passphrase for retained encrypted recovery archives, even after changing the active passphrase. An interrupted format upgrade can retry; other unfinished encryption transitions do not expose this action. No upgrade runs automatically during unlock.
 
 ## Settings › Data (backup, import, export, diagnostics)
 
@@ -389,7 +398,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Shortcuts: Widget links open `mindwtr:///focus`, `mindwtr:///inbox`, `mindwtr:///waiting`, `mindwtr:///someday`, or `mindwtr:///widget-list/<list-id>`.
 - Code: `apps/mobile/modules/android-widget/README.md`, `apps/mobile/plugins/android-widget.js`, `apps/mobile/lib/widget-service.ts`, `apps/mobile/app/(drawer)/widget-list/[id].tsx`, `apps/mobile/hooks/use-widget-launch.tsx`
 - Checks: `apps/mobile/tests/use-widget-launch.test.tsx`, `apps/mobile/app/(drawer)/widget-list/widget-list-screen.test.tsx`, `apps/mobile/modules/android-widget/android/src/test/java/tech/dongdongbh/mindwtr/androidwidget/WidgetNavigationTest.kt`, `apps/mobile/hooks/root-layout/use-root-layout-pending-captures.test.tsx`
-- Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite.
+- Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite. Rows checked off in a row stay in place, struck through and undoable, until three seconds after the last tap; then they all leave together (`CheckoffStore.kt`, check `CheckoffStoreTest.kt`) (#1211).
+- Notes: Existing `/widget-list/filter:<id>` links for saved Contexts filters open the full Contexts controls with that filter selected after local settings load. Deleted or unknown filters show an empty result. The original widget path remains mounted for launch acknowledgment after App lock unlocks.
 - E-Ink: Present priority rings and identity dots use each Android widget's effective text foreground, including transparent light-text and dark-text modes. Missing identity stays hidden; the transparent surface stays clear.
 
 ## Android launcher shortcuts and Quick Settings tile
@@ -419,3 +429,17 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `apple-image-capture-evaluation`, `apple-image-pick`, `apple-image-analyze`, `apple-image-save`, `apple-image-cancel`
 - Code: `apps/mobile/app/apple-evaluation.tsx`, `apps/mobile/components/AppleImageCaptureEvaluation.tsx`
 - Checks: `apps/mobile/tests/apple-evaluation-route.test.tsx`
+
+## Capture reminder syntax (#1545)
+
+- Reach: Quick capture or task capture title, then Save.
+- Syntax: `/due:tomorrow 5pm /remind-due:1d` and `/start:tomorrow 9am /remind-start:30m`. Positive leads require the matching explicit date command with an explicit time. Units are integer `m`, `h`, `d`, `w`; due accepts 0–10080 minutes and start accepts only 0/5/15/30/60. `0m` turns the advance reminder off. Invalid tokens remain visible, show a warning and refuse save. Existing task reminder policy and device notification settings apply.
+- Code: `packages/core/src/quick-add.ts`, `packages/core/src/quick-add-preview.ts`, `packages/core/src/capture.ts`
+- Checks: `packages/core/src/quick-add-reminders.test.ts`, `packages/core/src/task-reminder-policy.test.ts`, `packages/core/src/native-host-contract-prepared-capture.test.ts`, `packages/core/src/native-host-contract-prepared-lines.test.ts`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`
+
+### Selective task reminders (#1547)
+
+- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time; its advance reminder replaces the date-time alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
+- Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
+- Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
+- Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.

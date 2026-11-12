@@ -4,7 +4,7 @@ import {
     ATTACHMENTS_DIR_NAME,
     buildCloudKey,
     generateUUID,
-    shouldSendTaskReminders,
+    suppressLegacyTaskReminders,
     type AppData,
     type Attachment,
     type Task,
@@ -366,7 +366,7 @@ export async function handleCaptureRequest(
                 { status: 200 },
             );
         }
-        task.suppressMindwtrReminders = !shouldSendTaskReminders(task, data.settings);
+        task.suppressMindwtrReminders = suppressLegacyTaskReminders(task, data.settings);
         data.tasks.push(task);
         const finalized = options.finalizeForWrite(data, nowIso);
         if ('error' in finalized) return finalized.error;

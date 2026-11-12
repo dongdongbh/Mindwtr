@@ -11,7 +11,7 @@ import {
     type ReminderScheduleRequest,
 } from './schedule-utils';
 import { isTaskActionable } from './task-status';
-import { shouldSendTaskReminders } from './task-reminder-policy';
+import { isTaskReminderSelectionCurrent, shouldSendTaskReminders } from './task-reminder-policy';
 import type { AppLanguage, NotificationSettings, Project, Task } from './types';
 
 export const REMINDER_ALARM_MAP_STORAGE_KEY = 'mindwtr:local:alarms:v1';
@@ -454,6 +454,7 @@ async function scheduleReminderAlarm(
             if (config.data?.kind === 'task-due-advance' || config.data?.kind === 'task-start-advance') {
                 port.logInfo('Advance reminder scheduled', { releaseCheck: config.data.kind === 'task-start-advance' ? 'v1.3.8/start-advance-reminder' : 'v1.3.8/due-advance-reminder', outcome: 'scheduled' });
             }
+            if (config.data?.reminderSelection) port.logInfo('Selective task reminder scheduled', { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'scheduled' });
             alarms.set(key, { id: Math.floor(id), signature, ...(retry > 0 ? { fireAtMs: fireAt.getTime() } : {}) });
             return true;
         } catch (error) {
@@ -591,12 +592,14 @@ export function findStaleNativeReminderAlarms(input: {
     for (const row of input.rows as Record<string, unknown>[]) {
         if (!row || typeof row !== 'object') continue;
         const id = Number(row.id);
-        if (!Number.isSafeInteger(id) || id <= 0 || input.trackedIds.has(id) || isPomodoroNativeAlarm(row)) continue;
+        if (!Number.isSafeInteger(id) || id <= 0 || isPomodoroNativeAlarm(row)) continue;
         const data = readNativeAlarmData(row.data);
         const key = data.alarmKey ?? '';
         const task = key.startsWith('task:') ? tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|s?a\d+:-?\d+)$/, '')) : undefined;
         const taskDateReminder = data.kind === 'task-start' || data.kind === 'task-due' || data.kind === 'task-due-advance' || data.kind === 'task-start-advance' || data.kind === 'task-reminder';
-        const remindersSkipped = taskDateReminder && task && !shouldSendTaskReminders(task, input.settings);
+        const selectionChanged = taskDateReminder && task && !isTaskReminderSelectionCurrent(task, data, input.settings);
+        if (input.trackedIds.has(id) && !selectionChanged) continue;
+        const remindersSkipped = taskDateReminder && task && (!shouldSendTaskReminders(task, input.settings) || selectionChanged);
         const ownerGone = isReminderOwnerGone(key, tasks, projects);
         const fireAtMs = new Date(
             Number(row.year), Number(row.month) - 1, Number(row.day), Number(row.hour), Number(row.minute), Number(row.second),

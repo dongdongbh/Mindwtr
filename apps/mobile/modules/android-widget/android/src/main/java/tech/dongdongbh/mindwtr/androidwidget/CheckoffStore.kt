@@ -24,11 +24,14 @@ object CheckoffStore {
     val committed: Map<String, String>,
     val newlyCommitted: Int,
     val failed: Int,
+    val held: Int = 0,
   )
 
   const val PREFS_NAME = "mindwtr_widget_checkoff"
   const val COMMITTED_PREFS_NAME = "mindwtr_widget_checkoff_committed"
   const val DIAGNOSTICS_PREFS_NAME = "mindwtr_widget_checkoff_diagnostics"
+  const val WINDOW_PREFS_NAME = "mindwtr_widget_checkoff_window"
+  private const val LAST_TOGGLE_AT = "lastToggleAt"
   const val UNDO_WINDOW_MS = 3_000L
   const val ACTION_SWEEP = "tech.dongdongbh.mindwtr.androidwidget.CHECKOFF_SWEEP"
   private const val HANDLER_DELAY_MS = 3_200L
@@ -39,6 +42,7 @@ object CheckoffStore {
   private const val INDEX_RETRY = "indexRetry"
   private const val FAST_RETRY_COUNT = "fastRetryCount"
   private const val SERIALIZED_COUNT = "serializedCount"
+  private const val HELD_COUNT = "heldCount"
   internal const val MAX_FAST_RETRIES = 2
   private const val TAG = "MindwtrWidgetCheckoff"
   private val stateMonitor = Any()
@@ -87,8 +91,15 @@ object CheckoffStore {
     now: Long = System.currentTimeMillis(),
   ): TapAction = when {
     isCommitted || hasQueuedCompletion -> TapAction.RECONCILE
-    pendingSince != null && now - pendingSince >= UNDO_WINDOW_MS -> TapAction.RECONCILE
+    pendingSince != null && windowEnded(pendingSince, now) -> TapAction.RECONCILE
     else -> TapAction.TOGGLE_PENDING
+  }
+
+  internal fun completeAction(tap: TapAction, isPending: Boolean): TapAction =
+    if (isPending && tap == TapAction.TOGGLE_PENDING) TapAction.NO_OP else tap
+
+  fun completeAction(context: Context, taskId: String, now: Long = System.currentTimeMillis()): TapAction = withStateTransaction {
+    completeAction(tapAction(context, taskId, now), isPending(context, taskId))
   }
 
 
@@ -99,7 +110,7 @@ object CheckoffStore {
     tapAction(
       isCommitted = false,
       hasQueuedCompletion = tappedAt != null && PendingCaptureWriter.hasQueuedCompletion(context.filesDir, taskId, tappedAt),
-      pendingSince = tappedAt,
+      pendingSince = if (current.containsKey(taskId)) latestTapAt(current, lastToggleAt(context)) else null,
       now = now,
     )
   }
@@ -112,7 +123,7 @@ object CheckoffStore {
     if (tapAction(
         isCommitted = false,
         hasQueuedCompletion = tappedAt != null && PendingCaptureWriter.hasQueuedCompletion(context.filesDir, taskId, tappedAt),
-        pendingSince = tappedAt,
+        pendingSince = if (current.containsKey(taskId)) latestTapAt(current, lastToggleAt(context)) else null,
         now = now,
       ) != TapAction.TOGGLE_PENDING
     ) return@withStateTransaction current.containsKey(taskId)
@@ -123,7 +134,8 @@ object CheckoffStore {
       return@withStateTransaction result.isPending
     }
     recordSerializedCheckoff(context)
-    if (result.isPending) scheduleInitialCommit(context)
+    recordLastToggle(context, now)
+    if (result.state.isNotEmpty()) scheduleInitialCommit(context)
     result.isPending
   }
 
@@ -132,7 +144,7 @@ object CheckoffStore {
     val committed = committedFiles(context)
     val current = readPending(context)
       ?: return@withStateTransaction SweepState(emptyMap(), committed, newlyCommitted = 0, failed = 1)
-    val next = swept(current, committed, now) { taskId, tappedAt ->
+    val next = swept(current, committed, now, lastToggleAt(context)) { taskId, tappedAt ->
       PendingCaptureWriter.writeCompletion(context.filesDir, taskId, tappedAt).name
     }
     if (next.newlyCommitted > 0) markRefreshNeeded(context, next.newlyCommitted)
@@ -153,6 +165,7 @@ object CheckoffStore {
     val pendingWritten = next.pending == current || writePending(context, next.pending)
     val actual = if (pendingWritten) next else next.copy(pending = current, failed = next.failed + 1)
     if (!pendingWritten) Log.w(TAG, "Could not clear queued widget check-offs; retrying")
+    if (pendingWritten && actual.held > 0) recordHeld(context, actual.held)
     if (actual.failed > 0) Log.w(TAG, "Could not queue ${actual.failed} widget completion(s); retrying")
     actual
   }
@@ -171,20 +184,33 @@ object CheckoffStore {
     return ToggleResult(next, persisted = true, isPending = next.containsKey(taskId))
   }
 
-  fun expired(pending: Map<String, Long>, now: Long, windowMs: Long): List<String> =
-    pending.filter { (_, tappedAt) -> now - tappedAt >= windowMs }.keys.sorted()
+  internal fun latestTapAt(pending: Map<String, Long>, lastToggleAt: Long? = null): Long? {
+    val latestPending = pending.values.maxOrNull() ?: return null
+    return maxOf(latestPending, lastToggleAt ?: latestPending)
+  }
+
+  internal fun windowEnded(latestTapAt: Long, now: Long, windowMs: Long = UNDO_WINDOW_MS): Boolean =
+    now - latestTapAt >= windowMs || latestTapAt - now > windowMs
+
+  fun expired(pending: Map<String, Long>, now: Long, windowMs: Long, lastToggleAt: Long? = null): List<String> {
+    val latest = latestTapAt(pending, lastToggleAt) ?: return emptyList()
+    return if (windowEnded(latest, now, windowMs)) pending.keys.sorted() else emptyList()
+  }
 
   internal fun swept(
     pending: Map<String, Long>,
     committed: Map<String, String>,
     now: Long,
+    lastToggleAt: Long? = null,
     enqueue: (String, Long) -> String,
   ): SweepState {
     val remaining = pending.toMutableMap()
     val done = committed.toMutableMap()
     var newlyCommitted = 0
     var failed = 0
-    for (taskId in expired(pending, now, UNDO_WINDOW_MS)) {
+    var held = 0
+    val lastTap = latestTapAt(pending, lastToggleAt) ?: 0L
+    for (taskId in expired(pending, now, UNDO_WINDOW_MS, lastToggleAt)) {
       if (done.containsKey(taskId)) {
         remaining.remove(taskId)
         continue
@@ -193,11 +219,12 @@ object CheckoffStore {
         done[taskId] = enqueue(taskId, pending.getValue(taskId))
         remaining.remove(taskId)
         newlyCommitted += 1
+        if (pending.getValue(taskId) + UNDO_WINDOW_MS <= lastTap) held += 1
       } catch (_: Exception) {
         failed += 1
       }
     }
-    return SweepState(remaining, done, newlyCommitted, failed)
+    return SweepState(remaining, done, newlyCommitted, failed, held)
   }
 
   private fun writeCommitted(context: Context, committed: Map<String, String>): Boolean {
@@ -315,6 +342,28 @@ object CheckoffStore {
     val count = prefs.getInt(SERIALIZED_COUNT, 0).coerceAtLeast(0)
     if (count <= 0) return@withStateTransaction 0
     if (prefs.edit().remove(SERIALIZED_COUNT).commit()) count else 0
+  }
+
+  private fun lastToggleAt(context: Context): Long? {
+    val prefs = context.getSharedPreferences(WINDOW_PREFS_NAME, Context.MODE_PRIVATE)
+    return if (prefs.contains(LAST_TOGGLE_AT)) prefs.getLong(LAST_TOGGLE_AT, 0L) else null
+  }
+
+  private fun recordLastToggle(context: Context, now: Long) {
+    context.getSharedPreferences(WINDOW_PREFS_NAME, Context.MODE_PRIVATE).edit().putLong(LAST_TOGGLE_AT, now).commit()
+  }
+
+  private fun recordHeld(context: Context, count: Int) {
+    val prefs = context.getSharedPreferences(DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
+    val total = prefs.getInt(HELD_COUNT, 0).coerceAtLeast(0) + count
+    prefs.edit().putInt(HELD_COUNT, total).commit()
+  }
+
+  fun consumeHeldCount(context: Context): Int = withStateTransaction {
+    val prefs = context.getSharedPreferences(DIAGNOSTICS_PREFS_NAME, Context.MODE_PRIVATE)
+    val count = prefs.getInt(HELD_COUNT, 0).coerceAtLeast(0)
+    if (count <= 0) return@withStateTransaction 0
+    if (prefs.edit().remove(HELD_COUNT).commit()) count else 0
   }
 
   internal fun nextFastRetry(previous: Int): Int? =

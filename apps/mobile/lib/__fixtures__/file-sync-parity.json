@@ -261,8 +261,8 @@
    "value": null
   },
   "folder": {
-   "content://provider/tree/root/document/root/data.json.enc": "<bytes:210:561731d704f55f57>",
-   "content://provider/tree/root/document/root/data.json.enc.bak": "<bytes:210:0dcd04f9dc0ee9e8>"
+   "content://provider/tree/root/document/root/data.json.enc": "<bytes:210:ec6e1e44abc554f3>",
+   "content://provider/tree/root/document/root/data.json.enc.bak": "<bytes:210:0b6f6d18262aa2aa>"
   },
   "calls": [
    [
@@ -354,7 +354,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-0",
-    "<text:280:60b277c39a238a26>",
+    "<text:280:6c2c91f0854124e0>",
     {
      "encoding": "base64"
     }
@@ -380,7 +380,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc",
-    "<text:280:60b277c39a238a26>",
+    "<text:280:6c2c91f0854124e0>",
     {
      "encoding": "base64"
     }
@@ -450,7 +450,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc.bak",
-    "<text:280:60b277c39a238a26>",
+    "<text:280:6c2c91f0854124e0>",
     {
      "encoding": "base64"
     }
@@ -484,7 +484,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-1",
-    "<text:280:0137285d97119365>",
+    "<text:280:419d833285243fae>",
     {
      "encoding": "base64"
     }
@@ -523,7 +523,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc",
-    "<text:280:0137285d97119365>",
+    "<text:280:419d833285243fae>",
     {
      "encoding": "base64"
     }
@@ -555,7 +555,7 @@
    "value": null
   },
   "folder": {
-   "file://sync/data.json.enc": "<bytes:213:58760cafaea5cad0>"
+   "file://sync/data.json.enc": "<bytes:213:d61a43e6a8c5483c>"
   },
   "calls": [
    [
@@ -701,7 +701,7 @@
    [
     "file.write",
     "file://sync/.mindwtr-et-s-0",
-    "<bytes:213:58760cafaea5cad0>"
+    "<bytes:213:d61a43e6a8c5483c>"
    ],
    [
     "file.exists",
@@ -726,7 +726,7 @@
    [
     "file.write",
     "file://sync/data.json.enc",
-    "<bytes:213:58760cafaea5cad0>"
+    "<bytes:213:d61a43e6a8c5483c>"
    ],
    [
     "fs.info",
@@ -908,7 +908,7 @@
    "value": null
   },
   "folder": {
-   "file://sync/data.json.enc": "<bytes:213:d01b072d82f56d64>"
+   "file://sync/data.json.enc": "<bytes:213:650385278674ab6a>"
   },
   "calls": [
    [
@@ -1058,7 +1058,7 @@
    [
     "file.write",
     "file://sync/.mindwtr-et-s-0",
-    "<bytes:213:d01b072d82f56d64>"
+    "<bytes:213:650385278674ab6a>"
    ],
    [
     "file.exists",
@@ -1100,7 +1100,7 @@
    [
     "file.write",
     "file://sync/data.json.enc",
-    "<bytes:213:d01b072d82f56d64>"
+    "<bytes:213:650385278674ab6a>"
    ],
    [
     "fs.info",
@@ -1670,7 +1670,7 @@
    "value": "SyncEncryptionNoKeyError"
   },
   "folder": {
-   "content://provider/tree/root/document/root/data.json.enc": "<bytes:211:bbae6c5f383c5fc8>"
+   "content://provider/tree/root/document/root/data.json.enc": "<bytes:211:703e19f194b8473a>"
   },
   "calls": [
    [
@@ -2204,9 +2204,9 @@
    "value": null
   },
   "folder": {
-   "content://provider/tree/root/document/root/attachments/a1.png": "<bytes:77:12592425abb5c71d>",
-   "content://provider/tree/root/document/root/attachments/a2.txt": "<bytes:84:e680d53cca927592>",
-   "content://provider/tree/root/document/root/data.json.enc": "<bytes:213:3755909ecbfa3fa3>"
+   "content://provider/tree/root/document/root/attachments/a1.png": "<bytes:77:478b8834da9fb801>",
+   "content://provider/tree/root/document/root/attachments/a2.txt": "<bytes:84:d4766513484b911f>",
+   "content://provider/tree/root/document/root/data.json.enc": "<bytes:213:15c41f1f6ef6fea8>"
   },
   "calls": [
    [
@@ -2290,7 +2290,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-0",
-    "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp53DeyddMHZOdux1eKxcAAAAAAAAAD4uk3dTE65HlFOnCUDeTvCXhqqjTYpA=",
+    "TVdFTkMxAgEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp53DeyddMHZOdux1eKxcAAAAAAAAAD4uk3dTE64Bm3AAAyp1UZdmvKfaLyfE=",
     {
      "encoding": "base64"
     }
@@ -2353,7 +2353,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/a1.png",
-    "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp53DeyddMHZOdux1eKxcAAAAAAAAAD4uk3dTE65HlFOnCUDeTvCXhqqjTYpA=",
+    "TVdFTkMxAgEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp53DeyddMHZOdux1eKxcAAAAAAAAAD4uk3dTE64Bm3AAAyp1UZdmvKfaLyfE=",
     {
      "encoding": "base64"
     }
@@ -2395,7 +2395,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-3",
-    "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Ph+rZ4VldDffc7I8xhtGT1U",
+    "TVdFTkMxAgEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Pi53glMD0T3hT/xcqoSBQa6",
     {
      "encoding": "base64"
     }
@@ -2430,7 +2430,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/a2.txt",
-    "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Ph+rZ4VldDffc7I8xhtGT1U",
+    "TVdFTkMxAgEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Pi53glMD0T3hT/xcqoSBQa6",
     {
      "encoding": "base64"
     }
@@ -2472,7 +2472,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/.mindwtr-et-s-5",
-    "<text:284:4f75a8e07d0e2f6b>",
+    "<text:284:3dda3b0ec8cc9005>",
     {
      "encoding": "base64"
     }
@@ -2498,7 +2498,7 @@
    [
     "saf.write",
     "content://provider/tree/root/document/root/data.json.enc",
-    "<text:284:4f75a8e07d0e2f6b>",
+    "<text:284:3dda3b0ec8cc9005>",
     {
      "encoding": "base64"
     }
@@ -2814,7 +2814,7 @@
    [
     "file.write",
     "file://sync/attachments/.mindwtr-et-s-0",
-    "<bytes:77:5ae4f5c2295479fc>"
+    "<bytes:77:851c0e56c36e46cb>"
    ],
    [
     "file.exists",
@@ -2856,7 +2856,7 @@
    [
     "file.write",
     "file://sync/attachments/a1.png",
-    "<bytes:77:5ae4f5c2295479fc>"
+    "<bytes:77:851c0e56c36e46cb>"
    ],
    [
     "file.exists",
@@ -2905,7 +2905,7 @@
    [
     "file.write",
     "file://sync/.mindwtr-et-s-2",
-    "<bytes:213:9c81b4a5b65a2095>"
+    "<bytes:213:0d08085f05ee515e>"
    ],
    [
     "file.exists",
@@ -2930,7 +2930,7 @@
    [
     "file.write",
     "file://sync/data.json.enc",
-    "<bytes:213:9c81b4a5b65a2095>"
+    "<bytes:213:0d08085f05ee515e>"
    ],
    [
     "fs.info",
@@ -3723,7 +3723,7 @@
    "error": "SyncEncryptionTerminalError: MWENC1 ciphertext_len exceeds available bytes"
   },
   "folder": {
-   "content://provider/tree/root/document/root/data.json.enc": "<bytes:204:b3724e84289621e0>"
+   "content://provider/tree/root/document/root/data.json.enc": "<bytes:204:0f8fa8278bdd8af3>"
   },
   "calls": [
    [
@@ -4310,7 +4310,7 @@
    "error": "SyncEncryptionRemoteConflictError: data.json.enc changed before the File Sync write"
   },
   "folder": {
-   "content://provider/tree/root/document/root/data.json.enc": "<bytes:211:52e73cafd1933d44>"
+   "content://provider/tree/root/document/root/data.json.enc": "<bytes:211:90adada04d44891f>"
   },
   "calls": [
    [

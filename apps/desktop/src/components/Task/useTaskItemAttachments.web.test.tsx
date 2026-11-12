@@ -5,7 +5,7 @@ import { useTaskItemAttachments } from './useTaskItemAttachments';
 
 const fetchWebCloudAttachmentBlobMock = vi.fn();
 const fetchWebCloudAttachmentTextMock = vi.fn();
-const retainOpenedWebAttachmentUrlMock = vi.fn();
+const openWebCloudAttachmentMock = vi.fn();
 const openAttachmentTargetMock = vi.fn(async (..._args: unknown[]) => undefined);
 const revokeObjectUrlMock = vi.fn();
 
@@ -40,7 +40,7 @@ vi.mock('../../lib/open-attachment-target', () => ({
 vi.mock('../../lib/web-attachment-source', () => ({
     fetchWebCloudAttachmentBlob: (...args: unknown[]) => fetchWebCloudAttachmentBlobMock(...args),
     fetchWebCloudAttachmentText: (...args: unknown[]) => fetchWebCloudAttachmentTextMock(...args),
-    retainOpenedWebAttachmentUrl: (...args: unknown[]) => retainOpenedWebAttachmentUrlMock(...args),
+    openWebCloudAttachment: (...args: unknown[]) => openWebCloudAttachmentMock(...args),
 }));
 
 const task = {
@@ -99,15 +99,15 @@ describe('useTaskItemAttachments in the web build', () => {
     beforeEach(() => {
         fetchWebCloudAttachmentBlobMock.mockReset();
         fetchWebCloudAttachmentTextMock.mockReset();
-        retainOpenedWebAttachmentUrlMock.mockReset();
+        openWebCloudAttachmentMock.mockReset();
         openAttachmentTargetMock.mockClear();
 
         (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectUrlMock;
         revokeObjectUrlMock.mockClear();
     });
 
-    it('opens a metadata-only attachment as a blob URL in a new tab', async () => {
-        fetchWebCloudAttachmentBlobMock.mockResolvedValue('blob:cloud-bytes');
+    it('opens a metadata-only attachment through the browser content policy', async () => {
+        openWebCloudAttachmentMock.mockResolvedValue(true);
         const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
         const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
 
@@ -115,15 +115,15 @@ describe('useTaskItemAttachments in the web build', () => {
             result.current.openAttachment(makeAttachment('report.pdf'));
         });
 
-        await waitFor(() => expect(openSpy).toHaveBeenCalledWith('blob:cloud-bytes', '_blank'));
-        expect(retainOpenedWebAttachmentUrlMock).toHaveBeenCalledWith('blob:cloud-bytes');
+        await waitFor(() => expect(openWebCloudAttachmentMock).toHaveBeenCalledWith(makeAttachment('report.pdf')));
+        expect(openSpy).not.toHaveBeenCalled();
         expect(openAttachmentTargetMock).not.toHaveBeenCalled();
         expect(result.current.attachmentError).toBeNull();
         openSpy.mockRestore();
     });
 
     it('surfaces the unsupported message when the bytes cannot be fetched', async () => {
-        fetchWebCloudAttachmentBlobMock.mockResolvedValue(null);
+        openWebCloudAttachmentMock.mockResolvedValue(false);
         const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
         const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
 

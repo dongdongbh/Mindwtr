@@ -22,7 +22,7 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
 import type { TaskDraft } from './task-draft';
 import { computeRelativeStartTime } from './task-relative-start';
-import { getTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
+import { getTaskReminderPolicy, isSingleTaskReminder, shouldSendTaskReminderKind, shouldSendTaskReminders } from './task-reminder-policy';
 import type {
     AppSettings,
     NotificationSettings,
@@ -239,7 +239,7 @@ export function getTaskEditorRelativeStart(
 }
 
 
-export const DUE_REMINDER_LEAD_OPTIONS = [5, 15, 30, 60, 1440, 2880, 10080] as const;
+export const DUE_REMINDER_LEAD_OPTIONS = [5, 15, 30, 60, 120, 1440, 2880, 10080] as const;
 
 export type TaskEditorReminders = {
     startAdvance: {
@@ -250,6 +250,7 @@ export type TaskEditorReminders = {
         options: Array<{ value: number; label: string; selected: boolean }>;
     } | null;
     showAdvance: boolean;
+    showDueAdvance: boolean;
     advanceLabel: string;
     advanceValueLabel: string;
     advanceHint: string | null;
@@ -287,6 +288,8 @@ export function getTaskEditorReminders(
         { value: 'inherit', label: tFallback(t, 'taskEdit.reminderPolicyInherit', 'Use default ({value})').replace('{value}', settings.taskReminderDefault === 'skip' ? skip : send), selected: policy === 'inherit' },
         { value: 'send', label: send, selected: policy === 'send' },
         { value: 'skip', label: skip, selected: policy === 'skip' },
+        { value: 'start', label: tFallback(t, 'taskEdit.reminderPolicyStart', 'Start only'), selected: policy === 'start' },
+        { value: 'due', label: tFallback(t, 'taskEdit.reminderPolicyDue', 'Due only'), selected: policy === 'due' },
     ];
     const advanceCurrent = normalizeDueReminderLeadMinutes(draft.dueReminderLeadMinutes) ?? 0;
     const advanceValues: number[] = [0, ...DUE_REMINDER_LEAD_OPTIONS];
@@ -299,18 +302,19 @@ export function getTaskEditorReminders(
         if (minutes === 60) return tFallback(t, 'taskEdit.advanceReminderHour', '1 hour before');
         return tFallback(t, 'taskEdit.advanceReminderMinutes', '{count} min before').replace('{count}', String(minutes));
     };
-    const showAdvance = hasTimeComponent(draft.dueDate) && !!safeParseDate(draft.dueDate) && shouldSendTaskReminders(draft, settings);
+    const showAdvance = hasTimeComponent(draft.dueDate) && !!safeParseDate(draft.dueDate) && shouldSendTaskReminderKind(draft, 'due', settings);
     const startCurrent = normalizeStartReminderLeadMinutes(draft.startReminderLeadMinutes) ?? 0;
     return {
-        startAdvance: hasTimeComponent(draft.startTime) && !!safeParseDate(draft.startTime) ? {
-            enabled: shouldSendTaskReminders(draft, settings),
+        startAdvance: policy !== 'due' && hasTimeComponent(draft.startTime) && !!safeParseDate(draft.startTime) ? {
+            enabled: shouldSendTaskReminderKind(draft, 'start', settings),
             label: tFallback(t, 'taskEdit.startAdvanceReminderLabel', 'Before start'),
             valueLabel: advanceLabel(startCurrent),
-            hint: shouldSendTaskReminders(draft, settings) ? null
+            hint: shouldSendTaskReminderKind(draft, 'start', settings) ? null
                 : tFallback(t, 'taskEdit.advanceReminderSkipped', 'Enable start/due reminders for this task to use an advance reminder.'),
             options: [0, 5, 15, 30, 60].map((value) => ({ value, label: advanceLabel(value), selected: value === startCurrent })),
         } : null,
         showAdvance,
+        showDueAdvance: policy !== 'start',
         advanceLabel: tFallback(t, 'taskEdit.advanceReminderLabel', 'Advance reminder'),
         advanceValueLabel: advanceLabel(advanceCurrent),
         advanceHint: !hasTimeComponent(draft.dueDate) || !safeParseDate(draft.dueDate)
@@ -318,11 +322,13 @@ export function getTaskEditorReminders(
             : !showAdvance ? tFallback(t, 'taskEdit.advanceReminderSkipped', 'Enable start/due reminders for this task to use an advance reminder.') : null,
         advanceOptions: advanceValues.map((value) => ({ value, label: advanceLabel(value), selected: value === advanceCurrent })),
         showSkip: hasTimeComponent(draft.startTime) || hasTimeComponent(draft.dueDate),
-        showRepeat: hasTimeComponent(draft.dueDate) && shouldSendTaskReminders(draft, settings),
+        showRepeat: !isSingleTaskReminder(draft) && hasTimeComponent(draft.dueDate) && shouldSendTaskReminders(draft, settings),
         policyLabel: tFallback(t, 'taskEdit.reminders', 'Start/due reminders'),
         policyValueLabel: policyOptions.find((option) => option.selected)!.label,
         policyOptions,
-        hint: tFallback(t, 'taskEdit.reminderPolicyHint', 'Start and due reminders need an explicit time. Focus and review reminders are unchanged.'),
+        hint: isSingleTaskReminder(draft)
+            ? tFallback(t, 'taskEdit.reminderPolicySingleHint', 'Requires an explicit time. Sends one reminder at the selected time, or its advance time instead. Repeat reminders are ignored. Focus and review reminders are unchanged.')
+            : tFallback(t, 'taskEdit.reminderPolicyHint', 'Start and due reminders need an explicit time. Focus and review reminders are unchanged.'),
         disabledHint: settings.notificationsEnabled === false
             ? tFallback(t, 'taskEdit.remindersDisabledHint', 'Task reminders are turned off in Notifications settings on this device.') : null,
         repeatLabel: tFallback(t, 'taskEdit.repeatReminderLabel', 'Repeat reminder'),

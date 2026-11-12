@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parseQuickAdd } from './quick-add';
+import { executeCaptureTransaction } from './capture';
 import { getTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { mergeSettingsForSync } from './sync-merge-settings';
@@ -62,6 +64,19 @@ describe('reminder intent through task writes', () => {
             settings: saved.settings, persistenceFailure: null, isLoading: false, editLockCount: 0 });
     });
     afterEach(async () => { await flushPendingSave(); resetForTests(); });
+
+    it.each(['send', 'skip'] as const)('persists capture lead fields while inheriting %s policy and retaining device preferences', async policy => {
+        useTaskStore.setState({ settings: { ...saved.settings, taskReminderDefault: policy, notificationsEnabled: false } });
+        const input = 'Call /due:2030-11-12 17:00 /remind-due:1d /start:2030-11-12 09:00 /remind-start:30m';
+        const result = await executeCaptureTransaction({ parsed: parseQuickAdd(input), rawInput: input, projects: [] }, useTaskStore.getState());
+        expect(result.success).toBe(true);
+        await flushPendingSave();
+        const captured = saved.tasks.find(row => row.title === 'Call');
+        expect(captured).toMatchObject({ dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 30, reminderPolicy: 'inherit' });
+        if (!captured) throw new Error('Capture missing');
+        expect(shouldSendTaskReminders(captured, saved.settings)).toBe(policy === 'send');
+        expect(saved.settings.notificationsEnabled).toBe(false);
+    });
 
     it('new tasks inherit, survive unrelated edits, and legacy tasks keep sending', async () => {
         const created = await useTaskStore.getState().addTask('New');

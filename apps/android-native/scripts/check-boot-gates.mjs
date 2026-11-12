@@ -573,11 +573,11 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     for (const vector of vectors) {
         const material = await pumped(gate.deriveSyncKeyMaterial(vector.passphrase, u8(b(vector.saltB64)), vector.params, gate.prims));
         const encrypted = u8(b(vector.encryptedB64));
-        const opened = await pumped(gate.decryptSyncArtifact(encrypted, material.key, gate.prims));
+        const opened = await pumped(gate.decryptSyncArtifact(encrypted, material.key, gate.prims, { kind: 'document' }));
         assert(Buffer.from(opened).equals(b(vector.plaintextB64)), `${vector.name} opens through the host's calls`);
 
         const nonce = encrypted.slice(34, 46);
-        const sealed = await pumped(gate.encryptSyncArtifact(u8(b(vector.plaintextB64)), material, { ...gate.prims, randomBytes: () => nonce }));
+        const sealed = await pumped(gate.encryptSyncArtifact(u8(b(vector.plaintextB64)), material, { ...gate.prims, randomBytes: () => nonce }, { kind: 'document' }));
         assert(Buffer.from(sealed).equals(b(vector.encryptedB64)), `${vector.name} seals byte for byte`);
     }
     const argonRequest = requests.find((request) => request.op === 'argon2id' && request.m === 19456);
@@ -587,7 +587,7 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
     const material = await pumped(gate.deriveSyncKeyMaterial(first.passphrase, u8(b(first.saltB64)), first.params, gate.prims));
     const tampered = u8(b(first.encryptedB64));
     tampered[tampered.length - 1] ^= 1;
-    const authError = await pumped(gate.decryptSyncArtifact(tampered, material.key, gate.prims)).then(() => null, (error) => error);
+    const authError = await pumped(gate.decryptSyncArtifact(tampered, material.key, gate.prims, { kind: 'document' })).then(() => null, (error) => error);
     assert(authError instanceof gate.SyncCryptoAuthError, 'a tag mismatch is core\'s SyncCryptoAuthError');
     const short = await pumped(gate.prims.aesGcmOpen(material.key, u8(new Uint8Array(12)), u8(new Uint8Array(15)), u8(new Uint8Array(0)))).then(() => null, (error) => error);
     assert(short instanceof gate.SyncCryptoAuthError, 'a body too short for a tag is an auth failure too');
@@ -2073,7 +2073,7 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
 
 
 assert.match(owner, /fun queue\(app: Application\) = File\(app\.filesDir, PendingCaptureWriter\.DIRECTORY\)/, 'the queue is RN\'s writer\'s folder');
-assert.match(owner, /private fun drain\(runtime: CoreHost, queue: File, app: Application\): StartOrder\.Drain \{\s+if \(failure != null\) return StartOrder\.Drain\.Waiting\s+val unswept = runCatching \{ CheckoffStore\.sweep\(app\)\.failed > 0 \}[^\n]*\.getOrDefault\(true\)\s+if \(unswept\) runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unswept"\)\)\s+val drained = if \(unswept\) StartOrder\.Drain\.Unswept else StartOrder\.Drain\.Done\s+when \(StartOrder\.queueEmpty\(queue\.list\(\), queue\.exists\(\)\)\) \{\s+true -> return drained\s+null -> \{\s+runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unreadable"\)\)\s+return StartOrder\.Drain\.Unswept\s+\}\s+false -> Unit\s+\}\s+return try \{\s+val ingested = runtime\.ingestPendingCaptures\(UUID\.randomUUID\(\)\.toString\(\)\)/, 'a failed check-off sweep is retried, the queue still drained');
+assert.match(owner, /private fun drain\(runtime: CoreHost, queue: File, app: Application\): StartOrder\.Drain \{\s+if \(failure != null\) return StartOrder\.Drain\.Waiting\s+val unswept = runCatching \{ CheckoffStore\.sweep\(app\)\.failed > 0 \}[^\n]*\.getOrDefault\(true\)\s+if \(unswept\) runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unswept"\)\)\s+logHeldCheckoffs\(runtime, app\)\s+val drained = if \(unswept\) StartOrder\.Drain\.Unswept else StartOrder\.Drain\.Done\s+when \(StartOrder\.queueEmpty\(queue\.list\(\), queue\.exists\(\)\)\) \{\s+true -> return drained\s+null -> \{\s+runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unreadable"\)\)\s+return StartOrder\.Drain\.Unswept\s+\}\s+false -> Unit\s+\}\s+return try \{\s+val ingested = runtime\.ingestPendingCaptures\(UUID\.randomUUID\(\)\.toString\(\)\)/, 'a failed check-off sweep is retried, the queue still drained');
 assert.match(owner, /val ingested = [^\n]+\n\s+runCatching \{ CoreWork\.owedUploads\(app\)\.add\(ingested\) \}[^\n]+\n[^\n]+"drained"[^\n]+\n\s+drained\n/, 'what a drain stored is owed to CoreWork\'s next background run, across process death (S4a, review 2)');
 assert.match(source('CoreWork.kt'), /return host\.backgroundSync\(trigger, if \(ProcessCoreHost\.appActive\) 0 else stored\)\.also \{ owed\.settle\(stored\) \}/, 'an owed upload is settled only once its run settled');
 assert.match(owner, /\.put\("error", message\.substringBefore\(':'\)\)\)\s+StartOrder\.Drain\.Failed\(message\)/);

@@ -385,7 +385,7 @@ export async function downloadDropboxAppData(
 
         const foreign = detectForeignSaltArtifact(bodyBytes, material);
         if (foreign) return { data: null, rev: downloaded.rev, encryptedNoKey: foreign };
-        const plaintext = await decryptRemoteArtifactOrThrow(bodyBytes, material.key, crypto.cryptoPrims);
+        const plaintext = await decryptRemoteArtifactOrThrow(bodyBytes, material.key, crypto.cryptoPrims, { kind: 'document' });
         return { data: JSON.parse(new TextDecoder().decode(plaintext)) as AppData, rev: downloaded.rev };
     }
 
@@ -440,7 +440,7 @@ export async function uploadDropboxAppData(
 
 
     const body: BodyInit = crypto.material
-        ? (await encryptSyncArtifact(new TextEncoder().encode(JSON.stringify(data)), crypto.material, crypto.cryptoPrims)).slice().buffer
+        ? (await encryptSyncArtifact(new TextEncoder().encode(JSON.stringify(data)), crypto.material, crypto.cryptoPrims, { kind: 'document' })).slice().buffer
         : JSON.stringify(data);
     return await fetchDropboxAndConsume(fetcher, UPLOAD_ENDPOINT, {
         method: 'POST',

@@ -1,5 +1,6 @@
 
 export const plOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Nieprawidłowe przypomnienie: podaj obsługiwany czas oraz dokładną datę i godzinę",
     'task.copyDetails': "Kopiuj szczegóły zadania",
     "taskEdit.startAdvanceReminderLabel": "Przed rozpoczęciem",
     "settings.speechUseGemini": "Użyj Gemini",
@@ -174,7 +175,7 @@ export const plOverrides: Record<string, string> = {
         'nav.sectionLists': 'Listy',
         'nav.sectionOrganize': 'Organizuj',
         'nav.sectionArchive': 'Archiwum',
-        'quickAdd.help': 'Szybkie dodawanie obsługuje /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> lub !Area, @context, #tag, +Project, %Person (lub %"Full Name").',
+        'quickAdd.help': 'Szybkie dodawanie obsługuje /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> lub !Area, @context, #tag, +Project, %Person (lub %"Full Name").',
         'quickAdd.example': 'Przykład: Zadzwoń do mamy /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Spróbuj: Zadzwoń do mamy /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Pomoc składni szybkiego dodawania',
@@ -967,6 +968,7 @@ export const plOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Po 5 minutach',
         'settings.mobile.appLockRelockAfter15': 'Po 15 minutach',
         'appLock.title': 'Mindwtr jest zablokowany',
+        "appLock.loadFailed": "Mindwtr nie mógł wczytać Twoich danych. Spróbuj ponownie.",
         'appLock.description': 'Użyj blokady urządzenia, aby otworzyć Mindwtr. Chroni to widok aplikacji, a nie bazę danych na urządzeniu.',
         'appLock.prompt': 'Odblokuj Mindwtr',
         'appLock.enablePrompt': 'Włącz blokadę aplikacji Mindwtr',
@@ -1802,6 +1804,9 @@ export const plOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Użyj domyślnego ({value})",
         "taskEdit.reminderPolicySend": "Wysyłaj",
         "taskEdit.reminderPolicySkip": "Pomiń",
+        "taskEdit.reminderPolicyStart": "Tylko rozpoczęcie",
+        "taskEdit.reminderPolicyDue": "Tylko termin",
+        "taskEdit.reminderPolicySingleHint": "Wymaga podania godziny. Wysyła jedno przypomnienie o wybranej porze lub zamiast niej z ustawionym wyprzedzeniem. Powtarzane przypomnienia są ignorowane. Przypomnienia skupienia i przeglądu pozostają bez zmian.",
         "taskEdit.reminderPolicyHint": "Przypomnienia o rozpoczęciu i terminie wymagają podania godziny. Przypomnienia skupienia i przeglądu pozostają bez zmian.",
         "taskEdit.remindersDisabledHint": "Przypomnienia o zadaniach są wyłączone w ustawieniach powiadomień tego urządzenia.",
         "settings.taskReminderDefault": "Domyślne przypomnienia o zadaniach",

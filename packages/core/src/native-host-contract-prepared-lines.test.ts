@@ -46,6 +46,16 @@ afterEach(async () => {
 });
 
 describe('prepared native multiline capture prerequisite', () => {
+    it('round-trips positive and disabled reminder leads through a bulk prepared journal', async () => {
+        const { host, options } = await open();
+        const request = { text: 'Call /due:2030-11-12 17:00 /remind-due:1d /start:2030-11-12 09:00 /remind-start:30m\nRead /remind-due:0m /remind-start:0m',
+            options, captureIds: [generateUUID(), generateUUID()] };
+        const command = prepare(host, request);
+        expect(value(await host.commitPreparedQuickCaptureLines(command))).toEqual(command.prepared.result);
+        expect(useTaskStore.getState()._tasksById.get(request.captureIds[0])).toMatchObject({ dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 30 });
+        expect(useTaskStore.getState()._tasksById.get(request.captureIds[1])).toMatchObject({ dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 });
+    });
+
     it('prepares detached canonical rows without task, project, device or persistence writes', async () => {
         const { host, options, saveData, recorder } = await open();
         const before = stateRows();

@@ -63,6 +63,7 @@ class TaskPeekActivity : AppCompatActivity() {
       }
     }
     findViewById<Button>(R.id.mindwtr_task_peek_complete).apply {
+      isVisible(item.canComplete)
       text = payload.taskPeek.complete
       palette?.let {
         (background?.mutate() as? GradientDrawable)?.setColor(it.accent)
@@ -77,7 +78,8 @@ class TaskPeekActivity : AppCompatActivity() {
 
 
   private fun complete() {
-    when (CheckoffStore.tapAction(this, taskId)) {
+    if (WidgetPayloadStore.read(this).itemFor(taskId)?.canComplete == false) return
+    when (CheckoffStore.completeAction(this, taskId)) {
       CheckoffStore.TapAction.TOGGLE_PENDING -> {
         CheckoffStore.toggle(this, taskId)
         WidgetRenderer.refreshAll(this)

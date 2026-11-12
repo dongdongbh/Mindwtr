@@ -412,8 +412,8 @@ describe('TaskEditScheduleField', () => {
         });
 
         const options = timedTree.root.findAllByType(TouchableOpacity).filter((option) => option.props.accessibilityRole === 'radio');
-        expect(options.map((option) => option.props.accessibilityLabel)).toEqual(['Use default (Send)', 'Send', 'Skip']);
-        expect(options.map((option) => option.props.accessibilityState.checked)).toEqual([false, true, false]);
+        expect(options.map((option) => option.props.accessibilityLabel)).toEqual(['Use default (Send)', 'Send', 'Skip', 'Start only', 'Due only']);
+        expect(options.map((option) => option.props.accessibilityState.checked)).toEqual([false, true, false, false, false]);
         const handoffSwitch = options[2];
 
         act(() => {
@@ -436,6 +436,39 @@ describe('TaskEditScheduleField', () => {
         expect(texts.some((text) => text.includes('explicit time'))).toBe(true);
         expect(timedTree.root.findAllByType(TouchableOpacity).some((node) => String(node.props.accessibilityLabel).startsWith('Repeat reminder:'))).toBe(false);
         act(() => { useTaskStore.setState({ settings: previousSettings }); timedTree.unmount(); });
+    });
+
+    it.each(['start', 'due'] as const)('renders only selected %s reminder controls without clearing hidden values', (reminderPolicy) => {
+        const setDraftField = vi.fn();
+        const draft = makeDraft({ startTime: '2026-04-28T08:00:00', dueDate: '2026-04-28T09:20:00',
+            reminderPolicy, suppressMindwtrReminders: true, startReminderLeadMinutes: 15,
+            dueReminderLeadMinutes: 30, repeatReminderMinutes: 10 });
+        const props = {
+            customWeekdays: [], dailyInterval: 1, draft, fieldId: 'dueDate',
+            formatDate: (value?: string) => value ?? '', formatDueDate: (value?: string) => value ?? '',
+            getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'), monthlyPattern: 'date',
+            onDateChange: vi.fn(), openCustomRecurrence: vi.fn(), pendingDueDate: null, pendingStartDate: null,
+            recurrenceOptions: [], recurrenceRRuleValue: '', recurrenceRuleValue: '', recurrenceStrategyValue: 'strict',
+            recurrenceWeekdayButtons: [], setCustomWeekdays: vi.fn(), setDraftField,
+            setShowDatePicker: vi.fn(), showDatePicker: null, styles, t, task: null, tc,
+        } as any;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => { tree = renderer.create(<TaskEditScheduleField {...props} />); });
+        const selected = tree.root.findByProps({ accessibilityRole: 'radio', accessibilityLabel: reminderPolicy === 'start' ? 'Start only' : 'Due only' });
+        expect(selected.props.accessibilityState.checked).toBe(true);
+        expect(tree.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === 'Advance reminder: 30 min before')).toHaveLength(reminderPolicy === 'due' ? 1 : 0);
+        expect(tree.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === 'Repeat reminder: Every 10 min')).toHaveLength(0);
+        expect(tree.root.findAllByType(Text).some((node) => String(node.props.children).includes('or its advance time instead'))).toBe(true);
+        act(() => { tree.update(<TaskEditScheduleField {...props} fieldId="startTime" />); });
+        expect(tree.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === 'Before start: 15 min before')).toHaveLength(reminderPolicy === 'start' ? 1 : 0);
+        expect(setDraftField).not.toHaveBeenCalled();
+        expect(draft.startReminderLeadMinutes).toBe(15);
+        expect(draft.dueReminderLeadMinutes).toBe(30);
+        expect(draft.repeatReminderMinutes).toBe(10);
+        act(() => { tree.update(<TaskEditScheduleField {...props} draft={{ ...draft, reminderPolicy: 'send' }} />); });
+        expect(tree.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === 'Advance reminder: 30 min before')).toHaveLength(1);
+        expect(tree.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === 'Repeat reminder: Every 10 min')).toHaveLength(1);
+        act(() => { tree.unmount(); });
     });
 
     it.each(['repeat', 'advance', 'start advance'] as const)('collapses %s reminder options until the compact row is pressed', (kind) => {

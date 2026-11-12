@@ -1,5 +1,6 @@
 
 export const deOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Ungültige Erinnerung: unterstützte Dauer und ausdrückliches Datum mit Uhrzeit angeben",
     'task.copyDetails': "Aufgabendetails kopieren",
     "taskEdit.startAdvanceReminderLabel": "Vor dem Start",
     "settings.speechUseGemini": "Gemini verwenden",
@@ -221,7 +222,7 @@ export const deOverrides: Record<string, string> = {
         'accessibility.mainContent': 'Hauptinhalt',
 
 
-        'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
+        'quickAdd.help': 'Schnell-Hinzufügen unterstützt /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> oder !Area, @context, #tag, +Project, %Person (oder %"Full Name").',
         'quickAdd.example': 'Beispiel: Mama anrufen /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tipp: Mama anrufen /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hilfe zur Schnell-Hinzufügen-Syntax',
@@ -1060,6 +1061,7 @@ export const deOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Nach 5 Minuten',
         'settings.mobile.appLockRelockAfter15': 'Nach 15 Minuten',
         'appLock.title': 'Mindwtr ist gesperrt',
+        "appLock.loadFailed": "Mindwtr konnte deine Daten nicht laden. Versuche es erneut.",
         'appLock.description': 'Verwende die Gerätesperre, um Mindwtr zu öffnen. Das schützt die App-Ansicht, nicht die Datenbank auf dem Gerät.',
         'appLock.prompt': 'Mindwtr entsperren',
         'appLock.enablePrompt': 'Mindwtr-App-Sperre aktivieren',
@@ -2635,6 +2637,11 @@ export const deOverrides: Record<string, string> = {
         'settings.syncEncryptionDisableWarning': 'Die synchronisierten Dateien werden am Sync-Speicherort wieder zu Klartext. Die Daten auf Deinen Geräten sind nicht betroffen.',
         'settings.syncEncryptionDisableWarningNoBackend': 'Die Synchronisierung ist nicht eingerichtet, daher ändern sich keine synchronisierten Dateien — dies entfernt nur die Passphrase und den Schlüssel von diesem Gerät. Ein Sync-Speicherort, der zuvor verschlüsselt war, bleibt verschlüsselt und benötigt weiterhin die Passphrase.',
         'settings.syncEncryptionEnable': 'Verschlüsselung aktivieren',
+        "settings.syncEncryptionUpgrade": "Sync-Verschlüsselung aktualisieren",
+        "settings.syncEncryptionUpgradeWarning": "Aktualisiere zuerst Mindwtr auf allen Geräten. Ältere Versionen können aktualisierte Sync-Dateien nicht lesen. Die Aktualisierung verwendet eine geprüfte lokale Kopie und stoppt, wenn die synchronisierte Kopie abweicht. Bestehende verschlüsselte Kopien bleiben erhalten. Bewahre diese Passphrase zur Wiederherstellung der aufbewahrten Kopien auf, auch wenn Du sie später änderst.",
+        "settings.syncEncryptionErrorLegacy": "Dieser Sync-Speicherort verwendet eine ältere Verschlüsselung. Aktualisiere alle Geräte und wähle dann Sync-Verschlüsselung aktualisieren.",
+        "settings.syncEncryptionErrorReconciliation": "Die Übereinstimmung der lokalen und synchronisierten Kopien konnte nicht bestätigt werden. Vergleiche Deine vertrauenswürdigen Kopien und behebe Unterschiede vor einem erneuten Versuch. Die Synchronisierung bleibt pausiert.",
+        "settings.syncEncryptionErrorTrustedLocal": "Öffne vor der Aktualisierung eine vollständige, gespeicherte lokale Bibliothek auf diesem Gerät. Die Synchronisierung bleibt pausiert.",
         'settings.syncEncryptionEnableBeforeFirstSyncHint': 'Die Synchronisierung ist noch nicht eingerichtet — die Passphrase wird jetzt auf diesem Gerät gespeichert, und die erste Synchronisierung lädt alles bereits verschlüsselt hoch.',
         'settings.syncEncryptionErrorBackendIncompatible': 'Dieser WebDAV-Server bietet oder erzwingt keine sicheren Versionsprüfungen (starke ETags und bedingte Schreibvorgänge), daher kann Mindwtr die Verschlüsselung nicht sicher synchronisieren oder ändern. Verwende einen kompatiblen WebDAV-Anbieter, Datei-Synchronisierung oder Dropbox.',
         'settings.syncEncryptionErrorBackendRequired': 'Dies erfordert eine funktionierende Sync-Verbindung — es aktualisiert die Dateien am Sync-Speicherort, und es ist noch keine eingerichtet. Führe zuerst eine Synchronisierung durch oder schalte die Verschlüsselung mit der neuen Passphrase aus und wieder ein.',
@@ -2889,6 +2896,9 @@ export const deOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Standard verwenden ({value})",
         "taskEdit.reminderPolicySend": "Senden",
         "taskEdit.reminderPolicySkip": "Überspringen",
+        "taskEdit.reminderPolicyStart": "Nur Beginn",
+        "taskEdit.reminderPolicyDue": "Nur Fälligkeit",
+        "taskEdit.reminderPolicySingleHint": "Erfordert eine genaue Uhrzeit. Sendet eine Erinnerung zur gewählten Zeit oder stattdessen zur eingestellten Vorlaufzeit. Wiederholte Erinnerungen werden ignoriert. Fokus- und Durchsichtserinnerungen bleiben unverändert.",
         "taskEdit.reminderPolicyHint": "Beginn- und Fälligkeitserinnerungen benötigen eine genaue Uhrzeit. Fokus- und Durchsichtserinnerungen bleiben unverändert.",
         "taskEdit.remindersDisabledHint": "Aufgabenerinnerungen sind in den Benachrichtigungseinstellungen dieses Geräts deaktiviert.",
         "settings.taskReminderDefault": "Standard für Aufgabenerinnerungen",

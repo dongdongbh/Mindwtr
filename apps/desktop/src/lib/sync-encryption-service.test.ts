@@ -600,7 +600,7 @@ describe('Dropbox sync encryption transitions', () => {
             store.files.get('attachments/a1.png')!,
             changedKey,
             desktopSyncCryptoPrimitives,
-        )).resolves.toEqual(attachment);
+         { kind: 'attachment', cloudKey: 'attachments/a1.png' })).resolves.toEqual(attachment);
 
         await service.disableSyncEncryption();
         expect(JSON.parse(new TextDecoder().decode(store.files.get('data.json.bak')!)))
@@ -693,11 +693,11 @@ describe('attachment bytes', () => {
 
     it('are a no-op while encryption is off', async () => {
         const bytes = new Uint8Array([9, 8, 7]);
-        expect(await sealAttachmentBytes(bytes)).toBe(bytes);
-        expect(await openAttachmentBytes(bytes)).toBe(bytes);
+        expect(await sealAttachmentBytes(bytes, 'attachments/a1.png')).toBe(bytes);
+        expect(await openAttachmentBytes(bytes, 'attachments/a1.png')).toBe(bytes);
     });
 
-    it('round-trip once a key is cached, and plaintext still passes through', async () => {
+    it('round-trips cached material with identity and refuses plaintext while enabled', async () => {
         native.state = {
             state: 'enabled',
             key: bytesToBase64(new Uint8Array(32).fill(7)),
@@ -707,11 +707,11 @@ describe('attachment bytes', () => {
         clearSyncEncryptionMaterialCache();
 
         const plain = new Uint8Array([1, 2, 3]);
-        const sealed = await sealAttachmentBytes(plain);
+        const sealed = await sealAttachmentBytes(plain, 'attachments/a1.png');
         expect(isEncrypted(sealed)).toBe(true);
-        expect(await openAttachmentBytes(sealed)).toEqual(plain);
+        expect(await openAttachmentBytes(sealed, 'attachments/a1.png')).toEqual(plain);
 
-        expect(await openAttachmentBytes(plain)).toBe(plain);
+        await expect(openAttachmentBytes(plain, 'attachments/a1.png')).rejects.toThrow('PLAINTEXT_ATTACHMENT');
     });
 
     it('S3: fail closed on upload when local state says enabled but the keyring has no key', async () => {
@@ -723,7 +723,7 @@ describe('attachment bytes', () => {
         };
         clearSyncEncryptionMaterialCache();
 
-        await expect(sealAttachmentBytes(new Uint8Array([1, 2, 3]))).rejects.toBeInstanceOf(
+        await expect(sealAttachmentBytes(new Uint8Array([1, 2, 3]), 'attachments/a1.png')).rejects.toBeInstanceOf(
             SyncEncryptionTerminalError,
         );
     });
@@ -736,11 +736,11 @@ describe('attachment bytes', () => {
             kdfParams: { mKib: 19456, t: 2, p: 1 },
         };
         clearSyncEncryptionMaterialCache();
-        const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]));
+        const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]), 'attachments/a1.png');
 
         native.state = { state: 'off' };
         clearSyncEncryptionMaterialCache();
-        await expect(openAttachmentBytes(sealed)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+        await expect(openAttachmentBytes(sealed, 'attachments/a1.png')).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
         expect(native.state.state).toBe('remote-encrypted-no-key');
     });
 
@@ -748,7 +748,7 @@ describe('attachment bytes', () => {
         const truncated = new Uint8Array(20);
         truncated.set(new TextEncoder().encode('MWENC1'));
 
-        await expect(openAttachmentBytes(truncated)).rejects.toBeInstanceOf(
+        await expect(openAttachmentBytes(truncated, 'attachments/a1.png')).rejects.toBeInstanceOf(
             SyncEncryptionTerminalError,
         );
     });
@@ -814,8 +814,8 @@ describe('passphrase-change resume', () => {
         );
         const sealedNames = ['attachments/a1.png', 'data.json.enc', 'data.json.enc.bak'];
         for (const name of sealedNames) {
-            const plain = await decryptRemoteArtifactOrThrow(store.files.get(name)!, enabledKey, desktopSyncCryptoPrimitives);
-            store.files.set(name, await encryptSyncArtifact(plain, abandoned, desktopSyncCryptoPrimitives));
+            const plain = await decryptRemoteArtifactOrThrow(store.files.get(name)!, enabledKey, desktopSyncCryptoPrimitives, name.startsWith('attachments/') ? { kind: 'attachment', cloudKey: name } : { kind: 'document' });
+            store.files.set(name, await encryptSyncArtifact(plain, abandoned, desktopSyncCryptoPrimitives, name.startsWith('attachments/') ? { kind: 'attachment', cloudKey: name } : { kind: 'document' }));
         }
 
         await service.changeSyncEncryptionPassphrase('old-pw', 'new-pw');
@@ -825,10 +825,10 @@ describe('passphrase-change resume', () => {
 
         for (const name of sealedNames) {
             await expect(
-                decryptRemoteArtifactOrThrow(store.files.get(name)!, finalKey, desktopSyncCryptoPrimitives),
+                decryptRemoteArtifactOrThrow(store.files.get(name)!, finalKey, desktopSyncCryptoPrimitives, name.startsWith('attachments/') ? { kind: 'attachment', cloudKey: name } : { kind: 'document' }),
             ).resolves.toBeInstanceOf(Uint8Array);
         }
-        expect(store.files.get('attachments/a1.png')).not.toEqual(await encryptSyncArtifact(new Uint8Array([1, 2, 3, 4, 5]), abandoned, desktopSyncCryptoPrimitives));
+        expect(store.files.get('attachments/a1.png')).not.toEqual(await encryptSyncArtifact(new Uint8Array([1, 2, 3, 4, 5]), abandoned, desktopSyncCryptoPrimitives, { kind: 'document' }));
     });
 });
 
@@ -893,14 +893,14 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
                 kdfParams: { mKib: 19456, t: 2, p: 1 },
             };
             clearSyncEncryptionMaterialCache();
-            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]));
+            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]), 'attachments/a1.png');
 
             native.state = { state: 'off' };
             clearSyncEncryptionMaterialCache();
             appLog.logInfo.mockClear();
             appLog.logWarn.mockClear();
 
-            await expect(openAttachmentBytes(sealed)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+            await expect(openAttachmentBytes(sealed, 'attachments/a1.png')).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
 
             const trail = capturedTrail();
             expect(trail).toContain('[sync-encryption] remote-read');
@@ -912,7 +912,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
             const truncated = new Uint8Array(20);
             truncated.set(new TextEncoder().encode('MWENC1'));
 
-            await expect(openAttachmentBytes(truncated)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+            await expect(openAttachmentBytes(truncated, 'attachments/a1.png')).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
 
             const trail = capturedTrail();
             expect(trail).toContain('[sync-encryption] remote-read');
@@ -928,8 +928,8 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
             };
             clearSyncEncryptionMaterialCache();
 
-            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]));
-            await openAttachmentBytes(sealed);
+            const sealed = await sealAttachmentBytes(new Uint8Array([1, 2, 3]), 'attachments/a1.png');
+            await openAttachmentBytes(sealed, 'attachments/a1.png');
 
             const trail = capturedTrail();
             expect(trail).toContain('"decision":"seal"');
@@ -939,7 +939,7 @@ describe('sync-encryption diagnostics trail (#1056 follow-up)', () => {
         it('logs a plaintext seal (encryption off) without upgrading it to a failure line', async () => {
             const bytes = new Uint8Array([9, 8, 7]);
 
-            expect(await sealAttachmentBytes(bytes)).toBe(bytes);
+            expect(await sealAttachmentBytes(bytes, 'attachments/a1.png')).toBe(bytes);
 
             const trail = capturedTrail();
             expect(trail).toContain('"decision":"seal"');

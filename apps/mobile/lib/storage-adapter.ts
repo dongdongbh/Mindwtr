@@ -1614,6 +1614,15 @@ const createStorage = (): StorageAdapter => {
 
 export const mobileStorage = createStorage();
 
+export const readTrustedLocalDataForEncryptionUpgrade = async (): Promise<AppData> => {
+    await waitForQueuedSqliteWrites();
+    const state = await getSqliteState();
+    if (!state.adapter || state.writeBlockedReason || canonicalReloadRequired) {
+        throw new Error('SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED');
+    }
+    return state.adapter.getData({ rawTasks: true });
+};
+
 
 const drainMobileStorageWork = async (): Promise<void> => {
     await waitForQueuedSqliteWrites();

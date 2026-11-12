@@ -207,7 +207,7 @@ export function TaskEditScheduleField({
     };
     const renderAdvanceReminderControl = () => {
         const start = fieldId === 'startTime' ? reminders.startAdvance : null;
-        if (fieldId === 'startTime' ? !start : fieldId !== 'dueDate' || (!draft.dueDate && !draft.dueReminderLeadMinutes && !reminders.showSkip)) return null;
+        if (fieldId === 'startTime' ? !start : fieldId !== 'dueDate' || !reminders.showDueAdvance || (!draft.dueDate && !draft.dueReminderLeadMinutes && !reminders.showSkip)) return null;
         const control = start ?? {
             enabled: reminders.showAdvance, label: reminders.advanceLabel, valueLabel: reminders.advanceValueLabel,
             hint: reminders.advanceHint, options: reminders.advanceOptions,

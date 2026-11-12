@@ -724,7 +724,7 @@ export async function webdavGetSyncDocument<T>(
 
         const foreign = detectForeignSaltArtifact(remote.bytes, material);
         if (foreign) return { state: 'encrypted-no-key', salt: foreign.salt, params: foreign.params, exists: true, strongEtag: remote.strongEtag };
-        const plaintext = await decryptRemoteArtifactOrThrow(remote.bytes, material.key, cryptoPrims);
+        const plaintext = await decryptRemoteArtifactOrThrow(remote.bytes, material.key, cryptoPrims, { kind: 'document' });
         try {
             return {
                 state: 'data',
@@ -831,7 +831,7 @@ export async function webdavPutSyncDocument(
         return webdavPutJson(url, data, conditionalOptions);
     }
     const plaintext = new TextEncoder().encode(JSON.stringify(data, null, 2));
-    const sealed = await encryptSyncArtifact(plaintext, material, cryptoPrims);
+    const sealed = await encryptSyncArtifact(plaintext, material, cryptoPrims, { kind: 'document' });
     return putWebdavBytes(syncEncryptedArtifactName(url), sealed, conditionalOptions);
 }
 

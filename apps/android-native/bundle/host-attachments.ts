@@ -9,7 +9,7 @@ import { createSyncSecretVault, getSecureConfigValueReadOnly } from '../../../pa
 import { createSyncEncryptionStateStore } from '../../../packages/core/src/sync-encryption-local-state';
 import { normalizeCloudProvider } from '../../../packages/core/src/sync-client-helpers';
 import { encryptedSyncArtifactByteLength } from '../../../packages/core/src/sync-crypto';
-import { SyncEncryptionTransitionIncompleteError } from '../../../packages/core/src/sync-encryption';
+import { buildSyncLocationScope, SyncEncryptionTransitionIncompleteError } from '../../../packages/core/src/sync-encryption';
 import type { MobileAttachmentCleanupHost } from '../../../packages/core/src/mobile-attachment-cleanup';
 import {
     CLOUD_ALLOW_INSECURE_HTTP_KEY, CLOUD_PROVIDER_KEY, CLOUD_URL_KEY,
@@ -50,7 +50,7 @@ export type NativeAttachmentBindings = {
     log: Pick<MobileSyncLogPort, 'info' | 'warn' | 'sanitize'>;
 
     crypto: SyncCryptoPrimitives;
-    encryption: Pick<MobileSyncEncryptionPort, 'logSyncEncryptionEvent' | 'getSyncEncryptionMaterial'>;
+    encryption: Pick<MobileSyncEncryptionPort, 'logSyncEncryptionEvent' | 'getSyncEncryptionMaterial' | 'getSyncEncryptionStatus'>;
     fetch?: typeof fetch;
     dropboxAuth?: Pick<MobileSyncDropboxAuthPort, 'getValidAccessToken' | 'forceRefreshAccessToken'>;
     getDropboxClientId?: () => Promise<string>;
@@ -185,7 +185,7 @@ const bindNativeAttachmentFiles = (bindings: NativeAttachmentBindings, channels:
         fs,
         files,
         crypto: bindings.crypto,
-        encryption: { logSyncEncryptionEvent: (event, extra, options) => bindings.encryption.logSyncEncryptionEvent(event, extra, options) },
+        encryption: { logSyncEncryptionEvent: (event, extra, options) => bindings.encryption.logSyncEncryptionEvent(event, extra, options), getSyncEncryptionStatus: () => bindings.encryption.getSyncEncryptionStatus() },
         installer: { installAttachmentFileGeneration: (...args) => installer.installAttachmentFileGeneration(...args) },
 
         installerMayBeMissing: () => false,
@@ -457,7 +457,10 @@ export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttach
     const vault = createSyncSecretVault(secretPort);
     const secureConfig = { getSecureConfigValue: (name: string) => getSecureConfigValueReadOnly({ storage, secrets: secretPort, vault }, name),
         setSecureConfigValue: refuse, deleteSecureConfigValue: refuse };
-    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: refuse,
+    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: async () => buildSyncLocationScope({
+        backend: snapshot.get(SYNC_BACKEND_KEY), webdavUrl: snapshot.get(WEBDAV_URL_KEY),
+        webdavUsername: snapshot.get(WEBDAV_USERNAME_KEY), cloudProvider: snapshot.get(CLOUD_PROVIDER_KEY), cloudUrl: snapshot.get(CLOUD_URL_KEY),
+    }),
         log: { info: () => {}, warn: () => {} } });
     let sourceAttempted = false;
     const { availability } = bindNativeAttachmentFiles({ storage, getSecureConfigValue: cloudKit ? refuse : secureConfig.getSecureConfigValue,
@@ -465,7 +468,7 @@ export const createNativeTaskAttachmentPreparation = (bindings: NativeTaskAttach
         ...(dropbox ? { dropboxAuth: bindings.dropbox!.auth, getDropboxClientId: async () => { bindings.dropbox!.assertCurrent(); return bindings.dropbox!.configuration.clientId; } } : {}),
         crypto: bindings.crypto, fetch: cloudKit ? refuse : dropbox ? selectedDropboxFetcher : bindings.fetch,
         log: { info: () => {}, warn: () => {}, sanitize: () => 'Task attachment preparation is unavailable' },
-        encryption: { getSyncEncryptionMaterial: cloudKit ? refuse : encryption.getSyncEncryptionMaterial, logSyncEncryptionEvent: async () => {} },
+        encryption: { getSyncEncryptionMaterial: cloudKit ? refuse : encryption.getSyncEncryptionMaterial, getSyncEncryptionStatus: cloudKit ? refuse : encryption.getSyncEncryptionStatus, logSyncEncryptionEvent: async () => {} },
     }, channels, { installSha256Provider: false, ...(dropbox ? { selectedDropboxDownload: { fetcher: selectedDropboxFetcher } } : {}), preparePlaintextDownload: async (input, bytes, signal) => {
         if (signal?.aborted) throw signal.reason;
         if (sourceAttempted || bytes.byteLength > TASK_DOWNLOAD_BYTES) return refuse();
@@ -507,12 +510,16 @@ export const createNativeReadOnlySelfHostedAttachments = (
     const vault = createSyncSecretVault(secrets);
     const secureConfig = { getSecureConfigValue: (name: string) => getSecureConfigValueReadOnly({ storage, secrets, vault }, name),
         setSecureConfigValue: refuse, deleteSecureConfigValue: refuse };
-    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: refuse,
+    const encryption = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: async () => buildSyncLocationScope({
+        backend: await storage.getItem(SYNC_BACKEND_KEY),
+        ...(webdav ? { webdavUrl: await storage.getItem(WEBDAV_URL_KEY), webdavUsername: await storage.getItem(WEBDAV_USERNAME_KEY) }
+            : { cloudProvider: await storage.getItem(CLOUD_PROVIDER_KEY), cloudUrl: await storage.getItem(CLOUD_URL_KEY) }),
+    }),
         log: { info: () => {}, warn: () => {} } });
     const { contractHost, availability } = bindNativeAttachmentFiles({ storage,
         getSecureConfigValue: secureConfig.getSecureConfigValue, crypto: bindings.crypto, fetch: bindings.fetch,
         log: { info: () => {}, warn: () => {}, sanitize: () => 'Self-hosted attachment is unavailable' },
-        encryption: { getSyncEncryptionMaterial: encryption.getSyncEncryptionMaterial, logSyncEncryptionEvent: async () => {} },
+        encryption: { getSyncEncryptionMaterial: encryption.getSyncEncryptionMaterial, getSyncEncryptionStatus: encryption.getSyncEncryptionStatus, logSyncEncryptionEvent: async () => {} },
     }, channels, { installSha256Provider: false, preparePlaintextDownload: refuse });
     const admit = async () => {
         if (webdav ? await storage.getItem(SYNC_BACKEND_KEY) !== 'webdav'
@@ -623,6 +630,7 @@ export const createNativeLocalAttachmentConfiguration = (): NativeAttachmentBind
     },
     encryption: {
         getSyncEncryptionMaterial: refuseLocal,
+        getSyncEncryptionStatus: refuseLocal,
         logSyncEncryptionEvent: () => { throw new LocalAttachmentUnavailableError(); },
     },
     fetch: refuseLocal,

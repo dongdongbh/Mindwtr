@@ -119,7 +119,7 @@ fn field_schema(field: &str, project: bool) -> Value {
         "priority" => json!({"enum":["low","medium","high","urgent"]}),
         "energyLevel" => json!({"enum":["low","medium","high"]}),
         "taskMode" => json!({"enum":["task","list"]}),
-        "reminderPolicy" => json!({"enum":["inherit","send","skip"]}),
+        "reminderPolicy" => json!({"enum":["inherit","send","skip","start","due"]}),
         "textDirection" => json!({"enum":["auto","ltr","rtl"]}),
         "sortBy" => json!({"enum":["updatedAt","createdAt","dueDate","title","priority"]}),
         "sortOrder" => json!({"enum":["asc","desc"]}),
@@ -698,6 +698,46 @@ mod tests {
         ] {
             let input = json!({"title":"Task","recurrence":invalid});
             assert!(operation("mindwtr_add_task", input.as_object().unwrap()).is_err());
+        }
+    }
+
+    #[test]
+    fn mcp_task_reminder_policies_accept_selected_dates_and_reject_unknown_values() {
+        assert_eq!(
+            field_schema("reminderPolicy", false)["enum"],
+            json!(["inherit", "send", "skip", "start", "due"])
+        );
+        for policy in ["inherit", "send", "skip", "start", "due"] {
+            assert!(operation(
+                "mindwtr_add_task",
+                json!({"title":"Policy","reminderPolicy":policy})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_ok());
+            assert!(operation(
+                "mindwtr_update_task",
+                json!({"id":"task","reminderPolicy":policy})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_ok());
+        }
+        for policy in [json!("sometimes"), json!(true), json!(1)] {
+            assert!(operation(
+                "mindwtr_add_task",
+                json!({"title":"Policy","reminderPolicy":policy})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_err());
+            assert!(operation(
+                "mindwtr_update_task",
+                json!({"id":"task","reminderPolicy":policy})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_err());
         }
     }
 

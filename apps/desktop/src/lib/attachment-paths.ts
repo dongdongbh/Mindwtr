@@ -1,5 +1,6 @@
 import { ATTACHMENTS_DIR_NAME } from '@mindwtr/core';
 import { stripFileScheme } from './sync-service-utils';
+import { logWarn } from './app-log';
 
 const URI_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:[\\/]/;
@@ -8,11 +9,36 @@ const WINDOWS_UNC_PATTERN = /^\\\\[^\\]/;
 export function isLocalAttachmentPath(uri: string): boolean {
     const trimmed = uri.trim();
     if (!trimmed) return false;
-    if (/^file:\/\//i.test(trimmed)) return true;
+    if (/^file:/i.test(trimmed)) return true;
     if (WINDOWS_DRIVE_PATTERN.test(trimmed)) return true;
     if (WINDOWS_UNC_PATTERN.test(trimmed)) return true;
     if (trimmed.startsWith('/')) return true;
     return !URI_SCHEME_PATTERN.test(trimmed);
+}
+
+export function isUnsafeLocalAttachmentPath(uri: string): boolean {
+    const trimmed = uri.trim();
+    let path = trimmed;
+    if (/^file:/i.test(trimmed)) {
+        try {
+            const parsed = new URL(trimmed);
+            if (!/^file:\/\//i.test(trimmed) || parsed.hostname) return true;
+            decodeURIComponent(parsed.pathname);
+            path = stripFileScheme(trimmed);
+        } catch {
+            return true;
+        }
+    }
+    const normalized = path.replace(/\\/g, '/');
+    if (normalized.startsWith('//') || path.startsWith('\\') || [...path].some((character) => (
+        character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+    ))) return true;
+    if (!WINDOWS_DRIVE_PATTERN.test(path)) return false;
+    return normalized.slice(3).split('/').some((part) => (
+        part.includes(':')
+        || (part !== '.' && part !== '..' && /[. ]$/.test(part))
+        || /^(con|prn|aux|nul|clock\$|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³]) *(?:\.|$)/i.test(part)
+    ));
 }
 
 
@@ -41,6 +67,13 @@ export function resolveAttachmentOpenTarget(uri: string): string {
     const trimmed = uri.trim();
     if (!trimmed) return trimmed;
     if (!isLocalAttachmentPath(trimmed)) return trimmed;
+    if (isUnsafeLocalAttachmentPath(trimmed)) {
+        void logWarn('Attachment path refused', {
+            scope: 'attachment',
+            extra: { releaseCheck: 'v1.3.9/attachment-open-policy', outcome: 'refused-path' },
+        });
+        throw new Error('Only local file paths can be opened.');
+    }
     return stripFileScheme(trimmed);
 }
 

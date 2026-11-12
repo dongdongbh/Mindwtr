@@ -6,9 +6,11 @@ import {
     SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE,
     type SyncBackend,
     type SyncEncryptionTransitionProgress,
+    type SyncEncryptionTransitionKind,
 } from '@mindwtr/core';
 
 import { logError } from '../../../../lib/app-log';
+import { classifySyncEncryptionUpgradeFailure } from '@mindwtr/core/sync-encryption-card';
 import {
     isSyncEncryptionCleanupDeferredError,
     isSyncEncryptionFailure,
@@ -29,6 +31,9 @@ export const isEncryptionCapableBackend = (backend: SyncBackend, cloudProvider: 
 
 export const classifyFailure = (error: unknown, terminal: SyncEncryptionErrorKind): SyncEncryptionErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    if (message.includes('SYNC_ENCRYPTION_LEGACY')) return 'legacy-upgrade-required';
+    if (message.includes('SYNC_ENCRYPTION_RECONCILIATION_REQUIRED')) return 'reconciliation-required';
+    if (message.includes('SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED')) return 'trusted-local-required';
     if (message.includes('SYNC_ENCRYPTION_WRONG_PASSPHRASE')) return 'wrong-passphrase';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
     if (message.includes(SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE)) return 'backend-incompatible';
@@ -51,6 +56,8 @@ export function useSyncEncryptionSettings(
     const pendingFirstSync = !isEncryptionCapableBackend(persistedSyncBackend, persistedCloudProvider);
     const [state, setState] = useState<SyncEncryptionController['state']>(null);
     const [stateUnavailable, setStateUnavailable] = useState(false);
+    const [incompleteTransitionKind, setIncompleteTransitionKind] = useState<SyncEncryptionTransitionKind | null>(null);
+    const [partlyEncrypted, setPartlyEncrypted] = useState(false);
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<SyncEncryptionTransitionProgress | null>(null);
     const [error, setError] = useState<SyncEncryptionErrorKind | null>(null);
@@ -60,7 +67,9 @@ export function useSyncEncryptionSettings(
     const readState = useCallback(async (): Promise<SyncEncryptionController['state']> => {
         try {
             const status = await SyncService.getSyncEncryptionStatus();
-            if (status.incompleteTransition) setError('transition-incomplete');
+            setIncompleteTransitionKind(status.incompleteTransition ?? null);
+            setPartlyEncrypted(Boolean(status.partlyEncrypted));
+            if (status.incompleteTransition) setError((current) => current ?? 'transition-incomplete');
             return status.state;
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'status' });
@@ -107,6 +116,7 @@ export function useSyncEncryptionSettings(
     const run = useCallback(async (
         operation: (onProgress: (value: SyncEncryptionTransitionProgress) => void) => Promise<void>,
         terminal: SyncEncryptionErrorKind,
+        classify?: (error: unknown) => SyncEncryptionErrorKind | null,
     ): Promise<boolean> => {
         setBusy(true);
         setError(null);
@@ -122,7 +132,7 @@ export function useSyncEncryptionSettings(
                 succeeded = true;
                 setWarning('cleanup-deferred');
             } else {
-                setError(classifyFailure(failure, terminal));
+                setError(classify?.(failure) ?? classifyFailure(failure, terminal));
             }
         }
 
@@ -138,6 +148,12 @@ export function useSyncEncryptionSettings(
     const enable = useCallback((passphrase: string) => run(
         (onProgress) => SyncService.enableSyncEncryption(passphrase, onProgress),
         'generic',
+    ), [run]);
+
+    const upgrade = useCallback((passphrase: string) => run(
+        (onProgress) => SyncService.upgradeSyncEncryption(passphrase, onProgress),
+        'generic',
+        classifySyncEncryptionUpgradeFailure,
     ), [run]);
 
     const disable = useCallback(() => run(
@@ -205,6 +221,8 @@ export function useSyncEncryptionSettings(
     return {
         state,
         stateUnavailable,
+        incompleteTransitionKind,
+        partlyEncrypted,
         supported,
         pendingFirstSync,
         busy,
@@ -216,6 +234,7 @@ export function useSyncEncryptionSettings(
         retryState,
         generatePassphrase: useCallback(() => generateDicewarePassphrase(), []),
         enable,
+        upgrade,
         disable,
         changePassphrase,
         unlock,

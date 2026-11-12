@@ -74,8 +74,8 @@ describe('MCP task write-surface derivation (TASK_SYNC_FIELD_SCHEMA -> Zod tool 
     }
   });
 
-  test('reminder policy accepts only inheritance and explicit send/skip values', () => {
-    for (const reminderPolicy of ['inherit', 'send', 'skip']) {
+  test('reminder policy accepts inheritance, send/skip, and selected dates', () => {
+    for (const reminderPolicy of ['inherit', 'send', 'skip', 'start', 'due']) {
       expect((addTaskSchema.parse({ title: 'Policy', reminderPolicy }) as Record<string, unknown>).reminderPolicy === reminderPolicy).toBe(true);
       expect((updateTaskSchema.parse({ id: 'task-1', reminderPolicy }) as Record<string, unknown>).reminderPolicy === reminderPolicy).toBe(true);
     }

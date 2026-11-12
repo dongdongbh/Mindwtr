@@ -428,6 +428,55 @@ describe('Android capture description persistence', () => {
 
 
 describe('Android widget capture destination', () => {
+    it.each(['text', 'audio'] as const)('applies the fixed default area to queued %s captures without overriding explicit destinations', async (kind) => {
+        for (const explicit of ['default', 'area', 'project'] as const) {
+            await openStore([]);
+            const personal = await useTaskStore.getState().addArea('Personal');
+            const work = await useTaskStore.getState().addArea('Work');
+            expect(personal).not.toBeNull();
+            expect(work).not.toBeNull();
+            const project = await useTaskStore.getState().addProject('Launch', undefined, { areaId: work!.id });
+            await useTaskStore.getState().updateSettings({ gtd: { defaultAreaMode: 'fixed', defaultAreaId: personal!.id } });
+            const queue = fakeQueue({ [`${AUDIO_ID}.json`]: {
+                kind, id: AUDIO_ID, title: explicit === 'area' ? 'Capture /area:Work' : explicit === 'project' && kind === 'audio' ? 'Capture +Launch' : 'Capture',
+                ...(explicit === 'project' ? { project: 'Launch' } : {}),
+                source: 'android-quick-capture',
+                ...(kind === 'audio' ? { audioPath: `file:///owned/${AUDIO_ID}.wav` } : {}),
+            } });
+            const deps = storeDeps(queue.port, { audio: {
+                resolvePath: (capture) => capture.audioPath,
+                transcribe: async () => 'Transcript', delete: async () => undefined,
+            } });
+            expect(await drainPendingCaptureQueue(deps)).toBe(1);
+            expect(saved().tasks[0].areaId).toBe(explicit === 'project' ? undefined : explicit === 'area' ? work!.id : personal!.id);
+            expect(deps.log.info).toHaveBeenCalledWith('Android quick capture area ingested', {
+                scope: 'capture', force: true, extra: {
+                    releaseCheck: 'v1.3.9/android-widget-capture-area', kind,
+                    destination: explicit === 'project' ? 'project' : 'area', outcome: 'created',
+                },
+            });
+            if (explicit === 'project') expect(saved().tasks[0].projectId).toBe(project!.id);
+            await restartStore();
+            expect(useTaskStore.getState()._allTasks[0].areaId).toBe(saved().tasks[0].areaId);
+        }
+    });
+
+    it.each(['active', 'none', 'missing'] as const)('resolves %s area preferences for a queued task', async (mode) => {
+        await openStore([]);
+        const area = await useTaskStore.getState().addArea('Personal');
+        expect(area).not.toBeNull();
+        await useTaskStore.getState().updateSettings({
+            gtd: { defaultAreaMode: mode === 'missing' ? 'fixed' : mode, defaultAreaId: 'missing-area' },
+            filters: { areaId: area!.id },
+        });
+        const queue = fakeQueue({ [`${CAPTURE_ID}.json`]: {
+            kind: 'text', id: CAPTURE_ID, title: 'Capture', source: 'android-quick-capture',
+        } });
+        const deps = storeDeps(queue.port);
+        expect(await drainPendingCaptureQueue(deps)).toBe(1);
+        expect(saved().tasks[0].areaId).toBe(mode === 'active' ? area!.id : undefined);
+    });
+
     it.each(['text', 'audio'] as const)('validates optional %s metadata without losing old or invalid captures', (kind) => {
         const body = { kind, id: CAPTURE_ID, title: 'Keep title', audioPath: 'file:///owned.wav', note: 'Keep note' };
         for (const status of ['inbox', 'next', 'waiting', 'someday']) {

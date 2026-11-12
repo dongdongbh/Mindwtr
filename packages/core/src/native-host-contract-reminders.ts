@@ -32,7 +32,7 @@ import { exact, record } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { useTaskStore } from './store';
 import { getDigestSchedule } from './schedule-utils';
-import { shouldSendTaskReminders } from './task-reminder-policy';
+import { isTaskReminderSelectionCurrent, shouldSendTaskReminders } from './task-reminder-policy';
 import type { NotificationSettings, Project, Task } from './types';
 
 export type NativeReminderAlarm = {
@@ -198,7 +198,7 @@ const isSnoozedTaskSkipped = (entry: SnoozeReminder, tasks: ReadonlyMap<string, 
 
     if (kind !== undefined && kind !== 'task-start' && kind !== 'task-due' && kind !== 'task-due-advance' && kind !== 'task-start-advance' && kind !== 'task-reminder') return false;
     const task = tasks.get(key.slice('task:'.length).replace(/:(?:r\d+|s?a\d+:-?\d+)$/, ''));
-    return Boolean(task && !shouldSendTaskReminders(task, settings));
+    return Boolean(task && (!shouldSendTaskReminders(task, settings) || !isTaskReminderSelectionCurrent(task, entry.details.data, settings)));
 };
 
 const signedFireAtMs = (signature: string | undefined): number | null => {
@@ -314,6 +314,9 @@ export function createReminderMethods(deps: ReminderDeps) {
                 alarms: held,
                 permissionGranted: input.permissionGranted,
             });
+            const selectiveCount = plan.oneShot.filter(request => request.config.data?.reminderSelection).length;
+            if (selectiveCount > 0) logInfo('Selective task reminders planned', { scope: 'notifications',
+                context: { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'planned', count: selectiveCount } });
             const requests = new Map([...plan.recurring, ...plan.oneShot].map((request) => [request.key, request]));
             const nowMs = Date.now();
 

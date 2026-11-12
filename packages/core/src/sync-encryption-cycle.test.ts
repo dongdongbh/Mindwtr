@@ -64,9 +64,9 @@ async function runEncryptedCycle(
     local: AppData,
 ) {
     const remoteBytes = remote.store.get('data.json.enc');
-    const remoteData = remoteBytes ? decode(await decryptRemoteArtifactOrThrow(remoteBytes, material.key)) : local;
+    const remoteData = remoteBytes ? decode(await decryptRemoteArtifactOrThrow(remoteBytes, material.key, undefined, { kind: 'document' })) : local;
     const { data: merged, stats } = mergeAppDataWithStats(local, remoteData);
-    const sealed = await encryptSyncArtifact(utf8(JSON.stringify(merged)), material);
+    const sealed = await encryptSyncArtifact(utf8(JSON.stringify(merged)), material, undefined, { kind: 'document' });
     remote.store.set('data.json.enc', sealed);
     return { merged, stats };
 }

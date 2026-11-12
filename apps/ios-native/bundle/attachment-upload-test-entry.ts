@@ -103,6 +103,7 @@ host.attachmentUploadGate = {
             crypto: createHostSyncCrypto(host.__mindwtrCryptoCall),
             encryption: {
                 getSyncEncryptionMaterial: async () => material,
+                getSyncEncryptionStatus: async () => ({ state: material ? 'enabled' : 'off' }),
                 logSyncEncryptionEvent: async () => {},
             },
             ...(provider === 'webdav' ? { maxWebdavBufferedUploadBytes: cap } : { maxCloudBufferedUploadBytes: cap }),

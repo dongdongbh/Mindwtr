@@ -1,4 +1,5 @@
 export const viOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Lời nhắc không hợp lệ: dùng khoảng thời gian được hỗ trợ và ngày giờ rõ ràng",
     'task.copyDetails': "Sao chép chi tiết công việc",
     "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
     "settings.speechUseGemini": "Dùng Gemini",
@@ -254,7 +255,7 @@ export const viOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Lưu trữ',
 
 
-        'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
+        'quickAdd.help': 'Thêm nhanh hỗ trợ /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> hoặc !Area, @context, #tag, +Project, %Person (hoặc %"Full Name"). Ngày đến hạn chỉ là ngày trừ khi bạn thêm giờ.',
         'quickAdd.example': 'Ví dụ: Gọi cho mẹ /start:tomorrow /due:tomorrow 5pm @phone #family',
         'quickAdd.pasteImagesHint': 'Dán hình ảnh hoặc ảnh chụp màn hình bằng {{shortcut}} để đính kèm.',
         'quickAdd.placeholder': 'Thêm nhiệm vụ… dùng @ngữ cảnh +Dự án #thẻ',
@@ -1218,6 +1219,7 @@ export const viOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Sau 5 phút',
         'settings.mobile.appLockRelockAfter15': 'Sau 15 phút',
         'appLock.title': 'Mindwtr đã bị khóa',
+        "appLock.loadFailed": "Mindwtr không thể tải dữ liệu của bạn. Hãy thử lại.",
         'appLock.description': 'Dùng khóa thiết bị để mở Mindwtr. Điều này bảo vệ chế độ xem ứng dụng, không phải cơ sở dữ liệu trên thiết bị.',
         'appLock.prompt': 'Mở khóa Mindwtr',
         'appLock.enablePrompt': 'Bật khóa ứng dụng Mindwtr',
@@ -2654,6 +2656,9 @@ export const viOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Dùng mặc định ({value})",
         "taskEdit.reminderPolicySend": "Gửi",
         "taskEdit.reminderPolicySkip": "Bỏ qua",
+        "taskEdit.reminderPolicyStart": "Chỉ bắt đầu",
+        "taskEdit.reminderPolicyDue": "Chỉ đến hạn",
+        "taskEdit.reminderPolicySingleHint": "Cần giờ cụ thể. Gửi một lời nhắc vào giờ đã chọn hoặc thay bằng giờ nhắc trước đã đặt. Bỏ qua lời nhắc lặp lại. Lời nhắc Tập trung và xem lại không thay đổi.",
         "taskEdit.reminderPolicyHint": "Lời nhắc bắt đầu và đến hạn cần giờ cụ thể. Lời nhắc Tập trung và xem lại không thay đổi.",
         "taskEdit.remindersDisabledHint": "Lời nhắc công việc đã tắt trong phần cài đặt Thông báo của thiết bị này.",
         "settings.taskReminderDefault": "Lời nhắc công việc mặc định",

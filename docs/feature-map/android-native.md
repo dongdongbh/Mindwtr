@@ -329,11 +329,12 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Home-screen widgets and Quick Settings tile
 
+- Notes: Queued text/audio captures use the configured default area at ingestion; explicit area/project choices take precedence.
 - Reach: Home screen › Widgets › Mindwtr (Tasks, Compact, Quick capture). Quick Settings › the Mindwtr capture tile (RN's tile class).
 - Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list.
 - Code: `apps/android-native/android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessService.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt`, `apps/android-native/bundle/host-widgets.ts`, `apps/android-native/scripts/build-widgets.mjs`, `apps/mobile/modules/android-widget`
 - Checks: `apps/android-native/scripts/check-widgets-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetRefreshGateTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetAudioDrainTest.kt`, `apps/android-native/android/widget/src/test/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessServiceTest.kt`
-- Notes: The widget code is RN's module, compiled as is. A ring tap is queued and completed by a background job, even if the app was killed first.
+- Notes: The widget code is RN's module, compiled as is. A ring tap is queued and completed by a background job, even if the app was killed first. Rings tapped in a row keep every row in place until three seconds after the last tap, the same as RN (#1211).
 
 ## Widget list
 
@@ -400,6 +401,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SyncSettings.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostCrypto.kt`
 - Checks: `apps/android-native/scripts/check-encryption-device.mjs`, `apps/android-native/scripts/check-encryption-dry-run.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/PassphraseFieldsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCryptoTest.kt`
 - Notes: Argon2id key derivation never blocks the engine: a tap during it still answers. After a restart the phone syncs the encrypted folder with no passphrase typed.
+- Upgrade: Settings › Sync › Encryption › Upgrade sync encryption opens an explicit current-passphrase confirmation. Update every device first; older clients cannot read the result. The service uses a verified durable local copy and refuses mismatches or unavailable storage. Keep the upgrade passphrase for retained encrypted recovery archives, even after changing the active passphrase. An interrupted format upgrade can retry; other unfinished encryption transitions do not expose this action. No upgrade runs automatically during unlock.
 
 ## Data: backup, import, and recovery
 
@@ -502,3 +504,17 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/scripts/device.mjs`, `apps/android-native/scripts/device-lock.mjs`, `apps/android-native/scripts/run-device-batch.mjs`, `apps/android-native/scripts/phone-queue.mjs`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostNetwork.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/IcuDateTimeFormat.kt`
 - Checks: `apps/android-native/scripts/check-net-device.mjs`, `apps/android-native/scripts/check-intl-device.mjs`, `apps/android-native/scripts/run-device-batch.test.mjs`, `apps/android-native/scripts/check-boot-gates.mjs`
 - Notes: The net check needs `debug.mindwtr.native.net_check=<port>` and ends by stopping the host on purpose. The intl check compares the phone's output with RN's Hermes baseline in `apps/android-native/scripts/intl-hermes-baseline.json`.
+
+## Capture reminder syntax (#1545)
+
+- Reach: Quick capture or task capture title, then Save.
+- Syntax: `/due:tomorrow 5pm /remind-due:1d` and `/start:tomorrow 9am /remind-start:30m`. Positive leads require the matching explicit date command with an explicit time. Units are integer `m`, `h`, `d`, `w`; due accepts 0–10080 minutes and start accepts only 0/5/15/30/60. `0m` turns the advance reminder off. Invalid tokens remain visible, show a warning and refuse save. Existing task reminder policy and device notification settings apply.
+- Code: `packages/core/src/quick-add.ts`, `packages/core/src/quick-add-preview.ts`, `packages/core/src/capture.ts`
+- Checks: `packages/core/src/quick-add-reminders.test.ts`, `packages/core/src/task-reminder-policy.test.ts`, `packages/core/src/native-host-contract-prepared-capture.test.ts`, `packages/core/src/native-host-contract-prepared-lines.test.ts`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`
+
+### Selective task reminders (#1547)
+
+- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time; its advance reminder replaces the date-time alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
+- Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
+- Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
+- Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.

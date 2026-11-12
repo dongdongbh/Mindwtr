@@ -25,7 +25,7 @@ class WidgetTapActivity : Activity() {
       }
       data.scheme == CHECKOFF_SCHEME && data.host == CHECKOFF_HOST -> {
         val taskId = data.lastPathSegment?.trim().orEmpty()
-        if (taskId.isNotEmpty()) {
+        if (taskId.isNotEmpty() && WidgetPayloadStore.read(this).itemFor(taskId)?.canComplete != false) {
           when (CheckoffStore.tapAction(this, taskId)) {
             CheckoffStore.TapAction.TOGGLE_PENDING -> {
               CheckoffStore.toggle(this, taskId)

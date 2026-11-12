@@ -265,6 +265,10 @@ function createDevice(input: Device): { state: DeviceState; host: NativeSyncSett
             getIncompleteTransition: async () => device.encryption.incomplete as never,
             isBackendPending: async () => device.encryption.pending,
             transitions: {
+                upgrade: async (passphrase, options) => {
+                    calls.push(['upgradeSyncEncryption', passphrase]);
+                    return transition('upgrade', 'enabled', options.onProgress);
+                },
                 enable: async (passphrase, options) => {
                     calls.push(['enableSyncEncryption', passphrase]);
                     return transition('enable', 'enabled', options.onProgress);
@@ -1312,12 +1316,34 @@ describe.each(['saved-webdav', 'saved-webdav-or-local'] as const)('native Settin
     const type = async (contract: Host, field: string, phrase: string) => value(await act(contract, { type: 'typed', field, value: phrase }));
     const submit = (contract: Host) => rows(contract).find((row) => row.kind === 'action' && row.action.type === 'submit');
 
+    it.each(['enabled', 'remote-encrypted-no-key'] as const)('requires explicit upgrade confirmation and owned revision for %s', async (state) => {
+        const { contract } = await start({ ...selected, encryption: { state } });
+        expect(device.calls.filter((call) => call[0] === 'upgradeSyncEncryption')).toEqual([]);
+        value(await act(contract, { type: 'open', flow: 'upgrade' }));
+        expect(rows(contract)).toContainEqual({ kind: 'text', text: en['settings.syncEncryptionUpgradeWarning'], tone: 'warning' });
+        expect(rows(contract).filter((row) => row.kind === 'field')).toEqual([
+            { kind: 'field', field: 'current', label: en['settings.syncEncryptionCurrentPassphrase'], secure: true, maxLength: 1000, tooLong: en['settings.syncEncryptionPassphraseTooLong'] },
+        ]);
+        expect(submit(contract)).toMatchObject({ enabled: false });
+        await type(contract, 'current', 'synthetic phrase');
+        expect(await act(contract, { type: 'submit', flow: 'upgrade' }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await act(contract, { type: 'submit', flow: 'upgrade' }, 'stale', generateUUID()))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(device.calls.filter((call) => call[0] === 'upgradeSyncEncryption')).toEqual([]);
+        expect(submit(contract)).toMatchObject({ enabled: false });
+        await type(contract, 'current', 'synthetic phrase');
+        value(await act(contract, { type: 'submit', flow: 'upgrade' }, undefined, generateUUID()));
+        expect(device.calls.filter((call) => call[0] === 'upgradeSyncEncryption')).toEqual([['upgradeSyncEncryption', 'synthetic phrase']]);
+        expect(rows(contract).filter((row) => row.kind === 'field')).toEqual([]);
+    });
+
     it.each([
         { state: 'off', incomplete: null, flows: ['enable'] },
         { state: 'off', incomplete: 'enable', flows: ['enable', 'abandon'] },
         { state: 'off', incomplete: 'disable', flows: ['abandon'] },
         { state: 'off', incomplete: 'change-passphrase', flows: ['abandon'] },
-        { state: 'enabled', incomplete: null, flows: ['change', 'disable'] },
+        { state: 'enabled', incomplete: null, flows: ['change', 'disable', 'upgrade'] },
         { state: 'enabled', incomplete: 'enable', flows: ['abandon'] },
         { state: 'enabled', incomplete: 'disable', flows: ['disable', 'abandon'] },
         { state: 'enabled', incomplete: 'change-passphrase', flows: ['change', 'abandon'] },
@@ -1325,10 +1351,11 @@ describe.each(['saved-webdav', 'saved-webdav-or-local'] as const)('native Settin
         { state: 'remote-plaintext', incomplete: 'enable', flows: ['abandon'] },
         { state: 'remote-plaintext', incomplete: 'disable', flows: ['disable', 'abandon'] },
         { state: 'remote-plaintext', incomplete: 'change-passphrase', flows: ['abandon'] },
-        { state: 'remote-encrypted-no-key', incomplete: null, flows: ['unlock'] },
+        { state: 'remote-encrypted-no-key', incomplete: null, flows: ['unlock', 'upgrade'] },
         { state: 'remote-encrypted-no-key', incomplete: 'enable', flows: ['abandon'] },
         { state: 'remote-encrypted-no-key', incomplete: 'disable', flows: ['abandon'] },
         { state: 'remote-encrypted-no-key', incomplete: 'change-passphrase', flows: ['abandon'] },
+        { state: 'enabled', incomplete: 'upgrade', flows: ['upgrade'] },
         { state: 'enabled', incomplete: 'unknown', flows: [] },
     ] as const)('offers matching flows for $state / $incomplete and refuses hidden commands', async ({ state, incomplete, flows }) => {
         const { contract } = await start({ ...selected, encryption: { state, incomplete } });
@@ -1370,7 +1397,7 @@ describe.each(['saved-webdav', 'saved-webdav-or-local'] as const)('native Settin
         expect(result.passphrase).toBeNull();
         expect(device.calls.filter((call) => call[0] === 'changeSyncEncryptionPassphrase'))
             .toEqual([['changeSyncEncryptionPassphrase', current, 'private next phrase']]);
-        expect(actions(contract)).toEqual([{ type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' }]);
+        expect(actions(contract)).toEqual([{ type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' }, { type: 'open', flow: 'upgrade' }]);
         expect(JSON.stringify({ view: view(contract), result, stored: storedConfig(dev) })).not.toContain('private next phrase');
     });
 
@@ -1415,7 +1442,7 @@ describe.each(['saved-webdav', 'saved-webdav-or-local'] as const)('native Settin
             if (patch.encryption?.unavailable) {
                 device.encryption.unavailable = false;
                 value(await act(contract, { type: 'retry' }));
-                expect(actions(contract)).toEqual([{ type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' }]);
+                expect(actions(contract)).toEqual([{ type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' }, { type: 'open', flow: 'upgrade' }]);
             }
         }
         const staged = await start({ ...selected, storage: { [SYNC_BACKEND_KEY]: 'off' }, encryption: { state: 'enabled' } });
@@ -1452,7 +1479,7 @@ describe.each(['saved-webdav', 'saved-webdav-or-local'] as const)('native Settin
         value(await act(contract, { type: 'submit', flow: 'change' }, undefined, generateUUID()));
         expect(device.calls.filter((call) => call[0] === 'changeSyncEncryptionPassphrase'))
             .toEqual([['changeSyncEncryptionPassphrase', phrases.current, phrases.next], ['changeSyncEncryptionPassphrase', phrases.current, phrases.next]]);
-        expect(actions(contract)).toEqual([{ type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' }]);
+        expect(actions(contract)).toEqual([{ type: 'open', flow: 'change' }, { type: 'open', flow: 'disable' }, { type: 'open', flow: 'upgrade' }]);
     });
 
     it.each(['change', 'disable'] as const)('refuses a changed actual saved configuration before %s', async (flow) => {

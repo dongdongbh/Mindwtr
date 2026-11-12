@@ -1,5 +1,6 @@
 
 export const trOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Geçersiz hatırlatıcı: desteklenen bir süre ve açık tarih ve saat kullanın",
     'task.copyDetails': "Görev ayrıntılarını kopyala",
     "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",
     "settings.speechUseGemini": "Gemini'yi kullan",
@@ -179,7 +180,7 @@ export const trOverrides: Record<string, string> = {
         'nav.sectionLists': 'Listeler',
         'nav.sectionOrganize': 'Organize et',
         'nav.sectionArchive': 'Arşiv',
-        'quickAdd.help': 'Hızlı ekleme /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> veya !Area, @context, #tag, +Project, %Person (veya %"Full Name") komutlarını destekler.',
+        'quickAdd.help': 'Hızlı ekleme /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> veya !Area, @context, #tag, +Project, %Person (veya %"Full Name") komutlarını destekler.',
         'quickAdd.example': 'Örnek: Annemi ara /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Deneyin: Annemi ara /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hızlı ekleme sözdizimi yardımı',
@@ -985,6 +986,7 @@ export const trOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5 dakika sonra',
         'settings.mobile.appLockRelockAfter15': '15 dakika sonra',
         'appLock.title': 'Mindwtr kilitli',
+        "appLock.loadFailed": "Mindwtr verilerinizi yükleyemedi. Tekrar deneyin.",
         'appLock.description': 'Mindwtr’ı açmak için cihaz kilidini kullanın. Bu, cihazdaki veritabanını değil uygulama görünümünü korur.',
         'appLock.prompt': 'Mindwtr kilidini aç',
         'appLock.enablePrompt': 'Mindwtr uygulama kilidini aç',
@@ -1823,6 +1825,9 @@ export const trOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Varsayılanı kullan ({value})",
         "taskEdit.reminderPolicySend": "Gönder",
         "taskEdit.reminderPolicySkip": "Atla",
+        "taskEdit.reminderPolicyStart": "Yalnızca başlangıç",
+        "taskEdit.reminderPolicyDue": "Yalnızca bitiş",
+        "taskEdit.reminderPolicySingleHint": "Açık bir saat gerekir. Seçilen saatte veya bunun yerine ayarlanan ön hatırlatma saatinde tek bir hatırlatıcı gönderir. Tekrarlanan hatırlatıcılar yok sayılır. Odak ve gözden geçirme hatırlatıcıları değişmez.",
         "taskEdit.reminderPolicyHint": "Başlangıç ve bitiş hatırlatıcıları için açık bir saat gerekir. Odak ve gözden geçirme hatırlatıcıları değişmez.",
         "taskEdit.remindersDisabledHint": "Bu cihazın Bildirimler ayarlarında görev hatırlatıcıları kapalı.",
         "settings.taskReminderDefault": "Varsayılan görev hatırlatıcıları",

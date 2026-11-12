@@ -1,5 +1,6 @@
 
 export const en: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Invalid reminder: use a supported duration and an explicit date and time",
     "taskEdit.startAdvanceReminderLabel": "Before start",
     "taskEdit.advanceReminderLabel": "Advance reminder",
     "taskEdit.advanceReminderMinutes": "{count} min before",
@@ -272,7 +273,7 @@ export const en: Record<string, string> = {
         'accessibility.mainContent': 'Main content',
 
 
-        'quickAdd.help': 'Quick add supports /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> or !Area, @context, #tag, +Project, %Person (or %"Full Name"). Due dates stay date-only unless you include a time.',
+        'quickAdd.help': 'Quick add supports /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> or !Area, @context, #tag, +Project, %Person (or %"Full Name"). Due dates stay date-only unless you include a time.',
         'quickAdd.example': 'e.g. Call mom /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'Screenshot',
         'quickAdd.pastedImageSaving': 'Attaching image...',
@@ -1438,6 +1439,7 @@ export const en: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'After 5 minutes',
         'settings.mobile.appLockRelockAfter15': 'After 15 minutes',
         'appLock.title': 'Mindwtr is locked',
+        "appLock.loadFailed": "Mindwtr could not load your data. Try again.",
         'appLock.description': 'Use your device lock to open Mindwtr. This protects the app view, not the on-device database.',
         'appLock.prompt': 'Unlock Mindwtr',
         'appLock.enablePrompt': 'Enable Mindwtr app lock',
@@ -1502,6 +1504,11 @@ export const en: Record<string, string> = {
         'settings.syncEncryption': 'Encryption',
         'settings.syncEncryptionDesc': 'Encrypt the synced files with a passphrase. Devices without the passphrase cannot read them.',
         'settings.syncEncryptionEnable': 'Enable encryption',
+        "settings.syncEncryptionUpgrade": "Upgrade sync encryption",
+        "settings.syncEncryptionUpgradeWarning": "Update Mindwtr on every device first. Older versions cannot read upgraded sync files. The upgrade uses a verified local copy and stops if the synced copy differs. Existing encrypted copies are retained. Keep this passphrase to recover the retained copies, even if you change it later.",
+        "settings.syncEncryptionErrorLegacy": "This sync location uses older encryption. Update every device, then choose Upgrade sync encryption.",
+        "settings.syncEncryptionErrorReconciliation": "The local and synced copies could not be verified as matching. Compare your trusted copies and resolve differences before retrying. Sync stays paused.",
+        "settings.syncEncryptionErrorTrustedLocal": "Open a complete, saved local library on this device before upgrading. Sync stays paused.",
         'settings.syncEncryptionPassphrase': 'Passphrase',
         'settings.syncEncryptionPassphraseConfirm': 'Confirm passphrase',
         'settings.syncEncryptionCurrentPassphrase': 'Current passphrase',
@@ -3100,6 +3107,9 @@ export const en: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Use default ({value})",
         "taskEdit.reminderPolicySend": "Send",
         "taskEdit.reminderPolicySkip": "Skip",
+        "taskEdit.reminderPolicyStart": "Start only",
+        "taskEdit.reminderPolicyDue": "Due only",
+        "taskEdit.reminderPolicySingleHint": "Requires an explicit time. Sends one reminder at the selected time, or its advance time instead. Repeat reminders are ignored. Focus and review reminders are unchanged.",
         "taskEdit.reminderPolicyHint": "Start and due reminders need an explicit time. Focus and review reminders are unchanged.",
         "taskEdit.remindersDisabledHint": "Task reminders are turned off in Notifications settings on this device.",
         "settings.taskReminderDefault": "Default task reminders",

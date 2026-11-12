@@ -431,7 +431,7 @@ describe('native File Sync attachment pass', () => {
         const local = createNativeLocalAttachmentConfiguration();
         const warnings: string[] = [];
         const native = createNativeAttachments({ ...local, saf,
-            encryption: { getSyncEncryptionMaterial: async () => null, logSyncEncryptionEvent: () => {} },
+            encryption: { getSyncEncryptionMaterial: async () => null, getSyncEncryptionStatus: async () => ({ state: 'off' }), logSyncEncryptionEvent: () => {} },
             log: { info: () => {}, warn: (message, context) => { warnings.push(`${message} ${JSON.stringify(context ?? {})}`); }, sanitize: (message) => message },
             storage: { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined } }, channels);
         const uri = `${MANAGED}fixture.pdf`;

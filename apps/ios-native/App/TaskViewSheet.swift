@@ -2225,7 +2225,7 @@ private struct TaskScheduleField: View {
             if field == "startTime" && !relative.isEmpty { relativeControls }
             if !pickerMode.isEmpty { inlinePicker }
             if field == "dueDate" && reminders.flag("showSkip") { reminderPolicy }
-            if field == "dueDate" && (!part.text("value").isEmpty || reminders.flag("showSkip")
+            if field == "dueDate" && reminders.flag("showDueAdvance") && (!part.text("value").isEmpty || reminders.flag("showSkip")
                 || model.taskEditor.object("draft").number("dueReminderLeadMinutes") > 0) {
                 advanceReminder(enabled: reminders.flag("showAdvance"), label: reminders.text("advanceLabel"),
                     value: reminders.text("advanceValueLabel"), hint: reminders.text("advanceHint"),

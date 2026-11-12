@@ -217,7 +217,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
         : null;
       if (!expectedStagedHash) {
         const wireBytes = await common.readAttachmentDownloadStageBytes(stagedPath);
-        const plaintextBytes = await common.openAttachmentBytesFromDownload(wireBytes, material);
+        const plaintextBytes = await common.openAttachmentBytesFromDownload(wireBytes, material, attachment.cloudKey);
         const plaintextHash = await computeSha256Hex(plaintextBytes);
         if (!plaintextHash) throw new Error('Attachment download hash is unavailable');
         await validateAttachmentHash(attachment, plaintextBytes);
@@ -450,7 +450,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
           const bytes = await common.openAttachmentBytesFromDownload(
             data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
             await host.encryption.getSyncEncryptionMaterial(),
-            ...(preparing ? [localAttachment.cloudKey] : []),
+            localAttachment.cloudKey,
           );
           const installedAttachment = await installMissingAttachmentBytes(
             localAttachment,
@@ -490,6 +490,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
         const bytes = await common.openAttachmentBytesFromDownload(
           data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
           material,
+          localAttachment.cloudKey,
         );
         assertAttachmentSyncNotAborted(signal);
         const installedAttachment = await installMissingAttachmentBytes(
@@ -549,6 +550,7 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
         const bytes = await common.openAttachmentBytesFromDownload(
           wireBytes,
           material,
+          localAttachment.cloudKey,
         );
         assertAttachmentSyncNotAborted(signal);
         const installedAttachment = await installMissingAttachmentBytes(

@@ -190,6 +190,8 @@ const syncProps: Parameters<typeof SettingsSyncPage>[0] = {
     encryption: {
         state: 'off',
         stateUnavailable: false,
+        incompleteTransitionKind: null,
+        partlyEncrypted: false,
         supported: true,
         pendingFirstSync: false,
         busy: false,
@@ -201,6 +203,7 @@ const syncProps: Parameters<typeof SettingsSyncPage>[0] = {
         retryState: asyncNoop,
         generatePassphrase: () => 'correct horse battery staple extra words',
         enable: async () => true,
+        upgrade: async () => true,
         disable: async () => true,
         changePassphrase: async () => true,
         unlock: async () => true,

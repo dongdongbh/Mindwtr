@@ -1,5 +1,6 @@
 
 export const itOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Promemoria non valido: usa una durata supportata e una data e ora esplicite",
     'task.copyDetails': "Copia dettagli attività",
     "taskEdit.startAdvanceReminderLabel": "Prima dell’inizio",
     "settings.speechUseGemini": "Usa Gemini",
@@ -175,7 +176,7 @@ export const itOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Archivio',
 
 
-        'quickAdd.help': 'L\'aggiunta rapida supporta /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> o !Area, @context, #tag, +Project, %Person (o %"Full Name").',
+        'quickAdd.help': 'L\'aggiunta rapida supporta /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> o !Area, @context, #tag, +Project, %Person (o %"Full Name").',
         'quickAdd.example': 'Esempio: Chiama la mamma /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Prova: Chiama la mamma /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Aiuto sulla sintassi di aggiunta rapida',
@@ -1056,6 +1057,7 @@ export const itOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Dopo 5 minuti',
         'settings.mobile.appLockRelockAfter15': 'Dopo 15 minuti',
         'appLock.title': 'Mindwtr è bloccata',
+        "appLock.loadFailed": "Mindwtr non ha potuto caricare i tuoi dati. Riprova.",
         'appLock.description': 'Usa il blocco del dispositivo per aprire Mindwtr. Protegge la vista dell’app, non il database sul dispositivo.',
         'appLock.prompt': 'Sblocca Mindwtr',
         'appLock.enablePrompt': 'Attiva il blocco di Mindwtr',
@@ -1983,6 +1985,9 @@ export const itOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Usa predefinito ({value})",
         "taskEdit.reminderPolicySend": "Invia",
         "taskEdit.reminderPolicySkip": "Salta",
+        "taskEdit.reminderPolicyStart": "Solo inizio",
+        "taskEdit.reminderPolicyDue": "Solo scadenza",
+        "taskEdit.reminderPolicySingleHint": "Richiede un orario preciso. Invia un solo promemoria all’orario scelto o, al suo posto, con l’anticipo impostato. I promemoria ripetuti vengono ignorati. Quelli di Focus e revisione non cambiano.",
         "taskEdit.reminderPolicyHint": "I promemoria di inizio e scadenza richiedono un orario preciso. Quelli di Focus e revisione non cambiano.",
         "taskEdit.remindersDisabledHint": "I promemoria delle attività sono disattivati nelle impostazioni Notifiche di questo dispositivo.",
         "settings.taskReminderDefault": "Promemoria predefiniti delle attività",

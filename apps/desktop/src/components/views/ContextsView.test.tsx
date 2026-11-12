@@ -112,6 +112,16 @@ describe('ContextsView', () => {
         expect(screen.getByText('Someday meeting')).toBeInTheDocument();
     });
 
+    it('keeps Reference visible when opening Context filters', () => {
+        const tasks = [makeTask('note', { title: 'Meeting notes', status: 'reference', contexts: ['@Office'] })];
+        useTaskStore.setState({ tasks, _allTasks: tasks });
+        renderContextsView();
+        expect(screen.getByText('Meeting notes')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+        expect(screen.getByText('Meeting notes')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Remove filter: Reference' })).toBeInTheDocument();
+    });
+
     const taskDrag = (id: string) => {
         const values: Record<string, string> = {};
         const transfer = {

@@ -19,7 +19,7 @@ import { bytesToBase64 } from './base64-bytes';
 import { MAX_DOWNLOAD_BYTES, ResponseTooLargeError } from './http-utils';
 import { encryptSyncArtifact, inspectSyncArtifact, SyncCryptoUnsupportedError, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 import { buildSyncEncryptionRemoteReadExtra, SYNC_ENCRYPTION_LOG_EVENTS, type SyncEncryptionRemoteReadLogInput } from './sync-encryption-diagnostics';
-import { decryptRemoteArtifactOrThrow, SyncEncryptionPartlyEncryptedError, SyncEncryptionTerminalError } from './sync-encryption';
+import { assertSyncAttachmentEncryptionPosture, decryptRemoteArtifactOrThrow, SyncEncryptionPartlyEncryptedError, SyncEncryptionTerminalError } from './sync-encryption';
 import { WebDavRemoteWriteConflictError } from './webdav';
 import { assertMobileWebdavConnection } from './mobile-sync-utils';
 import { DEFAULT_ATTACHMENT_CONTENT_TYPE, isHttpAttachmentUri, type MobileAttachmentFiles, type MobileAttachmentFileSystemPort } from './mobile-attachment-files';
@@ -226,7 +226,7 @@ export type MobileAttachmentCommonHost = {
   fs: MobileAttachmentFileSystemPort;
   files: MobileAttachmentFiles;
   crypto: SyncCryptoPrimitives;
-  encryption: Pick<MobileSyncEncryptionPort, 'logSyncEncryptionEvent'>;
+  encryption: Pick<MobileSyncEncryptionPort, 'logSyncEncryptionEvent' | 'getSyncEncryptionStatus'>;
   installer: Pick<MobileAttachmentInstaller, 'installAttachmentFileGeneration'>;
 
 
@@ -254,15 +254,19 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     void host.encryption.logSyncEncryptionEvent(SYNC_ENCRYPTION_LOG_EVENTS.remoteRead, buildSyncEncryptionRemoteReadExtra(input));
   };
 
+  const assertEncryptionPosture = async (material: SyncKeyMaterial | null | undefined): Promise<void> =>
+    assertSyncAttachmentEncryptionPosture(await host.encryption.getSyncEncryptionStatus(), material);
+
 
   const sealAttachmentBytesForUpload = async (
     bytes: Uint8Array,
     material: SyncKeyMaterial | null | undefined,
     artifact?: string | null,
   ): Promise<Uint8Array> => {
+    await assertEncryptionPosture(material);
     if (material) {
       logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: null, kind: 'encrypted', decision: 'seal' });
-      return encryptSyncArtifact(bytes, material, host.crypto);
+      return encryptSyncArtifact(bytes, material, host.crypto, { kind: 'attachment', cloudKey: artifact ?? '' });
     }
     logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: null, kind: 'plaintext', decision: 'seal' });
     return bytes;
@@ -274,6 +278,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     material: SyncKeyMaterial | null | undefined,
     artifact?: string | null,
   ): Promise<Uint8Array> => {
+    await assertEncryptionPosture(material);
     if (!material) {
 
 
@@ -285,8 +290,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     }
     const inspected = inspectSyncArtifact(bytes);
     if (inspected.kind === 'plaintext') {
-      logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'plaintext', decision: 'plaintext' });
-      return bytes;
+      throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError('SYNC_ENCRYPTION_PLAINTEXT_ATTACHMENT: restore the attachment from a trusted local copy'));
     }
     if (inspected.kind === 'unsupported') {
       logAttachmentByteRemoteRead({ artifact: artifact ?? '', exists: true, kind: 'unsupported', decision: 'decrypt' });
@@ -300,7 +304,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
       headerKdf: inspected.params,
       decision: 'decrypt',
     });
-    return decryptRemoteArtifactOrThrow(bytes, material.key, host.crypto);
+    return decryptRemoteArtifactOrThrow(bytes, material.key, host.crypto, { kind: 'attachment', cloudKey: artifact ?? '' });
   };
 
   const buildAttachmentDownloadStagePath = (
@@ -899,6 +903,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
     timeoutMs?: number,
     timeoutMessage = 'Streamed upload timed out',
   ): Promise<T> => {
+    await assertEncryptionPosture(null);
     assertUploadNotAborted(signal);
     if (!signal && timeoutMs === undefined) {
       return task.uploadAsync();
@@ -1000,6 +1005,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
 
 
     assertMobileWebdavConnection(url, allowInsecureHttp);
+    await assertEncryptionPosture(null);
     assertUploadNotAborted(signal);
     if (!fileUri.startsWith('file://')) return false;
 
@@ -1033,6 +1039,7 @@ export const createMobileAttachmentCommon = (host: MobileAttachmentCommonHost) =
   };
 
   return {
+    assertEncryptionPosture,
     sealAttachmentBytesForUpload,
     openAttachmentBytesFromDownload,
     deleteAttachmentDownloadStageBestEffort,

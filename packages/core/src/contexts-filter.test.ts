@@ -45,7 +45,7 @@ describe('Context filters', () => {
     });
 
     it('selects Someday before matching contexts and keeps an empty result empty', () => {
-        const tasks = [...CONTEXTS_FILTER_STATUSES, 'reference', 'done', 'archived'].map((status) => task(status, status as TaskStatus));
+        const tasks = [...CONTEXTS_FILTER_STATUSES, 'done', 'archived'].map((status) => task(status, status as TaskStatus));
         const criteria: FilterCriteria = { contexts: ['@person'], statuses: ['waiting', 'someday'] };
         expect(selectContextsFilterTasks(tasks, criteria, []).map((row) => row.id)).toEqual(['waiting', 'someday']);
         expect(selectContextsFilterTasks(tasks, { ...criteria, excludedProjects: [SAVED_FILTER_NO_PROJECT_ID] }, [])).toEqual([]);
@@ -53,9 +53,13 @@ describe('Context filters', () => {
         expect(selectContextsFilterTasks(tasks, {}, []).map((row) => row.id)).not.toContain('done');
     });
 
-    it('saves only a representable unfinished scope and preserves future criteria through edits', () => {
+    it('saves a representable Contexts scope and preserves future criteria through edits', () => {
         expect(getContextsSaveCriteria({}, ['@person/emma'], 'all')).toBeNull();
-        expect(getContextsSaveCriteria({ statuses: ['next', 'reference'] }, ['@person/emma'], 'all')).toBeNull();
+        expect(getContextsSaveCriteria({ statuses: ['next', 'reference'] }, ['@person/emma'], 'all')).toEqual({
+            statuses: ['next', 'reference'], contexts: ['@person/emma'], contextMatchMode: 'all',
+        });
+        expect(getContextsSaveCriteria({ statuses: ['done'] }, ['@person/emma'], 'all')).toBeNull();
+        expect(getContextsSaveCriteria({ statuses: ['archived'] }, ['@person/emma'], 'all')).toBeNull();
         expect(getContextsSaveCriteria({ statuses: ['next'] }, ['@person', '#work'], 'any')).toBeNull();
         expect(getContextsSaveCriteria({ statuses: ['next'] }, ['__no_context__'], 'all')).toBeNull();
         expect(getContextsSaveCriteria({ statuses: ['next'] }, ['@person/emma'], 'all', ['needle', ''])).toBeNull();
@@ -82,4 +86,29 @@ describe('Context filters', () => {
         data.settings.savedFilters = [{ ...filter, criteria: { ...criteria, projects: ['p1'] } }];
         expect(buildWidgetPayload(data, 'en', { listIds: ['filter:emma'], maxItems: 200 }).lists?.['filter:emma'].items).toEqual([]);
     });
+    it('keeps Reference opt-in for saved widgets without exposing completion or hidden records', () => {
+        const filter: SavedFilter = { id: 'mixed', name: 'Mixed', view: 'contexts',
+            criteria: { contexts: ['@person/emma'], statuses: ['next', 'reference'], excludedProjects: ['excluded'] },
+            createdAt: stamp, updatedAt: stamp };
+        const data: AppData = {
+            tasks: [task('action'), task('note', 'reference'), task('done', 'done'), task('archived', 'archived'),
+                task('removed', 'reference', { deletedAt: stamp }), task('excluded-note', 'reference', { projectId: 'excluded' }),
+                task('parked-note', 'reference', { projectId: 'parked' }), task('hidden-note', 'reference', { areaId: 'hidden' })],
+            projects: [project('excluded'), project('parked', { status: 'someday' })],
+            areas: [{ id: 'hidden', name: 'Hidden', color: '#111111', order: 0, createdAt: stamp, updatedAt: stamp }],
+            sections: [], settings: { savedFilters: [filter], filters: { excludedAreaIds: ['hidden'] } },
+        };
+        const items = () => buildWidgetPayload(data, 'en', { listIds: ['filter:mixed'], maxItems: 200 }).lists!['filter:mixed'].items;
+        expect(items().map((item) => item.id)).toEqual(['action', 'note']);
+        expect(items().find((item) => item.id === 'note')).toMatchObject({ canComplete: false, statusLabel: 'Reference' });
+        expect(items().find((item) => item.id === 'note')).not.toHaveProperty('completionToken');
+        expect(items().find((item) => item.id === 'action')?.completionToken).toBeTruthy();
+        data.settings.savedFilters = [{ ...filter, criteria: { ...filter.criteria, statuses: ['next'] } }];
+        expect(items().map((item) => item.id)).toEqual(['action']);
+        data.settings.savedFilters = [{ ...filter, criteria: { contexts: ['@person/emma'] } }];
+        expect(items().some((item) => item.id === 'note')).toBe(false);
+        data.settings.savedFilters = [{ ...filter, view: 'next' }];
+        expect(items().map((item) => item.id)).toEqual(['action']);
+    });
+
 });

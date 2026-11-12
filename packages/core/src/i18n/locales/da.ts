@@ -1,5 +1,6 @@
 
 export const daOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Ugyldig påmindelse: angiv en understøttet varighed og en udtrykkelig dato og tid",
     "taskEdit.startAdvanceReminderLabel": "Før start",
     "taskEdit.advanceReminderLabel": "Forhåndspåmindelse",
     "taskEdit.advanceReminderMinutes": "{count} min før",
@@ -274,7 +275,7 @@ export const daOverrides: Record<string, string> = {
     'accessibility.skipToContent': 'Gå til indhold',
     'accessibility.mainContent': 'Hovedindhold',
     'quickAdd.help':
-        'Hurtig tilføjelse understøtter /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> eller !Area, @context, #tag, +Project, %Person (eller %"Full Name"). Forfaldsdatoer forbliver uden klokkeslæt, medmindre du angiver et tidspunkt.',
+        'Hurtig tilføjelse understøtter /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> eller !Area, @context, #tag, +Project, %Person (eller %"Full Name"). Forfaldsdatoer forbliver uden klokkeslæt, medmindre du angiver et tidspunkt.',
     'quickAdd.example': 'f.eks. Ring til mor /due:tomorrow @phone',
     'quickAdd.pastedImageTitle': 'Skærmbillede',
     'quickAdd.pastedImageSaving': 'Vedhæfter billede...',
@@ -1428,6 +1429,7 @@ export const daOverrides: Record<string, string> = {
     'settings.mobile.appLockRelockAfter5': 'Efter 5 minutter',
     'settings.mobile.appLockRelockAfter15': 'Efter 15 minutter',
     'appLock.title': 'Mindwtr er låst',
+    "appLock.loadFailed": "Mindwtr kunne ikke indlæse dine data. Prøv igen.",
     'appLock.description':
         'Brug din enhedslås til at åbne Mindwtr. Dette beskytter appvisningen, ikke databasen på enheden.',
     'appLock.prompt': 'Lås Mindwtr op',
@@ -1496,6 +1498,11 @@ export const daOverrides: Record<string, string> = {
     'settings.syncEncryptionDesc':
         'Krypter de synkroniserede filer med en adgangssætning. Enheder uden adgangssætningen kan ikke læse dem.',
     'settings.syncEncryptionEnable': 'Aktiver kryptering',
+    "settings.syncEncryptionUpgrade": "Opgrader synkroniseringskryptering",
+    "settings.syncEncryptionUpgradeWarning": "Opdater først Mindwtr på alle enheder. Ældre versioner kan ikke læse opgraderede synkroniseringsfiler. Opgraderingen bruger en verificeret lokal kopi og stopper, hvis den synkroniserede kopi afviger. Eksisterende krypterede kopier bevares. Gem denne adgangssætning for at gendanne de bevarede kopier, selv hvis du ændrer den senere.",
+    "settings.syncEncryptionErrorLegacy": "Denne synkroniseringsplacering bruger ældre kryptering. Opdater alle enheder, og vælg derefter Opgrader synkroniseringskryptering.",
+    "settings.syncEncryptionErrorReconciliation": "Det kunne ikke bekræftes, at den lokale og synkroniserede kopi stemmer overens. Sammenlign dine betroede kopier, og løs forskellene, før du prøver igen. Synkronisering forbliver sat på pause.",
+    "settings.syncEncryptionErrorTrustedLocal": "Åbn et komplet, gemt lokalt bibliotek på denne enhed før opgraderingen. Synkronisering forbliver sat på pause.",
     'settings.syncEncryptionPassphrase': 'Adgangssætning',
     'settings.syncEncryptionPassphraseConfirm': 'Bekræft adgangssætning',
     'settings.syncEncryptionCurrentPassphrase': 'Aktuel adgangssætning',
@@ -3335,6 +3342,9 @@ export const daOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Brug standard ({value})",
         "taskEdit.reminderPolicySend": "Send påmindelser",
         "taskEdit.reminderPolicySkip": "Spring over",
+        "taskEdit.reminderPolicyStart": "Kun start",
+        "taskEdit.reminderPolicyDue": "Kun forfald",
+        "taskEdit.reminderPolicySingleHint": "Kræver et præcist tidspunkt. Sender én påmindelse på det valgte tidspunkt eller i stedet på det indstillede forhåndstidspunkt. Gentagne påmindelser ignoreres. Fokus- og gennemgangspåmindelser er uændrede.",
         "taskEdit.reminderPolicyHint": "Start- og forfaldspåmindelser kræver et præcist tidspunkt. Fokus- og gennemgangspåmindelser er uændrede.",
         "taskEdit.remindersDisabledHint": "Opgavepåmindelser er slået fra i denne enheds notifikationsindstillinger.",
         "settings.taskReminderDefault": "Standard for opgavepåmindelser",

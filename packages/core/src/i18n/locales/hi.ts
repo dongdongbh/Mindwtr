@@ -1,5 +1,6 @@
 
 export const hiOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "अमान्य अनुस्मारक: समर्थित अवधि और स्पष्ट तारीख व समय दें",
     'task.copyDetails': "कार्य का विवरण कॉपी करें",
     "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",
     "settings.speechUseGemini": "Gemini का उपयोग करें",
@@ -975,6 +976,7 @@ export const hiOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5 मिनट बाद',
         'settings.mobile.appLockRelockAfter15': '15 मिनट बाद',
         'appLock.title': 'Mindwtr लॉक है',
+        "appLock.loadFailed": "Mindwtr आपका डेटा लोड नहीं कर सका। फिर से कोशिश करें।",
         'appLock.description': 'Mindwtr खोलने के लिए डिवाइस लॉक का उपयोग करें। यह ऐप दृश्य की सुरक्षा करता है, डिवाइस पर मौजूद डेटाबेस की नहीं।',
         'appLock.prompt': 'Mindwtr अनलॉक करें',
         'appLock.enablePrompt': 'Mindwtr ऐप लॉक सक्षम करें',
@@ -1777,6 +1779,9 @@ export const hiOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "डिफ़ॉल्ट इस्तेमाल करें ({value})",
         "taskEdit.reminderPolicySend": "भेजें",
         "taskEdit.reminderPolicySkip": "छोड़ें",
+        "taskEdit.reminderPolicyStart": "केवल शुरुआत",
+        "taskEdit.reminderPolicyDue": "केवल नियत समय",
+        "taskEdit.reminderPolicySingleHint": "स्पष्ट समय आवश्यक है। चुने गए समय पर या उसकी जगह तय किए गए अग्रिम समय पर एक अनुस्मारक भेजता है। दोहराए जाने वाले अनुस्मारक अनदेखे किए जाते हैं। फ़ोकस और समीक्षा के अनुस्मारक नहीं बदलते।",
         "taskEdit.reminderPolicyHint": "शुरुआत और नियत समय के अनुस्मारकों के लिए स्पष्ट समय चाहिए। फ़ोकस और समीक्षा के अनुस्मारक नहीं बदलते।",
         "taskEdit.remindersDisabledHint": "इस डिवाइस की सूचना सेटिंग में कार्य अनुस्मारक बंद हैं।",
         "settings.taskReminderDefault": "डिफ़ॉल्ट कार्य अनुस्मारक",

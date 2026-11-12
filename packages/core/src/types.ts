@@ -452,7 +452,7 @@ export interface WindowSettings {
     showTray?: boolean;
 }
 
-export type TaskReminderPolicy = 'inherit' | 'send' | 'skip';
+export type TaskReminderPolicy = 'inherit' | 'send' | 'skip' | 'start' | 'due';
 export type TaskReminderDefault = 'send' | 'skip';
 
 export interface NotificationSettings {

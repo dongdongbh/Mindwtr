@@ -204,7 +204,8 @@ try {
 
     const due = (days) => new Date(Date.now() + days * 86_400_000).toLocaleDateString('en-CA', { timeZone: phoneZone });
     const seeded = { [title(1)]: `${title(1)} /next /due:${due(0)}`, [title(2)]: `${title(2)} /next /due:${due(0)}`,
-        [title(3)]: `${title(3)} /next /due:${due(3)}`, [title(4)]: title(4) };
+        [title(3)]: `${title(3)} /next /due:${due(3)}`, [title(4)]: title(4),
+        [title(6)]: `${title(6)} /next /due:${due(0)}`, [title(7)]: `${title(7)} /next /due:${due(0)}`, [title(8)]: `${title(8)} /next /due:${due(0)}` };
     {
         await killApp();
         for (const text of Object.values(seeded)) enqueue({ id: randomUUID(), title: text, createdAt: new Date().toISOString(), source: 'android-capture-intent' });
@@ -261,6 +262,53 @@ try {
         await sleep(2000);
         nodes = await revealRow(title(1));
         check(nodes === null, '(4) CoreWork\'s refresh redrew the widget without the completed row');
+    }
+
+
+    {
+        const batch = [title(6), title(7), title(8)];
+        const before = batch.map((text) => stored(text)[0]);
+        nodes = (await revealRow(title(8))) ?? fail(`no row ${title(8)}`);
+        const shown = hostedRows(nodes);
+        for (const text of batch) if (!shown.includes(text)) fail(`(4b) ${text} is not on screen with the other two`);
+        const tappedAt = [];
+        for (const [index, text] of batch.entries()) {
+            if (index > 0) await sleep(1600);
+            await tapRing(nodes, text);
+            tappedAt.push(Date.now());
+        }
+        const lastUndoEnds = tappedAt[2] + 3000;
+        let heldReads = 0;
+        let laterReads = 0;
+        for (const deadline = Date.now() + 30_000; ;) {
+            const readStarted = Date.now();
+            const rows = hostedRows(await screen());
+            const readEnded = Date.now();
+            const present = batch.filter((text) => rows.includes(text));
+            if (present.length === 0) break;
+            if (present.length < batch.length) fail(`(4b) a read showed only part of the batch removed: ${present.join(', ')} still shown`);
+            if (readEnded < lastUndoEnds) {
+                if (JSON.stringify(rows) !== JSON.stringify(shown)) fail(`(4b) a read before the last Undo ended showed different rows: ${rows.join(', ')}`);
+                if (readStarted >= tappedAt[0] + 3000) heldReads += 1;
+            } else {
+                laterReads += 1;
+            }
+            if (Date.now() > deadline) fail('(4b) the three checked rows never left');
+        }
+        check(tappedAt[2] - tappedAt[0] >= 3000, `(4b) the last tap came ${tappedAt[2] - tappedAt[0]} ms after the first, after the first row's own Undo ended`);
+        check(heldReads >= 1, `(4b) ${heldReads} screen read(s) taken after the first row's own Undo ended and finished before the last Undo ended showed exactly the rows from before the taps`);
+        check(true, `(4b) no screen read showed only part of the batch removed (${laterReads} read(s) after the last Undo ended, about one per second)`);
+        await waitUntil('CoreWork to store the three check-offs', () => batch.every((text) => stored(text)[0]?.status === 'done'), 60_000, 2000);
+        await sleep(3000);
+        for (const [index, text] of batch.entries()) {
+            const [after] = stored(text);
+            check(after.status === 'done' && after.rev === before[index].rev + 1 && queuedFor(before[index].id).length === 0, `(4b) ${text} is done after one store write (rev ${before[index].rev} to ${after.rev}) and its queue entry is gone`);
+        }
+        await waitUntil('the held count in the log', () => allLogs().includes('releaseCheck=v1.3.9/widget-checkoff-batch'), 30_000);
+        check(true, '(4b) logcat shows the native widget-checkoff-batch line');
+        const coreLogged = await waitUntil('core\'s logger to receive the held count', () => allLogs().split('\n').find((line) => line.includes('info: Native Android widget check-offs held until the last Undo releaseCheck=v1.3.9/widget-checkoff-batch')
+            && line.includes('"scope":"native-android"') && /"count":[1-9]/.test(line)), 30_000);
+        check(Boolean(coreLogged), '(4b) core\'s logger, which writes Settings › Diagnostics when Debug logging is on, received the line with a positive count');
     }
 
 

@@ -1,0 +1,299 @@
+{
+  "baseCommit": "64eb64c35",
+  "baselineSha256": "1306e3b941c0fdaefd21cc2d735e36924558cd51c2947b45d634ba27a0981342",
+  "fixtureSha256": "9a203e42bc0bc0307d5b4a09ca72adc67865780004e585b34c91f4049227d8ac",
+  "command": "TMPDIR=/home/dd/scratch/mindwtr-security-20261111/hardening-tmp FILE_SYNC_PARITY_UPDATE=1 bun run --filter mobile test -- lib/file-sync-parity.test.ts --maxWorkers=1",
+  "reason": "Context-bound MWENC1 format version 2 changes ciphertext authentication and digests. Scenario outcomes, call order, artifact paths, operation options, and byte lengths remain exact.",
+  "changedScenarios": [
+    "03 encrypted SAF writes, twice",
+    "04 enable encryption on a path folder",
+    "05 change the passphrase",
+    "09 no-key discovery",
+    "16 enable encryption on a SAF folder with attachments",
+    "17 enable then disable encryption on a path folder with attachments",
+    "21 unverified encrypted SAF read that is cut off",
+    "28 encrypted SAF write after a peer replaced the read generation"
+  ],
+  "changes": [
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "folder",
+        "content://provider/tree/root/document/root/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 210
+    },
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "folder",
+        "content://provider/tree/root/document/root/data.json.enc.bak"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 210
+    },
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "calls",
+        21,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 280
+    },
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "calls",
+        26,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 280
+    },
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "calls",
+        42,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 280
+    },
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "calls",
+        49,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 280
+    },
+    {
+      "path": [
+        "03 encrypted SAF writes, twice",
+        "calls",
+        57,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 280
+    },
+    {
+      "path": [
+        "04 enable encryption on a path folder",
+        "folder",
+        "file://sync/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "04 enable encryption on a path folder",
+        "calls",
+        34,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "04 enable encryption on a path folder",
+        "calls",
+        39,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "05 change the passphrase",
+        "folder",
+        "file://sync/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "05 change the passphrase",
+        "calls",
+        35,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "05 change the passphrase",
+        "calls",
+        44,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "09 no-key discovery",
+        "folder",
+        "content://provider/tree/root/document/root/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 211
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "folder",
+        "content://provider/tree/root/document/root/attachments/a1.png"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 77
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "folder",
+        "content://provider/tree/root/document/root/attachments/a2.txt"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 84
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "folder",
+        "content://provider/tree/root/document/root/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "calls",
+        19,
+        2
+      ],
+      "kind": "encoded-ciphertext",
+      "length": 77
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "calls",
+        32,
+        2
+      ],
+      "kind": "encoded-ciphertext",
+      "length": 77
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "calls",
+        41,
+        2
+      ],
+      "kind": "encoded-ciphertext",
+      "length": 84
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "calls",
+        48,
+        2
+      ],
+      "kind": "encoded-ciphertext",
+      "length": 84
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "calls",
+        57,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 284
+    },
+    {
+      "path": [
+        "16 enable encryption on a SAF folder with attachments",
+        "calls",
+        62,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 284
+    },
+    {
+      "path": [
+        "17 enable then disable encryption on a path folder with attachments",
+        "calls",
+        39,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 77
+    },
+    {
+      "path": [
+        "17 enable then disable encryption on a path folder with attachments",
+        "calls",
+        48,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 77
+    },
+    {
+      "path": [
+        "17 enable then disable encryption on a path folder with attachments",
+        "calls",
+        59,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "17 enable then disable encryption on a path folder with attachments",
+        "calls",
+        64,
+        2
+      ],
+      "kind": "ciphertext-digest",
+      "length": 213
+    },
+    {
+      "path": [
+        "21 unverified encrypted SAF read that is cut off",
+        "folder",
+        "content://provider/tree/root/document/root/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 204
+    },
+    {
+      "path": [
+        "28 encrypted SAF write after a peer replaced the read generation",
+        "folder",
+        "content://provider/tree/root/document/root/data.json.enc"
+      ],
+      "kind": "ciphertext-digest",
+      "length": 211
+    }
+  ]
+}

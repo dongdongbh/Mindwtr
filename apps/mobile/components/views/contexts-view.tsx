@@ -49,6 +49,9 @@ import {
   type ContextOrTagMatchMode,
   type Task,
   type TaskStatus,
+  type TaskSortBy,
+  sortTasksBy,
+  sortTasksBySavedPreference,
 } from '@mindwtr/core';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
@@ -59,6 +62,7 @@ import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openProjectScreen } from '@/lib/task-meta-navigation';
 import { useToast } from '@/contexts/toast-context';
+import { logInfo } from '@/lib/app-log';
 import { TaskEditModal } from '../task-edit-modal';
 import { TokenPickerModal } from '../token-picker-modal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -76,7 +80,7 @@ type BulkTokenPickerState = {
   action: 'add' | 'remove';
 } | null;
 
-export function ContextsView() {
+export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: string } = {}) {
   const {
     tasks,
     projects,
@@ -109,6 +113,8 @@ export function ContextsView() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [sortOverride, setSortOverride] = useState<TaskSortBy | null>(null);
+  const [appliedInitialFilter, setAppliedInitialFilter] = useState<string | undefined>(undefined);
 
   const tc = useThemeColors();
   const { showToast } = useToast();
@@ -126,12 +132,25 @@ export function ContextsView() {
   const filters = useTaskFilterSelections({ view: 'list', t, visibility: filterVisibility,
     savedFilters: savedContextFilters, rawSavedFilters: settings?.savedFilters,
     getProjectLabel: (id) => id === SAVED_FILTER_NO_PROJECT_ID ? t('taskEdit.noProjectOption') : projectById.get(id)?.title });
+  const { applySaved } = filters;
   const projectFilterOptions = useMemo(() => getFocusProjectFilterOptions(visibleTasks, projects, t), [visibleTasks, projects, t]);
   const saveCriteria = getContextsSaveCriteria(filters.currentCriteria, selectedContexts, matchMode, [searchQuery, filters.searchQuery]);
   const canSave = !filters.activeSavedFilter && saveCriteria !== null && !searchQuery.trim() && !filters.searchQuery.trim();
   const applyContextFilter = (filter: SavedFilter) => {
-    filters.applySaved(filter); setSelectedContexts([]); setMatchMode('all'); setSearchQuery('');
+    filters.applySaved(filter); setSelectedContexts([]); setMatchMode('all'); setSearchQuery(''); setSortOverride(null);
   };
+  useEffect(() => {
+    if (!initialSavedFilterId || appliedInitialFilter === initialSavedFilterId) return;
+    const filter = savedContextFilters.find((item) => item.id === initialSavedFilterId);
+    if (!filter) return;
+    setAppliedInitialFilter(initialSavedFilterId);
+    applySaved(filter);
+    setSelectedContexts([]); setMatchMode('all'); setSearchQuery(''); setSortOverride(null);
+    void logInfo('Widget Contexts filter selected', {
+      scope: 'navigation',
+      extra: { releaseCheck: 'v1.3.9/widget-contexts-filter', outcome: 'selected' },
+    });
+  }, [initialSavedFilterId, appliedInitialFilter, savedContextFilters, applySaved]);
   const saveContextFilter = async () => {
     if (!canSave || !saveCriteria || !saveFilterName.trim()) return;
     const stamp = new Date().toISOString();
@@ -156,13 +175,13 @@ export function ContextsView() {
 
 
   const contextsIndex = useMemo(() => buildContextsTokenIndex(scopedTasks, { includeFinished: true }), [scopedTasks]);
-  const model = buildContextsViewModel({
+  const model = useMemo(() => buildContextsViewModel({
     index: contextsIndex,
     settings,
     selectedTokens: selectedContexts,
     matchMode,
     searchQuery,
-  });
+  }), [contextsIndex, settings, selectedContexts, matchMode, searchQuery]);
 
   const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
   const tasksById = useMemo(
@@ -178,7 +197,14 @@ export function ContextsView() {
     const resolved = resolveContextsMatchMode(selectedContexts, matchMode);
     if (resolved !== matchMode) setMatchMode(resolved);
   }, [selectedContexts, matchMode]);
-  const sortedTasks = model.tasks;
+  const savedSort = filters.activeSavedFilter?.sortBy;
+  const activeSortOverride = filters.activeSavedFilter ? sortOverride : null;
+  const sortBy = activeSortOverride ?? (savedSort && savedSort !== 'default' ? savedSort : model.sortBy);
+  const savedSortOrder = filters.activeSavedFilter?.sortOrder;
+  const sortedTasks = useMemo(() => activeSortOverride ? sortTasksBy(model.tasks, activeSortOverride)
+    : savedSort && savedSort !== 'default' ? sortTasksBySavedPreference(model.tasks, savedSort, {
+      projects, prioritizeByPriority: features.priorities, sortOrder: savedSortOrder,
+    }) : model.tasks, [activeSortOverride, model.tasks, savedSort, projects, features.priorities, savedSortOrder]);
   const {
     bulkActionLabel,
     bulkActionLoading,
@@ -270,7 +296,7 @@ export function ContextsView() {
   const emptyState = getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: selectedContexts }, t);
 
   const sortAccessibilityLabel = getTaskListHeaderText({
-    sortByLabel: getTaskSortByLabel(model.sortBy, t),
+    sortByLabel: getTaskSortByLabel(sortBy, t),
     hasActiveFilters: false,
     filterActiveCount: 0,
     t,
@@ -299,6 +325,8 @@ export function ContextsView() {
       });
     });
   };
+
+  if (initialSavedFilterId && appliedInitialFilter !== initialSavedFilterId) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -626,10 +654,11 @@ export function ContextsView() {
         <TaskListSortModal
           onClose={() => setSortModalVisible(false)}
           onSelect={(option) => {
-            void updateSettings({ taskSortBy: option });
+            if (filters.activeSavedFilter) setSortOverride(option);
+            else void updateSettings({ taskSortBy: option });
             setSortModalVisible(false);
           }}
-          sortBy={model.sortBy}
+          sortBy={TASK_LIST_SORT_OPTIONS.find((option) => option === sortBy) ?? model.sortBy}
           sortOptions={TASK_LIST_SORT_OPTIONS}
           t={t}
           themeColors={tc}

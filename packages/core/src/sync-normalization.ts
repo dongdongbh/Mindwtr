@@ -1,4 +1,4 @@
-import { normalizeTaskReminderPolicy } from './task-reminder-policy';
+import { isSingleTaskReminder, normalizeTaskReminderPolicy } from './task-reminder-policy';
 import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from './color-constants';
 import { isTaxonomyCatalog } from './taxonomy-catalog';
 import { runToEnd, SLICE_ITEMS, type CooperativePass } from './cooperative';
@@ -253,7 +253,7 @@ export const normalizeTaskForSyncMerge = (
         timeEstimate: normalized.timeEstimate,
         timeSpentMinutes: normalized.timeSpentMinutes,
         showFutureRecurrence: hasRecurrence && normalizeSyncedBoolean(normalized.showFutureRecurrence) ? true : undefined,
-        suppressMindwtrReminders: normalizeSyncedBoolean(normalized.suppressMindwtrReminders),
+        suppressMindwtrReminders: isSingleTaskReminder(normalized) ? true : normalizeSyncedBoolean(normalized.suppressMindwtrReminders),
         reminderPolicy: normalizeTaskReminderPolicy(normalized.reminderPolicy),
         repeatReminderMinutes: normalized.repeatReminderMinutes,
         dueReminderLeadMinutes: normalized.dueReminderLeadMinutes,

@@ -1061,7 +1061,7 @@ export function TaskItemFieldRenderer({
                             const isDefault = draft.reminderPolicy === 'inherit' && (!showRepeat || current === 0) && !(draft.dueReminderLeadMinutes ?? 0);
                             const summary = [
                                 `${reminders.policyLabel}: ${reminders.policyValueLabel}`,
-                                ...((draft.dueReminderLeadMinutes ?? 0) > 0 ? [`${reminders.advanceLabel}: ${reminders.advanceValueLabel}`] : []),
+                                ...(reminders.showDueAdvance && (draft.dueReminderLeadMinutes ?? 0) > 0 ? [`${reminders.advanceLabel}: ${reminders.advanceValueLabel}`] : []),
                                 ...(showRepeat ? [`${repeatLabel}: ${reminders.repeatValueLabel}`] : []),
                             ].join(' · ');
                             return (
@@ -1094,7 +1094,7 @@ export function TaskItemFieldRenderer({
                                                 <span className="mt-1 block leading-snug">{reminders.hint}</span>
                                                 {reminders.disabledHint && <span className="mt-1 block leading-snug">{reminders.disabledHint}</span>}
                                             </label>
-                                            <label className="block text-xs text-muted-foreground">
+                                            {reminders.showDueAdvance && <label className="block text-xs text-muted-foreground">
                                                 <span>{reminders.advanceLabel}</span>
                                                 <select
                                                     aria-label={reminders.advanceLabel}
@@ -1106,7 +1106,7 @@ export function TaskItemFieldRenderer({
                                                     {reminders.advanceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                                                 </select>
                                                 {reminders.advanceHint && <span className="mt-1 block leading-snug">{reminders.advanceHint}</span>}
-                                            </label>
+                                            </label>}
                                             {showRepeat && (
                                                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={repeatLabel}>
                                                     <span className="text-xs text-muted-foreground">{repeatLabel}</span>

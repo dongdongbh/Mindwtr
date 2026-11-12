@@ -206,7 +206,10 @@ pub(crate) const TRANSITION_DISABLE: &str = "disable";
 pub(crate) const TRANSITION_CHANGE_PASSPHRASE: &str = "change-passphrase";
 
 fn valid_transition_kind(kind: &str) -> bool {
-    matches!(kind, TRANSITION_ENABLE | TRANSITION_DISABLE | TRANSITION_CHANGE_PASSPHRASE)
+    matches!(
+        kind,
+        TRANSITION_ENABLE | TRANSITION_DISABLE | TRANSITION_CHANGE_PASSPHRASE | "upgrade"
+    )
 }
 
 pub(crate) fn state_holds_key(state: &str) -> bool {

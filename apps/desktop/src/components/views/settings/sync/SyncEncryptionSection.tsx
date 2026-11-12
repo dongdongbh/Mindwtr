@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isSyncEncryptionUpgradeAvailable } from '@mindwtr/core/sync-encryption-card';
 import { Eye, EyeOff, Lock, ExternalLink } from 'lucide-react';
 
 import { SettingField } from '../SettingRow';
@@ -9,7 +10,7 @@ import type { SettingsSyncPageProps } from './types';
 type SyncEncryptionSectionProps = Pick<SettingsSyncPageProps, 't' | 'encryption'>;
 
 
-type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
+type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock' | 'upgrade';
 
 const INPUT_CLS = 'w-full bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-primary';
 const PRIMARY_BUTTON_CLS = 'px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 whitespace-nowrap disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed';
@@ -54,6 +55,10 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
     };
 
     const submit = async () => {
+        if (flow === 'upgrade') {
+            if (await encryption.upgrade(currentPassphrase)) closeFlow();
+            return;
+        }
         if (flow === 'unlock') {
             if (await encryption.unlock(currentPassphrase)) closeFlow();
             return;
@@ -103,7 +108,10 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
         );
     }
 
-    const errorMessage = mismatch
+    const upgradeFailure = error === 'legacy-upgrade-required' ? t.syncEncryptionErrorLegacy
+        : error === 'reconciliation-required' ? t.syncEncryptionErrorReconciliation
+            : error === 'trusted-local-required' ? t.syncEncryptionErrorTrustedLocal : null;
+    const errorMessage = upgradeFailure ?? (mismatch
         ? t.syncEncryptionErrorMismatch
         : error === 'wrong-passphrase'
             ? t.syncEncryptionErrorWrongPassphrase
@@ -117,7 +125,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                             ? t.syncEncryptionErrorTransitionIncomplete
                             : error === 'generic'
                                 ? t.syncEncryptionErrorGeneric
-                                : null;
+                                : null);
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments' ? t.syncEncryptionProgressAttachments : t.syncEncryptionProgressDocuments} ${progress.completed} / ${progress.total}`
@@ -285,13 +293,13 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                         <p className="text-sm text-muted-foreground">{t.syncEncryptionLockedDesc}</p>
                         <p className="text-sm text-muted-foreground">{t.syncEncryptionPausedDesc}</p>
                         <p className="text-sm text-muted-foreground">{t.syncEncryptionLockedRecheckHint}</p>
-                        {flow !== 'unlock' ? (
+                        {flow === 'none' ? (
                             <div className="flex justify-end">
                                 <button type="button" onClick={() => openFlow('unlock')} className={PRIMARY_BUTTON_CLS}>
                                     {t.syncEncryptionUnlock}
                                 </button>
                             </div>
-                        ) : (
+                        ) : flow === 'unlock' ? (
                             <div className="space-y-4 border-t border-border pt-4">
                                 {passphraseInput(t.syncEncryptionPassphrase, currentPassphrase, setCurrentPassphrase, true)}
                                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -317,8 +325,23 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                                     </button>
                                 </div>
                             </div>
-                        )}
+                        ) : null}
                     </>
+                )}
+
+                {flow === 'none' && isSyncEncryptionUpgradeAvailable(encryption) && (
+                    <div className="flex justify-end">
+                        <button type="button" onClick={() => openFlow('upgrade')} disabled={busy} className={SECONDARY_BUTTON_CLS}>
+                            {t.syncEncryptionUpgrade}
+                        </button>
+                    </div>
+                )}
+                {flow === 'upgrade' && (
+                    <div className="space-y-4 border-t border-border pt-4">
+                        <p className="text-sm text-warning">{t.syncEncryptionUpgradeWarning}</p>
+                        {passphraseInput(t.syncEncryptionCurrentPassphrase, currentPassphrase, setCurrentPassphrase, true)}
+                        {formActions(t.syncEncryptionUpgrade, !currentPassphrase)}
+                    </div>
                 )}
 
                 {progressLabel && <p className="text-sm text-muted-foreground" role="status">{progressLabel}</p>}

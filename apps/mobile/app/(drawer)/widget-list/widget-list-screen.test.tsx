@@ -38,6 +38,7 @@ vi.mock('@/hooks/use-local-day-key', () => ({ useLocalDayKey: () => state.dayKey
 vi.mock('@/lib/task-meta-navigation', () => ({ openProjectScreen: vi.fn(), openContextsScreen: vi.fn() }));
 vi.mock('@/components/swipeable-task-item', () => ({ SwipeableTaskItem: (props: object) => React.createElement('TaskRow', props) }));
 vi.mock('@/components/task-edit-modal', () => ({ TaskEditModal: (props: object) => React.createElement('TaskModal', props) }));
+vi.mock('@/components/views/contexts-view', () => ({ ContextsView: (props: object) => React.createElement('ContextsView', props) }));
 vi.mock('react-native', async (original) => ({
   ...await original<typeof import('react-native')>(),
   FlatList: (props: object) => React.createElement('TaskRows', props),
@@ -56,6 +57,33 @@ describe('WidgetListScreen', () => {
     vi.clearAllMocks();
   });
   afterEach(() => vi.useRealTimers());
+  it('opens editable Contexts for a saved Contexts widget filter after cold data loads', async () => {
+    state.id = 'filter:desk';
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<WidgetListScreen />); });
+    expect(tree.root.findAllByType('ContextsView' as never)).toHaveLength(0);
+    state.data.settings = { savedFilters: [{ id: 'desk', name: 'Desk', view: 'contexts', criteria: { statuses: ['someday'] }, sortBy: 'title', sortOrder: 'desc', createdAt: '2026-01-01', updatedAt: '2026-01-01' }] };
+    await act(async () => { tree.update(<WidgetListScreen />); });
+    expect(tree.root.findByType('ContextsView' as never).props.initialSavedFilterId).toBe('desk');
+    expect(tree.root.findAllByType('TaskRows' as never)).toHaveLength(0);
+    state.data.settings = { savedFilters: [{ ...state.data.settings.savedFilters![0], deletedAt: '2026-01-02' }] };
+    await act(async () => { tree.update(<WidgetListScreen />); });
+    expect(tree.root.findAllByType('ContextsView' as never)).toHaveLength(0);
+    expect(tree.root.findByType('TaskRows' as never).props.data).toEqual([]);
+    await act(async () => { tree.unmount(); });
+  });
+  it('opens a warm saved Contexts link without changing other saved-filter destinations', async () => {
+    state.id = 'filter:desk';
+    state.data.settings = { savedFilters: [{ id: 'desk', name: 'Desk', view: 'contexts', criteria: {}, createdAt: '2026-01-01', updatedAt: '2026-01-01' }] };
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<WidgetListScreen />); });
+    expect(tree.root.findByType('ContextsView' as never).props.initialSavedFilterId).toBe('desk');
+    state.id = 'filter:missing';
+    await act(async () => { tree.update(<WidgetListScreen />); });
+    expect(tree.root.findAllByType('ContextsView' as never)).toHaveLength(0);
+    expect(tree.root.findByType('TaskRows' as never).props.data).toEqual([]);
+    await act(async () => { tree.unmount(); });
+  });
   it('opens the full Upcoming list and refreshes its eligibility on the next local day', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 9, 17, 12));

@@ -1,5 +1,6 @@
 
 export const ptOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Lembrete inválido: use uma duração compatível e data e hora explícitas",
     'task.copyDetails': "Copiar detalhes da tarefa",
     "taskEdit.startAdvanceReminderLabel": "Antes do início",
     "settings.speechUseGemini": "Usar Gemini",
@@ -179,7 +180,7 @@ export const ptOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Arquivo',
 
 
-        'quickAdd.help': 'A adição rápida suporta /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
+        'quickAdd.help': 'A adição rápida suporta /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> ou !Area, @context, #tag, +Project, %Person (ou %"Full Name").',
         'quickAdd.example': 'Exemplo: Ligue para a mãe /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tente: Ligue para a mãe /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Ajuda da sintaxe de adição rápida',
@@ -1019,6 +1020,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Após 5 minutos',
         'settings.mobile.appLockRelockAfter15': 'Após 15 minutos',
         'appLock.title': 'Mindwtr está bloqueado',
+        "appLock.loadFailed": "O Mindwtr não conseguiu carregar os seus dados. Tente novamente.",
         'appLock.description': 'Use o bloqueio do dispositivo para abrir o Mindwtr. Isso protege a visualização do app, não o banco de dados no dispositivo.',
         'appLock.prompt': 'Desbloquear Mindwtr',
         'appLock.enablePrompt': 'Ativar bloqueio do Mindwtr',
@@ -1872,6 +1874,9 @@ export const ptOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Usar padrão ({value})",
         "taskEdit.reminderPolicySend": "Enviar",
         "taskEdit.reminderPolicySkip": "Ignorar",
+        "taskEdit.reminderPolicyStart": "Apenas início",
+        "taskEdit.reminderPolicyDue": "Apenas vencimento",
+        "taskEdit.reminderPolicySingleHint": "Requer uma hora explícita. Envia um lembrete na hora escolhida ou, em vez disso, com a antecedência configurada. Os lembretes repetidos são ignorados. Os lembretes de Foco e revisão não mudam.",
         "taskEdit.reminderPolicyHint": "Os lembretes de início e vencimento precisam de uma hora explícita. Os lembretes de Foco e revisão não mudam.",
         "taskEdit.remindersDisabledHint": "Os lembretes de tarefas estão desativados nas configurações de Notificações deste dispositivo.",
         "settings.taskReminderDefault": "Lembretes padrão de tarefas",

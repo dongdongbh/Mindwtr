@@ -631,6 +631,7 @@ async function getTauriFetch(): Promise<typeof fetch | undefined> {
 
 const tauriOrWebviewFetch: typeof fetch = async (input, init) => ((await getTauriFetch()) ?? fetch)(input, init);
 
+let desktopEncryptionFileLease: string | null = null;
 let desktopEncryptionService: SyncEncryptionService | null = null;
 
 type DropboxCredentialHandleOptions = {
@@ -1677,6 +1678,7 @@ export class SyncService {
 
                     if (backend === 'off') return { backend: 'off' };
                     if (backend === 'webdav') return { backend: 'webdav' };
+                    if (backend === 'file') return { backend: 'file', syncPath: await SyncService.getSyncPath() };
 
                     if (backend === 'cloud' && (await SyncService.getCloudProvider()) === 'dropbox') {
                         return { backend: 'dropbox' };
@@ -1689,6 +1691,43 @@ export class SyncService {
                 invalidateCycleProofs: async () => {
                     clearFastSyncState();
                     clearAttachmentPresenceStamp();
+                },
+            },
+            readTrustedLocalData: async () => {
+                await syncServiceDependencies.flushPendingSave();
+                if (!isTauriRuntimeEnv()) throw new Error('SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED');
+                return invokeSyncNative<AppData>('read_sync_encryption_trusted_local');
+            },
+            fileSync: {
+                acquireLease: async (path) => {
+                    const token = await acquireFileSyncLease(path);
+                    desktopEncryptionFileLease = token;
+                    return token;
+                },
+                revalidateLease: (token) => invokeSyncNative('file_sync_encryption_artifact', { token, request: { op: 'revalidate' } }),
+                releaseLease: async (token) => {
+                    try { await releaseFileSyncLease(token); }
+                    finally { if (desktopEncryptionFileLease === token) desktopEncryptionFileLease = null; }
+                },
+                isLeaseIdentityLostError: (error) => /identity|authority|lease/i.test(String(error)),
+                openRemotePort: async () => {
+                    const token = desktopEncryptionFileLease;
+                    if (!token) throw new Error('File Sync encryption upgrade requires a held lease');
+                    const call = <T,>(request: Record<string, unknown>) =>
+                        invokeSyncNative<T>('file_sync_encryption_artifact', { token, request });
+                    const read = async (name: string) => {
+                        const result = await call<{ bytes: number[] | null; version: string | null }>({ op: 'read', name });
+                        return { bytes: result.bytes ? new Uint8Array(result.bytes) : null, version: result.version };
+                    };
+                    return {
+                        list: () => call<{ name: string; kind: 'document' | 'attachment' }[]>({ op: 'list' }),
+                        read,
+                        write: async (name, bytes, expectedVersion) => {
+                            await call({ op: 'write', name, bytes: Array.from(bytes), expectedVersion });
+                            return read(name);
+                        },
+                        remove: (name, expectedVersion) => call<void>({ op: 'remove', name, expectedVersion }),
+                    };
                 },
             },
             fetch: tauriOrWebviewFetch,
@@ -1736,6 +1775,13 @@ export class SyncService {
             }
             await SyncService.encryptionService().enableSyncEncryption(passphrase, { onProgress });
         });
+    }
+
+    static async upgradeSyncEncryption(
+        passphrase: string,
+        onProgress?: (progress: SyncEncryptionTransitionProgress) => void,
+    ): Promise<void> {
+        return runSyncRestoreExclusive(() => SyncService.encryptionService().upgradeSyncEncryption(passphrase, { onProgress }));
     }
 
     static async disableSyncEncryption(

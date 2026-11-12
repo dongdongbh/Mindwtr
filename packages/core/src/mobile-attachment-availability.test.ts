@@ -57,7 +57,7 @@ const setup = (options: {
     fs: memory.fs,
     files,
     crypto: defaultSyncCryptoPrimitives,
-    encryption: { logSyncEncryptionEvent: async () => undefined },
+    encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: options.material ? 'enabled' : 'off' }) },
     installer: { installAttachmentFileGeneration },
     installerMayBeMissing: () => false,
     timersPaused: () => false,
@@ -311,7 +311,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     const material: SyncKeyMaterial = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
     const preparePlaintextDownload = vi.fn(async () => sourceReply());
     const { availability, common, memory, webdavGetFile } = setup({ storage: webdav, material, preparePlaintextDownload });
-    const sealed = await common.sealAttachmentBytesForUpload(REMOTE, material);
+    const sealed = await common.sealAttachmentBytesForUpload(REMOTE, material, 'attachments/att-1.txt');
     webdavGetFile.mockResolvedValueOnce(toArrayBuffer(sealed));
     const hash = (await computeSha256Hex(REMOTE))!;
 
@@ -326,8 +326,9 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
   it('never prepares ciphertext when the encrypted location is locked', async () => {
     const material: SyncKeyMaterial = { key: new Uint8Array(32).fill(7), salt: new Uint8Array(16).fill(1), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS };
     const preparePlaintextDownload = vi.fn(async () => sourceReply());
-    const { availability, common, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
-    const sealed = await common.sealAttachmentBytesForUpload(REMOTE, material);
+    const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
+    const { common } = setup({ material });
+    const sealed = await common.sealAttachmentBytesForUpload(REMOTE, material, 'attachments/att-1.txt');
     webdavGetFile.mockResolvedValueOnce(toArrayBuffer(sealed));
 
     await expect(availability.prepareAttachmentAvailableDetailed!(remoteAttachment())).resolves.toEqual({ status: 'unavailable' });

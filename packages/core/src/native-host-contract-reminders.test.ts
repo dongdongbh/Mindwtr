@@ -805,7 +805,8 @@ describe('native host contract: reminders', () => {
     it.each([
         { platform: 'android', policy: 'skip' }, { platform: 'ios', policy: 'skip' },
         { platform: 'android', policy: 'inherit' }, { platform: 'ios', policy: 'inherit' },
-    ] as const)('withdraws and refuses date Snoozes under $policy Skip on $platform, preserving review Snoozes', async ({ platform, policy }) => {
+        { platform: 'android', policy: 'due' }, { platform: 'ios', policy: 'start' },
+    ] as const)('withdraws and refuses date Snoozes under $policy policy on $platform, preserving review Snoozes', async ({ platform, policy }) => {
         freezeClock();
         await seed({ taskReminderDefault: 'send' }, [task({ id: 'snoozed', reminderPolicy: 'inherit', dueDate: '2026-09-28T11:00:00.000Z' })]);
         const host = await openHost(platform);
@@ -821,7 +822,7 @@ describe('native host contract: reminders', () => {
             expect(made.schedule).toEqual([alarm]);
             snoozes.push({ kind, alarm, made });
         }
-        if (policy === 'skip') await useTaskStore.getState().updateTask('snoozed', { reminderPolicy: 'skip' });
+        if (policy !== 'inherit') await useTaskStore.getState().updateTask('snoozed', { reminderPolicy: policy });
         else await useTaskStore.getState().updateSettings({ taskReminderDefault: 'skip' });
         for (const { kind, alarm, made } of snoozes) {
             const rebuilt = value(await host.planReminderAlarms({ storedAlarms: null, storedState: made.state, permissionGranted: true, remake: 'all' }));
@@ -829,16 +830,33 @@ describe('native host contract: reminders', () => {
             const replay = value(await host.planReminderSnooze({ storedState: made.stateAhead, alarm, permissionGranted: true }));
             if (kind === 'task-review') {
                 expect(rebuilt.cancel).toEqual([]);
-                expect(rebuilt.schedule).toEqual([alarm]);
+                expect(rebuilt.schedule.filter(item => item.key.startsWith('snooze:'))).toEqual([alarm]);
                 expect(fresh.schedule).toEqual([alarm]);
                 expect(replay.schedule).toEqual([alarm]);
             } else {
                 expect(rebuilt.cancel).toEqual([{ key: alarm.key, id: alarm.id, reason: 'withdrawn' }]);
-                expect(rebuilt.schedule).toEqual([]);
+                expect(rebuilt.schedule.filter(item => item.key.startsWith('snooze:'))).toEqual([]);
                 expect(JSON.parse(rebuilt.state)[alarm.key]).toBeUndefined();
                 expect(fresh).toEqual({ schedule: [], stateAhead: null, state: null });
                 expect(replay).toEqual({ schedule: [], stateAhead: null, state: null });
             }
+        }
+    });
+
+    it.each(['start', 'due'] as const)('withdraws selected %s Snoozes when device reminders are disabled', async (reminderPolicy) => {
+        for (const setting of ['notificationsEnabled', reminderPolicy === 'start' ? 'startDateNotificationsEnabled' : 'dueDateNotificationsEnabled']) {
+            freezeClock();
+            await seed({}, [task({ id: 'selective-snooze', reminderPolicy, startTime: '2026-09-28T11:00:00.000Z', dueDate: '2026-09-28T12:00:00.000Z' })]);
+            const host = await openHost();
+            const fired = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true })).schedule[0];
+            const alarm = value(await host.snoozeReminder({ requestId: generateUUID(), requestedAt: Date.now(), details: fired.details }));
+            const made = value(await host.planReminderSnooze({ storedState: null, alarm, permissionGranted: true }));
+            expect(made.schedule).toEqual([alarm]);
+            await useTaskStore.getState().updateSettings({ [setting]: false });
+            expect(value(await host.planReminderSnooze({ storedState: null, alarm, permissionGranted: true })).schedule).toEqual([]);
+            const rebuilt = value(await host.planReminderAlarms({ storedAlarms: null, storedState: made.state, permissionGranted: true, remake: 'all' }));
+            expect(rebuilt.schedule).toEqual([]);
+            expect(rebuilt.cancel).toContainEqual({ key: alarm.key, id: alarm.id, reason: 'withdrawn' });
         }
     });
 

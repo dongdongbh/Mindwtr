@@ -95,6 +95,7 @@ vi.mock('@/hooks/use-theme-tokens', () => ({
 }));
 
 vi.mock('@/lib/mobile-app-lock', () => ({
+    MobileAppLockEnableContext: React.createContext<() => void>(() => undefined),
     authenticateWithDeviceLock: vi.fn(async () => true),
     getMobileAppLockErrorKey: () => 'settings.mobileAppLockUnavailable',
 }));

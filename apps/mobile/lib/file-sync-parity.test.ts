@@ -356,7 +356,7 @@ const scenarios: Record<string, (material: SyncKeyMaterial) => Promise<unknown>>
     return pickAndParseSyncFolder().catch((error: Error) => error.message);
   },
   '09 no-key discovery': async (material) => {
-    fs.files.set(`${SAF}/data.json.enc`, await encryptSyncArtifact(json('peer'), material, mobileSyncCryptoPrimitives));
+    fs.files.set(`${SAF}/data.json.enc`, await encryptSyncArtifact(json('peer'), material, mobileSyncCryptoPrimitives, { kind: 'document' }));
     return readSyncFileVersioned(SAF_SYNC_URI).catch((error: Error) => error.name);
   },
   '10 peer-disabled discovery': async (material) => {
@@ -428,7 +428,7 @@ const scenarios: Record<string, (material: SyncKeyMaterial) => Promise<unknown>>
     return readSyncFileVersioned(SAF_SYNC_URI);
   },
   '21 unverified encrypted SAF read that is cut off': async (material) => {
-    const sealed = await encryptSyncArtifact(json('sealed'), material, mobileSyncCryptoPrimitives);
+    const sealed = await encryptSyncArtifact(json('sealed'), material, mobileSyncCryptoPrimitives, { kind: 'document' });
     fs.files.set(`${SAF}/data.json.enc`, sealed.slice(0, sealed.length - 9));
     fault.unverified = true;
     return readSyncFileVersioned(SAF_SYNC_URI, { material });
@@ -468,9 +468,9 @@ const scenarios: Record<string, (material: SyncKeyMaterial) => Promise<unknown>>
     await writeSyncFile(`${PATH}/data.json`, appData('mine'), { expectedFingerprint: remote.fingerprint });
   },
   '28 encrypted SAF write after a peer replaced the read generation': async (material) => {
-    fs.files.set(`${SAF}/data.json.enc`, await encryptSyncArtifact(json('remote'), material, mobileSyncCryptoPrimitives));
+    fs.files.set(`${SAF}/data.json.enc`, await encryptSyncArtifact(json('remote'), material, mobileSyncCryptoPrimitives, { kind: 'document' }));
     const remote = await readSyncFileVersioned(SAF_SYNC_URI, { material });
-    fs.files.set(`${SAF}/data.json.enc`, await encryptSyncArtifact(json('peer'), material, mobileSyncCryptoPrimitives));
+    fs.files.set(`${SAF}/data.json.enc`, await encryptSyncArtifact(json('peer'), material, mobileSyncCryptoPrimitives, { kind: 'document' }));
     await writeSyncFile(SAF_SYNC_URI, appData('mine'), { material, expectedFingerprint: remote.fingerprint });
   },
   '29 iOS bookmarked read': async () => {

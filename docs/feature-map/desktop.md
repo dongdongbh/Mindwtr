@@ -236,7 +236,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Shortcuts: `e` (Vim), `Shift+Enter` (Standard), `Ctrl+E` (Emacs). `Ctrl+Enter` (`Cmd+Enter`) saves. `Esc` cancels.
 - Code: `apps/desktop/src/components/TaskItem.tsx`, `apps/desktop/src/components/Task/TaskItemEditor.tsx`, `apps/desktop/src/components/Task/TaskItemEditorSurface.tsx`, `apps/desktop/src/components/Task/TaskEditorSection.tsx`, `apps/desktop/src/components/Task/TaskItemFieldRenderer.tsx`, `apps/desktop/src/components/Task/fields/TaskMetadataFields.tsx`, `apps/desktop/src/components/Task/fields/DescriptionField.tsx`, `apps/desktop/src/components/Task/fields/RecurrenceField.tsx`, `apps/desktop/src/components/Task/TaskForm/ChecklistField.tsx`, `apps/desktop/src/components/Task/TaskForm/AttachmentsField.tsx`, `apps/desktop/src/components/Task/TaskItemRecurrenceModal.tsx`
 - Checks: `e2e/task-editor-sections.spec.ts`, `e2e/advance-reminder.spec.ts`, `e2e/time-input-format.spec.ts`, `e2e/saved-taxonomy.spec.ts`, `apps/desktop/src/components/Task/TaskItemEditor.test.tsx`, `apps/desktop/src/components/Task/TaskItemFieldRenderer.test.tsx`, `apps/desktop/src/components/Task/TaskEditorSection.test.tsx`, `apps/desktop/src/components/Task/useTaskItemSubmit.test.tsx`, `apps/desktop/src/components/Task/TaskForm/ChecklistField.test.tsx`, `apps/desktop/src/components/Task/TaskForm/AttachmentsField.test.tsx`, `apps/desktop/src/components/Task/TaskItemRecurrenceModal.test.tsx`
-- Notes: Edits live in the Task draft until Save. The default presentation is In-row. Sending a draft back to Inbox drops its Focus star.
+- Notes: Edits live in the Task draft until Save. The default presentation is In-row. Sending a draft back to Inbox drops its Focus star. Attachment links reject network and device paths and unsupported protocols, including browser script, data, and blob URLs. Common local documents and folders open normally; executable files, scripts, shortcuts, app bundles, and unknown file types open their containing folder instead. This also applies to project attachments and Open externally from attachment previews. In the browser, cloud attachments with an inert PDF, raster-image, audio, video, or plain-text MIME can open a preview. HTML, SVG, XHTML, XML, and unknown types download instead; in-app image, audio, and text previews remain available.
 
 ## Task menu
 
@@ -383,6 +383,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Code: `apps/desktop/src/components/views/settings/SettingsSyncPage.tsx`, `apps/desktop/src/components/views/settings/sync/SyncConfigurationSection.tsx`, `apps/desktop/src/components/views/settings/sync/SyncEncryptionSection.tsx`, `apps/desktop/src/components/views/settings/sync/SyncStatusSection.tsx`, `apps/desktop/src/lib/sync-service.ts`
 - Checks: `apps/desktop/src/components/views/settings/sync/SyncConfigurationSection.test.tsx`, `apps/desktop/src/components/views/settings/sync/SyncEncryptionSection.test.tsx`, `apps/desktop/src/components/views/settings/sync/SyncStatusSection.test.tsx`
 - Notes: iCloud shows only on macOS in the default workspace. A new destination stays off until its probe passes (one Sync run). Encryption covers File, WebDAV, and Dropbox only. Real-backend checks follow the sync-device-testing skill.
+- Upgrade: Settings › Sync › Encryption › Upgrade sync encryption opens an explicit current-passphrase confirmation. Update every device first; older clients cannot read the result. The service uses a verified durable local copy and refuses mismatches or unavailable storage. Keep the upgrade passphrase for retained encrypted recovery archives, even after changing the active passphrase. An interrupted format upgrade can retry; other unfinished encryption transitions do not expose this action. No upgrade runs automatically during unlock.
 
 ## Settings › Data
 
@@ -458,3 +459,17 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Code: `apps/desktop/src/lib/web-service-worker.ts`, `apps/desktop/src/main.tsx`
 - Checks: `e2e/service-worker-online.spec.ts`
 - Notes: A worker update never reloads the page or deletes local data.
+
+## Capture reminder syntax (#1545)
+
+- Reach: Quick capture or task capture title, then Save.
+- Syntax: `/due:tomorrow 5pm /remind-due:1d` and `/start:tomorrow 9am /remind-start:30m`. Positive leads require the matching explicit date command with an explicit time. Units are integer `m`, `h`, `d`, `w`; due accepts 0–10080 minutes and start accepts only 0/5/15/30/60. `0m` turns the advance reminder off. Invalid tokens remain visible, show a warning and refuse save. Existing task reminder policy and device notification settings apply.
+- Code: `packages/core/src/quick-add.ts`, `packages/core/src/quick-add-preview.ts`, `packages/core/src/capture.ts`
+- Checks: `packages/core/src/quick-add-reminders.test.ts`, `packages/core/src/task-reminder-policy.test.ts`, `packages/core/src/native-host-contract-prepared-capture.test.ts`, `packages/core/src/native-host-contract-prepared-lines.test.ts`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`
+
+### Selective task reminders (#1547)
+
+- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time; its advance reminder replaces the date-time alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
+- Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
+- Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
+- Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.

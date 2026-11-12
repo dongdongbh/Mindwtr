@@ -2,6 +2,7 @@
 
 
 export const jaOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "無効なリマインダー：対応する期間と明確な日付・時刻を指定してください",
     "taskEdit.startAdvanceReminderLabel": "開始前",
     "taskEdit.advanceReminderLabel": "事前リマインダー",
     "taskEdit.advanceReminderMinutes": "{count} 分前",
@@ -276,7 +277,7 @@ export const jaOverrides: Record<string, string> = {
         'accessibility.mainContent': 'メインコンテンツ',
 
 
-        'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>、 /estimate:45m、/note:<メモ>、/link:<URL>、/energy:<レベル>、/priority:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
+        'quickAdd.help': 'クイック追加では /start:<日時>、/due:<日時>、/review:<日時>, /remind-due:1d, /remind-start:30m、 /estimate:45m、/note:<メモ>、/link:<URL>、/energy:<レベル>、/priority:<レベル>、/next、/*（フォーカスに追加）、/area:<エリア名> または !Area、@context、#tag、+Project、%Person（%"氏名" の形も可）が使えます。期限は時刻を書かない限り日付のみとして扱われます。',
         'quickAdd.example': '例：母に電話する /due:tomorrow @phone',
         'quickAdd.pastedImageTitle': 'スクリーンショット',
         'quickAdd.pastedImageSaving': '画像を添付しています…',
@@ -1437,6 +1438,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5 分後',
         'settings.mobile.appLockRelockAfter15': '15 分後',
         'appLock.title': 'Mindwtr はロックされています',
+        "appLock.loadFailed": "Mindwtr はデータを読み込めませんでした。もう一度お試しください。",
         'appLock.description': '端末のロック解除で Mindwtr を開きます。保護されるのは画面の表示だけで、端末内のデータベースそのものは保護の対象ではありません。',
         'appLock.prompt': 'Mindwtr のロックを解除',
         'appLock.enablePrompt': 'Mindwtr のアプリロックを有効にする',
@@ -1501,6 +1503,11 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncEncryption': '暗号化',
         'settings.syncEncryptionDesc': '同期ファイルをパスフレーズで暗号化します。パスフレーズを持たない端末では読み取れません。',
         'settings.syncEncryptionEnable': '暗号化を有効にする',
+        "settings.syncEncryptionUpgrade": "同期暗号化をアップグレード",
+        "settings.syncEncryptionUpgradeWarning": "最初にすべての端末の Mindwtr を更新してください。古いバージョンではアップグレード後の同期ファイルを読み取れません。検証済みのローカルコピーを使用し、同期コピーと異なる場合は停止します。既存の暗号化コピーは保持されます。 後でパスフレーズを変更しても、保持されたコピーの復元に必要なため、このパスフレーズを保管してください。",
+        "settings.syncEncryptionErrorLegacy": "この同期先は古い暗号化を使用しています。すべての端末を更新してから「同期暗号化をアップグレード」を選択してください。",
+        "settings.syncEncryptionErrorReconciliation": "ローカルコピーと同期コピーの一致を確認できませんでした。信頼できるコピーを比較し、相違を解消してから再試行してください。同期は一時停止したままです。",
+        "settings.syncEncryptionErrorTrustedLocal": "アップグレード前に、この端末で保存済みの完全なローカルライブラリを開いてください。同期は一時停止したままです。",
         'settings.syncEncryptionPassphrase': 'パスフレーズ',
         'settings.syncEncryptionPassphraseConfirm': 'パスフレーズの確認',
         'settings.syncEncryptionCurrentPassphrase': '現在のパスフレーズ',
@@ -3092,6 +3099,9 @@ export const jaOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "既定値を使う（{value}）",
         "taskEdit.reminderPolicySend": "送信",
         "taskEdit.reminderPolicySkip": "スキップ",
+        "taskEdit.reminderPolicyStart": "開始のみ",
+        "taskEdit.reminderPolicyDue": "期限のみ",
+        "taskEdit.reminderPolicySingleHint": "時刻の指定が必要です。選択した時刻に1回通知します。事前リマインダーを設定した場合は、代わりにその時刻に通知します。繰り返し通知は無視されます。フォーカスとレビューの通知は変わりません。",
         "taskEdit.reminderPolicyHint": "開始・期限のリマインダーには時刻の指定が必要です。フォーカスとレビューの通知は変わりません。",
         "taskEdit.remindersDisabledHint": "この端末の通知設定でタスクのリマインダーがオフになっています。",
         "settings.taskReminderDefault": "タスクリマインダーの既定値",

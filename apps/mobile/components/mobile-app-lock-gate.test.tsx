@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppState, Modal, Platform, type AppStateStatus } from 'react-native';
 import { useTaskStore, type MobileAppLockRelockDelayMinutes } from '@mindwtr/core';
 
+import { MobileAppLockEnableContext } from '@/lib/mobile-app-lock';
+import { MobileAppLockGate } from './mobile-app-lock-gate';
+
 const authenticateWithDeviceLockMock = vi.hoisted(() => vi.fn());
 const logInfoMock = vi.hoisted(() => vi.fn());
 
@@ -32,7 +35,6 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 vi.mock('lucide-react-native', () => ({ LockKeyhole: (props: any) => React.createElement('LockKeyhole', props) }));
 
-import { MobileAppLockGate } from './mobile-app-lock-gate';
 
 const textNode = (root: ReactTestInstance, text: string) => root.findAll((node) => (
   String(node.type) === 'Text' && node.props.children === text
@@ -43,7 +45,7 @@ describe('MobileAppLockGate', () => {
     authenticateWithDeviceLockMock.mockResolvedValue({ success: false, reason: 'failed' });
     let tree!: ReactTestRenderer;
     await act(async () => {
-      tree = create(<MobileAppLockGate enabled><></></MobileAppLockGate>);
+      tree = create(<MobileAppLockGate securityReady enabled><></></MobileAppLockGate>);
     });
 
     expect(textNode(tree.root, 'Mindwtr is locked').props.accessibilityRole).toBe('header');
@@ -91,7 +93,7 @@ describe('MobileAppLockGate', () => {
     const coldStart = async () => {
       let tree!: ReactTestRenderer;
       await act(async () => {
-        tree = create(<MobileAppLockGate enabled>{React.createElement('Content')}</MobileAppLockGate>);
+        tree = create(<MobileAppLockGate securityReady enabled>{React.createElement('Content')}</MobileAppLockGate>);
       });
       mounted = tree;
       expect(shows(tree)).toBe(false);
@@ -149,7 +151,7 @@ describe('MobileAppLockGate', () => {
       authenticateWithDeviceLockMock.mockResolvedValueOnce({ success: false, reason: 'cancelled' });
       let tree!: ReactTestRenderer;
       await act(async () => {
-        tree = create(<MobileAppLockGate enabled onLockedChange={onLockedChange}><></></MobileAppLockGate>);
+        tree = create(<MobileAppLockGate securityReady enabled onLockedChange={onLockedChange}><></></MobileAppLockGate>);
       });
       mounted = tree;
       expect(onLockedChange.mock.calls).toEqual([[true]]);
@@ -188,10 +190,11 @@ describe('MobileAppLockGate', () => {
         contentMounts = 0;
         let tree!: ReactTestRenderer;
         await act(async () => {
-          tree = create(<MobileAppLockGate enabled><MountCounter /></MobileAppLockGate>);
+          tree = create(<MobileAppLockGate securityReady enabled><MountCounter /></MobileAppLockGate>);
         });
         mounted = tree;
         expect(lockModal(tree).props.visible).toBe(true);
+        expect(contentMounts).toBe(0);
         await wait(300);
         return tree;
       };
@@ -199,6 +202,120 @@ describe('MobileAppLockGate', () => {
       const privacyCover = (tree: ReactTestRenderer) => tree.root.findAll((node) => (
         String(node.type) === 'View' && node.props.testID === 'app-lock-privacy-cover'
       ));
+
+      it('holds stale disabled backup content until canonical security is available and authentication succeeds', async () => {
+        authenticateWithDeviceLockMock.mockResolvedValue({ success: false, reason: 'cancelled' });
+        let tree!: ReactTestRenderer;
+        contentMounts = 0;
+        await act(async () => {
+          tree = create(<MobileAppLockGate enabled={false} securityReady={false}><MountCounter /></MobileAppLockGate>);
+        });
+        mounted = tree;
+        expect(contentMounts).toBe(0);
+        expect(shows(tree)).toBe(false);
+        await wait(300);
+        expect(authenticateWithDeviceLockMock).not.toHaveBeenCalled();
+        await act(async () => {
+          tree.update(<MobileAppLockGate enabled securityReady><MountCounter /></MobileAppLockGate>);
+        });
+        expect(lockModal(tree).props.visible).toBe(true);
+        expect(contentMounts).toBe(0);
+        await wait(300);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(1);
+        expect(contentMounts).toBe(0);
+        authenticateWithDeviceLockMock.mockResolvedValue({ success: true });
+        await act(async () => {
+          await tree.root.findAll((node) => String(node.type) === 'TouchableOpacity')[0].props.onPress();
+        });
+        expect(lockModal(tree).props.visible).toBe(false);
+        expect(contentMounts).toBe(1);
+      });
+
+      it('offers a retry without mounting private content when canonical storage fails', async () => {
+        const retry = vi.fn();
+        let tree!: ReactTestRenderer;
+        await act(async () => {
+          tree = create(<MobileAppLockGate enabled={false} securityReady={false} startupLoadFailed onRetryStartup={retry}><MountCounter /></MobileAppLockGate>);
+        });
+        mounted = tree;
+        expect(shows(tree)).toBe(false);
+        expect(textNode(tree.root, 'Mindwtr could not load your data. Try again.')).toBeDefined();
+        await act(async () => {
+          tree.root.findAll((node) => String(node.type) === 'TouchableOpacity')[0].props.onPress();
+        });
+        expect(retry).toHaveBeenCalledOnce();
+        expect(shows(tree)).toBe(false);
+      });
+
+      it('rejects an authentication that completes after canonical readiness is invalidated', async () => {
+        let finishAuthentication: (result: { success: true }) => void = () => undefined;
+        authenticateWithDeviceLockMock.mockReturnValueOnce(new Promise((resolve) => { finishAuthentication = resolve; }));
+        authenticateWithDeviceLockMock.mockResolvedValue({ success: false, reason: 'cancelled' });
+        let tree!: ReactTestRenderer;
+        await act(async () => {
+          tree = create(<MobileAppLockGate enabled securityReady><MountCounter /></MobileAppLockGate>);
+        });
+        mounted = tree;
+        await wait(300);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(1);
+        await act(async () => {
+          tree.update(<MobileAppLockGate enabled securityReady={false}><MountCounter /></MobileAppLockGate>);
+        });
+        await act(async () => { finishAuthentication({ success: true }); });
+        expect(shows(tree)).toBe(false);
+        await act(async () => {
+          tree.update(<MobileAppLockGate enabled securityReady><MountCounter /></MobileAppLockGate>);
+        });
+        await wait(300);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(2);
+        expect(shows(tree)).toBe(false);
+        expect(lockModal(tree).props.visible).toBe(true);
+      });
+
+      it('covers a disabled-to-enabled load instead of assuming an authenticated settings action', async () => {
+        let tree!: ReactTestRenderer;
+        await act(async () => {
+          tree = create(<MobileAppLockGate securityReady enabled={false}>{React.createElement('Content')}</MobileAppLockGate>);
+        });
+        mounted = tree;
+        await act(async () => {
+          tree.update(<MobileAppLockGate securityReady enabled>{React.createElement('Content')}</MobileAppLockGate>);
+        });
+        expect(lockModal(tree).props.visible).toBe(true);
+        await wait(300);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(1);
+      });
+
+      it('accepts only the current mounted settings flow authentication without a second prompt', async () => {
+        let confirmAuthenticatedEnable: () => void = () => undefined;
+        const Settings = () => {
+          confirmAuthenticatedEnable = React.useContext(MobileAppLockEnableContext);
+          return React.createElement('Content');
+        };
+        let tree!: ReactTestRenderer;
+        await act(async () => {
+          tree = create(<MobileAppLockGate securityReady enabled={false}><Settings /></MobileAppLockGate>);
+        });
+        mounted = tree;
+        await act(async () => {
+          useTaskStore.setState({ settings: { security: { mobileAppLockEnabled: true } } });
+          confirmAuthenticatedEnable();
+          tree.update(<MobileAppLockGate securityReady enabled><Settings /></MobileAppLockGate>);
+        });
+        await wait(300);
+        expect(lockModal(tree).props.visible).toBe(false);
+        expect(authenticateWithDeviceLockMock).not.toHaveBeenCalled();
+        await act(async () => {
+          useTaskStore.setState({ settings: {} });
+          tree.update(<MobileAppLockGate securityReady enabled={false}><Settings /></MobileAppLockGate>);
+        });
+        await act(async () => {
+          tree.update(<MobileAppLockGate securityReady enabled><Settings /></MobileAppLockGate>);
+        });
+        expect(lockModal(tree).props.visible).toBe(true);
+        await wait(300);
+        expect(authenticateWithDeviceLockMock).toHaveBeenCalledTimes(1);
+      });
 
       it('keeps the open task mounted behind a blank privacy cover while away', async () => {
         setDelay(5);

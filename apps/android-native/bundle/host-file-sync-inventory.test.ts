@@ -374,7 +374,7 @@ const pass = (folder: ReturnType<typeof provider>, app: ReturnType<typeof appFil
         log: { info: record, warn: record, sanitize: (message) => message },
         crypto: createHostSyncCrypto(cryptoCall),
         saf: createHostSafPort(folder.call),
-        encryption: { getSyncEncryptionMaterial: async () => material, logSyncEncryptionEvent: async () => undefined },
+        encryption: { getSyncEncryptionMaterial: async () => material, getSyncEncryptionStatus: async () => ({ state: material ? 'enabled' : 'off' }), logSyncEncryptionEvent: async () => undefined },
     }, { files: app.files, installer: app.installer, directories: { document: DOCUMENTS, cache: CACHE }, deleteNow: app.native.fileDeleteNow });
     const run = async (data: AppData, options: { activationProbe?: boolean; phase?: 'prepare' | 'post-merge' } = { phase: 'post-merge' }) => {
         const result = await native.syncPort.syncFile(data, folder.root, new AbortController().signal,
@@ -521,7 +521,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
 
             const material = await core.deriveSyncKeyMaterial(PASS, new Uint8Array(16).fill(3), { mKib: 8, t: 1, p: 1 }, createHostSyncCrypto(cryptoCall));
             folder.put('data.json', text(JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: {} })));
-            folder.put('attachments/peer.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material));
+            folder.put('attachments/peer.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material, undefined, { kind: 'document' }));
             app.memory.put(`${MANAGED}a1.txt`, text('mine, in plaintext'));
             const { sync, logged } = fileHost(withAttachments(fileAttachment('a1')));
             const first = await sync.settingsHost.performSync(undefined, manual);
@@ -556,7 +556,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
         it('a plaintext device meeting an encrypted attachment in the folder fails its on-demand fetch closed and installs nothing (129)', async () => {
             const { folder, app } = install();
             const material = await core.deriveSyncKeyMaterial(PASS, new Uint8Array(16).fill(3), { mKib: 8, t: 1, p: 1 }, createHostSyncCrypto(cryptoCall));
-            folder.put('attachments/r1.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material));
+            folder.put('attachments/r1.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material, undefined, { kind: 'document' }));
             const { sync, logged } = fileHost();
             const outcome = await sync.attachmentsHost!.ensureAttachmentAvailableDetailed(
                 fileAttachment('r1', { uri: '', cloudKey: 'attachments/r1.txt', localStatus: 'missing' }));

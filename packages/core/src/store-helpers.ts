@@ -1,5 +1,5 @@
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './schedule-utils';
-import { normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
+import { normalizeTaskReminderPolicy, suppressLegacyTaskReminders } from './task-reminder-policy';
 import type { ProjectTaskSummary } from './project-row-meta';
 import { buildNextRecurringTask, canonicalRecurringFollowUp, createNextRecurringTask, normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
 import { getTaskDateCoherenceIssues } from './task-date-coherence';
@@ -309,7 +309,7 @@ export const normalizeTaskUpdate = (
         const policy = normalizeTaskReminderPolicy(updates.reminderPolicy);
         if (policy) {
             adjustedUpdates = { ...adjustedUpdates, reminderPolicy: policy,
-                suppressMindwtrReminders: !shouldSendTaskReminders({ reminderPolicy: policy }, context?.settings) };
+                suppressMindwtrReminders: suppressLegacyTaskReminders({ reminderPolicy: policy }, context?.settings) };
         } else {
             adjustedUpdates = { ...adjustedUpdates };
             delete adjustedUpdates.reminderPolicy;

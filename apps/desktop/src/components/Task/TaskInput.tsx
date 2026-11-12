@@ -13,7 +13,7 @@ import { Sparkles } from 'lucide-react';
 
 type TriggerType = 'project' | 'context' | 'tag' | 'area' | 'person' | 'command';
 type SlashCommand =
-    | 'due' | 'start' | 'review' | 'note' | 'link' | 'energy' | 'priority' | 'area' | 'estimate' | 'duration'
+    | 'due' | 'start' | 'review' | 'remind-due' | 'remind-start' | 'note' | 'link' | 'energy' | 'priority' | 'area' | 'estimate' | 'duration'
     | 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived' | '*';
 
 interface TriggerState {
@@ -112,6 +112,8 @@ const SLASH_COMMANDS: Array<{
     { command: 'due', hint: '<when>', requiresArgument: true },
     { command: 'start', hint: '<when>', requiresArgument: true },
     { command: 'review', hint: '<when>', requiresArgument: true },
+    { command: 'remind-due', hint: '1d', requiresArgument: true },
+    { command: 'remind-start', hint: '30m', requiresArgument: true },
     { command: 'note', hint: '<text>', requiresArgument: true },
     { command: 'link', hint: '<url>', requiresArgument: true },
     { command: 'energy', hint: '<level>', requiresArgument: true },
@@ -170,8 +172,9 @@ function getSlashCommandOptions(query: string, prioritiesEnabled: boolean, timeE
         .filter(({ command }) => (command !== 'estimate' && command !== 'duration') || timeEstimatesEnabled)
         .filter(({ command }) => (
             rawCommandQuery.length === 0
-            || command.startsWith(rawCommandQuery)
-            || command.includes(rawCommandQuery)
+            || (separatorIndex >= 0 && SLASH_COMMANDS.some(option => option.command === rawCommandQuery)
+                ? command === rawCommandQuery
+                : command.startsWith(rawCommandQuery) || command.includes(rawCommandQuery))
         ))
         .map(({ command, hint, requiresArgument }) => {
             const label = requiresArgument

@@ -320,7 +320,7 @@ export function hasTranslatableEnglishText(value: string): boolean {
 
 
 const technicalTermsByKey: Record<string, readonly string[]> = {
-    'quickAdd.help': ['/* focus', '%Person', '%"Full Name"'],
+    'quickAdd.help': ['/* focus', '%Person', '%"Full Name"', '/remind-due:1d', '/remind-start:30m'],
     'quickAdd.bulkImportTextFile': ['.txt'],
     'keybindings.helpSubtitle': ['Esc'],
     'settings.webdavHint': ['data.json'],

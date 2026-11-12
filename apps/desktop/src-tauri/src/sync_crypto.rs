@@ -11,7 +11,7 @@ pub const KEY_LEN: usize = 32;
 pub const HEADER_LEN: usize = 54;
 
 const MAGIC: &[u8; 6] = b"MWENC1";
-const FORMAT_VERSION: u8 = 0x01;
+const FORMAT_VERSION: u8 = 0x02;
 const KDF_ID_ARGON2ID: u8 = 0x01;
 const CIPHER_ID_AES_256_GCM: u8 = 0x01;
 
@@ -127,7 +127,7 @@ fn parse_header(bytes: &[u8]) -> Result<ParsedHeaderFields, SyncCryptoError> {
     let format_version = bytes[6];
     let kdf_id = bytes[7];
     let cipher_id = bytes[17];
-    if format_version != FORMAT_VERSION {
+    if format_version != FORMAT_VERSION && format_version != 1 {
         return Err(SyncCryptoError::Unsupported(format!("unsupported MWENC1 format_version {format_version}")));
     }
     if kdf_id != KDF_ID_ARGON2ID {
@@ -178,7 +178,7 @@ pub fn inspect_sync_artifact(bytes: &[u8]) -> SyncArtifactInspection {
     }
 }
 
-pub fn encrypt_sync_artifact(
+pub fn encrypt_sync_document(
     plaintext: &[u8],
     material: &SyncKeyMaterial,
 ) -> Result<Vec<u8>, SyncCryptoError> {
@@ -187,13 +187,14 @@ pub fn encrypt_sync_artifact(
     }
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
-    encrypt_sync_artifact_with_nonce(plaintext, material, nonce_bytes)
+    encrypt_context_artifact_with_nonce(plaintext, material, nonce_bytes, ArtifactContext::Document)
 }
 
-fn encrypt_sync_artifact_with_nonce(
+fn encrypt_context_artifact_with_nonce(
     plaintext: &[u8],
     material: &SyncKeyMaterial,
     nonce_bytes: [u8; NONCE_LEN],
+    context: ArtifactContext<'_>,
 ) -> Result<Vec<u8>, SyncCryptoError> {
     let ciphertext_len = (plaintext.len() + GCM_TAG_LEN) as u64;
     let mut header = [0u8; HEADER_LEN];
@@ -210,8 +211,15 @@ fn encrypt_sync_artifact_with_nonce(
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&material.key));
     let nonce = Nonce::from_slice(&nonce_bytes);
+    let aad = artifact_authenticated_data(&header, context)?;
     let ct_and_tag = cipher
-        .encrypt(nonce, Payload { msg: plaintext, aad: &header })
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad: &aad,
+            },
+        )
         .map_err(|_| SyncCryptoError::Auth)?;
 
     let mut out = Vec::with_capacity(HEADER_LEN + ct_and_tag.len());
@@ -220,18 +228,150 @@ fn encrypt_sync_artifact_with_nonce(
     Ok(out)
 }
 
-pub fn decrypt_sync_artifact(bytes: &[u8], key: &[u8; KEY_LEN]) -> Result<Vec<u8>, SyncCryptoError> {
+pub fn decrypt_sync_document(
+    bytes: &[u8],
+    key: &[u8; KEY_LEN],
+) -> Result<Vec<u8>, SyncCryptoError> {
+    decrypt_context_artifact(bytes, key, ArtifactContext::Document)
+}
+
+fn decrypt_context_artifact(
+    bytes: &[u8],
+    key: &[u8; KEY_LEN],
+    context: ArtifactContext<'_>,
+) -> Result<Vec<u8>, SyncCryptoError> {
     if !has_magic(bytes) {
         return Err(SyncCryptoError::Unsupported("missing MWENC1 magic".into()));
     }
     let header = parse_header(bytes)?;
-    let aad = &bytes[..HEADER_LEN];
+    if header.format_version != FORMAT_VERSION {
+        return Err(SyncCryptoError::Unsupported(
+            "SYNC_ENCRYPTION_LEGACY: upgrade sync encryption from a trusted local library".into(),
+        ));
+    }
+    let aad = artifact_authenticated_data(&bytes[..HEADER_LEN], context)?;
     let ct_and_tag = &bytes[HEADER_LEN..HEADER_LEN + header.ciphertext_len as usize];
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let nonce = Nonce::from_slice(&header.nonce);
     cipher
-        .decrypt(nonce, Payload { msg: ct_and_tag, aad })
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ct_and_tag,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| SyncCryptoError::Auth)
+}
+
+#[derive(Clone, Copy)]
+enum ArtifactContext<'a> {
+    Document,
+    Attachment(&'a str),
+    Recovery(&'a str),
+}
+
+fn artifact_authenticated_data(
+    header: &[u8],
+    context: ArtifactContext<'_>,
+) -> Result<Vec<u8>, SyncCryptoError> {
+    let identity = match context {
+        ArtifactContext::Document => "mindwtr-sync:2\0document\0data.json".to_string(),
+        ArtifactContext::Attachment(name)
+            if name.starts_with("attachments/") && name.len() > 12 =>
+        {
+            format!("mindwtr-sync:2\0attachment\0{name}")
+        }
+        ArtifactContext::Recovery(name) if !name.is_empty() => {
+            format!("mindwtr-sync:2\0recovery\0{name}")
+        }
+        _ => {
+            return Err(SyncCryptoError::Unsupported(
+                "Missing canonical artifact identity".into(),
+            ))
+        }
+    };
+    if header.len() + identity.len() > 65536 {
+        return Err(SyncCryptoError::Unsupported(
+            "Sync artifact identity exceeds authenticated-data capacity".into(),
+        ));
+    }
+    let mut aad = header.to_vec();
+    aad.extend_from_slice(identity.as_bytes());
+    Ok(aad)
+}
+
+pub fn encrypt_sync_attachment(
+    plaintext: &[u8],
+    material: &SyncKeyMaterial,
+    cloud_key: &str,
+) -> Result<Vec<u8>, SyncCryptoError> {
+    let mut nonce = [0u8; NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce);
+    encrypt_context_artifact_with_nonce(
+        plaintext,
+        material,
+        nonce,
+        ArtifactContext::Attachment(cloud_key),
+    )
+}
+
+pub fn decrypt_sync_attachment(
+    bytes: &[u8],
+    key: &[u8; KEY_LEN],
+    cloud_key: &str,
+) -> Result<Vec<u8>, SyncCryptoError> {
+    decrypt_context_artifact(bytes, key, ArtifactContext::Attachment(cloud_key))
+}
+
+pub fn encrypt_sync_recovery(
+    plaintext: &[u8],
+    material: &SyncKeyMaterial,
+    identity: &str,
+) -> Result<Vec<u8>, SyncCryptoError> {
+    let mut nonce = [0u8; NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce);
+    encrypt_context_artifact_with_nonce(
+        plaintext,
+        material,
+        nonce,
+        ArtifactContext::Recovery(identity),
+    )
+}
+
+pub fn decrypt_sync_recovery(
+    bytes: &[u8],
+    key: &[u8; KEY_LEN],
+    identity: &str,
+) -> Result<Vec<u8>, SyncCryptoError> {
+    decrypt_context_artifact(bytes, key, ArtifactContext::Recovery(identity))
+}
+
+#[cfg(test)]
+fn decrypt_legacy_artifact_for_upgrade(
+    bytes: &[u8],
+    key: &[u8; KEY_LEN],
+) -> Result<Vec<u8>, SyncCryptoError> {
+    if !has_magic(bytes) {
+        return Err(SyncCryptoError::Unsupported(
+            "Missing legacy encrypted artifact".into(),
+        ));
+    }
+    let header = parse_header(bytes)?;
+    if header.format_version != 1 {
+        return Err(SyncCryptoError::Unsupported(
+            "Expected a legacy encrypted artifact".into(),
+        ));
+    }
+    Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key))
+        .decrypt(
+            Nonce::from_slice(&header.nonce),
+            Payload {
+                msg: &bytes[HEADER_LEN..HEADER_LEN + header.ciphertext_len as usize],
+                aad: &bytes[..HEADER_LEN],
+            },
+        )
         .map_err(|_| SyncCryptoError::Auth)
 }
 
@@ -284,6 +424,116 @@ mod tests {
     }
 
     #[test]
+    fn attachment_context_refuses_document_and_other_attachment_identity() {
+        let material = derive_sync_key_material(
+            "phrase",
+            [1; SALT_LEN],
+            SyncCryptoKdfParams {
+                m_kib: 64,
+                t: 1,
+                p: 1,
+            },
+        )
+        .unwrap();
+        let sealed =
+            encrypt_sync_attachment(b"{\"tasks\":[]}", &material, "attachments/a.json").unwrap();
+        assert_eq!(
+            decrypt_sync_attachment(&sealed, &material.key, "attachments/a.json").unwrap(),
+            b"{\"tasks\":[]}"
+        );
+        assert!(matches!(
+            decrypt_sync_document(&sealed, &material.key),
+            Err(SyncCryptoError::Auth)
+        ));
+        assert!(matches!(
+            decrypt_sync_attachment(&sealed, &material.key, "attachments/b.json"),
+            Err(SyncCryptoError::Auth)
+        ));
+    }
+
+    #[test]
+    fn document_and_attachment_context_vectors_match_shared_core() {
+        #[derive(Deserialize)]
+        struct ContextVector {
+            #[serde(flatten)]
+            vector: Vector,
+            #[serde(rename = "cloudKey")]
+            cloud_key: Option<String>,
+        }
+        let fixtures: Vec<ContextVector> = serde_json::from_str(include_str!(
+            "../../../../packages/core/src/__fixtures__/sync-crypto/context-vectors.json"
+        ))
+        .unwrap();
+        for fixture in fixtures {
+            let vector = fixture.vector;
+            let material = derive_sync_key_material(
+                &vector.passphrase,
+                array16(&b64_decode(&vector.salt_b64)),
+                SyncCryptoKdfParams {
+                    m_kib: vector.params.m_kib,
+                    t: vector.params.t,
+                    p: vector.params.p,
+                },
+            )
+            .unwrap();
+            let sealed = encrypt_context_artifact_with_nonce(
+                &b64_decode(&vector.plaintext_b64),
+                &material,
+                array12(&b64_decode(&vector.nonce_b64)),
+                fixture
+                    .cloud_key
+                    .as_deref()
+                    .map(ArtifactContext::Attachment)
+                    .unwrap_or(ArtifactContext::Document),
+            )
+            .unwrap();
+            assert_eq!(sealed, b64_decode(&vector.encrypted_b64));
+            assert_eq!(
+                decrypt_context_artifact(
+                    &sealed,
+                    &material.key,
+                    fixture
+                        .cloud_key
+                        .as_deref()
+                        .map(ArtifactContext::Attachment)
+                        .unwrap_or(ArtifactContext::Document)
+                )
+                .unwrap(),
+                b64_decode(&vector.plaintext_b64)
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_vectors_are_not_ordinary_sync_documents() {
+        let fixtures: Vec<Vector> = serde_json::from_str(include_str!(
+            "../../../../packages/core/src/__fixtures__/sync-crypto/legacy-vectors.json"
+        ))
+        .unwrap();
+        for vector in fixtures {
+            let material = derive_sync_key_material(
+                &vector.passphrase,
+                array16(&b64_decode(&vector.salt_b64)),
+                SyncCryptoKdfParams {
+                    m_kib: vector.params.m_kib,
+                    t: vector.params.t,
+                    p: vector.params.p,
+                },
+            )
+            .unwrap();
+            let sealed = b64_decode(&vector.encrypted_b64);
+            assert!(matches!(
+                decrypt_sync_document(&sealed, &material.key),
+                Err(SyncCryptoError::Unsupported(_))
+            ));
+            assert_eq!(
+                decrypt_legacy_artifact_for_upgrade(&sealed, &material.key).unwrap(),
+                b64_decode(&vector.plaintext_b64)
+            );
+        }
+    }
+
+    #[test]
     fn default_kdf_params_are_pinned() {
         assert_eq!(SYNC_CRYPTO_DEFAULT_KDF_PARAMS, SyncCryptoKdfParams { m_kib: 19456, t: 2, p: 1 });
     }
@@ -294,14 +544,14 @@ mod tests {
         let params = SyncCryptoKdfParams { m_kib: 64, t: 1, p: 1 };
         let material = derive_sync_key_material("a fresh passphrase", salt, params).unwrap();
         let plaintext = b"round trip payload";
-        let encrypted = encrypt_sync_artifact(plaintext, &material).unwrap();
-        let decrypted = decrypt_sync_artifact(&encrypted, &material.key).unwrap();
+        let encrypted = encrypt_sync_document(plaintext, &material).unwrap();
+        let decrypted = decrypt_sync_document(&encrypted, &material.key).unwrap();
         assert_eq!(decrypted, plaintext);
 
         match inspect_sync_artifact(&encrypted) {
             SyncArtifactInspection::Encrypted(header) => {
                 assert_eq!(header.params, params);
-                assert_eq!(header.format_version, 1);
+                assert_eq!(header.format_version, 2);
                 assert_eq!(header.kdf_id, 1);
                 assert_eq!(header.cipher_id, 1);
             }
@@ -316,7 +566,7 @@ mod tests {
             let params = SyncCryptoKdfParams { m_kib: vector.params.m_kib, t: vector.params.t, p: vector.params.p };
             let material = derive_sync_key_material(&vector.passphrase, salt, params).unwrap();
             let encrypted = b64_decode(&vector.encrypted_b64);
-            let decrypted = decrypt_sync_artifact(&encrypted, &material.key)
+            let decrypted = decrypt_sync_document(&encrypted, &material.key)
                 .unwrap_or_else(|err| panic!("fixture {} failed to decrypt: {err}", vector.name));
             assert_eq!(decrypted, b64_decode(&vector.plaintext_b64), "fixture {} plaintext mismatch", vector.name);
         }
@@ -330,8 +580,19 @@ mod tests {
             let params = SyncCryptoKdfParams { m_kib: vector.params.m_kib, t: vector.params.t, p: vector.params.p };
             let material = derive_sync_key_material(&vector.passphrase, salt, params).unwrap();
             let plaintext = b64_decode(&vector.plaintext_b64);
-            let re_encrypted = encrypt_sync_artifact_with_nonce(&plaintext, &material, nonce).unwrap();
-            assert_eq!(re_encrypted, b64_decode(&vector.encrypted_b64), "fixture {} re-encrypt mismatch", vector.name);
+            let re_encrypted = encrypt_context_artifact_with_nonce(
+                &plaintext,
+                &material,
+                nonce,
+                ArtifactContext::Document,
+            )
+            .unwrap();
+            assert_eq!(
+                re_encrypted,
+                b64_decode(&vector.encrypted_b64),
+                "fixture {} re-encrypt mismatch",
+                vector.name
+            );
         }
     }
 
@@ -344,7 +605,7 @@ mod tests {
         let mut padded = b64_decode(&vector.encrypted_b64);
         padded.extend_from_slice(&[0x20, 0x20, 0x00, 0x00, 0x20]);
 
-        let decrypted = decrypt_sync_artifact(&padded, &material.key).unwrap();
+        let decrypted = decrypt_sync_document(&padded, &material.key).unwrap();
         assert_eq!(decrypted, b64_decode(&vector.plaintext_b64));
     }
 
@@ -355,7 +616,7 @@ mod tests {
         let params = SyncCryptoKdfParams { m_kib: vector.params.m_kib, t: vector.params.t, p: vector.params.p };
         let wrong_material = derive_sync_key_material("not the right passphrase", salt, params).unwrap();
         let encrypted = b64_decode(&vector.encrypted_b64);
-        match decrypt_sync_artifact(&encrypted, &wrong_material.key) {
+        match decrypt_sync_document(&encrypted, &wrong_material.key) {
             Err(SyncCryptoError::Auth) => {}
             other => panic!("expected Auth error, got {other:?}"),
         }
@@ -370,7 +631,7 @@ mod tests {
         let mut tampered = b64_decode(&vector.encrypted_b64);
         tampered[20] ^= 0xff;
 
-        match decrypt_sync_artifact(&tampered, &material.key) {
+        match decrypt_sync_document(&tampered, &material.key) {
             Err(SyncCryptoError::Auth) => {}
             other => panic!("expected Auth error, got {other:?}"),
         }
@@ -385,7 +646,7 @@ mod tests {
         let params = SyncCryptoKdfParams { m_kib: vector.params.m_kib, t: vector.params.t, p: vector.params.p };
         let material = derive_sync_key_material(&vector.passphrase, salt, params).unwrap();
 
-        match decrypt_sync_artifact(truncated, &material.key) {
+        match decrypt_sync_document(truncated, &material.key) {
             Err(SyncCryptoError::Unsupported(_)) => {}
             other => panic!("expected Unsupported error, got {other:?}"),
         }
@@ -421,19 +682,37 @@ mod tests {
         let material = derive_sync_key_material(&vector.passphrase, salt, params).unwrap();
 
         let mut bad_version = encrypted.clone();
-        bad_version[6] = 0x02;
-        assert!(matches!(inspect_sync_artifact(&bad_version), SyncArtifactInspection::Unsupported(_)));
-        assert!(matches!(decrypt_sync_artifact(&bad_version, &material.key), Err(SyncCryptoError::Unsupported(_))));
+        bad_version[6] = 0x03;
+        assert!(matches!(
+            inspect_sync_artifact(&bad_version),
+            SyncArtifactInspection::Unsupported(_)
+        ));
+        assert!(matches!(
+            decrypt_sync_document(&bad_version, &material.key),
+            Err(SyncCryptoError::Unsupported(_))
+        ));
 
         let mut bad_kdf = encrypted.clone();
         bad_kdf[7] = 0x02;
-        assert!(matches!(inspect_sync_artifact(&bad_kdf), SyncArtifactInspection::Unsupported(_)));
-        assert!(matches!(decrypt_sync_artifact(&bad_kdf, &material.key), Err(SyncCryptoError::Unsupported(_))));
+        assert!(matches!(
+            inspect_sync_artifact(&bad_kdf),
+            SyncArtifactInspection::Unsupported(_)
+        ));
+        assert!(matches!(
+            decrypt_sync_document(&bad_kdf, &material.key),
+            Err(SyncCryptoError::Unsupported(_))
+        ));
 
         let mut bad_cipher = encrypted.clone();
         bad_cipher[17] = 0x02;
-        assert!(matches!(inspect_sync_artifact(&bad_cipher), SyncArtifactInspection::Unsupported(_)));
-        assert!(matches!(decrypt_sync_artifact(&bad_cipher, &material.key), Err(SyncCryptoError::Unsupported(_))));
+        assert!(matches!(
+            inspect_sync_artifact(&bad_cipher),
+            SyncArtifactInspection::Unsupported(_)
+        ));
+        assert!(matches!(
+            decrypt_sync_document(&bad_cipher, &material.key),
+            Err(SyncCryptoError::Unsupported(_))
+        ));
     }
 
     #[test]
@@ -463,7 +742,7 @@ mod tests {
         let valid_params = SyncCryptoKdfParams { m_kib: 64, t: 1, p: 1 };
         let material = derive_sync_key_material("x", salt, valid_params).unwrap();
         let bogus_material = SyncKeyMaterial { params: SyncCryptoKdfParams { p: 0, ..valid_params }, ..material };
-        match encrypt_sync_artifact(b"x", &bogus_material) {
+        match encrypt_sync_document(b"x", &bogus_material) {
             Err(SyncCryptoError::Unsupported(_)) => {}
             other => panic!("expected Unsupported error, got {other:?}"),
         }
@@ -476,8 +755,8 @@ mod tests {
         let material = derive_sync_key_material("nonce pin test", salt, params).unwrap();
         let plaintext = b"same plaintext both times";
 
-        let first = encrypt_sync_artifact(plaintext, &material).unwrap();
-        let second = encrypt_sync_artifact(plaintext, &material).unwrap();
+        let first = encrypt_sync_document(plaintext, &material).unwrap();
+        let second = encrypt_sync_document(plaintext, &material).unwrap();
 
         assert_ne!(&first[34..46], &second[34..46], "nonces must differ between encrypt calls");
         assert_ne!(first, second, "GCM nonce reuse would otherwise be silent");
@@ -523,7 +802,7 @@ mod tests {
     fn rejects_over_ceiling_header_via_decrypt_too() {
         let hostile = hostile_header(999_999_999, 1, 1);
         let key = [0u8; KEY_LEN];
-        match decrypt_sync_artifact(&hostile, &key) {
+        match decrypt_sync_document(&hostile, &key) {
             Err(SyncCryptoError::Unsupported(_)) => {}
             other => panic!("expected Unsupported error, got {other:?}"),
         }

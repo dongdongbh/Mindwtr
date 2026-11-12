@@ -168,7 +168,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
 
     private func encryptedWire(_ key: Data) throws -> Data {
         let salt = Data((1...16).map { UInt8($0) }), nonce = Data((33...44).map { UInt8($0) })
-        var header = Data("MWENC1".utf8); header.append(contentsOf: [1, 1, 64, 0, 0, 0, 1, 0, 0, 0, 1, 1])
+        var header = Data("MWENC1".utf8); header.append(contentsOf: [2, 1, 64, 0, 0, 0, 1, 0, 0, 0, 1, 1])
         header.append(salt); header.append(nonce)
         var length = UInt64(bytes.count + 16).littleEndian
         withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }

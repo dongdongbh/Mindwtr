@@ -1,5 +1,6 @@
 
 export const csOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Neplatná připomínka: zadejte podporovanou dobu a výslovné datum a čas",
     'task.copyDetails': "Kopírovat podrobnosti úkolu",
     "taskEdit.startAdvanceReminderLabel": "Před začátkem",
     "settings.speechUseGemini": "Použít Gemini",
@@ -241,7 +242,7 @@ export const csOverrides: Record<string, string> = {
         'nav.sectionLists': 'Seznamy',
         'nav.sectionOrganize': 'Organizace',
         'nav.sectionArchive': 'Archiv',
-        'quickAdd.help': 'Rychlé přidání podporuje /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> nebo !Area, @context, #tag, +Project, %Person (nebo %"Full Name"). Termíny zůstávají bez času, dokud čas neuvedete.',
+        'quickAdd.help': 'Rychlé přidání podporuje /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> nebo !Area, @context, #tag, +Project, %Person (nebo %"Full Name"). Termíny zůstávají bez času, dokud čas neuvedete.',
         'quickAdd.example': 'Příklad: Zavolat mámě /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Zkuste: Zavolat mámě /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Nápověda syntaxe rychlého přidání',
@@ -1181,6 +1182,7 @@ export const csOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Po 5 minutách',
         'settings.mobile.appLockRelockAfter15': 'Po 15 minutách',
         'appLock.title': 'Mindwtr je zamčený',
+        "appLock.loadFailed": "Mindwtr nemohl načíst vaše data. Zkuste to znovu.",
         'appLock.description': 'K otevření Mindwtr použijte zámek zařízení. Chrání zobrazení aplikace, ne databázi v zařízení.',
         'appLock.prompt': 'Odemknout Mindwtr',
         'appLock.enablePrompt': 'Zapnout zámek aplikace Mindwtr',
@@ -2588,6 +2590,9 @@ export const csOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Použít výchozí ({value})",
         "taskEdit.reminderPolicySend": "Odesílat",
         "taskEdit.reminderPolicySkip": "Přeskočit",
+        "taskEdit.reminderPolicyStart": "Pouze začátek",
+        "taskEdit.reminderPolicyDue": "Pouze termín",
+        "taskEdit.reminderPolicySingleHint": "Vyžaduje přesný čas. Odešle jedno připomenutí ve vybraný čas, nebo místo něj s nastaveným předstihem. Opakovaná připomenutí se ignorují. Připomenutí soustředění a revize se nemění.",
         "taskEdit.reminderPolicyHint": "Připomenutí začátku a termínu vyžadují přesný čas. Připomenutí soustředění a revize se nemění.",
         "taskEdit.remindersDisabledHint": "Připomenutí úkolů jsou v nastavení oznámení tohoto zařízení vypnuta.",
         "settings.taskReminderDefault": "Výchozí připomenutí úkolů",

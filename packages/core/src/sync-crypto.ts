@@ -5,7 +5,7 @@ import { argon2idAsync } from '@noble/hashes/argon2.js';
 
 const MAGIC = new Uint8Array([0x4d, 0x57, 0x45, 0x4e, 0x43, 0x31]);
 const HEADER_LEN = 54;
-const FORMAT_VERSION = 0x01;
+const FORMAT_VERSION = 0x02;
 const KDF_ID_ARGON2ID = 0x01;
 const CIPHER_ID_AES_256_GCM = 0x01;
 const SALT_LEN = 16;
@@ -100,6 +100,23 @@ export const defaultSyncCryptoPrimitives: SyncCryptoPrimitives = {
 
 export type SyncKeyMaterial = { key: Uint8Array; salt: Uint8Array; params: SyncCryptoKdfParams };
 
+export type SyncArtifactContext = { kind: 'document' } | { kind: 'attachment'; cloudKey: string } | { kind: 'recovery'; artifactName: string };
+
+function artifactAuthenticatedData(header: Uint8Array, context: SyncArtifactContext): Uint8Array {
+    const name = context.kind === 'document' ? 'data.json' : context.kind === 'attachment' ? context.cloudKey : context.artifactName;
+    if (!name || context.kind === 'attachment' && !name.startsWith('attachments/')) {
+        throw new SyncCryptoUnsupportedError('Missing canonical attachment identity');
+    }
+    const identity = new TextEncoder().encode(`mindwtr-sync:2\u0000${context.kind}\u0000${name}`);
+    if (header.length + identity.length > 65536) {
+        throw new SyncCryptoUnsupportedError('Sync artifact identity exceeds authenticated-data capacity');
+    }
+    const aad = new Uint8Array(header.length + identity.length);
+    aad.set(header);
+    aad.set(identity, header.length);
+    return aad;
+}
+
 
 export const syncPassphraseBytes = (passphrase: string): Uint8Array => new TextEncoder().encode(passphrase.normalize('NFC'));
 
@@ -185,7 +202,7 @@ function parseHeader(bytes: Uint8Array): ParsedHeaderFields {
     const formatVersion = bytes[6];
     const kdfId = bytes[7];
     const cipherId = bytes[17];
-    if (formatVersion !== FORMAT_VERSION) {
+    if (formatVersion !== FORMAT_VERSION && formatVersion !== 1) {
         throw new SyncCryptoUnsupportedError(`unsupported MWENC1 format_version ${formatVersion}`);
     }
     if (kdfId !== KDF_ID_ARGON2ID) {
@@ -235,6 +252,7 @@ export async function encryptSyncArtifact(
     plaintext: Uint8Array,
     material: SyncKeyMaterial,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
+    context: SyncArtifactContext,
 ): Promise<Uint8Array> {
     if (material.key.length !== KEY_LEN) {
 
@@ -266,7 +284,7 @@ export async function encryptSyncArtifact(
     header.set(nonce, 34);
     writeU64LE(header, 46, BigInt(ciphertextLen));
 
-    const ctAndTag = await prims.aesGcmSeal(material.key, nonce, plaintext, header);
+    const ctAndTag = await prims.aesGcmSeal(material.key, nonce, plaintext, artifactAuthenticatedData(header, context));
     const out = new Uint8Array(HEADER_LEN + ctAndTag.length);
     out.set(header, 0);
     out.set(ctAndTag, HEADER_LEN);
@@ -277,6 +295,7 @@ export async function decryptSyncArtifact(
     bytes: Uint8Array,
     key: Uint8Array,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
+    context: SyncArtifactContext,
 ): Promise<Uint8Array> {
     if (key.length !== KEY_LEN) {
         throw new SyncCryptoUnsupportedError(`sync key must be ${KEY_LEN} bytes`);
@@ -285,7 +304,24 @@ export async function decryptSyncArtifact(
         throw new SyncCryptoUnsupportedError('missing MWENC1 magic');
     }
     const header = parseHeader(bytes);
-    const aad = bytes.slice(0, HEADER_LEN);
+    if (header.formatVersion !== FORMAT_VERSION) {
+        throw new SyncCryptoUnsupportedError('SYNC_ENCRYPTION_LEGACY: upgrade sync encryption from a trusted local library');
+    }
+    const aad = artifactAuthenticatedData(bytes.slice(0, HEADER_LEN), context);
     const ctAndTag = bytes.slice(HEADER_LEN, HEADER_LEN + header.ciphertextLen);
     return prims.aesGcmOpen(key, header.nonce, ctAndTag, aad);
+}
+
+export async function decryptLegacySyncArtifactForUpgrade(
+    bytes: Uint8Array,
+    key: Uint8Array,
+    prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
+): Promise<Uint8Array> {
+    if (key.length !== KEY_LEN || !hasMagic(bytes)) {
+        throw new SyncCryptoUnsupportedError('Invalid legacy encrypted artifact');
+    }
+    const header = parseHeader(bytes);
+    if (header.formatVersion !== 1) throw new SyncCryptoUnsupportedError('Expected a legacy encrypted artifact');
+    return prims.aesGcmOpen(key, header.nonce,
+        bytes.slice(HEADER_LEN, HEADER_LEN + header.ciphertextLen), bytes.slice(0, HEADER_LEN));
 }

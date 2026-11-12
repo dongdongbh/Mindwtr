@@ -1,4 +1,7 @@
 import * as LocalAuthentication from 'expo-local-authentication';
+import { createContext } from 'react';
+
+export const MobileAppLockEnableContext = createContext<() => void>(() => undefined);
 
 export type MobileAppLockAuthFailureReason = 'unavailable' | 'cancelled' | 'failed';
 

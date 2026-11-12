@@ -69,7 +69,7 @@ import {
     handleAttachmentValidationFailure,
     shouldAttemptAttachmentUpload,
 } from './sync-attachment-validation';
-import { openAttachmentBytes, sealAttachmentBytes } from './sync-encryption-service';
+import { assertPlaintextAttachmentTransfer, openAttachmentBytes, sealAttachmentBytes } from './sync-encryption-service';
 import {
     isAttachmentPresenceReconciliationDue,
     markAttachmentPresenceReconciled,
@@ -968,6 +968,7 @@ export async function syncCloudAttachments(
     helpers?: SyncRunAttachmentHelpers,
 ): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv() || !cloudConfig.url) return false;
+    await assertPlaintextAttachmentTransfer();
 
     const fetcher = await deps.getTauriFetch();
     const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
@@ -1064,6 +1065,7 @@ export async function syncCloudAttachments(
                 await withRetry(
                     async () => {
                         await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
+                        await assertPlaintextAttachmentTransfer();
                         return await cloudPutFile(
                             `${baseSyncUrl}/${cloudKey}`,
                             fileData,
@@ -1822,6 +1824,7 @@ export async function syncFileAttachments(
 
     const publishFileSyncGeneration = async (
         targetPath: string,
+        cloudKey: string,
         wireData: Uint8Array,
         expectedPlaintextSha256: string,
     ): Promise<boolean> => {
@@ -1859,7 +1862,7 @@ export async function syncFileAttachments(
                     'existing-generation-verify',
                     deps.logSyncWarning,
                     async () => {
-                        const plaintext = await openAttachmentBytes(existingWireData, targetPath);
+                        const plaintext = await openAttachmentBytes(existingWireData, cloudKey);
                         const actualSha256 = await computeSha256Hex(plaintext);
                         if (actualSha256?.toLowerCase() !== expectedPlaintextSha256.toLowerCase()) {
                             throw new Error('plaintext digest mismatch');
@@ -2058,6 +2061,7 @@ export async function syncFileAttachments(
             );
             if (!await publishFileSyncGeneration(
                 await resolveFileBackendPath(join, baseSyncDir, cloudKey),
+                cloudKey,
                 wireData,
                 snapshot.fileHash,
             )) return false;

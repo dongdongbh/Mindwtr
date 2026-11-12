@@ -2082,6 +2082,12 @@ describe('TaskEditModal', () => {
 
     expect(findPager().props.keyboardShouldPersistTaps).toBe('handled');
     expect(findPager().props.scrollEnabled).toBe(true);
+    const dragChange = tree!.root.findByType('TaskEditFormTab' as any).props.onChecklistDragChange;
+    act(() => dragChange(true));
+    expect(findPager().props.scrollEnabled).toBe(false);
+    act(() => dragChange(false));
+    expect(findPager().props.scrollEnabled).toBe(true);
+
 
     await act(async () => {
       const descriptionField = formTab.props.renderField('description');

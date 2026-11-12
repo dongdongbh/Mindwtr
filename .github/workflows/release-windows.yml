@@ -92,11 +92,6 @@ jobs:
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}
       VITE_FEEDBACK_ENDPOINT_URL: ${{ vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
       VITE_DONATION_PROMPT_ENABLED: "true"
-
-
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
@@ -232,9 +227,20 @@ jobs:
           GGML_BMI2: "OFF"
 
 
+      - name: Resolve SignPath credential availability
+        id: signpath-config
+        if: ${{ vars.SIGNPATH_SIGNING_ENABLED == 'true' && github.repository == 'dongdongbh/Mindwtr' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '' || github.event.inputs.tag != '') }}
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          $enabled = -not [string]::IsNullOrEmpty($env:SIGNPATH_API_TOKEN) -and -not [string]::IsNullOrEmpty($env:SIGNPATH_ORGANIZATION_ID)
+          "enabled=$($enabled.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
       - name: Stage unsigned app binary for signing
         id: stage-unsigned-exe
-        if: ${{ vars.SIGNPATH_SIGNING_ENABLED == 'true' && github.repository == 'dongdongbh/Mindwtr' && env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != '' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '' || github.event.inputs.tag != '') }}
+        if: ${{ steps.signpath-config.outputs.enabled == 'true' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path signing-unsigned-exe | Out-Null

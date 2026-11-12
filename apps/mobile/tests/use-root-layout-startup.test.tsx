@@ -170,10 +170,11 @@ type HarnessProps = {
   onReadyChange: (ready: boolean) => void;
   onCanonicalChange?: (ready: boolean) => void;
   sandboxMode?: boolean;
+  onStartupChange?: (failed: boolean, retry: () => void) => void;
 };
 
-function TestHarness({ onReadyChange, onCanonicalChange, sandboxMode = false }: HarnessProps) {
-  const { dataReady, canonicalDataReady } = useRootLayoutStartup({
+function TestHarness({ onReadyChange, onCanonicalChange, onStartupChange, sandboxMode = false }: HarnessProps) {
+  const { dataReady, canonicalDataReady, startupLoadFailed, retryDataLoad } = useRootLayoutStartup({
     analyticsHeartbeatUrl: '',
     appVersion: '0.8.3',
     isExpoGo: false,
@@ -187,6 +188,8 @@ function TestHarness({ onReadyChange, onCanonicalChange, sandboxMode = false }: 
     onReadyChange(dataReady);
   }, [dataReady, onReadyChange]);
   useEffect(() => { onCanonicalChange?.(canonicalDataReady); }, [canonicalDataReady, onCanonicalChange]);
+
+  useEffect(() => { onStartupChange?.(startupLoadFailed, retryDataLoad); }, [startupLoadFailed, retryDataLoad, onStartupChange]);
 
   return null;
 }
@@ -273,7 +276,7 @@ describe('useRootLayoutStartup', () => {
     await act(async () => tree.unmount());
   });
 
-  it('applies the backup snapshot before the canonical fetch finishes', async () => {
+  it('hydrates a stale disabled backup without declaring canonical security ready', async () => {
     const fetchDeferred = createDeferred<void>();
     const readyStates: boolean[] = [];
     const canonicalStates: boolean[] = [];
@@ -281,6 +284,7 @@ describe('useRootLayoutStartup', () => {
 
     fetchData.mockImplementation(async (options) => {
       await fetchDeferred.promise;
+      storeHolder.state.settings = { security: { mobileAppLockEnabled: true } };
       runAppliedLoadChecks(options);
     });
     getMobileStartupSnapshotFromBackup.mockResolvedValue({
@@ -296,7 +300,7 @@ describe('useRootLayoutStartup', () => {
       projects: [],
       sections: [],
       areas: [],
-      settings: {},
+      settings: { security: { mobileAppLockEnabled: false } },
     });
 
     await act(async () => {
@@ -310,6 +314,7 @@ describe('useRootLayoutStartup', () => {
     expect(storeHolder.state._allTasks).toHaveLength(1);
     expect(readyStates.at(-1)).toBe(true);
     expect(canonicalStates.at(-1)).toBe(false);
+    expect(storeHolder.state.settings.security.mobileAppLockEnabled).toBe(false);
     expect(markStartupPhase).not.toHaveBeenCalledWith('js.local_data_ready');
     expect(requestSync).not.toHaveBeenCalled();
 
@@ -320,6 +325,7 @@ describe('useRootLayoutStartup', () => {
 
     expect(requestSync).toHaveBeenCalledWith(0);
     expect(canonicalStates.at(-1)).toBe(true);
+    expect(storeHolder.state.settings.security.mobileAppLockEnabled).toBe(true);
     expect(markStartupPhase).toHaveBeenCalledWith('js.local_data_ready');
 
     act(() => {
@@ -395,7 +401,32 @@ describe('useRootLayoutStartup', () => {
         outcome: 'skipped',
       },
     });
+    expect(canonicalStates.at(-1)).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('retries a failed canonical load without treating the backup as security authority', async () => {
+    fetchData.mockImplementationOnce(async () => { storeHolder.state.error = 'Storage unavailable'; });
+    const canonicalStates: boolean[] = [];
+    const failures: boolean[] = [];
+    let retry: () => void = () => undefined;
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(<TestHarness onReadyChange={() => undefined} onCanonicalChange={(ready) => canonicalStates.push(ready)} onStartupChange={(failed, reload) => { failures.push(failed); retry = reload; }} />);
+      await flushMicrotasks();
+    });
+    expect(canonicalStates).not.toContain(true);
+    expect(failures.at(-1)).toBe(true);
+    expect(requestSync).not.toHaveBeenCalled();
+    fetchData.mockImplementation(async (options) => {
+      storeHolder.state.error = null;
+      runAppliedLoadChecks(options);
+    });
+    await act(async () => { retry(); await flushMicrotasks(); });
+    expect(fetchData).toHaveBeenCalledTimes(2);
+    expect(failures.at(-1)).toBe(false);
     expect(canonicalStates.at(-1)).toBe(true);
+    expect(requestSync).toHaveBeenCalledWith(0);
     act(() => tree.unmount());
   });
 

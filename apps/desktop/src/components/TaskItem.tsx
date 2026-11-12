@@ -1503,6 +1503,17 @@ export const TaskItem = memo(function TaskItem({
             return true;
         }
 
+        if (suggestion.command === 'remind-due' || suggestion.command === 'remind-start') {
+            const isDue = suggestion.command === 'remind-due';
+            const date = isDue ? draft.dueDate : draft.startTime;
+            const parsed = parseQuickAddDateCommands(`${date ? `/${isDue ? 'due' : 'start'}:${date} ` : ''}/${suggestion.command}:${value}`);
+            if (parsed.invalidDateCommands?.length) return false;
+            const lead = isDue ? parsed.props.dueReminderLeadMinutes : parsed.props.startReminderLeadMinutes;
+            if (lead === undefined) return false;
+            setField(isDue ? 'dueReminderLeadMinutes' : 'startReminderLeadMinutes', lead);
+            return true;
+        }
+
         if (suggestion.command === 'due' || suggestion.command === 'start' || suggestion.command === 'review') {
             if (!value) return false;
             const parsed = parseQuickAddDateCommands(`/${suggestion.command}:${value}`, new Date(), {
@@ -1569,6 +1580,8 @@ export const TaskItem = memo(function TaskItem({
         return false;
     }, [
         draft.description,
+        draft.dueDate,
+        draft.startTime,
         draft.focusedToday,
         draft.status,
         focusTaskLimit,

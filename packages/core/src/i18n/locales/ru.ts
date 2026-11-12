@@ -1,5 +1,6 @@
 
 export const ruOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Недопустимое напоминание: укажите поддерживаемый интервал и точные дату и время",
     'task.copyDetails': "Копировать сведения о задаче",
     "taskEdit.startAdvanceReminderLabel": "До начала",
     "settings.speechUseGemini": "Использовать Gemini",
@@ -971,6 +972,7 @@ export const ruOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': 'Через 5 минут',
         'settings.mobile.appLockRelockAfter15': 'Через 15 минут',
         'appLock.title': 'Mindwtr заблокирован',
+        "appLock.loadFailed": "Mindwtr не удалось загрузить ваши данные. Попробуйте ещё раз.",
         'appLock.description': 'Используйте блокировку устройства, чтобы открыть Mindwtr. Это защищает экран приложения, а не базу данных на устройстве.',
         'appLock.prompt': 'Разблокировать Mindwtr',
         'appLock.enablePrompt': 'Включить блокировку Mindwtr',
@@ -1777,6 +1779,9 @@ export const ruOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "По умолчанию ({value})",
         "taskEdit.reminderPolicySend": "Отправлять",
         "taskEdit.reminderPolicySkip": "Пропускать",
+        "taskEdit.reminderPolicyStart": "Только начало",
+        "taskEdit.reminderPolicyDue": "Только срок",
+        "taskEdit.reminderPolicySingleHint": "Нужно указать время. Отправляет одно напоминание в выбранное время или вместо него с заданным опережением. Повторные напоминания игнорируются. Напоминания Фокуса и обзора не меняются.",
         "taskEdit.reminderPolicyHint": "Для напоминаний о начале и сроке нужно указать время. Напоминания Фокуса и обзора не меняются.",
         "taskEdit.remindersDisabledHint": "Напоминания о задачах отключены в настройках уведомлений этого устройства.",
         "settings.taskReminderDefault": "Напоминания о задачах по умолчанию",

@@ -72,6 +72,7 @@ type TaskEditFormTabProps = {
     onTitleSelectionChange?: (selection: { start: number; end: number }) => void;
     onInputFocusTracked?: (targetInput?: number | string) => void;
     onTitleInputFocusChange?: (focused: boolean) => void;
+    onChecklistDragChange?: (dragging: boolean) => void;
     registerScrollToEnd?: (handler: ((targetInput?: number | string) => void) | null) => void;
     formResetKey?: string;
     suspendKeyboardHandling?: boolean;
@@ -125,6 +126,7 @@ function TaskEditFormTabComponent({
     onTitleSelectionChange,
     onInputFocusTracked,
     onTitleInputFocusChange,
+    onChecklistDragChange,
     registerScrollToEnd,
     formResetKey,
     suspendKeyboardHandling = false,
@@ -144,8 +146,8 @@ function TaskEditFormTabComponent({
         });
     }, []);
     const checklistDragScroll = React.useMemo<ChecklistDragScroll>(() => ({
-        begin: () => { measureDragViewport(); setChecklistDragging(true); },
-        end: () => setChecklistDragging(false),
+        begin: () => { measureDragViewport(); setChecklistDragging(true); onChecklistDragChange?.(true); },
+        end: () => { setChecklistDragging(false); onChecklistDragChange?.(false); },
         offset: () => formScrollOffsetRef.current,
         viewport: () => formViewportRef.current,
         scrollBy: (delta) => {
@@ -155,7 +157,7 @@ function TaskEditFormTabComponent({
             formScrollOffsetRef.current = y;
             formScrollRef.current?.scrollTo({ y, animated: false });
         },
-    }), [measureDragViewport]);
+    }), [measureDragViewport, onChecklistDragChange]);
     const keyboardTopRef = React.useRef(Dimensions.get('window').height);
     const keyboardVisibleRef = React.useRef(false);
 
@@ -368,6 +370,7 @@ function TaskEditFormTabComponent({
                         formScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
                     }}
                     scrollEventThrottle={16}
+                    removeClippedSubviews={false}
                     nestedScrollEnabled
                 >
                     <ChecklistDragScrollContext.Provider value={checklistDragScroll}>

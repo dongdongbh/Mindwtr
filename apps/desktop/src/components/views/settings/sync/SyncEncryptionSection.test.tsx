@@ -2,6 +2,8 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { describe, expect, it, vi } from 'vitest';
 import {
     SyncCryptoAuthError,
+    SyncCryptoUnsupportedError,
+    SyncEncryptionRemoteConflictError,
     SyncEncryptionBackendIncompatibleError,
     SyncEncryptionRemoteVersionUnavailableError,
     SyncEncryptionTerminalError,
@@ -24,6 +26,8 @@ const t = getEnglishSettingsLabels();
 const controller = (overrides: Partial<SyncEncryptionController> = {}): SyncEncryptionController => ({
     state: 'off',
     stateUnavailable: false,
+    incompleteTransitionKind: null,
+    partlyEncrypted: false,
     supported: true,
     pendingFirstSync: false,
     busy: false,
@@ -35,6 +39,7 @@ const controller = (overrides: Partial<SyncEncryptionController> = {}): SyncEncr
     retryState: vi.fn(async () => undefined),
     generatePassphrase: vi.fn(() => 'gerbil unpaved trombone cameo hazily wrongdoer'),
     enable: vi.fn(async () => true),
+    upgrade: vi.fn(async () => true),
     disable: vi.fn(async () => true),
     changePassphrase: vi.fn(async () => true),
     unlock: vi.fn(async () => true),
@@ -66,6 +71,27 @@ describe('encryption-capable backends', () => {
 });
 
 describe('SyncEncryptionSection', () => {
+    it.each([
+        ['upgrade', true], ['enable', false], ['disable', false], ['change-passphrase', false],
+    ] as const)('offers upgrade only for a matching interrupted transition: %s', (incompleteTransitionKind, available) => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', incompleteTransitionKind })} />);
+        expect(screen.queryByRole('button', { name: t.syncEncryptionUpgrade }) !== null).toBe(available);
+    });
+
+    it.each(['enabled', 'remote-encrypted-no-key'] as const)('confirms upgrade explicitly with compatibility warnings and a passphrase for %s', async (state) => {
+        const encryption = controller({ state });
+        render(<SyncEncryptionSection t={t} encryption={encryption} />);
+        expect(encryption.upgrade).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: t.syncEncryptionUpgrade }));
+        expect(screen.getByText(t.syncEncryptionUpgradeWarning)).toBeTruthy();
+        expect(lastButton(t.syncEncryptionUpgrade)).toBeDisabled();
+        type(t.syncEncryptionCurrentPassphrase, 'synthetic phrase');
+        fireEvent.click(lastButton(t.syncEncryptionUpgrade));
+        await waitFor(() => expect(encryption.upgrade).toHaveBeenCalledWith('synthetic phrase'));
+        expect(screen.queryByLabelText(t.syncEncryptionCurrentPassphrase)).toBeNull();
+    });
+
+
     it('renders nothing for a backend that cannot be encrypted', () => {
         const { container } = render(
             <SyncEncryptionSection t={t} encryption={controller({ supported: false, state: null })} />,
@@ -319,6 +345,28 @@ describe('useSyncEncryptionSettings cleanup outcome', () => {
         enable.mockRestore();
         status.mockRestore();
         unmount();
+    });
+});
+
+describe('upgrade failure classification through the desktop service', () => {
+    it.each([
+        [new SyncCryptoAuthError(), 'wrong-passphrase'],
+        [new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError('corrupt header')), 'generic'],
+        [new SyncEncryptionRemoteConflictError(), 'transition-incomplete'],
+        [new Error('network unavailable'), 'generic'],
+    ] as const)('keeps %s distinct from an incorrect passphrase', async (failure, expected) => {
+        const status = vi.spyOn(SyncService, 'getSyncEncryptionStatus').mockResolvedValue({ state: 'enabled' });
+        const upgrade = vi.spyOn(SyncService, 'upgradeSyncEncryption').mockRejectedValue(failure);
+        try {
+            const { result } = renderHook(() => useSyncEncryptionSettings('webdav', 'selfhosted', 'webdav', 'selfhosted'));
+            await waitFor(() => expect(result.current.state).toBe('enabled'));
+            await act(async () => { expect(await result.current.upgrade('synthetic phrase')).toBe(false); });
+            expect(result.current.error).toBe(expected);
+            expect(upgrade).toHaveBeenCalledWith('synthetic phrase', expect.any(Function));
+        } finally {
+            status.mockRestore();
+            upgrade.mockRestore();
+        }
     });
 });
 

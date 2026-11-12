@@ -13,6 +13,8 @@ import {
   loadStoredLanguage,
   nameNotifyListener,
   shouldSendTaskReminders,
+  isSingleTaskReminder,
+  isTaskReminderSelectionCurrent,
   type Language,
   useTaskStore,
 } from '@mindwtr/core';
@@ -567,6 +569,7 @@ async function rearmRetainedNativeAlarms(api: AlarmNotificationsApi): Promise<vo
       isReminderOwnerGone(key, taskMap, projectMap) ? 0 : entry.id
     )).filter((id) => Number.isSafeInteger(id) && id > 0));
     const stale = new Set(findStaleNativeReminderAlarms({ rows, trackedIds: ids, settings, tasks, projects, now: new Date() }).map(({ id }) => id));
+    for (const id of stale) ids.delete(id);
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       const id = Number(row.id);
@@ -578,6 +581,7 @@ async function rearmRetainedNativeAlarms(api: AlarmNotificationsApi): Promise<vo
       if (Number.isSafeInteger(id) && id > 0 && !stale.has(id) && row.scheduleType === 'once'
         && areTaskRemindersEnabled(settings)
         && data.kind?.startsWith('task-') && data.alarmKey?.startsWith('task:')
+        && isTaskReminderSelectionCurrent(taskMap.get(data.alarmKey.slice('task:'.length).replace(/:(?:r\d+|s?a\d+:-?\d+)$/, '')) ?? {}, data, settings)
         && (data.kind === 'task-review' || shouldSendTaskReminders(taskMap.get(data.alarmKey.slice('task:'.length).replace(/:(?:r\d+|s?a\d+:-?\d+)$/, '')) ?? {}, settings))
         && !isReminderOwnerGone(data.alarmKey, taskMap, projectMap)) ids.add(id);
     }
@@ -742,7 +746,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi, options: { deleteS
     weeklyReviewEnabled,
   });
 
-  if (options.deleteStale || tasks.some((task) => !shouldSendTaskReminders(task, settings))) await deleteStaleNativeAlarms(api);
+  if (options.deleteStale || tasks.some((task) => isSingleTaskReminder(task) || !shouldSendTaskReminders(task, settings))) await deleteStaleNativeAlarms(api);
 
   const port = toReminderAlarmPort(api);
   const delivered = activeFeature ? await readDeliveredCandidates(Date.now()) : [];

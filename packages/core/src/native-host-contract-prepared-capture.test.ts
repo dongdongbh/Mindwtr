@@ -49,6 +49,45 @@ afterEach(async () => {
 });
 
 describe('prepared native quick capture', () => {
+    it.each([
+        { due: '1d', start: '30m', dueMinutes: 1440, startMinutes: 30 },
+        { due: '0m', start: '0m', dueMinutes: 0, startMinutes: 0 },
+    ])('round-trips reminder leads $due/$start through the prepared journal and restart replay', async ({ due, start, dueMinutes, startMinutes }) => {
+        const { host, options, saveData } = await open();
+        const command = prepare(host, { text: `Call /due:2030-11-12 17:00 /remind-due:${due} /start:2030-11-12 09:00 /remind-start:${start}`,
+            options, captureId: generateUUID() });
+        expect(command.prepared.task).toMatchObject({ dueReminderLeadMinutes: dueMinutes, startReminderLeadMinutes: startMinutes });
+        for (const [field, invalid] of [['dueReminderLeadMinutes', 10081], ['dueReminderLeadMinutes', -1],
+            ['startReminderLeadMinutes', 2], ['startReminderLeadMinutes', 90], ['startReminderLeadMinutes', '30']] as const) {
+            const forged = JSON.parse(JSON.stringify(command));
+            forged.prepared.task[field] = invalid;
+            expect(await host.commitPreparedQuickCapture(forged)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(saveData).not.toHaveBeenCalled();
+        expect(value(await host.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        const stored = await getStorageAdapter().getData();
+        expect(stored.tasks.find(task => task.id === command.prepared.task.id)).toMatchObject({
+            dueReminderLeadMinutes: dueMinutes, startReminderLeadMinutes: startMinutes,
+        });
+        const restarted = await activate(true);
+        saveData.mockClear();
+        expect(value(await restarted.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('round-trips reminder leads through the copilot prepared journal', async () => {
+        const { host, options } = await open();
+        const request = { capture: { text: 'Call /due:2030-11-12 17:00 /remind-due:1d /start:2030-11-12 09:00 /remind-start:30m',
+            options, captureId: generateUUID() }, applied: { tags: ['#work'] } };
+        const planned = value(host.prepareQuickCaptureCopilot(request));
+        if (planned.kind !== 'prepared') throw new Error('Capture was not prepared');
+        const command = JSON.parse(JSON.stringify({ request, prepared: planned.prepared }));
+        expect(value(await host.commitPreparedQuickCapture(command))).toMatchObject({ kind: 'saved' });
+        expect(useTaskStore.getState()._tasksById.get(request.capture.captureId)).toMatchObject({
+            dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 30,
+        });
+    });
+
     it('preserves review-due focused Someday capture parity with ordinary submission', async () => {
         const { host, options } = await open();
         const request = { text: 'Read /someday /review:today', options: { ...options, focus: true }, captureId: generateUUID() };

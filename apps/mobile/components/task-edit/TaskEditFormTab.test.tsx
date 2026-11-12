@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTaskDraft } from '@mindwtr/core/task-draft';
 
 import { TaskEditFormTab } from './TaskEditFormTab';
+import { ChecklistDragScrollContext } from './use-checklist-handle-drag';
 
 const mockScrollTo = vi.hoisted(() => vi.fn());
 const mockFindNodeHandle = vi.hoisted(() => vi.fn(() => 9001));
@@ -325,6 +326,25 @@ describe('TaskEditFormTab keyboard handling', () => {
     expect(findScrollContainer(tree).props.contentContainerStyle).toEqual(
       expect.arrayContaining([expect.objectContaining({ paddingBottom: 312 })])
     );
+  });
+
+  it('locks form scrolling and forwards handle contact to the pager until cancellation', () => {
+    const onChecklistDragChange = vi.fn();
+    function DragHandle() {
+      const scroll = React.useContext(ChecklistDragScrollContext);
+      return <View testID="drag-contact" onTouchStart={() => scroll?.begin()} onTouchCancel={() => scroll?.end()} />;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TaskEditFormTab {...baseProps} onChecklistDragChange={onChecklistDragChange}
+      basicFields={['checklist']} renderField={() => <DragHandle />} />); });
+    const handle = tree.root.findByProps({ testID: 'drag-contact' });
+    act(() => handle.props.onTouchStart());
+    expect(findScrollContainer(tree).props.scrollEnabled).toBe(false);
+    expect(findScrollContainer(tree).props.removeClippedSubviews).toBe(false);
+    expect(onChecklistDragChange).toHaveBeenLastCalledWith(true);
+    act(() => handle.props.onTouchCancel());
+    expect(findScrollContainer(tree).props.scrollEnabled).toBe(true);
+    expect(onChecklistDragChange).toHaveBeenLastCalledWith(false);
   });
 
   it('tracks title focus without forcing fallback scrolling when no native handle is reported', () => {

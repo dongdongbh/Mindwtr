@@ -772,7 +772,7 @@ describe('cloud server utils', () => {
 
     test('validates task reminder policies for creation and patch transport', () => {
         for (const mode of ['create', 'patch'] as const) {
-            for (const reminderPolicy of ['inherit', 'send', 'skip', null]) {
+            for (const reminderPolicy of ['inherit', 'send', 'skip', 'start', 'due', null]) {
                 expect(validateEntityProps('task', mode, { reminderPolicy }).ok).toBe(true);
             }
             for (const reminderPolicy of ['sometimes', '', true, 1, {}, []]) {
@@ -3321,6 +3321,10 @@ describe('cloud server api', () => {
         expect(await patch({ title: 'Unrelated' })).toMatchObject({ reminderPolicy: 'inherit', suppressMindwtrReminders: true });
         expect(await patch({ suppressMindwtrReminders: false })).toMatchObject({ reminderPolicy: 'send', suppressMindwtrReminders: false });
         expect(await patch({ reminderPolicy: 'inherit' })).toMatchObject({ reminderPolicy: 'inherit', suppressMindwtrReminders: true });
+        for (const reminderPolicy of ['start', 'due'] as const) {
+            expect(await create({ reminderPolicy, suppressMindwtrReminders: false })).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
+            expect(await patch({ reminderPolicy, suppressMindwtrReminders: false })).toMatchObject({ reminderPolicy, suppressMindwtrReminders: true });
+        }
     });
 
     test('supports task CRUD and soft delete flow', async () => {

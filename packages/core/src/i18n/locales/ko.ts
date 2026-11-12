@@ -1,5 +1,6 @@
 
 export const koOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "잘못된 알림: 지원되는 기간과 명시적인 날짜 및 시간을 입력하세요",
     "taskEdit.startAdvanceReminderLabel": "시작 전",
     "settings.speechUseGemini": "Gemini 사용",
     "settings.speechNativeUnsupported": "이 음성 제공업체는 아직 여기서 지원되지 않습니다. 음성 입력을 사용하려면 Gemini, OpenAI 또는 Whisper를 선택하세요.",
@@ -310,7 +311,7 @@ export const koOverrides: Record<string, string> = {
         'nav.sectionArchive': '보관함',
 
 
-        'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
+        'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
         'quickAdd.example': '예: 엄마에게 전화 /due:tomorrow @전화',
         'quickAdd.inlineHint': '예: 엄마에게 전화 /due:tomorrow 5pm @전화 #가족',
         'quickAdd.syntaxHelp': '빠른 추가 문법 도움말',
@@ -1332,6 +1333,7 @@ export const koOverrides: Record<string, string> = {
         'settings.mobile.appLockRelockAfter5': '5분 후',
         'settings.mobile.appLockRelockAfter15': '15분 후',
         'appLock.title': 'Mindwtr가 잠겨 있습니다',
+        "appLock.loadFailed": "Mindwtr가 데이터를 불러오지 못했습니다. 다시 시도하세요.",
         'appLock.description': '기기 잠금으로 Mindwtr를 엽니다. 앱 화면만 보호하며 기기 안의 데이터베이스는 보호하지 않습니다.',
         'appLock.prompt': 'Mindwtr 잠금 해제',
         'appLock.enablePrompt': 'Mindwtr 앱 잠금 켜기',
@@ -2776,6 +2778,9 @@ export const koOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "기본값 사용 ({value})",
         "taskEdit.reminderPolicySend": "보내기",
         "taskEdit.reminderPolicySkip": "건너뛰기",
+        "taskEdit.reminderPolicyStart": "시작만",
+        "taskEdit.reminderPolicyDue": "마감만",
+        "taskEdit.reminderPolicySingleHint": "명확한 시간이 필요합니다. 선택한 시간에 한 번 알리며, 미리 알림을 설정하면 대신 그 시간에 알립니다. 반복 알림은 무시됩니다. 집중 및 검토 알림은 변경되지 않습니다.",
         "taskEdit.reminderPolicyHint": "시작 및 마감 알림에는 명확한 시간이 필요합니다. 집중 및 검토 알림은 변경되지 않습니다.",
         "taskEdit.remindersDisabledHint": "이 기기의 알림 설정에서 작업 알림이 꺼져 있습니다.",
         "settings.taskReminderDefault": "기본 작업 알림",

@@ -395,6 +395,8 @@ function checkDueAndNotify() {
 
                 if (request.fireAt.getTime() > now.getTime() || !advanceObservedByTask.has(request.key)) continue;
                 void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then((sent) => {
+                    if (sent && request.data.reminderSelection) void logInfo('Selective task reminder delivered', { scope: 'notifications', force: true,
+                        extra: { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'delivered' } });
                     if (sent) void logInfo('Advance reminder delivered', { scope: 'notifications', force: true,
                         extra: { releaseCheck: request.data.kind === 'task-start-advance' ? 'v1.3.8/start-advance-reminder' : 'v1.3.8/due-advance-reminder', outcome: 'delivered' } });
                 });
@@ -402,7 +404,10 @@ function checkDueAndNotify() {
             }
             if (notifiedAtByTask.get(taskId) === fireIso) continue;
             logReminderFired('task', fireIso);
-            void sendNotification(request.title, request.message, getReminderNotificationTag(request.key));
+            void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then(sent => {
+                if (sent && request.data.reminderSelection) void logInfo('Selective task reminder delivered', { scope: 'notifications', force: true,
+                    extra: { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'delivered' } });
+            });
             notifiedAtByTask.set(taskId, fireIso);
         } else if (projectId) {
             if (notifiedAtByProject.get(projectId) === fireIso) continue;

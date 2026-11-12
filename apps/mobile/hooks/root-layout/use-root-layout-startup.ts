@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -100,20 +100,35 @@ export function useRootLayoutStartup({
 }: UseRootLayoutStartupParams) {
     const [dataReady, setDataReady] = useState(false);
     const [canonicalDataReady, setCanonicalDataReady] = useState(false);
+    const [startupLoadFailed, setStartupLoadFailed] = useState(false);
+    const [retryNonce, setRetryNonce] = useState(0);
     const retryLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const widgetRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const storageWarningShown = useRef(false);
     const loadAttempts = useRef(0);
     const startupContextLogged = useRef(false);
 
+    const retryDataLoad = useCallback(() => {
+        loadAttempts.current = 0;
+        setCanonicalDataReady(false);
+        setStartupLoadFailed(false);
+        setRetryNonce((value) => value + 1);
+    }, []);
+
     useEffect(() => {
-        if (storageInitError && !storageWarningShown.current) {
-            storageWarningShown.current = true;
-            Alert.alert(
-                'Storage Error',
-                'Failed to initialize storage. Your data will NOT be saved. Please restart the app.\n\nError: ' + storageInitError.message,
-                [{ text: 'OK' }]
-            );
+        setCanonicalDataReady(false);
+        setStartupLoadFailed(false);
+        if (storageInitError) {
+            setDataReady(true);
+            setStartupLoadFailed(true);
+            if (!storageWarningShown.current) {
+                storageWarningShown.current = true;
+                Alert.alert(
+                    'Storage Error',
+                    'Failed to initialize storage. Your data will NOT be saved. Please restart the app.\n\nError: ' + storageInitError.message,
+                    [{ text: 'OK' }]
+                );
+            }
         }
 
         let cancelled = false;
@@ -181,8 +196,11 @@ export function useRootLayoutStartup({
                 }
                 setDataReady(true);
 
-                setCanonicalDataReady(!loadedStore.error);
-                if (!loadedStore.error) markStartupPhase('js.local_data_ready');
+                const canonicalReady = canonicalApplied && !loadedStore.error;
+                setCanonicalDataReady(canonicalReady);
+                setStartupLoadFailed(!canonicalReady);
+                if (!canonicalReady) return;
+                markStartupPhase('js.local_data_ready');
                 markStartupPhase('js.store.fetch_data.applied');
                 if (!startupContextLogged.current) {
                     startupContextLogged.current = true;
@@ -276,6 +294,7 @@ export function useRootLayoutStartup({
                     return;
                 }
                 setDataReady(true);
+                setStartupLoadFailed(true);
                 Alert.alert(
                     'Data Load Error',
                     'Failed to load your data. Some tasks may be missing.\n\nError: ' + (error as Error).message,
@@ -303,7 +322,7 @@ export function useRootLayoutStartup({
                 widgetRefreshTimer.current = null;
             }
         };
-    }, [analyticsHeartbeatUrl, analyticsHeartbeatChannel, appVersion, isExpoGo, isFossBuild, requestSync, sandboxMode, storageInitError]);
+    }, [analyticsHeartbeatUrl, analyticsHeartbeatChannel, appVersion, isExpoGo, isFossBuild, requestSync, retryNonce, sandboxMode, storageInitError]);
 
-    return { dataReady, canonicalDataReady };
+    return { dataReady, canonicalDataReady, startupLoadFailed, retryDataLoad };
 }

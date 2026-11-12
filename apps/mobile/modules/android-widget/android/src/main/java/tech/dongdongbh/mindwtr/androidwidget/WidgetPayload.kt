@@ -63,6 +63,7 @@ data class WidgetPayload(
     val upcomingLabel: String? = null,
     val statusLabel: String? = null,
     val showStatus: Boolean = false,
+    val canComplete: Boolean = true,
   )
 
   enum class DueTone { OVERDUE, TODAY, NORMAL }
@@ -564,6 +565,7 @@ data class WidgetPayload(
             upcomingLabel = item.optString("upcomingLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("upcomingLabel") },
             statusLabel = item.optString("statusLabel").trim().takeIf { it.isNotEmpty() && !item.isNull("statusLabel") },
             showStatus = item.optBoolean("showStatus", false),
+            canComplete = item.optBoolean("canComplete", true),
           ),
         )
       }

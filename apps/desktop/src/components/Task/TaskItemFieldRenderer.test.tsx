@@ -2001,6 +2001,46 @@ describe('TaskItemFieldRenderer reminder policy', () => {
         expect(advance).toHaveValue('0');
     });
 
+    it('switches between selective reminder modes without clearing saved leads or repeats', () => {
+        const { getByRole, getByText, queryByRole } = render(
+            <DraftFieldHarness fieldId="dueDate" initialDraft={{
+                startTime: '2026-04-19T09:30', dueDate: '2026-04-19T11:45',
+                startReminderLeadMinutes: 15, dueReminderLeadMinutes: 30, repeatReminderMinutes: 10,
+            }} />
+        );
+        openReminders(getByRole);
+        const policy = getByRole('combobox', { name: 'Start/due reminders' });
+        fireEvent.change(policy, { target: { value: 'start' } });
+        expect(policy).toHaveValue('start');
+        expect(getByRole('option', { name: 'Start only' })).toBeInTheDocument();
+        expect(getByRole('option', { name: 'Due only' })).toBeInTheDocument();
+        expect(queryByRole('combobox', { name: 'Advance reminder' })).toBeNull();
+        expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
+        expect(getByRole('button', { name: 'Start/due reminders: Start only' })).toBeInTheDocument();
+        expect(getByText(/or its advance time instead/)).toBeInTheDocument();
+        fireEvent.change(policy, { target: { value: 'due' } });
+        expect(getByRole('combobox', { name: 'Advance reminder' })).toHaveValue('30');
+        expect(queryByRole('group', { name: 'Repeat reminder' })).toBeNull();
+        expect(getByRole('option', { name: '120 min before' })).toBeInTheDocument();
+        fireEvent.change(getByRole('combobox', { name: 'Advance reminder' }), { target: { value: '120' } });
+        fireEvent.change(policy, { target: { value: 'send' } });
+        expect(getByRole('combobox', { name: 'Advance reminder' })).toHaveValue('120');
+        expect(getByRole('button', { name: '10 min' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it.each(['start', 'due'] as const)('shows the start advance only when selected in %s-only mode', (reminderPolicy) => {
+        const setField = vi.fn();
+        const { queryByRole } = render(
+            <TaskItemFieldRenderer fieldId="startTime" {...createProps({ draft: {
+                startTime: '2026-04-19T09:30', dueDate: '2026-04-19T11:45',
+                reminderPolicy, suppressMindwtrReminders: true, startReminderLeadMinutes: 15,
+            }, setField })} />
+        );
+        if (reminderPolicy === 'start') expect(queryByRole('combobox', { name: 'Before start' })).toHaveValue('15');
+        else expect(queryByRole('combobox', { name: 'Before start' })).toBeNull();
+        expect(setField).not.toHaveBeenCalled();
+    });
+
     it('serializes legacy controls as explicit reminder policies', () => {
         const on = setTaskDraftField(createTaskDraft(timedTask), 'suppressMindwtrReminders', true);
         expect(taskDraftToUpdatePatch(on, timedTask)).toMatchObject({ reminderPolicy: 'skip' });

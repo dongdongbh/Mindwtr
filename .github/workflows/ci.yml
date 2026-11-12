@@ -546,7 +546,7 @@ jobs:
           if-no-files-found: ignore
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: E2E (Web)
     timeout-minutes: 30
     steps:

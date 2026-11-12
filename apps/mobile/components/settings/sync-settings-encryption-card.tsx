@@ -9,6 +9,7 @@ import {
 import {
     createSyncEncryptionCard,
     getSyncEncryptionCardMessages,
+    isSyncEncryptionUpgradeAvailable,
     type SyncEncryptionPassphraseField,
 } from '@mindwtr/core/sync-encryption-card';
 
@@ -21,6 +22,7 @@ import {
     declineSyncEncryptionPassphrase,
     disableSyncEncryption,
     enableSyncEncryption,
+    upgradeSyncEncryption,
     getSyncEncryptionStatus,
     isSyncEncryptionBackendPending,
     isSyncEncryptionCleanupDeferredError,
@@ -53,6 +55,7 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
         getStatus: () => getSyncEncryptionStatus(),
         isBackendPending: () => isSyncEncryptionBackendPending(),
         enable: (passphrase, options) => enableSyncEncryption(passphrase, options),
+        upgrade: (passphrase, options) => upgradeSyncEncryption(passphrase, options),
         change: (current, next, options) => changeSyncEncryptionPassphrase(current, next, options),
         disable: (options) => disableSyncEncryption(options),
         provide: (passphrase) => provideSyncEncryptionPassphrase(passphrase),
@@ -380,6 +383,23 @@ export function SyncEncryptionCard({ appData, t, tc, language, transportBusy = f
                 )}
 
                 {                                                                                           }
+                {flow === 'none' && isSyncEncryptionUpgradeAvailable(cardState)
+                    && renderAction(t('settings.syncEncryptionUpgrade'), () => openFlow('upgrade'))}
+                {flow === 'upgrade' && (
+                    <>
+                        <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <Text style={[styles.settingDescription, { color: tc.warning }]}>
+                                {t('settings.syncEncryptionUpgradeWarning')}
+                            </Text>
+                        </View>
+                        {renderPassphraseInput(t('settings.syncEncryptionCurrentPassphrase'), currentPassphrase, 'current')}
+                        {errorBlock}
+                        {renderRevealToggle()}
+                        {renderAction(t('settings.syncEncryptionUpgrade'), () => { void card.submitUpgrade(); }, !currentPassphrase)}
+                        {renderAction(t('common.cancel'), closeFlow)}
+                    </>
+                )}
+
                 {flow === 'abandon' && (
                     <>
                         <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>

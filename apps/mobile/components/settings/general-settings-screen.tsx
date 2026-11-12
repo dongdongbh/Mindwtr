@@ -18,7 +18,7 @@ import { useTheme } from '@/contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { isAppSearchSupported, readAppSearchIndexingEnabled, writeAppSearchIndexingEnabled } from '@/lib/app-search-preference';
 import { enableAppSearchIndexing, wipeAppSearchIndex } from '@/lib/app-search-service';
-import { authenticateWithDeviceLock, getMobileAppLockErrorKey } from '@/lib/mobile-app-lock';
+import { authenticateWithDeviceLock, getMobileAppLockErrorKey, MobileAppLockEnableContext } from '@/lib/mobile-app-lock';
 import { getSystemDateFormat } from '@/modules/system-date-format';
 
 import { SettingRow, SettingToggleRow } from './setting-row';
@@ -27,6 +27,7 @@ import { SettingsTopBar } from './settings.shell';
 import { styles } from './settings.styles';
 
 export function GeneralSettingsScreen() {
+    const confirmAuthenticatedEnable = React.useContext(MobileAppLockEnableContext);
     const { themeMode, setThemeMode } = useTheme();
     const { language, tr, setLanguage, t } = useSettingsLocalization();
     const { settings, updateSettings } = useTaskStore((state) => ({
@@ -92,10 +93,11 @@ export function GeneralSettingsScreen() {
                     return;
                 }
                 updateSettings(buildGeneralSettingsUpdate(settings, { type: 'appLock', value: true })!).catch(console.error);
+                confirmAuthenticatedEnable();
             })
             .catch(() => setAppLockErrorKey('appLock.failed'))
             .finally(() => setAppLockBusy(false));
-    }, [appLockBusy, enablePrompt, settings, updateSettings]);
+    }, [appLockBusy, confirmAuthenticatedEnable, enablePrompt, settings, updateSettings]);
     const appLockError = appLockErrorKey ? tr(appLockErrorKey) : null;
 
     useEffect(() => {

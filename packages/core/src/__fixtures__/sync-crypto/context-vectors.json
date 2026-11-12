@@ -1,0 +1,30 @@
+[
+  {
+    "name": "canonical-document",
+    "passphrase": "context-vector",
+    "saltB64": "FxcXFxcXFxcXFxcXFxcXFw==",
+    "params": {
+      "mKib": 64,
+      "t": 1,
+      "p": 1
+    },
+    "nonceB64": "GRkZGRkZGRkZGRkZ",
+    "plaintextB64": "eyJ0YXNrcyI6W119",
+    "encryptedB64": "TVdFTkMxAgFAAAAAAQAAAAEBFxcXFxcXFxcXFxcXFxcXFxkZGRkZGRkZGRkZGRwAAAAAAAAAeU1ljqhD/UZCNmuDfbNgPVq/9Mb0trEjboTpGQ==",
+    "cloudKey": null
+  },
+  {
+    "name": "attachment-sync-shaped-json",
+    "passphrase": "context-vector",
+    "saltB64": "FxcXFxcXFxcXFxcXFxcXFw==",
+    "params": {
+      "mKib": 64,
+      "t": 1,
+      "p": 1
+    },
+    "nonceB64": "GRkZGRkZGRkZGRkZ",
+    "plaintextB64": "eyJ0YXNrcyI6W119",
+    "encryptedB64": "TVdFTkMxAgFAAAAAAQAAAAEBFxcXFxcXFxcXFxcXFxcXFxkZGRkZGRkZGRkZGRwAAAAAAAAAeU1ljqhD/UZCNmuD6ri4c+/1U0d7P1NjZEah0A==",
+    "cloudKey": "attachments/a.json"
+  }
+]

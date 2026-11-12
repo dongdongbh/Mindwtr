@@ -13,7 +13,7 @@ import { mobileAttachmentFiles, mobileAttachmentFileSystem } from '../attachment
 import { installAttachmentFileGeneration } from '../attachment-file-installer';
 import { isExpoGo } from '../expo-go';
 import { areJsTimersPaused } from '../js-timers';
-import { logSyncEncryptionEvent } from '../sync-encryption-state';
+import { getMobileSyncEncryptionStatus, logSyncEncryptionEvent } from '../sync-encryption-state';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 
 
@@ -43,6 +43,7 @@ export const mobileAttachmentCommon = (): MobileAttachmentCommon => {
     files: mobileAttachmentFiles(),
     crypto: mobileSyncCryptoPrimitives,
     encryption: {
+      getSyncEncryptionStatus: () => getMobileSyncEncryptionStatus(),
       logSyncEncryptionEvent: (event, extra, options) => logSyncEncryptionEvent(event, extra, options),
     },
     installer: {

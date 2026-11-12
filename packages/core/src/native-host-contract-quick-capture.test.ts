@@ -46,6 +46,23 @@ describe('native host contract: the capture popup', () => {
     const chip = (view: NativeQuickCaptureView, kind: string) => view.preview.find((entry) => entry.kind === kind)?.value;
 
 
+    it('previews, refuses invalid leads, and saves reminder syntax through the native contract', async () => {
+        const { host } = await openHost();
+        const options = value(host.openQuickCapture()).options;
+        const text = 'Call /due:2030-11-12 17:00 /remind-due:1d /start:2030-11-12 09:00 /remind-start:30m';
+        const preview = value(host.getQuickCaptureView({ text, options }));
+        expect(preview.preview).toContainEqual(expect.objectContaining({ id: 'due-reminder', value: '1 day before' }));
+        expect(preview.preview).toContainEqual(expect.objectContaining({ id: 'start-reminder', value: '30 min before' }));
+        const refused = value(await host.submitQuickCapture({ text: 'Call /due:tomorrow /remind-due:1d', options, captureId: generateUUID() }));
+        expect(refused).toMatchObject({ kind: 'refused' });
+        const captureId = generateUUID();
+        expect(value(await host.submitQuickCapture({ text, options, captureId }))).toMatchObject({ kind: 'saved', taskId: captureId });
+        await flushPendingSave();
+        expect(useTaskStore.getState()._allTasks.find(task => task.id === captureId)).toMatchObject({
+            title: 'Call', dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 30, reminderPolicy: 'inherit',
+        });
+    });
+
     it('does not read an opener preset: the capture saves as the tab-bar popup does', async () => {
         const { host } = await openHost();
         const preset = { projectId: 'p-home', status: 'next' } as const;

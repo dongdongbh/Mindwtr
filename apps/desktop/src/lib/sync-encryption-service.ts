@@ -15,6 +15,7 @@ import {
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
     SyncEncryptionTerminalError,
+    assertSyncAttachmentEncryptionPosture,
     type SyncCryptoKdfParams,
     type SyncCryptoPrimitives,
     type SyncEncryptionKeyCachePort,
@@ -384,12 +385,12 @@ const statusToLocalState = (status: SyncEncryptionStatus): SyncEncryptionLocalSt
 
 
 export type DesktopSyncEncryptionHost = Pick<
-    SyncEncryptionServiceDeps<never>,
-    'fetch' | 'loadWebDavConfig' | 'webDavRequestOptions' | 'getDropboxClientId' | 'runDropboxAuthorized'
+    SyncEncryptionServiceDeps<string>,
+    'fetch' | 'loadWebDavConfig' | 'webDavRequestOptions' | 'getDropboxClientId' | 'runDropboxAuthorized' | 'readTrustedLocalData' | 'fileSync'
 > & { location: SyncEncryptionLocationPort };
 
 export const createDesktopSyncEncryptionService = (host: DesktopSyncEncryptionHost): SyncEncryptionService =>
-    createSyncEncryptionService<never>({
+    createSyncEncryptionService<string>({
         ...host,
         fenceOwnerId: 'mindwtr-desktop',
         state: createDesktopSyncEncryptionState(),
@@ -407,9 +408,10 @@ export const createDesktopSyncEncryptionService = (host: DesktopSyncEncryptionHo
 export async function sealAttachmentBytes(bytes: Uint8Array, artifact?: string | null): Promise<Uint8Array> {
     const label = artifact ?? '';
     const material = await getSyncEncryptionMaterial();
+    assertSyncAttachmentEncryptionPosture(await getSyncEncryptionStatus(), material);
     if (material) {
         logSyncEncryptionRemoteRead({ artifact: label, exists: null, kind: 'encrypted', decision: 'seal' });
-        return encryptSyncArtifact(bytes, material);
+        return encryptSyncArtifact(bytes, material, desktopSyncCryptoPrimitives, { kind: 'attachment', cloudKey: artifact ?? '' });
     }
     if (await isSyncEncryptionEnabledButLocked()) {
 
@@ -423,15 +425,24 @@ export async function sealAttachmentBytes(bytes: Uint8Array, artifact?: string |
     return bytes;
 }
 
+export async function assertPlaintextAttachmentTransfer(): Promise<void> {
+    assertSyncAttachmentEncryptionPosture(await getSyncEncryptionStatus(), null);
+}
+
 
 export async function openAttachmentBytes(bytes: Uint8Array, artifact?: string | null): Promise<Uint8Array> {
     const label = artifact ?? '';
+    const currentMaterial = await getSyncEncryptionMaterial();
+    assertSyncAttachmentEncryptionPosture(await getSyncEncryptionStatus(), currentMaterial);
     const inspected = inspectSyncArtifact(bytes);
     if (inspected.kind === 'unsupported') {
         logSyncEncryptionRemoteRead({ artifact: label, exists: true, kind: 'unsupported', decision: 'decrypt' });
         throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
     }
     if (inspected.kind === 'plaintext') {
+        if (await getSyncEncryptionMaterial() || await isSyncEncryptionEnabledButLocked()) {
+            throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError('SYNC_ENCRYPTION_PLAINTEXT_ATTACHMENT: restore the attachment from a trusted local copy'));
+        }
         logSyncEncryptionRemoteRead({ artifact: label, exists: true, kind: 'plaintext', decision: 'plaintext' });
         return bytes;
     }
@@ -458,7 +469,7 @@ export async function openAttachmentBytes(bytes: Uint8Array, artifact?: string |
         headerKdf: inspected.params,
         decision: 'decrypt',
     });
-    return decryptRemoteArtifactOrThrow(bytes, material.key, desktopSyncCryptoPrimitives);
+    return decryptRemoteArtifactOrThrow(bytes, material.key, desktopSyncCryptoPrimitives, { kind: 'attachment', cloudKey: artifact ?? '' });
 }
 
 

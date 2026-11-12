@@ -335,6 +335,19 @@ const contextScans = () => quickCaptureSpies.getQuickCaptureContextChoices.mock.
   .filter(([tasks]) => tasks === selectStore.getState().tasks).length;
 
 describe('QuickCaptureSheet save handling', () => {
+  it('previews and saves typed existing reminder leads (#1545)', async () => {
+    addTask.mockResolvedValue({ success: true, id: 'task-1' });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<QuickCaptureSheet visible openRequestId={1} initialValue="Call /due:2030-11-12 17:00 /remind-due:1d /start:2030-11-12 09:00 /remind-start:30m" onClose={vi.fn()} />);
+    });
+    const body = tree.root.findAll((node) => String(node.type) === 'QuickCaptureSheetBody')[0];
+    expect(body.props.preview.props.entries).toContainEqual(expect.objectContaining({ id: 'due-reminder', value: '1 day before' }));
+    expect(body.props.preview.props.entries).toContainEqual(expect.objectContaining({ id: 'start-reminder', value: '30 min before' }));
+    await act(async () => { await body.props.handleSave(); });
+    expect(addTask).toHaveBeenCalledWith('Call', expect.objectContaining({ dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 30 }));
+  });
+
   it('previews and saves the exact typed custom estimate (#1358)', async () => {
     addTask.mockResolvedValue({ success: true, id: 'task-1' });
     let tree!: ReturnType<typeof create>;

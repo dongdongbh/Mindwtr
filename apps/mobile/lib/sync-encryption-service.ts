@@ -42,6 +42,7 @@ import {
     restoreAfterFenceLoss,
 } from './sync-encryption-state';
 import { backgroundSafeFetch } from './background-safe-fetch';
+import { flushPendingSave } from '@mindwtr/core';
 
 export {
     isSyncEncryptionCleanupDeferredError,
@@ -53,6 +54,11 @@ export type { SyncEncryptionProgressCallback, SyncEncryptionTransitionOptions } 
 let service: SyncEncryptionService | null = null;
 const encryptionService = (): SyncEncryptionService => {
     service ??= createSyncEncryptionService<MobileFileSyncLease>({
+        readTrustedLocalData: async () => {
+            await flushPendingSave();
+            const { readTrustedLocalDataForEncryptionUpgrade } = await import('./storage-adapter');
+            return readTrustedLocalDataForEncryptionUpgrade();
+        },
         location: createStorageSyncEncryptionLocation({
             getItem: (key) => AsyncStorage.getItem(key),
             removeItem: (key) => AsyncStorage.removeItem(key),
@@ -115,6 +121,11 @@ export const enableSyncEncryption = (
 export const disableSyncEncryption = (
     options: SyncEncryptionTransitionOptions = {},
 ): Promise<void> => encryptionService().disableSyncEncryption(options);
+
+export const upgradeSyncEncryption = (
+    passphrase: string,
+    options: SyncEncryptionTransitionOptions = {},
+): Promise<void> => encryptionService().upgradeSyncEncryption(passphrase, options);
 
 export const changeSyncEncryptionPassphrase = (
     current: string,

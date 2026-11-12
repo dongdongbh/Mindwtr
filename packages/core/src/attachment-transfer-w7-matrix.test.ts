@@ -214,7 +214,7 @@ const startDevice = async (w: World) => {
         core: { isSandboxMode: () => false },
     });
     const common = createMobileAttachmentCommon({
-        fs, files, installer, crypto: {} as never, encryption: { logSyncEncryptionEvent: async () => undefined },
+        fs, files, installer, crypto: {} as never, encryption: { logSyncEncryptionEvent: async () => undefined, getSyncEncryptionStatus: async () => ({ state: 'off' }) },
         installerMayBeMissing: () => false, timersPaused: () => true, uploads: { createUploadTask: () => null },
     });
 

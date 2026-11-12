@@ -16,6 +16,7 @@ type WidgetRefreshResult = {
   compactWidgetCount: number;
   hiddenCheckoffCount?: number;
   serializedCheckoffCount?: number;
+  heldCheckoffCount?: number;
   directCollectionCount?: number;
   renderedTaskCount?: number;
   eligibleTaskCount?: number;

@@ -125,6 +125,7 @@ export interface WidgetListContext {
     data: AppData;
 
     activeTasks: Task[];
+    referenceTasks?: Task[];
 
     inboxTasks: Task[];
     focusLists: FocusTaskLists;
@@ -157,7 +158,9 @@ const savedFilterStatus: Partial<Record<SavedFilter['view'], Task['status']>> = 
 function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): WidgetTaskList {
     const { data, activeTasks, sortBy, prioritiesEnabled } = context;
     const status = savedFilterStatus[filter.view];
-    const pool = status ? activeTasks.filter((task) => task.status === status) : activeTasks;
+    const includeReference = (filter.view === 'contexts' || filter.view === 'all') && filter.criteria.statuses?.includes('reference');
+    const pool = status ? activeTasks.filter((task) => task.status === status)
+        : includeReference ? [...activeTasks, ...(context.referenceTasks ?? [])] : activeTasks;
     const projects = data.projects || [];
     const matched = applyFilter(pool, filter.criteria, { projects, tokenMatchMode: 'all', now: context.now });
     if (filter.criteria.excludedProjects?.length || ((filter.view === 'contexts' || filter.view === 'all') && filter.criteria.statuses?.length)) {

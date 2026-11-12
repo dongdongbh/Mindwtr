@@ -1,5 +1,6 @@
 
 export const nlOverrides: Record<string, string> = {
+    "quickAdd.invalidReminderCommand": "Ongeldige herinnering: gebruik een ondersteunde duur en een expliciete datum en tijd",
     'task.copyDetails': "Taakdetails kopiëren",
     "review.startDailyReview": "Dagelijkse terugblik starten",
     "review.startWeeklyReview": "Wekelijkse terugblik starten",
@@ -240,7 +241,7 @@ export const nlOverrides: Record<string, string> = {
         'nav.sectionLists': 'Lijsten',
         'nav.sectionOrganize': 'Organiseren',
         'nav.sectionArchive': 'Archief',
-        'quickAdd.help': 'Snel toevoegen ondersteunt /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> of !Area, @context, #tag, +Project, %Person (of %"Full Name").',
+        'quickAdd.help': 'Snel toevoegen ondersteunt /start:<when>, /due:<when>, /review:<when>, /remind-due:1d, /remind-start:30m, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> of !Area, @context, #tag, +Project, %Person (of %"Full Name").',
         'quickAdd.example': 'Voorbeeld: Bel mama /due:tomorrow @phone',
         'quickAdd.inlineHint': 'Tip: Bel mama /due:tomorrow 5pm @phone #family',
         'quickAdd.syntaxHelp': 'Hulp voor snel toevoegen-syntax',
@@ -916,6 +917,9 @@ export const nlOverrides: Record<string, string> = {
         "taskEdit.reminderPolicyInherit": "Standaard gebruiken ({value})",
         "taskEdit.reminderPolicySend": "Versturen",
         "taskEdit.reminderPolicySkip": "Overslaan",
+        "taskEdit.reminderPolicyStart": "Alleen start",
+        "taskEdit.reminderPolicyDue": "Alleen deadline",
+        "taskEdit.reminderPolicySingleHint": "Vereist een expliciete tijd. Stuurt één herinnering op het gekozen tijdstip of in plaats daarvan op het ingestelde eerdere tijdstip. Herhaalde herinneringen worden genegeerd. Focus- en evaluatieherinneringen blijven gelijk.",
         "taskEdit.reminderPolicyHint": "Herinneringen voor start en deadline hebben een expliciete tijd nodig. Focus- en evaluatieherinneringen blijven gelijk.",
         "taskEdit.remindersDisabledHint": "Taakherinneringen zijn uitgeschakeld in de meldingsinstellingen van dit apparaat.",
         "settings.taskReminderDefault": "Standaard taakherinneringen",
