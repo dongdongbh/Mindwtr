@@ -735,6 +735,23 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.schedules).toEqual([]);
     });
 
+    it('reports the Menu tab sync badge from the stored sync, an unsynced edit and a failed sync like RN', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(fixture.sync.badgeView()).toEqual({ state: 'hidden', color: null, accessibilityLabel: null, icon: null });
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.badgeView()).toEqual({ state: 'healthy', color: '#22C55E', accessibilityLabel: 'settings.syncBadgeHealthy', icon: null });
+        now += 1_000;
+        core.useTaskStore.setState((state) => ({ lastDataChangeAt: core.getNextDataChangeAt(state.lastDataChangeAt, now) }) as never);
+        expect(fixture.sync.badgeView()).toMatchObject({ state: 'syncing', accessibilityLabel: 'settings.syncBadgeSyncing' });
+        globalThis.fetch = (async () => new Response('denied', { status: 403 })) as typeof fetch;
+        now += 60_000;
+        expect(await fixture.sync.performStoredManualSync()).toMatchObject({ success: false });
+        expect(fixture.sync.badgeView()).toEqual({ state: 'attention', color: '#EF4444', accessibilityLabel: 'settings.syncBadgeWarning', icon: null });
+    });
+
     it('runs an explicit stored pull despite automatic resume pacing and preserves configuration', async () => {
         resetForTests(); serve();
         spyOn(Date, 'now').mockReturnValue(100_000);

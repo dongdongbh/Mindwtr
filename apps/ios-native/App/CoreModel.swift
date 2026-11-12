@@ -625,6 +625,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             } }
     }
     private(set) var settingsMenu: CoreObject = [:]
+    private(set) var syncBadge: CoreObject = [:]
+    @ObservationIgnored private var syncBadgeTicket = 0
     private(set) var settingsSearch = ""
     private(set) var settingsManagePresented = false
     private(set) var settingsAIPresented = false
@@ -11377,6 +11379,21 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         } else { observeChangeSync() }
     }
 
+    private func observeSyncBadge() {
+        syncBadgeTicket &+= 1
+        let ticket = syncBadgeTicket
+        guard let currentHost = host, currentHost.workspaceMode == .personal, ready else { if !syncBadge.isEmpty { syncBadge = [:] }; return }
+        Task { [weak self] in
+            guard let self, let raw = try? await currentHost.call("menuRead", argumentsJSON: self.json(["syncBadge", "{}"])),
+                  let badge = try? self.decode(raw), self.host === currentHost, self.syncBadgeTicket == ticket else { return }
+            guard Set(badge.keys) == Set(["state", "color", "accessibilityLabel", "icon"]),
+                  ["hidden", "syncing", "healthy", "attention"].contains(badge.text("state")),
+                  badge.text("state") == "hidden" || (!badge.text("color").isEmpty && !badge.text("accessibilityLabel").isEmpty) else { return }
+            let next: CoreObject = badge.text("state") == "hidden" ? [:] : badge
+            if !NativeValueEquality.same(self.syncBadge, next) { self.syncBadge = next }
+        }
+    }
+
     private func admitLeaveSync() {
         guard syncLeaveArmed, !foregroundSyncSceneActive, backgroundSyncRefusal == nil,
               let currentHost = syncTriggerHost, let token = completedStartupToken else { return }
@@ -13532,7 +13549,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         do {
             let state = try await readAboutUpdateState(host: currentHost)
             guard current() else { return }
-            let result = try await query("menuRead", ["settingsMenu", try json(["query": search, "updateAvailable": state.available])])
+            var input: CoreObject = ["query": search, "updateAvailable": state.available]
+            if !syncBadge.isEmpty { input["syncBadge"] = syncBadge.text("state") }
+            let result = try await query("menuRead", ["settingsMenu", try json(input)])
             guard !result.text("title").isEmpty, result["groups"] is [[CoreObject]],
                   result["searchPlaceholder"] is String, !result.object("advanced").text("title").isEmpty,
                   result.object("advanced")["rows"] is [CoreObject] else { throw CocoaError(.coderReadCorrupt) }
@@ -48221,6 +48240,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             admitBackgroundSync()
             observeLeaveSync()
             observeChangeSync()
+            observeSyncBadge()
             #if DEBUG && targetEnvironment(simulator)
             publishTrashBulkTestState()
             #endif

@@ -34890,6 +34890,45 @@ extension FoundationUITests {
         cold.name = "cloudkit-fixture-cold-stored-selection"; cold.lifetime = .keepAlways; add(cold)
     }
 
+    func testMenuTabSyncBadgeFollowsTheStoredSyncResult() throws {
+        continueAfterFailure = false
+        let library = UUID().uuidString.lowercased()
+        let app = try cloudKitFixtureApp(library: library, available: true)
+        app.launch(); defer { app.terminate() }
+        let menu = app.buttons["tab-menu"]
+        boardEnabled(menu, timeout: 30)
+        XCTAssertEqual(menu.label, "Menu")
+        task322OpenSync(app)
+        let option = app.buttons["sync-option-cloudkit"]
+        revealPagedElement(app, option, in: app.scrollViews["sync-screen"])
+        boardTap(app, "sync-option-cloudkit")
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: option)
+        waitForExpectations(timeout: 30)
+        boardTap(app, "sync-now")
+        boardEnabled(app.buttons["sync-now"], timeout: 60)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "sync-progress").firstMatch.waitForNonExistence(timeout: 30))
+        app.terminate(); app.launch()
+        boardEnabled(menu, timeout: 30)
+        expectation(for: NSPredicate(format: "label == %@", "Menu, Sync healthy"), evaluatedWith: menu)
+        waitForExpectations(timeout: 60)
+        task322OpenSync(app)
+        boardTap(app, "sync-back")
+        let row = app.buttons["settings-sync"]
+        boardEnabled(row, timeout: 30)
+        XCTAssertTrue(row.label.contains("Sync healthy"), row.label)
+        let healthy = XCTAttachment(screenshot: app.screenshot())
+        healthy.name = "G11 Menu tab sync badge healthy"; healthy.lifetime = .keepAlways; add(healthy)
+        app.terminate()
+        let failing = try cloudKitFixtureApp(library: library, available: false)
+        failing.launch(); defer { failing.terminate() }
+        let failingMenu = failing.buttons["tab-menu"]
+        boardEnabled(failingMenu, timeout: 30)
+        expectation(for: NSPredicate(format: "label == %@", "Menu, Sync needs attention"), evaluatedWith: failingMenu)
+        waitForExpectations(timeout: 60)
+        let attention = XCTAttachment(screenshot: failing.screenshot())
+        attention.name = "G11 Menu tab sync badge needs attention"; attention.lifetime = .keepAlways; add(attention)
+    }
+
     func testNativeCloudKitNoAccountDisablesSync() throws {
         continueAfterFailure = false
         let app = try cloudKitFixtureApp(library: "c4bd842f-d7d6-4447-abf0-81ba6d4a64c2", available: false)

@@ -1420,13 +1420,16 @@ private struct InboxTabBar: View {
             Button { model.endContextsInput(); Task { await model.toggleMore() } } label: {
                 VStack(spacing: 2) {
                     AppIcon(name: "menu", size: model.morePresented ? 26 : 24).opacity(model.morePresented ? 1 : 0.65)
+                        .overlay(alignment: .topTrailing) { menuSyncBadge }
                     Text(model.label("tab.menu")).rnFont(10, model.morePresented ? .bold : .semibold, maxScale: 1.15).lineLimit(1)
                 }
                 .foregroundStyle(model.morePresented ? palette.tint : palette.secondary)
                 .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
             }
             .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busyShown || model.retryNeeded })
-            .accessibilityLabel(model.label("tab.menu")).accessibilityIdentifier("tab-menu")
+            .accessibilityLabel(model.syncBadge.isEmpty ? model.label("tab.menu")
+                : model.label("tab.menu") + ", " + model.syncBadge.text("accessibilityLabel"))
+            .accessibilityIdentifier("tab-menu")
             .accessibilityAddTraits(model.morePresented ? .isSelected : [])
         }
         .frame(minHeight: 66)
@@ -1435,6 +1438,24 @@ private struct InboxTabBar: View {
         .padding(.bottom, -min(12, bottomSafeInset))
         .background(palette.card.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { palette.border.frame(height: 0.5) }
+    }
+
+    @ViewBuilder private var menuSyncBadge: some View {
+        let badge = model.syncBadge
+        if !badge.isEmpty {
+            let color = Color(hex: badge.text("color"))
+            Group {
+                if let symbol = ["refresh": "arrow.triangle.2.circlepath", "check": "checkmark", "warning": "exclamationmark.triangle"][badge.text("icon")] {
+                    Image(systemName: symbol).font(.system(size: 9, weight: .semibold)).foregroundStyle(color)
+                        .frame(width: 16, height: 16).background(palette.card, in: Circle())
+                } else {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                        .overlay(Circle().stroke(palette.card, lineWidth: 1.5)).opacity(0.85)
+                }
+            }
+            .offset(x: 7, y: -2).accessibilityHidden(true)
+            .accessibilityIdentifier("menu-sync-" + badge.text("state"))
+        }
     }
 
     private func tab(_ icon: String, label: String, surface: CoreModel.Surface? = nil) -> some View {

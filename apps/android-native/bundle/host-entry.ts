@@ -1452,6 +1452,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     focusControls: (input) => contract.getFocusControlsList(input),
 
     settingsMenu: (input) => contract.getSettingsMenu(input),
+    syncBadge: () => ({ ok: true, value: (nativeSync ?? iosManualSync)?.badgeView() ?? { state: 'hidden', color: null, accessibilityLabel: null, icon: null } }),
 
     generalSettings: (input) => contract.getGeneralSettings(nativeAppSearch
         ? { ...(input as Parameters<typeof contract.getGeneralSettings>[0]), appSearch: nativeAppSearch.device() } : input),

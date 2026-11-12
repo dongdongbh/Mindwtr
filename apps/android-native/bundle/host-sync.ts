@@ -32,6 +32,7 @@ import {
     flushPendingSave,
     generateUUID,
     getInMemorySyncChangeFingerprint,
+    getSettingsSyncBadge,
     getMobileAutoSyncCadence,
     getMobileWebDavRequestOptions,
     getSyncConflictCount,
@@ -525,8 +526,14 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             pendingRemoteWriteAt: settings.pendingRemoteWriteAt,
             lastSyncStatus: settings.lastSyncStatus,
             lastSyncAt: settings.lastSyncAt,
-            localChangePending,
+            localChangePending: localChangePending || (platform === 'ios' && hasPendingLocalChange()),
         });
+    };
+    const badgeView = () => {
+        const current = badge();
+        if (platform === 'ios') void refreshConfigured();
+        const view = getSettingsSyncBadge(current, bindings.translate, themeDescriptor(useTaskStore.getState().settings.theme)?.statusPreset);
+        return { state: current, color: view?.color ?? null, accessibilityLabel: view?.accessibilityLabel ?? null, icon: view?.icon ?? null };
     };
     const state = () => {
         const current = badge();
@@ -967,6 +974,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,
 
         state,
+        badgeView,
 
         selectedBackend: () => service.getMobileSelectedSyncBackend(),
 
