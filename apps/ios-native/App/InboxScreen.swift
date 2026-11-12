@@ -1932,6 +1932,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     private var rightWidth: CGFloat { CGFloat(right.count) * buttonWidth }
 
     @ViewBuilder func body(content: Content) -> some View {
+        let left = self.left, right = self.right
         if host == .list {
             content
                 .swipeActions(edge: layoutDirection == .leftToRight ? .leading : .trailing, allowsFullSwipe: false) {
