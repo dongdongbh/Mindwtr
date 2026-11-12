@@ -37787,6 +37787,79 @@ extension FoundationUITests {
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
         processEditorObserve(app, "UI10 largest text status, tri-state project picker and save-name cancel remain reachable")
     }
+
+    func testContextsSavedFilterSortOrdersRowsAndSessionSortLeavesTheListSortAlone() throws {
+        continueAfterFailure = false
+        let library = try task371Library("NORMAL", prefix: "MINDWTR_CONTEXTS_SAVED_SORT_UI_")
+        let app = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev")
+        app.launchArguments = task192Arguments(library)
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        let token = "@cxsaved"
+        let mike = "Mike saved sort", zulu = "Zulu saved sort", alpha = "Alpha saved sort"
+        processEditorCapture(app, [mike, zulu, alpha].map { $0 + " " + token + " /next" })
+        func order(_ titles: [String]) {
+            let rows = titles.map { title in
+                app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "task-title-", title)).firstMatch
+            }
+            for row in rows { boardEnabled(row, timeout: 30) }
+            XCTAssertLessThan(rows[0].frame.minY, rows[1].frame.minY)
+            XCTAssertLessThan(rows[1].frame.minY, rows[2].frame.minY)
+            XCTAssertFalse(app.staticTexts["contexts-error"].exists)
+            XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        }
+        func sort(_ value: String) {
+            boardTap(app, "contexts-sort")
+            boardTap(app, "contexts-sort-" + value)
+            XCTAssertTrue(app.buttons["contexts-sort-close"].waitForNonExistence(timeout: 30))
+        }
+        func selectedSort(_ value: String) {
+            boardTap(app, "contexts-sort")
+            boardEnabled(app.buttons["contexts-sort-" + value], timeout: 30)
+            XCTAssertTrue(app.buttons["contexts-sort-" + value].isSelected)
+            boardTap(app, "contexts-sort-close")
+            XCTAssertTrue(app.buttons["contexts-sort-close"].waitForNonExistence(timeout: 20))
+        }
+        contextsFiltersOpen(app)
+        let query = app.textFields["contexts-search"]
+        boardEnabled(query, timeout: 30); query.tap(); query.typeText(token)
+        boardTap(app, "contexts-chip-" + token)
+        contextsFiltersSelected(app, "contexts-chip-" + token, true)
+        query.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        query.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: token.count))
+        sort("title")
+        order([alpha, mike, zulu])
+        boardTap(app, "contexts-filters")
+        let name = "Saved sort " + String(library.prefix(8))
+        contextsFiltersSaveDialog(app, name, cancel: false)
+        let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "contexts-saved-filter-", name)).firstMatch
+        boardEnabled(saved, timeout: 30)
+        contextsFiltersSelected(app, saved.identifier, true)
+        contextsFiltersSavedTap(app, saved)
+        contextsFiltersSelected(app, saved.identifier, false)
+        boardTap(app, "contexts-chip-" + token)
+        contextsFiltersSelected(app, "contexts-chip-" + token, true)
+        sort("created")
+        order([mike, zulu, alpha])
+        contextsFiltersSavedTap(app, saved)
+        contextsFiltersSelected(app, saved.identifier, true)
+        order([alpha, mike, zulu])
+        selectedSort("title")
+        processEditorObserve(app, "G10 saved Contexts filter applies its own title sort over the created list sort")
+        sort("created-desc")
+        order([alpha, zulu, mike])
+        selectedSort("created-desc")
+        contextsFiltersSavedTap(app, saved)
+        contextsFiltersSelected(app, saved.identifier, false)
+        boardTap(app, "contexts-chip-" + token)
+        contextsFiltersSelected(app, "contexts-chip-" + token, true)
+        order([mike, zulu, alpha])
+        selectedSort("created")
+        contextsFiltersSavedTap(app, saved)
+        contextsFiltersSelected(app, saved.identifier, true)
+        order([alpha, mike, zulu])
+        processEditorObserve(app, "G10 session sort under a saved filter leaves the list sort and resets on reselect")
+    }
 }
 
 extension FoundationUITests {

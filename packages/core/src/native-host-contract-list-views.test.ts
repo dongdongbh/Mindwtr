@@ -114,6 +114,29 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
     });
 
 
+    it('orders Contexts by the selected saved filter sort, and a session sort replaces it only while that filter is selected', async () => {
+        const stamp = fixture.contexts.now;
+        const task = (id: string, title: string): Task => ({ id, title, status: 'someday', contexts: ['@work'], tags: [], createdAt: stamp, updatedAt: stamp });
+        const part: ListViewsPart = { ...fixture.contexts, tasks: [task('a', 'Alpha'), task('z', 'Zebra'), task('m', 'Mango')], projects: [], areas: [],
+            settings: { sorted: { taskSortBy: 'default', savedFilters: [{ id: 'desk', name: 'Desk', view: 'contexts', criteria: { statuses: ['someday'], contexts: ['@work'] },
+                sortBy: 'title', sortOrder: 'desc', createdAt: stamp, updatedAt: stamp }] } } };
+        const { host, recorder } = await openHost(part, { name: 'Saved filter sort', settings: 'sorted', actions: [] });
+        const titles = (view: NativeContextsView) => view.rows.map((row) => row.title);
+        const selected = (view: NativeContextsView) => view.sort.options.filter((option) => option.selected).map((option) => option.value);
+        const saved = value(host.getContextsView({ savedFilterId: 'desk', offset: 0, limit: 100 }));
+        expect(titles(saved)).toEqual(['Zebra', 'Mango', 'Alpha']);
+        expect(selected(saved)).toEqual(['title']);
+        expect(saved.sort.accessibilityLabel).toContain('Title');
+        const session = value(host.getContextsView({ savedFilterId: 'desk', savedFilterSortOverride: 'title', offset: 0, limit: 100 }));
+        expect(titles(session)).toEqual(['Alpha', 'Mango', 'Zebra']);
+        const plain = value(host.getContextsView({ savedFilterSortOverride: 'title', offset: 0, limit: 100 }));
+        expect(selected(plain)).toEqual(['default']);
+        expect(Object.keys(session).sort()).toEqual(Object.keys(plain).sort());
+        expect(host.getContextsView({ savedFilterId: 'desk', savedFilterSortOverride: 'energy' as never, offset: 0, limit: 100 }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(recorder.log).toEqual([]);
+    });
+
     it('filters Contexts by status without writing', async () => {
         const { host, recorder } = await openHost(fixture.contexts, scenario(fixture.contexts, 'chips, counts and chip search'));
         const input = { offset: 0, limit: 100, tokens: ['@phone'], matchMode: 'all' as const };

@@ -3542,6 +3542,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var areaDeleteOptionsCurrent = false
     private var contextsCaller: Surface = .inbox
     private var contextsSelection: CoreObject = ["filters": CoreObject()]
+    @ObservationIgnored private var contextsSavedFilterSort: (filterID: String, sortBy: String)?
+    @ObservationIgnored private var contextsSavedFilterSortSheetID: String?
     private(set) var contextsFiltersPresented = false
     private(set) var contextsTaskSearchText = ""
     private(set) var contextsLocationText = ""
@@ -27396,6 +27398,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         contextsLocationText = ""
         contextsSearchText = ""
         contextsSelection = ["filters": CoreObject()]
+        contextsSavedFilterSort = nil
         contexts = [:]
         contextsError = nil
         if contextsSavedFilterHost != nil {
@@ -27456,6 +27459,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if contexts.object("savedFilters").objects("items").first(where: { $0.text("id") == id })?.flag("selected") != true {
             contextsSearchText = ""
         }
+        contextsSavedFilterSort = nil
         contextsIntents.append(["kind": "saved", "value": id])
         contextsLoadedDepth = pageSize
         requestContextsRead(delay: 0)
@@ -27502,6 +27506,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         var input = selection
         input["filters"] = selection.object("filters")
         input["filterSheetOpen"] = contextsFiltersPresented
+        if let sort = contextsSavedFilterSort, sort.filterID == selection.text("savedFilterId") {
+            input["savedFilterSortOverride"] = sort.sortBy
+        }
         input["searchQuery"] = search
         input["offset"] = offset
         input["limit"] = limit
@@ -28714,6 +28721,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func retireTaskListSort() {
+        contextsSavedFilterSortSheetID = nil
         taskListSortPresentationID = UUID()
         taskListSortCaller = nil
         taskListSortHost = nil
@@ -28782,6 +28790,18 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 guard contextsCurrent else { throw CocoaError(.fileReadUnknown) }
             } else if !referenceCurrent, !(await readReference(ownedGuard: current)) { throw CocoaError(.fileReadUnknown) }
             guard current() else { return }
+            contextsSavedFilterSortSheetID = nil
+            if caller == .contexts, let savedFilterID = contexts["savedFilterId"] as? String, !savedFilterID.isEmpty {
+                let choices = contexts.object("sort").objects("options")
+                guard !choices.isEmpty, Set(choices.map { $0.text("value") }).count == choices.count,
+                      choices.allSatisfy({ Set($0.keys) == Set(["value", "label", "selected"])
+                          && !$0.text("value").isEmpty && !$0.text("label").isEmpty && $0["selected"] is Bool }) else {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                contextsSavedFilterSortSheetID = savedFilterID
+                referenceSortOptions = ["revision": contexts.text("revision"), "choices": choices]
+                return
+            }
             let options = try await query("taskListSortOptions", ["{}"], beforeDispatch: current)
             guard current() else { return }
             let expected = options.object("expected")
@@ -28806,6 +28826,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func setTaskListSort(_ sortBy: String, caller: TaskListSortCaller) async {
         guard taskListSortActionsEnabled, taskListSortCaller == caller, let owner = taskListSortHost,
               referenceSortOptions.objects("choices").contains(where: { $0.text("value") == sortBy }) else { return }
+        if caller == .contexts, let savedFilterID = contextsSavedFilterSortSheetID {
+            await chooseContextsSavedFilterSort(sortBy, savedFilterID: savedFilterID)
+            return
+        }
         let presentation = taskListSortPresentationID
         busy = true
         referenceSortError = nil
@@ -28824,6 +28848,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         } catch {
             if host === owner { await handleReferenceSortError(error) }
         }
+    }
+
+    private func chooseContextsSavedFilterSort(_ sortBy: String, savedFilterID: String) async {
+        contextsSavedFilterSort = (savedFilterID, sortBy)
+        retireTaskListSort()
+        contextsLoadedDepth = pageSize
+        await refreshTaskListSortCaller(.contexts)
     }
 
     private func acknowledgeReferenceSort(_ result: CoreObject) throws -> TaskListSortCaller {

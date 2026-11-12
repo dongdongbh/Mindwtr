@@ -175,9 +175,10 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 - Reach: Menu › Contexts (or the Quick Access tab when it is set to Contexts).
 - Shortcuts: Long-press a chip to add it to the current selection.
-- Selectors: `contexts-search`, `contexts-filters`, `contexts-filter-save`, `contexts-more`
-- Code: `apps/ios-native/App/ContextsScreen.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testContextsTokens…, testTask162ContextsRowIdentity…)
+- Selectors: `contexts-search`, `contexts-filters`, `contexts-filter-save`, `contexts-more`, `contexts-sort`, `contexts-saved-filter-` (+ filter id)
+- Code: `apps/ios-native/App/ContextsScreen.swift`, `apps/ios-native/App/CoreModel.swift` (contextsSavedFilterSort)
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testContextsTokens…, testTask162ContextsRowIdentity…, testContextsSavedFilterSort…), `packages/core/src/native-host-contract-list-views.test.ts` (saved filter sort)
+- Notes: A selected saved filter orders rows by its own sort, as mobile does. A sort picked while it is selected lasts only until the filter is tapped again and does not change the list sort.
 
 ## Review and Contexts bulk selection
 
