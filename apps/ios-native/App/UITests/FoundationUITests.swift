@@ -1546,6 +1546,12 @@ final class FoundationUITests: XCTestCase {
         app.open(URL(string: url)!)
     }
 
+    private func task454OpenInRunningApp(_ url: String) {
+        XCUIDevice.shared.system.open(URL(string: url)!)
+        let confirm = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
+        if confirm.waitForExistence(timeout: 2) { confirm.tap() }
+    }
+
     func testNativeEntityLinkColdTaskUsesViewAndPreservesSavedEditPreference() throws {
         let app = try task454App("TASK")
         try task454Open(app, "mindwtr-native-dev://open?task=task454-a"); defer { app.terminate() }
@@ -1579,24 +1585,24 @@ final class FoundationUITests: XCTestCase {
         let app = try task454App("ROUTES")
         try task454Open(app, "mindwtr-native-dev:///waiting"); defer { app.terminate() }
         XCTAssertTrue(app.scrollViews["waiting-scroll"].waitForExistence(timeout: 40))
-        try task454Open(app, "mindwtr-native-dev:///someday")
+        task454OpenInRunningApp("mindwtr-native-dev:///someday")
         XCTAssertTrue(app.scrollViews["someday-scroll"].waitForExistence(timeout: 30))
-        try task454Open(app, "mindwtr-native-dev:///widget-list/next")
+        task454OpenInRunningApp("mindwtr-native-dev:///widget-list/next")
         XCTAssertTrue(app.scrollViews["widget-list-scroll"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["tab-focus"].exists)
         boardTap(app, "widget-list-back")
         XCTAssertTrue(app.scrollViews["someday-scroll"].waitForExistence(timeout: 30))
-        try task454Open(app, "mindwtr-native-dev:///focus")
+        task454OpenInRunningApp("mindwtr-native-dev:///focus")
         expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["tab-focus"])
         waitForExpectations(timeout: 30)
-        try task454Open(app, "mindwtr-native-dev:///capture-quick?mode=text")
+        task454OpenInRunningApp("mindwtr-native-dev:///capture-quick?mode=text")
         XCTAssertTrue(app.textViews["capture-input"].waitForExistence(timeout: 30))
         boardTap(app, "capture-close")
         XCTAssertFalse(app.textViews["capture-input"].waitForExistence(timeout: 2))
-        try task454Open(app, "mindwtr-native-dev:///widget-list/filter%3Amissing")
+        task454OpenInRunningApp("mindwtr-native-dev:///widget-list/filter%3Amissing")
         boardEnabled(app.buttons["tab-menu"], timeout: 30)
         XCTAssertTrue(app.buttons["tab-focus"].isSelected)
-        try task454Open(app, "mindwtr-native-dev:///capture?note=Only")
+        task454OpenInRunningApp("mindwtr-native-dev:///capture?note=Only")
         XCTAssertTrue(app.descendants(matching: .any)["link-notice"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.buttons["tab-inbox"].isSelected)
         XCTAssertFalse(app.textViews["capture-input"].exists)
@@ -1696,7 +1702,7 @@ final class FoundationUITests: XCTestCase {
         let title = app.textFields["task-editor-title"]
         boardEnabled(title, timeout: 30)
         XCTAssertEqual(title.value as? String, "Task454 first preview")
-        try task454Open(app, "mindwtr-native-dev://open?task=task454-b")
+        task454OpenInRunningApp("mindwtr-native-dev://open?task=task454-b")
         task454Preview(app, title: "Task454 second preview")
         boardTap(app, "task-view-close")
         boardEnabled(app.buttons["tab-menu"], timeout: 30)
