@@ -327,18 +327,43 @@ final class NativeWatchAudioHostTests: XCTestCase {
         XCTAssertEqual(state.counts.requests, 1); XCTAssertEqual(state.counts.checks, 1)
     }
 
-    func testCustomKeylessOpenAISTTSucceedsInSmartModeWithoutParseUpload() async throws {
+    func testCustomKeylessOpenAIParsesOnConfiguredServer() async throws {
         try Data(json(["mindwtr-ai-key:gemini": sentinel]).utf8).write(to: manifest)
         try await seed(provider: "openai", model: "whisper-1", baseURL: "http://speech.local:8123/v1", language: "English")
         let core = host(); _ = try await core.start()
-        openAIReplies([try openAIResponse("Synthetic local speech")])
+        openAIReplies([try openAIResponse("Synthetic local speech"), try openAIResponse("Synthetic local parsed speech", api: .responses)])
         try await core.ingestWatchAudio(source(), load: loader())
         let sent = try XCTUnwrap(state.sentRequests.first)
         XCTAssertEqual(sent.url, "http://speech.local:8123/v1/audio/transcriptions")
         XCTAssertNil(sent.authorization)
         XCTAssertTrue(String(decoding: sent.body, as: UTF8.self).contains("name=\"language\"\r\n\r\nen\r\n"))
-        XCTAssertEqual(state.counts.requests, 1)
-        XCTAssertEqual(try rows("SELECT title FROM tasks").first?["title"] as? String, "Synthetic local speech")
+        XCTAssertEqual(state.sentRequests.map(\.url), ["http://speech.local:8123/v1/audio/transcriptions", "http://speech.local:8123/v1/responses"])
+        XCTAssertTrue(state.sentRequests.allSatisfy { $0.authorization == nil })
+        XCTAssertEqual(state.counts.requests, 2)
+        XCTAssertEqual(try rows("SELECT title FROM tasks").first?["title"] as? String, "Synthetic local parsed speech")
+    }
+
+    func testCustomOpenAIParseFallbackKeepsEndpointModelAndCredential() async throws {
+        try await seed(provider: "openai", baseURL: "https://speech.local/prefix/v1/audio/transcriptions/")
+        let core = host(); _ = try await core.start()
+        openAIReplies([try openAIResponse("Synthetic custom fallback"), nil, Data("{}".utf8), nil, Data("{}".utf8)])
+        try await core.ingestWatchAudio(source(), load: loader())
+        let sent = state.sentRequests
+        XCTAssertEqual(sent.map(\.url), ["https://speech.local/prefix/v1/audio/transcriptions", "https://speech.local/prefix/v1/responses",
+            "https://speech.local/prefix/v1/chat/completions", "https://speech.local/prefix/v1/responses", "https://speech.local/prefix/v1/chat/completions"])
+        XCTAssertTrue(sent.allSatisfy { $0.authorization == "Bearer " + openAISentinel })
+        let models = try sent.dropFirst().map { try NativeVoiceJSON.object(String(decoding: $0.body, as: UTF8.self), maximum: 512 * 1024)["model"] as? String }
+        XCTAssertEqual(models, Array(repeating: "gpt-test-primary", count: 4))
+        XCTAssertEqual(try rows("SELECT title FROM tasks").first?["title"] as? String, "Synthetic custom fallback")
+    }
+
+    func testParseEndpointsKeepConfiguredPrefixAndRefuseUnrecognizedTranscriptionRoute() throws {
+        XCTAssertEqual(try NativeOpenAISpeechAPI.responses.endpoint(transcriptionEndpoint: "https://speech.local/prefix/v1/audio/transcriptions"),
+            "https://speech.local/prefix/v1/responses")
+        XCTAssertEqual(try NativeOpenAISpeechAPI.chat.endpoint(transcriptionEndpoint: "https://speech.local/prefix/v1/AUDIO/TRANSCRIPTIONS"),
+            "https://speech.local/prefix/v1/chat/completions")
+        XCTAssertThrowsError(try NativeOpenAISpeechAPI.chat.endpoint(transcriptionEndpoint: "https://speech.local/prefix/v1"))
+        XCTAssertThrowsError(try NativeOpenAISpeechAPI.chat.endpoint(transcriptionEndpoint: "https://speech.local/v1/audio/transcriptions?private=1"))
     }
 
     func testOfficialOpenAIRequiresItsOwnCredentialAndNeverUsesGeminiFallback() async throws {

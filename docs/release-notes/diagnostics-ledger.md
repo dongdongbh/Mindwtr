@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.9 (add before tagging, trim in the release after)
 
+- **`v1.3.9/speech-parse-endpoint`** — `packages/core/src/speech-to-task.ts`, `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`. Smart Parse logs `outcome=started` (shared runtime) or `outcome=routed` (native iOS) and `destination=configured` for a custom speech server, or `default` for OpenAI. No endpoint, credential, transcript, or model is logged. Confirm the custom server receives parsing requests, including retries, and the resulting task has parsed fields. The marker confirms routing selection, not server success. (#1551)
+
 - **`v1.3.9/sqlite-access-event-filter`** — `apps/desktop/src/lib/local-data-watcher.ts`. Logs once per watcher controller when an access-only SQLite-directory event is ignored. Expect `outcome=ignored`, fewer no-change SQLite refreshes while idle, and continued refresh after genuine external edits. The marker proves filtering ran, not a measured disk-write reduction. (#1548)
 
 - **`v1.3.9/selective-task-reminder`** — (#1547) `packages/core/src/mobile-reminder-alarms.ts`, `packages/core/src/native-host-contract-reminders.ts`, `apps/desktop/src/lib/notification-service.tsx`. Select Start only or Due only and optionally choose an advance time. Diagnostics must show `v1.3.9/selective-task-reminder` with `scheduled` (React Native), `planned` (native host), or `delivered` (desktop). Native planning is not OS delivery proof: confirm exactly one chosen alert and no alert at the other date or original date-time when an advance time is selected. No task content is logged.

@@ -1,5 +1,6 @@
 import type { AudioCaptureMode, AudioFieldStrategy } from './ai/types';
 import { strToU8 } from 'fflate';
+import { logInfo } from './logger';
 import { OPENAI_DEFAULT_MODEL, resolveGeminiModel } from './ai/catalog';
 import { fetchTextWithTimeout } from './ai/utils';
 import {
@@ -8,8 +9,6 @@ import {
 } from './ai-config';
 
 const SPEECH_REQUEST_TIMEOUT_MS = 30_000;
-const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const GEMINI_SPEECH_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export type SpeechToTaskProvider = 'openai' | 'gemini' | 'whisper' | 'parakeet';
@@ -70,11 +69,12 @@ export type RemoteSpeechToTaskOptions = {
 
 export type OpenAISpeechTranscriptionRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'model' | 'language' | 'baseUrl'>;
 export type OpenAISpeechTranscriptionRequest = { url: string; method: 'POST'; fields: [string, string][]; timeoutMs: number };
-export type OpenAISpeechParseRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'fieldStrategy' | 'language' | 'now' | 'timeZone'>;
+export type OpenAISpeechParseRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'fieldStrategy' | 'language' | 'now' | 'timeZone' | 'baseUrl'>;
 export type OpenAISpeechParseAPI = 'responses' | 'chat';
 export type OpenAISpeechParseRequest = { url: string; method: 'POST'; headers: [string, string][]; body: string; timeoutMs: number };
 
-export function resolveOpenAIParseModel(value?: string): string {
+export function resolveOpenAIParseModel(value?: string, baseUrl?: string): string {
+    if (baseUrl?.trim() && value) return value;
     if (!value || value.toLowerCase().startsWith('gpt-4o')) return OPENAI_DEFAULT_MODEL;
     return value;
 }
@@ -194,7 +194,7 @@ async function requestRemoteGemini(
 
 export const NATIVE_VOICE_MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 export const NATIVE_VOICE_MAX_HTTP_BYTES = 8 * 1024 * 1024;
-export type GeminiSpeechRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'model' | 'mode' | 'fieldStrategy' | 'language' | 'now' | 'timeZone'>;
+export type GeminiSpeechRequestConfig = Pick<RemoteSpeechToTaskCaptureConfig, 'model' | 'mode' | 'fieldStrategy' | 'language' | 'now' | 'timeZone' | 'baseUrl'>;
 export type GeminiSpeechRequest = { url: string; method: 'POST'; headers: [string, string][]; body: string; timeoutMs: number };
 
 const geminiSpeechUpload = (modelId: string, audioBase64: string, mimeType: string, prompt: string): GeminiSpeechRequest => ({
@@ -270,7 +270,9 @@ export function buildRemoteOpenAISpeechParseRequest(config: OpenAISpeechParseReq
     model: string, api: OpenAISpeechParseAPI): OpenAISpeechParseRequest {
     if (api !== 'responses' && api !== 'chat') throw new Error('OpenAI speech parse API is invalid');
     const messages = [{ role: 'system', content: buildOpenAIParsePrompt(config) }, { role: 'user', content: transcript }];
-    return { url: api === 'responses' ? OPENAI_RESPONSES_URL : OPENAI_CHAT_COMPLETIONS_URL, method: 'POST',
+    const endpoint = resolveOpenAITranscribeEndpoint(config.baseUrl).replace(/\/audio\/transcriptions$/i,
+        api === 'responses' ? '/responses' : '/chat/completions');
+    return { url: endpoint, method: 'POST',
         headers: [['Content-Type', 'application/json']], timeoutMs: SPEECH_REQUEST_TIMEOUT_MS,
         body: JSON.stringify(api === 'responses' ? { model, temperature: 0.2, input: messages, text: { format: { type: 'json_object' } } }
             : { model, temperature: 0.2, response_format: { type: 'json_object' }, messages }) };
@@ -292,7 +294,7 @@ async function parseRemoteOpenAIResponses(
     config: RemoteSpeechToTaskCaptureConfig,
     fetcher: typeof fetch,
 ): Promise<SpeechToTaskResult> {
-    if (!config.apiKey) {
+    if (!config.apiKey && !config.baseUrl?.trim()) {
         throw new Error('OpenAI API key missing');
     }
     const request = buildRemoteOpenAISpeechParseRequest(config, transcript, model, 'responses');
@@ -302,7 +304,7 @@ async function parseRemoteOpenAIResponses(
             method: request.method,
             headers: {
                 ...Object.fromEntries(request.headers),
-                Authorization: `Bearer ${config.apiKey}`,
+                ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
             },
             body: request.body,
         },
@@ -317,7 +319,7 @@ async function parseRemoteOpenAIChat(
     config: RemoteSpeechToTaskCaptureConfig,
     fetcher: typeof fetch,
 ): Promise<SpeechToTaskResult> {
-    if (!config.apiKey) {
+    if (!config.apiKey && !config.baseUrl?.trim()) {
         throw new Error('OpenAI API key missing');
     }
     const request = buildRemoteOpenAISpeechParseRequest(config, transcript, model, 'chat');
@@ -327,7 +329,7 @@ async function parseRemoteOpenAIChat(
             method: request.method,
             headers: {
                 ...Object.fromEntries(request.headers),
-                Authorization: `Bearer ${config.apiKey}`,
+                ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
             },
             body: request.body,
         },
@@ -344,6 +346,10 @@ async function parseRemoteOpenAI(
     onWarn?: RemoteSpeechToTaskOptions['onWarn'],
 ): Promise<SpeechToTaskResult> {
     const model = overrideModel ?? config.parseModel ?? 'gpt-4o-mini';
+    logInfo('OpenAI smart parse starting', { scope: 'speech', context: {
+        releaseCheck: 'v1.3.9/speech-parse-endpoint',
+        destination: config.baseUrl?.trim() ? 'configured' : 'default', outcome: 'started',
+    } });
     try {
         return await parseRemoteOpenAIResponses(transcript, model, config, fetcher);
     } catch (error) {
@@ -372,7 +378,9 @@ export async function runRemoteSpeechToTaskCapture(
             direct: (prompt) => requestRemoteGemini(config, audio, prompt, fetcher),
         });
     }
-    return runSpeechToTaskCapture(config, {
+    return runSpeechToTaskCapture({ ...config,
+        retryModel: config.retryModel ?? (config.baseUrl?.trim() ? config.parseModel : undefined),
+    }, {
         transcribe: () => transcribeRemoteOpenAI(config, audio, fetcher),
         parse: (transcript, overrideModel) => parseRemoteOpenAI(
             transcript,

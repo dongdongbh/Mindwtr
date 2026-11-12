@@ -304,3 +304,23 @@ describe('processAudioCapture openai transcription against a custom base URL', (
         expect(legacyModelForm.get('languages[]')).toBeNull();
     });
 });
+
+
+describe('desktop custom speech parsing', () => {
+    afterEach(() => vi.unstubAllGlobals());
+    it('keeps the custom endpoint and model through all parse fallbacks', async () => {
+        const models: string[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            expect(String(input).startsWith('https://speech.example/v1/')).toBe(true);
+            if (String(input).endsWith('/audio/transcriptions')) return new Response(JSON.stringify({ text: 'Buy milk' }));
+            models.push(JSON.parse(String(init?.body)).model);
+            return new Response('Unavailable', { status: 503 });
+        });
+        vi.stubGlobal('fetch', fetcher);
+        const result = await processAudioCapture({ bytes: new Uint8Array([1]), mimeType: 'audio/wav' },
+            { provider: 'openai', model: 'custom-transcribe', parseModel: 'gpt-5-custom-alias',
+                baseUrl: 'https://speech.example/v1', apiKey: 'synthetic' });
+        expect(models).toEqual(Array(4).fill('gpt-5-custom-alias'));
+        expect(result.transcript).toBe('Buy milk');
+    });
+});

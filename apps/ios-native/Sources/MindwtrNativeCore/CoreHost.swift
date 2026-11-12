@@ -1401,11 +1401,11 @@ public final class CoreHost: @unchecked Sendable {
         return response
     }
     private func completeOpenAIVoiceSpeech(_ job: Engine.VoiceSpeech, bytes: Data) async throws {
-        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote else { throw NativeVoiceJSON.invalid }
+        guard let remote = job.capture.remote, case .openai(let config, _) = remote else { throw NativeVoiceJSON.invalid }
         let request = try await perform { try $0.buildVoiceOpenAITranscription(job, bytes: bytes) }
         let response = try await voiceSpeechHTTP(job, request: request)
         let initial = try await perform { try $0.decodeVoiceOpenAITranscription(job, response: response) }
-        if !initial.isEmpty, config.mode == .smartParse, credential != nil {
+        if !initial.isEmpty, config.mode == .smartParse {
             for model in [config.parseModel, config.retryModel] {
                 for api in NativeOpenAISpeechAPI.allCases {
                     let decoded: String
@@ -1895,8 +1895,8 @@ public final class CoreHost: @unchecked Sendable {
 
     private func parseWatchOpenAIAudio(_ job: Engine.WatchAudio, initial: String,
                                       readmit: @escaping @Sendable () async -> Bool) async throws -> String {
-        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime else { throw NativeWatchAudio.invalid }
-        if config.mode == .smartParse, credential != nil {
+        guard let runtime = job.runtime, case .openai(let config, _) = runtime else { throw NativeWatchAudio.invalid }
+        if config.mode == .smartParse {
             for model in [config.parseModel, config.retryModel] {
                 for api in NativeOpenAISpeechAPI.allCases {
                     guard await readmit(), job.lease.isCurrent, !Task.isCancelled, !job.cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
@@ -8849,7 +8849,7 @@ private final class Engine: @unchecked Sendable {
     }
     func buildVoiceOpenAIParse(_ job: VoiceSpeech, transcript: String, model: String, api: NativeOpenAISpeechAPI) throws -> String {
         try checkVoiceSpeech(job)
-        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote, let credential else { throw NativeVoiceJSON.invalid }
+        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote else { throw NativeVoiceJSON.invalid }
         return try buildOpenAIParse(binding: job.capture.binding, config: config, credential: credential, transcript: transcript, model: model,
                                    api: api, now: job.speechNow, timeZone: job.timeZone, cancellation: job.cancellation)
     }
@@ -9783,26 +9783,29 @@ private final class Engine: @unchecked Sendable {
 
     func buildWatchOpenAIParse(_ job: WatchAudio, transcript: String, model: String, api: NativeOpenAISpeechAPI) throws -> String {
         try checkWatchAudio(job)
-        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime, let credential else { throw NativeWatchAudio.invalid }
+        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime else { throw NativeWatchAudio.invalid }
         return try buildOpenAIParse(binding: job.binding, config: config, credential: credential, transcript: transcript, model: model,
                                    api: api, now: job.speechNow, timeZone: job.timeZone, cancellation: job.cancellation)
     }
-    private func buildOpenAIParse(binding: VoiceBinding, config: NativeWatchOpenAIRuntime, credential: String,
+    private func buildOpenAIParse(binding: VoiceBinding, config: NativeWatchOpenAIRuntime, credential: String?,
                                  transcript: String, model: String, api: NativeOpenAISpeechAPI, now: String, timeZone: String,
                                  cancellation: NativeAttachmentCancellation) throws -> String {
         try requireVoiceBinding(binding, cancellation: cancellation)
         guard Self.ownedEqual(model, config.parseModel) || Self.ownedEqual(model, config.retryModel) else { throw NativeWatchAudio.invalid }
         let requestConfig: [String: Any] = ["language": config.language, "fieldStrategy": config.fieldStrategy.rawValue,
-                                           "now": now, "timeZone": timeZone]
+                                           "now": now, "timeZone": timeZone, "baseUrl": config.endpoint]
         let input = try NativeVoiceJSON.encode(["config": requestConfig, "transcript": transcript, "model": model, "api": api.rawValue])
         let built = try NativeVoiceJSON.object(invokeVoice("iosVoiceOpenAIParseBuild", [input], binding: binding, cancellation: cancellation), maximum: 8 * 1024 * 1024)
         guard Set(built.keys) == ["url", "method", "headers", "body", "timeoutMs"], built["method"] as? String == "POST",
               Self.isInteger(built["timeoutMs"], equalTo: 30000), let url = built["url"] as? String,
-              Self.ownedEqual(url, api.endpoint), let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed),
+              Self.ownedEqual(url, try api.endpoint(transcriptionEndpoint: config.endpoint)), let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed),
               let headers = built["headers"] as? [[String]], headers == [["Content-Type", "application/json"]],
               let body = built["body"] as? String, body.utf8.count <= 8 * 1024 * 1024 else { throw NativeWatchAudio.invalid }
+        let routingContext = try NativeVoiceJSON.encode(["releaseCheck": "v1.3.9/speech-parse-endpoint", "provider": "openai",
+            "destination": config.credentialRequired ? "default" : "configured", "outcome": "routed"])
+        _ = try? invoke("logLine", arguments: ["Native iOS speech Smart Parse request routed", routingContext])
         return try NativeVoiceJSON.encode(["url": url, "method": "POST", "redirect": "error",
-            "headers": headers + [["Authorization", "Bearer " + credential]], "text": body])
+            "headers": headers + (credential.map { [["Authorization", "Bearer " + $0]] } ?? []), "text": body])
     }
 
     func decodeWatchOpenAIParse(_ job: WatchAudio, response: String, api: NativeOpenAISpeechAPI) throws -> String {
