@@ -52,6 +52,13 @@ final class EntityOpenHostTests: XCTestCase {
             _ = try sql.execute("INSERT INTO projects(id,title,status,color,orderNum,tagIds,isSequential,isFocused,supportNotes,createdAt,updatedAt,deletedAt,rev,revBy) VALUES (?,'PRIVATE_PROJECT',?,'#123456',0,'[]',0,0,'PRIVATE_PROJECT_NOTES',?,?,?,4,'fixture')",
                                 parametersJSON: json([id, status, at, at, deleted ? at as Any : NSNull()]))
         }
+        let stored = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("SELECT data FROM settings WHERE id=1", parametersJSON: "[]").utf8)) as? [[String: Any]])
+        var settings = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(stored.first?["data"] as? String).utf8)) as? [String: Any])
+        settings["savedFilters"] = [
+            ["id": "calls", "name": "Calls", "view": "contexts", "criteria": [String: Any](), "createdAt": at, "updatedAt": at],
+            ["id": "focus-only", "name": "Focus only", "view": "focus", "criteria": [String: Any](), "createdAt": at, "updatedAt": at],
+        ] as [[String: Any]]
+        _ = try sql.execute("UPDATE settings SET data=? WHERE id=1", parametersJSON: json([json(settings)]))
     }
     private func rows() throws -> [String: String] {
         let sql = try SQLiteBridge(url: database); defer { sql.close() }
@@ -102,8 +109,7 @@ final class EntityOpenHostTests: XCTestCase {
         let before = try rows()
         for url in ["mindwtr://open?task=reference-task", "https://open?task=reference-task",
                     "mindwtr-native-row://open?task=reference-task", "mindwtr-native-dev://capture?title=PRIVATE",
-                    "mindwtr-native-dev://open-feature?feature=capture", "mindwtr-native-dev://global-search?q=PRIVATE",
-                    "mindwtr-native-dev://share", "mindwtr-native-dev://oauth", "mindwtr-native-dev://focus",
+                    "mindwtr-native-dev://global-search?q=PRIVATE", "mindwtr-native-dev://share", "mindwtr-native-dev://oauth",
                     link("area=a"), link("task=&project=%20&area=a"), "PRIVATE_BAD_URL", ""] {
             let actual = try await route(core, url)
             XCTAssertEqual(actual, ["type": "none"])
@@ -113,6 +119,36 @@ final class EntityOpenHostTests: XCTestCase {
             XCTFail("Generic entryPoint must remain unavailable")
         } catch { XCTAssertTrue(error is HostFailure || error is CoreHostRejection) }
         XCTAssertEqual(try rows(), before)
+    }
+
+    func testWidgetScreenLinksResolveSharedRoutesWithoutDomainWrites() async throws {
+        try await seed()
+        let core = host(); _ = try await core.start()
+        let before = try rows()
+        let routes: [(String, [String: String])] = [
+            ("/focus", ["type": "focus"]), ("/inbox", ["type": "inbox"]), ("/waiting", ["type": "waiting"]),
+            ("/someday", ["type": "someday"]), ("/capture-quick?mode=text", ["type": "capture"]),
+            ("/widget-list/next", ["type": "focus"]), ("/widget-list/upcoming", ["type": "focus"]),
+            ("/widget-list/filter%3Acalls", ["type": "contexts", "savedFilterId": "calls"]),
+            ("/widget-list/filter%3Acalls?source=shortcut", ["type": "contexts", "savedFilterId": "calls"]),
+            ("/widget-list/filter%3Afocus-only", ["type": "none"]), ("/widget-list/filter%3Amissing", ["type": "none"]),
+            ("/widget-list/context%3A%40phone", ["type": "none"]), ("/widget-list/%E0%A4%A", ["type": "none"]),
+            ("/not-a-route", ["type": "none"]),
+        ]
+        for (path, expected) in routes {
+            let production = try await productionRoute(core, "mindwtr://" + path)
+            let development = try await route(core, "mindwtr-native-dev://" + path)
+            XCTAssertEqual(production, expected, path)
+            XCTAssertEqual(development, expected, path)
+        }
+        for url in ["mindwtr://capture?title=PRIVATE", "mindwtr://global-search?q=PRIVATE", "mindwtr-native-dev:///focus"] {
+            let value = try await productionRoute(core, url)
+            XCTAssertEqual(value, ["type": "none"])
+        }
+        let foreign = try await route(core, "mindwtr:///focus")
+        XCTAssertEqual(foreign, ["type": "none"])
+        XCTAssertEqual(try rows(), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
     }
 
     func testReadWaitsForCanonicalStartup() async throws {
@@ -176,9 +212,8 @@ final class EntityOpenHostTests: XCTestCase {
             XCTAssertEqual(production, expected)
             XCTAssertEqual(dev, ["type": "none"])
         }
-        for url in [link("task=reference-task"), "https://open?task=reference-task", "mindwtr:///focus", "mindwtr:///inbox",
-                    "mindwtr:///capture-quick?mode=text", "mindwtr:///waiting", "mindwtr:///someday",
-                    "mindwtr:///widget-list/next", "mindwtr://open?project=" + encoded(projectID), "mindwtr://open?area=a"] {
+        for url in [link("task=reference-task"), "https://open?task=reference-task",
+                    "mindwtr://open?project=" + encoded(projectID), "mindwtr://open?area=a"] {
             let value = try await productionRoute(core, url)
             XCTAssertEqual(value, ["type": "none"])
         }

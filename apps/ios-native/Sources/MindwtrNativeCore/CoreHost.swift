@@ -26613,6 +26613,11 @@ private final class Engine: @unchecked Sendable {
                 && (context["count"] as? NSNumber).map({ (0.0...13.0).contains($0.doubleValue) }) == true
         case "Native iOS Next widget task opened":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "opened"])
+        case "Native iOS widget route opened":
+            valid = Set(context.keys) == Set(["releaseCheck", "destination", "outcome"])
+                && context["releaseCheck"] as? String == "v1.3.9/ios-widget-routes"
+                && ["focus", "waiting", "someday", "contexts", "capture"].contains(context["destination"] as? String ?? "")
+                && context["outcome"] as? String == "opened"
         case "Native iOS Add Task shortcut presented":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])
         case "Native iOS share intake confirmed":

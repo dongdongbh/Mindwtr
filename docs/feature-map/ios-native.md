@@ -35,11 +35,11 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 ## Navigation and Menu
 
 - Reach: Bottom tab bar › Focus, Inbox, + (Add Task), the Quick Access tab, Menu. Menu opens a sheet with Trash, Board, History, Settings, Saved Searches, and tiles for Waiting For, Someday, Review or Projects, Reference, Contexts, Calendar.
-- Shortcuts: Deep link `mindwtr-native-dev://open?task=<id>` or `mindwtr-native-dev://open?project=<id>`.
+- Shortcuts: Deep link `mindwtr-native-dev://open?task=<id>` or `mindwtr-native-dev://open?project=<id>`. Screen links use the widget routes: `mindwtr-native-dev:///focus`, `/inbox`, `/waiting`, `/someday`, `/capture-quick?mode=text` and `/widget-list/<list id>`.
 - Selectors: `tab-focus`, `tab-inbox`, `capture-open`, `tab-menu`, `menu-dismiss`, `menu-saved-search-scroll`, `search-open`, `area-open`
 - Code: `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/App/InboxScreen.swift`, `apps/ios-native/App/MoreMenuSheet.swift`, `apps/ios-native/App/CoreModel.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testQuickAccess…, testNativeEntityLink…), `apps/ios-native/Tests/MindwtrNativeCoreTests/EntityOpenHostTests.swift`
-- Notes: The fourth tab follows Settings › General › Quick access view (default Review), so the Menu tile that it replaces shows Projects. Only `open?task=` and `open?project=` links work; capture, search and `mindwtr://` links open nothing.
+- Notes: The fourth tab follows Settings › General › Quick access view (default Review), so the Menu tile that it replaces shows Projects. Widget and saved-list links open the screen RN opens (#1485): a Focus, Inbox, Waiting or Someday header opens that screen, the widget Add button opens the capture sheet, and `widget-list/filter:<id>` for a saved filter whose view is Contexts opens Contexts with that filter selected. A Next or Upcoming list header opens Focus, which shows both lists; RN opens a separate list screen that this client does not have. A saved filter with another view, a context or tag list, and an unknown or malformed link only bring the app forward. The production build reads the same routes from `mindwtr://` links and still opens only tasks from `open?`; the development build also opens `open?project=`. Prefilled `capture?title=` links and search links open nothing. A link that arrives while the app lock covers the app waits for unlock. A screen link that arrives during a Sandbox session is settled as ignored. Checks: `packages/core/src/native-route-destination.test.ts`, `apps/android-native/bundle/host-ios-entity-open.test.ts`.
 
 ## Capture
 

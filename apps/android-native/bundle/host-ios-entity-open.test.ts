@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { isEntityOpenUrl, parseEntityOpenUrl } from '../../../packages/core/src/capture-deeplink';
 import { createNativeHostContract, type NativeHostResult } from '../../../packages/core/src/native-host-contract';
+import { resolveNativeRouteDestination } from '../../../packages/core/src/native-route-destination';
 import { openScreenHost } from '../../../packages/core/src/screen-parity.replay';
 import { flushPendingSave, resetForTests, useTaskStore } from '../../../packages/core/src/store';
 import type { Project, Task } from '../../../packages/core/src/types';
@@ -33,10 +34,12 @@ const fixture = async (platform = 'ios', ready = true, hostURL = false) => {
             task('😀'.repeat(250)), task('😀'.repeat(250) + 'x')],
         projects: [project(projectId), project('deleted-project', { deletedAt: at }),
             project('archived-project', { status: 'archived' }), project('p'.repeat(500)), project('p'.repeat(501))],
-        settings: { gtd: { taskEditor: { hidden: ['contexts'] } } },
+        settings: { gtd: { taskEditor: { hidden: ['contexts'] } }, savedFilters: [
+            { id: 'calls', name: 'Calls', view: 'contexts', criteria: {}, createdAt: at, updatedAt: at },
+            { id: 'focus-only', name: 'Focus only', view: 'focus', criteria: {}, createdAt: at, updatedAt: at }] },
     }, record: {}, log: [], saveData: async (data) => { writes.push(data); } }) : createNativeHostContract();
     writes.length = 0;
-    const state = { __mindwtrHostPlatform: platform, isEntityOpenUrl, parseEntityOpenUrl,
+    const state = { __mindwtrHostPlatform: platform, isEntityOpenUrl, parseEntityOpenUrl, resolveNativeRouteDestination, useTaskStore,
         port: undefined as unknown as { iosEntityOpen(url: unknown): Promise<unknown>; iosProductionWidgetTaskOpen(url: unknown): Promise<unknown> },
         logInfo: (message: string, options: unknown) => { diagnostics.push({ message, options }); },
         submit: (work: () => Promise<unknown>) => work(),
@@ -90,14 +93,31 @@ describe('iOS entity Open bridge with actual shared parser and canonical lookup'
     });
     it.each([
         'mindwtr://open?task=reference-task', 'https://open?task=reference-task', 'mindwtr-native-row://open?task=reference-task',
-        'mindwtr-native-dev://capture?title=PRIVATE', 'mindwtr-native-dev://open-feature?feature=capture',
-        'mindwtr-native-dev://global-search?q=PRIVATE', 'mindwtr-native-dev://share', 'mindwtr-native-dev://oauth',
-        'mindwtr-native-dev://focus', 'mindwtr-native-dev://open/other?area=a',
-        link('area=a'), link('task=&project=%20&area=a'), '', 'PRIVATE_BAD_URL',
+        'mindwtr-native-dev://open/other?area=a', link('area=a'), link('task=&project=%20&area=a'), '', 'PRIVATE_BAD_URL',
     ])('refuses unsupported URL without broad routing: %s', async (url) => {
         const f = await fixture();
         expect(await f.port.iosEntityOpen(url)).toEqual({ type: 'none' });
         expect(f.calls).toEqual([]);
+        expect(f.writes).toEqual([]);
+    });
+    it.each([
+        ['mindwtr-native-dev://focus', { type: 'focus' }],
+        ['mindwtr-native-dev:///waiting', { type: 'waiting' }],
+        ['mindwtr-native-dev:///someday', { type: 'someday' }],
+        ['mindwtr-native-dev:///inbox', { type: 'inbox' }],
+        ['mindwtr-native-dev://open-feature?feature=capture', { type: 'capture' }],
+        ['mindwtr-native-dev:///widget-list/filter%3Acalls', { type: 'contexts', savedFilterId: 'calls' }],
+        ['mindwtr-native-dev:///widget-list/filter%3Afocus-only', { type: 'none' }],
+        ['mindwtr-native-dev://capture?title=PRIVATE', { type: 'none' }],
+        ['mindwtr-native-dev://global-search?q=PRIVATE', { type: 'none' }],
+        ['mindwtr-native-dev://share', { type: 'none' }],
+        ['mindwtr-native-dev://oauth', { type: 'none' }],
+    ])('routes developer screen link %s through the shared resolver read-only', async (url, expected) => {
+        const f = await fixture(), before = useTaskStore.getState();
+        expect(await f.port.iosEntityOpen(url)).toEqual(expected);
+        expect(f.calls).toEqual([{ kind: 'link', url, scheme: 'mindwtr-native-dev' }]);
+        await flushPendingSave();
+        expect(useTaskStore.getState().settings).toBe(before.settings);
         expect(f.writes).toEqual([]);
     });
     it('propagates readiness and later resolves the same delivery against loaded state', async () => {
@@ -179,14 +199,40 @@ describe('closed production widget task URL read', () => {
             context: { releaseCheck: 'v1.3.9/ios-production-task-url', outcome: expected.type } } }]);
     });
     it.each(['mindwtr-native-dev://open?task=reference-task', 'https://open?task=reference-task',
-        'mindwtr:///focus', 'mindwtr:///inbox', 'mindwtr:///waiting', 'mindwtr:///someday',
-        'mindwtr:///capture-quick?mode=text', 'mindwtr:///widget-list/next', 'mindwtr:///widget-list/filter%3Alegacy',
-        'mindwtr://global-search?q=PRIVATE', 'mindwtr://capture?title=PRIVATE', 'mindwtr://share', 'mindwtr://oauth',
         production(`project=${encodeURIComponent(projectId)}`), production('area=a'), '', 'PRIVATE_BAD_URL'])
     ('keeps foreign schemes and other capabilities closed: %s', async url => {
         const f = await fixture();
         expect(await f.port.iosProductionWidgetTaskOpen(url)).toEqual({ type: 'none' });
         expect(f.calls).toEqual([]); expect(f.writes).toEqual([]); expect(f.diagnostics).toEqual([]);
+    });
+    it.each([
+        ['mindwtr:///focus', { type: 'focus' }],
+        ['mindwtr:///inbox', { type: 'inbox' }],
+        ['mindwtr:///waiting', { type: 'waiting' }],
+        ['mindwtr:///someday', { type: 'someday' }],
+        ['mindwtr:///capture-quick?mode=text', { type: 'capture' }],
+        ['mindwtr:///widget-list/next', { type: 'focus' }],
+        ['mindwtr:///widget-list/upcoming', { type: 'focus' }],
+        ['mindwtr:///widget-list/filter%3Acalls', { type: 'contexts', savedFilterId: 'calls' }],
+        ['mindwtr:///widget-list/filter%3Acalls?source=shortcut', { type: 'contexts', savedFilterId: 'calls' }],
+        ['mindwtr:///widget-list/filter%3Afocus-only', { type: 'none' }],
+        ['mindwtr:///widget-list/filter%3Alegacy', { type: 'none' }],
+        ['mindwtr://global-search?q=PRIVATE', { type: 'none' }],
+        ['mindwtr://capture?title=PRIVATE', { type: 'none' }],
+        ['mindwtr://share', { type: 'none' }],
+        ['mindwtr://oauth', { type: 'none' }],
+    ])('routes production widget screen link %s read-only', async (url, expected) => {
+        const f = await fixture(), before = useTaskStore.getState();
+        expect(await f.port.iosProductionWidgetTaskOpen(url)).toEqual(expected);
+        expect(f.calls).toEqual([{ kind: 'link', url, scheme: 'mindwtr' }]);
+        await flushPendingSave();
+        expect(useTaskStore.getState().settings).toBe(before.settings);
+        expect(f.writes).toEqual([]); expect(f.diagnostics).toEqual([]);
+    });
+    it('waits for canonical startup before routing a widget screen link', async () => {
+        const cold = await fixture('ios', false);
+        await expect(cold.port.iosProductionWidgetTaskOpen('mindwtr:///waiting')).rejects.toThrow('NOT_READY');
+        await expect(cold.port.iosEntityOpen('mindwtr-native-dev:///waiting')).rejects.toThrow('NOT_READY');
     });
     it('uses the native host URL/parser binding for the actual task lookup', async () => {
         const f = await fixture('ios', true, true), url = production(`task=${encodeURIComponent(taskId)}`);

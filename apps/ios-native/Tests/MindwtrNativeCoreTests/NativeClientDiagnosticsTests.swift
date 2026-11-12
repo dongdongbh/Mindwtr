@@ -55,6 +55,9 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
             ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
         ]
+        for destination in ["focus", "waiting", "someday", "contexts", "capture"] {
+            result.append(("Native iOS widget route opened", ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": destination, "outcome": "opened"]))
+        }
         for outcome in ["completed", "ignored"] {
             result.append(("Native iOS navigation finish settlement confirmed", [
                 "releaseCheck": "v1.3.9/ios-navigation-finish-settlement", "operation": "finish-settlement", "outcome": outcome]))
@@ -191,6 +194,15 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ["releaseCheck": "v1.3.8/unreviewed", "outcome": "confirmed"],
         ] {
             refused.append(try json(["Native iOS Weekly Review project completion confirmed", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": "inbox", "outcome": "opened"],
+            ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": "focus", "outcome": "refused"],
+            ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": "contexts", "outcome": "opened", "savedFilterId": "private"],
+            ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": "focus"],
+            ["releaseCheck": "v1.3.8/ios-widget-routes", "destination": "focus", "outcome": "opened"],
+        ] {
+            refused.append(try json(["Native iOS widget route opened", json(context)]))
         }
         let finishMessage = "Native iOS navigation finish settlement confirmed"
         for invalid in [

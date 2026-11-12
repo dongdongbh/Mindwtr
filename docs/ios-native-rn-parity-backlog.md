@@ -113,7 +113,7 @@ These are landed requirements or feedback follow-ups, not all confirmed native g
 | CloudKit | Complete live physical integration and convergence; source tests alone do not close this gate. |
 | Watch | Paired Watch unavailable. Keep device acceptance explicitly open rather than substituting simulator evidence. |
 | Production adoption | Complete actual RN Hermes/op-sqlite/AsyncStorage round-trip and legacy media/file intake. Existing synthetic native/JSC↔RN adapter checks are narrower evidence. Preserve task IDs, attachments, settings and interrupted operations. |
-| Widgets / App Intents | Task route and intent source work exists. Resolve SDK metadata availability (observed 17.2 metadata versus 17.0 source annotation), package maintained production renderer, validate task and non-task routes on supported iOS versions. No production install is authorized by this document. |
+| Widgets / App Intents | Task route and intent source work exists. Non-task widget routes now resolve in source: Focus, Inbox, Waiting and Someday headers, the Add button, and Contexts saved-filter lists open the RN screen; Next and Upcoming headers open Focus because this client has no separate list screen (#1485). Resolve SDK metadata availability (observed 17.2 metadata versus 17.0 source annotation), package maintained production renderer, validate task and non-task routes on supported iOS versions. No production install is authorized by this document. |
 | UI acceptance | Exercise recent workflows, gestures, VoiceOver, large text and RTL after parity fixes, on the actual screens affected. |
 | Dropbox | Deferred until other migration work is finished, per user instruction. |
 

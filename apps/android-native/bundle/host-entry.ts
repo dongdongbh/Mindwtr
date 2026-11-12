@@ -7,6 +7,7 @@ import { readWatchOpenAIRuntime, buildWatchOpenAITranscription, decodeWatchOpenA
 import { ingestIOSWatchBatch, readIOSWatchBatchOutcome, ingestIOSWatchAudio, readIOSWatchAudioOutcome, readIOSWatchAudioNeedsTranscript } from './ios-watch-ingest';
 import { createNativeShareCaptureMethods } from '../../../packages/core/src/native-share-capture';
 import { readIOSShareCaptureDraft } from './ios-share-capture';
+import { resolveNativeRouteDestination } from '../../../packages/core/src/native-route-destination';
 import {
     DEFAULT_GLOBAL_SEARCH_FILTERS,
     getOnboardingGuideUrl,
@@ -4022,8 +4023,12 @@ globalThis.MindwtrHost = {
                 throw new Error('INVALID_INPUT: Invalid production task URL');
             }
             const scheme = 'mindwtr';
-            if (url.slice(0, scheme.length + 1).toLowerCase() !== `${scheme}:`
-                || !isEntityOpenUrl(url) || parseEntityOpenUrl(url)?.kind !== 'task') return { type: 'none' };
+            if (url.slice(0, scheme.length + 1).toLowerCase() !== `${scheme}:`) return { type: 'none' };
+            if (!isEntityOpenUrl(url)) {
+                return resolveNativeRouteDestination(unwrap(contract.resolveNativeEntryPoint({ kind: 'link', url, scheme })),
+                    useTaskStore.getState().settings.savedFilters);
+            }
+            if (parseEntityOpenUrl(url)?.kind !== 'task') return { type: 'none' };
             const target = unwrap(contract.resolveNativeEntryPoint({ kind: 'link', url, scheme }));
             const type = target.taskId && target.taskId.length <= 500 ? 'task' : target.route === '/inbox' ? 'inbox' : 'none';
             if (type !== 'none') {
@@ -4043,7 +4048,11 @@ globalThis.MindwtrHost = {
             const scheme = 'mindwtr-native-dev';
             if (url.slice(0, scheme.length + 1).toLowerCase() !== `${scheme}:`) return { type: 'none' };
             const normalized = `mindwtr:${url.slice(scheme.length + 1)}`;
-            if (!isEntityOpenUrl(normalized) || parseEntityOpenUrl(normalized)?.kind === 'area') return { type: 'none' };
+            if (!isEntityOpenUrl(normalized)) {
+                return resolveNativeRouteDestination(unwrap(contract.resolveNativeEntryPoint({ kind: 'link', url, scheme })),
+                    useTaskStore.getState().settings.savedFilters);
+            }
+            if (parseEntityOpenUrl(normalized)?.kind === 'area') return { type: 'none' };
             const target = unwrap(contract.resolveNativeEntryPoint({ kind: 'link', url, scheme }));
             if (target.taskId) return target.taskId.length <= 500 ? { type: 'task', taskId: target.taskId } : { type: 'none' };
             if (target.projectId) return target.projectId.length <= 500 ? { type: 'project', projectId: target.projectId } : { type: 'none' };

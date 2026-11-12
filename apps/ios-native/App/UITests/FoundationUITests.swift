@@ -1575,6 +1575,25 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
 
+    func testNativeWidgetScreenLinksOpenTheRNDestinations() throws {
+        let app = try task454App("ROUTES")
+        try task454Open(app, "mindwtr-native-dev:///waiting"); defer { app.terminate() }
+        XCTAssertTrue(app.scrollViews["waiting-scroll"].waitForExistence(timeout: 40))
+        try task454Open(app, "mindwtr-native-dev:///someday")
+        XCTAssertTrue(app.scrollViews["someday-scroll"].waitForExistence(timeout: 30))
+        try task454Open(app, "mindwtr-native-dev:///widget-list/next")
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["tab-focus"])
+        waitForExpectations(timeout: 30)
+        try task454Open(app, "mindwtr-native-dev:///capture-quick?mode=text")
+        XCTAssertTrue(app.textViews["capture-input"].waitForExistence(timeout: 30))
+        boardTap(app, "capture-close")
+        XCTAssertFalse(app.textViews["capture-input"].waitForExistence(timeout: 2))
+        try task454Open(app, "mindwtr-native-dev:///widget-list/filter%3Amissing")
+        boardEnabled(app.buttons["tab-menu"], timeout: 30)
+        XCTAssertTrue(app.buttons["tab-focus"].isSelected)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
     private func task454InboxFallback(_ suffix: String, identifier: String) throws {
         let app = try task454App(suffix)
         try task454Open(app, "mindwtr-native-dev://open?task=" + identifier); defer { app.terminate() }
