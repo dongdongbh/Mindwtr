@@ -36234,7 +36234,16 @@ extension FoundationUITests {
             XCTAssertFalse(app.buttons["task-delete-undo"].exists)
             XCTAssertFalse(app.buttons["persistence-retry"].exists)
         }
+        func closeLocalTray(_ id: String) {
+            guard labels.keys.contains(where: { button($0, id).exists && button($0, id).isHittable }) else { return }
+            let title = app.buttons["task-title-" + id], visible = title.frame.intersection(app.frame)
+            guard !visible.isEmpty else { return }
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: visible.midX, dy: visible.midY)).tap()
+            let closed = expectation(for: NSPredicate { _, _ in title.frame.minX >= app.frame.minX - 1 }, evaluatedWith: nil)
+            wait(for: [closed], timeout: 10)
+        }
         func reveal(_ id: String, left: Bool, scroll: String) {
+            if scroll == "focus-scroll" { closeLocalTray(id) }
             let title = row(id, scroll: scroll), actions = left ? ["organize", "dates", "delete"] : ["done", "focus"]
             for _ in 0..<4 {
                 if left { title.swipeLeft() } else { title.swipeRight() }
