@@ -5,7 +5,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { apkDrift, buildSteps, checkApks, checkArgs, defaultChecks, harnessChecks, parseArgs, pinApks, setenvArgs, unreachable, verdict, withAdbPort } from './run-device-batch.mjs';
+import { apkDrift, buildSteps, checkApks, checkArgs, closingLines, defaultChecks, DISPOSABLE_PACKAGES, harnessChecks, KNOWN_STALE, parseArgs, pinApks, resetLibrary, setenvArgs, staleEntryProblem, staleLines, staleProblems, unreachable, verdict,
+    withAdbPort } from './run-device-batch.mjs';
 import { DEFAULT_ADB } from './device.mjs';
 
 const readCheck = (check) => readFileSync(new URL(`./${check}.mjs`, import.meta.url), 'utf8');
@@ -85,9 +86,61 @@ test('the batch installs its own copy of each APK, so a rebuild in the tree mid-
 });
 
 test('verdict passes only when every check exits 0', () => {
-    assert.equal(verdict([{ check: 'a', exit: 0 }, { check: 'b', exit: 0 }]), 'VERDICT PASS 2/2');
-    assert.equal(verdict([{ check: 'a', exit: 0 }, { check: 'b', exit: 1 }, { check: 'c', exit: 124 }]), 'VERDICT FAIL 1/3: b c');
-    assert.equal(verdict([]), 'VERDICT FAIL 0/0: no checks ran');
+    assert.equal(verdict([{ check: 'a', exit: 0 }, { check: 'b', exit: 0 }], {}), 'VERDICT PASS 2/2');
+    assert.equal(verdict([{ check: 'a', exit: 0 }, { check: 'b', exit: 1 }, { check: 'c', exit: 124 }], {}), 'VERDICT FAIL 1/3: b c');
+    assert.equal(verdict([], {}), 'VERDICT FAIL 0/0: no checks ran');
+});
+
+test('a known-stale failure is reported on its own and does not fail the verdict; a new failure still does', () => {
+    const stale = { s: '2026-11-12 reason' };
+    assert.equal(verdict([{ check: 'a', exit: 0 }, { check: 's', exit: 1 }], stale), 'VERDICT PASS 1/2; known-stale failed: s');
+    assert.equal(verdict([{ check: 'b', exit: 1 }, { check: 's', exit: 1 }], stale), 'VERDICT FAIL 0/2: b; known-stale failed: s');
+    assert.deepEqual(staleLines([{ check: 'a', exit: 0 }, { check: 's', exit: 3 }], stale), ['KNOWN-STALE FAILED s EXIT=3: 2026-11-12 reason']);
+    assert.deepEqual(staleLines([{ check: 's', exit: 0 }], stale), ['KNOWN-STALE PASSED s: take it off KNOWN_STALE (2026-11-12 reason)']);
+    for (const check of Object.keys(KNOWN_STALE)) assert.ok(readdirSync(new URL('.', import.meta.url)).includes(`${check}.mjs`), check);
+    assert.deepEqual(staleProblems(), []);
+    assert.ok(!('check-ai-device' in KNOWN_STALE), 'a real app crash is never known-stale');
+});
+
+test('a known-stale entry without a proof path, a check line or a date is rejected', () => {
+    const line = 'check-x-device.mjs:12';
+    assert.equal(staleEntryProblem('x', `2026-11-12 misreads the row (${line}); proof /home/dd/scratch/logs/x/shot.png shows it works`), null);
+    assert.match(staleEntryProblem('x', `2026-11-12 fails on main too (${line})`), /needs "proof \/path"/);
+    assert.match(staleEntryProblem('x', `2026-11-12 misreads the row (${line}); proof shot.png`), /needs "proof \/path"/);
+    assert.match(staleEntryProblem('x', '2026-11-12 misreads the row; proof /home/dd/x.png'), /names the check line/);
+    assert.match(staleEntryProblem('x', `misreads the row (${line}); proof /home/dd/x.png`), /date and reason/);
+    assert.deepEqual(staleProblems({ x: '2026-11-12 fails on main too' }).length, 1);
+});
+
+test('the batch reset clears only the two disposable dev packages', () => {
+    assert.deepEqual(DISPOSABLE_PACKAGES, ['tech.dongdongbh.mindwtr.nativeclient.dev', 'tech.dongdongbh.mindwtr.upgradetest']);
+    const calls = [];
+    const adb = (...args) => {
+        calls.push(args.join(' '));
+        if (args[0] === 'pm' && args[1] === 'list') return `package:${args[3]}`;
+        if (args[0] === 'dumpsys') return '    android.permission.POST_NOTIFICATIONS: granted=true, flags=[ USER_SET ]\n    android.permission.CAMERA: granted=false';
+        if (args[0] === 'appops' && args[1] === 'get') return calls.includes(`pm clear ${args[2]}`) && !calls.some((call) => call.startsWith('appops set')) ? 'No operations.' : 'SCHEDULE_EXACT_ALARM: allow';
+        return args[1] === 'clear' ? 'Success' : '';
+    };
+    const past = () => { calls.push('past onboarding'); return 0; };
+    assert.equal(resetLibrary(adb, 'tech.dongdongbh.mindwtr.nativeclient.dev', past), 'Success, 1 permissions granted again, exact alarms allow (now allow), past onboarding=0');
+    assert.deepEqual(calls.slice(2).filter((call) => !call.startsWith('appops get')), ['pm clear tech.dongdongbh.mindwtr.nativeclient.dev',
+        'pm grant tech.dongdongbh.mindwtr.nativeclient.dev android.permission.POST_NOTIFICATIONS',
+        'appops set tech.dongdongbh.mindwtr.nativeclient.dev SCHEDULE_EXACT_ALARM allow', 'past onboarding']);
+    calls.length = 0;
+    assert.equal(resetLibrary(adb, 'tech.dongdongbh.mindwtr.upgradetest', past), 'Success, 1 permissions granted again, exact alarms allow (now allow)');
+    assert.ok(!calls.includes('past onboarding'), 'every upgradetest check uninstalls first, so only the dev library needs onboarding passed');
+    assert.throws(() => resetLibrary(adb, 'tech.dongdongbh.mindwtr', past), /refusing to clear tech\.dongdongbh\.mindwtr$/);
+    assert.equal(resetLibrary(() => '', 'tech.dongdongbh.mindwtr.upgradetest', past), 'not installed');
+});
+
+test('the batch ends with the dev library past onboarding, so the old runner on other branches finds it as it expects', () => {
+    let passed = 0;
+    const lines = closingLines([{ check: 'check-review-device', exit: 1 }, { check: 'a', exit: 0 }], () => { passed += 1; return 0; }, { 'check-review-device': '2026-11-12 reason (check-review-device.mjs:1); proof /x' });
+    assert.equal(passed, 1);
+    assert.deepEqual(lines.slice(-2), ['past onboarding=0', 'VERDICT PASS 1/2; known-stale failed: check-review-device']);
+    assert.match(readCheck('past-onboarding-device'), /waitFor\('the tabs past the welcome sheet'/);
+    assert.match(readFileSync(new URL('./device.mjs', import.meta.url), 'utf8'), /if \(!keepWelcome && welcomeSkip\(nodes\)\) await skipWelcome\(nodes\);/);
 });
 
 test('an unset adb port defaults to 5038 in the child env and the detached unit; a set one wins', () => {

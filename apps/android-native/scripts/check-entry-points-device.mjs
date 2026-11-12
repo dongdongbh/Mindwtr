@@ -193,6 +193,13 @@ try {
     await waitFor('the capture command', () => captures() === capturesBefore + 1, 15_000);
     let stored = core();
     check(stored.tasks.shared.length === 1 && stored.tasks.shared[0].status === 'inbox', `(b) the shared text is stored once, in the Inbox (${JSON.stringify(stored.tasks.shared)})`);
+    if (!stored.project) {
+        const text = `${titles.shared}0 +p${titles.shared}`;
+        console.log(`note - the library has no project that takes tasks; sharing "${text}" to make one`);
+        nodes = await send(`-a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT '${text}'`, modal(text), 'the capture screen with the project text');
+        await tapExpecting(tagged(nodes, 'capture-modal-save'), onTabs(en['tab.inbox']), 'the project text to save');
+        for (let wait = 0; wait < 15 && !stored.project; wait += 1) { await sleep(1000); stored = core(); }
+    }
 
 
     await link('/inbox', onTabs(en['tab.inbox']), 'the Inbox');
@@ -215,11 +222,10 @@ try {
     nodes = await screen();
     await tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close in the editor'), onTabs(en['tab.next']), 'Focus under the editor');
     check(true, '(c) open?task opens the task in the editor over Focus');
-    if (stored.project) {
-        await link(`/open?project=${stored.project.id}`, (current) => projectTitled(current, stored.project.title) && Boolean(button(current, 'Back')), 'the project');
-        await back('the tabs after the project');
-        check(true, `(c) open?project opens the project ${stored.project.title}`);
-    } else console.log('skip - (c) open?project: the development data has no project that takes tasks');
+    if (!stored.project) fail('the library has no project that takes tasks, and the shared +project text made none');
+    await link(`/open?project=${stored.project.id}`, (current) => projectTitled(current, stored.project.title) && Boolean(button(current, 'Back')), 'the project');
+    await back('the tabs after the project');
+    check(true, `(c) open?project opens the project ${stored.project.title}`);
     nodes = await link('/open-feature?feature=capture', popup(''), 'the empty capture popup');
     await closePopup(nodes);
     check(true, '(c) open-feature capture opens the capture popup');

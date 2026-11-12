@@ -203,7 +203,9 @@ export const besideRow = (nodes, title, label) => {
 
 export const DEFAULT_ADB = '/opt/android-sdk/platform-tools/adb';
 
-export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_ADB }) {
+const welcomeSkip = (nodes) => (tagged(nodes, 'welcome-sheet') ? button(nodes, en['onboarding.skipForNow']) : undefined);
+
+export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_ADB, keepWelcome = false }) {
     process.env.ANDROID_ADB_SERVER_PORT ||= '5038';
     const adbRaw = (...args) => execFileSync(adb, ['-s', serial, ...args], { maxBuffer: 64 << 20 });
     const shell = (command) => adbRaw('shell', command).toString('utf8').replace(/\r/g, '').trim();
@@ -334,16 +336,25 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
         }
         return fail('uiautomator dump failed');
     };
+    const skipWelcome = async (nodes) => {
+        const skip = welcomeSkip(nodes);
+        if (!skip) return nodes;
+        console.log('note - the welcome sheet is open over an empty library; tapping Skip for now');
+        await tap(skip);
+        return screen();
+    };
     const waitFor = async (description, predicate, timeoutMs = 30_000) => {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
             const nodes = await screen();
             if (predicate(nodes)) return nodes;
+            if (!keepWelcome && welcomeSkip(nodes)) await skipWelcome(nodes);
             await sleep(500);
         }
         return fail(`timed out waiting for ${description}`);
     };
     const tap = async (node) => {
+        if (!node) fail('nothing on screen to tap');
         requireAppFront();
         const [x1, y1, x2, y2] = box(node);
 
@@ -357,6 +368,7 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
 
 
     const tapExpecting = async (node, expected, description, timeoutMs = 30_000) => {
+        if (!node) fail(`nothing on screen to tap for ${description}`);
         const before = state(await screen());
         await tap(node);
         const deadline = Date.now() + 4_000;
@@ -568,10 +580,30 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
         finally { closeSync(out); }
     };
 
+    const projectsTab = async (toTabs) => {
+        let nodes = await toTabs();
+        if (tab(nodes, en['nav.projects'])) return nodes;
+        console.log('note - the tab bar has no Projects tab; choosing Projects as the quick access view in Settings › General');
+        const startsWith = (prefix) => (current) => current.find((node) => (node['content-desc'] ?? '').startsWith(prefix));
+        nodes = await tapExpecting(tab(nodes, en['tab.menu']), (current) => Boolean(tagged(current, 'more-sheet')), 'the More sheet');
+        nodes = await settle(nodes);
+        await tapExpecting(withDescription(nodes, en['nav.settings']), (current) => Boolean(tagged(current, 'settings-main')), 'Settings');
+        await tapExpecting(await revealNode(startsWith(en['settings.general']), 'the General row'), (current) => Boolean(tagged(current, 'settings-general')), 'Settings › General');
+        const quick = `${en['settings.mobile.quickAccessView']}: `;
+        nodes = await tapExpecting(await revealNode(startsWith(quick), 'the Quick access view row'), (current) => Boolean(tagged(current, 'settings-picker')), 'the quick access picker');
+        await tapExpecting(withDescription(nodes, en['nav.projects']), (current) => !tagged(current, 'settings-picker')
+            && Boolean(withDescription(current, `${quick}${en['nav.projects']}`)), 'Projects as the quick access view');
+        nodes = await toTabs();
+        if (tab(nodes, en['nav.projects'])) return nodes;
+        console.log('note - the tab bar kept its old quick access tab (SettingsModel.done reads More while the command is still busy); opening and closing the More sheet reads it again');
+        await tapExpecting(tab(nodes, en['tab.menu']), (current) => Boolean(tagged(current, 'more-sheet')) && Boolean(tab(current, en['nav.projects'])), 'the More sheet and the Projects tab');
+        return toTabs();
+    };
+
     const colors = (file, points) => {
         writeFileSync(file, adbRaw('exec-out', 'screencap', '-p'));
         return execFileSync('magick', [file, '-format', points.map(([x, y]) => `%[hex:p{${x},${y}}]`).join(' '), 'info:'], { encoding: 'utf8' })
             .trim().split(' ').map((hex) => hex.slice(0, 6).toUpperCase());
     };
-    return { adbRaw, sh, home, front, requireAppFront, launch, pid, stopApp, tapExpecting, focusAtEnd, logs, screen, waitFor, tap, openCapture, type, swipe, signature, toTop, settle, reveal, revealNode, pull, colors, revealAction, swipeDone, completeUntil };
+    return { adbRaw, sh, home, front, requireAppFront, launch, pid, stopApp, tapExpecting, focusAtEnd, logs, screen, waitFor, tap, openCapture, type, swipe, signature, toTop, settle, reveal, revealNode, projectsTab, pull, colors, revealAction, swipeDone, completeUntil };
 }

@@ -797,7 +797,8 @@ class CoreHost(
     fun sandboxRelease() { runCatching { callAsync("sandboxRelease") }.onFailure { Log.w(TAG, "Native Android sandbox switch not released ${it.javaClass.simpleName}") } }
 
 
-    fun languageSaved(stored: String, system: String): JSONObject = callAsync("languageSaved", stored, system)
+    fun languageSaved(stored: String, system: String): JSONObject =
+        debugFault("language").takeIf { it.isNotEmpty() }?.let { callAsync("language", it, system) } ?: callAsync("languageSaved", stored, system)
 
 
     fun appLock(): JSONObject = callAsync("appLock")

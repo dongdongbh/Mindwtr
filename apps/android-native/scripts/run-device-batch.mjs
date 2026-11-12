@@ -32,6 +32,19 @@ const ORDER = ['check-projects-device', 'check-bgsync-device', 'check-encryption
     'check-ai-device', 'check-attachments-device', 'check-continue-without-files-device', 'check-reminders-device', 'check-runner-device',
     'check-upgrade-device'];
 const LAST = 'check-upgrade-device';
+export const DISPOSABLE_PACKAGES = ['tech.dongdongbh.mindwtr.nativeclient.dev', 'tech.dongdongbh.mindwtr.upgradetest'];
+
+
+export const KNOWN_STALE = {};
+
+export function staleEntryProblem(check, entry) {
+    if (!/^\d{4}-\d\d-\d\d \S/.test(entry)) return `${check}: a known-stale entry starts with its date and reason`;
+    if (!/[\w-]+\.mjs:\d+/.test(entry)) return `${check}: a known-stale entry names the check line that misreads the app (file.mjs:line)`;
+    if (!/\bproof \/\S+/.test(entry)) return `${check}: a known-stale entry needs "proof /path" to evidence that the app works`;
+    return null;
+}
+
+export const staleProblems = (stale = KNOWN_STALE) => Object.entries(stale).map(([check, entry]) => staleEntryProblem(check, entry)).filter(Boolean);
 
 export function parseArgs(argv) {
     const opts = { tree: resolve(here, '../../..'), harness: null, log: null, build: true, detach: false, unit: null, checks: [] };
@@ -75,12 +88,21 @@ export function unreachable(result, port, total) {
     return state === 'device' ? null : `VERDICT FAIL 0/${total}: not run, ${SERIAL} not reachable on adb port ${port} (${state})`;
 }
 
-export function verdict(results) {
+export function staleLines(results, stale = KNOWN_STALE) {
+    return results.filter((r) => stale[r.check]).map((r) => r.exit === 0
+        ? `KNOWN-STALE PASSED ${r.check}: take it off KNOWN_STALE (${stale[r.check]})`
+        : `KNOWN-STALE FAILED ${r.check} EXIT=${r.exit}: ${stale[r.check]}`);
+}
+
+export function verdict(results, stale = KNOWN_STALE) {
     const failed = results.filter((r) => r.exit !== 0).map((r) => r.check);
+    const fresh = failed.filter((check) => !stale[check]);
+    const known = failed.filter((check) => stale[check]);
     const passed = results.length - failed.length;
-    return failed.length === 0 && results.length > 0
-        ? `VERDICT PASS ${passed}/${results.length}`
-        : `VERDICT FAIL ${passed}/${results.length}: ${failed.join(' ') || 'no checks ran'}`;
+    const tail = known.length ? `; known-stale failed: ${known.join(' ')}` : '';
+    return fresh.length === 0 && results.length > 0
+        ? `VERDICT PASS ${passed}/${results.length}${tail}`
+        : `VERDICT FAIL ${passed}/${results.length}: ${fresh.join(' ') || 'no checks ran'}${tail}`;
 }
 
 export function checkApks(check, source) {
@@ -127,6 +149,21 @@ export function buildSteps(tree, needHarness) {
     ];
 }
 
+export function resetLibrary(adb, pkg, pastOnboarding) {
+    if (!DISPOSABLE_PACKAGES.includes(pkg)) throw new Error(`refusing to clear ${pkg}`);
+    if (!adb('pm', 'list', 'packages', pkg).split('\n').some((line) => line.trim() === `package:${pkg}`)) return 'not installed';
+    const granted = [...new Set([...adb('dumpsys', 'package', pkg).matchAll(/^\s+(android\.permission\.[\w.]+): granted=true/gm)].map(([, name]) => name))];
+    const exactMode = () => /SCHEDULE_EXACT_ALARM: (\w+)/.exec(adb('appops', 'get', pkg, 'SCHEDULE_EXACT_ALARM'))?.[1] ?? 'default';
+    const exactBefore = exactMode();
+    const cleared = adb('pm', 'clear', pkg);
+    for (const permission of granted) adb('pm', 'grant', pkg, permission);
+    if (exactMode() !== exactBefore) adb('appops', 'set', pkg, 'SCHEDULE_EXACT_ALARM', exactBefore);
+    const onboarding = pkg === DISPOSABLE_PACKAGES[0] ? `, past onboarding=${pastOnboarding()}` : '';
+    return `${cleared}, ${granted.length} permissions granted again, exact alarms ${exactBefore} (now ${exactMode()})${onboarding}`;
+}
+
+export const closingLines = (results, pastOnboarding, stale = KNOWN_STALE) => [...staleLines(results, stale), `past onboarding=${pastOnboarding()}`, verdict(results, stale)];
+
 const hhmm = () => new Date().toTimeString().slice(0, 5);
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
 
@@ -137,6 +174,11 @@ function main() {
         opts = parseArgs(process.argv.slice(2));
     } catch (error) {
         console.error(`run-device-batch: ${error.message}`);
+        process.exit(2);
+    }
+    const badStale = staleProblems();
+    if (badStale.length) {
+        console.error(`run-device-batch: ${badStale.join('; ')}`);
         process.exit(2);
     }
     opts.log ??= `/home/dd/scratch/logs/device-batch/${stamp()}`;
@@ -186,12 +228,13 @@ function main() {
         }
     };
     const adb = (...args) => spawnSync(ADB, ['-s', SERIAL, 'shell', ...args], { encoding: 'utf8', maxBuffer: 1 << 26 }).stdout?.trim() ?? '';
+    const pastOnboarding = () => run(process.execPath, [`${scriptsDir}/past-onboarding-device.mjs`, SERIAL], 'past-onboarding.log');
     const finish = (results) => {
         adb('settings', 'put', 'system', 'accelerometer_rotation', '1');
         say(`end ${new Date().toString()} rotation=${adb('settings', 'get', 'system', 'accelerometer_rotation')}`);
-        const line = verdict(results);
-        say(line);
-        process.exit(line.startsWith('VERDICT PASS') ? 0 : 1);
+        const lines = closingLines(results, pastOnboarding);
+        for (const line of lines) say(line);
+        process.exit(lines.at(-1).startsWith('VERDICT PASS') ? 0 : 1);
     };
 
     const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: opts.tree, encoding: 'utf8' }).stdout.trim();
@@ -232,6 +275,7 @@ function main() {
     }
     for (const { path, sha } of pinned) say(`apk ${path} sha256 ${sha} head ${head}`);
     const pinnedPath = new Map(pinned.map(({ apk, path }) => [apk, path]));
+    for (const pkg of DISPOSABLE_PACKAGES) say(`reset ${pkg}: ${resetLibrary(adb, pkg, pastOnboarding)}`);
 
     const results = [];
     for (const [index, check] of checks.entries()) {
@@ -247,14 +291,19 @@ function main() {
             results.push({ check, exit: 1 });
             continue;
         }
-        if (!adb('dumpsys', 'activity', 'activities').split('\n').find((l) => l.includes('topResumedActivity'))?.includes('launcher')) {
-            adb('input', 'keyevent', 'KEYCODE_HOME');
+        const top = adb('dumpsys', 'activity', 'activities').split('\n').find((l) => l.includes('topResumedActivity')) ?? '';
+        const leftOpen = DISPOSABLE_PACKAGES.find((pkg) => top.includes(` ${pkg}/`));
+        if (leftOpen) {
+            adb('am', 'force-stop', leftOpen);
+            say(`force-stopped ${leftOpen}: it was still in front`);
         }
+        if (!top.includes('launcher')) adb('input', 'keyevent', 'KEYCODE_HOME');
         adb('settings', 'put', 'system', 'accelerometer_rotation', '1');
         say(`## ${check} ${hhmm()}`);
         const code = run('timeout', ['3600', process.execPath, `${scriptsDir}/${check}.mjs`, SERIAL, ...checkArgs(check, apksOf.get(check).map((apk) => pinnedPath.get(apk)))], `${check}.log`);
         say(`EXIT=${code} rotation=${adb('settings', 'get', 'system', 'accelerometer_rotation')}`);
         results.push({ check, exit: code });
+        if (code !== 0) for (const pkg of DISPOSABLE_PACKAGES) say(`reset ${pkg} after the failure: ${resetLibrary(adb, pkg, pastOnboarding)}`);
     }
     finish(results);
 }

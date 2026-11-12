@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, inboxCount, inEditor, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { button, check, connect, evidenced, fail, inboxCount, inEditor, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -220,6 +220,13 @@ try {
         seen = await setLock(false);
         console.log('note - App lock was on; turned off through core for the check, and turned on again at the end');
     }
+    if (!seen.taskId) {
+        const title = `al${String(Date.now()).slice(-9)}`;
+        console.log(`note - the library has no open task for the task link; capturing ${title}`);
+        await waitFor('the tabs', onTabs, 60_000);
+        await device.type(title);
+        await tapExpecting(button(await screen(), en['common.save']), (current) => onTabs(current) && !current.some((node) => node.class === 'android.widget.EditText'), 'the capture to close');
+    }
 
 
     let nodes = await openGeneral(seen);
@@ -360,7 +367,7 @@ try {
         '(g) a return within the relock delay shows General again and never draws the unlock panel on the way (RN 80690c7eb, #1423)');
     await choose('settings.mobile.appLockRelockAfter1', 'settings.mobile.appLockRelockImmediately', 0);
     setProp('app_lock_answer', '');
-    const taskId = core('read').taskId ?? fail('no open task in the development data');
+    const taskId = core('read').taskId ?? fail('no open task, though the check captured one at its start');
     requireAppFront();
     sh('input keyevent KEYCODE_HOME');
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);

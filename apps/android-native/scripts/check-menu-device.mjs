@@ -184,6 +184,7 @@ try {
     await capture(`${titles.waiting}%s/waiting`, `${titles.waiting} /waiting`);
     await capture(`${titles.someday}%s/someday`, `${titles.someday} /someday`);
     await capture(`${titles.done}%s/done`, `${titles.done} /done`);
+    await capture(`${titles.done}0%s+mp${run}`, `${titles.done}0 +mp${run}`);
     await capture(`${titles.archived}%s/archived`, `${titles.archived} /archived`);
     let seen = core();
     check(Object.values(titles).filter((title) => title !== titles.added).every((title) => seen.stored[title].length === 1), 'the five captures are stored once each');

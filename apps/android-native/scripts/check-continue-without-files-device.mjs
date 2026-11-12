@@ -6,9 +6,9 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, inboxCount, inEditor, inList, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { check, connect, evidenced, fail, inboxCount, inEditor, inList, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
-import { removeNowhereFiles } from './nowhere-files.mjs';
+import { projectFiles, removeNowhereFiles } from './nowhere-files.mjs';
 import { hostDevice, serveWebdav } from './sync-harness.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -141,34 +141,7 @@ const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
     await tapTag(tag, () => commands(operation, since) > 0, description, timeoutMs);
 };
 
-const projectList = async () => {
-    let nodes = await toTabs();
-    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
-
-    const inProject = (current) => current.some((node) => /(^|\/)project-(title-input|details-[a-z]+|attachment-add-link)$/.test(node['resource-id'] ?? ''));
-    for (let step = 0; step < 4 && inProject(nodes); step += 1) {
-        await hideKeyboard();
-        requireAppFront();
-        sh('input keyevent KEYCODE_BACK');
-        await sleep(1000);
-        nodes = await screen();
-    }
-    return inProject(nodes) ? fail('the project list did not come back') : nodes;
-};
-
-const removeProjectFile = async (project, file) => {
-    await projectList();
-    let nodes = await device.reveal(project);
-    nodes = await tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
-    if (!tagged(nodes, 'project-attachment-add-link')) {
-        nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
-    }
-    const row = await reveal((current) => current.find((node) => node.text === file), file, false);
-    nodes = await screen();
-    const [, top, , bottom] = box(row);
-    const remove = nodes.find((node) => node.text === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
-    await tapExpecting(remove ?? fail(`no Remove beside ${file}`), (current) => !current.some((node) => node.text === file), `${file} removed`);
-};
+const { projectList, removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -180,6 +153,7 @@ const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) =
 
 let dav = null;
 let second = null;
+let fileId = null;
 const cleanup = cleanupOnExit([
     () => execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${WEBDAV_PORT}`], { stdio: 'ignore' }),
     () => { void dav?.close(); },
@@ -228,7 +202,7 @@ try {
     const added = await second.call('menuCommand', 'attachmentAddFile', JSON.stringify({ requestId: randomUUID(), owner: { kind: 'project', projectId },
         source: 'file', picked: { uri: `file://${source}`, name: names.file, mimeType: 'application/octet-stream', size: bytes.length } }));
     if (added.kind !== 'saved') fail(`the second device's file was not added (${JSON.stringify(added)})`);
-    const fileId = added.ids[0];
+    fileId = added.ids[0];
     await second.syncNow('webdav', { ...fieldsA, password: null });
     const blob = [...dav.state.files.keys()].find((path) => path.startsWith(`${folderA}/`) && path.includes(fileId));
     check(Boolean(blob), '(1) the second device uploaded the project file to folder A');
@@ -271,8 +245,10 @@ try {
     nodes = await device.reveal(names.project);
     nodes = await tapExpecting(inList(nodes, names.project) ?? fail('no project row'), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
     nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
+    const fileRow = (current) => current.find((node) => (node.text ?? '') === names.file || (node['content-desc'] ?? '').includes(names.file));
+    await reveal(fileRow, names.file, false);
     nodes = await waitFor(`"${en['attachments.missing']}" beside the file`, (current) => current.some((node) => node.text === en['attachments.missing'])
-        && current.some((node) => (node.text ?? '') === names.file || (node['content-desc'] ?? '').includes(names.file)), 20_000);
+        && Boolean(fileRow(current)), 20_000);
     check(!nodes.some((node) => node.text === en['attachments.download']), `(4) the attachment shows "${en['attachments.missing']}", not "${en['attachments.download']}"`);
 
 
@@ -292,6 +268,16 @@ try {
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {
+    try {
+        if (fileId && projectAttachments().some((a) => a.id === fileId && !a.deletedAt)) {
+            console.log(`note - removing ${names.file}, which this run left on the phone`);
+            if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);
+            await removeProjectFile(names.project, names.file);
+        }
+    } catch (error) {
+        console.log(`warn - ${names.file} could not be removed: ${error.message}`);
+        process.exitCode ||= 1;
+    }
     if (process.exitCode === 1 && dav) {
         try {
             if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);

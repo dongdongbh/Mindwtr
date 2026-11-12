@@ -68,12 +68,16 @@ const openData = async () => {
     return tapExpecting(withDescription(nodes, words.dataRow) ?? fail('no Data row in Settings'), onData, 'Settings › Data');
 };
 
+const revealTag = (tag) => device.revealNode((current) => tagged(current, tag), tag, false);
 const setLogging = async (on) => {
     const nodes = await screen();
     if (switchOn(nodes, words.debugLogging) === on) return nodes;
-    return tapExpecting(withDescription(nodes, words.debugLogging) ?? fail('no Debug logging switch'),
-        (current) => switchOn(current, words.debugLogging) === on && Boolean(tagged(current, 'settings-share-log')) === on && Boolean(tagged(current, 'settings-clear-log')) === on,
+    await tapExpecting(withDescription(nodes, words.debugLogging) ?? fail('no Debug logging switch'),
+        (current) => switchOn(current, words.debugLogging) === on && (on || !tagged(current, 'settings-share-log') && !tagged(current, 'settings-clear-log')),
         `Debug logging ${on ? 'on' : 'off'}`);
+    if (on) for (const tag of ['settings-share-log', 'settings-clear-log']) await revealTag(tag);
+    await device.revealNode((current) => withDescription(current, words.debugLogging), 'the Debug logging switch');
+    return screen();
 };
 
 
@@ -198,7 +202,7 @@ try {
     check(true, `(a) all ${lines.length} lines are RN's format (compact JSON, RN's key order, ISO time, text context)`);
 
 
-    await tap(tagged(await screen(), 'settings-share-log') ?? fail('no Share log row'));
+    await tap(await revealTag('settings-share-log'));
     let sheet = '';
     for (let wait = 0; wait < 20; wait += 1) {
         sheet = front();
@@ -218,6 +222,7 @@ try {
 
 
     await sleep(1500);
+    await revealTag('settings-clear-log');
     nodes = await device.settle(await screen());
     let toastSeen = false;
     let cleared = false;

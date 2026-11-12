@@ -255,9 +255,11 @@ try {
 
     const rows = nodes.filter((node) => node['resource-id'] === 'calendar-block' && box(node)[0] === box(offsite)[0])
         .sort((a, b) => box(a)[1] - box(b)[1]);
+    const gap = Math.round(4 * Number(/(\d+)\s*$/.exec(sh('wm density'))[1]) / 160);
     const stacked = rows.every((row, index) => box(row)[3] - box(row)[1] === box(rows[0])[3] - box(rows[0])[1]
-        && (index === 0 || box(row)[1] === box(rows[index - 1])[3]));
-    check(rows.length >= 3 && stacked, `(4) the all-day card stacks ${rows.length} rows, each node its own row's box (${rows.map((row) => row.bounds).join(' ')})`);
+        && (index === 0 || Math.abs(box(row)[1] - box(rows[index - 1])[3] - gap) <= 1));
+    check(rows.length >= 3 && stacked,
+        `(4) the all-day card stacks ${rows.length} rows ${gap} px (RN's gap: 4) apart, each node its own row's box (${rows.map((row) => row.bounds).join(' ')})`);
 
     const expected = [EVENTS.allDay, ...EVENTS.moreAllDay].sort((a, b) => a.localeCompare(b));
     const shown = rows.map((row) => row['content-desc']).filter((label) => expected.includes(label));

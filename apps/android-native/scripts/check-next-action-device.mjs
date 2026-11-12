@@ -134,8 +134,8 @@ const syncOff = async () => {
 
 const inProject = (nodes) => projectTitled(nodes, PROJECT.title) && !inEditor(nodes);
 const openProject = async () => {
-    let nodes = await toTabs();
-    nodes = await tapExpecting(tab(nodes, 'Projects') ?? fail('no Projects tab'), (next) => tabSelected(next, 'Projects'), 'the Projects tab');
+    let nodes = await device.projectsTab(toTabs);
+    nodes = await tapExpecting(tab(nodes, 'Projects'), (next) => tabSelected(next, 'Projects'), 'the Projects tab');
     const row = await reveal((current) => current.find((node) => node.text === PROJECT.title), `the project ${PROJECT.title}`);
     return tapExpecting(row, inProject, `the project ${PROJECT.title}`, 30_000);
 };

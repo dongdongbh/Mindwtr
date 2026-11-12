@@ -1416,7 +1416,7 @@ assert.match(coreHost, /failCommits = debugFault\("fail_commit"\) == "1"/);
 assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt].join('\n').match(/failCommits|debugFault|getprop/g), null);
 
 assert.match(coreHost, /fun language\(stored: String, system: String\): JSONObject =\s*callAsync\("language", debugFault\("language"\)\.ifEmpty \{ stored \}, system\)/);
-assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
+assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 2);
 
 
 {
@@ -8986,7 +8986,7 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     assert.match(viewModelKt, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\);/);
 
     assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) loadLabels\(runtime\)/);
-    assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);
+    assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject =\s+debugFault\("language"\)\.takeIf \{ it\.isNotEmpty\(\) \}\?\.let \{ callAsync\("language", it, system\) \} \?: callAsync\("languageSaved", stored, system\)/);
 }
 
 {

@@ -16,15 +16,17 @@ const RECOVERY_COMMIT = 'df495e07691b71657932cf7bb406121c3e89d703';
 
 const RN_FIX_COMMIT = '101f81ee1abb5daf6c9504b14217785cd7db4e51';
 const repo = resolve(import.meta.dirname, '../../..');
-const home = process.env.MINDWTR_HARNESS_DIR ?? '/home/dd/.mindwtr-harness';
+const SHARED = '/home/dd/.mindwtr-harness';
+const home = process.env.MINDWTR_HARNESS_DIR ?? SHARED;
 const sdk = '/home/dd/Android/Sdk';
 const aapt2 = `${sdk}/build-tools/36.1.0/aapt2`;
 const apksigner = `${sdk}/build-tools/36.1.0/apksigner`;
-const keystore = resolve(home, 'upgradetest.keystore');
+const keystore = resolve(SHARED, 'upgradetest.keystore');
 
 const ALIAS = 'upgradetest';
 const STORE_SECRET = 'mindwtr-upgradetest-harness';
 const apks = resolve(home, 'apks');
+const rnApks = resolve(SHARED, 'apks');
 const patch = resolve(import.meta.dirname, 'upgradetest-rn-identity.patch');
 
 const patchFix = resolve(import.meta.dirname, 'upgradetest-rn-identity-155.patch');
@@ -60,7 +62,7 @@ const patchId = sha256(patch).slice(0, 12);
 const parityArg = process.argv.find((arg) => arg === '--parity-rn' || arg.startsWith('--parity-rn='));
 const parityCommit = parityArg ? out('git', ['-C', repo, 'rev-parse', `${parityArg.split('=')[1] ?? 'HEAD'}^{commit}`]) : null;
 const patchFor = (commit) => (commit === RN_FIX_COMMIT ? patchFix : commit === parityCommit ? patchParity : patch);
-const rnApk = (commit, code) => resolve(apks, `rn-${commit.slice(0, 12)}-${sha256(patchFor(commit)).slice(0, 12)}-${code}.apk`);
+const rnApk = (commit, code) => resolve(rnApks, `rn-${commit.slice(0, 12)}-${sha256(patchFor(commit)).slice(0, 12)}-${code}.apk`);
 
 const checkRnIdentity = (mobile) => {
     const manifest = readFileSync(resolve(mobile, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
@@ -137,6 +139,7 @@ const describe = (apk, versionCode, rn) => {
 
 try {
     mkdirSync(apks, { recursive: true });
+    mkdirSync(rnApks, { recursive: true });
     mkdirSync(env.TMPDIR, { recursive: true });
     if (!existsSync(keystore)) {
         run('keytool', ['-genkeypair', '-keystore', keystore, '-storetype', 'PKCS12', '-storepass', STORE_SECRET,

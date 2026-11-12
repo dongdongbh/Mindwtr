@@ -3,7 +3,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, inEditor, isOn, Stopped, tab, tagged, taskRows, withDescription } from './device.mjs';
+import { box, check, connect, evidenced, fail, inEditor, isOn, Stopped, switchOn, tab, tagged, taskRows, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -139,6 +139,18 @@ const logText = () => { try { return runAs(`cat ${LOG}`); } catch { return ''; }
 const completeReal = (title) => enqueue({ kind: 'complete', id: randomUUID(), taskId: realRows().tasks.find((task) => task.title === title)?.id ?? '', completedAt: new Date().toISOString(), source: 'android-widget' });
 
 let originalExact = null;
+let remindersWere = null;
+const setTaskReminders = async (on) => {
+    await openSettings();
+    const row = `${en['settings.notifications']}. ${en['settings.menuDesc.notifications']}`;
+    await tapExpecting(await device.revealNode((current) => withDescription(current, row), 'the Notifications row'), (current) => Boolean(tagged(current, 'settings-notifications')), 'Settings › Notifications');
+    const label = en['settings.notificationsEnable'];
+    const toggle = await device.revealNode((current) => withDescription(current, label), 'the task reminders switch', false);
+    const was = switchOn(await screen(), label);
+    if (was !== on) await tapExpecting(toggle, (current) => switchOn(current, label) === on, `task reminders ${on ? 'on' : 'off'}`);
+    await toTabs();
+    return was;
+};
 let realTitle = null;
 let heldTitle = null;
 const restore = async () => {
@@ -156,6 +168,14 @@ const restore = async () => {
             await sleep(8000);
         }
     } catch (error) { console.error(`RESTORE: the real reminder task was not completed (${error.message})`); }
+    try {
+        if (remindersWere === false) {
+            if (!front().includes(`${PKG}/`)) launch();
+            await appUp('the real workspace for the reminders restore');
+            await setTaskReminders(false);
+            console.log('restored - task reminders are off again, as the fresh library had them');
+        }
+    } catch (error) { console.error(`RESTORE FAILED: task reminders are still on (${error.message})`); process.exitCode ||= 1; }
     try { if (originalExact) sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM ${originalExact}`); } catch {}
     try { sh('cmd statusbar collapse'); } catch {}
     try { if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME'); } catch {}
@@ -173,13 +193,26 @@ try {
     originalExact = /SCHEDULE_EXACT_ALARM: (\w+)/.exec(sh(`appops get ${PKG} SCHEDULE_EXACT_ALARM`))?.[1] ?? 'default';
     sh(`appops set ${PKG} SCHEDULE_EXACT_ALARM allow`);
 
+    launch();
+    await appUp('the real workspace');
+    remindersWere = await setTaskReminders(true);
+    if (!remindersWere) console.log('note - task reminders were off (core turns them off on a fresh install); turned on for this check, off again at the end');
     await device.stopApp();
     const due = Math.ceil((phoneNow() + 4 * 60_000) / 60_000) * 60_000;
     realTitle = `SB1196Real${randomInt(100000, 999999)}`;
     enqueue({ id: randomUUID(), title: `${realTitle} /due:${local(due)}`, createdAt: new Date().toISOString(), source: 'android-capture-intent' });
     launch();
     await appUp('the real workspace');
-    await waitFor('the real reminder alarm', () => alarms().includes(due), 60_000, 2000);
+    try {
+        await waitFor('the real reminder alarm', () => alarms().includes(due), 60_000, 2000);
+    } catch (error) {
+        const blocks = sh('dumpsys alarm').split(/\n(?=\s*(?:RTC_WAKEUP|RTC|ELAPSED_WAKEUP|ELAPSED) #\d+: Alarm\{)/).filter((block) => block.includes(PKG));
+        console.log(`evidence - due ${due} (${local(due)}); ${blocks.length} ${PKG} alarms in dumpsys alarm:\n${blocks.map((block) => block.trim().slice(0, 600)).join('\n')}`);
+        const row = realRows().tasks.find((task) => String(task.title).startsWith(realTitle));
+        console.log(`evidence - the stored task: ${JSON.stringify(row ?? null)}`);
+        console.log(`evidence - reminder log:\n${logText().split('\n').filter((line) => /remind|alarm|notif/i.test(line)).slice(-30).join('\n')}`);
+        throw error;
+    }
     const alarmsBefore = alarms();
     const before = realRows();
     const logStart = logText().length;

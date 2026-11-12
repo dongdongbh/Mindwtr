@@ -6,7 +6,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, mainList, Stopped, tagged, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, mainList, Stopped, tagged, taskRow, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -148,6 +148,9 @@ try {
     if (tagged(nodes, 'capture-modal-cancel')) await tapExpecting(tagged(nodes, 'capture-modal-cancel'), atTabs, 'Cancel to close the capture screen');
 
 
+    const rowTitle = `kb${randomInt(1_000_000_000)}`;
+    await device.type(rowTitle);
+    await tapExpecting(button(await screen(), en['common.save']), (current) => atTabs(current) && Boolean(taskRow(current, rowTitle)), `the captured row ${rowTitle}`);
     nodes = await device.settle(await screen());
     const row = nodes.find((node) => / Status: /.test(node['content-desc'] ?? '')) ?? fail('no task row on the first tab');
     nodes = await tapExpecting(row, (current) => current.some((node) => node.class === 'android.widget.EditText') || Boolean(withDescription(current, en['markdown.edit'])), 'the editor');
