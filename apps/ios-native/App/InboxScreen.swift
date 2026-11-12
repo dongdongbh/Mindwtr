@@ -890,7 +890,8 @@ private struct FocusSurface: View {
     }
     private var otherFocusSectionsOpen: Bool { !otherFocusKeys.subtracting(model.collapsedFocusSections).isEmpty }
     private var focusContent: some View {
-        ScrollView {
+        let sections = focusSections, projects = reviewProjects
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error = model.focusError {
                     Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
@@ -912,8 +913,8 @@ private struct FocusSurface: View {
                         }
                         .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
-                    ForEach(focusSections.indices, id: \.self) { index in
-                        let section = focusSections[index]
+                    ForEach(sections.indices, id: \.self) { index in
+                        let section = sections[index]
                         let key = section.text("key")
                         focusSectionHeader(key: key, title: section.text("title"), count: section.number("total"), first: index == 0, countLabel: section.text("countLabel"))
                         if !section.text("hiddenByAreaLabel").isEmpty {
@@ -966,12 +967,12 @@ private struct FocusSurface: View {
                             }
                         }
                     }
-                    if !reviewProjects.isEmpty {
+                    if !projects.isEmpty {
                         focusSectionHeader(key: "reviewProjects", title: model.label("agenda.reviewDueProjects"),
-                                           count: reviewProjects.count, first: focusSections.isEmpty)
+                                           count: projects.count, first: sections.isEmpty)
                         if !model.collapsedFocusSections.contains("reviewProjects") {
-                            ForEach(reviewProjects.indices, id: \.self) { index in
-                                focusReviewProject(reviewProjects[index])
+                            ForEach(projects.indices, id: \.self) { index in
+                                focusReviewProject(projects[index])
                             }
                         }
                     }
