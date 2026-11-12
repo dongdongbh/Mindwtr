@@ -2096,9 +2096,6 @@ struct TaskCard: View {
     @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
     @Environment(\.taskCardPresentationContext) private var listPresentationContext
     @Environment(\.layoutDirection) private var hostLayoutDirection
-    @State private var swipeDTO: CoreObject = [:]
-    @State private var swipePublishedKey = ""
-    @State private var swipePublishedRow: CoreObject = [:]
     @State private var swipeCloseGeneration = 0
     @State private var selectionPressStartedAt = Date.distantPast
     @State private var statusMenu = false
@@ -2134,6 +2131,7 @@ struct TaskCard: View {
         !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeRowEligible(row)
     }
     private var swipeEnabled: Bool { model.taskRowSwipeActionsAdmitted && swipeCandidate }
+    private var swipeActions: CoreObject { swipeCandidate ? model.taskRowSwipeActions(row) : [:] }
     private var swipeReadIdentity: String { swipeIdentity(context: model.taskCardPresentationContext) }
     private var displayedSwipeIdentity: String { swipeIdentity(context: displayedContext) }
     private func swipeIdentity(context: String) -> String {
@@ -2271,17 +2269,9 @@ struct TaskCard: View {
         .padding(.vertical, 10).padding(.horizontal, 16)
         .background(palette.row, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
-        .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeDTO, identity: swipePublishedKey,
-            rowID: row.text("id"), palette: palette, enabled: swipeCandidate && swipePublishedKey == displayedSwipeIdentity,
+        .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeActions, identity: displayedSwipeIdentity,
+            rowID: row.text("id"), palette: palette, enabled: swipeCandidate,
             closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe, admission: model))
-        .task(id: displayedSwipeIdentity) {
-            let identity = swipeReadIdentity, displayed = row
-            swipeDTO = [:]; swipePublishedKey = ""; swipePublishedRow = [:]
-            guard let value = await model.readTaskRowSwipeActions(displayed, selectionMode: onSelection != nil,
-                interactionDisabled: readOnly || swipeInteractionDisabled),
-                  !Task.isCancelled, identity == swipeReadIdentity else { return }
-            swipePublishedRow = displayed; swipePublishedKey = identity; swipeDTO = value
-        }
         .overlay(alignment: .leading) {
             if !meta.text("priority").isEmpty {
                 RoundedRectangle(cornerRadius: 2)
@@ -2401,11 +2391,11 @@ struct TaskCard: View {
     }
 
     private func activateSwipe(_ action: CoreObject, identity: String) {
-        guard identity == swipeReadIdentity, identity == swipePublishedKey, swipeEnabled, action.flag("enabled"),
-              (swipeDTO.objects("swipeRight") + swipeDTO.objects("swipeLeft")).contains(where: {
+        let displayed = row, actions = swipeActions
+        guard identity == swipeReadIdentity, swipeEnabled, action.flag("enabled"),
+              (actions.objects("swipeRight") + actions.objects("swipeLeft")).contains(where: {
                   NSDictionary(dictionary: $0).isEqual(to: action)
               }) else { return }
-        let displayed = swipePublishedRow
         guard let activation = model.captureTaskRowSwipeActivation(displayed) else { return }
         swipeCloseGeneration += 1
         if action.text("id") == "organize" {

@@ -17999,6 +17999,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     func dismissTaskFocusNotice() { taskFocusNotice = [:] }
 
     private(set) var taskCardPresentationGeneration = 0
+    @ObservationIgnored private var taskCardRowKeyCache: Set<TaskCardRowKey>?
     private struct InlineChecklistOwner {
         let host: CoreHost
         let context: String
@@ -18047,6 +18048,22 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func taskCardCurrentRow(_ displayed: CoreObject) -> Bool {
+        taskCardRowKeys().contains(TaskCardRowKey(displayed))
+    }
+
+    private func taskCardRowKeys() -> Set<TaskCardRowKey> {
+        if let keys = taskCardRowKeyCache { return keys }
+        let keys = withObservationTracking {
+            Set(taskCardRows().map(TaskCardRowKey.init))
+        } onChange: { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated { self.taskCardRowKeyCache = nil }
+        }
+        taskCardRowKeyCache = keys
+        return keys
+    }
+
+    private func taskCardRows() -> [CoreObject] {
         let rows: [CoreObject]
         switch selectedSurface {
         case .inbox:
@@ -18066,15 +18083,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .savedSearch:
             rows = savedSearch.objects("rows")
         case .history:
-            guard !historyArchived else { return false }
+            guard !historyArchived else { return [] }
             rows = history.objects("items").filter { $0.text("type") == "task" }.map { $0.object("row") }
-        default: return false
+        default: return []
         }
-        return rows.contains {
-            $0.text("id").utf8.elementsEqual(displayed.text("id").utf8)
-                && $0.text("taskRevision").utf8.elementsEqual(displayed.text("taskRevision").utf8)
-                && $0.flag("readOnly") == displayed.flag("readOnly") && $0.text("status") == displayed.text("status")
-        }
+        return rows
     }
 
     func inlineChecklistEnabled(_ row: CoreObject, writing: Bool = false) -> Bool {
@@ -18215,6 +18228,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     var taskRowSwipeLanguageGeneration: Int { rowSwipeLanguageGeneration }
+    private struct TaskRowSwipeActionStamp: Equatable {
+        let host: ObjectIdentifier
+        let language: Int
+    }
+    private(set) var taskRowSwipeActionSets: [TaskRowSwipeInput: CoreObject] = [:]
+    @ObservationIgnored private var taskRowSwipeActionStamp: TaskRowSwipeActionStamp?
+    @ObservationIgnored private var taskRowSwipeActionWanted: Set<TaskRowSwipeInput> = []
+    @ObservationIgnored private var taskRowSwipeActionRead: Task<Void, Never>?
     func taskRowSwipeRowCurrent(_ row: CoreObject) -> Bool {
         (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActionsEnabled) && taskRowSwipeRowListed(row)
     }
@@ -18271,17 +18292,44 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard rowSwipeWarm(context), taskRowSwipeActivationCurrent(activation, row: row) else { return }
         await complete(row.text("id"), taskRevision: row.text("taskRevision"))
     }
-    func readTaskRowSwipeActions(_ row: CoreObject, selectionMode: Bool, interactionDisabled: Bool) async -> CoreObject? {
-        guard let originalHost = host, ready else { return nil }
-        let context = taskCardPresentationContext, foreground = foregroundSyncGeneration, language = rowSwipeLanguageGeneration
+    func taskRowSwipeActions(_ row: CoreObject) -> CoreObject {
+        let input = TaskRowSwipeInput(status: row.text("status"), focused: row.flag("isFocusedToday"))
+        let sets = taskRowSwipeActionSets
+        if let value = sets[input], let stamp = taskRowSwipeActionStamp, taskRowSwipeActionStampCurrent(stamp) { return value }
+        taskRowSwipeActionWanted.insert(input)
+        if taskRowSwipeActionRead == nil { taskRowSwipeActionRead = Task { await readWantedTaskRowSwipeActions() } }
+        return [:]
+    }
+
+    private func taskRowSwipeActionStampCurrent(_ stamp: TaskRowSwipeActionStamp) -> Bool {
+        host.map { ObjectIdentifier($0) } == stamp.host && rowSwipeLanguageGeneration == stamp.language
+    }
+
+    private func readWantedTaskRowSwipeActions() async {
+        defer { taskRowSwipeActionRead = nil }
+        guard let originalHost = host, ready else { return }
+        let stamp = TaskRowSwipeActionStamp(host: ObjectIdentifier(originalHost), language: rowSwipeLanguageGeneration)
+        var read: [TaskRowSwipeInput: CoreObject] = [:]
+        while let input = taskRowSwipeActionWanted.first {
+            taskRowSwipeActionWanted.remove(input)
+            guard let value = await readTaskRowSwipeActions(input, host: originalHost, stamp: stamp) else { continue }
+            read[input] = value
+        }
+        guard !read.isEmpty, host === originalHost, taskRowSwipeActionStampCurrent(stamp) else { return }
+        var kept: [TaskRowSwipeInput: CoreObject] = [:]
+        if let previous = taskRowSwipeActionStamp, taskRowSwipeActionStampCurrent(previous) { kept = taskRowSwipeActionSets }
+        taskRowSwipeActionStamp = stamp
+        taskRowSwipeActionSets = kept.merging(read) { _, next in next }
+    }
+
+    private func readTaskRowSwipeActions(_ input: TaskRowSwipeInput, host originalHost: CoreHost,
+                                         stamp: TaskRowSwipeActionStamp) async -> CoreObject? {
         @MainActor func current() -> Bool {
-            host === originalHost && taskCardPresentationContext.utf8.elementsEqual(context.utf8)
-                && foregroundSyncGeneration == foreground && rowSwipeLanguageGeneration == language && !Task.isCancelled
+            host === originalHost && taskRowSwipeActionStampCurrent(stamp) && !Task.isCancelled
         }
         do {
-            let value = try await query("taskRowSwipeActions", [try json(["status": row.text("status"),
-                "isFocusedToday": row.flag("isFocusedToday"), "selectionMode": selectionMode,
-                "interactionDisabled": interactionDisabled])], beforeDispatch: current)
+            let value = try await query("taskRowSwipeActions", [try json(["status": input.status,
+                "isFocusedToday": input.focused, "selectionMode": false, "interactionDisabled": false])], beforeDispatch: current)
             guard current(), Set(value.keys) == Set(["swipeRight", "swipeLeft"]), try json(value).utf8.count <= 16_384 else { return nil }
             var identities = Set<String>()
             for side in ["swipeRight", "swipeLeft"] {
@@ -47656,4 +47704,23 @@ extension CoreModel {
         default: openAboutSettings()
         }
     }
+}
+
+private struct TaskCardRowKey: Hashable {
+    let id: [UInt8]
+    let revision: [UInt8]
+    let status: String
+    let readOnly: Bool
+
+    init(_ row: CoreObject) {
+        id = Array(row.text("id").utf8)
+        revision = Array(row.text("taskRevision").utf8)
+        status = row.text("status")
+        readOnly = row.flag("readOnly")
+    }
+}
+
+struct TaskRowSwipeInput: Hashable {
+    let status: String
+    let focused: Bool
 }
