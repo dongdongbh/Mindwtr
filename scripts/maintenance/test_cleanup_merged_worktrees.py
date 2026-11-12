@@ -415,8 +415,14 @@ class CleanupTests(unittest.TestCase):
         self.ignored_file(".orchestrator/result.md")
         self.assert_skip("low_disk", free_bytes=lambda path: 9 * 1024**3, min_free_gb=10)
         self.assertEqual(self.candidate(self.run_cleanup(free_bytes=lambda path: 11 * 1024**3, min_free_gb=10))["decision"], "removed")
-        with self.assertRaisesRegex(cleanup.SafetyError, "invalid_min_free"):
-            self.service(min_free_gb=-1)
+        for value in (-1, float("inf"), float("nan")):
+            with self.subTest(value=value), self.assertRaisesRegex(cleanup.SafetyError, "invalid_min_free"):
+                self.service(min_free_gb=value)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = cleanup.main(["--repo", str(self.repo), "--worktree-root", str(self.root),
+                                   "--archive-root", str(self.archive_root), "--min-free-gb", "inf"])
+        self.assertEqual((result, json.loads(output.getvalue())["error"]), (1, "invalid_min_free"))
 
     def test_archive_space_probe_failure_preserves_source(self):
         self.ignored_file(".orchestrator/result.md")
@@ -631,8 +637,8 @@ class CleanupTests(unittest.TestCase):
         self.git(self.worktree, "add", "staged.txt")
         self.age()
         preview = self.candidate(self.run_cleanup(apply=False))
-        self.assertEqual((preview["decision"], preview["reason"], preview["change_proof"], preview["changed_path_count"]),
-                         ("eligible", "merged_inactive_changes_on_origin_main", "bytes_equal_origin_main", 3))
+        self.assertEqual((preview["decision"], preview["reason"], preview["changed_path_count"]),
+                         ("eligible", "merged_inactive_changes_on_origin_main", 3))
         self.assertEqual((self.worktree / "landed.txt").read_bytes(), b"landed new file\n")
         item = self.candidate(self.run_cleanup())
         self.assertEqual(item["decision"], "removed")
@@ -655,7 +661,7 @@ class CleanupTests(unittest.TestCase):
         self.age()
         self.assert_skip("dirty_or_untracked")
 
-    def test_dirty_diff_that_reverse_applies_to_origin_main_is_retired(self):
+    def test_diff_whose_hunk_is_on_origin_main_but_file_differs_skips(self):
         lines = [b"line %d\n" % number for number in range(20)]
         self.land_on_main({"source.txt": b"".join(lines)})
         self.git(self.worktree, "merge", "--ff-only", "origin/main")
@@ -664,10 +670,39 @@ class CleanupTests(unittest.TestCase):
         self.land_on_main({"source.txt": b"".join(topic_change[:-1] + [b"later main change\n"])})
         (self.worktree / "source.txt").write_bytes(b"".join(topic_change))
         self.age()
-        item = self.candidate(self.run_cleanup(apply=False))
-        self.assertEqual((item["decision"], item["change_proof"]), ("eligible", "diff_reverse_applies_to_origin_main"))
-        self.assertEqual(self.candidate(self.run_cleanup())["decision"], "removed")
-        self.assertFalse(self.worktree.exists())
+        self.assert_skip("dirty_or_untracked")
+
+    def test_staged_content_that_differs_from_worktree_is_never_disposable(self):
+        self.land_on_main({"source.txt": b"landed\n"})
+        (self.worktree / "source.txt").write_bytes(b"staged unique work\n")
+        self.git(self.worktree, "add", "source.txt")
+        (self.worktree / "source.txt").write_bytes(b"landed\n")
+        self.age()
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain")[:2], b"MM")
+        self.assert_skip("dirty_or_untracked")
+        self.assertEqual(self.git(self.worktree, "show", ":source.txt"), b"staged unique work\n")
+
+    def test_staged_new_file_deleted_from_disk_is_never_disposable(self):
+        (self.worktree / "new.txt").write_bytes(b"staged new file\n")
+        self.git(self.worktree, "add", "new.txt")
+        (self.worktree / "new.txt").unlink()
+        self.age()
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain")[:2], b"AD")
+        self.assert_skip("dirty_or_untracked")
+        self.assertEqual(self.git(self.worktree, "show", ":new.txt"), b"staged new file\n")
+
+    def test_conflicted_path_matching_origin_main_is_never_disposable(self):
+        self.git(self.worktree, "checkout", "-b", "side")
+        (self.worktree / "source.txt").write_bytes(b"side change\n")
+        self.git(self.worktree, "commit", "-am", "side")
+        self.git(self.worktree, "checkout", "retained-topic")
+        self.land_on_main({"source.txt": b"main change\n"})
+        self.git(self.worktree, "merge", "--ff-only", "origin/main")
+        subprocess.run(["git", "-C", str(self.worktree), "merge", "side"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        (self.worktree / "source.txt").write_bytes(b"main change\n")
+        self.age()
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain")[:2], b"UU")
+        self.assert_skip("dirty_or_untracked")
 
     def test_change_made_after_proof_prevents_discard(self):
         self.land_on_main({"landed.txt": b"landed new file\n"})
@@ -684,6 +719,75 @@ class CleanupTests(unittest.TestCase):
         item = self.candidate(service.run(apply=True))
         self.assertEqual(item["reason"], "recheck_dirty_or_untracked")
         self.assertEqual((self.worktree / "landed.txt").read_bytes(), b"edited after proof\n")
+
+    def test_edit_during_evidence_recheck_survives(self):
+        self.land_on_main({"landed.txt": b"landed new file\n"})
+        (self.worktree / "landed.txt").write_bytes(b"landed new file\n")
+        self.age()
+        original = cleanup.evidence_manifest
+        calls = []
+        def manifest(root):
+            calls.append(root)
+            if len(calls) == 2:
+                (self.worktree / "landed.txt").write_bytes(b"unique edit during evidence recheck\n")
+            return original(root)
+        with patch.object(cleanup, "evidence_manifest", manifest):
+            item = self.candidate(self.run_cleanup())
+        self.assertEqual(item["decision"], "skip")
+        self.assertEqual((self.worktree / "landed.txt").read_bytes(), b"unique edit during evidence recheck\n")
+
+    def test_edit_after_final_recheck_survives_discard(self):
+        self.land_on_main({"landed.txt": b"landed new file\n", "source.txt": b"landed source\n"})
+        (self.worktree / "source.txt").write_bytes(b"landed source\n")
+        cases = {"same size edit": lambda: (self.worktree / "landed.txt").write_bytes(b"landed NEW file\n"),
+                 "new untracked file": lambda: (self.worktree / "late.txt").write_bytes(b"late work\n")}
+        for name, edit in cases.items():
+            with self.subTest(name=name):
+                (self.worktree / "landed.txt").write_bytes(b"landed new file\n")
+                (self.worktree / "late.txt").unlink(missing_ok=True)
+                self.age()
+                calls = []
+                def probe(path):
+                    calls.append(path)
+                    if len(calls) == 2:
+                        edit()
+                        self.age()
+                    return False
+                item = self.candidate(self.run_cleanup(probe=probe))
+                self.assertEqual((item["decision"], item["reason"]), ("skip", "changed_before_discard"))
+                self.assertTrue(self.worktree.exists())
+        self.assertEqual((self.worktree / "late.txt").read_bytes(), b"late work\n")
+
+    def test_commit_reachable_only_from_head_reflog_skips(self):
+        self.git(self.worktree, "checkout", "--detach")
+        (self.worktree / "source.txt").write_text("detached work\n")
+        self.git(self.worktree, "commit", "-am", "detached only")
+        detached = self.git(self.worktree, "rev-parse", "HEAD").strip()
+        self.git(self.worktree, "checkout", "retained-topic")
+        self.age()
+        self.assert_skip("unreachable_reflog_commit")
+        self.git(self.repo, "branch", "keep-detached", detached.decode())
+        self.assertEqual(self.candidate(self.run_cleanup())["decision"], "removed")
+
+    def test_report_is_written_under_the_machine_lock(self):
+        self.archive_root.mkdir(mode=0o700)
+        report_path = self.archive_root / "latest-apply.json"
+        arguments = ["--repo", str(self.repo), "--worktree-root", str(self.root), "--archive-root", str(self.archive_root),
+                     "--apply", "--report", str(report_path)]
+        with patch.object(cleanup, "Cleanup", return_value=self.service()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cleanup.main(arguments), 0)
+        first = report_path.read_bytes()
+        holder = self.service()
+        holder.lock()
+        try:
+            output = io.StringIO()
+            with patch.object(cleanup, "Cleanup", return_value=self.service()), contextlib.redirect_stdout(output):
+                self.assertEqual(cleanup.main(arguments), 1)
+            self.assertEqual(json.loads(output.getvalue())["error"], "cleanup_already_running")
+            self.assertEqual(report_path.read_bytes(), first)
+        finally:
+            os.close(holder.lock_descriptor)
+            holder.lock_descriptor = None
 
     def test_git_remove_never_uses_force(self):
         commands = []
