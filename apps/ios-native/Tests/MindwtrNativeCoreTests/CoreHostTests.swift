@@ -42756,7 +42756,7 @@ extension CoreHostTests {
         XCTAssertEqual(exclusion["total"] as? Int, 102)
         XCTAssertEqual(((exclusion["chips"] as? [[String: Any]])?.first { $0["id"] as? String == "@ui10-home" })?["count"] as? Int, 102)
         let sheet = try await contextsFilter10Read(core, ["filters": [:], "filterSheetOpen": true, "offset": 0, "limit": 50])
-        XCTAssertEqual(((sheet["filters"] as? [String: Any])?["state"] as? [String: Any])?["statuses"] as? [String], ["inbox", "next", "waiting", "someday"])
+        XCTAssertEqual(((sheet["filters"] as? [String: Any])?["state"] as? [String: Any])?["statuses"] as? [String], ["inbox", "next", "waiting", "someday", "reference"])
         XCTAssertEqual(sheet["canSave"] as? Bool, true)
         let omittedAgain = try await core.call("menuRead", argumentsJSON: json(["contexts", json(omittedInput)]))
         XCTAssertEqual(omittedAgain, omittedJSON)

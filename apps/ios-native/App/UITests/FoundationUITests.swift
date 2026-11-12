@@ -37528,10 +37528,10 @@ extension FoundationUITests {
 
     private func contextsFiltersSomeday(_ app: XCUIApplication) {
         boardTap(app, "contexts-filters")
-        for status in ["inbox", "next", "waiting", "someday"] {
+        for status in ["inbox", "next", "waiting", "someday", "reference"] {
             contextsFiltersSelected(app, "contexts-filter-status-" + status, true)
         }
-        for status in ["inbox", "next", "waiting"] {
+        for status in ["inbox", "next", "waiting", "reference"] {
             contextsFiltersTap(app, "contexts-filter-status-" + status)
             contextsFiltersSelected(app, "contexts-filter-status-" + status, false)
         }
