@@ -24,12 +24,12 @@ struct ReviewScreen: View {
                         ForEach(choices.indices, id: \.self) { index in
                             let choice = choices[index]
                             ReviewAction(title: choice.text("label"), selected: view.object("scope").text("selected") == choice.text("id"),
-                                enabled: model.reviewActionsEnabled, palette: palette, id: "review-scope-" + choice.text("id")) {
+                                enabled: model.reviewActionsShown, palette: palette, id: "review-scope-" + choice.text("id")) {
                                 Task { await model.editReviewOverview(scope: choice.text("id")) }
                             }
                         }
                         if view.object("scope").text("selected") == "all" {
-                            ReviewAction(title: model.label("nav.history"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-history") {
+                            ReviewAction(title: model.label("nav.history"), enabled: model.reviewActionsShown, palette: palette, id: "review-history") {
                                 Task { await model.openHistory() }
                             }
                         }
@@ -41,11 +41,11 @@ struct ReviewScreen: View {
                 .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
                 AppChipFlow {
                     ReviewAction(title: view.object("expansion").text("label"),
-                        enabled: model.reviewActionsEnabled && !view.object("expansion").flag("disabled"), palette: palette, id: "review-expand-cycle") {
+                        enabled: model.reviewActionsShown && !view.object("expansion").flag("disabled"), palette: palette, id: "review-expand-cycle") {
                         Task { await model.editReviewOverview(expansion: ["type": "cycle"]) }
                     }
                     ReviewAction(title: view.object("startReview").text("label"), selected: true,
-                        enabled: model.reviewActionsEnabled, palette: palette, id: "review-start") { model.openReviewPicker() }
+                        enabled: model.reviewActionsShown, palette: palette, id: "review-start") { model.openReviewPicker() }
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.card)
                 Group {
@@ -78,7 +78,7 @@ struct ReviewScreen: View {
                                     ForEach(["markReviewed", "advance"], id: \.self) { name in
                                         let action = item.object("review").object(name)
                                         if !action.isEmpty {
-                                            ReviewAction(title: action.text("label"), enabled: model.reviewActionsEnabled,
+                                            ReviewAction(title: action.text("label"), enabled: model.reviewActionsShown,
                                                 palette: palette, id: "review-task-" + name + "-" + item.object("row").text("id")) {
                                                 Task { await model.performReviewTaskAction(action.object("action")) }
                                             }
@@ -87,9 +87,9 @@ struct ReviewScreen: View {
                                     }
                                 }
                             }
-                            .disabled(!model.reviewActionsEnabled).padding(.leading, 20)
+                            .disabled(!model.reviewActionsShown).padding(.leading, 20)
                         } else if item.text("type") == "later" {
-                            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsEnabled,
+                            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsShown,
                                 palette: palette, id: "review-later-" + item.text("id")) {
                                 Task { await model.toggleReviewLater(item.text("id"), weekly: false) }
                             }
@@ -97,11 +97,11 @@ struct ReviewScreen: View {
                         } else { group(item) }
                     }
                     if items.count < view.number("total") {
-                        ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-more") {
+                        ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsShown, palette: palette, id: "review-more") {
                             Task { await model.loadMoreReview() }
                         }
                     }
-                    if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                    if model.busyShown { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
                 .padding(.horizontal, 12).padding(.bottom, 10)
             }
@@ -133,7 +133,7 @@ struct ReviewScreen: View {
             .padding(14).frame(minHeight: 44).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(!model.reviewActionsEnabled).padding(.leading, area ? 0 : 12)
+        .buttonStyle(.plain).disabled(!model.reviewActionsShown).padding(.leading, area ? 0 : 12)
         .accessibilityLabel(item.text("accessibilityLabel"))
         .accessibilityValue(model.label(item.flag("expanded") ? "markdown.collapse" : "markdown.expand"))
         .accessibilityAddTraits(item.flag("expanded") ? .isSelected : [])

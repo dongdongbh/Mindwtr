@@ -266,6 +266,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             if selectedSurface != .inbox { foregroundSyncIntent = nil }
             if oldValue != selectedSurface {
                 if oldValue == .settings { cancelNativeDropboxAuthorization() }
+                schedulePublishShownState()
                 taskCardPresentationGeneration += 1
                 retireRowTaskBackdatePresentation()
                 retireTaskChecklistMovePresentation()
@@ -319,7 +320,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         didSet { inboxItemIndexCache = nil; navigationReplayPublicationChanged("inbox") }
     }
     @ObservationIgnored private var inboxItemIndexCache: [[String]: Int]?
-    private(set) var inboxCurrent = false
+    private(set) var inboxCurrent = false { didSet { schedulePublishShownState() } }
     private(set) var inboxGroupPresented = false
     private(set) var inboxReadError: String?
     private var inboxParams: CoreObject = ["groupBy": "none", "collapsedGroupIds": [String](), "filters": CoreObject()]
@@ -502,8 +503,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var focusShowDetails = false
     private(set) var collapsedFocusSections: Set<String> = []
     private(set) var collapsedFocusGroups: [String: [String]] = [:]
-    private(set) var focusCurrent = false
-    private(set) var focusLoading = false
+    private(set) var focusCurrent = false { didSet { schedulePublishShownState() } }
+    private(set) var focusLoading = false { didSet { schedulePublishShownState() } }
     private(set) var focusError: String?
     private(set) var pomodoroPanel: CoreObject = [:]
     private(set) var pomodoroError: String?
@@ -542,7 +543,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
     private(set) var reviewKind = ""
-    private(set) var reviewCurrent = false
+    private(set) var reviewCurrent = false { didSet { schedulePublishShownState() } }
     private(set) var reviewError: String?
     private(set) var reviewNotice: String?
     private(set) var reviewProjectCompletionOptions: CoreObject = [:]
@@ -1994,8 +1995,49 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 }
             }
             if !busy && oldValue { requestDeferredTextInputRevalidation() }
+            if busy != oldValue { busyChangedForShownState() }
         }
     }
+    private(set) var busyShown = false
+    private(set) var inboxCurrentShown = false
+    private(set) var focusCurrentShown = false
+    private(set) var focusLoadingShown = false
+    private(set) var reviewCurrentShown = false
+    @ObservationIgnored private var busyShownTicket = 0
+    @ObservationIgnored private var shownStatePublishScheduled = false
+    private static let busyShownDelay: UInt64 = 150_000_000
+
+    private func busyChangedForShownState() {
+        busyShownTicket &+= 1
+        guard busy else { publishShownState(); return }
+        let ticket = busyShownTicket
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: CoreModel.busyShownDelay)
+            guard let self, self.busy, self.busyShownTicket == ticket else { return }
+            if !self.busyShown { self.busyShown = true }
+            self.publishShownState()
+        }
+    }
+
+    private func schedulePublishShownState() {
+        guard !shownStatePublishScheduled else { return }
+        shownStatePublishScheduled = true
+        Task { [weak self] in self?.publishShownState() }
+    }
+
+    private func publishShownState() {
+        shownStatePublishScheduled = false
+        if !busy, busyShown { busyShown = false }
+        guard !busy || busyShown else { return }
+        if selectedSurface == .inbox, inboxCurrentShown != inboxCurrent { inboxCurrentShown = inboxCurrent }
+        if selectedSurface == .focus {
+            if focusCurrentShown != focusCurrent { focusCurrentShown = focusCurrent }
+            if focusLoadingShown != focusLoading { focusLoadingShown = focusLoading }
+        }
+        if selectedSurface == .review, reviewCurrentShown != reviewCurrent { reviewCurrentShown = reviewCurrent }
+    }
+
+    private func operationBusy(shown: Bool) -> Bool { shown ? busyShown : busy }
     private(set) var retryNeeded = false {
         didSet {
             projectBulkRetryRequest = nil
@@ -3528,8 +3570,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
     private var initialAddAnother = false
 
-    var focusControlsEnabled: Bool {
-        ready && selectedSurface == .focus && !focus.isEmpty && !busy && !retryNeeded && !taskPresented && !areaPickerPresented && !focusOrderPresented && !focusSavedFilterPresented
+    var focusControlsEnabled: Bool { focusControls(shown: false) }
+    var focusControlsShown: Bool { focusControls(shown: true) }
+    private func focusControls(shown: Bool) -> Bool {
+        ready && selectedSurface == .focus && !focus.isEmpty && !operationBusy(shown: shown) && !retryNeeded && !taskPresented && !areaPickerPresented && !focusOrderPresented && !focusSavedFilterPresented
     }
     var focusSavedFilterPresented: Bool { !focusSavedFilterOperation.isEmpty }
     var focusSavedFilterCanConfirm: Bool {
@@ -3541,8 +3585,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && focusOrderView.flag("canReorder") && !busy && !retryNeeded && focusOrderRequest == nil
             && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
     }
-    var reviewActionsEnabled: Bool {
-        ready && selectedSurface == .review && reviewCurrent && !busy && !retryNeeded
+    var reviewActionsEnabled: Bool { reviewActions(shown: false) }
+    var reviewActionsShown: Bool { reviewActions(shown: true) }
+    private func reviewActions(shown: Bool) -> Bool {
+        ready && selectedSurface == .review && (shown ? reviewCurrentShown : reviewCurrent) && !operationBusy(shown: shown) && !retryNeeded
             && !taskPresented && !areaPickerPresented && !reviewPickerPresented && !mindSweepPresented
             && !processInboxPresented && reviewProjectCompletionOptions.isEmpty && projectLifecycleRequest == nil && reviewProjectTaskOwner == nil
     }
@@ -3664,6 +3710,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && $0.object("row").text("id").utf8.elementsEqual(id.utf8) && !$0.object("row").flag("readOnly") }
     }
     var focusActionsEnabled: Bool { focusControlsEnabled && focusCurrent && focusPanel.isEmpty }
+    var focusActionsShown: Bool { focusControlsShown && focusCurrentShown && focusPanel.isEmpty }
     var focusPickerMatchesQuery: Bool {
         focusPickerPublishedName == focusPickerName && focusPickerPublishedQuery == focusPickerQuery
     }
@@ -18033,11 +18080,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && !reviewFinishPending && !appLockRecoveryPending && !settingsSyncRestartRequired
     }
 
-    private var taskCardSurfaceActionsEnabled: Bool {
+    private var taskCardSurfaceActionsEnabled: Bool { taskCardSurfaceActions(shown: false) }
+    private func taskCardSurfaceActions(shown: Bool) -> Bool {
         switch selectedSurface {
-        case .inbox: return inboxActionsEnabled && !inboxSelectionMode
-        case .focus: return focusActionsEnabled
-        case .review: return reviewActionsEnabled && !statusListSelectionMode
+        case .inbox: return (shown ? inboxActionsShown : inboxActionsEnabled) && !inboxSelectionMode
+        case .focus: return shown ? focusActionsShown : focusActionsEnabled
+        case .review: return (shown ? reviewActionsShown : reviewActionsEnabled) && !statusListSelectionMode
         case .project: return projectActionsEnabled
         case .waiting: return waitingActionsEnabled && !statusListSelectionMode
         case .someday: return somedayActionsEnabled && !statusListSelectionMode
@@ -18091,12 +18139,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return rows
     }
 
-    func inlineChecklistEnabled(_ row: CoreObject, writing: Bool = false) -> Bool {
-        guard ready, workspaceAdmissionsOpen, !busy, !retryNeeded, inlineChecklistPending == nil, rowQuickStatusPending == nil,
+    func inlineChecklistEnabled(_ row: CoreObject, writing: Bool = false, shown: Bool = false) -> Bool {
+        guard ready, workspaceAdmissionsOpen, !operationBusy(shown: shown), !retryNeeded, inlineChecklistPending == nil, rowQuickStatusPending == nil,
               !settingsSyncRestartRequired, !appLockRecoveryPending, !appLock.concealed, !appLock.authenticating,
               UIApplication.shared.applicationState == .active, row.text("status") != "reference",
               !row.text("id").isEmpty, !row.text("taskRevision").isEmpty,
-              taskCardSurfaceActionsEnabled, taskCardCurrentRow(row) else { return false }
+              taskCardSurfaceActions(shown: shown), taskCardCurrentRow(row) else { return false }
         return !writing || (!row.flag("readOnly") && (selectedSurface != .project || !projectDetail.flag("readOnly")))
     }
 
@@ -18250,13 +18298,15 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
     func taskRowSwipeActionsEnabled(_ row: CoreObject) -> Bool { taskRowSwipeActionsAdmitted && taskRowSwipeRowEligible(row) }
-    var taskRowSwipeActionsAdmitted: Bool {
-        ready && workspaceAdmissionsOpen && !busy && !retryNeeded && inlineChecklistPending == nil && rowQuickStatusPending == nil
+    var taskRowSwipeActionsAdmitted: Bool { taskRowSwipeAdmission(shown: false) }
+    var taskRowSwipeActionsShown: Bool { taskRowSwipeAdmission(shown: true) }
+    private func taskRowSwipeAdmission(shown: Bool) -> Bool {
+        ready && workspaceAdmissionsOpen && !operationBusy(shown: shown) && !retryNeeded && inlineChecklistPending == nil && rowQuickStatusPending == nil
             && rowSwipeOwner == nil && !rowTaskDatesPending && !rowTaskDestinationPending && !rowTaskBackdatePending && !taskChecklistMovePending
             && !appLock.concealed && !appLock.authenticating && !settingsSyncRestartRequired && !appLockRecoveryPending
             && UIApplication.shared.applicationState == .active
             && (selectedSurface != .project || !projectDetail.flag("readOnly"))
-            && (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActionsEnabled)
+            && (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActions(shown: shown))
             && notificationResponseContextIsClean(allowingReviewGuide: true, allowingProjectNotes: selectedSurface == .project)
     }
     func taskRowSwipeRowEligible(_ row: CoreObject) -> Bool {
@@ -19844,17 +19894,17 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
-    func taskFocusInputEnabled(_ row: CoreObject, checkingCurrentRow: Bool = false) -> Bool {
-        guard ready, !busy, !retryNeeded, taskFocusRequest == nil, !taskPresented,
+    func taskFocusInputEnabled(_ row: CoreObject, checkingCurrentRow: Bool = false, shown: Bool = false) -> Bool {
+        guard ready, !operationBusy(shown: shown), !retryNeeded, taskFocusRequest == nil, !taskPresented,
               !capturePresented, !areaPickerPresented, !morePresented, !projectRenameEditing,
               !row.flag("readOnly"), row.object("meta").flag("canFocus") else { return false }
         let rows: [CoreObject]
         switch selectedSurface {
         case .focus:
-            guard focusActionsEnabled else { return false }
+            guard shown ? focusActionsShown : focusActionsEnabled else { return false }
             rows = checkingCurrentRow ? focus.objects("sections").flatMap { $0.objects("rows") } : []
         case .review:
-            guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "daily",
+            guard shown ? reviewActionsShown : reviewActionsEnabled, reviewGuidePresented, reviewKind == "daily",
                   reviewGuide.object("content").text("step") == "focus" else { return false }
             rows = checkingCurrentRow ? reviewRows : []
         default: return false
@@ -26771,7 +26821,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             do {
                 if reviewGuidePresented { try await readReviewGuide() }
                 else { try await readReviewOverview() }
-                reviewCurrent = true
+                if !reviewCurrent { reviewCurrent = true }
                 if !reviewGuidePresented { await pruneStatusListSelection(.review) }
                 return
             } catch {
@@ -28266,6 +28316,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var contextsSortPresented: Bool { taskListSortCaller == .contexts }
     var contextsSortEnabled: Bool { taskListSortCaller == nil && canOpenTaskListSort(.contexts) }
     var inboxSortEnabled: Bool { taskListSortCaller == nil && canOpenTaskListSort(.inbox) }
+    var inboxSortShown: Bool { taskListSortCaller == nil && canOpenTaskListSort(.inbox, shown: true) }
     var taskListSortActionsEnabled: Bool {
         guard let caller = taskListSortCaller, let owner = taskListSortHost else { return false }
         return taskListSortCurrent(caller, presentation: taskListSortPresentationID, host: owner)
@@ -28280,8 +28331,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
-    private func canOpenTaskListSort(_ caller: TaskListSortCaller) -> Bool {
-        guard ready, host != nil, !busy, !retryNeeded, !appLock.concealed,
+    private func canOpenTaskListSort(_ caller: TaskListSortCaller, shown: Bool = false) -> Bool {
+        guard ready, host != nil, !operationBusy(shown: shown), !retryNeeded, !appLock.concealed,
               !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked,
               !inboxGroupPresented, !inboxFiltersPresented, !inboxFilterWorkPending, !taskStatusMenuPresented,
               !capturePresented, !areaPickerPresented, !taskPresented, !morePresented,
@@ -28289,7 +28340,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               referenceSortRequest == nil, taskListSortCaller == nil else { return false }
         if caller == .reference { return referenceActionsEnabled }
         if caller == .contexts { return contextsActionsEnabled }
-        return selectedSurface == .inbox && inboxCurrent && !inbox.isEmpty && referencePanel.isEmpty
+        return selectedSurface == .inbox && (shown ? inboxCurrentShown : inboxCurrent) && !inbox.isEmpty && referencePanel.isEmpty
             && somedayPanel.isEmpty && historyPanel.isEmpty
     }
 
@@ -28469,8 +28520,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private var inboxFoldPreference: String { devicePreferencePrefix + "mindwtr:view:group-collapse:inbox:v1" }
     var inboxGroupEnabled: Bool { canOpenTaskListSort(.inbox) }
-    var inboxActionsEnabled: Bool {
-        ready && selectedSurface == .inbox && inboxCurrent && !busy && !retryNeeded && !appLock.concealed
+    var inboxGroupShown: Bool { canOpenTaskListSort(.inbox, shown: true) }
+    var inboxActionsEnabled: Bool { inboxActions(shown: false) }
+    var inboxActionsShown: Bool { inboxActions(shown: true) }
+    private func inboxActions(shown: Bool) -> Bool {
+        ready && selectedSurface == .inbox && (shown ? inboxCurrentShown : inboxCurrent) && !operationBusy(shown: shown) && !retryNeeded && !appLock.concealed
             && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
             && !inboxGroupPresented && !inboxSortPresented && !inboxFiltersPresented && !inboxFilterWorkPending
             && !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked
@@ -28587,6 +28641,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         inboxPendingFilterEdit != nil || !inboxFilterTextEdits.isEmpty || inboxFilterNeedsRead
     }
     var inboxFiltersEnabled: Bool { canOpenTaskListSort(.inbox) }
+    var inboxFiltersShown: Bool { canOpenTaskListSort(.inbox, shown: true) }
     var inboxFilterControlsEnabled: Bool {
         inboxFiltersPresented && ready && selectedSurface == .inbox && inboxCurrent
             && !busy && !retryNeeded && !appLock.concealed && !inboxFilterWorkPending

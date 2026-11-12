@@ -104,7 +104,7 @@ struct InboxScreen: View {
                     else { focusContent }
                 } else {
                     Spacer()
-                    ModelShown { model.busy } content: { ProgressView().accessibilityLabel(model.label("common.loading")) }
+                    ModelShown { model.busyShown } content: { ProgressView().accessibilityLabel(model.label("common.loading")) }
                     Spacer()
                 }
             }
@@ -468,7 +468,7 @@ struct InboxScreen: View {
             InboxToolbar(model: model, palette: palette)
             inboxFilterChips
             if model.inboxSelectionMode { AnyView(inboxBulkDeleteBar) }
-            primaryAction.modifier(ModelDisabled { !model.inboxActionsEnabled || model.inboxSelectionMode })
+            primaryAction.modifier(ModelDisabled { !model.inboxActionsShown || model.inboxSelectionMode })
 
             List {
                 Group {
@@ -480,7 +480,7 @@ struct InboxScreen: View {
                         Text(error).rnFont(13).foregroundStyle(palette.danger)
                             .accessibilityIdentifier("inbox-group-error")
                         Button(model.label("common.retry")) { Task { await model.retryInboxGrouping() } }
-                            .frame(minHeight: 44).modifier(ModelDisabled { model.busy || model.retryNeeded || menuPanelPresented })
+                            .frame(minHeight: 44).modifier(ModelDisabled { model.busyShown || model.retryNeeded || menuPanelPresented })
                             .accessibilityIdentifier("inbox-group-retry")
                     }
                     ForEach(inboxRows, id: \.id) { entry in
@@ -493,10 +493,10 @@ struct InboxScreen: View {
                                 .padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(palette.filter, in: Capsule()).contentShape(Capsule())
                         }
-                        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded || menuPanelPresented })
+                        .buttonStyle(.plain).modifier(ModelDisabled { model.busyShown || model.retryNeeded || menuPanelPresented })
                         .accessibilityIdentifier("inbox-more")
                     }
-                    ModelShown { model.busy && !model.capturePresented } content: { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                    ModelShown { model.busyShown && !model.capturePresented } content: { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
                 .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
                 .listRowSeparator(.hidden)
@@ -609,7 +609,7 @@ struct InboxScreen: View {
                     Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
                         .accessibilityIdentifier("focus-error")
                     Button(model.label("common.retry")) { model.retryFocus() }
-                        .rnFont(14, .semibold).frame(minHeight: 44).modifier(ModelDisabled { model.busy || model.retryNeeded })
+                        .rnFont(14, .semibold).frame(minHeight: 44).modifier(ModelDisabled { model.busyShown || model.retryNeeded })
                         .accessibilityIdentifier("focus-retry")
                 }
                 PomodoroTimerPanel(model: model, palette: palette)
@@ -617,7 +617,7 @@ struct InboxScreen: View {
                     focusToolbar
                     focusFilterRows
                     let empty = model.focus.object("controls").object("empty")
-                    if model.focusCurrent && !empty.isEmpty {
+                    if model.focusCurrentShown && !empty.isEmpty {
                         VStack(spacing: 4) {
                             Text(empty.text("title")).rnFont(16, .bold)
                                 .accessibilityIdentifier("focus-empty-title")
@@ -661,7 +661,7 @@ struct InboxScreen: View {
                                                 if !section.objects("groups").isEmpty { palette.border.frame(width: 2).padding(.leading, 13) }
                                             }
                                             .accessibilityIdentifier("focus-group-item-" + (groupID ?? "none") + "-" + row.text("id"))
-                                            .padding(.bottom, 8).modifier(ModelDisabled { !model.focusActionsEnabled })
+                                            .padding(.bottom, 8).modifier(ModelDisabled { !model.focusActionsShown })
                                     }
                                 }
                                 .id(key + ":" + String(rowIndex) + ":" + row.text("id"))
@@ -672,7 +672,7 @@ struct InboxScreen: View {
                                         .padding(.horizontal, 16).frame(minHeight: 44)
                                         .background(palette.filter, in: Capsule())
                                 }
-                                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsEnabled })
+                                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsShown })
                                 .accessibilityLabel(model.label("common.more") + " " + section.text("title"))
                                 .accessibilityIdentifier("focus-more-" + key)
                                 .frame(maxWidth: .infinity).padding(.vertical, 8)
@@ -689,7 +689,7 @@ struct InboxScreen: View {
                         }
                     }
                 }
-                ModelShown { (model.busy || model.focusLoading) && !model.capturePresented } content: {
+                ModelShown { (model.busyShown || model.focusLoadingShown) && !model.capturePresented } content: {
                     ProgressView().frame(maxWidth: .infinity).padding(12)
                 }
             }
@@ -762,7 +762,7 @@ struct InboxScreen: View {
         .foregroundStyle(selected ? palette.onTint : palette.text)
         .background(selected ? palette.tint : palette.filter, in: Capsule())
         .overlay(Capsule().stroke(selected ? palette.tint : palette.border, lineWidth: 1))
-        .modifier(ModelDisabled { !model.focusControlsEnabled })
+        .modifier(ModelDisabled { !model.focusControlsShown })
     }
 
     private func focusFilterChip(_ title: String, selected: Bool, excluded: Bool = false, removable: Bool = false,
@@ -777,7 +777,7 @@ struct InboxScreen: View {
             .frame(minHeight: 44).background(selected ? tone : palette.filter, in: Capsule())
             .overlay(Capsule().stroke(selected ? tone : palette.border, lineWidth: 1)).contentShape(Capsule())
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsEnabled }).accessibilityIdentifier(id)
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsShown }).accessibilityIdentifier(id)
         .accessibilityLabel(removable ? model.label("filters.remove") + ": " + title : title)
         .accessibilityAddTraits(selected ? .isSelected : []).accessibilityValue(excluded ? model.label("filters.excluded") : "")
     }
@@ -795,7 +795,7 @@ struct InboxScreen: View {
             .foregroundStyle(palette.secondary).frame(minHeight: 44).contentShape(Rectangle())
             .padding(.top, 10).padding(.bottom, 6)
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsEnabled })
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsShown })
         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
         .accessibilityValue(model.label(collapsed ? "markdown.expand" : "markdown.collapse"))
         .accessibilityIdentifier("focus-group-header-" + id)
@@ -816,7 +816,7 @@ struct InboxScreen: View {
             .frame(minHeight: 44).contentShape(Rectangle())
             .padding(.horizontal, 4).padding(.top, 10).padding(.bottom, 8)
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsEnabled })
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsShown })
         .accessibilityValue(model.label(collapsed ? "markdown.expand" : "markdown.collapse"))
         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("focus-group-header-" + group.text("id"))
@@ -843,7 +843,7 @@ struct InboxScreen: View {
                         .frame(width: 44, height: 44)
                         .accessibilityHidden(true)
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsEnabled }).accessibilityLabel(controls.object("viewOptions").text("label"))
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsShown }).accessibilityLabel(controls.object("viewOptions").text("label"))
                 .accessibilityValue(model.label(model.focusPanel == "view" ? "markdown.collapse" : "markdown.expand"))
                 .accessibilityIdentifier("focus-view-options")
                 Button { model.openFocusPanel("filters") } label: {
@@ -857,7 +857,7 @@ struct InboxScreen: View {
                             }
                         }
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsEnabled })
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsShown })
                 .accessibilityLabel(controls.object("filters").text("label"))
                 .accessibilityValue(controls.object("filters").text("badge")).accessibilityIdentifier("focus-filters-open")
                 Button { model.toggleOtherFocusSections() } label: {
@@ -873,7 +873,7 @@ struct InboxScreen: View {
                         .frame(width: 44, height: 44).opacity(otherFocusKeys.isEmpty ? 0.4 : 1)
                         .accessibilityHidden(true)
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { otherFocusKeys.isEmpty || !model.focusControlsEnabled })
+                .buttonStyle(.plain).modifier(ModelDisabled { otherFocusKeys.isEmpty || !model.focusControlsShown })
                 .accessibilityLabel(model.label(otherFocusSectionsOpen ? "agenda.collapseOtherSections" : "agenda.expandOtherSections"))
                 .accessibilityIdentifier("focus-toggle-sections")
             }
@@ -894,7 +894,7 @@ struct InboxScreen: View {
                 }
                 .foregroundStyle(palette.secondary).frame(minHeight: 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsEnabled })
+            .buttonStyle(.plain).modifier(ModelDisabled { !model.focusControlsShown })
             .accessibilityLabel(title + " · " + countText)
             .accessibilityValue(model.label(open ? "markdown.collapse" : "markdown.expand"))
             .accessibilityAddTraits(.isHeader)
@@ -918,7 +918,7 @@ struct InboxScreen: View {
                     }
                     .foregroundStyle(palette.secondary).frame(minHeight: 44).padding(.horizontal, 6)
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsEnabled })
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsShown })
                 .accessibilityIdentifier("focus-reorder-toggle")
             }
         }
@@ -1019,7 +1019,7 @@ struct InboxScreen: View {
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsEnabled })
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsShown })
         .padding(.bottom, 8)
         .accessibilityIdentifier("focus-project-" + project.text("id"))
     }
@@ -1120,7 +1120,7 @@ struct InboxScreen: View {
                         .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(tone, lineWidth: 1))
                         .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsEnabled })
+                    .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsShown })
                     .accessibilityLabel(chip.text("accessibilityLabel")).accessibilityAddTraits(.isSelected)
                     .accessibilityValue(chip.flag("excluded") ? model.label("filters.excluded") : "")
                     .accessibilityIdentifier("inbox-chip-" + chip.text("id"))
@@ -1129,7 +1129,7 @@ struct InboxScreen: View {
                     Text(model.inbox.text("clearLabel")).rnFont(12, .semibold).padding(.horizontal, 12)
                         .frame(minHeight: 44).contentShape(Capsule())
                 }
-                .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { !model.inboxActionsEnabled })
+                .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { !model.inboxActionsShown })
                 .accessibilityIdentifier("inbox-chips-clear")
                 }
                 .padding(.horizontal, 16)
@@ -1156,7 +1156,7 @@ struct InboxScreen: View {
                 .background(palette.material ? palette.captureBackground : palette.tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.material ? .clear : palette.tint, lineWidth: 0.7))
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { label.isEmpty || !model.ready || model.busy || model.retryNeeded })
+        .buttonStyle(.plain).modifier(ModelDisabled { label.isEmpty || !model.ready || model.busyShown || model.retryNeeded })
         .accessibilityIdentifier(isMindSweep ? "inbox-mind-sweep-primary" : "inbox-process-primary")
         .padding(.horizontal, 16).padding(.top, 6)
     }
@@ -1178,7 +1178,7 @@ struct InboxScreen: View {
                     .overlay(Capsule().stroke(palette.text, lineWidth: 1))
             }
             .buttonStyle(.plain).padding(.top, 8)
-            .modifier(ModelDisabled { !model.inboxActionsEnabled })
+            .modifier(ModelDisabled { !model.inboxActionsShown })
             .accessibilityIdentifier(model.inbox.object("empty").object("action").object("filterEdit").isEmpty
                 ? "inbox-empty-capture" : "inbox-empty-clear")
         }
@@ -1311,7 +1311,7 @@ private struct InboxHeader: View {
                     .foregroundStyle(model.defaultAreaScope ? palette.secondary : palette.tint)
                     .frame(minHeight: 48).padding(.horizontal, 6).frame(maxWidth: 160, alignment: .leading)
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busy || model.retryNeeded })
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busyShown || model.retryNeeded })
                 .accessibilityLabel(model.label("projects.areaFilter") + ": " + model.area.text("summary"))
                 .accessibilityValue(model.area.text("label"))
                 .accessibilityIdentifier("area-open")
@@ -1319,7 +1319,7 @@ private struct InboxHeader: View {
                 Button { model.openSearch() } label: {
                     AppIcon(name: "search", size: 22).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busy || model.retryNeeded })
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busyShown || model.retryNeeded })
                 .accessibilityLabel(model.label("search.title")).accessibilityIdentifier("search-open")
             }
             .padding(.horizontal, 16)
@@ -1354,7 +1354,7 @@ private struct InboxToolbar: View {
                     .padding(.horizontal, counted ? 6 : 0)
                     .frame(minWidth: 44, minHeight: 44)
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { field == "sort" ? !model.inboxSortEnabled : field == "group" ? !model.inboxGroupEnabled : !model.inboxFiltersEnabled })
+                .buttonStyle(.plain).modifier(ModelDisabled { field == "sort" ? !model.inboxSortShown : field == "group" ? !model.inboxGroupShown : !model.inboxFiltersShown })
                 .accessibilityLabel(model.inbox.object("toolbar").object(field).text("accessibilityLabel"))
                 .accessibilityIdentifier("inbox-" + field + "-open")
                 .accessibilityAddTraits(field == "filters" && model.inbox.object("toolbar").object(field).flag("selected") ? .isSelected : [])
@@ -1368,7 +1368,7 @@ private struct InboxToolbar: View {
                         .background(palette.filter, in: Capsule())
                         .overlay(Capsule().stroke(palette.border, lineWidth: 1))
                 }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsEnabled || model.inboxSelectionMode || model.inbox.object("mindSweep").text("label").isEmpty })
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsShown || model.inboxSelectionMode || model.inbox.object("mindSweep").text("label").isEmpty })
                 .accessibilityIdentifier("inbox-mind-sweep-accessory")
             }
         }
@@ -1393,7 +1393,7 @@ private struct InboxTabBar: View {
                     .offset(y: -4)
                     .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busy || model.retryNeeded || (model.selectedSurface == .inbox && model.inboxSelectionMode)
+            .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busyShown || model.retryNeeded || (model.selectedSurface == .inbox && model.inboxSelectionMode)
                 || (model.selectedSurface == .project && model.projectSelectionMode) })
             .accessibilityLabel(model.label("nav.addTask"))
             .accessibilityIdentifier("capture-open")
@@ -1406,7 +1406,7 @@ private struct InboxTabBar: View {
                 .foregroundStyle(model.morePresented ? palette.tint : palette.secondary)
                 .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busy || model.retryNeeded })
+            .buttonStyle(.plain).modifier(ModelDisabled { !model.ready || model.busyShown || model.retryNeeded })
             .accessibilityLabel(model.label("tab.menu")).accessibilityIdentifier("tab-menu")
             .accessibilityAddTraits(model.morePresented ? .isSelected : [])
         }
@@ -1428,7 +1428,7 @@ private struct InboxTabBar: View {
             .foregroundStyle(selected ? palette.tint : palette.secondary)
             .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { surface == nil || !model.ready || model.busy || model.retryNeeded })
+        .buttonStyle(.plain).modifier(ModelDisabled { surface == nil || !model.ready || model.busyShown || model.retryNeeded })
         .accessibilityLabel(label)
         .accessibilityIdentifier(surface == .focus ? "tab-focus" : surface == .inbox ? "tab-inbox" : "tab-" + icon)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -1454,7 +1454,7 @@ private struct InboxTabBar: View {
             .foregroundStyle(selected ? palette.tint : palette.secondary)
             .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).modifier(ModelDisabled { !["projects", "review", "calendar", "board", "contexts"].contains(model.quickAccessView) || !model.ready || model.busy || model.retryNeeded })
+        .buttonStyle(.plain).modifier(ModelDisabled { !["projects", "review", "calendar", "board", "contexts"].contains(model.quickAccessView) || !model.ready || model.busyShown || model.retryNeeded })
         .accessibilityLabel(model.quickAccessLabel).accessibilityIdentifier("tab-" + model.quickAccessView)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -1533,7 +1533,7 @@ private struct InboxListRow: View, Equatable {
     @ViewBuilder private var section: some View {
         if item.flag("collapsible") {
             Button { Task { await model.toggleInboxSection(item.text("id")) } } label: { sectionLabel }
-                .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsEnabled })
+                .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsShown })
                 .accessibilityValue(model.label(item.flag("collapsed") ? "markdown.expand" : "markdown.collapse"))
                 .accessibilityIdentifier("inbox-section-" + item.text("id"))
         } else { sectionLabel.accessibilityAddTraits(.isHeader) }
@@ -1573,7 +1573,7 @@ private struct InboxListRow: View, Equatable {
                      swipeHost: .list)
                 .accessibilityIdentifier("inbox-item-" + item.text("groupId") + "-" + row.text("id"))
         }
-        .modifier(ModelDisabled { !model.inboxActionsEnabled })
+        .modifier(ModelDisabled { !model.inboxActionsShown })
     }
 }
 
@@ -1923,7 +1923,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     @State private var width: CGFloat = 320
     private var active: Bool {
         guard let admission else { return enabled }
-        return enabled && interactionEnabled && admission.taskRowSwipeActionsAdmitted
+        return enabled && interactionEnabled && admission.taskRowSwipeActionsShown
     }
     private var left: [CoreObject] { active ? actions.objects("swipeRight").filter { $0.flag("enabled") } : [] }
     private var right: [CoreObject] { active ? actions.objects("swipeLeft").filter { $0.flag("enabled") } : [] }
@@ -2231,7 +2231,7 @@ struct TaskCard: View {
                                         }
                                         .frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row) })
+                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row, shown: true) })
                                     .accessibilityValue(checklistExpanded ? model.label("common.close") : model.label("common.open"))
                                     .accessibilityIdentifier("task-inline-checklist-" + row.text("id"))
                                 } else if part.text("kind") == "completed", row.text("status") == "done", let onCompletedAt {
@@ -2252,7 +2252,7 @@ struct TaskCard: View {
                                     } label: {
                                         Text(metadata([part])).rnFont(12, .medium).frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+                                    .buttonStyle(.plain).modifier(ModelDisabled { model.busyShown || model.retryNeeded })
                                     .accessibilityIdentifier("task-project-" + row.text("id") + "-" + part.text("projectId"))
                                 } else if ["context", "tag"].contains(part.text("kind")), let onToken {
                                     Button {
@@ -2303,7 +2303,7 @@ struct TaskCard: View {
                     AppIcon(name: "status", size: 20).foregroundStyle(statusColor).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).modifier(ModelDisabled { [statusBlocked = row.flag("readOnly") || readOnly || onSelection != nil || statusOptionsTask != nil] in
-                    model.busy || model.retryNeeded || model.taskStatusMenuPresented || statusBlocked
+                    model.busyShown || model.retryNeeded || model.taskStatusMenuPresented || statusBlocked
                 })
                 .accessibilityLabel(model.label("task.aria.changeStatus").replacingOccurrences(of: "{{status}}", with: meta.text("statusLabel")))
                 .accessibilityHint(model.label("task.aria.changeStatusHint"))
@@ -2743,7 +2743,7 @@ struct TaskCard: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).modifier(ModelDisabled { [blocked = !focusBlockedReason.isEmpty] in
-                    blocked || !model.taskFocusInputEnabled(row)
+                    blocked || !model.taskFocusInputEnabled(row, shown: true)
                 })
                 .accessibilityLabel(focusBlockedReason.isEmpty
                     ? model.label(row.flag("isFocusedToday") ? "agenda.removeFromFocus" : "agenda.addToFocus")
