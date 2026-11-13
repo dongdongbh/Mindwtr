@@ -114,6 +114,8 @@ struct InboxScreen: View {
                     Spacer()
                 }
             }
+            .accessibilityHidden(fullScreen)
+            .allowsHitTesting(!fullScreen)
             if fullScreen {
                 VStack(spacing: 0) { fullScreenSurfaceContent }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -674,6 +676,8 @@ private struct KeptTabSurfaces: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(palette.bg)
+        .accessibilityHidden(surface != selected)
+        .allowsHitTesting(surface == selected)
         .toolbar(.hidden, for: .tabBar)
         .tag(surface)
     }
