@@ -2067,6 +2067,18 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func operationBusy(shown: Bool) -> Bool { shown ? busyShown : busy }
 
+    private func refusalLogged<Value>(_ method: String, _ run: () async throws -> Value) async -> Value? {
+        do { return try await run() } catch is CancellationError { return nil } catch {
+            let prefix = String(error.localizedDescription.prefix { $0 != ":" })
+            let code = prefix.range(of: "^[A-Z][A-Z_]+$", options: .regularExpression) == nil ? "unknown" : prefix
+            if let currentHost = host, let context = try? json(["level": "warn", "method": method, "code": code]),
+               let arguments = try? json(["Native iOS host read refused", context]) {
+                Task { _ = try? await currentHost.call("logLine", argumentsJSON: arguments) }
+            }
+            return nil
+        }
+    }
+
     typealias HeldTapAction = @MainActor () async -> Void
     struct HeldTapContext: Equatable, Sendable {
         let host: ObjectIdentifier?
@@ -4625,7 +4637,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     func recordNoteAppHandoff(_ outcome: String, surface: String, scheme: String = "upnote") async {
         guard workspaceAdmissionsOpen, ["upnote", "obsidian"].contains(scheme) else { return }
-        _ = try? await query("logLinkHandoff", [outcome, surface, scheme])
+        _ = await refusalLogged("logLinkHandoff", { try await query("logLinkHandoff", [outcome, surface, scheme]) })
     }
     private let taskRecoveryScheduleFields = ["startTime", "dueDate", "relativeStartOffset", "reviewAt"]
     private let taskRecoveryAssociationFields = ["projectId", "areaId", "sectionId"]
@@ -11402,7 +11414,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let ticket = syncBadgeTicket
         guard let currentHost = host, currentHost.workspaceMode == .personal, ready else { if !syncBadge.isEmpty { syncBadge = [:] }; return }
         Task { [weak self] in
-            guard let self, let raw = try? await currentHost.call("menuRead", argumentsJSON: self.json(["syncBadge", "{}"])),
+            guard let self, let raw = await self.refusalLogged("menuRead:syncBadge", { try await currentHost.call("menuRead", argumentsJSON: self.json(["syncBadge", "{}"])) }),
                   let badge = try? self.decode(raw), self.host === currentHost, self.syncBadgeTicket == ticket else { return }
             guard Set(badge.keys) == Set(["state", "color", "accessibilityLabel", "icon"]),
                   ["hidden", "syncing", "healthy", "attention"].contains(badge.text("state")),
@@ -26982,7 +26994,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if !dispatched || isDefiniteRejection(failure) {
             reviewProjectTaskOwner?.request = nil
             if !appLock.concealed,
-               let refreshed = try? await query("weeklyReviewProjectTaskOptions", [try json(["projectId": owner.projectID])]),
+               let refreshed = await refusalLogged("weeklyReviewProjectTaskOptions", { try await query("weeklyReviewProjectTaskOptions", [try json(["projectId": owner.projectID])]) }),
                reviewProjectTaskOwned(owner), refreshed.text("projectId") == owner.projectID,
                Set(refreshed.keys) == Set(["projectId", "projectRevision", "title", "placeholder", "save", "saveAndEdit", "cancel"]),
                refreshed.values.allSatisfy({ ($0 as? String).map { !$0.isEmpty && $0.utf16.count <= 10_000 } == true }) {
@@ -30195,11 +30207,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard current(), await readProjectDetail(ownedGuard: current), current() else { return }
         let message: String
         if operation == .move {
-            guard let encoded = try? json(result), let notice = try? await query("projectTasksMoveNotice", [encoded], beforeDispatch: current),
+            guard let encoded = try? json(result), let notice = await refusalLogged("projectTasksMoveNotice", { try await query("projectTasksMoveNotice", [encoded], beforeDispatch: current) }),
                   current(), Set(notice.keys) == Set(["message"]), !notice.text("message").isEmpty else { return }
             message = notice.text("message")
         } else {
-            guard let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current), current(),
+            guard let input = await refusalLogged("inboxBulkTagInput", { try await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current) }), current(),
                   let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
                   !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
             message = notice.text("title") + ": " + notice.text("message")
@@ -30656,11 +30668,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let message: String
         if operation == .move {
             guard let encoded = try? json(result),
-                  let notice = try? await query("inboxTasksMoveNotice", [encoded], beforeDispatch: current), current(),
+                  let notice = await refusalLogged("inboxTasksMoveNotice", { try await query("inboxTasksMoveNotice", [encoded], beforeDispatch: current) }), current(),
                   Set(notice.keys) == Set(["message"]), !notice.text("message").isEmpty else { return }
             message = notice.text("message")
         } else {
-            guard let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current), current(),
+            guard let input = await refusalLogged("inboxBulkTagInput", { try await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current) }), current(),
                   let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
                   !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
             message = notice.text("title") + ": " + notice.text("message")
@@ -31153,7 +31165,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard current() else { return }
         try? await readInbox(ownedGuard: current)
         guard current(), let encoded = try? json(result),
-              let notice = try? await query("inboxTasksMoveNotice", [encoded], beforeDispatch: current), current(),
+              let notice = await refusalLogged("inboxTasksMoveNotice", { try await query("inboxTasksMoveNotice", [encoded], beforeDispatch: current) }), current(),
               Set(notice.keys) == Set(["message"]), !notice.text("message").isEmpty else { return }
         showTaskActionNotice(["operation": "inboxBulkMove", "source": "inbox", "undoEnabled": false,
                               "message": notice.text("message")])
@@ -31358,7 +31370,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let current = { self.inboxTasksMoveWarm(on: owner, generation: generation, foreground: foreground) }
         guard current() else { return }
         try? await readInbox(ownedGuard: current)
-        guard current(), let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current),
+        guard current(), let input = await refusalLogged("inboxBulkTagInput", { try await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current) }),
               current(), let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
               !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
         showTaskActionNotice(["operation": "inboxBulkTag", "source": "inbox", "undoEnabled": false,
@@ -31625,7 +31637,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let current = { self.inboxTasksMoveWarm(on: owner, generation: generation, foreground: foreground) }
         guard current() else { return }
         try? await readInbox(ownedGuard: current)
-        guard current(), let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current),
+        guard current(), let input = await refusalLogged("inboxBulkTagInput", { try await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: current) }),
               current(), let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
               !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
         showTaskActionNotice(["operation": "inboxBulkRemoveTag", "source": "inbox", "undoEnabled": false,
@@ -32067,7 +32079,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let selected = inboxSelectionGeneration
         let warm = { self.inboxTasksMoveWarm(on: owner, generation: selected, foreground: context.foregroundGeneration) }
         guard warm() else { return }; try? await readInbox(ownedGuard: warm)
-        guard warm(), let input = try? await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: warm),
+        guard warm(), let input = await refusalLogged("inboxBulkTagInput", { try await query("inboxBulkTagInput", ["", result.number("count")], beforeDispatch: warm) }),
               warm(), let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
               !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
         showTaskActionNotice(["operation": "inboxBulkOrganize", "source": "inbox", "undoEnabled": false,
@@ -33789,7 +33801,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func showDoneBulkTagNotice(_ result: CoreObject) async {
         let generation = doneBulkTagReadGeneration
         guard result.flag("changed"), result.number("count") > 0,
-              let input = try? await query("doneBulkTagInput", ["", result.number("count")]),
+              let input = await refusalLogged("doneBulkTagInput", { try await query("doneBulkTagInput", ["", result.number("count")]) }),
               generation == doneBulkTagReadGeneration, selectedSurface == .history, !historyArchived,
               let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
               !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
@@ -34191,7 +34203,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func showReferenceTasksAddTagNotice(_ result: CoreObject, generation: Int) async {
         guard result.flag("changed"), result.number("count") > 0, selectedSurface == .reference,
               generation == referenceBulkTagReadGeneration,
-              let input = try? await query("referenceBulkTagInput", ["", result.number("count")]),
+              let input = await refusalLogged("referenceBulkTagInput", { try await query("referenceBulkTagInput", ["", result.number("count")]) }),
               generation == referenceBulkTagReadGeneration, selectedSurface == .reference,
               let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
               !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
@@ -34396,7 +34408,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func showReferenceTasksRemoveTagNotice(_ result: CoreObject, generation: Int) async {
         guard result.flag("changed"), result.number("count") > 0, selectedSurface == .reference,
               generation == referenceBulkRemoveGeneration,
-              let input = try? await query("referenceBulkTagInput", ["", result.number("count")]),
+              let input = await refusalLogged("referenceBulkTagInput", { try await query("referenceBulkTagInput", ["", result.number("count")]) }),
               generation == referenceBulkRemoveGeneration, selectedSurface == .reference,
               let notice = input["notice"] as? CoreObject, Set(notice.keys) == Set(["title", "message"]),
               !notice.text("title").isEmpty, !notice.text("message").isEmpty else { return }
@@ -34460,7 +34472,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func showReferenceTasksMoveNotice(_ result: CoreObject, generation: Int) async {
         guard selectedSurface == .reference, generation == referenceTasksMoveGeneration,
-              let encoded = try? json(result), let notice = try? await query("referenceTasksMoveNotice", [encoded]),
+              let encoded = try? json(result), let notice = await refusalLogged("referenceTasksMoveNotice", { try await query("referenceTasksMoveNotice", [encoded]) }),
               selectedSurface == .reference, generation == referenceTasksMoveGeneration,
               Set(notice.keys) == Set(["message"]), !notice.text("message").isEmpty else { return }
         showTaskActionNotice(["operation": "referenceBulkMove", "source": "reference", "undoEnabled": false,
@@ -39814,7 +39826,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             taskRecoveryHydrating = false
             taskRecoveryGateVisible = true
             if (!owned || (self.host === host && !appLock.concealed && !Task.isCancelled)),
-               let editor = try? await query("editorModel", [snapshot.taskID]),
+               let editor = await refusalLogged("editorModel", { try await query("editorModel", [snapshot.taskID]) }),
                !owned || (self.host === host && !appLock.concealed && !Task.isCancelled) {
                 taskRecoveryReviewOptions = editor.object("options")
                 await readTaskEditorSectionHelp(editor)
@@ -48661,6 +48673,6 @@ extension CoreModel {
     func markdownEditorRead(_ name: String, _ input: CoreObject) async -> CoreObject? {
         guard ["markdownToolbarActions", "markdownToolbarApply", "markdownTextChange"].contains(name),
               let encoded = try? json(input) else { return nil }
-        return try? await query("menuRead", [name, encoded])
+        return await refusalLogged("menuRead:" + name, { try await query("menuRead", [name, encoded]) })
     }
 }
