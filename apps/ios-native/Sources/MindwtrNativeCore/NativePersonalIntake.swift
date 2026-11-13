@@ -48,6 +48,7 @@ public actor NativePersonalIntake {
         public let releaseCheck: String
         public let operation: String
         public let outcome: String
+        public private(set) var check = ""
         init() {
             message = "Native iOS personal intake capture confirmed"
             releaseCheck = "v1.3.9/ios-personal-intake"
@@ -72,6 +73,11 @@ public actor NativePersonalIntake {
             message = "Native iOS navigation finish settlement confirmed"
             releaseCheck = "v1.3.9/ios-navigation-finish-settlement"
             operation = "finish-settlement"; self.outcome = outcome.rawValue
+        }
+        fileprivate init(intakeCheck check: String, outcome: String) {
+            message = "Native iOS personal intake check failed"
+            releaseCheck = "v1.3.9/ios-intake-check"
+            operation = "intake-check"; self.outcome = outcome; self.check = check
         }
         fileprivate init(sameTreeReopen: Void) {
             message = "Native iOS personal intake reopened after container relocation"
@@ -133,8 +139,8 @@ public actor NativePersonalIntake {
                 _ = try files.publish(IntakeWire.encode(initial, limit: IntakeWire.headerLimit), to: .header, before: nil, exclusive: true)
             } else {
                 guard let snapshot = files.headerSnapshot else { throw NativePersonalIntakeError.unavailable }
-                let existing = try IntakeWire.decode(IntakeHeader.self, snapshot.bytes, limit: IntakeWire.headerLimit)
-                try existing.validate(files: files); self.header = existing
+                let existing = try Self.openHeader(snapshot, files: files, diagnostic: diagnostic)
+                self.header = existing
                 if existing.origin != route.descriptor { diagnostic(.init(sameTreeReopen: ())) }
             }
         } catch { files.close(); throw NativePersonalIntakeError.unavailable }
@@ -149,10 +155,41 @@ public actor NativePersonalIntake {
         self.files = files; self.diagnostic = diagnostic
         do {
             guard let snapshot = files.headerSnapshot else { throw NativePersonalIntakeError.unavailable }
-            let existing = try IntakeWire.decode(IntakeHeader.self, snapshot.bytes, limit: IntakeWire.headerLimit)
-            try existing.validate(files: files); header = existing
+            let existing = try Self.openHeader(snapshot, files: files, diagnostic: diagnostic)
+            header = existing
             if existing.origin != route.descriptor { diagnostic(.init(sameTreeReopen: ())) }
         } catch { files.close(); throw NativePersonalIntakeError.unavailable }
+    }
+    private static func openHeader(_ snapshot: IntakeFileSnapshot, files: NativePersonalIntakeFiles,
+                                   diagnostic: DiagnosticSink) throws -> IntakeHeader {
+        let existing = try IntakeWire.decode(IntakeHeader.self, snapshot.bytes, limit: IntakeWire.headerLimit)
+        let stale = try existing.identityMismatches(files: files)
+        guard !stale.isEmpty else { try existing.validate(files: files); return existing }
+        let check = stale.joined(separator: ",")
+        guard let restored = try? existing.rebound(files: files), (try? restored.validate(files: files)) != nil,
+              (try? settledRestoredTree(restored, files: files)) == true else {
+            diagnostic(.init(intakeCheck: check, outcome: "refused")); throw NativePersonalIntakeError.unavailable
+        }
+        _ = try files.publish(IntakeWire.encode(restored, limit: IntakeWire.headerLimit), to: .header, before: snapshot, exclusive: false)
+        diagnostic(.init(intakeCheck: check, outcome: "rebound"))
+        return restored
+    }
+    private static func settledRestoredTree(_ header: IntakeHeader, files: NativePersonalIntakeFiles) throws -> Bool {
+        guard header.pending == nil, header.legacy == nil, header.navigationReservation == nil,
+              header.nextSequence <= 4_097, try files.read(.legacyTerminals) == nil else { return false }
+        var sequence: Int64 = 1
+        while sequence < header.nextSequence {
+            guard let order = try files.read(.order(sequence)) else { return false }
+            let slot = try IntakeWire.decode(IntakeOrder.self, order.bytes, limit: IntakeWire.recordLimit)
+            guard slot.version == 1, slot.root == header.root, slot.sequence == sequence, IntakeWire.uuid(slot.id),
+                  let snapshot = try files.read(.record(slot.id)) else { return false }
+            let record = try IntakeWire.decode(IntakeRecord.self, snapshot.bytes, limit: IntakeWire.recordLimit)
+            try record.validate(header: header, namespace: files.route.namespace)
+            guard record.id == slot.id, record.sequence == sequence, record.captureFingerprint == slot.captureFingerprint,
+                  record.stage == .terminal else { return false }
+            sequence += 1
+        }
+        return true
     }
     public func requiresReminderPreparation() throws -> Bool {
         guard !importInFlight, importAcknowledgement?.isPending != true else { throw NativePersonalIntakeError.legacyHeld }
@@ -738,6 +775,20 @@ private struct IntakeHeader: Codable {
     var pending: IntakeCaptureIntent?
     var legacy: LegacyImportState? = nil
     var navigationReservation: String? = nil
+    func identityMismatches(files: NativePersonalIntakeFiles) throws -> [String] {
+        var names: [String] = []
+        if directory != (try files.rootIdentity) { names.append("directory") }
+        if records != (try files.recordDirectoryIdentity) { names.append("records") }
+        if order != (try files.orderDirectoryIdentity) { names.append("order") }
+        if lease != (try files.leaseWitness) { names.append("lease") }
+        return names
+    }
+    func rebound(files: NativePersonalIntakeFiles) throws -> IntakeHeader {
+        IntakeHeader(version: version, origin: origin, root: root, directory: try files.rootIdentity,
+                     records: try files.recordDirectoryIdentity, order: try files.orderDirectoryIdentity,
+                     lease: try files.leaseWitness, nextSequence: nextSequence, pending: pending,
+                     legacy: legacy, navigationReservation: navigationReservation)
+    }
     func validate(files: NativePersonalIntakeFiles) throws {
         guard version == 1, files.route.matchesStoredOrigin(origin), IntakeWire.uuid(root),
               directory == (try files.rootIdentity), records == (try files.recordDirectoryIdentity),

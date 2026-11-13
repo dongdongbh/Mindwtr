@@ -7216,7 +7216,7 @@ globalThis.MindwtrHost = {
     logLine(message: string, contextJson: string): string {
         return submit(async () => {
             try {
-                const warning = message === 'Native iOS reminder response settled';
+                const warning = ['Native iOS reminder response settled', 'Native iOS personal intake check failed'].includes(message);
                 (warning ? logWarn : logInfo)(message, { scope: globalThis.__mindwtrHostPlatform === 'ios' ? 'native-ios' : 'native-android',
                     ...(warning || ['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'].includes(message) ? { force: true } : {}), context: JSON.parse(contextJson) as Record<string, unknown> });
             } catch {                                                    }

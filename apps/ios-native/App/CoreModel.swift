@@ -2597,6 +2597,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var notificationResponseRetryRequested = false
     private var notificationResponseRetry: NotificationResponseRetry?
     @ObservationIgnored private weak var notificationResponseSettledHost: CoreHost?
+    @ObservationIgnored private weak var intakeCheckDiagnosticHost: CoreHost?
     private enum EntityLinkInput {
         case url(String), searchTask(String)
         var bytes: Data {
@@ -8429,6 +8430,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             await inspectNavigationCapture()
             reminderCaptureHeld = await NativeNotificationResponses.shared.startupHeld()
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
+            await recordIntakeCheckDiagnostic(host: currentHost)
             if let token = completedStartupToken { await recordReminderHandoverDiagnostic(host: currentHost, startupToken: token) }
             guard host === currentHost, !Task.isCancelled else { throw CancellationError() }
             if case .production = selection {
@@ -8977,6 +8979,16 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if let original = host, let token = completedStartupToken {
             await recordIntakeSameTreeReopenDiagnostic(host: original, startupToken: token)
         }
+    }
+    private func recordIntakeCheckDiagnostic(host original: CoreHost) async {
+        guard host === original, intakeCheckDiagnosticHost !== original,
+              let marker = await NativeNotificationResponses.shared.intakeCheckDiagnostic, host === original else { return }
+        intakeCheckDiagnosticHost = original
+        _ = try? await original.call("logLine", argumentsJSON: json([
+            "Native iOS personal intake check failed", try json([
+                "releaseCheck": "v1.3.9/ios-intake-check", "operation": "intake-check",
+                "check": marker.check, "outcome": marker.outcome]),
+        ]))
     }
     private func recordIntakeSameTreeReopenDiagnostic(host original: CoreHost, startupToken: UUID) async {
         func current() -> Bool {

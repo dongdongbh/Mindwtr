@@ -1126,7 +1126,49 @@ final class NativePersonalIntakeTests: XCTestCase {
         XCTAssertThrowsError(try NativePersonalIntake.openExisting(route: currentRoute, diagnostic: diagnostics.receive))
         XCTAssertEqual(try finishEvidence(currentRoot), copied)
         XCTAssertEqual(try finishEvidence(root), before)
-        XCTAssertTrue(diagnostics.events.isEmpty)
+        XCTAssertEqual(diagnostics.events.map(\.outcome), ["refused"])
+    }
+    func testColdRestoredCopyWithOnlySettledRecordsIsReboundOnceAndNamesTheFailedChecks() async throws {
+        let original = try open(), captured = try await original.capture(event())
+        let admitting = try await original.markAdmitting(captured)
+        try await original.finish(admitting, outcome: .completed)
+        _ = try await original.settleFinish(admitting, outcome: .completed)
+        await original.close()
+        let restoredHome = try futureRenamedHome()
+        try FileManager.default.copyItem(at: home, to: restoredHome)
+        try FileManager.default.removeItem(at: home)
+        let restoredRoute = try NativePersonalIntakeRoute.fixture(home: restoredHome)
+        let diagnostics = Diagnostics()
+        let reopened = try XCTUnwrap(NativePersonalIntake.openExisting(route: restoredRoute, diagnostic: diagnostics.receive))
+        stores.append(reopened)
+        let checks = diagnostics.events.filter { $0.operation == "intake-check" }
+        XCTAssertEqual(checks.map(\.outcome), ["rebound"])
+        XCTAssertEqual(checks.first?.check, "directory,records,order,lease")
+        XCTAssertEqual(checks.first?.message, "Native iOS personal intake check failed")
+        XCTAssertEqual(checks.first?.releaseCheck, "v1.3.9/ios-intake-check")
+        let page = try await reopened.pendingPage()
+        XCTAssertTrue(page.items.isEmpty)
+        let later = try await reopened.capture(event("after-restore", seconds: 102))
+        XCTAssertEqual(later.sequence, 2)
+        await reopened.close()
+        let again = Diagnostics()
+        let third = try XCTUnwrap(NativePersonalIntake.openExisting(route: restoredRoute, diagnostic: again.receive))
+        stores.append(third)
+        XCTAssertTrue(again.events.filter { $0.operation == "intake-check" }.isEmpty)
+    }
+    func testColdRestoredCopyWithUnfinishedWorkIsRefusedWithoutRepairAndNamesTheFailedChecks() async throws {
+        let original = try open(); _ = try await original.capture(event())
+        await original.close()
+        let restoredHome = try futureRenamedHome()
+        try FileManager.default.copyItem(at: home, to: restoredHome)
+        let restoredRoute = try NativePersonalIntakeRoute.fixture(home: restoredHome)
+        let restoredRoot = restoredRoute.components.reduce(restoredHome) { $0.appendingPathComponent($1) }
+        let before = try finishEvidence(restoredRoot), diagnostics = Diagnostics()
+        XCTAssertThrowsError(try NativePersonalIntake.openExisting(route: restoredRoute, diagnostic: diagnostics.receive))
+        XCTAssertEqual(try finishEvidence(restoredRoot), before)
+        XCTAssertEqual(diagnostics.events.map(\.operation), ["intake-check"])
+        XCTAssertEqual(diagnostics.events.first?.outcome, "refused")
+        XCTAssertEqual(diagnostics.events.first?.check, "directory,records,order,lease")
     }
     func testColdHomeRenameRejectsReplacedLeaseWithoutRepair() async throws {
         let original = try open(); _ = try await original.capture(event())
@@ -1140,7 +1182,8 @@ final class NativePersonalIntakeTests: XCTestCase {
         XCTAssertEqual(try intakeDirectoryEvidence(currentRoot), directories)
         XCTAssertThrowsError(try NativePersonalIntake.openExisting(route: currentRoute, diagnostic: diagnostics.receive))
         XCTAssertEqual(try inode(currentRoot.appendingPathComponent(".lock")), replacementInode)
-        XCTAssertEqual(try finishEvidence(currentRoot), before); XCTAssertTrue(diagnostics.events.isEmpty)
+        XCTAssertEqual(try finishEvidence(currentRoot), before)
+        XCTAssertEqual(diagnostics.events.map(\.check), ["lease"])
     }
     func testColdHomeRenameRejectsForeignNamespaceOnSamePhysicalTree() async throws {
         let original = try open(); _ = try await original.capture(event())

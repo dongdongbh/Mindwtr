@@ -63,6 +63,7 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
     private var identity: Identity?
     private var marker: NativePersonalIntake.Diagnostic?
     private var sameTreeReopenMarker: NativePersonalIntake.Diagnostic?
+    private var intakeCheckMarker: NativePersonalIntake.Diagnostic?
     private var shareImportMarker: NativePersonalIntake.Diagnostic?
     func arm(_ value: Identity) throws {
         lock.lock(); defer { lock.unlock() }
@@ -71,6 +72,9 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
     }
     func retainedSameTreeReopen() -> NativePersonalIntake.Diagnostic? {
         lock.lock(); defer { lock.unlock() }; return sameTreeReopenMarker
+    }
+    func retainedIntakeCheck() -> NativePersonalIntake.Diagnostic? {
+        lock.lock(); defer { lock.unlock() }; return intakeCheckMarker
     }
     func retainedShareImport() -> NativePersonalIntake.Diagnostic? {
         lock.lock(); defer { lock.unlock() }; return shareImportMarker
@@ -86,6 +90,13 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
                   value.outcome == "confirmed" else { return }
             lock.lock(); defer { lock.unlock() }
             if shareImportMarker == nil { shareImportMarker = value }
+            return
+        }
+        if value.operation == "intake-check" {
+            guard value.message == "Native iOS personal intake check failed", value.releaseCheck == "v1.3.9/ios-intake-check",
+                  ["rebound", "refused"].contains(value.outcome) else { return }
+            lock.lock(); defer { lock.unlock() }
+            if intakeCheckMarker == nil { intakeCheckMarker = value }
             return
         }
         if value.operation == "same-tree-reopen" {
@@ -270,6 +281,7 @@ actor NativeNotificationResponses {
     }
 
     var sameTreeReopenDiagnostic: NativePersonalIntake.Diagnostic? { navigationFinishRelay.retainedSameTreeReopen() }
+    var intakeCheckDiagnostic: NativePersonalIntake.Diagnostic? { navigationFinishRelay.retainedIntakeCheck() }
 
     func navigationReservationID() async throws -> String? {
         let route = try NativeAppLaunch.reminderRoute.get()
